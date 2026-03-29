@@ -1,12 +1,25 @@
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { getBuiltinSkillRoots } from './defaults.js';
 
 export interface SkillMeta {
   name: string;
   description: string;
   content: string;  // frontmatter 之后的全部内容
-  source: 'global' | 'project';
+  path: string;
+  source: 'builtin' | 'global' | 'project';
+  tier: 'system' | 'user' | 'project';
+}
+
+export interface SkillLoadOptions {
+  builtinRoots?: string[];
+}
+
+export interface SkillCatalog {
+  reload(): Promise<SkillMeta[]>;
+  list(): SkillMeta[];
+  get(name: string): SkillMeta | undefined;
 }
 
 /**
@@ -35,7 +48,11 @@ function parseFrontmatter(raw: string): { name: string; description: string; con
   return { name: fields.name, description: fields.description, content };
 }
 
-function loadSkillsFromDir(dir: string, source: 'global' | 'project'): SkillMeta[] {
+function loadSkillsFromDir(
+  dir: string,
+  source: SkillMeta['source'],
+  tier: SkillMeta['tier'],
+): SkillMeta[] {
   if (!existsSync(dir)) return [];
 
   const results: SkillMeta[] = [];
@@ -54,7 +71,7 @@ function loadSkillsFromDir(dir: string, source: 'global' | 'project'): SkillMeta
         console.warn(`[xiaok] Skills: 跳过格式错误的文件: ${file}`);
         continue;
       }
-      results.push({ ...parsed, source });
+      results.push({ ...parsed, path: join(dir, file), source, tier });
     } catch {
       console.warn(`[xiaok] Skills: 读取文件失败: ${file}`);
     }
@@ -71,27 +88,67 @@ function loadSkillsFromDir(dir: string, source: 'global' | 'project'): SkillMeta
  */
 export async function loadSkills(
   xiaokConfigDir = join(homedir(), '.xiaok'),
-  cwd = process.cwd()
+  cwd = process.cwd(),
+  options?: SkillLoadOptions,
 ): Promise<SkillMeta[]> {
+  const builtinRoots = options?.builtinRoots ?? getBuiltinSkillRoots();
   const globalSkillsDir = join(xiaokConfigDir, 'skills');
   const projectSkillsDir = join(cwd, '.xiaok', 'skills');
 
-  const globalSkills = loadSkillsFromDir(globalSkillsDir, 'global');
-  const projectSkills = loadSkillsFromDir(projectSkillsDir, 'project');
+  const builtinSkills = builtinRoots.flatMap((root) =>
+    loadSkillsFromDir(root, 'builtin', 'system'),
+  );
+  const globalSkills = loadSkillsFromDir(globalSkillsDir, 'global', 'user');
+  const projectSkills = loadSkillsFromDir(projectSkillsDir, 'project', 'project');
 
   // 合并：项目本地覆盖全局同名 skill
   const map = new Map<string, SkillMeta>();
+  for (const s of builtinSkills) map.set(s.name, s);
   for (const s of globalSkills) map.set(s.name, s);
   for (const s of projectSkills) map.set(s.name, s); // 覆盖
 
   return Array.from(map.values());
 }
 
+export function createSkillCatalog(
+  xiaokConfigDir = join(homedir(), '.xiaok'),
+  cwd = process.cwd(),
+  options?: SkillLoadOptions,
+): SkillCatalog {
+  let skills: SkillMeta[] = [];
+
+  return {
+    async reload() {
+      skills = await loadSkills(xiaokConfigDir, cwd, options);
+      return [...skills];
+    },
+    list() {
+      return [...skills];
+    },
+    get(name: string) {
+      return skills.find((skill) => skill.name === name);
+    },
+  };
+}
+
 /** 格式化 skills 列表为系统提示片段 */
 export function formatSkillsContext(skills: SkillMeta[]): string {
   if (skills.length === 0) return '';
-  const lines = skills.map(s => `- /${s.name}: ${s.description}`).join('\n');
-  return `## 可用 Skills\n\n通过 /skill-name 或工具调用方式使用：\n${lines}`;
+
+  const builtinSkills = skills.filter((skill) => skill.tier === 'system');
+  const customSkills = skills.filter((skill) => skill.tier !== 'system');
+  const sections: string[] = [];
+
+  if (builtinSkills.length > 0) {
+    sections.push(`## 默认 Skills\n\n${builtinSkills.map((skill) => `- /${skill.name}: ${skill.description}`).join('\n')}`);
+  }
+
+  if (customSkills.length > 0) {
+    sections.push(`## 扩展 Skills\n\n${customSkills.map((skill) => `- /${skill.name}: ${skill.description}`).join('\n')}`);
+  }
+
+  sections.push('通过 /skill-name 或工具调用方式使用。');
+  return sections.join('\n\n');
 }
 
 /** 解析用户输入中的斜杠命令。以 / 开头且第一个 token 是 skill 名称。 */

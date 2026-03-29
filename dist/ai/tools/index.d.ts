@@ -1,15 +1,24 @@
 import type { Tool, ToolDefinition } from '../../types.js';
-export declare function buildToolList(skillTool?: Tool): Tool[];
+import { PermissionManager } from '../permissions/manager.js';
+import { type WorkspaceToolOptions } from './read.js';
+export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions): Tool[];
 export interface RegistryOptions {
-    autoMode: boolean;
-    dryRun: boolean;
-    onPrompt: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
+    permissionManager?: PermissionManager;
+    autoMode?: boolean;
+    dryRun?: boolean;
+    onPrompt?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
 }
 export declare class ToolRegistry {
     private tools;
+    private deferredTools;
+    private permissionManager;
     private options;
     constructor(options: RegistryOptions, tools?: Tool[]);
     getToolDefinitions(): ToolDefinition[];
+    registerTool(tool: Tool): void;
+    registerDeferredTool(definition: ToolDefinition): void;
+    registerDeferredTools(definitions: ToolDefinition[]): void;
+    searchDeferredTools(query: string): ToolDefinition[];
     executeTool(name: string, input: Record<string, unknown>): Promise<string>;
     /** 用户输入 y! 后，切换当前 registry 为 auto 模式 */
     enableAutoMode(): void;

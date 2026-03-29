@@ -112,7 +112,15 @@ describe('OpenAIAdapter', () => {
 
     const messages = [
       {
-        role: 'tool_result' as const,
+        role: 'assistant' as const,
+        content: [
+          { type: 'text' as const, text: 'running tools' },
+          { type: 'tool_use' as const, id: 'tu_1', name: 'bash', input: { command: 'ls' } },
+          { type: 'tool_use' as const, id: 'tu_2', name: 'glob', input: { pattern: '*.ts' } },
+        ],
+      },
+      {
+        role: 'user' as const,
         content: [
           { type: 'tool_result' as const, tool_use_id: 'tu_1', content: 'result1' },
           { type: 'tool_result' as const, tool_use_id: 'tu_2', content: 'result2' },
@@ -121,6 +129,10 @@ describe('OpenAIAdapter', () => {
     ];
 
     for await (const _ of adapter.stream(messages, [], 'system')) { /* consume */ }
+
+    const assistantMessages = capturedMessages.filter((m: unknown) => (m as { role: string }).role === 'assistant');
+    expect(assistantMessages).toHaveLength(1);
+    expect((assistantMessages[0] as { tool_calls?: unknown[] }).tool_calls).toHaveLength(2);
 
     const toolMessages = capturedMessages.filter((m: unknown) => (m as { role: string }).role === 'tool');
     expect(toolMessages).toHaveLength(2);

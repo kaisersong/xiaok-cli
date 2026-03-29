@@ -2,13 +2,15 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFileSync, readFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { editTool } from '../../../src/ai/tools/edit.js';
+import { createEditTool } from '../../../src/ai/tools/edit.js';
 
 describe('editTool', () => {
   let dir: string;
+  let editTool: ReturnType<typeof createEditTool>;
   beforeEach(() => {
     dir = join(tmpdir(), `xiaok-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(dir, { recursive: true });
+    editTool = createEditTool({ cwd: dir });
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 

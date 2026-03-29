@@ -22,32 +22,45 @@ export class OpenAIAdapter implements ModelAdapter {
     ];
 
     for (const m of messages) {
-      if (m.role === 'tool_result') {
-        // 每条 ToolResultContent 展开为独立的 tool 消息
-        const items = Array.isArray(m.content) ? m.content : [];
-        for (const item of items) {
-          openaiMessages.push({
-            role: 'tool' as const,
-            tool_call_id: item.tool_use_id,
-            content: item.content,
-          });
-        }
-      } else if (m.role === 'assistant') {
+      if (m.role === 'assistant') {
+        const textBlocks = m.content.filter((block) => block.type === 'text');
+        const toolUseBlocks = m.content.filter((block) => block.type === 'tool_use');
+
         const msg: OpenAI.ChatCompletionAssistantMessageParam = {
           role: 'assistant',
-          content: (m.content as string) || null,
+          content: textBlocks.length > 0 ? textBlocks.map((block) => block.text).join('') : null,
         };
-        // 如果 assistant 消息携带 tool_calls，必须传给 OpenAI
-        if (m.toolCalls && m.toolCalls.length > 0) {
-          msg.tool_calls = m.toolCalls.map(tc => ({
-            id: tc.id,
+
+        if (toolUseBlocks.length > 0) {
+          msg.tool_calls = toolUseBlocks.map((block) => ({
+            id: block.id,
             type: 'function' as const,
-            function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+            function: {
+              name: block.name,
+              arguments: JSON.stringify(block.input),
+            },
           }));
         }
+
         openaiMessages.push(msg);
-      } else {
-        openaiMessages.push({ role: 'user', content: m.content as string });
+        continue;
+      }
+
+      const textBlocks = m.content.filter((block) => block.type === 'text');
+      if (textBlocks.length > 0) {
+        openaiMessages.push({
+          role: 'user',
+          content: textBlocks.map((block) => block.text).join(''),
+        });
+      }
+
+      const toolResults = m.content.filter((block) => block.type === 'tool_result');
+      for (const item of toolResults) {
+        openaiMessages.push({
+          role: 'tool' as const,
+          tool_call_id: item.tool_use_id,
+          content: item.content,
+        });
       }
     }
 
@@ -67,17 +80,12 @@ export class OpenAIAdapter implements ModelAdapter {
       stream: true,
     });
 
-    const rawChunks: OpenAI.Chat.Completions.ChatCompletionChunk[] = [];
-    for await (const chunk of stream) {
-      rawChunks.push(chunk);
-    }
-
-    // Buffer for tool_calls arguments
     const toolBuffers = new Map<number, { id: string; name: string; argsBuffer: string }>();
-    let gotFinishReason = false;
+    let emittedDone = false;
 
-    for (const chunk of rawChunks) {
-      const delta = chunk.choices[0]?.delta;
+    for await (const chunk of stream) {
+      const choice = chunk.choices[0];
+      const delta = choice?.delta;
       if (!delta) continue;
 
       if (delta.content) {
@@ -86,19 +94,15 @@ export class OpenAIAdapter implements ModelAdapter {
 
       if (delta.tool_calls) {
         for (const tc of delta.tool_calls) {
-          if (!toolBuffers.has(tc.index)) {
-            toolBuffers.set(tc.index, { id: tc.id ?? '', name: tc.function?.name ?? '', argsBuffer: '' });
-          }
-          const buf = toolBuffers.get(tc.index)!;
-          if (tc.function?.arguments) buf.argsBuffer += tc.function.arguments;
-          if (tc.id) buf.id = tc.id;
-          if (tc.function?.name) buf.name = tc.function.name;
+          const current = toolBuffers.get(tc.index) ?? { id: '', name: '', argsBuffer: '' };
+          if (tc.id) current.id = tc.id;
+          if (tc.function?.name) current.name = tc.function.name;
+          if (tc.function?.arguments) current.argsBuffer += tc.function.arguments;
+          toolBuffers.set(tc.index, current);
         }
       }
 
-      const finishReason = chunk.choices[0]?.finish_reason;
-      if (finishReason) {
-        gotFinishReason = true;
+      if (choice?.finish_reason) {
         for (const buf of toolBuffers.values()) {
           let input: Record<string, unknown> = {};
           try {
@@ -109,13 +113,13 @@ export class OpenAIAdapter implements ModelAdapter {
           yield { type: 'tool_use', id: buf.id, name: buf.name, input };
         }
         toolBuffers.clear();
+        emittedDone = true;
         yield { type: 'done' };
+        return;
       }
     }
 
-
-    // 防御：部分 provider 不发 finish_reason，确保 done 总会发出
-    if (!gotFinishReason) {
+    if (!emittedDone) {
       for (const buf of toolBuffers.values()) {
         let input: Record<string, unknown> = {};
         try {

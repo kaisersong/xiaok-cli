@@ -4,7 +4,7 @@ import { writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createSkillTool } from '../../../src/ai/skills/tool.js';
-import { loadSkills } from '../../../src/ai/skills/loader.js';
+import { createSkillCatalog, loadSkills } from '../../../src/ai/skills/loader.js';
 
 describe('skillTool', () => {
   let dir: string;
@@ -22,15 +22,30 @@ description: 打招呼技能
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   it('returns skill content for known skill', async () => {
-    const skills = await loadSkills(dir, dir);
+    const skills = await loadSkills(dir, dir, { builtinRoots: [] });
     const tool = createSkillTool(skills);
     const result = await tool.execute({ name: 'greet' });
-    expect(result).toContain('打招呼');
-    expect(result).toContain('中文');
+    const payload = JSON.parse(result) as {
+      type: string;
+      name: string;
+      description: string;
+      source: string;
+      tier: string;
+      path: string;
+      content: string;
+    };
+
+    expect(payload.type).toBe('skill');
+    expect(payload.name).toBe('greet');
+    expect(payload.description).toContain('打招呼');
+    expect(payload.source).toBe('global');
+    expect(payload.tier).toBe('user');
+    expect(payload.path).toContain('greet.md');
+    expect(payload.content).toContain('中文');
   });
 
   it('returns error message for unknown skill', async () => {
-    const skills = await loadSkills(dir, dir);
+    const skills = await loadSkills(dir, dir, { builtinRoots: [] });
     const tool = createSkillTool(skills);
     const result = await tool.execute({ name: 'nonexistent' });
     expect(result).toContain('Error');
@@ -38,9 +53,31 @@ description: 打招呼技能
   });
 
   it('tool definition has correct name and inputSchema', async () => {
-    const skills = await loadSkills(dir, dir);
+    const skills = await loadSkills(dir, dir, { builtinRoots: [] });
     const tool = createSkillTool(skills);
     expect(tool.definition.name).toBe('skill');
     expect(tool.definition.inputSchema).toHaveProperty('properties.name');
+  });
+
+  it('reads a newly installed skill after the catalog reloads', async () => {
+    const catalog = createSkillCatalog(dir, dir, { builtinRoots: [] });
+    await catalog.reload();
+    const tool = createSkillTool(catalog);
+
+    let result = await tool.execute({ name: 'deploy' });
+    expect(result).toContain('Error');
+
+    writeFileSync(join(dir, 'skills', 'deploy.md'), `---
+name: deploy
+description: 发布技能
+---
+请先检查 CI，再执行发布。`);
+
+    await catalog.reload();
+    result = await tool.execute({ name: 'deploy' });
+
+    const payload = JSON.parse(result) as { name: string; content: string };
+    expect(payload.name).toBe('deploy');
+    expect(payload.content).toContain('检查 CI');
   });
 });

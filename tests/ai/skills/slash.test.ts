@@ -14,4 +14,8 @@ describe('parseSlashCommand', () => {
   it('handles /skill-name with no trailing text', () => {
     expect(parseSlashCommand('/deploy')).toEqual({ skillName: 'deploy', rest: '' });
   });
+
+  it('normalizes extra whitespace after the slash command', () => {
+    expect(parseSlashCommand('/review    api   layer  ')).toEqual({ skillName: 'review', rest: 'api layer' });
+  });
 });

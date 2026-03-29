@@ -1,57 +1,126 @@
+import { compactMessages, estimateTokens, mergeUsage, shouldCompact } from './runtime/usage.js';
+let nextSessionOrdinal = 0;
 export class Agent {
-    messages = [];
     adapter;
     registry;
     systemPrompt;
-    constructor(adapter, registry, systemPrompt) {
+    options;
+    messages = [];
+    usage = { inputTokens: 0, outputTokens: 0 };
+    sessionId = `sess_${(nextSessionOrdinal += 1)}`;
+    turnCount = 0;
+    constructor(adapter, registry, systemPrompt, options = {}) {
         this.adapter = adapter;
         this.registry = registry;
         this.systemPrompt = systemPrompt;
+        this.options = options;
     }
     /** 执行一轮对话（可能包含多次工具调用循环） */
-    async runTurn(userInput, onChunk) {
-        this.messages.push({ role: 'user', content: userInput });
-        while (true) {
-            const toolCalls = [];
-            const textParts = [];
+    async runTurn(userInput, onChunk, signal) {
+        this.throwIfAborted(signal);
+        const turnId = `turn_${(this.turnCount += 1)}`;
+        this.emit({
+            type: 'turn_started',
+            sessionId: this.sessionId,
+            turnId,
+        });
+        this.messages.push({
+            role: 'user',
+            content: [{ type: 'text', text: userInput }],
+        });
+        const maxIterations = this.options.maxIterations ?? 12;
+        const contextLimit = this.options.contextLimit ?? 200_000;
+        const compactThreshold = this.options.compactThreshold ?? 0.85;
+        const compactPlaceholder = this.options.compactPlaceholder ?? '[context compacted]';
+        for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+            this.throwIfAborted(signal);
+            if (shouldCompact(estimateTokens(this.messages), contextLimit, compactThreshold)) {
+                this.messages = compactMessages(this.messages, compactPlaceholder);
+            }
+            const assistantBlocks = [];
             for await (const chunk of this.adapter.stream(this.messages, this.registry.getToolDefinitions(), this.systemPrompt)) {
+                this.throwIfAborted(signal);
                 if (chunk.type === 'text') {
-                    textParts.push(chunk.delta);
+                    assistantBlocks.push({ type: 'text', text: chunk.delta });
                     onChunk(chunk);
+                    continue;
                 }
-                else if (chunk.type === 'tool_use') {
-                    toolCalls.push({ id: chunk.id, name: chunk.name, input: chunk.input });
+                if (chunk.type === 'tool_use') {
+                    assistantBlocks.push(chunk);
+                    continue;
                 }
-                else if (chunk.type === 'done') {
+                if (chunk.type === 'usage') {
+                    this.usage = mergeUsage(this.usage, chunk.usage);
+                    onChunk(chunk);
+                    continue;
+                }
+                if (chunk.type === 'done') {
                     break;
                 }
             }
-            // 构建 assistant message，保留 toolCalls 供 OpenAI 适配器使用
-            const assistantContent = textParts.join('');
-            this.messages.push({
-                role: 'assistant',
-                content: assistantContent,
-                toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-            });
-            // 如果没有工具调用，对话结束
-            if (toolCalls.length === 0)
-                break;
-            // 执行工具调用，收集结果
+            if (assistantBlocks.length > 0) {
+                this.messages.push({
+                    role: 'assistant',
+                    content: assistantBlocks,
+                });
+            }
+            const toolCalls = assistantBlocks.filter((block) => block.type === 'tool_use');
+            if (toolCalls.length === 0) {
+                this.emit({
+                    type: 'turn_completed',
+                    sessionId: this.sessionId,
+                    turnId,
+                });
+                return;
+            }
             const toolResults = [];
             for (const tc of toolCalls) {
+                this.emit({
+                    type: 'tool_started',
+                    sessionId: this.sessionId,
+                    turnId,
+                    toolName: tc.name,
+                });
                 const result = await this.registry.executeTool(tc.name, tc.input);
+                const isError = result.startsWith('Error');
+                this.emit({
+                    type: 'tool_finished',
+                    sessionId: this.sessionId,
+                    turnId,
+                    toolName: tc.name,
+                    ok: !isError,
+                });
                 toolResults.push({
                     type: 'tool_result',
                     tool_use_id: tc.id,
                     content: result,
-                    is_error: result.startsWith('Error'),
+                    is_error: isError,
                 });
             }
-            this.messages.push({ role: 'tool_result', content: toolResults });
+            this.messages.push({ role: 'user', content: toolResults });
         }
+        throw new Error('agent reached max iterations');
     }
     /** 清空历史记录（会话结束时调用） */
     clearHistory() {
         this.messages = [];
+        this.usage = { inputTokens: 0, outputTokens: 0 };
+    }
+    getUsage() {
+        return this.usage;
+    }
+    setAdapter(adapter) {
+        this.adapter = adapter;
+    }
+    setSystemPrompt(systemPrompt) {
+        this.systemPrompt = systemPrompt;
+    }
+    throwIfAborted(signal) {
+        if (signal?.aborted) {
+            throw new Error('agent aborted');
+        }
+    }
+    emit(event) {
+        this.options.hooks?.emit(event);
     }
 }

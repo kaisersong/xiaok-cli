@@ -1,3 +1,7 @@
+import type { MessageBlock } from './ai/runtime/blocks.js';
+import type { UsageStats } from './ai/runtime/usage.js';
+import type { RuntimeEvent } from './runtime/events.js';
+export type { MessageBlock, UsageStats };
 export interface ModelAdapter {
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string): AsyncIterable<StreamChunk>;
 }
@@ -10,24 +14,21 @@ export type StreamChunk = {
     name: string;
     input: Record<string, unknown>;
 } | {
+    type: 'usage';
+    usage: UsageStats;
+} | {
     type: 'done';
 };
-export interface ToolCall {
-    id: string;
-    name: string;
-    input: Record<string, unknown>;
-}
+export type ToolCall = Extract<MessageBlock, {
+    type: 'tool_use';
+}>;
 export interface Message {
-    role: 'user' | 'assistant' | 'tool_result';
-    content: string | ToolResultContent[];
-    toolCalls?: ToolCall[];
+    role: 'user' | 'assistant';
+    content: MessageBlock[];
 }
-export interface ToolResultContent {
+export type ToolResultContent = Extract<MessageBlock, {
     type: 'tool_result';
-    tool_use_id: string;
-    content: string;
-    is_error?: boolean;
-}
+}>;
 export interface ToolDefinition {
     name: string;
     description: string;
@@ -38,6 +39,9 @@ export interface Tool {
     definition: ToolDefinition;
     permission: PermissionClass;
     execute(input: Record<string, unknown>): Promise<string>;
+}
+export interface RuntimeHookSink {
+    emit(event: RuntimeEvent): void;
 }
 export interface Credentials {
     schemaVersion: 1;

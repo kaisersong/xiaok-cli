@@ -1,0 +1,19 @@
+import { describe, it, expect } from 'vitest';
+import { PermissionManager } from '../../../src/ai/permissions/manager.js';
+
+describe('PermissionManager', () => {
+  it('denies write tools in plan mode', async () => {
+    const pm = new PermissionManager({ mode: 'plan' });
+
+    expect(await pm.check('write', { file_path: '/tmp/x' })).toBe('deny');
+  });
+
+  it('auto-allows matching bash rule', async () => {
+    const pm = new PermissionManager({
+      mode: 'default',
+      allowRules: ['bash:git status*'],
+    });
+
+    expect(await pm.check('bash', { command: 'git status --short' })).toBe('allow');
+  });
+});

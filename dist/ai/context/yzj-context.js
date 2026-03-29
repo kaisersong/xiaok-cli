@@ -23,7 +23,7 @@ function loadYzjHelp() {
 export async function buildSystemPrompt(opts) {
     const sections = [];
     // 1. 角色定义
-    sections.push(`你是 xiaok，面向云之家（yunzhijia.com）开发者的 AI 编程助手。你擅长云之家开放平台 API 集成、轻应用开发、Webhook 配置等场景。`);
+    sections.push(`你是 xiaok，面向金蝶(kingdee.com)与云之家（yunzhijia.com）开发者的 AI 编程助手。你擅长金蝶苍穹、云之家开放平台 API 集成、轻应用开发、Webhook 配置等场景。`);
     // 2. 当前会话上下文
     const ctxLines = [`当前工作目录：${opts.cwd}`];
     if (opts.enterpriseId)
@@ -34,6 +34,20 @@ export async function buildSystemPrompt(opts) {
     // 3. Skills 列表（若有）
     if (opts.skills && opts.skills.length > 0) {
         sections.push(formatSkillsContext(opts.skills));
+    }
+    if (opts.deferredTools && opts.deferredTools.length > 0) {
+        const deferredToolSummary = opts.deferredTools
+            .slice(0, 20)
+            .map((tool) => `- ${tool.name}: ${tool.description}`)
+            .join('\n');
+        sections.push(`可按需发现的工具（通过 tool_search 查询完整 schema）：\n${deferredToolSummary}`);
+    }
+    if (opts.agents && opts.agents.length > 0) {
+        const agentSummary = opts.agents
+            .slice(0, 20)
+            .map((agent) => `- @${agent.name}${agent.model ? ` (${agent.model})` : ''}${agent.allowedTools?.length ? ` tools=${agent.allowedTools.join(',')}` : ''}`)
+            .join('\n');
+        sections.push(`可用自定义 agents：\n${agentSummary}`);
     }
     // 4. 云之家 API 概览（内置文档）
     let apiOverview = '';

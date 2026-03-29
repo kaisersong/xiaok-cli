@@ -1,5 +1,11 @@
 // AI Agent 与模型适配层的共享接口
 
+import type { MessageBlock } from './ai/runtime/blocks.js';
+import type { UsageStats } from './ai/runtime/usage.js';
+import type { RuntimeEvent } from './runtime/events.js';
+
+export type { MessageBlock, UsageStats };
+
 export interface ModelAdapter {
   stream(
     messages: Message[],
@@ -11,27 +17,17 @@ export interface ModelAdapter {
 export type StreamChunk =
   | { type: 'text'; delta: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'usage'; usage: UsageStats }
   | { type: 'done' };
 
-export interface ToolCall {
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-}
+export type ToolCall = Extract<MessageBlock, { type: 'tool_use' }>;
 
 export interface Message {
-  role: 'user' | 'assistant' | 'tool_result';
-  content: string | ToolResultContent[];
-  // OpenAI 要求 assistant 消息携带 tool_calls 以便后续 turn 关联 tool 结果
-  toolCalls?: ToolCall[];
+  role: 'user' | 'assistant';
+  content: MessageBlock[];
 }
 
-export interface ToolResultContent {
-  type: 'tool_result';
-  tool_use_id: string;
-  content: string;
-  is_error?: boolean;
-}
+export type ToolResultContent = Extract<MessageBlock, { type: 'tool_result' }>;
 
 export interface ToolDefinition {
   name: string;
@@ -45,6 +41,10 @@ export interface Tool {
   definition: ToolDefinition;
   permission: PermissionClass;
   execute(input: Record<string, unknown>): Promise<string>;
+}
+
+export interface RuntimeHookSink {
+  emit(event: RuntimeEvent): void;
 }
 
 // credentials.json schema

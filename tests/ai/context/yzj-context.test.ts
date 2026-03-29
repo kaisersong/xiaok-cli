@@ -26,4 +26,26 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('云之家');
     expect(typeof prompt).toBe('string');
   });
+
+  it('includes builtin skill summary in the system prompt', async () => {
+    const prompt = await buildSystemPrompt({
+      enterpriseId: null,
+      devApp: null,
+      cwd: '/tmp/demo',
+      budget: 2000,
+      skills: [
+        {
+          name: 'review',
+          description: 'review code',
+          content: 'Do review',
+          path: '/builtin/review.md',
+          source: 'builtin',
+          tier: 'system',
+        },
+      ],
+    });
+
+    expect(prompt).toContain('默认 Skills');
+    expect(prompt).toContain('/review');
+  });
 });

@@ -17,17 +17,40 @@ export class ClaudeAdapter implements ModelAdapter {
     tools: ToolDefinition[],
     systemPrompt: string
   ): AsyncIterable<StreamChunk> {
-    const anthropicMessages = messages.map(m => ({
-      role: m.role === 'tool_result' ? 'user' as const : m.role as 'user' | 'assistant',
-      content: typeof m.content === 'string'
-        ? m.content
-        : m.content.map(tc => ({
-            type: 'tool_result' as const,
-            tool_use_id: tc.tool_use_id,
-            content: tc.content,
-            is_error: tc.is_error,
-          })),
-    }));
+    const anthropicMessages: Anthropic.MessageParam[] = messages.map((message) => {
+      const content: Anthropic.ContentBlockParam[] = [];
+
+      for (const block of message.content) {
+        if (block.type === 'text') {
+          content.push({ type: 'text', text: block.text });
+          continue;
+        }
+
+        if (block.type === 'tool_use') {
+          content.push({
+            type: 'tool_use',
+            id: block.id,
+            name: block.name,
+            input: block.input,
+          });
+          continue;
+        }
+
+        if (block.type === 'tool_result') {
+          content.push({
+            type: 'tool_result',
+            tool_use_id: block.tool_use_id,
+            content: block.content,
+            is_error: block.is_error,
+          });
+        }
+      }
+
+      return {
+        role: message.role,
+        content,
+      };
+    });
 
     const anthropicTools = tools.map(t => ({
       name: t.name,
