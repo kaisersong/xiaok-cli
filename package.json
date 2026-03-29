@@ -1,0 +1,27 @@
+{
+  "name": "xiaok",
+  "version": "0.1.0",
+  "description": "面向云之家开发者的 AI 编程 CLI",
+  "type": "module",
+  "bin": { "xiaok": "./dist/index.js" },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "commander": "^12.0.0",
+    "fast-glob": "^3.3.2",
+    "openai": "^4.77.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": { "node": ">=20" },
+  "files": ["dist", "data"]
+}
