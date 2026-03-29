@@ -7,8 +7,8 @@ export class ClaudeAdapter implements ModelAdapter {
   client: Anthropic;
   private model: string;
 
-  constructor(apiKey: string, model = 'claude-opus-4-6') {
-    this.client = new Anthropic({ apiKey, maxRetries: MAX_RETRIES });
+  constructor(apiKey: string, model = 'claude-opus-4-6', baseUrl?: string) {
+    this.client = new Anthropic({ apiKey, baseURL: baseUrl, maxRetries: MAX_RETRIES });
     this.model = model;
   }
 

@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "面向云之家开发者的 AI 编程 CLI",
   "type": "module",
-  "bin": { "xiaok": "./dist/index.js" },
+  "bin": {
+    "xiaok": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
@@ -22,6 +24,11 @@
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
-  "engines": { "node": ">=20" },
-  "files": ["dist", "data"]
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "data"
+  ]
 }

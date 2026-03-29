@@ -67,11 +67,16 @@ export class OpenAIAdapter implements ModelAdapter {
       stream: true,
     });
 
+    const rawChunks: OpenAI.Chat.Completions.ChatCompletionChunk[] = [];
+    for await (const chunk of stream) {
+      rawChunks.push(chunk);
+    }
+
     // Buffer for tool_calls arguments
     const toolBuffers = new Map<number, { id: string; name: string; argsBuffer: string }>();
     let gotFinishReason = false;
 
-    for await (const chunk of stream) {
+    for (const chunk of rawChunks) {
       const delta = chunk.choices[0]?.delta;
       if (!delta) continue;
 
@@ -108,11 +113,16 @@ export class OpenAIAdapter implements ModelAdapter {
       }
     }
 
+
     // 防御：部分 provider 不发 finish_reason，确保 done 总会发出
     if (!gotFinishReason) {
       for (const buf of toolBuffers.values()) {
         let input: Record<string, unknown> = {};
-        try { input = JSON.parse(buf.argsBuffer || '{}') as Record<string, unknown>; } catch { /**/ }
+        try {
+          input = JSON.parse(buf.argsBuffer || '{}') as Record<string, unknown>;
+        } catch {
+          input = { _raw: buf.argsBuffer };
+        }
         yield { type: 'tool_use', id: buf.id, name: buf.name, input };
       }
       yield { type: 'done' };

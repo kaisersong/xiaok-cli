@@ -17,6 +17,7 @@ interface ChatOptions {
 }
 
 async function runChat(initialInput: string | undefined, opts: ChatOptions): Promise<void> {
+
   // 检测 CI 环境
   const autoMode = opts.auto || !isTTY();
   if (!isTTY() && !opts.auto) {
@@ -25,6 +26,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   // 加载配置和凭据
   const config = await loadConfig();
+
   let adapter;
   try {
     adapter = createAdapter(config);
@@ -68,9 +70,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   // 单次任务模式
   if (initialInput) {
     process.stdout.write('\n');
-    await agent.runTurn(initialInput, (chunk) => {
-      if (chunk.type === 'text') writeChunk(chunk.delta);
-    });
+    try {
+      await agent.runTurn(initialInput, (chunk) => {
+        if (chunk.type === 'text') writeChunk(chunk.delta);
+      });
+    } catch (e) {
+      writeError(String(e));
+      process.exit(1);
+    }
     process.stdout.write('\n');
     return;
   }

@@ -1,0 +1,78 @@
+export interface ModelAdapter {
+    stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string): AsyncIterable<StreamChunk>;
+}
+export type StreamChunk = {
+    type: 'text';
+    delta: string;
+} | {
+    type: 'tool_use';
+    id: string;
+    name: string;
+    input: Record<string, unknown>;
+} | {
+    type: 'done';
+};
+export interface ToolCall {
+    id: string;
+    name: string;
+    input: Record<string, unknown>;
+}
+export interface Message {
+    role: 'user' | 'assistant' | 'tool_result';
+    content: string | ToolResultContent[];
+    toolCalls?: ToolCall[];
+}
+export interface ToolResultContent {
+    type: 'tool_result';
+    tool_use_id: string;
+    content: string;
+    is_error?: boolean;
+}
+export interface ToolDefinition {
+    name: string;
+    description: string;
+    inputSchema: Record<string, unknown>;
+}
+export type PermissionClass = 'safe' | 'write' | 'bash';
+export interface Tool {
+    definition: ToolDefinition;
+    permission: PermissionClass;
+    execute(input: Record<string, unknown>): Promise<string>;
+}
+export interface Credentials {
+    schemaVersion: 1;
+    accessToken: string;
+    refreshToken: string;
+    enterpriseId: string;
+    userId: string;
+    expiresAt: string;
+}
+export interface Config {
+    schemaVersion: 1;
+    defaultModel: 'claude' | 'openai' | 'custom';
+    models: {
+        claude?: {
+            model: string;
+            apiKey?: string;
+            baseUrl?: string;
+        };
+        openai?: {
+            model: string;
+            apiKey?: string;
+        };
+        custom?: {
+            baseUrl: string;
+            apiKey?: string;
+            model?: string;
+        };
+    };
+    devApp?: {
+        appKey: string;
+        appSecret: string;
+    };
+    defaultMode: 'interactive';
+    contextBudget: number;
+}
+export declare const DEFAULT_CONFIG: Config;
+/** 校验 defaultModel 是否合法，防止脏数据写入 */
+export declare function isValidProvider(v: unknown): v is Config['defaultModel'];

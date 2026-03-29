@@ -22,7 +22,9 @@ export function createAdapter(config: Config): ModelAdapter {
 
   if (provider === 'claude') {
     const m = config.models.claude;
-    return new ClaudeAdapter(providerKey!, m?.model ?? 'claude-opus-4-6');
+    // 支持 custom baseURL（用于第三方 Anthropic 兼容 API）
+    const baseUrl = process.env.ANTHROPIC_BASE_URL ?? m?.baseUrl;
+    return new ClaudeAdapter(providerKey!, m?.model ?? 'claude-opus-4-6', baseUrl);
   }
 
   if (provider === 'openai') {

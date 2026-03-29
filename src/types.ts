@@ -62,7 +62,7 @@ export interface Config {
   schemaVersion: 1;
   defaultModel: 'claude' | 'openai' | 'custom';
   models: {
-    claude?: { model: string; apiKey?: string };
+    claude?: { model: string; apiKey?: string; baseUrl?: string };
     openai?: { model: string; apiKey?: string };
     custom?: { baseUrl: string; apiKey?: string; model?: string };
   };
