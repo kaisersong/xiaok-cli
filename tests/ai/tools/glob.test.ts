@@ -7,7 +7,7 @@ import { globTool } from '../../../src/ai/tools/glob.js';
 describe('globTool', () => {
   let dir: string;
   beforeEach(() => {
-    dir = join(tmpdir(), `xiaok-test-${Date.now()}`);
+    dir = join(tmpdir(), `xiaok-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(join(dir, 'src'), { recursive: true });
     writeFileSync(join(dir, 'src', 'a.ts'), '');
     writeFileSync(join(dir, 'src', 'b.ts'), '');

@@ -7,7 +7,7 @@ import { writeTool } from '../../../src/ai/tools/write.js';
 describe('writeTool', () => {
   let dir: string;
   beforeEach(() => {
-    dir = join(tmpdir(), `xiaok-test-${Date.now()}`);
+    dir = join(tmpdir(), `xiaok-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(dir, { recursive: true });
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));

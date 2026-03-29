@@ -7,7 +7,7 @@ import { editTool } from '../../../src/ai/tools/edit.js';
 describe('editTool', () => {
   let dir: string;
   beforeEach(() => {
-    dir = join(tmpdir(), `xiaok-test-${Date.now()}`);
+    dir = join(tmpdir(), `xiaok-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(dir, { recursive: true });
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));

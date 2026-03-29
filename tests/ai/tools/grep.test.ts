@@ -7,7 +7,7 @@ import { grepTool } from '../../../src/ai/tools/grep.js';
 describe('grepTool', () => {
   let dir: string;
   beforeEach(() => {
-    dir = join(tmpdir(), `xiaok-test-${Date.now()}`);
+    dir = join(tmpdir(), `xiaok-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'a.txt'), 'hello world\nfoo bar\nhello again');
   });
