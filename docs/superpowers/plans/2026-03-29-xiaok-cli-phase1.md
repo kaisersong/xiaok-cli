@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 构建 xiaok CLI Phase 1 核心骨架——包含多模型 AI Agent 循环、6 种内置工具、权限模型、云之家上下文注入、多模型适配层（Claude + OpenAI），以及 auth/chat/config 三组 CLI 命令。
+**Goal:** 构建 xiaok CLI Phase 1 核心骨架——包含多模型 AI Agent 循环、6 种内置工具 + skill 工具、Skills 系统（/skill-name 调用 + description 命中）、权限模型、云之家上下文注入、多模型适配层（Claude + OpenAI），以及 auth/chat/config 三组 CLI 命令。
 
 **Architecture:** 单体 TypeScript CLI，以 commander 作为命令框架；核心是 ModelAdapter 接口驱动的 Agent Loop，通过工具调用实现文件操作和 shell 执行；配置和凭据以 JSON 文件存储于 `~/.xiaok/`。
 
@@ -43,6 +43,9 @@ xiaok-cli/
 │   │   │   ├── edit.ts                  # 精确字符串替换，唯一性校验
 │   │   │   ├── grep.ts                  # child_process 调用 rg/grep，返回匹配行
 │   │   │   └── glob.ts                  # fast-glob 文件模式匹配
+│   │   ├── skills/
+│   │   │   ├── loader.ts                # 扫描全局/项目目录，解析 frontmatter，合并去重
+│   │   │   └── tool.ts                  # skill 工具实现（注册到工具集）
 │   │   └── context/
 │   │       └── yzj-context.ts           # 组装系统提示：内置文档 + yzj CLI help + 会话上下文，4000 token 预算
 │   ├── commands/
@@ -69,6 +72,9 @@ xiaok-cli/
     │   │   ├── edit.test.ts             # 字符串替换、唯一性
     │   │   ├── grep.test.ts             # 内容搜索
     │   │   └── glob.test.ts             # 模式匹配
+    │   ├── skills/
+    │   │   ├── loader.test.ts           # 目录扫描、frontmatter 解析、优先级合并
+    │   │   └── tool.test.ts             # skill 工具加载和错误处理
     │   ├── context/
     │   │   └── yzj-context.test.ts      # token 预算裁剪、yzj CLI 超时
     │   └── agent.test.ts                # Agent 循环、--dry-run、SIGINT
@@ -3055,6 +3061,7 @@ git commit -m "chore: Phase 1 完整集成验证通过"
 ```bash
 npx vitest run              # 全量测试
 npx vitest run tests/ai/    # 只跑 AI 模块测试
+npx vitest run tests/ai/skills/  # 只跑 Skills 模块测试
 npx vitest --watch          # 监听模式
 ```
 
@@ -3071,3 +3078,580 @@ npx tsc --noEmit # 只做类型检查
 npm run dev -- chat          # 使用 tsx 直接运行（无需编译）
 node dist/index.js --help    # 编译后运行
 ```
+
+---
+
+## Chunk 6：Skills 系统
+
+### Task 24：Skills Loader
+
+**Files:**
+- Create: `src/ai/skills/loader.ts`
+- Create: `tests/ai/skills/loader.test.ts`
+
+- [ ] **Step 1: 写失败的测试**
+
+```typescript
+// tests/ai/skills/loader.test.ts
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { writeFileSync, mkdirSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { loadSkills } from '../../../src/ai/skills/loader.js';
+
+describe('loadSkills', () => {
+  let globalDir: string;
+  let projectDir: string;
+
+  beforeEach(() => {
+    globalDir = join(tmpdir(), `xiaok-global-${Date.now()}`);
+    projectDir = join(tmpdir(), `xiaok-project-${Date.now()}`);
+    mkdirSync(join(globalDir, 'skills'), { recursive: true });
+    mkdirSync(join(projectDir, '.xiaok', 'skills'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(globalDir, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it('loads skills from global directory', async () => {
+    writeFileSync(join(globalDir, 'skills', 'hello.md'), `---
+name: hello
+description: 打招呼
+---
+# Hello Skill
+说你好。`);
+    const skills = await loadSkills(globalDir, projectDir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0].name).toBe('hello');
+    expect(skills[0].description).toBe('打招呼');
+    expect(skills[0].content).toContain('说你好');
+  });
+
+  it('loads skills from project-local directory', async () => {
+    writeFileSync(join(projectDir, '.xiaok', 'skills', 'local.md'), `---
+name: local
+description: 本地 skill
+---
+Local content.`);
+    const skills = await loadSkills(globalDir, projectDir);
+    expect(skills.find(s => s.name === 'local')).toBeTruthy();
+  });
+
+  it('project-local skill overrides global skill with same name', async () => {
+    writeFileSync(join(globalDir, 'skills', 'shared.md'), `---
+name: shared
+description: global version
+---
+Global content.`);
+    writeFileSync(join(projectDir, '.xiaok', 'skills', 'shared.md'), `---
+name: shared
+description: project version
+---
+Project content.`);
+    const skills = await loadSkills(globalDir, projectDir);
+    const shared = skills.find(s => s.name === 'shared');
+    expect(shared?.description).toBe('project version');
+    expect(shared?.content).toContain('Project content');
+    // 不重复
+    expect(skills.filter(s => s.name === 'shared')).toHaveLength(1);
+  });
+
+  it('skips files with malformed frontmatter and continues', async () => {
+    writeFileSync(join(globalDir, 'skills', 'bad.md'), 'no frontmatter at all');
+    writeFileSync(join(globalDir, 'skills', 'good.md'), `---
+name: good
+description: 正常的
+---
+Content.`);
+    const skills = await loadSkills(globalDir, projectDir);
+    expect(skills.find(s => s.name === 'good')).toBeTruthy();
+    expect(skills.find(s => s.name === 'bad')).toBeUndefined();
+  });
+
+  it('returns empty array when directories do not exist', async () => {
+    const skills = await loadSkills('/nonexistent/path', '/also/nonexistent');
+    expect(skills).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 2: 运行测试，确认失败**
+
+```bash
+npx vitest run tests/ai/skills/loader.test.ts
+```
+
+Expected: FAIL。
+
+- [ ] **Step 3: 实现 src/ai/skills/loader.ts**
+
+```typescript
+import { readdirSync, readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+
+export interface SkillMeta {
+  name: string;
+  description: string;
+  content: string;  // frontmatter 之后的全部内容
+  source: 'global' | 'project';
+}
+
+/**
+ * 解析 Markdown 文件中的 YAML frontmatter。
+ * 格式：文件以 --- 开头，第二个 --- 之前是 frontmatter。
+ * 返回 { frontmatter: Record<string,string>, content: string } 或 null（格式不合法）。
+ */
+function parseFrontmatter(raw: string): { name: string; description: string; content: string } | null {
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!match) return null;
+
+  const fm = match[1];
+  const content = match[2].trim();
+
+  // 简单解析 key: value 行（不依赖 yaml 库）
+  const fields: Record<string, string> = {};
+  for (const line of fm.split('\n')) {
+    const colonIdx = line.indexOf(':');
+    if (colonIdx === -1) continue;
+    const key = line.slice(0, colonIdx).trim();
+    const value = line.slice(colonIdx + 1).trim();
+    fields[key] = value;
+  }
+
+  if (!fields.name || !fields.description) return null;
+  return { name: fields.name, description: fields.description, content };
+}
+
+function loadSkillsFromDir(dir: string, source: 'global' | 'project'): SkillMeta[] {
+  if (!existsSync(dir)) return [];
+
+  const results: SkillMeta[] = [];
+  let entries: string[];
+  try {
+    entries = readdirSync(dir).filter(f => f.endsWith('.md'));
+  } catch {
+    return [];
+  }
+
+  for (const file of entries) {
+    try {
+      const raw = readFileSync(join(dir, file), 'utf-8');
+      const parsed = parseFrontmatter(raw);
+      if (!parsed) {
+        console.warn(`[xiaok] Skills: 跳过格式错误的文件: ${file}`);
+        continue;
+      }
+      results.push({ ...parsed, source });
+    } catch {
+      console.warn(`[xiaok] Skills: 读取文件失败: ${file}`);
+    }
+  }
+
+  return results;
+}
+
+/**
+ * 加载所有可用 skills。项目本地优先于全局（同名时覆盖）。
+ *
+ * @param xiaokConfigDir  ~/.xiaok 目录路径（测试时可覆盖）
+ * @param cwd             当前工作目录（用于查找 .xiaok/skills/）
+ */
+export async function loadSkills(
+  xiaokConfigDir = join(homedir(), '.xiaok'),
+  cwd = process.cwd()
+): Promise<SkillMeta[]> {
+  const globalSkillsDir = join(xiaokConfigDir, 'skills');
+  const projectSkillsDir = join(cwd, '.xiaok', 'skills');
+
+  const globalSkills = loadSkillsFromDir(globalSkillsDir, 'global');
+  const projectSkills = loadSkillsFromDir(projectSkillsDir, 'project');
+
+  // 合并：项目本地覆盖全局同名 skill
+  const map = new Map<string, SkillMeta>();
+  for (const s of globalSkills) map.set(s.name, s);
+  for (const s of projectSkills) map.set(s.name, s); // 覆盖
+
+  return Array.from(map.values());
+}
+
+/** 格式化 skills 列表为系统提示片段 */
+export function formatSkillsContext(skills: SkillMeta[]): string {
+  if (skills.length === 0) return '';
+  const lines = skills.map(s => `- /${s.name}: ${s.description}`).join('\n');
+  return `## 可用 Skills\n\n通过 /skill-name 或工具调用方式使用：\n${lines}`;
+}
+```
+
+- [ ] **Step 4: 运行测试**
+
+```bash
+npx vitest run tests/ai/skills/loader.test.ts
+```
+
+Expected: PASS。
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/ai/skills/loader.ts tests/ai/skills/loader.test.ts
+git commit -m "feat: 实现 Skills Loader，支持全局/项目本地目录，项目优先"
+```
+
+---
+
+### Task 25：Skill 工具
+
+**Files:**
+- Create: `src/ai/skills/tool.ts`
+- Create: `tests/ai/skills/tool.test.ts`
+
+- [ ] **Step 1: 写失败的测试**
+
+```typescript
+// tests/ai/skills/tool.test.ts
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { writeFileSync, mkdirSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { createSkillTool } from '../../../src/ai/skills/tool.js';
+import { loadSkills } from '../../../src/ai/skills/loader.js';
+
+describe('skillTool', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = join(tmpdir(), `xiaok-skills-${Date.now()}`);
+    mkdirSync(join(dir, 'skills'), { recursive: true });
+    writeFileSync(join(dir, 'skills', 'greet.md'), `---
+name: greet
+description: 打招呼技能
+---
+请用中文打招呼，保持友好。`);
+  });
+
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('returns skill content for known skill', async () => {
+    const skills = await loadSkills(dir, dir);
+    const tool = createSkillTool(skills);
+    const result = await tool.execute({ name: 'greet' });
+    expect(result).toContain('打招呼');
+    expect(result).toContain('中文');
+  });
+
+  it('returns error message for unknown skill', async () => {
+    const skills = await loadSkills(dir, dir);
+    const tool = createSkillTool(skills);
+    const result = await tool.execute({ name: 'nonexistent' });
+    expect(result).toContain('Error');
+    expect(result).toContain('nonexistent');
+  });
+
+  it('tool definition has correct name and inputSchema', async () => {
+    const skills = await loadSkills(dir, dir);
+    const tool = createSkillTool(skills);
+    expect(tool.definition.name).toBe('skill');
+    expect(tool.definition.inputSchema).toHaveProperty('properties.name');
+  });
+});
+```
+
+- [ ] **Step 2: 运行测试，确认失败**
+
+```bash
+npx vitest run tests/ai/skills/tool.test.ts
+```
+
+Expected: FAIL。
+
+- [ ] **Step 3: 实现 src/ai/skills/tool.ts**
+
+```typescript
+import type { Tool } from '../../types.js';
+import type { SkillMeta } from './loader.js';
+
+export function createSkillTool(skills: SkillMeta[]): Tool {
+  const skillMap = new Map(skills.map(s => [s.name, s]));
+
+  return {
+    permission: 'safe',
+    definition: {
+      name: 'skill',
+      description: '按名称加载 skill 内容并注入到当前对话上下文。当用户请求匹配某个 skill 的描述时使用。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'skill 名称（不含 / 前缀）',
+          },
+        },
+        required: ['name'],
+      },
+    },
+    async execute(input) {
+      const { name } = input as { name: string };
+      const skill = skillMap.get(name);
+      if (!skill) {
+        const available = Array.from(skillMap.keys()).join(', ') || '（无）';
+        return `Error: 找不到 skill "${name}"。可用 skills：${available}`;
+      }
+      return skill.content;
+    },
+  };
+}
+```
+
+- [ ] **Step 4: 运行测试**
+
+```bash
+npx vitest run tests/ai/skills/tool.test.ts
+```
+
+Expected: PASS。
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/ai/skills/tool.ts tests/ai/skills/tool.test.ts
+git commit -m "feat: 实现 skill 工具，按名称加载 skill 内容"
+```
+
+---
+
+### Task 26：斜杠命令处理 + 系统提示集成
+
+将 Skills 接入 `chat.ts`（斜杠命令）、`yzj-context.ts`（系统提示注入）和 `tools/index.ts`（注册 skill 工具）。
+
+**Files:**
+- Modify: `src/commands/chat.ts`
+- Modify: `src/ai/context/yzj-context.ts`
+- Modify: `src/ai/tools/index.ts`
+
+- [ ] **Step 1: 写失败的斜杠命令测试**
+
+```typescript
+// tests/ai/skills/slash.test.ts
+import { describe, it, expect } from 'vitest';
+import { parseSlashCommand } from '../../../src/ai/skills/loader.js';
+
+describe('parseSlashCommand', () => {
+  it('detects /skill-name at start of input', () => {
+    expect(parseSlashCommand('/greet 帮我打招呼')).toEqual({ skillName: 'greet', rest: '帮我打招呼' });
+  });
+
+  it('returns null for non-slash input', () => {
+    expect(parseSlashCommand('普通输入')).toBeNull();
+  });
+
+  it('handles /skill-name with no trailing text', () => {
+    expect(parseSlashCommand('/deploy')).toEqual({ skillName: 'deploy', rest: '' });
+  });
+});
+```
+
+- [ ] **Step 2: 运行测试，确认失败**
+
+```bash
+npx vitest run tests/ai/skills/slash.test.ts
+```
+
+- [ ] **Step 3: 在 loader.ts 中添加 parseSlashCommand**
+
+在 `src/ai/skills/loader.ts` 末尾追加：
+
+```typescript
+/** 解析用户输入中的斜杠命令。以 / 开头且第一个 token 是 skill 名称。 */
+export function parseSlashCommand(input: string): { skillName: string; rest: string } | null {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith('/')) return null;
+  const [token, ...rest] = trimmed.slice(1).split(/\s+/);
+  if (!token) return null;
+  return { skillName: token, rest: rest.join(' ') };
+}
+```
+
+- [ ] **Step 4: 运行斜杠命令测试**
+
+```bash
+npx vitest run tests/ai/skills/slash.test.ts
+```
+
+Expected: PASS。
+
+- [ ] **Step 5: 更新 src/ai/tools/index.ts — 注册 skill 工具**
+
+在 `ALL_TOOLS` 数组和 `ToolRegistry` 构造函数中加入 skills 支持：
+
+将：
+```typescript
+const ALL_TOOLS: Tool[] = [readTool, writeTool, editTool, bashTool, grepTool, globTool];
+```
+
+改为：
+```typescript
+export function buildToolList(skillTool?: Tool): Tool[] {
+  const tools: Tool[] = [readTool, writeTool, editTool, bashTool, grepTool, globTool];
+  if (skillTool) tools.push(skillTool);
+  return tools;
+}
+```
+
+更新 `ToolRegistry`：
+
+```typescript
+export class ToolRegistry {
+  private tools: Tool[];
+  private options: RegistryOptions;
+
+  constructor(options: RegistryOptions, tools?: Tool[]) {
+    this.options = options;
+    this.tools = tools ?? buildToolList();
+  }
+
+  getToolDefinitions(): ToolDefinition[] {
+    return this.tools.map(t => t.definition);
+  }
+
+  async executeTool(name: string, input: Record<string, unknown>): Promise<string> {
+    const tool = this.tools.find(t => t.definition.name === name);
+    // ... 其余逻辑不变
+  }
+  // enableAutoMode 不变
+}
+```
+
+- [ ] **Step 6: 更新 src/ai/context/yzj-context.ts — 注入 skills 目录**
+
+在 `ContextOptions` 中加入 `skills` 参数，在系统提示末尾追加 skills 列表：
+
+```typescript
+import type { SkillMeta } from '../skills/loader.js';
+import { formatSkillsContext } from '../skills/loader.js';
+
+interface ContextOptions {
+  enterpriseId: string | null;
+  devApp: DevAppIdentity | null;
+  cwd: string;
+  budget: number;
+  skills?: SkillMeta[];   // 新增
+}
+
+// 在 buildSystemPrompt 中，sections.push 末尾加：
+if (opts.skills && opts.skills.length > 0) {
+  sections.push(formatSkillsContext(opts.skills));
+}
+```
+
+- [ ] **Step 7: 更新 src/commands/chat.ts — 斜杠命令处理**
+
+在 `runChat` 中加入：
+1. 会话启动时加载 skills：`const skills = await loadSkills();`
+2. 创建 skill 工具并传入 `ToolRegistry`
+3. 在 `buildSystemPrompt` 中传入 `skills`
+4. 交互循环中检测斜杠命令
+
+```typescript
+import { loadSkills, parseSlashCommand } from '../ai/skills/loader.js';
+import { createSkillTool } from '../ai/skills/tool.js';
+import { buildToolList } from '../ai/tools/index.js';
+
+// 在 runChat 中：
+const skills = await loadSkills();
+const skillTool = createSkillTool(skills);
+const tools = buildToolList(skillTool);
+
+const registry = new ToolRegistry({ ... }, tools);
+
+// 系统提示加上 skills：
+const systemPrompt = await buildSystemPrompt({ ..., skills });
+
+// 交互模式输入处理：
+rl.question('\n\x1b[36m> \x1b[0m', async (input: string) => {
+  const trimmed = input.trim();
+  if (!trimmed || trimmed === '/exit') { ... }
+
+  // 斜杠命令：直接触发对应 skill
+  const slash = parseSlashCommand(trimmed);
+  if (slash) {
+    const skill = skills.find(s => s.name === slash.skillName);
+    if (skill) {
+      // 将 skill 内容作为 system 级别指令注入，附带用户的补充说明
+      const userMsg = slash.rest
+        ? `执行以下 skill，用户补充说明：${slash.rest}\n\n${skill.content}`
+        : skill.content;
+      await agent.runTurn(userMsg, (chunk) => {
+        if (chunk.type === 'text') writeChunk(chunk.delta);
+      });
+    } else {
+      writeLine(`找不到 skill "${slash.skillName}"。输入 /help 查看可用 skills。`);
+    }
+    askQuestion();
+    return;
+  }
+
+  // 普通输入
+  await agent.runTurn(trimmed, ...);
+  askQuestion();
+});
+```
+
+- [ ] **Step 8: 编译检查**
+
+```bash
+npx tsc --noEmit
+```
+
+Expected: 无报错。
+
+- [ ] **Step 9: 运行全量测试**
+
+```bash
+npx vitest run
+```
+
+Expected: 所有测试 PASS。
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add src/ai/skills/ src/ai/tools/index.ts src/ai/context/yzj-context.ts src/commands/chat.ts tests/ai/skills/
+git commit -m "feat: 集成 Skills 系统——斜杠命令、系统提示注入、skill 工具注册"
+```
+
+---
+
+### Task 27：Skills 冒烟测试
+
+- [ ] **Step 1: 创建测试 skill**
+
+```bash
+mkdir -p ~/.xiaok/skills
+cat > ~/.xiaok/skills/yzj-api.md << 'EOF'
+---
+name: yzj-api
+description: 生成云之家 OpenAPI 调用代码
+---
+你是云之家 API 集成专家。用户希望你生成调用云之家 OpenAPI 的代码。
+请默认使用 Node.js + axios，并包含完整的错误处理和 token 刷新逻辑。
+EOF
+```
+
+- [ ] **Step 2: 测试斜杠命令**
+
+```bash
+node dist/index.js chat --dry-run
+> /yzj-api 帮我发送一条消息给用户 user_123
+```
+
+Expected: AI 收到 skill 内容 + 用户说明，tool 调用序列打印（dry-run），不报错。
+
+- [ ] **Step 3: Commit**
+
+```bash
+git commit -m "chore: Phase 1 Skills 冒烟测试通过"
+```
+
