@@ -1723,7 +1723,6 @@ npx vitest run tests/ai/tools/write.test.ts
 ```typescript
 import { writeFileSync, mkdirSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
-import { tmpdir } from 'os';
 import type { Tool } from '../../types.js';
 
 export const writeTool: Tool = {
@@ -1743,8 +1742,8 @@ export const writeTool: Tool = {
   async execute(input) {
     const { file_path, content } = input as { file_path: string; content: string };
     mkdirSync(dirname(file_path), { recursive: true });
-    // 原子写入：先写临时文件，再 rename
-    const tmp = join(tmpdir(), `xiaok-write-${Date.now()}`);
+    // 原子写入：temp 文件放在同目录，确保 rename 在同一文件系统（避免 Windows EXDEV 错误）
+    const tmp = join(dirname(file_path), `.xiaok-tmp-${Date.now()}`);
     writeFileSync(tmp, content, 'utf-8');
     renameSync(tmp, file_path);
     return `已写入: ${file_path}（${content.length} 字符）`;
@@ -1827,8 +1826,7 @@ npx vitest run tests/ai/tools/edit.test.ts
 
 ```typescript
 import { readFileSync, writeFileSync, renameSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import { dirname, join } from 'path';
 import type { Tool } from '../../types.js';
 
 export const editTool: Tool = {
@@ -1864,8 +1862,9 @@ export const editTool: Tool = {
     if (occurrences === 0) return `Error: old_string 在文件中不存在`;
     if (occurrences > 1) return `Error: old_string 在文件中出现了 ${occurrences} 次，必须唯一`;
 
-    const updated = content.replace(old_string, new_string);
-    const tmp = join(tmpdir(), `xiaok-edit-${Date.now()}`);
+    const updated = content.split(old_string).join(new_string);
+    // 原子替换：temp 文件放在同目录，确保 rename 在同一文件系统（避免 Windows EXDEV 错误）
+    const tmp = join(dirname(file_path), `.xiaok-tmp-${Date.now()}`);
     writeFileSync(tmp, updated, 'utf-8');
     renameSync(tmp, file_path);
     return `已编辑: ${file_path}`;
@@ -2228,6 +2227,14 @@ describe('buildSystemPrompt', () => {
     const prompt = await buildSystemPrompt({ enterpriseId: null, devApp: null, cwd: '/tmp', budget: 50 });
     // rough estimate: 50 tokens ≈ 200 chars
     expect(prompt.length).toBeLessThan(1000);
+  });
+
+  it('resolves successfully when yzj CLI is not installed or times out', async () => {
+    // spawnSync returns non-zero when yzj is not found; buildSystemPrompt should not throw
+    const prompt = await buildSystemPrompt({ enterpriseId: 'ent_x', devApp: null, cwd: '/tmp', budget: 4000 });
+    // Should still contain the base API overview even if yzj help loading failed
+    expect(prompt).toContain('云之家');
+    expect(typeof prompt).toBe('string');
   });
 });
 ```
@@ -2741,7 +2748,12 @@ export function registerConfigCommands(program: Command): void {
     .option('--provider <provider>', '指定提供商（默认当前默认模型）')
     .action(async (key: string, opts: { provider?: string }) => {
       const cfg = await loadConfig();
-      const provider = (opts.provider ?? cfg.defaultModel) as 'claude' | 'openai' | 'custom';
+    const provider = (opts.provider ?? cfg.defaultModel) as 'claude' | 'openai' | 'custom';
+      // custom 模型必须先有 baseUrl 才能设置 apiKey
+      if (provider === 'custom' && !cfg.models.custom?.baseUrl) {
+        console.error('请先设置 baseUrl：xiaok config set model custom --base-url <url>');
+        return;
+      }
       cfg.models[provider] = { ...cfg.models[provider], apiKey: key } as never;
       await saveConfig(cfg);
       console.log(`已为 ${provider} 设置 API Key`);
@@ -2954,10 +2966,8 @@ registerAuthCommands(program);
 registerConfigCommands(program);
 registerChatCommands(program);
 
-// 无子命令时，直接启动 chat
-program.action(async () => {
-  await program.parseAsync(['node', 'xiaok', 'chat', ...process.argv.slice(2)]);
-});
+// chat 命令注册时使用 { isDefault: true }，Commander 自动处理无子命令时的路由
+// 无需额外 program.action() — 会导致双重调用
 
 program.parse();
 ```
