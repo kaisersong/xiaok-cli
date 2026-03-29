@@ -168,17 +168,33 @@ All platform operations (messaging, apps, org structure, workflows, logs) are ha
 ```typescript
 interface ModelAdapter {
   // Stream a chat completion; yields chunks as they arrive
-  stream(messages: Message[], tools: ToolDefinition[]): AsyncIterable<StreamChunk>;
+  // systemPrompt is passed separately to match Claude's top-level system parameter;
+  // adapters that use message-based system (e.g. OpenAI) prepend it internally
+  stream(
+    messages: Message[],
+    tools: ToolDefinition[],
+    systemPrompt: string
+  ): AsyncIterable<StreamChunk>;
 }
 
 type StreamChunk =
   | { type: 'text'; delta: string }
+  // tool_use is emitted once per tool call with fully assembled input.
+  // Adapters MUST buffer incremental argument deltas (Anthropic input_json_delta /
+  // OpenAI tool_calls[].function.arguments) and parse the complete JSON before emitting.
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'done' };
 
 interface Message {
   role: 'user' | 'assistant' | 'tool_result';
   content: string | ToolResultContent[];
+}
+
+interface ToolResultContent {
+  type: 'tool_result';
+  tool_use_id: string;
+  content: string;
+  is_error?: boolean;
 }
 
 interface ToolDefinition {
@@ -190,17 +206,19 @@ interface ToolDefinition {
 
 Each provider adapter (Claude, OpenAI, custom) implements `ModelAdapter`. The agent only depends on this interface.
 
-**Streaming normalization:** Each adapter maps provider-specific SSE events to the `StreamChunk` union. Tool call parsing differences (Claude `tool_use` blocks vs OpenAI `tool_calls` array) are fully encapsulated inside each adapter.
+**Streaming normalization:** Each adapter maps provider-specific SSE events to the `StreamChunk` union. Tool call parsing differences (Claude `tool_use` blocks vs OpenAI `tool_calls` array) are fully encapsulated inside each adapter. Adapters must buffer incremental tool argument deltas and emit a single `tool_use` chunk only after the full `input` JSON is assembled and parsed.
 
 **Rate limiting and retry:** Each adapter handles its own retry logic (exponential backoff on 429/5xx). The agent does not retry at the loop level.
 
 **API key precedence per provider:**
 
 ```
-Environment variable (XIAOK_API_KEY or XIAOK_<PROVIDER>_API_KEY)
+XIAOK_<PROVIDER>_API_KEY env var (e.g. XIAOK_CLAUDE_API_KEY, XIAOK_OPENAI_API_KEY)
   > ~/.xiaok/config.json models[provider].apiKey
   > Error: key required
 ```
+
+`XIAOK_API_KEY` (unprefixed) is not supported — use the per-provider form to avoid ambiguity when multiple providers are configured.
 
 Config schema for multi-model:
 ```json
@@ -296,6 +314,17 @@ The system prompt includes the following, assembled at session start:
 ```
 
 **Schema versioning:** Both files include `schemaVersion: 1`. On startup, xiaok checks the version; if it reads a file with an unknown version, it renames the old file to `*.bak` and starts fresh. Automatic migration between versions is a future concern.
+
+---
+
+## Open Questions / Preconditions
+
+These must be resolved before auth module implementation begins:
+
+| # | Question | Owner |
+|---|----------|-------|
+| 1 | Does 云之家 OAuth support dynamic redirect URIs (`http://localhost:*`), or must xiaok use a fixed callback port (e.g. 51000)? | 云之家 open platform team |
+| 2 | What OAuth scopes does yzj CLI require beyond `openid profile`? | yzj CLI team |
 
 ---
 
