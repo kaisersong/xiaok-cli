@@ -35,7 +35,7 @@ export function createAdapter(config: Config): ModelAdapter {
     if (!m?.baseUrl) throw new Error('custom 模型需要配置 baseUrl。请运行: xiaok config set model custom --base-url <url>');
     const apiKey = process.env.XIAOK_CUSTOM_API_KEY ?? m.apiKey ?? '';
     // 自定义端点的 model 名称从配置中读取，未配置时使用 'default'（部分 provider 忽略此字段）
-    return new OpenAIAdapter(apiKey, 'default', m.baseUrl);
+    return new OpenAIAdapter(apiKey, m.model ?? 'default', m.baseUrl);
   }
 
   throw new Error(`未知的模型提供商: ${provider}`);

@@ -64,7 +64,7 @@ export interface Config {
   models: {
     claude?: { model: string; apiKey?: string };
     openai?: { model: string; apiKey?: string };
-    custom?: { baseUrl: string; apiKey?: string };
+    custom?: { baseUrl: string; apiKey?: string; model?: string };
   };
   devApp?: { appKey: string; appSecret: string };
   defaultMode: 'interactive';
