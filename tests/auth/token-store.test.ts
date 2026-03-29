@@ -18,7 +18,7 @@ describe('token-store', () => {
   let testDir: string;
 
   beforeEach(() => {
-    testDir = join(tmpdir(), `xiaok-test-${Date.now()}`);
+    testDir = join(tmpdir(), `xiaok-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(testDir, { recursive: true });
     process.env.XIAOK_CONFIG_DIR = testDir;
   });

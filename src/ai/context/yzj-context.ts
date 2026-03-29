@@ -60,19 +60,22 @@ export async function buildSystemPrompt(opts: ContextOptions): Promise<string> {
   const yzjHelp = loadYzjHelp();
 
   // 组装并按预算裁剪
+  // 优先级：API 概览 > yzj 帮助（超出时先截断 yzj，再截断 API）
   const base = sections.join('\n\n');
   let remaining = opts.budget - estimateTokens(base);
 
-  let yzjSection = '';
-  if (yzjHelp && remaining > 100) {
-    const maxYzjTokens = Math.min(remaining - 100, Math.floor(remaining / 2));
-    yzjSection = truncateToTokens(`## yzj CLI 用法\n${yzjHelp}`, maxYzjTokens);
-    remaining -= estimateTokens(yzjSection);
-  }
-
   let apiSection = '';
   if (apiOverview && remaining > 50) {
-    apiSection = truncateToTokens(apiOverview, remaining);
+    // API 概览优先：保留 yzj 最少 100 tokens 的空间（若 yzj 可用），其余全给 API
+    const reserveForYzj = yzjHelp ? 100 : 0;
+    const maxApiTokens = Math.max(0, remaining - reserveForYzj);
+    apiSection = truncateToTokens(apiOverview, maxApiTokens);
+    remaining -= estimateTokens(apiSection);
+  }
+
+  let yzjSection = '';
+  if (yzjHelp && remaining > 0) {
+    yzjSection = truncateToTokens(`## yzj CLI 用法\n${yzjHelp}`, remaining);
   }
 
   return [base, apiSection, yzjSection].filter(Boolean).join('\n\n');

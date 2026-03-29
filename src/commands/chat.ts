@@ -51,11 +51,15 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
 
   // 创建 registry
+  // rl 在交互模式下赋值，confirm() 复用它避免 stdin 嵌套冲突；
+  // 单次任务模式下 rl 保持未赋值，confirm() 内部会创建临时接口（仅作兜底）
+  let rl!: readline.Interface;
+
   const registry = new ToolRegistry({
     autoMode,
     dryRun: opts.dryRun,
     onPrompt: async (name, input) => {
-      return confirm(name, input, () => registry.enableAutoMode());
+      return confirm(name, input, () => registry.enableAutoMode(), rl ?? undefined);
     },
   }, tools);
 
@@ -72,10 +76,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   }
 
   // 交互模式
+  rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   writeLine('\x1b[36mxiaok\x1b[0m - 云之家 AI 编程助手。输入 /exit 或 Ctrl-C 退出。');
   if (opts.dryRun) writeLine('\x1b[33m[dry-run 模式]\x1b[0m 工具调用不会实际执行。');
-
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   // SIGINT 处理
   process.on('SIGINT', () => {

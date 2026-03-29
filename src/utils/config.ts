@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { Config } from '../types.js';
@@ -10,6 +10,13 @@ export function getConfigDir(): string {
 
 export function getConfigPath(): string {
   return join(getConfigDir(), 'config.json');
+}
+
+/** Rename path to path+'.bak', removing any stale .bak first (Windows EPERM guard). */
+function backupAndRemove(path: string): void {
+  const bak = path + '.bak';
+  if (existsSync(bak)) rmSync(bak, { force: true });
+  renameSync(path, bak);
 }
 
 export async function loadConfig(): Promise<Config> {
@@ -27,19 +34,19 @@ export async function loadConfig(): Promise<Config> {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    renameSync(path, path + '.bak');
+    backupAndRemove(path);
     return { ...DEFAULT_CONFIG };
   }
 
   const obj = parsed as Record<string, unknown>;
   if (obj.schemaVersion !== 1) {
-    renameSync(path, path + '.bak');
+    backupAndRemove(path);
     return { ...DEFAULT_CONFIG };
   }
 
   // 校验 defaultModel，防止脏数据
   if (obj.defaultModel !== undefined && !isValidProvider(obj.defaultModel)) {
-    renameSync(path, path + '.bak');
+    backupAndRemove(path);
     return { ...DEFAULT_CONFIG };
   }
 
