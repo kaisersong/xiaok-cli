@@ -261,6 +261,58 @@ interface ToolDefinition {
 | `edit` | 写入 | 精确字符串替换 |
 | `grep` | 安全 | 正则表达式内容搜索 |
 | `glob` | 安全 | 文件模式匹配 |
+| `skill` | 安全 | 加载并返回指定 skill 的内容，供 Agent 注入上下文 |
+
+---
+
+### 6. Skills 系统（Phase 1 完整实现）
+
+Skills 是存储在 Markdown 文件中的可复用提示/指令，遵循 Claude Code 标准 Skills 规范。
+
+**文件格式：**
+
+```markdown
+---
+name: skill-name
+description: 一句话描述，用于 description 命中匹配
+---
+
+# Skill 内容
+
+这里是注入到 Agent 上下文的指令或提示内容。
+```
+
+**存储位置（优先级由低到高）：**
+1. 全局：`~/.xiaok/skills/`
+2. 项目本地：`.xiaok/skills/`（当前工作目录）
+
+同名 skill 项目本地优先于全局。
+
+**调用方式：**
+
+1. **斜杠命令**：用户在聊天输入中以 `/skill-name` 开头，精确匹配 frontmatter 中的 `name` 字段，直接触发对应 skill
+2. **描述命中**：会话启动时，所有可用 skill 的 `name` 和 `description` 注入系统提示；Agent 根据用户请求语义判断是否调用 `skill` 工具
+3. **`skill` 工具**：AI Agent 可通过内置 `skill` 工具按名称加载 skill 内容，返回值注入当前对话上下文
+
+**`skill` 工具行为：**
+- 输入：`{ name: string }`
+- 按名称在项目本地和全局目录查找 skill 文件
+- 返回：skill 文件中 frontmatter 之后的完整 Markdown 内容
+- 找不到时返回错误信息，由模型自行处理
+
+**目录结构新增：**
+```
+src/
+└── ai/
+    └── skills/
+        ├── loader.ts      # 扫描目录、解析 frontmatter、合并全局/项目本地
+        └── tool.ts        # skill 工具实现（注册到工具集）
+tests/
+└── ai/
+    └── skills/
+        └── loader.test.ts
+        └── tool.test.ts
+```
 
 ---
 
@@ -274,6 +326,8 @@ interface ToolDefinition {
 | yzj CLI 未安装 | 跳过 AI 上下文注入；bash 工具仍可正常使用；显示一次安装提示 |
 | 未配置 API Key | 立即退出，提示：`运行: xiaok config set api-key <key>` |
 | stdin 非 TTY（CI 环境）| 隐式视为 `--auto` 模式并打印警告 |
+| Skill 文件未找到 | `skill` 工具返回错误文本，由模型自行处理；不崩溃 |
+| Skill frontmatter 格式错误 | 跳过该文件，打印警告，继续加载其他 skill |
 
 ---
 
