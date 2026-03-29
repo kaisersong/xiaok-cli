@@ -36,6 +36,28 @@ describe('config', () => {
     expect(config.contextBudget).toBe(8000);
   });
 
+  it('preserves nested default model config when file only overrides part of models', async () => {
+    writeFileSync(
+      join(testDir, 'config.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        defaultModel: 'claude',
+        models: {
+          claude: {
+            apiKey: 'test-key',
+          },
+        },
+        defaultMode: 'interactive',
+        contextBudget: 4000,
+      })
+    );
+
+    const config = await loadConfig();
+
+    expect(config.models.claude?.apiKey).toBe('test-key');
+    expect(config.models.claude?.model).toBe(DEFAULT_CONFIG.models.claude?.model);
+  });
+
   it('renames corrupt config to .bak and returns defaults', async () => {
     writeFileSync(join(testDir, 'config.json'), 'not valid json');
     const config = await loadConfig();

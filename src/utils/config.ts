@@ -55,7 +55,43 @@ export async function loadConfig(): Promise<Config> {
     return cloneDefaultConfig();
   }
 
-  return { ...cloneDefaultConfig(), ...(obj as Partial<Config>), schemaVersion: 1 };
+  const defaults = cloneDefaultConfig();
+  const parsedConfig = obj as Partial<Config>;
+  const mergedModels: Config['models'] = {};
+
+  if (defaults.models.claude || parsedConfig.models?.claude) {
+    mergedModels.claude = {
+      ...(defaults.models.claude ?? { model: 'claude-opus-4-6' }),
+      ...(parsedConfig.models?.claude ?? {}),
+    };
+  }
+
+  if (defaults.models.openai || parsedConfig.models?.openai) {
+    const openaiModel = {
+      ...(defaults.models.openai ?? {}),
+      ...(parsedConfig.models?.openai ?? {}),
+    };
+    if (openaiModel.model) {
+      mergedModels.openai = openaiModel as NonNullable<Config['models']['openai']>;
+    }
+  }
+
+  if (defaults.models.custom || parsedConfig.models?.custom) {
+    const customModel = {
+      ...(defaults.models.custom ?? {}),
+      ...(parsedConfig.models?.custom ?? {}),
+    };
+    if (customModel.baseUrl) {
+      mergedModels.custom = customModel as NonNullable<Config['models']['custom']>;
+    }
+  }
+
+  return {
+    ...defaults,
+    ...parsedConfig,
+    models: mergedModels,
+    schemaVersion: 1,
+  };
 }
 
 export async function saveConfig(config: Config): Promise<void> {

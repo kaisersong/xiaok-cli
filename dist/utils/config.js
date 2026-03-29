@@ -48,7 +48,39 @@ export async function loadConfig() {
         backupAndRemove(path);
         return cloneDefaultConfig();
     }
-    return { ...cloneDefaultConfig(), ...obj, schemaVersion: 1 };
+    const defaults = cloneDefaultConfig();
+    const parsedConfig = obj;
+    const mergedModels = {};
+    if (defaults.models.claude || parsedConfig.models?.claude) {
+        mergedModels.claude = {
+            ...(defaults.models.claude ?? { model: 'claude-opus-4-6' }),
+            ...(parsedConfig.models?.claude ?? {}),
+        };
+    }
+    if (defaults.models.openai || parsedConfig.models?.openai) {
+        const openaiModel = {
+            ...(defaults.models.openai ?? {}),
+            ...(parsedConfig.models?.openai ?? {}),
+        };
+        if (openaiModel.model) {
+            mergedModels.openai = openaiModel;
+        }
+    }
+    if (defaults.models.custom || parsedConfig.models?.custom) {
+        const customModel = {
+            ...(defaults.models.custom ?? {}),
+            ...(parsedConfig.models?.custom ?? {}),
+        };
+        if (customModel.baseUrl) {
+            mergedModels.custom = customModel;
+        }
+    }
+    return {
+        ...defaults,
+        ...parsedConfig,
+        models: mergedModels,
+        schemaVersion: 1,
+    };
 }
 export async function saveConfig(config) {
     const dir = getConfigDir();
