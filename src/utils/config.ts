@@ -19,15 +19,20 @@ function backupAndRemove(path: string): void {
   renameSync(path, bak);
 }
 
+/** 深拷贝 DEFAULT_CONFIG，避免浅拷贝导致 models 引用共享 */
+function cloneDefaultConfig(): Config {
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as Config;
+}
+
 export async function loadConfig(): Promise<Config> {
   const path = getConfigPath();
-  if (!existsSync(path)) return { ...DEFAULT_CONFIG };
+  if (!existsSync(path)) return cloneDefaultConfig();
 
   let raw: string;
   try {
     raw = readFileSync(path, 'utf-8');
   } catch {
-    return { ...DEFAULT_CONFIG };
+    return cloneDefaultConfig();
   }
 
   let parsed: unknown;
@@ -35,22 +40,22 @@ export async function loadConfig(): Promise<Config> {
     parsed = JSON.parse(raw);
   } catch {
     backupAndRemove(path);
-    return { ...DEFAULT_CONFIG };
+    return cloneDefaultConfig();
   }
 
   const obj = parsed as Record<string, unknown>;
   if (obj.schemaVersion !== 1) {
     backupAndRemove(path);
-    return { ...DEFAULT_CONFIG };
+    return cloneDefaultConfig();
   }
 
   // 校验 defaultModel，防止脏数据
   if (obj.defaultModel !== undefined && !isValidProvider(obj.defaultModel)) {
     backupAndRemove(path);
-    return { ...DEFAULT_CONFIG };
+    return cloneDefaultConfig();
   }
 
-  return { ...DEFAULT_CONFIG, ...(obj as Partial<Config>), schemaVersion: 1 };
+  return { ...cloneDefaultConfig(), ...(obj as Partial<Config>), schemaVersion: 1 };
 }
 
 export async function saveConfig(config: Config): Promise<void> {

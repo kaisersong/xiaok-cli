@@ -15,16 +15,20 @@ function backupAndRemove(path) {
         rmSync(bak, { force: true });
     renameSync(path, bak);
 }
+/** 深拷贝 DEFAULT_CONFIG，避免浅拷贝导致 models 引用共享 */
+function cloneDefaultConfig() {
+    return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+}
 export async function loadConfig() {
     const path = getConfigPath();
     if (!existsSync(path))
-        return { ...DEFAULT_CONFIG };
+        return cloneDefaultConfig();
     let raw;
     try {
         raw = readFileSync(path, 'utf-8');
     }
     catch {
-        return { ...DEFAULT_CONFIG };
+        return cloneDefaultConfig();
     }
     let parsed;
     try {
@@ -32,19 +36,19 @@ export async function loadConfig() {
     }
     catch {
         backupAndRemove(path);
-        return { ...DEFAULT_CONFIG };
+        return cloneDefaultConfig();
     }
     const obj = parsed;
     if (obj.schemaVersion !== 1) {
         backupAndRemove(path);
-        return { ...DEFAULT_CONFIG };
+        return cloneDefaultConfig();
     }
     // 校验 defaultModel，防止脏数据
     if (obj.defaultModel !== undefined && !isValidProvider(obj.defaultModel)) {
         backupAndRemove(path);
-        return { ...DEFAULT_CONFIG };
+        return cloneDefaultConfig();
     }
-    return { ...DEFAULT_CONFIG, ...obj, schemaVersion: 1 };
+    return { ...cloneDefaultConfig(), ...obj, schemaVersion: 1 };
 }
 export async function saveConfig(config) {
     const dir = getConfigDir();
