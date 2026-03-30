@@ -3,6 +3,7 @@ import type { ApprovalAction, ApprovalRequest, ChannelReplyTarget } from './type
 import type { ChannelAgentExecutionResult } from './agent-service.js';
 import { InMemoryTaskStore, type RemoteTask } from './task-store.js';
 import type { SessionBinding } from './session-binding-store.js';
+import { SerialTaskManager } from '../runtime/tasking/manager.js';
 export interface TaskExecutionRequest {
     request: ChannelRequest;
     sessionId: string;
@@ -18,31 +19,22 @@ export interface TaskStartOptions {
     binding?: SessionBinding | null;
     ackText?: string;
 }
-export declare class TaskManager {
-    private readonly store;
-    private readonly running;
-    private readonly sessionTails;
-    private readonly activeBySession;
-    private readonly executeTask;
-    private readonly notify;
+export declare class TaskManager extends SerialTaskManager<ChannelRequest, RemoteTask, {
+    sessionId: string;
+    prompt: string;
+    replyTarget: ChannelReplyTarget;
+    cwd?: string;
+    repoRoot?: string;
+    branch?: string;
+}> {
     constructor(options: TaskManagerOptions);
-    createAndStart(request: ChannelRequest, sessionId: string, options?: TaskStartOptions): Promise<RemoteTask>;
-    getTask(taskId: string): RemoteTask | undefined;
-    getLatestTask(sessionId: string): RemoteTask | undefined;
-    listTasks(sessionId: string): RemoteTask[];
     getActiveTask(sessionId: string): RemoteTask | undefined;
     getActiveReplyTarget(sessionId: string): ChannelReplyTarget | undefined;
     setTaskEvent(taskId: string, latestEvent: string): RemoteTask | undefined;
     setSessionProgress(sessionId: string, latestEvent: string): RemoteTask | undefined;
     markWaitingApproval(sessionId: string, approval: ApprovalRequest): RemoteTask | undefined;
     resumeFromApproval(approval: ApprovalRequest, action: ApprovalAction | 'expired'): RemoteTask | undefined;
-    cancelTask(taskId: string): {
-        ok: boolean;
-        message: string;
-        task?: RemoteTask;
-    };
     formatStatus(task: RemoteTask): string;
-    private runTask;
-    private buildAckMessage;
-    private buildCompletionSummary;
+    private buildAckText;
+    private buildCompletionText;
 }

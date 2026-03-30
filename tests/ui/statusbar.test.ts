@@ -164,4 +164,15 @@ describe('StatusBar', () => {
       expect(line).not.toContain('main');
     });
   });
+
+  describe('mode display', () => {
+    it('shows non-default mode in the status line', () => {
+      statusBar.init('claude-opus-4-6', 'test123', '/Users/song/projects/xiaok-cli');
+      statusBar.updateMode('plan');
+
+      const line = statusBar.getStatusLine();
+
+      expect(line).toContain('plan');
+    });
+  });
 });

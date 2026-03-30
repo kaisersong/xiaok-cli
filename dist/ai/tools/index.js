@@ -8,7 +8,7 @@ import { globTool } from './glob.js';
 import { createToolSearchTool } from './search.js';
 import { webFetchTool } from './web-fetch.js';
 import { webSearchTool } from './web-search.js';
-export function buildToolList(skillTool, workspace) {
+export function buildToolList(skillTool, workspace, extraTools = []) {
     const tools = [
         createReadTool(workspace),
         createWriteTool(workspace),
@@ -18,6 +18,7 @@ export function buildToolList(skillTool, workspace) {
         globTool,
         webFetchTool,
         webSearchTool,
+        ...extraTools,
     ];
     if (skillTool)
         tools.push(skillTool);

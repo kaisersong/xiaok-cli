@@ -10,6 +10,9 @@ English | [简体中文](./README.zh-CN.md)
 - Supports Claude and OpenAI adapters
 - Loads built-in, global, and project skills
 - Executes file, search, and shell tools through a shared agent runtime
+- Preserves sessions with resume and fork flows
+- Auto-loads project instructions and git context into the runtime
+- Supports print/json one-shot output, image input, and web fetch/search tools
 - Connects to Yunzhijia IM through WebSocket or webhook
 - Turns Yunzhijia messages into async tasks with status, approval, and workspace binding
 
@@ -20,8 +23,20 @@ English | [简体中文](./README.zh-CN.md)
 - `xiaok` or `xiaok chat`
 - interactive chat mode
 - single-shot task mode
+- `-p` / `--json` print modes
+- `--resume <id>` / `--fork-session <id>`
+- local image path input for multimodal models
 - slash-triggered skills
+- `/mode [default|auto|plan]`
+- `/tasks`
+- `/task <id>`
 - tool execution with permission control
+- `ask_user` tool for interactive operator questions
+- session-scoped `task_create` / `task_update` / `task_list` / `task_get`
+- model-aware context policy and prompt caching support
+- auto-loaded `AGENTS.md`, `CLAUDE.md`, git branch, dirty state, and recent commits
+- `web_fetch` / `web_search`
+- shared truncation and pagination for read/glob/grep/bash output
 
 ### Yunzhijia IM Gateway
 
@@ -234,12 +249,14 @@ data/
 
 - The terminal CLI and Yunzhijia gateway share the same core agent runtime
 - Channel integrations are implemented at the boundary layer under `src/channels`
-- Yunzhijia task execution is in-memory for now
+- Shared tasking primitives live under `src/runtime/tasking`
+- Yunzhijia and CLI workflow tasks are both in-memory for now
 - Runtime events are reused for mobile-side progress notifications
 
 ## Known Limitations
 
 - task state is process-local and not persisted across restarts
+- `ask_user` is only available when the CLI is running interactively with a TTY
 - the Yunzhijia integration currently focuses on text workflows, not rich cards
 - in restricted Windows sandboxes, `vitest` may fail with `spawn EPERM`
 - user config updates outside the workspace may require running commands locally

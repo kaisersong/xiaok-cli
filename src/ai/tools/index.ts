@@ -10,7 +10,11 @@ import { createToolSearchTool } from './search.js';
 import { webFetchTool } from './web-fetch.js';
 import { webSearchTool } from './web-search.js';
 
-export function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions): Tool[] {
+export function buildToolList(
+  skillTool?: Tool,
+  workspace?: WorkspaceToolOptions,
+  extraTools: Tool[] = [],
+): Tool[] {
   const tools: Tool[] = [
     createReadTool(workspace),
     createWriteTool(workspace),
@@ -20,6 +24,7 @@ export function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions
     globTool,
     webFetchTool,
     webSearchTool,
+    ...extraTools,
   ];
   if (skillTool) tools.push(skillTool);
   return tools;

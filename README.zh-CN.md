@@ -4,6 +4,18 @@
 
 `xiaok-cli` 是一个面向金蝶云之家开发者的 AI 编程命令行工具。它同时提供本地终端助手、skill 机制，以及云之家 IM 网关，让同一套 agent runtime 能在终端和移动端会话里复用。
 
+## 能做什么
+
+- 在终端里运行交互式 AI 编程助手
+- 支持 Claude 和 OpenAI 适配器
+- 加载内置、全局和项目级 skills
+- 通过共享 agent runtime 执行文件、搜索、shell 等工具
+- 支持会话持久化、恢复和分叉
+- 自动把项目指令文件和 git 上下文注入 runtime
+- 支持 print/json 单次输出、图片输入，以及 web fetch/search 工具
+- 通过 WebSocket 或 webhook 接入云之家 IM
+- 把云之家消息转成带状态、审批和工作区绑定的异步任务
+
 ## 项目能力
 
 ### 本地 CLI
@@ -11,8 +23,20 @@
 - `xiaok` 或 `xiaok chat`
 - 交互式对话模式
 - 单次任务模式
+- `-p` / `--json` 打印模式
+- `--resume <id>` / `--fork-session <id>`
+- 支持本地图片路径输入到多模态模型
 - 斜杠命令触发 skills
+- `/mode [default|auto|plan]`
+- `/tasks`
+- `/task <id>`
 - 带权限控制的工具调用
+- `ask_user` 工具，可在运行中向操作者提问
+- 会话级 `task_create` / `task_update` / `task_list` / `task_get`
+- 按模型能力调整上下文策略，并支持 prompt caching
+- 自动加载 `AGENTS.md`、`CLAUDE.md`、git 分支、脏状态和最近提交
+- `web_fetch` / `web_search`
+- read/glob/grep/bash 共享截断与分页输出
 
 ### 云之家 IM 网关
 
@@ -218,12 +242,14 @@ data/
 
 - 终端 CLI 和云之家网关复用同一套核心 agent runtime
 - channel 集成位于边界层 `src/channels`
-- 云之家任务目前是单进程内存态实现
+- 共享 tasking 基础设施位于 `src/runtime/tasking`
+- 云之家任务和 CLI workflow task 目前都还是单进程内存态实现
 - runtime events 会被复用为移动端进展通知
 
 ## 当前限制
 
 - task 状态不会跨进程重启持久化
+- `ask_user` 只在带 TTY 的交互式 CLI 里可用
 - 云之家接入当前主要面向文本工作流，还没有做富文本卡片
 - 在受限 Windows 沙箱里，`vitest` 可能会报 `spawn EPERM`
 - 工作区外的用户配置文件修改，可能需要在本机直接执行命令

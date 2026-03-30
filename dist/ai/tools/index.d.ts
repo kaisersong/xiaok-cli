@@ -1,7 +1,7 @@
 import type { Tool, ToolDefinition } from '../../types.js';
 import { PermissionManager } from '../permissions/manager.js';
 import { type WorkspaceToolOptions } from './read.js';
-export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions): Tool[];
+export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions, extraTools?: Tool[]): Tool[];
 export interface RegistryOptions {
     permissionManager?: PermissionManager;
     autoMode?: boolean;

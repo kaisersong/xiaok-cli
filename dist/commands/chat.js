@@ -5,9 +5,12 @@ import { createAdapter } from '../ai/models.js';
 import { loadCustomAgents } from '../ai/agents/loader.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
 import { ToolRegistry, buildToolList } from '../ai/tools/index.js';
+import { createAskUserTool } from '../ai/tools/ask-user.js';
+import { createTaskTools } from '../ai/tools/tasks.js';
 import { buildSystemPrompt } from '../ai/context/yzj-context.js';
 import { Agent } from '../ai/agent.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
+import { SessionTaskBoard } from '../runtime/tasking/board.js';
 import { writeError, isTTY } from '../utils/ui.js';
 import { showPermissionPrompt } from '../ui/permission-prompt.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
@@ -46,11 +49,44 @@ async function runChat(initialInput, opts) {
     const creds = await loadCredentials();
     const devApp = await getDevAppIdentity();
     const customAgents = await loadCustomAgents();
+    const sessionStore = new FileSessionStore();
+    let persistedSession = null;
+    if (opts.resume) {
+        persistedSession = await sessionStore.load(opts.resume);
+        if (!persistedSession) {
+            writeError(`找不到会话: ${opts.resume}`);
+            process.exit(1);
+        }
+    }
+    else if (opts.forkSession) {
+        persistedSession = await sessionStore.fork(opts.forkSession);
+    }
+    const sessionId = persistedSession?.sessionId ?? sessionStore.createSessionId();
+    const sessionCreatedAt = persistedSession?.createdAt ?? Date.now();
+    const forkedFromSessionId = persistedSession?.forkedFromSessionId;
     // 加载 skills
     const skillCatalog = createSkillCatalog();
     let skills = await skillCatalog.reload();
+    const inputReader = new InputReader();
     const skillTool = createSkillTool(skillCatalog);
-    const tools = buildToolList(skillTool, { cwd: process.cwd() });
+    const taskBoard = new SessionTaskBoard('cli');
+    const workflowTools = [
+        createAskUserTool({
+            ask: async (question, placeholder) => {
+                if (!isTTY()) {
+                    throw new Error('当前运行模式不支持 ask_user 交互');
+                }
+                process.stdout.write(`\n${dim('Agent question:')} ${question}\n`);
+                const answer = await inputReader.read(placeholder ? `${placeholder}: ` : 'Answer: ');
+                if (answer === null) {
+                    throw new Error('用户取消了问题输入');
+                }
+                return answer;
+            },
+        }),
+        ...createTaskTools({ board: taskBoard, sessionId }),
+    ];
+    const tools = buildToolList(skillTool, { cwd: process.cwd() }, workflowTools);
     // 构建系统提示
     const buildPrompt = async (nextSkills = skills) => buildSystemPrompt({
         enterpriseId: creds?.enterpriseId ?? null,
@@ -101,21 +137,7 @@ async function runChat(initialInput, opts) {
     }, tools);
     const runtimeHooks = createRuntimeHooks();
     const agent = new Agent(adapter, registry, systemPrompt, { hooks: runtimeHooks });
-    const sessionStore = new FileSessionStore();
-    let persistedSession = null;
-    if (opts.resume) {
-        persistedSession = await sessionStore.load(opts.resume);
-        if (!persistedSession) {
-            writeError(`找不到会话: ${opts.resume}`);
-            process.exit(1);
-        }
-        agent.restoreSession({
-            messages: persistedSession.messages,
-            usage: persistedSession.usage,
-        });
-    }
-    else if (opts.forkSession) {
-        persistedSession = await sessionStore.fork(opts.forkSession);
+    if (persistedSession) {
         agent.restoreSession({
             messages: persistedSession.messages,
             usage: persistedSession.usage,
@@ -124,10 +146,6 @@ async function runChat(initialInput, opts) {
     // 创建 UI 组件
     const mdRenderer = new MarkdownRenderer();
     const statusBar = new StatusBar();
-    const sessionId = persistedSession?.sessionId ?? sessionStore.createSessionId();
-    const sessionCreatedAt = persistedSession?.createdAt ?? Date.now();
-    const forkedFromSessionId = persistedSession?.forkedFromSessionId;
-    const inputReader = new InputReader();
     const persistSession = async () => {
         const snapshot = agent.exportSession();
         await sessionStore.save({
@@ -148,7 +166,7 @@ async function runChat(initialInput, opts) {
     };
     // 初始化状态栏（在单次任务模式之前）
     const fullModelName = adapter.getModelName();
-    statusBar.init(fullModelName, sessionId, process.cwd(), opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : undefined);
+    statusBar.init(fullModelName, sessionId, process.cwd(), opts.dryRun ? 'dry-run' : permissionManager.getMode());
     const branch = await getCurrentBranch(process.cwd());
     if (branch)
         statusBar.updateBranch(branch);
@@ -295,6 +313,9 @@ async function runChat(initialInput, opts) {
             process.stdout.write('  /exit    - 退出\n');
             process.stdout.write('  /clear   - 清屏\n');
             process.stdout.write('  /models  - 切换模型\n');
+            process.stdout.write('  /mode [default|auto|plan] - 查看或切换权限模式\n');
+            process.stdout.write('  /tasks   - 查看当前会话任务\n');
+            process.stdout.write('  /task <id> - 查看任务详情\n');
             process.stdout.write('  /compact - 手动压缩上下文\n');
             process.stdout.write('  /help    - 显示帮助\n');
             if (skills.length > 0) {
@@ -304,6 +325,48 @@ async function runChat(initialInput, opts) {
                 }
             }
             process.stdout.write('\n');
+            continue;
+        }
+        if (trimmed.startsWith('/mode')) {
+            const [, requestedMode] = trimmed.split(/\s+/, 2);
+            if (!requestedMode) {
+                process.stdout.write(`当前权限模式：${permissionManager.getMode()}\n\n`);
+                continue;
+            }
+            if (!['default', 'auto', 'plan'].includes(requestedMode)) {
+                process.stdout.write('用法：/mode [default|auto|plan]\n\n');
+                continue;
+            }
+            permissionManager.setMode(requestedMode);
+            statusBar.updateMode(requestedMode);
+            process.stdout.write(`权限模式已切换为 ${requestedMode}\n\n`);
+            continue;
+        }
+        if (trimmed === '/tasks') {
+            const tasks = taskBoard.list(sessionId);
+            if (tasks.length === 0) {
+                process.stdout.write('当前会话还没有任务。\n\n');
+                continue;
+            }
+            process.stdout.write('\n当前会话任务：\n');
+            for (const task of tasks) {
+                process.stdout.write(`  ${task.taskId} [${task.status}] ${task.title}\n`);
+            }
+            process.stdout.write('\n');
+            continue;
+        }
+        if (trimmed.startsWith('/task ')) {
+            const taskId = trimmed.slice('/task '.length).trim();
+            if (!taskId) {
+                process.stdout.write('用法：/task <taskId>\n\n');
+                continue;
+            }
+            const task = taskBoard.get(sessionId, taskId);
+            if (!task) {
+                process.stdout.write(`未找到任务 ${taskId}\n\n`);
+                continue;
+            }
+            process.stdout.write(`${JSON.stringify(task, null, 2)}\n\n`);
             continue;
         }
         if (trimmed === '/compact') {

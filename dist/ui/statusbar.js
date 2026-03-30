@@ -52,6 +52,9 @@ export class StatusBar {
         if (this.branch) {
             parts.push(this.branch);
         }
+        if (this.mode && this.mode !== "default") {
+            parts.push(this.mode);
+        }
         // Token usage: "26%"
         if (this.usage.budget && this.usage.budget > 0) {
             const total = this.usage.inputTokens + this.usage.outputTokens;

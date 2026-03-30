@@ -16,6 +16,8 @@ const BASE_SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   { cmd: '/exit', desc: 'Exit the chat' },
   { cmd: '/clear', desc: 'Clear the screen' },
   { cmd: '/models', desc: 'Switch model' },
+  { cmd: '/mode', desc: 'Show or change permission mode' },
+  { cmd: '/tasks', desc: 'List workflow tasks' },
   { cmd: '/help', desc: 'Show help' },
 ];
 
