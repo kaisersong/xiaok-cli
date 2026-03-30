@@ -58,6 +58,17 @@ export interface Credentials {
   expiresAt: string; // ISO 8601
 }
 
+export type YZJInboundMode = 'webhook' | 'websocket';
+
+export interface YZJChannelConfig {
+  enabled?: boolean;
+  sendMsgUrl?: string;
+  inboundMode?: YZJInboundMode;
+  webhookPath?: string;
+  webhookPort?: number;
+  secret?: string;
+}
+
 // config.json schema
 export interface Config {
   schemaVersion: 1;
@@ -70,6 +81,9 @@ export interface Config {
   devApp?: { appKey: string; appSecret: string };
   defaultMode: 'interactive';
   contextBudget: number;
+  channels?: {
+    yzj?: YZJChannelConfig;
+  };
 }
 
 const VALID_PROVIDERS = ['claude', 'openai', 'custom'] as const;
@@ -82,6 +96,7 @@ export const DEFAULT_CONFIG: Config = {
   },
   defaultMode: 'interactive',
   contextBudget: 4000,
+  channels: {},
 };
 
 /** 校验 defaultModel 是否合法，防止脏数据写入 */

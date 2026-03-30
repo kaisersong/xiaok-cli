@@ -86,10 +86,23 @@ export async function loadConfig(): Promise<Config> {
     }
   }
 
+  const mergedChannels: NonNullable<Config['channels']> = {
+    ...(defaults.channels ?? {}),
+    ...(parsedConfig.channels ?? {}),
+  };
+
+  if (defaults.channels?.yzj || parsedConfig.channels?.yzj) {
+    mergedChannels.yzj = {
+      ...(defaults.channels?.yzj ?? {}),
+      ...(parsedConfig.channels?.yzj ?? {}),
+    };
+  }
+
   return {
     ...defaults,
     ...parsedConfig,
     models: mergedModels,
+    channels: mergedChannels,
     schemaVersion: 1,
   };
 }

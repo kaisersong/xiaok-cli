@@ -58,6 +58,34 @@ describe('config', () => {
     expect(config.models.claude?.model).toBe(DEFAULT_CONFIG.models.claude?.model);
   });
 
+  it('merges yzj channel config with defaults', async () => {
+    writeFileSync(
+      join(testDir, 'config.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        defaultModel: 'claude',
+        models: {
+          claude: {
+            model: 'claude-opus-4-6',
+          },
+        },
+        defaultMode: 'interactive',
+        contextBudget: 4000,
+        channels: {
+          yzj: {
+            sendMsgUrl: 'https://www.yunzhijia.com/gateway/robot/webhook/send?yzjtype=12&yzjtoken=abc',
+            webhookPort: 3100,
+          },
+        },
+      })
+    );
+
+    const config = await loadConfig();
+
+    expect(config.channels?.yzj?.sendMsgUrl).toContain('yzjtoken=abc');
+    expect(config.channels?.yzj?.webhookPort).toBe(3100);
+  });
+
   it('renames corrupt config to .bak and returns defaults', async () => {
     writeFileSync(join(testDir, 'config.json'), 'not valid json');
     const config = await loadConfig();

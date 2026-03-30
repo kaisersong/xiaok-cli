@@ -6,11 +6,17 @@ export interface ChannelWorkerResult {
   sessionId: string;
 }
 
+export interface ChannelRequestExecutor {
+  execute(input: ChannelRequest, sessionId: string): Promise<void> | void;
+}
+
 export async function handleChannelRequest(
   input: ChannelRequest,
-  sessionStore: InMemoryChannelSessionStore
+  sessionStore: InMemoryChannelSessionStore,
+  executor?: ChannelRequestExecutor
 ): Promise<ChannelWorkerResult> {
   const session = sessionStore.getOrCreate(input.sessionKey);
+  await executor?.execute(input, session.sessionId);
   return {
     accepted: true,
     sessionId: session.sessionId,

@@ -67,6 +67,85 @@ export function registerConfigCommands(program: Command): void {
       console.log(`已设置 context-budget 为 ${tokens} tokens`);
     });
 
+  configSet
+    .command('yzj-send-msg-url <url>')
+    .description('设置云之家机器人 sendMsgUrl')
+    .action(async (url: string) => {
+      const cfg = await loadConfig();
+      cfg.channels = cfg.channels ?? {};
+      cfg.channels.yzj = {
+        ...(cfg.channels.yzj ?? {}),
+        sendMsgUrl: url,
+      };
+      await saveConfig(cfg);
+      console.log('已设置 channels.yzj.sendMsgUrl');
+    });
+
+  configSet
+    .command('yzj-inbound-mode <mode>')
+    .description('设置云之家入站模式（webhook / websocket）')
+    .action(async (mode: string) => {
+      if (mode !== 'webhook' && mode !== 'websocket') {
+        console.error('inbound-mode 仅支持 webhook 或 websocket');
+        return;
+      }
+      const cfg = await loadConfig();
+      cfg.channels = cfg.channels ?? {};
+      cfg.channels.yzj = {
+        ...(cfg.channels.yzj ?? {}),
+        inboundMode: mode,
+      };
+      await saveConfig(cfg);
+      console.log(`已设置 channels.yzj.inboundMode = ${mode}`);
+    });
+
+  configSet
+    .command('yzj-webhook-path <path>')
+    .description('设置云之家 webhook 路径')
+    .action(async (path: string) => {
+      const cfg = await loadConfig();
+      cfg.channels = cfg.channels ?? {};
+      cfg.channels.yzj = {
+        ...(cfg.channels.yzj ?? {}),
+        webhookPath: path,
+      };
+      await saveConfig(cfg);
+      console.log(`已设置 channels.yzj.webhookPath = ${path}`);
+    });
+
+  configSet
+    .command('yzj-webhook-port <port>')
+    .description('设置云之家 webhook 监听端口')
+    .action(async (port: string) => {
+      const parsed = Number(port);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        console.error('webhook-port 必须是正整数');
+        return;
+      }
+      const cfg = await loadConfig();
+      cfg.channels = cfg.channels ?? {};
+      cfg.channels.yzj = {
+        ...(cfg.channels.yzj ?? {}),
+        webhookPort: parsed,
+      };
+      await saveConfig(cfg);
+      console.log(`已设置 channels.yzj.webhookPort = ${parsed}`);
+    });
+
+  configSet
+    .command('yzj-secret <secret>')
+    .description('设置云之家 webhook 签名 secret')
+    .action(async (secret: string) => {
+      const cfg = await loadConfig();
+      cfg.channels = cfg.channels ?? {};
+      cfg.channels.yzj = {
+        ...(cfg.channels.yzj ?? {}),
+        secret,
+      };
+      await saveConfig(cfg);
+      console.log('已设置 channels.yzj.secret');
+    });
+
   config
     .command('get <key>')
     .description('获取配置项（如 model）')
@@ -75,6 +154,16 @@ export function registerConfigCommands(program: Command): void {
       if (key === 'model') {
         const m = cfg.models[cfg.defaultModel];
         console.log(`${cfg.defaultModel}${'model' in (m ?? {}) ? '/' + (m as { model: string }).model : ''}`);
+      } else if (key === 'yzj') {
+        console.log(JSON.stringify(cfg.channels?.yzj ?? null, null, 2));
+      } else if (key === 'yzj.send-msg-url') {
+        console.log(cfg.channels?.yzj?.sendMsgUrl ?? '');
+      } else if (key === 'yzj.inbound-mode') {
+        console.log(cfg.channels?.yzj?.inboundMode ?? '');
+      } else if (key === 'yzj.webhook-path') {
+        console.log(cfg.channels?.yzj?.webhookPath ?? '');
+      } else if (key === 'yzj.webhook-port') {
+        console.log(cfg.channels?.yzj?.webhookPort ?? '');
       } else {
         console.log(JSON.stringify((cfg as unknown as Record<string, unknown>)[key] ?? null, null, 2));
       }
