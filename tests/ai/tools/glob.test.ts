@@ -21,4 +21,16 @@ describe('globTool', () => {
     expect(result).toContain('b.ts');
     expect(result).not.toContain('README.md');
   });
+
+  it('supports offset and head_limit pagination', async () => {
+    const result = await globTool.execute({
+      pattern: '**/*.*',
+      path: dir,
+      offset: 1,
+      head_limit: 1,
+    });
+
+    expect(result.split('\n').filter(Boolean)).toHaveLength(2);
+    expect(result).toContain('offset=');
+  });
 });

@@ -8,6 +8,7 @@ export const DEFAULT_CONFIG = {
     },
     defaultMode: 'interactive',
     contextBudget: 4000,
+    channels: {},
 };
 /** 校验 defaultModel 是否合法，防止脏数据写入 */
 export function isValidProvider(v) {

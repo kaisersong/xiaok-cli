@@ -48,4 +48,34 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('默认 Skills');
     expect(prompt).toContain('/review');
   });
+
+  it('includes auto-loaded prompt docs and git context in the system prompt', async () => {
+    const prompt = await buildSystemPrompt({
+      enterpriseId: null,
+      devApp: null,
+      cwd: '/tmp/demo',
+      budget: 2000,
+      autoContext: {
+        docs: [
+          {
+            name: 'AGENTS.md',
+            path: '/repo/AGENTS.md',
+            content: 'workspace rules',
+            truncated: false,
+          },
+        ],
+        git: {
+          branch: 'feature/runtime',
+          isDirty: true,
+          recentCommits: ['feat: add prompt cache'],
+        },
+      },
+    });
+
+    expect(prompt).toContain('仓库提示文档');
+    expect(prompt).toContain('workspace rules');
+    expect(prompt).toContain('Git 上下文');
+    expect(prompt).toContain('feature/runtime');
+    expect(prompt).toContain('feat: add prompt cache');
+  });
 });

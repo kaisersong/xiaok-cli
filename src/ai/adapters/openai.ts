@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
+import type { ModelInvocationOptions } from '../runtime/model-capabilities.js';
 
 const MAX_RETRIES = 3;
 
@@ -19,7 +20,8 @@ export class OpenAIAdapter implements ModelAdapter {
   async *stream(
     messages: Message[],
     tools: ToolDefinition[],
-    systemPrompt: string
+    systemPrompt: string,
+    _options?: ModelInvocationOptions,
   ): AsyncIterable<StreamChunk> {
     const openaiMessages: OpenAI.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
@@ -51,7 +53,26 @@ export class OpenAIAdapter implements ModelAdapter {
       }
 
       const textBlocks = m.content.filter((block) => block.type === 'text');
-      if (textBlocks.length > 0) {
+      const imageBlocks = m.content.filter((block) => block.type === 'image');
+      if (imageBlocks.length > 0) {
+        const contentParts = [
+          ...textBlocks.map((block) => ({
+            type: 'text' as const,
+            text: block.text,
+          })),
+          ...imageBlocks.map((block) => ({
+            type: 'image_url' as const,
+            image_url: {
+              url: `data:${block.source.media_type};base64,${block.source.data}`,
+            },
+          })),
+        ];
+
+        openaiMessages.push({
+          role: 'user',
+          content: contentParts,
+        } as OpenAI.ChatCompletionUserMessageParam);
+      } else if (textBlocks.length > 0) {
         openaiMessages.push({
           role: 'user',
           content: textBlocks.map((block) => block.text).join(''),

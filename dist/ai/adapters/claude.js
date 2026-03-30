@@ -10,12 +10,25 @@ export class ClaudeAdapter {
     getModelName() {
         return this.model;
     }
-    async *stream(messages, tools, systemPrompt) {
-        const anthropicMessages = messages.map((message) => {
+    async *stream(messages, tools, systemPrompt, options) {
+        const sourceMessages = options?.promptCache?.messages ?? messages;
+        const anthropicMessages = sourceMessages.map((message) => {
             const content = [];
             for (const block of message.content) {
                 if (block.type === 'text') {
-                    content.push({ type: 'text', text: block.text });
+                    content.push({
+                        type: 'text',
+                        text: block.text,
+                        cache_control: block.cache_control,
+                    });
+                    continue;
+                }
+                if (block.type === 'image') {
+                    content.push({
+                        type: 'image',
+                        source: block.source,
+                        cache_control: block.cache_control,
+                    });
                     continue;
                 }
                 if (block.type === 'tool_use') {
@@ -24,6 +37,7 @@ export class ClaudeAdapter {
                         id: block.id,
                         name: block.name,
                         input: block.input,
+                        cache_control: block.cache_control,
                     });
                     continue;
                 }
@@ -33,7 +47,9 @@ export class ClaudeAdapter {
                         tool_use_id: block.tool_use_id,
                         content: block.content,
                         is_error: block.is_error,
+                        cache_control: block.cache_control,
                     });
+                    continue;
                 }
             }
             return {
@@ -41,15 +57,17 @@ export class ClaudeAdapter {
                 content,
             };
         });
-        const anthropicTools = tools.map(t => ({
+        const sourceTools = options?.promptCache?.tools ?? tools;
+        const anthropicTools = sourceTools.map((t) => ({
             name: t.name,
             description: t.description,
             input_schema: t.inputSchema,
+            cache_control: t.cache_control,
         }));
         const stream = this.client.messages.stream({
             model: this.model,
             max_tokens: 8192,
-            system: systemPrompt,
+            system: (options?.promptCache?.systemPrompt ?? systemPrompt),
             messages: anthropicMessages,
             tools: anthropicTools.length > 0 ? anthropicTools : undefined,
         });

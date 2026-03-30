@@ -75,10 +75,21 @@ export async function loadConfig() {
             mergedModels.custom = customModel;
         }
     }
+    const mergedChannels = {
+        ...(defaults.channels ?? {}),
+        ...(parsedConfig.channels ?? {}),
+    };
+    if (defaults.channels?.yzj || parsedConfig.channels?.yzj) {
+        mergedChannels.yzj = {
+            ...(defaults.channels?.yzj ?? {}),
+            ...(parsedConfig.channels?.yzj ?? {}),
+        };
+    }
     return {
         ...defaults,
         ...parsedConfig,
         models: mergedModels,
+        channels: mergedChannels,
         schemaVersion: 1,
     };
 }

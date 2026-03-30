@@ -2,6 +2,12 @@ import type { MessageBlock, ModelAdapter, ToolCall } from '../../types.js';
 import type { ToolRegistry } from '../tools/index.js';
 import { AgentRunController } from './controller.js';
 import type { AgentRuntimeEvent } from './events.js';
+import {
+  buildPromptCacheSegments,
+  resolveModelCapabilities,
+  type CapabilityAwareAdapter,
+  type ModelInvocationOptions,
+} from './model-capabilities.js';
 import { AgentSessionState } from './session.js';
 import { estimateTokens, shouldCompact } from './usage.js';
 
@@ -24,9 +30,12 @@ export class AgentRuntime {
   private readonly controller: AgentRunController;
   private systemPrompt: string;
   private readonly maxIterations: number;
-  private readonly contextLimit: number;
-  private readonly compactThreshold: number;
+  private readonly contextLimitOverride?: number;
+  private readonly compactThresholdOverride?: number;
+  private contextLimit: number;
+  private compactThreshold: number;
   private readonly compactPlaceholder: string;
+  private supportsPromptCaching: boolean;
 
   constructor(options: AgentRuntimeOptions) {
     this.adapter = options.adapter;
@@ -35,13 +44,18 @@ export class AgentRuntime {
     this.controller = options.controller;
     this.systemPrompt = options.systemPrompt;
     this.maxIterations = options.maxIterations ?? 12;
-    this.contextLimit = options.contextLimit ?? 200_000;
-    this.compactThreshold = options.compactThreshold ?? 0.85;
+    this.contextLimitOverride = options.contextLimit;
+    this.compactThresholdOverride = options.compactThreshold;
+    this.contextLimit = 200_000;
+    this.compactThreshold = 0.85;
     this.compactPlaceholder = options.compactPlaceholder ?? '[context compacted]';
+    this.supportsPromptCaching = false;
+    this.refreshModelPolicy();
   }
 
   setAdapter(adapter: ModelAdapter): void {
     this.adapter = adapter;
+    this.refreshModelPolicy();
   }
 
   setSystemPrompt(systemPrompt: string): void {
@@ -49,7 +63,7 @@ export class AgentRuntime {
   }
 
   async run(
-    input: string,
+    input: string | MessageBlock[],
     onEvent: (event: AgentRuntimeEvent) => void,
     externalSignal?: AbortSignal,
   ): Promise<void> {
@@ -57,7 +71,11 @@ export class AgentRuntime {
 
     const run = this.controller.startRun();
     onEvent({ type: 'run_started', runId: run.runId });
-    this.session.appendUserText(input);
+    if (typeof input === 'string') {
+      this.session.appendUserText(input);
+    } else {
+      this.session.appendUserBlocks(input);
+    }
 
     try {
       for (let iteration = 0; iteration < this.maxIterations; iteration += 1) {
@@ -69,10 +87,11 @@ export class AgentRuntime {
         }
 
         const assistantBlocks: MessageBlock[] = [];
-        for await (const chunk of this.adapter.stream(
+        for await (const chunk of (this.adapter as CapabilityAwareAdapter).stream(
           this.session.getMessages(),
           this.registry.getToolDefinitions(),
           this.systemPrompt,
+          this.buildInvocationOptions(),
         )) {
           this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
 
@@ -168,5 +187,26 @@ export class AgentRuntime {
 
   private isAbortError(error: unknown): boolean {
     return error instanceof Error && /aborted/i.test(error.message);
+  }
+
+  private refreshModelPolicy(): void {
+    const capabilities = resolveModelCapabilities(this.adapter);
+    this.contextLimit = this.contextLimitOverride ?? capabilities.contextLimit;
+    this.compactThreshold = this.compactThresholdOverride ?? capabilities.compactThreshold;
+    this.supportsPromptCaching = capabilities.supportsPromptCaching;
+  }
+
+  private buildInvocationOptions(): ModelInvocationOptions | undefined {
+    if (!this.supportsPromptCaching) {
+      return undefined;
+    }
+
+    return {
+      promptCache: buildPromptCacheSegments(
+        this.systemPrompt,
+        this.registry.getToolDefinitions(),
+        this.session.getMessages(),
+      ),
+    };
   }
 }

@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { registerAuthCommands } from './commands/auth.js';
 import { registerConfigCommands } from './commands/config.js';
 import { registerChatCommands } from './commands/chat.js';
+import { registerYZJCommands } from './commands/yzj.js';
 const program = new Command();
 program
     .name('xiaok')
@@ -11,6 +12,7 @@ program
 registerAuthCommands(program);
 registerConfigCommands(program);
 registerChatCommands(program);
+registerYZJCommands(program);
 // chat 命令注册时使用 { isDefault: true }，Commander 自动处理无子命令时的路由
 // 无需额外 program.action() — 会导致双重调用
 program.parse();

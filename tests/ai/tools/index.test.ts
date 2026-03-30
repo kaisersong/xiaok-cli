@@ -71,6 +71,8 @@ describe('ToolRegistry', () => {
     expect(defs.map(d => d.name)).toContain('bash');
     expect(defs.map(d => d.name)).toContain('read');
     expect(defs.map(d => d.name)).toContain('write');
+    expect(defs.map(d => d.name)).toContain('web_fetch');
+    expect(defs.map(d => d.name)).toContain('web_search');
   });
 
   it('denies write tools in plan mode without prompting', async () => {

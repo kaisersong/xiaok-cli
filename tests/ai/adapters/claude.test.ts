@@ -113,4 +113,125 @@ describe('ClaudeAdapter', () => {
       },
     ]);
   });
+
+  it('maps prompt cache metadata onto Anthropic request payloads', async () => {
+    const { ClaudeAdapter } = await import('../../../src/ai/adapters/claude.js');
+
+    let capturedParams: Record<string, unknown> | null = null;
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'message_stop' };
+      },
+    };
+
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const instance = new Anthropic({ apiKey: 'test' });
+    vi.spyOn(instance.messages, 'stream').mockImplementation((params: unknown) => {
+      capturedParams = params as Record<string, unknown>;
+      return mockStream as never;
+    });
+
+    const adapter = new ClaudeAdapter('test-key', 'claude-opus-4-6');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    for await (const _ of adapter.stream(
+      [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'hello', cache_control: { type: 'ephemeral' } }],
+        },
+      ],
+      [
+        {
+          name: 'read',
+          description: 'Read a file',
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+      'system',
+      {
+        promptCache: {
+          systemPrompt: [{ type: 'text', text: 'cached system', cache_control: { type: 'ephemeral' } }],
+          tools: [
+            {
+              name: 'read',
+              description: 'Read a file',
+              inputSchema: { type: 'object', properties: {} },
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
+          messages: [
+            {
+              role: 'user',
+              content: [{ type: 'text', text: 'hello', cache_control: { type: 'ephemeral' } }],
+            },
+          ],
+        },
+      },
+    )) { /* consume */ }
+
+    expect(capturedParams).toMatchObject({
+      system: [{ type: 'text', text: 'cached system', cache_control: { type: 'ephemeral' } }],
+      tools: [{ name: 'read', cache_control: { type: 'ephemeral' } }],
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'hello', cache_control: { type: 'ephemeral' } }],
+        },
+      ],
+    });
+  });
+
+  it('serializes image blocks for Claude-compatible payloads', async () => {
+    const { ClaudeAdapter } = await import('../../../src/ai/adapters/claude.js');
+
+    let capturedMessages: unknown[] = [];
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'message_stop' };
+      },
+    };
+
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const instance = new Anthropic({ apiKey: 'test' });
+    vi.spyOn(instance.messages, 'stream').mockImplementation((params: unknown) => {
+      capturedMessages = (params as { messages: unknown[] }).messages;
+      return mockStream as never;
+    });
+
+    const adapter = new ClaudeAdapter('test-key', 'claude-opus-4-6');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    for await (const _ of adapter.stream([
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/png',
+              data: 'YWJj',
+            },
+          },
+        ],
+      },
+    ], [], 'system')) { /* consume */ }
+
+    expect(capturedMessages).toEqual([
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/png',
+              data: 'YWJj',
+            },
+          },
+        ],
+      },
+    ]);
+  });
 });

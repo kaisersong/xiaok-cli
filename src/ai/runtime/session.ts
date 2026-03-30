@@ -24,9 +24,13 @@ export class AgentSessionState {
   }
 
   appendUserText(text: string): void {
+    this.appendUserBlocks([{ type: 'text', text }]);
+  }
+
+  appendUserBlocks(blocks: MessageBlock[]): void {
     this.messages.push({
       role: 'user',
-      content: [{ type: 'text', text }],
+      content: blocks,
     });
   }
 

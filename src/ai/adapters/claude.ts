@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
+import type { CachedToolDefinition, ModelInvocationOptions, SystemPromptBlock } from '../runtime/model-capabilities.js';
 
 const MAX_RETRIES = 3;
 
@@ -19,14 +20,29 @@ export class ClaudeAdapter implements ModelAdapter {
   async *stream(
     messages: Message[],
     tools: ToolDefinition[],
-    systemPrompt: string
+    systemPrompt: string,
+    options?: ModelInvocationOptions,
   ): AsyncIterable<StreamChunk> {
-    const anthropicMessages: Anthropic.MessageParam[] = messages.map((message) => {
+    const sourceMessages = options?.promptCache?.messages ?? messages;
+    const anthropicMessages: Anthropic.MessageParam[] = sourceMessages.map((message) => {
       const content: Anthropic.ContentBlockParam[] = [];
 
       for (const block of message.content) {
         if (block.type === 'text') {
-          content.push({ type: 'text', text: block.text });
+          content.push({
+            type: 'text',
+            text: block.text,
+            cache_control: block.cache_control,
+          });
+          continue;
+        }
+
+        if (block.type === 'image') {
+          content.push({
+            type: 'image',
+            source: block.source,
+            cache_control: block.cache_control,
+          });
           continue;
         }
 
@@ -36,6 +52,7 @@ export class ClaudeAdapter implements ModelAdapter {
             id: block.id,
             name: block.name,
             input: block.input,
+            cache_control: block.cache_control,
           });
           continue;
         }
@@ -46,7 +63,9 @@ export class ClaudeAdapter implements ModelAdapter {
             tool_use_id: block.tool_use_id,
             content: block.content,
             is_error: block.is_error,
+            cache_control: block.cache_control,
           });
+          continue;
         }
       }
 
@@ -56,16 +75,18 @@ export class ClaudeAdapter implements ModelAdapter {
       };
     });
 
-    const anthropicTools = tools.map(t => ({
+    const sourceTools = options?.promptCache?.tools ?? tools;
+    const anthropicTools = sourceTools.map((t) => ({
       name: t.name,
       description: t.description,
       input_schema: t.inputSchema as Anthropic.Tool['input_schema'],
+      cache_control: (t as CachedToolDefinition).cache_control,
     }));
 
     const stream = this.client.messages.stream({
       model: this.model,
       max_tokens: 8192,
-      system: systemPrompt,
+      system: (options?.promptCache?.systemPrompt ?? systemPrompt) as string | SystemPromptBlock[],
       messages: anthropicMessages,
       tools: anthropicTools.length > 0 ? anthropicTools : undefined,
     });

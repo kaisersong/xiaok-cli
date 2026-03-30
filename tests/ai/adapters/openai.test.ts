@@ -139,4 +139,132 @@ describe('OpenAIAdapter', () => {
     expect((toolMessages[0] as { tool_call_id: string }).tool_call_id).toBe('tu_1');
     expect((toolMessages[1] as { tool_call_id: string }).tool_call_id).toBe('tu_2');
   });
+
+  it('ignores prompt cache metadata for OpenAI-compatible payloads', async () => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    let capturedParams: Record<string, unknown> | null = null;
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    };
+
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (params: unknown) => {
+      capturedParams = params as Record<string, unknown>;
+      return mockStream as never;
+    });
+
+    const adapter = new OpenAIAdapter('test-key', 'gpt-4o');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    for await (const _ of adapter.stream(
+      [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'hello', cache_control: { type: 'ephemeral' } }],
+        },
+      ],
+      [
+        {
+          name: 'read',
+          description: 'Read a file',
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+      'system',
+      {
+        promptCache: {
+          systemPrompt: [{ type: 'text', text: 'cached system', cache_control: { type: 'ephemeral' } }],
+          tools: [
+            {
+              name: 'read',
+              description: 'Read a file',
+              inputSchema: { type: 'object', properties: {} },
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
+          messages: [
+            {
+              role: 'user',
+              content: [{ type: 'text', text: 'hello', cache_control: { type: 'ephemeral' } }],
+            },
+          ],
+        },
+      },
+    )) { /* consume */ }
+
+    expect(capturedParams).toMatchObject({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'system' },
+        { role: 'user', content: 'hello' },
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'read',
+            description: 'Read a file',
+          },
+        },
+      ],
+    });
+    expect(JSON.stringify(capturedParams)).not.toContain('cache_control');
+    expect(JSON.stringify(capturedParams)).not.toContain('cached system');
+  });
+
+  it('serializes image blocks into OpenAI image_url content parts', async () => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    let capturedMessages: unknown[] = [];
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    };
+
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (params: unknown) => {
+      capturedMessages = (params as { messages: unknown[] }).messages;
+      return mockStream as never;
+    });
+
+    const adapter = new OpenAIAdapter('test-key', 'gpt-4o');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    for await (const _ of adapter.stream([
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/png',
+              data: 'YWJj',
+            },
+          },
+        ],
+      },
+    ], [], 'system')) { /* consume */ }
+
+    expect(capturedMessages).toEqual([
+      { role: 'system', content: 'system' },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: {
+              url: 'data:image/png;base64,YWJj',
+            },
+          },
+        ],
+      },
+    ]);
+  });
 });

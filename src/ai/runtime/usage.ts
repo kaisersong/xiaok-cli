@@ -13,6 +13,7 @@ export function estimateTokens(messages: Message[]): number {
   for (const message of messages) {
     for (const block of message.content) {
       if (block.type === 'text') chars += block.text.length;
+      if (block.type === 'image') chars += Math.ceil(block.source.data.length / 8);
       if (block.type === 'thinking') chars += block.thinking.length;
       if (block.type === 'tool_use') chars += JSON.stringify(block.input).length;
       if (block.type === 'tool_result') chars += block.content.length;

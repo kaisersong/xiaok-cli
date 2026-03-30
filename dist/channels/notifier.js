@@ -41,8 +41,14 @@ export class ChannelNotifier {
         if (target.threadId) {
             replyTarget.threadId = target.threadId;
         }
+        if (target.userId) {
+            replyTarget.userId = target.userId;
+        }
         if (target.messageId) {
             replyTarget.messageId = target.messageId;
+        }
+        if (target.metadata) {
+            replyTarget.metadata = target.metadata;
         }
         return replyTarget;
     }

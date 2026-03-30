@@ -25,4 +25,15 @@ describe('readTool', () => {
     const result = await readTool.execute({ file_path: join(dir, 'missing.txt') });
     expect(result).toContain('Error');
   });
+
+  it('truncates oversized output when max_chars is provided', async () => {
+    writeFileSync(join(dir, 'large.txt'), Array.from({ length: 20 }, (_, index) => `line-${index + 1}`).join('\n'));
+
+    const result = await readTool.execute({
+      file_path: join(dir, 'large.txt'),
+      max_chars: 60,
+    });
+
+    expect(result).toContain('已截断');
+  });
 });

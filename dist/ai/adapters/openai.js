@@ -10,7 +10,7 @@ export class OpenAIAdapter {
     getModelName() {
         return this.model;
     }
-    async *stream(messages, tools, systemPrompt) {
+    async *stream(messages, tools, systemPrompt, _options) {
         const openaiMessages = [
             { role: 'system', content: systemPrompt },
         ];
@@ -36,7 +36,26 @@ export class OpenAIAdapter {
                 continue;
             }
             const textBlocks = m.content.filter((block) => block.type === 'text');
-            if (textBlocks.length > 0) {
+            const imageBlocks = m.content.filter((block) => block.type === 'image');
+            if (imageBlocks.length > 0) {
+                const contentParts = [
+                    ...textBlocks.map((block) => ({
+                        type: 'text',
+                        text: block.text,
+                    })),
+                    ...imageBlocks.map((block) => ({
+                        type: 'image_url',
+                        image_url: {
+                            url: `data:${block.source.media_type};base64,${block.source.data}`,
+                        },
+                    })),
+                ];
+                openaiMessages.push({
+                    role: 'user',
+                    content: contentParts,
+                });
+            }
+            else if (textBlocks.length > 0) {
                 openaiMessages.push({
                     role: 'user',
                     content: textBlocks.map((block) => block.text).join(''),

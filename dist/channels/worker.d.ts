@@ -4,4 +4,7 @@ export interface ChannelWorkerResult {
     accepted: true;
     sessionId: string;
 }
-export declare function handleChannelRequest(input: ChannelRequest, sessionStore: InMemoryChannelSessionStore): Promise<ChannelWorkerResult>;
+export interface ChannelRequestExecutor {
+    execute(input: ChannelRequest, sessionId: string): Promise<void> | void;
+}
+export declare function handleChannelRequest(input: ChannelRequest, sessionStore: InMemoryChannelSessionStore, executor?: ChannelRequestExecutor): Promise<ChannelWorkerResult>;

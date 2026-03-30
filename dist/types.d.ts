@@ -52,6 +52,15 @@ export interface Credentials {
     userId: string;
     expiresAt: string;
 }
+export type YZJInboundMode = 'webhook' | 'websocket';
+export interface YZJChannelConfig {
+    enabled?: boolean;
+    sendMsgUrl?: string;
+    inboundMode?: YZJInboundMode;
+    webhookPath?: string;
+    webhookPort?: number;
+    secret?: string;
+}
 export interface Config {
     schemaVersion: 1;
     defaultModel: 'claude' | 'openai' | 'custom';
@@ -77,6 +86,9 @@ export interface Config {
     };
     defaultMode: 'interactive';
     contextBudget: number;
+    channels?: {
+        yzj?: YZJChannelConfig;
+    };
 }
 export declare const DEFAULT_CONFIG: Config;
 /** 校验 defaultModel 是否合法，防止脏数据写入 */

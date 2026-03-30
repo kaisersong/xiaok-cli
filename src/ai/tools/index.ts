@@ -7,6 +7,8 @@ import { bashTool } from './bash.js';
 import { grepTool } from './grep.js';
 import { globTool } from './glob.js';
 import { createToolSearchTool } from './search.js';
+import { webFetchTool } from './web-fetch.js';
+import { webSearchTool } from './web-search.js';
 
 export function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions): Tool[] {
   const tools: Tool[] = [
@@ -16,6 +18,8 @@ export function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions
     bashTool,
     grepTool,
     globTool,
+    webFetchTool,
+    webSearchTool,
   ];
   if (skillTool) tools.push(skillTool);
   return tools;

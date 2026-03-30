@@ -6,6 +6,8 @@ import type { DevAppIdentity } from '../../auth/identity.js';
 import type { ToolDefinition } from '../../types.js';
 import type { CustomAgentDef } from '../agents/loader.js';
 import type { SkillMeta } from '../skills/loader.js';
+import type { LoadedContext } from '../runtime/context-loader.js';
+import { formatLoadedContext, loadAutoContext } from '../runtime/context-loader.js';
 import { formatSkillsContext } from '../skills/loader.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -19,6 +21,7 @@ interface ContextOptions {
   skills?: SkillMeta[];
   deferredTools?: Array<Pick<ToolDefinition, 'name' | 'description'>>;
   agents?: Array<Pick<CustomAgentDef, 'name' | 'model' | 'allowedTools'>>;
+  autoContext?: LoadedContext;
 }
 
 function estimateTokens(text: string): number {
@@ -68,6 +71,15 @@ export async function buildSystemPrompt(opts: ContextOptions): Promise<string> {
       .map((agent) => `- @${agent.name}${agent.model ? ` (${agent.model})` : ''}${agent.allowedTools?.length ? ` tools=${agent.allowedTools.join(',')}` : ''}`)
       .join('\n');
     sections.push(`可用自定义 agents：\n${agentSummary}`);
+  }
+
+  const autoContext = opts.autoContext ?? await loadAutoContext({
+    cwd: opts.cwd,
+    maxChars: Math.max(1_200, opts.budget * 2),
+  });
+  const autoContextSection = formatLoadedContext(autoContext);
+  if (autoContextSection) {
+    sections.push(autoContextSection);
   }
 
   // 4. 云之家 API 概览（内置文档）

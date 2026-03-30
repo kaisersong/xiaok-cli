@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
+import { formatLoadedContext, loadAutoContext } from '../runtime/context-loader.js';
 import { formatSkillsContext } from '../skills/loader.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const API_OVERVIEW_PATH = join(__dirname, '../../../data/yzj-api-overview.md');
@@ -48,6 +49,14 @@ export async function buildSystemPrompt(opts) {
             .map((agent) => `- @${agent.name}${agent.model ? ` (${agent.model})` : ''}${agent.allowedTools?.length ? ` tools=${agent.allowedTools.join(',')}` : ''}`)
             .join('\n');
         sections.push(`可用自定义 agents：\n${agentSummary}`);
+    }
+    const autoContext = opts.autoContext ?? await loadAutoContext({
+        cwd: opts.cwd,
+        maxChars: Math.max(1_200, opts.budget * 2),
+    });
+    const autoContextSection = formatLoadedContext(autoContext);
+    if (autoContextSection) {
+        sections.push(autoContextSection);
     }
     // 4. 云之家 API 概览（内置文档）
     let apiOverview = '';

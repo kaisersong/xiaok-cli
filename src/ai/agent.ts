@@ -1,4 +1,5 @@
 import type {
+  MessageBlock,
   ModelAdapter,
   RuntimeHookSink,
   StreamChunk,
@@ -39,7 +40,7 @@ export class Agent {
     this.runtime = this.createRuntime();
   }
 
-  async runTurn(userInput: string, onChunk: OnChunk, signal?: AbortSignal): Promise<void> {
+  async runTurn(userInput: string | MessageBlock[], onChunk: OnChunk, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) {
       throw new Error('agent aborted');
     }

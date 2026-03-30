@@ -108,4 +108,84 @@ describe('AgentRuntime', () => {
     expect(events).toContain('compact_triggered');
     expect(events).toContain('usage_updated');
   });
+
+  it('derives compact policy from model capabilities when explicit overrides are absent', async () => {
+    const adapter: ModelAdapter & {
+      getCapabilities: () => { contextLimit: number; compactThreshold: number; supportsPromptCaching: boolean };
+    } = {
+      getModelName: () => 'mock-model',
+      getCapabilities: () => ({
+        contextLimit: 8,
+        compactThreshold: 0.5,
+        supportsPromptCaching: false,
+      }),
+      stream: () => mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]),
+    };
+    const session = new AgentSessionState();
+    session.appendUserText('12345678901234567890');
+
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    const events: string[] = [];
+    await runtime.run('next', (event) => {
+      events.push(event.type);
+    });
+
+    expect(events).toContain('compact_triggered');
+  });
+
+  it('passes prompt cache segments to cache-capable adapters', async () => {
+    const captured: unknown[] = [];
+    const adapter: ModelAdapter & {
+      getCapabilities: () => { supportsPromptCaching: boolean };
+      stream: (
+        messages: Parameters<ModelAdapter['stream']>[0],
+        tools: Parameters<ModelAdapter['stream']>[1],
+        systemPrompt: Parameters<ModelAdapter['stream']>[2],
+        options?: unknown,
+      ) => AsyncIterable<StreamChunk>;
+    } = {
+      getModelName: () => 'claude-opus-4-6',
+      getCapabilities: () => ({ supportsPromptCaching: true }),
+      stream: (_messages, _tools, _systemPrompt, options) => {
+        captured.push(options);
+        return mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]);
+      },
+    };
+    const session = new AgentSessionState();
+    session.appendUserText('previous turn');
+    session.appendAssistantBlocks([{ type: 'text', text: 'previous answer' }]);
+
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock({
+        getToolDefinitions: () => [
+          {
+            name: 'read',
+            description: 'Read a file',
+            inputSchema: { type: 'object', properties: {} },
+          },
+        ],
+      }) as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    await runtime.run('next', () => {});
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toMatchObject({
+      promptCache: {
+        systemPrompt: [{ text: 'system', cache_control: { type: 'ephemeral' } }],
+        tools: [{ name: 'read', cache_control: { type: 'ephemeral' } }],
+      },
+    });
+  });
 });

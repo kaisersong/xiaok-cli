@@ -13,13 +13,21 @@ import { showPermissionPrompt } from '../ui/permission-prompt.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
 import { createSkillCatalog, parseSlashCommand } from '../ai/skills/loader.js';
 import { createSkillTool, formatSkillPayload } from '../ai/skills/tool.js';
+import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
+import { FileSessionStore } from '../ai/runtime/session-store.js';
+import { formatPrintOutput } from './chat-print-mode.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
 import { renderWelcomeScreen, renderInputSeparator, renderInputPrompt, renderUserInput, dim, startSpinner } from '../ui/render.js';
 import { InputReader } from '../ui/input.js';
+import { parseInputBlocks } from '../ui/image-input.js';
 import { selectModel } from '../ui/model-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
 async function runChat(initialInput, opts) {
+    if ((opts.print || opts.json) && !initialInput) {
+        writeError('print/json 模式需要提供单次输入');
+        process.exit(1);
+    }
     // 检测 CI 环境
     const autoMode = opts.auto || !isTTY();
     if (!isTTY() && !opts.auto) {
@@ -93,11 +101,46 @@ async function runChat(initialInput, opts) {
     }, tools);
     const runtimeHooks = createRuntimeHooks();
     const agent = new Agent(adapter, registry, systemPrompt, { hooks: runtimeHooks });
+    const sessionStore = new FileSessionStore();
+    let persistedSession = null;
+    if (opts.resume) {
+        persistedSession = await sessionStore.load(opts.resume);
+        if (!persistedSession) {
+            writeError(`找不到会话: ${opts.resume}`);
+            process.exit(1);
+        }
+        agent.restoreSession({
+            messages: persistedSession.messages,
+            usage: persistedSession.usage,
+        });
+    }
+    else if (opts.forkSession) {
+        persistedSession = await sessionStore.fork(opts.forkSession);
+        agent.restoreSession({
+            messages: persistedSession.messages,
+            usage: persistedSession.usage,
+        });
+    }
     // 创建 UI 组件
     const mdRenderer = new MarkdownRenderer();
     const statusBar = new StatusBar();
-    const sessionId = Date.now().toString(36).slice(-6);
+    const sessionId = persistedSession?.sessionId ?? sessionStore.createSessionId();
+    const sessionCreatedAt = persistedSession?.createdAt ?? Date.now();
+    const forkedFromSessionId = persistedSession?.forkedFromSessionId;
     const inputReader = new InputReader();
+    const persistSession = async () => {
+        const snapshot = agent.exportSession();
+        await sessionStore.save({
+            sessionId,
+            cwd: process.cwd(),
+            model: adapter.getModelName(),
+            createdAt: sessionCreatedAt,
+            updatedAt: Date.now(),
+            forkedFromSessionId,
+            messages: snapshot.messages,
+            usage: snapshot.usage,
+        });
+    };
     const refreshSkills = async () => {
         skills = await skillCatalog.reload();
         inputReader.setSkills(skills);
@@ -112,27 +155,47 @@ async function runChat(initialInput, opts) {
     statusBar.update({ inputTokens: 0, outputTokens: 0, budget: config.contextBudget });
     // 单次任务模式
     if (initialInput) {
-        process.stdout.write('\n');
+        const inputBlocks = await parseInputBlocks(initialInput, resolveModelCapabilities(adapter).supportsImageInput);
+        const printChunks = [];
+        if (!opts.print && !opts.json) {
+            process.stdout.write('\n');
+        }
         try {
             await refreshSkills();
-            await agent.runTurn(initialInput, (chunk) => {
-                if (chunk.type === 'text')
-                    mdRenderer.write(chunk.delta);
+            await agent.runTurn(inputBlocks, (chunk) => {
+                if (chunk.type === 'text') {
+                    printChunks.push(chunk.delta);
+                    if (!opts.print && !opts.json) {
+                        mdRenderer.write(chunk.delta);
+                    }
+                }
                 if (chunk.type === 'usage') {
                     statusBar.update({ ...chunk.usage, budget: config.contextBudget });
                 }
             });
-            mdRenderer.flush();
-            process.stdout.write('\n');
-            const statusLine = statusBar.getStatusLine();
-            if (statusLine)
-                process.stdout.write(statusLine + '\n');
+            await persistSession();
+            if (opts.print || opts.json) {
+                process.stdout.write(formatPrintOutput({
+                    sessionId,
+                    text: printChunks.join(''),
+                    usage: agent.getUsage(),
+                }, Boolean(opts.json)) + '\n');
+            }
+            else {
+                mdRenderer.flush();
+                process.stdout.write('\n');
+                const statusLine = statusBar.getStatusLine();
+                if (statusLine)
+                    process.stdout.write(statusLine + '\n');
+            }
         }
         catch (e) {
             writeError(String(e));
             process.exit(1);
         }
-        process.stdout.write('\n');
+        if (!opts.print && !opts.json) {
+            process.stdout.write('\n');
+        }
         return;
     }
     // 交互模式 - 显示欢迎界面
@@ -302,6 +365,7 @@ async function runChat(initialInput, opts) {
                             statusBar.update({ ...chunk.usage, budget: config.contextBudget });
                         }
                     });
+                    await persistSession();
                     mdRenderer.flush();
                     process.stdout.write('\n');
                     // 状态栏作为一行文本输出，不使用固定定位
@@ -323,13 +387,15 @@ async function runChat(initialInput, opts) {
         process.stdout.write('\n');
         mdRenderer.reset();
         try {
-            await agent.runTurn(trimmed, (chunk) => {
+            const inputBlocks = await parseInputBlocks(trimmed, resolveModelCapabilities(adapter).supportsImageInput);
+            await agent.runTurn(inputBlocks, (chunk) => {
                 if (chunk.type === 'text')
                     mdRenderer.write(chunk.delta);
                 if (chunk.type === 'usage') {
                     statusBar.update({ ...chunk.usage, budget: config.contextBudget });
                 }
             });
+            await persistSession();
             mdRenderer.flush();
             process.stdout.write('\n');
             const statusLine = statusBar.getStatusLine();
@@ -348,6 +414,10 @@ export function registerChatCommands(program) {
         .description('启动 AI 编程助手（默认命令）')
         .option('--auto', '自动执行所有工具，无需确认（适用于 CI）')
         .option('--dry-run', '打印工具调用但不执行')
+        .option('-p, --print', '以纯文本模式输出单次结果')
+        .option('--json', '以 JSON 模式输出单次结果')
+        .option('--resume <id>', '恢复已保存会话')
+        .option('--fork-session <id>', '从已有会话分叉一个新会话')
         .argument('[input]', '单次任务描述（省略则进入交互模式）')
         .action(async (input, opts) => {
         await runChat(input, opts);

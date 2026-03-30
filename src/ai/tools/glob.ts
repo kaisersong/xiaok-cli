@@ -1,5 +1,6 @@
 import fg from 'fast-glob';
 import type { Tool } from '../../types.js';
+import { appendPaginationNotice, paginateItems, truncateText } from './truncation.js';
 
 export const globTool: Tool = {
   permission: 'safe',
@@ -11,17 +12,34 @@ export const globTool: Tool = {
       properties: {
         pattern: { type: 'string', description: 'Glob 模式，如 **/*.ts' },
         path: { type: 'string', description: '搜索根目录（可选，默认当前目录）' },
+        offset: { type: 'number', description: '分页偏移量（默认 0）' },
+        head_limit: { type: 'number', description: '单次返回条数（默认 50）' },
+        max_chars: { type: 'number', description: '输出字符上限（默认 12000）' },
       },
       required: ['pattern'],
     },
   },
   async execute(input) {
-    const { pattern, path: cwd = process.cwd() } = input as { pattern: string; path?: string };
+    const {
+      pattern,
+      path: cwd = process.cwd(),
+      offset = 0,
+      head_limit = 50,
+      max_chars = 12_000,
+    } = input as {
+      pattern: string;
+      path?: string;
+      offset?: number;
+      head_limit?: number;
+      max_chars?: number;
+    };
     try {
       const files = await fg(pattern, { cwd, absolute: true, stats: true });
       files.sort((a, b) => (b.stats?.mtimeMs ?? 0) - (a.stats?.mtimeMs ?? 0));
       if (files.length === 0) return '（无匹配文件）';
-      return files.map(f => f.path).join('\n');
+      const page = paginateItems(files.map((file) => file.path), offset, head_limit);
+      const truncated = truncateText(page.items.join('\n'), max_chars);
+      return appendPaginationNotice(truncated.text, page.nextOffset);
     } catch (e) {
       return `Error: ${String(e)}`;
     }

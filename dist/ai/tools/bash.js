@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { truncateText } from './truncation.js';
 const DEFAULT_TIMEOUT_MS = 30_000;
 export const bashTool = {
     permission: 'bash',
@@ -11,12 +12,13 @@ export const bashTool = {
                 command: { type: 'string', description: '要执行的 shell 命令' },
                 timeout_ms: { type: 'number', description: `超时毫秒数（默认 ${DEFAULT_TIMEOUT_MS}）` },
                 workdir: { type: 'string', description: '命令执行目录（可选，默认当前目录）' },
+                max_chars: { type: 'number', description: '输出字符上限（默认 12000）' },
             },
             required: ['command'],
         },
     },
     async execute(input) {
-        const { command, timeout_ms = DEFAULT_TIMEOUT_MS, workdir = process.cwd() } = input;
+        const { command, timeout_ms = DEFAULT_TIMEOUT_MS, workdir = process.cwd(), max_chars = 12_000 } = input;
         return new Promise(resolve => {
             const shell = process.platform === 'win32' ? 'cmd' : 'sh';
             const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-c', command];
@@ -48,7 +50,7 @@ export const bashTool = {
                     child.kill('SIGTERM');
                     setTimeout(() => child.kill('SIGKILL'), 2000);
                 }
-                finish(`Error: 命令超时（>${timeout_ms}ms）\n${stdout}${stderr}`);
+                finish(truncateText(`Error: 命令超时（>${timeout_ms}ms）\n${stdout}${stderr}`, max_chars).text);
             }, timeout_ms);
             child.on('close', code => {
                 if (settled) {
@@ -56,10 +58,10 @@ export const bashTool = {
                 }
                 const output = [stdout, stderr].filter(Boolean).join('\n').trim();
                 if (code !== 0) {
-                    finish(`Error (exit ${code}): ${output || '（无输出）'}`);
+                    finish(truncateText(`Error (exit ${code}): ${output || '（无输出）'}`, max_chars).text);
                 }
                 else {
-                    finish(output || '（命令执行成功，无输出）');
+                    finish(truncateText(output || '（命令执行成功，无输出）', max_chars).text);
                 }
             });
             child.on('error', (error) => {

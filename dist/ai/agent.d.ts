@@ -1,5 +1,6 @@
-import type { ModelAdapter, RuntimeHookSink, StreamChunk, UsageStats } from '../types.js';
+import type { MessageBlock, ModelAdapter, RuntimeHookSink, StreamChunk, UsageStats } from '../types.js';
 import type { ToolRegistry } from './tools/index.js';
+import { type AgentSessionSnapshot } from './runtime/session.js';
 export type OnChunk = (chunk: StreamChunk) => void;
 export interface AgentOptions {
     maxIterations?: number;
@@ -13,20 +14,20 @@ export declare class Agent {
     private registry;
     private systemPrompt;
     private options;
-    private messages;
-    private usage;
+    private session;
+    private readonly controller;
     private readonly sessionId;
     private turnCount;
+    private runtime;
     constructor(adapter: ModelAdapter, registry: ToolRegistry, systemPrompt: string, options?: AgentOptions);
-    /** 执行一轮对话（可能包含多次工具调用循环） */
-    runTurn(userInput: string, onChunk: OnChunk, signal?: AbortSignal): Promise<void>;
-    /** 清空历史记录（会话结束时调用） */
+    runTurn(userInput: string | MessageBlock[], onChunk: OnChunk, signal?: AbortSignal): Promise<void>;
     clearHistory(): void;
-    /** 手动触发 context 压缩 */
     forceCompact(): void;
     getUsage(): UsageStats;
+    exportSession(): AgentSessionSnapshot;
+    restoreSession(snapshot: AgentSessionSnapshot): void;
     setAdapter(adapter: ModelAdapter): void;
     setSystemPrompt(systemPrompt: string): void;
-    private throwIfAborted;
-    private emit;
+    private createRuntime;
+    private emitLegacyHook;
 }
