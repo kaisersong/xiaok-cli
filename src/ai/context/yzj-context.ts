@@ -52,6 +52,12 @@ export async function buildSystemPrompt(opts: ContextOptions): Promise<string> {
   // 3. Skills 列表（若有）
   if (opts.skills && opts.skills.length > 0) {
     sections.push(formatSkillsContext(opts.skills));
+    sections.push([
+      '## Skill 使用规则',
+      '如果用户显式点名某个 skill，或请求明显匹配某个 skill 描述，必须先调用 `skill` 工具加载该 skill。',
+      '在加载 skill 之前，不允许直接回答、不允许直接输出计划、不允许直接执行写入或命令。',
+      '如果用户输入 `/skill-name`，必须执行对应 skill。',
+    ].join('\n'));
   }
 
   if (opts.deferredTools && opts.deferredTools.length > 0) {

@@ -25,23 +25,14 @@ description: 打招呼技能
     const skills = await loadSkills(dir, dir, { builtinRoots: [] });
     const tool = createSkillTool(skills);
     const result = await tool.execute({ name: 'greet' });
-    const payload = JSON.parse(result) as {
-      type: string;
-      name: string;
-      description: string;
-      source: string;
-      tier: string;
-      path: string;
-      content: string;
-    };
 
-    expect(payload.type).toBe('skill');
-    expect(payload.name).toBe('greet');
-    expect(payload.description).toContain('打招呼');
-    expect(payload.source).toBe('global');
-    expect(payload.tier).toBe('user');
-    expect(payload.path).toContain('greet.md');
-    expect(payload.content).toContain('中文');
+    expect(result).toContain('<skill_instructions>');
+    expect(result).toContain('<name>greet</name>');
+    expect(result).toContain('<description>打招呼技能</description>');
+    expect(result).toContain('<source>global</source>');
+    expect(result).toContain('<tier>user</tier>');
+    expect(result).toContain('greet.md');
+    expect(result).toContain('请用中文打招呼');
   });
 
   it('returns error message for unknown skill', async () => {
@@ -75,9 +66,20 @@ description: 发布技能
 
     await catalog.reload();
     result = await tool.execute({ name: 'deploy' });
+    expect(result).toContain('<name>deploy</name>');
+    expect(result).toContain('检查 CI');
+  });
 
-    const payload = JSON.parse(result) as { name: string; content: string };
-    expect(payload.name).toBe('deploy');
-    expect(payload.content).toContain('检查 CI');
+  it('returns a structured skill instruction envelope', async () => {
+    const catalog = createSkillCatalog(dir, dir, { builtinRoots: [] });
+    await catalog.reload();
+    const tool = createSkillTool(catalog);
+
+    const result = await tool.execute({ name: 'greet' });
+
+    expect(result).toContain('<skill_instructions>');
+    expect(result).toContain('<name>greet</name>');
+    expect(result).toContain('<source>global</source>');
+    expect(result).toContain('当前任务必须先遵守这个 skill');
   });
 });

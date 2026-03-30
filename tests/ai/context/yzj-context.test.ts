@@ -48,4 +48,26 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('默认 Skills');
     expect(prompt).toContain('/review');
   });
+
+  it('includes required skill invocation rules in the system prompt', async () => {
+    const prompt = await buildSystemPrompt({
+      enterpriseId: null,
+      devApp: null,
+      cwd: '/tmp/demo',
+      budget: 2000,
+      skills: [
+        {
+          name: 'skill-installer',
+          description: '安装技能',
+          content: 'Install skill.',
+          path: '/builtin/skill-installer/SKILL.md',
+          source: 'builtin',
+          tier: 'system',
+        },
+      ],
+    });
+
+    expect(prompt).toContain('必须先调用 `skill` 工具');
+    expect(prompt).toContain('不允许直接回答');
+  });
 });

@@ -2,15 +2,17 @@ import type { Tool } from '../../types.js';
 import type { SkillCatalog, SkillMeta } from './loader.js';
 
 export function formatSkillPayload(skill: SkillMeta): string {
-  return JSON.stringify({
-    type: 'skill',
-    name: skill.name,
-    description: skill.description,
-    path: skill.path,
-    source: skill.source,
-    tier: skill.tier,
-    content: skill.content,
-  }, null, 2);
+  return [
+    '<skill_instructions>',
+    `<name>${skill.name}</name>`,
+    `<description>${skill.description}</description>`,
+    `<path>${skill.path}</path>`,
+    `<source>${skill.source}</source>`,
+    `<tier>${skill.tier}</tier>`,
+    '<requirement>当前任务必须先遵守这个 skill，再继续回答或执行操作。</requirement>',
+    skill.content,
+    '</skill_instructions>',
+  ].join('\n');
 }
 
 function isSkillCatalog(value: SkillMeta[] | SkillCatalog): value is SkillCatalog {
