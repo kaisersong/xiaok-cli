@@ -1,6 +1,14 @@
 import * as readline from 'readline';
 import { stdin, stdout } from 'process';
 import { boldCyan, dim } from './render.js';
+import { appendFileSync } from 'fs';
+const DEBUG_LOG = '/tmp/xiaok-debug.log';
+function log(msg) {
+    try {
+        appendFileSync(DEBUG_LOG, `${new Date().toISOString()} ${msg}\n`);
+    }
+    catch { }
+}
 const BASE_SLASH_COMMANDS = [
     { cmd: '/exit', desc: 'Exit the chat' },
     { cmd: '/clear', desc: 'Clear the screen' },
@@ -72,6 +80,7 @@ export class InputReader {
             const renderMenu = () => {
                 if (this.menuItems.length === 0)
                     return;
+                log(`renderMenu: items=${this.menuItems.length} idx=${this.menuIdx}`);
                 // 保存当前光标位置（相对于输入行）
                 const cursorOffset = input.length - cursor;
                 // 菜单显示在输入框下方
@@ -107,7 +116,9 @@ export class InputReader {
             };
             const getFilteredCommands = (text) => getSlashCommands(this.skills).filter((c) => c.cmd.startsWith(text));
             const openMenu = (text) => {
+                log(`openMenu: text=${JSON.stringify(text)}`);
                 this.menuItems = getFilteredCommands(text);
+                log(`openMenu: filtered items=${this.menuItems.length}`);
                 if (this.menuItems.length > 0) {
                     this.menuIdx = 0;
                     this.menuOpen = true;
@@ -156,6 +167,7 @@ export class InputReader {
             };
             const onData = (data) => {
                 const key = data.toString('utf8');
+                log(`key pressed: ${JSON.stringify(key)} input=${JSON.stringify(input)} cursor=${cursor}`);
                 if (key === '\x03') {
                     done(null);
                     return;
