@@ -26,6 +26,12 @@ export class PermissionManager {
     this.mode = mode;
   }
 
+  addSessionRule(rule: string): void {
+    if (!this.allowRules.includes(rule)) {
+      this.allowRules.push(rule);
+    }
+  }
+
   async check(toolName: string, input: Record<string, unknown>): Promise<PermissionDecision> {
     if (this.matches(this.denyRules, toolName, input)) {
       return 'deny';

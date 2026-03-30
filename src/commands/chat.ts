@@ -10,7 +10,9 @@ import { ToolRegistry, buildToolList } from '../ai/tools/index.js';
 import { buildSystemPrompt } from '../ai/context/yzj-context.js';
 import { Agent } from '../ai/agent.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
-import { writeError, isTTY, confirm } from '../utils/ui.js';
+import { writeError, isTTY } from '../utils/ui.js';
+import { showPermissionPrompt } from '../ui/permission-prompt.js';
+import { addAllowRule } from '../ai/permissions/settings.js';
 import { createSkillCatalog, parseSlashCommand } from '../ai/skills/loader.js';
 import { createSkillTool, formatSkillPayload } from '../ai/skills/tool.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
@@ -76,10 +78,45 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   const permissionManager = new PermissionManager({ mode: autoMode ? 'auto' : 'default' });
 
+  const cwd = process.cwd();
+
   const registry = new ToolRegistry({
     permissionManager,
     dryRun: opts.dryRun,
-    onPrompt: async (name, input) => confirm(name, input, () => registry.enableAutoMode(), rl ?? undefined),
+    onPrompt: async (name, input) => {
+      const choice = await showPermissionPrompt(name, input);
+
+      // 处理不同的选择
+      if (choice.action === 'deny') {
+        return false;
+      }
+
+      if (choice.action === 'allow_once') {
+        return true;
+      }
+
+      if (choice.action === 'allow_session') {
+        // 添加到会话规则（内存中）
+        permissionManager.addSessionRule(choice.rule);
+        return true;
+      }
+
+      if (choice.action === 'allow_project') {
+        // 保存到项目 settings.json
+        await addAllowRule('project', choice.rule, cwd);
+        permissionManager.addSessionRule(choice.rule);
+        return true;
+      }
+
+      if (choice.action === 'allow_global') {
+        // 保存到全局 settings.json
+        await addAllowRule('global', choice.rule, cwd);
+        permissionManager.addSessionRule(choice.rule);
+        return true;
+      }
+
+      return false;
+    },
   }, tools);
 
   const runtimeHooks = createRuntimeHooks();
