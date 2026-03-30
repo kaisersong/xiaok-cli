@@ -1,4 +1,4 @@
-import { dim, cyan } from "./render.js";
+import { dim, boldCyan, dimCyan } from "./render.js";
 
 export type StatusBarField = "model" | "mode" | "tokens" | "session";
 
@@ -7,8 +7,13 @@ const DEFAULT_FIELDS: StatusBarField[] = ["model", "mode", "tokens", "session"];
 export interface UsageStats {
   inputTokens: number;
   outputTokens: number;
+  budget?: number;
 }
 
+/**
+ * Inline status bar — prints a status line after input prompt.
+ * No ANSI scroll regions, no absolute cursor positioning.
+ */
 export class StatusBar {
   private model = "";
   private sessionId = "";
@@ -16,90 +21,78 @@ export class StatusBar {
   private usage: UsageStats = { inputTokens: 0, outputTokens: 0 };
   private fields: StatusBarField[] = DEFAULT_FIELDS;
   private enabled: boolean;
-  private welcomeLines = 0;
+  private cwd = "";
+  private branch = "";
 
   constructor() {
     this.enabled = process.stdout.isTTY === true && !process.env.NO_COLOR;
   }
 
-  /** Initialize status bar. */
-  init(model: string, sessionId: string, mode?: string, welcomeLines?: number): void {
-    if (!this.enabled) return;
+  init(model: string, sessionId: string, cwd: string, mode?: string): void {
     this.model = model;
     this.sessionId = sessionId;
+    this.cwd = cwd;
     if (mode) this.mode = mode;
-
-    const rows = process.stdout.rows ?? 24;
-    // 设置滚动区域：从第1行到倒数第4行
-    // 为分割线、输入栏、状态栏预留3行空间
-    process.stderr.write(`\x1b[1;${rows - 3}r`);
-    this.render();
   }
 
-  /** Update usage stats. */
   update(usage: UsageStats): void {
     this.usage = usage;
-    this.render();
   }
 
   updateModel(model: string): void {
     this.model = model;
-    this.render();
   }
 
   updateMode(mode: string): void {
     this.mode = mode;
-    this.render();
+  }
+
+  updateBranch(branch: string): void {
+    this.branch = branch;
   }
 
   setFields(fields: StatusBarField[]): void {
     this.fields = fields;
-    this.render();
   }
 
-  render(): void {
-    if (!this.enabled) return;
+  /** Build the status string (no newline). */
+  getStatusLine(): string {
+    if (!this.enabled) return "";
 
-    const rows = process.stdout.rows ?? 24;
-    const cols = process.stdout.columns ?? 80;
+    const parts: string[] = [];
 
-    const left: string[] = [];
-    const right: string[] = [];
+    // Project name (dirname basename)
+    const projectName = this.cwd.split('/').pop() || this.cwd;
+    parts.push(projectName);
 
-    for (const field of this.fields) {
-      switch (field) {
-        case "model":
-          left.push(this.model);
-          break;
-        case "mode":
-          if (this.mode !== "default") left.push(`[${this.mode}]`);
-          break;
-        case "tokens": {
-          const totalK = ((this.usage.inputTokens + this.usage.outputTokens) / 1000).toFixed(1);
-          right.push(`${totalK}k tokens`);
-          break;
-        }
-        case "session":
-          right.push(this.sessionId);
-          break;
-      }
+    // Model name
+    parts.push(this.model);
+
+    // Git branch
+    if (this.branch) parts.push(this.branch);
+
+    // Context usage %
+    if (this.usage.budget && this.usage.budget > 0) {
+      const total = this.usage.inputTokens + this.usage.outputTokens;
+      const pct = Math.round((total / this.usage.budget) * 100);
+      parts.push(`${pct}%`);
     }
 
-    const leftStr = ` ${left.join(" ")}`;
-    const rightStr = `${right.join("  ")} `;
-    const padding = Math.max(0, cols - leftStr.length - rightStr.length);
-    const bar = dim(leftStr + " ".repeat(padding) + rightStr);
+    // Mode badge
+    if (this.mode !== "default") parts.push(`[${this.mode}]`);
 
-    // 保存光标位置，定位到状态栏，渲染，恢复光标位置
-    process.stderr.write(`\x1b7\x1b[${rows};1H\x1b[K${bar}\x1b8`);
+    // Session
+    parts.push(this.sessionId);
+
+    return dim(parts.join("  "));
   }
 
-  /** Restore terminal state. */
-  destroy(): void {
+  /** Print the status bar as normal output line. */
+  render(): void {
     if (!this.enabled) return;
-    // 重置滚动区域
-    process.stderr.write('\x1b[r');
-    const rows = process.stdout.rows ?? 24;
-    process.stderr.write(`\x1b[${rows};1H\x1b[K`);
+    process.stdout.write(this.getStatusLine() + '\n');
   }
+
+  /** No-op — no terminal state to restore in inline mode. */
+  destroy(): void {}
 }

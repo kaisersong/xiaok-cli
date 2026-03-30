@@ -1,39 +1,38 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { StatusBar } from '../../src/ui/statusbar.js';
 
 describe('StatusBar', () => {
   let statusBar: StatusBar;
   let originalIsTTY: boolean | undefined;
-  let originalRows: number | undefined;
   let originalColumns: number | undefined;
-  let stderrOutput: string;
+  let stdoutOutput: string;
+  let originalWrite: typeof process.stdout.write;
 
   beforeEach(() => {
-    statusBar = new StatusBar();
     originalIsTTY = process.stdout.isTTY;
-    originalRows = process.stdout.rows;
     originalColumns = process.stdout.columns;
 
     // Mock TTY environment
     process.stdout.isTTY = true;
-    process.stdout.rows = 24;
     process.stdout.columns = 80;
+    delete process.env.NO_COLOR;
 
-    // Capture stderr output
-    stderrOutput = '';
-    const originalWrite = process.stderr.write;
-    process.stderr.write = ((chunk: any) => {
-      stderrOutput += chunk;
+    // Create instance after setting up environment
+    statusBar = new StatusBar();
+
+    // Capture stdout output
+    stdoutOutput = '';
+    originalWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => {
+      stdoutOutput += chunk;
       return true;
     }) as any;
   });
 
   afterEach(() => {
+    process.stdout.write = originalWrite;
     if (originalIsTTY !== undefined) {
       process.stdout.isTTY = originalIsTTY;
-    }
-    if (originalRows !== undefined) {
-      process.stdout.rows = originalRows;
     }
     if (originalColumns !== undefined) {
       process.stdout.columns = originalColumns;
@@ -41,121 +40,133 @@ describe('StatusBar', () => {
   });
 
   describe('init', () => {
-    it('should set scroll region from line 1 to rows-3', () => {
-      // Need to capture stderr before init and ensure NO_COLOR is not set
-      delete process.env.NO_COLOR;
-      process.stdout.isTTY = true;
+    it('should store model and session id', () => {
+      statusBar.init('claude-opus-4-6', 'test123', '/projects/xiaok-cli');
 
-      let capturedOutput = '';
-      const originalWrite = process.stderr.write;
-      process.stderr.write = ((chunk: any) => {
-        capturedOutput += chunk;
-        return true;
-      }) as any;
-
-      // Create new instance after setting up environment
-      const bar = new StatusBar();
-      bar.init('claude-opus-4-6', 'test123');
-
-      process.stderr.write = originalWrite;
-
-      // Should set scroll region: ESC[1;21r (line 1 to line 21, leaving 3 lines for separator/input/status)
-      expect(capturedOutput).toContain('\x1b[1;21r');
+      const line = statusBar.getStatusLine();
+      expect(line).toContain('claude-opus-4-6');
+      expect(line).toContain('test123');
     });
 
-    it('should render status bar after init', () => {
-      statusBar.init('claude-opus-4-6', 'test123');
+    it('should store mode if provided', () => {
+      statusBar.init('claude-opus-4-6', 'test123', '/projects/xiaok-cli', 'auto');
 
-      // Should position cursor at last row and render
-      expect(stderrOutput).toContain('\x1b[24;1H');
-      expect(stderrOutput).toContain('claude-opus-4-6');
-      expect(stderrOutput).toContain('test123');
+      const line = statusBar.getStatusLine();
+      expect(line).toContain('[auto]');
     });
 
-    it('should handle different terminal sizes', () => {
-      process.stdout.rows = 40;
-      stderrOutput = '';
+    it('should not show mode badge for default mode', () => {
+      statusBar.init('claude-opus-4-6', 'test123', '/projects/xiaok-cli');
 
-      statusBar.init('gpt-4o', 'abc456');
-
-      // Should set scroll region to line 1 to 37 (40 - 3)
-      expect(stderrOutput).toContain('\x1b[1;37r');
-      // Should position at line 40
-      expect(stderrOutput).toContain('\x1b[40;1H');
+      const line = statusBar.getStatusLine();
+      expect(line).not.toContain('[default]');
     });
   });
 
   describe('render', () => {
     beforeEach(() => {
-      statusBar.init('claude-opus-4-6', 'test123');
-      stderrOutput = ''; // Clear init output
+      statusBar.init('claude-opus-4-6', 'test123', '/projects/xiaok-cli');
+      stdoutOutput = ''; // Clear init output
     });
 
-    it('should position status bar at bottom row', () => {
+    it('should write status line to stdout', () => {
       statusBar.render();
 
-      expect(stderrOutput).toContain('\x1b[24;1H');
+      expect(stdoutOutput).toContain('claude-opus-4-6');
+      expect(stdoutOutput).toContain('test123');
     });
 
-    it('should clear line before rendering', () => {
+    it('should include project name', () => {
       statusBar.render();
 
-      // Should contain clear line sequence
-      expect(stderrOutput).toContain('\x1b[K');
+      expect(stdoutOutput).toContain('xiaok-cli');
     });
 
     it('should display model name', () => {
       statusBar.render();
 
-      expect(stderrOutput).toContain('claude-opus-4-6');
+      expect(stdoutOutput).toContain('claude-opus-4-6');
     });
 
     it('should display session id', () => {
       statusBar.render();
 
-      expect(stderrOutput).toContain('test123');
+      expect(stdoutOutput).toContain('test123');
     });
 
-    it('should display token usage', () => {
-      statusBar.update({ inputTokens: 1234, outputTokens: 5678 });
-      stderrOutput = '';
+    it('should display context percentage when budget is set', () => {
+      statusBar.update({ inputTokens: 1234, outputTokens: 5678, budget: 100000 });
+      stdoutOutput = '';
 
       statusBar.render();
 
-      // Total tokens: 6912, displayed as 6.9k
-      expect(stderrOutput).toContain('6.9k tokens');
+      // Total tokens: 6912, budget: 100000, percentage: 7%
+      expect(stdoutOutput).toContain('7%');
+    });
+
+    it('should not display percentage when budget is not set', () => {
+      statusBar.update({ inputTokens: 1234, outputTokens: 5678 });
+      stdoutOutput = '';
+
+      statusBar.render();
+
+      expect(stdoutOutput).not.toContain('%');
     });
 
     it('should update model name', () => {
       statusBar.updateModel('gpt-4o');
-      stderrOutput = '';
+      stdoutOutput = '';
 
       statusBar.render();
 
-      expect(stderrOutput).toContain('gpt-4o');
-      expect(stderrOutput).not.toContain('claude-opus-4-6');
+      expect(stdoutOutput).toContain('gpt-4o');
+      expect(stdoutOutput).not.toContain('claude-opus-4-6');
+    });
+
+    it('should display git branch when set', () => {
+      statusBar.updateBranch('main');
+      stdoutOutput = '';
+
+      statusBar.render();
+
+      expect(stdoutOutput).toContain('main');
+    });
+
+    it('should not display branch when not set', () => {
+      statusBar.render();
+
+      expect(stdoutOutput).toContain('claude-opus-4-6');
+      expect(stdoutOutput).toContain('xiaok-cli');
     });
   });
 
   describe('destroy', () => {
-    it('should reset scroll region', () => {
-      statusBar.init('claude-opus-4-6', 'test123');
-      stderrOutput = '';
+    it('should be a no-op in inline mode', () => {
+      statusBar.init('claude-opus-4-6', 'test123', '/projects/xiaok-cli');
+      stdoutOutput = '';
 
       statusBar.destroy();
 
-      // Should reset scroll region: ESC[r
-      expect(stderrOutput).toContain('\x1b[r');
+      // Inline status bar destroy is a no-op
+      expect(stdoutOutput).toBe('');
+    });
+  });
+
+  describe('disabled state', () => {
+    it('should return empty string when not TTY', () => {
+      process.stdout.isTTY = false;
+      const bar = new StatusBar();
+      bar.init('claude-opus-4-6', 'test123', '/projects/xiaok-cli');
+
+      expect(bar.getStatusLine()).toBe('');
     });
 
-    it('should clear status bar line', () => {
-      statusBar.init('claude-opus-4-6', 'test123');
-      stderrOutput = '';
+    it('should return empty string when NO_COLOR is set', () => {
+      process.env.NO_COLOR = '1';
+      const bar = new StatusBar();
+      bar.init('claude-opus-4-6', 'test123', '/projects/xiaok-cli');
 
-      statusBar.destroy();
-
-      expect(stderrOutput).toContain('\x1b[24;1H');
-      expect(stderrOutput).toContain('\x1b[K');
+      expect(bar.getStatusLine()).toBe('');
     });
   });
 });
