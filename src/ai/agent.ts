@@ -60,6 +60,11 @@ export class Agent {
 
       if (shouldCompact(estimateTokens(this.messages), contextLimit, compactThreshold)) {
         this.messages = compactMessages(this.messages, compactPlaceholder);
+        this.emit({
+          type: 'compact_triggered',
+          sessionId: this.sessionId,
+          turnId,
+        });
       }
 
       const assistantBlocks: MessageBlock[] = [];
@@ -118,6 +123,7 @@ export class Agent {
           sessionId: this.sessionId,
           turnId,
           toolName: tc.name,
+          toolInput: tc.input,
         });
         const result = await this.registry.executeTool(tc.name, tc.input);
         const isError = result.startsWith('Error');
@@ -146,6 +152,11 @@ export class Agent {
   clearHistory(): void {
     this.messages = [];
     this.usage = { inputTokens: 0, outputTokens: 0 };
+  }
+
+  /** 手动触发 context 压缩 */
+  forceCompact(): void {
+    this.messages = compactMessages(this.messages, '[context compacted]');
   }
 
   getUsage(): UsageStats {

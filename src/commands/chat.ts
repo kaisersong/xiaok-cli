@@ -125,7 +125,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
 
   // 初始化状态栏（在底部）
-  statusBar.init(modelName, sessionId, opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : undefined);
+  statusBar.init(modelName, sessionId, process.cwd(), opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : undefined);
 
   if (opts.dryRun) process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
 
