@@ -38,6 +38,38 @@ description: 打招呼
     expect(skills[0].content).toContain('说你好');
   });
 
+  it('loads skills from directory entries with SKILL.md', async () => {
+    const deployDir = join(globalDir, 'skills', 'deploy');
+    mkdirSync(deployDir, { recursive: true });
+    writeFileSync(join(deployDir, 'SKILL.md'), `---
+name: deploy
+description: 发布技能
+---
+执行发布检查。`);
+
+    const skills = await loadSkills(globalDir, projectDir, { builtinRoots: [] });
+
+    expect(skills.find((skill) => skill.name === 'deploy')).toMatchObject({
+      name: 'deploy',
+      description: '发布技能',
+      source: 'global',
+      tier: 'user',
+      path: join(deployDir, 'SKILL.md'),
+    });
+  });
+
+  it('keeps supporting legacy flat markdown skill files', async () => {
+    writeFileSync(join(globalDir, 'skills', 'legacy.md'), `---
+name: legacy
+description: 兼容旧格式
+---
+Legacy content.`);
+
+    const skills = await loadSkills(globalDir, projectDir, { builtinRoots: [] });
+
+    expect(skills.find((skill) => skill.name === 'legacy')?.path).toContain('legacy.md');
+  });
+
   it('loads skills from project-local directory', async () => {
     writeFileSync(join(projectDir, '.xiaok', 'skills', 'local.md'), `---
 name: local

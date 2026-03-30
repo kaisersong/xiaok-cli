@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, existsSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, type Dirent } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { getBuiltinSkillRoots } from './defaults.js';
@@ -48,6 +48,25 @@ function parseFrontmatter(raw: string): { name: string; description: string; con
   return { name: fields.name, description: fields.description, content };
 }
 
+function loadSkillFile(
+  filePath: string,
+  source: SkillMeta['source'],
+  tier: SkillMeta['tier'],
+): SkillMeta | null {
+  try {
+    const raw = readFileSync(filePath, 'utf-8');
+    const parsed = parseFrontmatter(raw);
+    if (!parsed) {
+      console.warn(`[xiaok] Skills: 跳过格式错误的文件: ${filePath.split('/').pop() ?? filePath}`);
+      return null;
+    }
+    return { ...parsed, path: filePath, source, tier };
+  } catch {
+    console.warn(`[xiaok] Skills: 读取文件失败: ${filePath.split('/').pop() ?? filePath}`);
+    return null;
+  }
+}
+
 function loadSkillsFromDir(
   dir: string,
   source: SkillMeta['source'],
@@ -56,24 +75,25 @@ function loadSkillsFromDir(
   if (!existsSync(dir)) return [];
 
   const results: SkillMeta[] = [];
-  let entries: string[];
+  let entries: Dirent[];
   try {
-    entries = readdirSync(dir).filter(f => f.endsWith('.md'));
+    entries = readdirSync(dir, { withFileTypes: true });
   } catch {
     return [];
   }
 
-  for (const file of entries) {
-    try {
-      const raw = readFileSync(join(dir, file), 'utf-8');
-      const parsed = parseFrontmatter(raw);
-      if (!parsed) {
-        console.warn(`[xiaok] Skills: 跳过格式错误的文件: ${file}`);
-        continue;
-      }
-      results.push({ ...parsed, path: join(dir, file), source, tier });
-    } catch {
-      console.warn(`[xiaok] Skills: 读取文件失败: ${file}`);
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.endsWith('.md')) {
+      const skill = loadSkillFile(join(dir, entry.name), source, tier);
+      if (skill) results.push(skill);
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      const skillPath = join(dir, entry.name, 'SKILL.md');
+      if (!existsSync(skillPath)) continue;
+      const skill = loadSkillFile(skillPath, source, tier);
+      if (skill) results.push(skill);
     }
   }
 
