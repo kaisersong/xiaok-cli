@@ -133,7 +133,14 @@ describe('yzj channel helpers', () => {
       text: '12345\n67890\nabcde',
     });
 
-    expect(result.chunks).toBe(2);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.chunks).toBeGreaterThan(1);
+    expect(fetchMock).toHaveBeenCalledTimes(result.chunks);
+
+    const sentChunks = fetchMock.mock.calls.map((call) => {
+      const body = JSON.parse(String(call[1]?.body));
+      return String(body.content);
+    });
+
+    expect(sentChunks.every((chunk) => chunk.length <= 10)).toBe(true);
   });
 });
