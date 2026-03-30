@@ -25,7 +25,7 @@ export class StatusBar {
   private branch = "";
 
   constructor() {
-    this.enabled = process.stdout.isTTY === true && !process.env.NO_COLOR;
+    this.enabled = true; // 始终启用状态栏
   }
 
   init(model: string, sessionId: string, cwd: string, mode?: string): void {
@@ -61,39 +61,36 @@ export class StatusBar {
 
     const parts: string[] = [];
 
-    // Project name (dirname basename)
-    const projectName = this.cwd.split('/').pop() || this.cwd;
-    parts.push(projectName);
-
     // Model name
     parts.push(this.model);
 
-    // Git branch
-    if (this.branch) parts.push(this.branch);
-
-    // Context usage %
+    // Token usage: "26% used"
     if (this.usage.budget && this.usage.budget > 0) {
       const total = this.usage.inputTokens + this.usage.outputTokens;
       const pct = Math.round((total / this.usage.budget) * 100);
-      parts.push(`${pct}%`);
+      parts.push(`${pct}% used`);
+
+      // Tokens left: "148k left"
+      const left = Math.round((this.usage.budget - total) / 1000);
+      parts.push(`${left}k left`);
     }
 
-    // Mode badge
-    if (this.mode !== "default") parts.push(`[${this.mode}]`);
+    // Current path (replace HOME with ~)
+    const displayPath = this.cwd.replace(process.env.HOME || '', '~');
+    parts.push(displayPath);
 
-    // Session
-    parts.push(this.sessionId);
-
-    return dim(parts.join("  "));
+    return dim(parts.join(' · '));
   }
 
   /** Print the status bar at fixed position (bottom line). */
   render(): void {
     if (!this.enabled) return;
+    const statusLine = this.getStatusLine();
+    if (!statusLine) return;
     const rows = process.stdout.rows ?? 24;
     // 移动到最后一行渲染状态栏
-    process.stderr.write(`\x1b[${rows};1H\x1b[K`);
-    process.stderr.write(this.getStatusLine());
+    process.stdout.write(`\x1b[${rows};1H\x1b[K`);
+    process.stdout.write(statusLine);
   }
 
   /** No-op — no terminal state to restore in inline mode. */
