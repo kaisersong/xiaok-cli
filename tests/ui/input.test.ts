@@ -104,6 +104,78 @@ describe('InputReader', () => {
       expect(reader).toBeDefined();
     });
   });
+
+  describe('slash command menu', () => {
+    it('should filter commands based on input', () => {
+      const skills: SkillMeta[] = [
+        { name: 'test-skill', description: 'A test skill', content: '', path: '' },
+        { name: 'another-skill', description: 'Another skill', content: '', path: '' },
+      ];
+
+      reader.setSkills(skills);
+
+      // Test that commands can be filtered
+      const allCommands = getSlashCommands(skills);
+      const exitCommands = allCommands.filter(c => c.cmd.startsWith('/exit'));
+      const testCommands = allCommands.filter(c => c.cmd.startsWith('/test'));
+
+      expect(exitCommands.length).toBe(1);
+      expect(testCommands.length).toBe(1);
+      expect(testCommands[0].cmd).toBe('/test-skill');
+    });
+
+    it('should handle partial command matching', () => {
+      const skills: SkillMeta[] = [
+        { name: 'test-one', description: 'Test 1', content: '', path: '' },
+        { name: 'test-two', description: 'Test 2', content: '', path: '' },
+        { name: 'other', description: 'Other', content: '', path: '' },
+      ];
+
+      const commands = getSlashCommands(skills);
+      const testCommands = commands.filter(c => c.cmd.startsWith('/test'));
+
+      expect(testCommands.length).toBe(2);
+      expect(testCommands[0].cmd).toBe('/test-one');
+      expect(testCommands[1].cmd).toBe('/test-two');
+    });
+
+    it('should return empty array when no commands match', () => {
+      const skills: SkillMeta[] = [
+        { name: 'test-skill', description: 'A test skill', content: '', path: '' },
+      ];
+
+      const commands = getSlashCommands(skills);
+      const noMatch = commands.filter(c => c.cmd.startsWith('/nonexistent'));
+
+      expect(noMatch.length).toBe(0);
+    });
+
+    it('should handle menu with many commands', () => {
+      const skills: SkillMeta[] = Array.from({ length: 20 }, (_, i) => ({
+        name: `skill-${i}`,
+        description: `Skill ${i}`,
+        content: '',
+        path: '',
+      }));
+
+      const commands = getSlashCommands(skills);
+
+      // 4 base commands + 20 skills = 24 total
+      expect(commands.length).toBe(24);
+    });
+
+    it('should preserve command descriptions', () => {
+      const skills: SkillMeta[] = [
+        { name: 'test', description: 'This is a test skill with a long description', content: '', path: '' },
+      ];
+
+      const commands = getSlashCommands(skills);
+      const testCmd = commands.find(c => c.cmd === '/test');
+
+      expect(testCmd).toBeDefined();
+      expect(testCmd?.desc).toBe('This is a test skill with a long description');
+    });
+  });
 });
 
 describe('word navigation helpers', () => {
