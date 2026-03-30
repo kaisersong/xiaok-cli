@@ -60,14 +60,21 @@ export class StatusBar {
         }
         return dim(parts.join(' · '));
     }
-    /** Print the status bar as footer after AI response. */
+    /** Print the status bar at fixed position (bottom line). */
     render() {
         if (!this.enabled)
             return;
         const statusLine = this.getStatusLine();
         if (!statusLine)
             return;
-        process.stdout.write('\n' + statusLine + '\n');
+        const rows = process.stdout.rows ?? 24;
+        // 保存当前光标位置
+        process.stdout.write('\x1b[s');
+        // 移动到最后一行渲染状态栏
+        process.stdout.write(`\x1b[${rows};1H\x1b[K`);
+        process.stdout.write(statusLine);
+        // 恢复光标位置
+        process.stdout.write('\x1b[u');
     }
     /** No-op — no terminal state to restore in inline mode. */
     destroy() { }

@@ -128,7 +128,9 @@ async function runChat(initialInput, opts) {
             });
             mdRenderer.flush();
             process.stdout.write('\n');
-            statusBar.render();
+            const statusLine = statusBar.getStatusLine();
+            if (statusLine)
+                process.stdout.write(statusLine + '\n');
         }
         catch (e) {
             writeError(String(e));
@@ -325,7 +327,10 @@ async function runChat(initialInput, opts) {
                     });
                     mdRenderer.flush();
                     process.stdout.write('\n');
-                    statusBar.render();
+                    // 状态栏作为一行文本输出，不使用固定定位
+                    const statusLine = statusBar.getStatusLine();
+                    if (statusLine)
+                        process.stdout.write(statusLine + '\n');
                 }
                 catch (e) {
                     writeError(String(e));
@@ -350,7 +355,9 @@ async function runChat(initialInput, opts) {
             });
             mdRenderer.flush();
             process.stdout.write('\n');
-            statusBar.render();
+            const statusLine = statusBar.getStatusLine();
+            if (statusLine)
+                process.stdout.write(statusLine + '\n');
         }
         catch (e) {
             writeError(String(e));
