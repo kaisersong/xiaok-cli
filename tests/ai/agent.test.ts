@@ -232,4 +232,46 @@ describe('Agent', () => {
 
     expect(prompts).toEqual(['system', 'updated system']);
   });
+
+  it('exports and restores session state for later resume', async () => {
+    const { Agent } = await import('../../src/ai/agent.js');
+    const seenMessages: Message[][] = [];
+    let streamCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (messages) => {
+        streamCalls += 1;
+        seenMessages.push(messages.map((message) => ({
+          role: message.role,
+          content: message.content.map((block) => ({ ...block })),
+        })));
+
+        if (streamCalls === 1) {
+          return mockStream([
+            { type: 'text', delta: 'first answer' },
+            { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } },
+            { type: 'done' },
+          ]);
+        }
+
+        return mockStream([{ type: 'text', delta: 'second answer' }, { type: 'done' }]);
+      },
+    };
+    const registry = createRegistryMock();
+    const agent = new Agent(adapter, registry as never, 'system');
+
+    await agent.runTurn('first', () => {});
+    const snapshot = agent.exportSession();
+
+    const resumed = new Agent(adapter, registry as never, 'system');
+    resumed.restoreSession(snapshot);
+    await resumed.runTurn('second', () => {});
+
+    expect(snapshot.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
+    expect(seenMessages[1]).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'first' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+      { role: 'user', content: [{ type: 'text', text: 'second' }] },
+    ]);
+  });
 });

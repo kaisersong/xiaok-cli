@@ -1,6 +1,11 @@
 import type { Message, MessageBlock, UsageStats } from '../../types.js';
 import { compactMessages, mergeUsage } from './usage.js';
 
+export interface AgentSessionSnapshot {
+  messages: Message[];
+  usage: UsageStats;
+}
+
 export class AgentSessionState {
   private messages: Message[] = [];
   private usage: UsageStats = { inputTokens: 0, outputTokens: 0 };
@@ -51,7 +56,29 @@ export class AgentSessionState {
     this.messages = messages;
   }
 
+  replaceUsage(usage: UsageStats): void {
+    this.usage = usage;
+  }
+
   forceCompact(placeholder = '[context compacted]'): void {
     this.messages = compactMessages(this.messages, placeholder);
+  }
+
+  exportSnapshot(): AgentSessionSnapshot {
+    return {
+      messages: this.messages.map((message) => ({
+        role: message.role,
+        content: message.content.map((block) => ({ ...block })),
+      })),
+      usage: { ...this.usage },
+    };
+  }
+
+  restoreSnapshot(snapshot: AgentSessionSnapshot): void {
+    this.replaceMessages(snapshot.messages.map((message) => ({
+      role: message.role,
+      content: message.content.map((block) => ({ ...block })),
+    })));
+    this.replaceUsage({ ...snapshot.usage });
   }
 }

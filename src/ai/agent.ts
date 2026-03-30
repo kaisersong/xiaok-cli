@@ -9,7 +9,7 @@ import { AgentRunController } from './runtime/controller.js';
 import type { AgentRuntimeEvent } from './runtime/events.js';
 import { toLegacyStreamChunk } from './runtime/events.js';
 import { AgentRuntime } from './runtime/agent-runtime.js';
-import { AgentSessionState } from './runtime/session.js';
+import { AgentSessionState, type AgentSessionSnapshot } from './runtime/session.js';
 
 export type OnChunk = (chunk: StreamChunk) => void;
 
@@ -71,6 +71,14 @@ export class Agent {
 
   getUsage(): UsageStats {
     return this.session.getUsage();
+  }
+
+  exportSession(): AgentSessionSnapshot {
+    return this.session.exportSnapshot();
+  }
+
+  restoreSession(snapshot: AgentSessionSnapshot): void {
+    this.session.restoreSnapshot(snapshot);
   }
 
   setAdapter(adapter: ModelAdapter): void {

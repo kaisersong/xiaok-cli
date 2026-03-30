@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import type { ModelAdapter } from '../types.js';
 import { loadConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
@@ -14,6 +15,7 @@ import { showPermissionPrompt } from '../ui/permission-prompt.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
 import { createSkillCatalog, parseSlashCommand } from '../ai/skills/loader.js';
 import { createSkillTool, formatSkillPayload } from '../ai/skills/tool.js';
+import { FileSessionStore, type PersistedSessionSnapshot } from '../ai/runtime/session-store.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
 import { renderWelcomeScreen, renderInputSeparator, renderInputPrompt, renderUserInput, dim, startSpinner } from '../ui/render.js';
@@ -24,6 +26,8 @@ import { getCurrentBranch } from '../utils/git.js';
 interface ChatOptions {
   auto: boolean;
   dryRun: boolean;
+  resume?: string;
+  forkSession?: string;
 }
 
 async function runChat(initialInput: string | undefined, opts: ChatOptions): Promise<void> {
@@ -37,7 +41,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   // 加载配置和凭据
   const config = await loadConfig();
 
-  let adapter;
+  let adapter: ModelAdapter;
   try {
     adapter = createAdapter(config);
   } catch (e) {
@@ -115,12 +119,48 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   const runtimeHooks = createRuntimeHooks();
   const agent = new Agent(adapter, registry, systemPrompt, { hooks: runtimeHooks });
+  const sessionStore = new FileSessionStore();
+  let persistedSession: PersistedSessionSnapshot | null = null;
+
+  if (opts.resume) {
+    persistedSession = await sessionStore.load(opts.resume);
+    if (!persistedSession) {
+      writeError(`找不到会话: ${opts.resume}`);
+      process.exit(1);
+    }
+    agent.restoreSession({
+      messages: persistedSession.messages,
+      usage: persistedSession.usage,
+    });
+  } else if (opts.forkSession) {
+    persistedSession = await sessionStore.fork(opts.forkSession);
+    agent.restoreSession({
+      messages: persistedSession.messages,
+      usage: persistedSession.usage,
+    });
+  }
 
   // 创建 UI 组件
   const mdRenderer = new MarkdownRenderer();
   const statusBar = new StatusBar();
-  const sessionId = Date.now().toString(36).slice(-6);
+  const sessionId = persistedSession?.sessionId ?? sessionStore.createSessionId();
+  const sessionCreatedAt = persistedSession?.createdAt ?? Date.now();
+  const forkedFromSessionId = persistedSession?.forkedFromSessionId;
   const inputReader = new InputReader();
+
+  const persistSession = async (): Promise<void> => {
+    const snapshot = agent.exportSession();
+    await sessionStore.save({
+      sessionId,
+      cwd: process.cwd(),
+      model: adapter.getModelName(),
+      createdAt: sessionCreatedAt,
+      updatedAt: Date.now(),
+      forkedFromSessionId,
+      messages: snapshot.messages,
+      usage: snapshot.usage,
+    });
+  };
 
   const refreshSkills = async (): Promise<void> => {
     skills = await skillCatalog.reload();
@@ -146,6 +186,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           statusBar.update({ ...chunk.usage, budget: config.contextBudget });
         }
       });
+      await persistSession();
       mdRenderer.flush();
       process.stdout.write('\n');
       const statusLine = statusBar.getStatusLine();
@@ -338,6 +379,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
               statusBar.update({ ...chunk.usage, budget: config.contextBudget });
             }
           });
+          await persistSession();
           mdRenderer.flush();
           process.stdout.write('\n');
           // 状态栏作为一行文本输出，不使用固定定位
@@ -363,6 +405,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           statusBar.update({ ...chunk.usage, budget: config.contextBudget });
         }
       });
+      await persistSession();
       mdRenderer.flush();
       process.stdout.write('\n');
       const statusLine = statusBar.getStatusLine();
@@ -380,6 +423,8 @@ export function registerChatCommands(program: Command): void {
     .description('启动 AI 编程助手（默认命令）')
     .option('--auto', '自动执行所有工具，无需确认（适用于 CI）')
     .option('--dry-run', '打印工具调用但不执行')
+    .option('--resume <id>', '恢复已保存会话')
+    .option('--fork-session <id>', '从已有会话分叉一个新会话')
     .argument('[input]', '单次任务描述（省略则进入交互模式）')
     .action(async (input: string | undefined, opts: ChatOptions) => {
       await runChat(input, opts);
