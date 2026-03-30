@@ -15,9 +15,10 @@ import { createSkillCatalog, parseSlashCommand } from '../ai/skills/loader.js';
 import { createSkillTool, formatSkillPayload } from '../ai/skills/tool.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
-import { renderWelcomeScreen, renderInputSeparator, renderInputPrompt, renderUserInput, boldCyan, dim } from '../ui/render.js';
+import { renderWelcomeScreen, renderInputSeparator, renderInputPrompt, renderUserInput, boldCyan, dim, startSpinner } from '../ui/render.js';
 import { InputReader } from '../ui/input.js';
 import { selectModel } from '../ui/model-selector.js';
+import { getCurrentBranch } from '../utils/git.js';
 
 interface ChatOptions {
   auto: boolean;
@@ -103,8 +104,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       await refreshSkills();
       await agent.runTurn(initialInput, (chunk) => {
         if (chunk.type === 'text') mdRenderer.write(chunk.delta);
+        if (chunk.type === 'usage') {
+          statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+        }
       });
       mdRenderer.flush();
+      process.stdout.write('\n');
+      statusBar.render();
     } catch (e) {
       writeError(String(e));
       process.exit(1);
@@ -127,10 +133,48 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   // 初始化状态栏（在底部）
   statusBar.init(modelName, sessionId, process.cwd(), opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : undefined);
 
+  // 同步获取 git branch
+  const branch = await getCurrentBranch(process.cwd());
+  if (branch) statusBar.updateBranch(branch);
+
   if (opts.dryRun) process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
 
   // 创建输入读取器
   inputReader.setSkills(skills);
+
+  // 工具调用可视化 — 用 startSpinner
+  const activeSpinners = new Map<string, () => void>();
+
+  runtimeHooks.on('tool_started', (e) => {
+    const displayValue = extractToolDisplay(e.toolInput);
+    const msg = displayValue ? `${e.toolName}(${displayValue})` : e.toolName;
+    const stopSpinner = startSpinner(msg);
+    activeSpinners.set(e.toolName, stopSpinner);
+  });
+
+  runtimeHooks.on('tool_finished', (e) => {
+    const stop = activeSpinners.get(e.toolName);
+    if (stop) {
+      stop();
+      activeSpinners.delete(e.toolName);
+    }
+    const icon = e.ok ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
+    process.stdout.write(`  ${icon} ${e.toolName}\n`);
+  });
+
+  // Context 压缩通知
+  runtimeHooks.on('compact_triggered', () => {
+    process.stdout.write(`\n  ${dim('⚠ 上下文已压缩，保留最近对话')}\n\n`);
+  });
+
+  // Helper: 从工具输入提取展示值
+  function extractToolDisplay(input: Record<string, unknown>): string {
+    if (typeof input.command === 'string') return input.command.slice(0, 40);
+    if (typeof input.file_path === 'string') return input.file_path;
+    if (typeof input.path === 'string') return input.path;
+    if (typeof input.pattern === 'string') return input.pattern;
+    return '';
+  }
 
   // 处理终端窗口大小调整
   let resizeTimeout: NodeJS.Timeout | null = null;
@@ -205,6 +249,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       process.stdout.write('  /exit    - 退出\n');
       process.stdout.write('  /clear   - 清屏\n');
       process.stdout.write('  /models  - 切换模型\n');
+      process.stdout.write('  /compact - 手动压缩上下文\n');
       process.stdout.write('  /help    - 显示帮助\n');
       if (skills.length > 0) {
         process.stdout.write('\n可用 skills：\n');
@@ -213,6 +258,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         }
       }
       process.stdout.write('\n');
+      continue;
+    }
+
+    if (trimmed === '/compact') {
+      agent.forceCompact();
+      process.stdout.write(`${dim('上下文已压缩。')}\n\n`);
       continue;
     }
 
@@ -270,8 +321,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         try {
           await agent.runTurn(userMsg, (chunk) => {
             if (chunk.type === 'text') mdRenderer.write(chunk.delta);
+            if (chunk.type === 'usage') {
+              statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+            }
           });
           mdRenderer.flush();
+          process.stdout.write('\n');
+          statusBar.render();
         } catch (e) {
           writeError(String(e));
         }
@@ -279,8 +335,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       } else {
         process.stdout.write(`找不到 skill "${slash.skillName}"。可用 skills：${skills.map(s => '/' + s.name).join(', ') || '（无）'}\n`);
       }
-      // 重新渲染状态栏
-      statusBar.update({ inputTokens: 0, outputTokens: 0 });
       continue;
     }
 
@@ -290,15 +344,17 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     try {
       await agent.runTurn(trimmed, (chunk) => {
         if (chunk.type === 'text') mdRenderer.write(chunk.delta);
+        if (chunk.type === 'usage') {
+          statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+        }
       });
       mdRenderer.flush();
+      process.stdout.write('\n');
+      statusBar.render();
     } catch (e) {
       writeError(String(e));
     }
     process.stdout.write('\n');
-
-    // 重新渲染状态栏
-    statusBar.update({ inputTokens: 0, outputTokens: 0 });
   }
 }
 

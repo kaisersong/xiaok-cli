@@ -87,3 +87,19 @@ export const DEFAULT_CONFIG: Config = {
 export function isValidProvider(v: unknown): v is Config['defaultModel'] {
   return VALID_PROVIDERS.includes(v as Config['defaultModel']);
 }
+
+// Permission settings schema
+export interface PermissionSettings {
+  permissions?: {
+    allow?: string[];
+    deny?: string[];
+  };
+}
+
+// Permission choice for interactive prompts
+export type PermissionChoice =
+  | { action: 'allow_once' }
+  | { action: 'allow_session'; rule: string }
+  | { action: 'allow_project'; rule: string }
+  | { action: 'allow_global'; rule: string }
+  | { action: 'deny' };
