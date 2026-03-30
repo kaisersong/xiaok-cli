@@ -71,6 +71,15 @@ Summary:
 - Do not let two Codex instances make concurrent uncoordinated edits to the same file.
 - If a shared file must change for both efforts, the single writer integrates both changes after reading the other commit.
 
+## Current Roadmap Docs
+
+- Wave 1 spec: `docs/superpowers/specs/2026-03-31-xiaok-clio-wave1-runtime-tools-design.md`
+- Wave 1 plan: `docs/superpowers/plans/2026-03-31-xiaok-clio-wave1-runtime-tools.md`
+- Wave 2 spec: `docs/superpowers/specs/2026-03-31-xiaok-clio-wave2-workflow-operator-design.md`
+- Wave 2 plan: `docs/superpowers/plans/2026-03-31-xiaok-clio-wave2-workflow-operator.md`
+- Wave 3 spec: `docs/superpowers/specs/2026-03-31-xiaok-clio-wave3-agent-platform-design.md`
+- Wave 3 plan: `docs/superpowers/plans/2026-03-31-xiaok-clio-wave3-agent-platform.md`
+
 ## Local Verification Note
 
 - In this Windows sandbox, raw `vitest` against TypeScript sources can fail with `spawn EPERM` because Vite/esbuild try to start child processes.
