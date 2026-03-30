@@ -177,6 +177,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const branch = await getCurrentBranch(process.cwd());
   if (branch) statusBar.updateBranch(branch);
 
+  // 立即渲染状态栏
+  statusBar.render();
+
   if (opts.dryRun) process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
 
   // 创建输入读取器
