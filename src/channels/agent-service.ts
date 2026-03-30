@@ -13,9 +13,11 @@ export interface ChannelAgentResponder {
 
 export interface ChannelAgentExecutionResult {
   ok: boolean;
+  cancelled?: boolean;
   generationMs: number;
   deliveryMs: number;
   replyLength: number;
+  replyPreview?: string;
   errorMessage?: string;
 }
 
@@ -32,7 +34,7 @@ export class ChannelAgentService {
     private readonly responder: ChannelAgentResponder
   ) {}
 
-  async execute(request: ChannelRequest, sessionId: string): Promise<ChannelAgentExecutionResult> {
+  async execute(request: ChannelRequest, sessionId: string, signal?: AbortSignal): Promise<ChannelAgentExecutionResult> {
     const session = this.getOrCreateSession(sessionId);
     const execution = session.tail.then(async (): Promise<ChannelAgentExecutionResult> => {
       const chunks: string[] = [];
@@ -42,7 +44,7 @@ export class ChannelAgentService {
           if (chunk.type === 'text') {
             chunks.push(chunk.delta);
           }
-        });
+        }, signal);
 
         const generationMs = Date.now() - generationStartedAt;
         const reply = chunks.join('').trim();
@@ -54,6 +56,7 @@ export class ChannelAgentService {
             generationMs,
             deliveryMs: Date.now() - deliveryStartedAt,
             replyLength: reply.length,
+            replyPreview: buildReplyPreview(reply),
           };
         }
         return {
@@ -64,6 +67,16 @@ export class ChannelAgentService {
         };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+        if (signal?.aborted || errorMessage === 'agent aborted') {
+          return {
+            ok: false,
+            cancelled: true,
+            generationMs: Date.now() - generationStartedAt,
+            deliveryMs: 0,
+            replyLength: 0,
+            errorMessage: 'agent aborted',
+          };
+        }
         let deliveryMs = 0;
         if (this.responder.onError) {
           const deliveryStartedAt = Date.now();
@@ -98,4 +111,9 @@ export class ChannelAgentService {
     this.sessions.set(sessionId, created);
     return created;
   }
+}
+
+function buildReplyPreview(reply: string, maxLength = 120): string {
+  if (reply.length <= maxLength) return reply;
+  return `${reply.slice(0, maxLength)}...`;
 }

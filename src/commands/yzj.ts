@@ -11,9 +11,11 @@ import { Agent } from '../ai/agent.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
 import { ToolRegistry, buildToolList } from '../ai/tools/index.js';
 import { createSkillCatalog } from '../ai/skills/loader.js';
-import { createSkillTool } from '../ai/skills/tool.js';
+import { createSkillTool, formatSkillPayload } from '../ai/skills/tool.js';
 import { ChannelAgentService } from '../channels/agent-service.js';
+import { parseYZJCommand } from '../channels/command-parser.js';
 import { InMemoryChannelSessionStore } from '../channels/session-store.js';
+import { TaskManager } from '../channels/task-manager.js';
 import { YZJInboundDedupeStore } from '../channels/yzj-dedupe-store.js';
 import { createYZJWebhookHandler } from '../channels/yzj-webhook.js';
 import { YZJWebSocketClient } from '../channels/yzj-websocket-client.js';
@@ -21,6 +23,7 @@ import { YZJTransport } from '../channels/yzj-transport.js';
 import { parseYZJMessage, resolveYZJConfig } from '../channels/yzj.js';
 import { deriveYZJWebSocketUrl } from '../channels/yzj-ws-url.js';
 import type { YZJChannelConfig } from '../types.js';
+import type { ChannelRequest } from '../channels/webhook.js';
 import { handleChannelRequest } from '../channels/worker.js';
 
 interface YZJServeOptions {
@@ -133,6 +136,8 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
   const config = await loadConfig();
   const yzjConfig = resolveYZJConfig(config, buildOverrides(options));
   const enableWebhook = options.webhook ?? true;
+  const skillCatalog = createSkillCatalog();
+  const skills = await skillCatalog.reload();
 
   if (yzjConfig.inboundMode === 'webhook' && !enableWebhook) {
     throw new Error('inboundMode=webhook 时不能关闭 webhook server');
@@ -151,8 +156,6 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
     const creds = await loadCredentials();
     const devApp = await getDevAppIdentity();
     const customAgents = await loadCustomAgents();
-    const skillCatalog = createSkillCatalog();
-    const skills = await skillCatalog.reload();
 
     const systemPrompt = await buildSystemPrompt({
       enterpriseId: creds?.enterpriseId ?? null,
@@ -200,6 +203,48 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
     );
   }
 
+  const notifyText = async (request: ChannelRequest, text: string): Promise<void> => {
+    if (options.dryRun) {
+      console.info(`[yzj][dry-run] outbound text: ${text}`);
+      return;
+    }
+    await transport.deliver({
+      channel: 'yzj',
+      target: request.replyTarget,
+      text,
+      kind: 'result',
+    });
+  };
+
+  const taskManager = new TaskManager({
+    execute: async ({ request, sessionId, signal }) => {
+      console.info(
+        `[yzj] task execute session=${sessionId} chars=${request.message.length} aborted=${signal.aborted ? 'yes' : 'no'}`
+      );
+      if (!agentService) {
+        if (signal.aborted) {
+          return {
+            ok: false,
+            cancelled: true,
+            generationMs: 0,
+            deliveryMs: 0,
+            replyLength: 0,
+            errorMessage: 'agent aborted',
+          };
+        }
+        console.info(`[yzj][dry-run] inbound text: ${request.message}`);
+        return {
+          ok: true,
+          generationMs: 0,
+          deliveryMs: 0,
+          replyLength: 0,
+        };
+      }
+      return agentService.execute(request, sessionId, signal);
+    },
+    notify: notifyText,
+  });
+
   const processInboundMessage = async (rawMessage: Parameters<typeof parseYZJMessage>[0], source: 'webhook' | 'websocket') => {
     if (!dedupeStore.markSeen(rawMessage.msgId)) {
       console.info(`[yzj] duplicate inbound dropped from ${source}: ${rawMessage.msgId}`);
@@ -213,23 +258,51 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
         console.info(
           `[yzj] accepted ${source} message msgId=${rawMessage.msgId} session=${sessionId} from=${rawMessage.operatorOpenid} chars=${input.message.length}`,
         );
-        if (!agentService) {
-          console.info(`[yzj][dry-run] inbound text: ${input.message}`);
+        const command = parseYZJCommand(input.message);
+
+        if (command.kind === 'help') {
+          await notifyText(input, formatYZJHelp(skills.map((skill) => skill.name)));
           return;
         }
-        const execution = await agentService.execute(input, sessionId);
-        if (execution.ok) {
-          console.info(
-            `[yzj] completed msgId=${rawMessage.msgId} session=${sessionId} modelMs=${execution.generationMs} outboundMs=${execution.deliveryMs} totalMs=${Date.now() - inboundStartedAt} replyChars=${execution.replyLength}`,
-          );
-        } else {
-          console.error(
-            `[yzj] failed msgId=${rawMessage.msgId} session=${sessionId} modelMs=${execution.generationMs} outboundMs=${execution.deliveryMs} totalMs=${Date.now() - inboundStartedAt} error=${execution.errorMessage ?? 'unknown error'}`,
-          );
+
+        if (command.kind === 'status') {
+          const task = command.taskId
+            ? resolveSessionTask(taskManager, sessionId, command.taskId)
+            : taskManager.getLatestTask(sessionId);
+          await notifyText(input, task ? taskManager.formatStatus(task) : buildMissingTaskMessage(command.taskId));
+          return;
         }
+
+        if (command.kind === 'cancel') {
+          const task = resolveSessionTask(taskManager, sessionId, command.taskId);
+          if (!task) {
+            await notifyText(input, buildMissingTaskMessage(command.taskId));
+            return;
+          }
+          const cancellation = taskManager.cancelTask(command.taskId);
+          await notifyText(input, cancellation.message);
+          return;
+        }
+
+        if (command.kind === 'skill') {
+          const skill = skillCatalog.get(command.skillName);
+          if (!skill) {
+            await notifyText(
+              input,
+              `找不到 skill "${command.skillName}"。可用 skills：${skills.map((item) => '/' + item.name).join(', ') || '（无）'}`
+            );
+            return;
+          }
+
+          const skillRequest = buildSkillRequest(input, skill.name, formatSkillPayload(skill), command.args);
+          await taskManager.createAndStart(skillRequest, sessionId);
+          return;
+        }
+
+        await taskManager.createAndStart(input, sessionId);
       },
     });
-    console.info(`[yzj] session ${result.sessionId} handled ${source} message ${rawMessage.msgId}`);
+    console.info(`[yzj] session ${result.sessionId} handled ${source} message ${rawMessage.msgId} totalMs=${Date.now() - inboundStartedAt}`);
   };
 
   const shutdown = new AbortController();
@@ -318,4 +391,47 @@ async function updateYZJConfig(
   config.channels = config.channels ?? {};
   config.channels.yzj = update(current);
   await saveConfig(config);
+}
+
+function buildSkillRequest(
+  request: ChannelRequest,
+  skillName: string,
+  skillPayload: string,
+  args?: string
+): ChannelRequest {
+  return {
+    ...request,
+    message: args?.trim()
+      ? `执行 skill "${skillName}"，用户补充说明：${args.trim()}\n\n${skillPayload}`
+      : `执行 skill：\n\n${skillPayload}`,
+  };
+}
+
+function resolveSessionTask(taskManager: TaskManager, sessionId: string, taskId: string) {
+  const task = taskManager.getTask(taskId);
+  if (!task || task.sessionId !== sessionId) {
+    return undefined;
+  }
+  return task;
+}
+
+function buildMissingTaskMessage(taskId?: string): string {
+  if (taskId) {
+    return `未找到当前会话下的任务 ${taskId}`;
+  }
+  return '当前会话下暂无任务';
+}
+
+function formatYZJHelp(skillNames: string[]): string {
+  const lines = [
+    '可用命令：',
+    '/help',
+    '/status [taskId]',
+    '/cancel <taskId>',
+    '/skill <name> [args]',
+  ];
+  if (skillNames.length > 0) {
+    lines.push(`可用 skills：${skillNames.map((name) => `/${name}`).join(', ')}`);
+  }
+  return lines.join('\n');
 }
