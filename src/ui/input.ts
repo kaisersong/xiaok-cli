@@ -81,9 +81,7 @@ export class InputReader {
         // 保存当前光标位置（相对于输入行）
         const cursorOffset = input.length - cursor;
 
-        // 向上移动到菜单区域（菜单显示在输入框上方）
-        stdout.write(`\x1b[${this.menuItems.length}A`);
-
+        // 菜单显示在输入框下方
         // 输出菜单项
         for (let m = 0; m < this.menuItems.length; m++) {
           const item = this.menuItems[m];
@@ -91,27 +89,14 @@ export class InputReader {
           const prefix = isSelected ? boldCyan('\u276f') : ' ';
           const cmdStr = isSelected ? boldCyan(item.cmd) : dim(item.cmd);
           const descStr = dim(item.desc);
-
-          // 清除当前行并输出菜单项
-          stdout.write('\x1b[2K');
-          stdout.write(`  ${prefix} ${cmdStr}  ${descStr}`);
-
-          // 移动到下一行（除了最后一项）
-          if (m < this.menuItems.length - 1) {
-            stdout.write('\n');
-          }
+          stdout.write(`\n  ${prefix} ${cmdStr}  ${descStr}`);
         }
 
-        // 移动到输入行开头
-        stdout.write('\r');
+        // 向上移动光标回到输入行
+        stdout.write(`\x1b[${this.menuItems.length}A`);
 
         // 恢复光标位置
-        if (cursorOffset > 0) {
-          stdout.write(`\x1b[${input.length}C`);
-          stdout.write(`\x1b[${cursorOffset}D`);
-        } else {
-          stdout.write(`\x1b[${input.length}C`);
-        }
+        if (cursorOffset > 0) stdout.write(`\x1b[${cursorOffset}D`);
       };
 
       const clearMenu = () => {
