@@ -77,6 +77,11 @@ export class InputReader {
 
       const renderMenu = () => {
         if (this.menuItems.length === 0) return;
+
+        // 保存当前光标位置（相对于输入行）
+        const cursorOffset = input.length - cursor;
+
+        // 输出菜单项（自然滚动，不使用固定位置）
         for (let m = 0; m < this.menuItems.length; m++) {
           const item = this.menuItems[m];
           const isSelected = m === this.menuIdx;
@@ -85,18 +90,24 @@ export class InputReader {
           const descStr = dim(item.desc);
           stdout.write(`\n  ${prefix} ${cmdStr}  ${descStr}`);
         }
+
+        // 向上移动光标回到输入行
         stdout.write(`\x1b[${this.menuItems.length}A`);
-        const back = input.length - cursor;
-        if (back > 0) stdout.write(`\x1b[${back}D`);
+
+        // 恢复光标位置
+        if (cursorOffset > 0) stdout.write(`\x1b[${cursorOffset}D`);
       };
 
       const clearMenu = () => {
         if (this.menuItems.length === 0) return;
-        stdout.write('\x1b7');
+
+        // 向下移动到菜单区域并清除每一行
         for (let m = 0; m < this.menuItems.length; m++) {
           stdout.write('\n\x1b[2K');
         }
-        stdout.write('\x1b8');
+
+        // 向上移动回到输入行
+        stdout.write(`\x1b[${this.menuItems.length}A`);
       };
 
       const getFilteredCommands = (text: string) =>
