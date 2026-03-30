@@ -4,5 +4,6 @@ export declare class OpenAIAdapter implements ModelAdapter {
     client: OpenAI;
     private model;
     constructor(apiKey: string, model?: string, baseUrl?: string);
+    getModelName(): string;
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string): AsyncIterable<StreamChunk>;
 }

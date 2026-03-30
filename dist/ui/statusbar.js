@@ -1,5 +1,9 @@
 import { dim } from "./render.js";
 const DEFAULT_FIELDS = ["model", "mode", "tokens", "session"];
+/**
+ * Inline status bar — prints a status line after input prompt.
+ * No ANSI scroll regions, no absolute cursor positioning.
+ */
 export class StatusBar {
     model = "";
     sessionId = "";
@@ -7,81 +11,66 @@ export class StatusBar {
     usage = { inputTokens: 0, outputTokens: 0 };
     fields = DEFAULT_FIELDS;
     enabled;
-    welcomeLines = 0;
+    cwd = "";
+    branch = "";
     constructor() {
-        this.enabled = process.stdout.isTTY === true && !process.env.NO_COLOR;
+        this.enabled = true; // 始终启用状态栏
     }
-    /** Initialize status bar. */
-    init(model, sessionId, mode, welcomeLines) {
-        if (!this.enabled)
-            return;
+    init(model, sessionId, cwd, mode) {
         this.model = model;
         this.sessionId = sessionId;
+        this.cwd = cwd;
         if (mode)
             this.mode = mode;
-        const rows = process.stdout.rows ?? 24;
-        // 设置滚动区域：从第1行到倒数第4行
-        // 为分割线、输入栏、状态栏预留3行空间
-        process.stderr.write(`\x1b[1;${rows - 3}r`);
-        this.render();
     }
-    /** Update usage stats. */
     update(usage) {
         this.usage = usage;
-        this.render();
     }
     updateModel(model) {
         this.model = model;
-        this.render();
     }
     updateMode(mode) {
         this.mode = mode;
-        this.render();
+    }
+    updateBranch(branch) {
+        this.branch = branch;
     }
     setFields(fields) {
         this.fields = fields;
-        this.render();
     }
+    /** Build the status string (no newline). */
+    getStatusLine() {
+        if (!this.enabled)
+            return "";
+        const parts = [];
+        // Model name
+        parts.push(this.model);
+        // Token usage: "26% used"
+        if (this.usage.budget && this.usage.budget > 0) {
+            const total = this.usage.inputTokens + this.usage.outputTokens;
+            const pct = Math.round((total / this.usage.budget) * 100);
+            parts.push(`${pct}% used`);
+            // Tokens left: "148k left"
+            const left = Math.round((this.usage.budget - total) / 1000);
+            parts.push(`${left}k left`);
+        }
+        // Current path (replace HOME with ~)
+        const displayPath = this.cwd.replace(process.env.HOME || '', '~');
+        parts.push(displayPath);
+        return dim(parts.join(' · '));
+    }
+    /** Print the status bar at fixed position (bottom line). */
     render() {
         if (!this.enabled)
             return;
-        const rows = process.stdout.rows ?? 24;
-        const cols = process.stdout.columns ?? 80;
-        const left = [];
-        const right = [];
-        for (const field of this.fields) {
-            switch (field) {
-                case "model":
-                    left.push(this.model);
-                    break;
-                case "mode":
-                    if (this.mode !== "default")
-                        left.push(`[${this.mode}]`);
-                    break;
-                case "tokens": {
-                    const totalK = ((this.usage.inputTokens + this.usage.outputTokens) / 1000).toFixed(1);
-                    right.push(`${totalK}k tokens`);
-                    break;
-                }
-                case "session":
-                    right.push(this.sessionId);
-                    break;
-            }
-        }
-        const leftStr = ` ${left.join(" ")}`;
-        const rightStr = `${right.join("  ")} `;
-        const padding = Math.max(0, cols - leftStr.length - rightStr.length);
-        const bar = dim(leftStr + " ".repeat(padding) + rightStr);
-        // 保存光标位置，定位到状态栏，渲染，恢复光标位置
-        process.stderr.write(`\x1b7\x1b[${rows};1H\x1b[K${bar}\x1b8`);
-    }
-    /** Restore terminal state. */
-    destroy() {
-        if (!this.enabled)
+        const statusLine = this.getStatusLine();
+        if (!statusLine)
             return;
-        // 重置滚动区域
-        process.stderr.write('\x1b[r');
         const rows = process.stdout.rows ?? 24;
-        process.stderr.write(`\x1b[${rows};1H\x1b[K`);
+        // 移动到最后一行渲染状态栏
+        process.stdout.write(`\x1b[${rows};1H\x1b[K`);
+        process.stdout.write(statusLine);
     }
+    /** No-op — no terminal state to restore in inline mode. */
+    destroy() { }
 }

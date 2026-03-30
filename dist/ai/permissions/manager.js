@@ -13,6 +13,11 @@ export class PermissionManager {
     setMode(mode) {
         this.mode = mode;
     }
+    addSessionRule(rule) {
+        if (!this.allowRules.includes(rule)) {
+            this.allowRules.push(rule);
+        }
+    }
     async check(toolName, input) {
         if (this.matches(this.denyRules, toolName, input)) {
             return 'deny';

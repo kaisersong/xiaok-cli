@@ -7,6 +7,9 @@ export class ClaudeAdapter {
         this.client = new Anthropic({ apiKey, baseURL: baseUrl, maxRetries: MAX_RETRIES });
         this.model = model;
     }
+    getModelName() {
+        return this.model;
+    }
     async *stream(messages, tools, systemPrompt) {
         const anthropicMessages = messages.map((message) => {
             const content = [];

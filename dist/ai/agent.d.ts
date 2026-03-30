@@ -22,6 +22,8 @@ export declare class Agent {
     runTurn(userInput: string, onChunk: OnChunk, signal?: AbortSignal): Promise<void>;
     /** 清空历史记录（会话结束时调用） */
     clearHistory(): void;
+    /** 手动触发 context 压缩 */
+    forceCompact(): void;
     getUsage(): UsageStats;
     setAdapter(adapter: ModelAdapter): void;
     setSystemPrompt(systemPrompt: string): void;

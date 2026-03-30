@@ -12,6 +12,7 @@ export declare class PermissionManager {
     constructor(options: PermissionManagerOptions);
     getMode(): PermissionMode;
     setMode(mode: PermissionMode): void;
+    addSessionRule(rule: string): void;
     check(toolName: string, input: Record<string, unknown>): Promise<PermissionDecision>;
     private matches;
     private getRuleTarget;

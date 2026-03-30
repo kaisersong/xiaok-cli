@@ -8,14 +8,17 @@ import { ToolRegistry, buildToolList } from '../ai/tools/index.js';
 import { buildSystemPrompt } from '../ai/context/yzj-context.js';
 import { Agent } from '../ai/agent.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
-import { writeError, isTTY, confirm } from '../utils/ui.js';
+import { writeError, isTTY } from '../utils/ui.js';
+import { showPermissionPrompt } from '../ui/permission-prompt.js';
+import { addAllowRule } from '../ai/permissions/settings.js';
 import { createSkillCatalog, parseSlashCommand } from '../ai/skills/loader.js';
 import { createSkillTool, formatSkillPayload } from '../ai/skills/tool.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
-import { renderWelcomeScreen, renderInputSeparator, renderUserInput, boldCyan, dim } from '../ui/render.js';
+import { renderWelcomeScreen, renderInputSeparator, renderUserInput, boldCyan, dim, startSpinner } from '../ui/render.js';
 import { InputReader } from '../ui/input.js';
 import { selectModel } from '../ui/model-selector.js';
+import { getCurrentBranch } from '../utils/git.js';
 async function runChat(initialInput, opts) {
     // 检测 CI 环境
     const autoMode = opts.auto || !isTTY();
@@ -59,10 +62,38 @@ async function runChat(initialInput, opts) {
     // 单次任务模式下 rl 保持未赋值，confirm() 内部会创建临时接口（仅作兜底）
     let rl;
     const permissionManager = new PermissionManager({ mode: autoMode ? 'auto' : 'default' });
+    const cwd = process.cwd();
     const registry = new ToolRegistry({
         permissionManager,
         dryRun: opts.dryRun,
-        onPrompt: async (name, input) => confirm(name, input, () => registry.enableAutoMode(), rl ?? undefined),
+        onPrompt: async (name, input) => {
+            const choice = await showPermissionPrompt(name, input);
+            // 处理不同的选择
+            if (choice.action === 'deny') {
+                return false;
+            }
+            if (choice.action === 'allow_once') {
+                return true;
+            }
+            if (choice.action === 'allow_session') {
+                // 添加到会话规则（内存中）
+                permissionManager.addSessionRule(choice.rule);
+                return true;
+            }
+            if (choice.action === 'allow_project') {
+                // 保存到项目 settings.json
+                await addAllowRule('project', choice.rule, cwd);
+                permissionManager.addSessionRule(choice.rule);
+                return true;
+            }
+            if (choice.action === 'allow_global') {
+                // 保存到全局 settings.json
+                await addAllowRule('global', choice.rule, cwd);
+                permissionManager.addSessionRule(choice.rule);
+                return true;
+            }
+            return false;
+        },
     }, tools);
     const runtimeHooks = createRuntimeHooks();
     const agent = new Agent(adapter, registry, systemPrompt, { hooks: runtimeHooks });
@@ -84,8 +115,13 @@ async function runChat(initialInput, opts) {
             await agent.runTurn(initialInput, (chunk) => {
                 if (chunk.type === 'text')
                     mdRenderer.write(chunk.delta);
+                if (chunk.type === 'usage') {
+                    statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+                }
             });
             mdRenderer.flush();
+            process.stdout.write('\n');
+            statusBar.render();
         }
         catch (e) {
             writeError(String(e));
@@ -95,20 +131,61 @@ async function runChat(initialInput, opts) {
         return;
     }
     // 交互模式 - 显示欢迎界面
-    let modelName = config.defaultModel ?? 'claude';
+    const provider = config.defaultModel ?? 'claude';
+    // 获取完整的模型名称用于状态栏显示
+    const fullModelName = adapter.getModelName();
     // 显示欢迎界面（不清屏，让它可以滚动）
     const welcomeLines = renderWelcomeScreen({
-        model: modelName,
+        model: provider,
         cwd: process.cwd(),
         sessionId,
         mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
     });
     // 初始化状态栏（在底部）
-    statusBar.init(modelName, sessionId, opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : undefined);
+    statusBar.init(fullModelName, sessionId, process.cwd(), opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : undefined);
+    // 同步获取 git branch
+    const branch = await getCurrentBranch(process.cwd());
+    if (branch)
+        statusBar.updateBranch(branch);
+    // 立即渲染状态栏
+    statusBar.render();
     if (opts.dryRun)
         process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
     // 创建输入读取器
     inputReader.setSkills(skills);
+    // 工具调用可视化 — 用 startSpinner
+    const activeSpinners = new Map();
+    runtimeHooks.on('tool_started', (e) => {
+        const displayValue = extractToolDisplay(e.toolInput);
+        const msg = displayValue ? `${e.toolName}(${displayValue})` : e.toolName;
+        const stopSpinner = startSpinner(msg);
+        activeSpinners.set(e.toolName, stopSpinner);
+    });
+    runtimeHooks.on('tool_finished', (e) => {
+        const stop = activeSpinners.get(e.toolName);
+        if (stop) {
+            stop();
+            activeSpinners.delete(e.toolName);
+        }
+        const icon = e.ok ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
+        process.stdout.write(`  ${icon} ${e.toolName}\n`);
+    });
+    // Context 压缩通知
+    runtimeHooks.on('compact_triggered', () => {
+        process.stdout.write(`\n  ${dim('⚠ 上下文已压缩，保留最近对话')}\n\n`);
+    });
+    // Helper: 从工具输入提取展示值
+    function extractToolDisplay(input) {
+        if (typeof input.command === 'string')
+            return input.command.slice(0, 40);
+        if (typeof input.file_path === 'string')
+            return input.file_path;
+        if (typeof input.path === 'string')
+            return input.path;
+        if (typeof input.pattern === 'string')
+            return input.pattern;
+        return '';
+    }
     // 处理终端窗口大小调整
     let resizeTimeout = null;
     const handleResize = () => {
@@ -160,7 +237,7 @@ async function runChat(initialInput, opts) {
         if (trimmed === '/clear') {
             process.stdout.write('\x1b[2J\x1b[H');
             renderWelcomeScreen({
-                model: modelName,
+                model: provider,
                 cwd: process.cwd(),
                 sessionId,
                 mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
@@ -173,6 +250,7 @@ async function runChat(initialInput, opts) {
             process.stdout.write('  /exit    - 退出\n');
             process.stdout.write('  /clear   - 清屏\n');
             process.stdout.write('  /models  - 切换模型\n');
+            process.stdout.write('  /compact - 手动压缩上下文\n');
             process.stdout.write('  /help    - 显示帮助\n');
             if (skills.length > 0) {
                 process.stdout.write('\n可用 skills：\n');
@@ -181,6 +259,11 @@ async function runChat(initialInput, opts) {
                 }
             }
             process.stdout.write('\n');
+            continue;
+        }
+        if (trimmed === '/compact') {
+            agent.forceCompact();
+            process.stdout.write(`${dim('上下文已压缩。')}\n\n`);
             continue;
         }
         if (trimmed === '/models') {
@@ -237,8 +320,13 @@ async function runChat(initialInput, opts) {
                     await agent.runTurn(userMsg, (chunk) => {
                         if (chunk.type === 'text')
                             mdRenderer.write(chunk.delta);
+                        if (chunk.type === 'usage') {
+                            statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+                        }
                     });
                     mdRenderer.flush();
+                    process.stdout.write('\n');
+                    statusBar.render();
                 }
                 catch (e) {
                     writeError(String(e));
@@ -248,8 +336,6 @@ async function runChat(initialInput, opts) {
             else {
                 process.stdout.write(`找不到 skill "${slash.skillName}"。可用 skills：${skills.map(s => '/' + s.name).join(', ') || '（无）'}\n`);
             }
-            // 重新渲染状态栏
-            statusBar.update({ inputTokens: 0, outputTokens: 0 });
             continue;
         }
         // 普通输入
@@ -259,15 +345,18 @@ async function runChat(initialInput, opts) {
             await agent.runTurn(trimmed, (chunk) => {
                 if (chunk.type === 'text')
                     mdRenderer.write(chunk.delta);
+                if (chunk.type === 'usage') {
+                    statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+                }
             });
             mdRenderer.flush();
+            process.stdout.write('\n');
+            statusBar.render();
         }
         catch (e) {
             writeError(String(e));
         }
         process.stdout.write('\n');
-        // 重新渲染状态栏
-        statusBar.update({ inputTokens: 0, outputTokens: 0 });
     }
 }
 export function registerChatCommands(program) {

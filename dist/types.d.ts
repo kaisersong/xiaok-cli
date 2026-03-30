@@ -4,6 +4,7 @@ import type { RuntimeEvent } from './runtime/events.js';
 export type { MessageBlock, UsageStats };
 export interface ModelAdapter {
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string): AsyncIterable<StreamChunk>;
+    getModelName(): string;
 }
 export type StreamChunk = {
     type: 'text';
@@ -80,3 +81,23 @@ export interface Config {
 export declare const DEFAULT_CONFIG: Config;
 /** 校验 defaultModel 是否合法，防止脏数据写入 */
 export declare function isValidProvider(v: unknown): v is Config['defaultModel'];
+export interface PermissionSettings {
+    permissions?: {
+        allow?: string[];
+        deny?: string[];
+    };
+}
+export type PermissionChoice = {
+    action: 'allow_once';
+} | {
+    action: 'allow_session';
+    rule: string;
+} | {
+    action: 'allow_project';
+    rule: string;
+} | {
+    action: 'allow_global';
+    rule: string;
+} | {
+    action: 'deny';
+};

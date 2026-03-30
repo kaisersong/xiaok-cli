@@ -7,6 +7,9 @@ export class OpenAIAdapter {
         this.client = new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: MAX_RETRIES });
         this.model = model;
     }
+    getModelName() {
+        return this.model;
+    }
     async *stream(messages, tools, systemPrompt) {
         const openaiMessages = [
             { role: 'system', content: systemPrompt },

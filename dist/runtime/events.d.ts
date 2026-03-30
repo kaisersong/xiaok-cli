@@ -16,10 +16,15 @@ export type RuntimeEvent = {
     sessionId: string;
     turnId: string;
     toolName: string;
+    toolInput: Record<string, unknown>;
 } | {
     type: 'tool_finished';
     sessionId: string;
     turnId: string;
     toolName: string;
     ok: boolean;
+} | {
+    type: 'compact_triggered';
+    sessionId: string;
+    turnId: string;
 };

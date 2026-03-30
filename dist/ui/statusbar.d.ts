@@ -2,7 +2,12 @@ export type StatusBarField = "model" | "mode" | "tokens" | "session";
 export interface UsageStats {
     inputTokens: number;
     outputTokens: number;
+    budget?: number;
 }
+/**
+ * Inline status bar — prints a status line after input prompt.
+ * No ANSI scroll regions, no absolute cursor positioning.
+ */
 export declare class StatusBar {
     private model;
     private sessionId;
@@ -10,16 +15,19 @@ export declare class StatusBar {
     private usage;
     private fields;
     private enabled;
-    private welcomeLines;
+    private cwd;
+    private branch;
     constructor();
-    /** Initialize status bar. */
-    init(model: string, sessionId: string, mode?: string, welcomeLines?: number): void;
-    /** Update usage stats. */
+    init(model: string, sessionId: string, cwd: string, mode?: string): void;
     update(usage: UsageStats): void;
     updateModel(model: string): void;
     updateMode(mode: string): void;
+    updateBranch(branch: string): void;
     setFields(fields: StatusBarField[]): void;
+    /** Build the status string (no newline). */
+    getStatusLine(): string;
+    /** Print the status bar at fixed position (bottom line). */
     render(): void;
-    /** Restore terminal state. */
+    /** No-op — no terminal state to restore in inline mode. */
     destroy(): void;
 }
