@@ -87,10 +87,13 @@ export class StatusBar {
     return dim(parts.join("  "));
   }
 
-  /** Print the status bar as normal output line. */
+  /** Print the status bar at fixed position (bottom line). */
   render(): void {
     if (!this.enabled) return;
-    process.stdout.write(this.getStatusLine() + '\n');
+    const rows = process.stdout.rows ?? 24;
+    // 移动到最后一行渲染状态栏
+    process.stderr.write(`\x1b[${rows};1H\x1b[K`);
+    process.stderr.write(this.getStatusLine());
   }
 
   /** No-op — no terminal state to restore in inline mode. */
