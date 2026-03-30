@@ -144,4 +144,27 @@ describe('StatusBar', () => {
       expect(line).toContain('1% used');
     });
   });
+
+  describe('branch display', () => {
+    beforeEach(() => {
+      statusBar.init('claude-opus-4-6', 'test123', '/Users/song/projects/xiaok-cli');
+    });
+
+    it('should display branch when set', () => {
+      statusBar.updateBranch('main');
+      const line = statusBar.getStatusLine();
+
+      expect(line).toContain('claude-opus-4-6');
+      expect(line).toContain('main');
+      expect(line).toContain('~/projects/xiaok-cli');
+    });
+
+    it('should not display branch when not set', () => {
+      const line = statusBar.getStatusLine();
+
+      expect(line).toContain('claude-opus-4-6');
+      expect(line).toContain('~/projects/xiaok-cli');
+      expect(line).not.toContain('main');
+    });
+  });
 });
