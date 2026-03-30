@@ -1,15 +1,15 @@
 import type {
-  Message,
-  MessageBlock,
   ModelAdapter,
   RuntimeHookSink,
   StreamChunk,
-  ToolCall,
   UsageStats,
 } from '../types.js';
 import type { ToolRegistry } from './tools/index.js';
-import type { RuntimeEvent } from '../runtime/events.js';
-import { compactMessages, estimateTokens, mergeUsage, shouldCompact } from './runtime/usage.js';
+import { AgentRunController } from './runtime/controller.js';
+import type { AgentRuntimeEvent } from './runtime/events.js';
+import { toLegacyStreamChunk } from './runtime/events.js';
+import { AgentRuntime } from './runtime/agent-runtime.js';
+import { AgentSessionState } from './runtime/session.js';
 
 export type OnChunk = (chunk: StreamChunk) => void;
 
@@ -24,160 +24,130 @@ export interface AgentOptions {
 }
 
 export class Agent {
-  private messages: Message[] = [];
-  private usage: UsageStats = { inputTokens: 0, outputTokens: 0 };
+  private session = new AgentSessionState();
+  private readonly controller = new AgentRunController();
   private readonly sessionId = `sess_${(nextSessionOrdinal += 1)}`;
   private turnCount = 0;
+  private runtime: AgentRuntime;
 
   constructor(
     private adapter: ModelAdapter,
     private registry: ToolRegistry,
     private systemPrompt: string,
-    private options: AgentOptions = {}
-  ) {}
+    private options: AgentOptions = {},
+  ) {
+    this.runtime = this.createRuntime();
+  }
 
-  /** 执行一轮对话（可能包含多次工具调用循环） */
   async runTurn(userInput: string, onChunk: OnChunk, signal?: AbortSignal): Promise<void> {
-    this.throwIfAborted(signal);
-    const turnId = `turn_${(this.turnCount += 1)}`;
-    this.emit({
-      type: 'turn_started',
-      sessionId: this.sessionId,
-      turnId,
-    });
-    this.messages.push({
-      role: 'user',
-      content: [{ type: 'text', text: userInput }],
-    });
-
-    const maxIterations = this.options.maxIterations ?? 12;
-    const contextLimit = this.options.contextLimit ?? 200_000;
-    const compactThreshold = this.options.compactThreshold ?? 0.85;
-    const compactPlaceholder = this.options.compactPlaceholder ?? '[context compacted]';
-
-    for (let iteration = 0; iteration < maxIterations; iteration += 1) {
-      this.throwIfAborted(signal);
-
-      if (shouldCompact(estimateTokens(this.messages), contextLimit, compactThreshold)) {
-        this.messages = compactMessages(this.messages, compactPlaceholder);
-        this.emit({
-          type: 'compact_triggered',
-          sessionId: this.sessionId,
-          turnId,
-        });
-      }
-
-      const assistantBlocks: MessageBlock[] = [];
-
-      for await (const chunk of this.adapter.stream(
-        this.messages,
-        this.registry.getToolDefinitions(),
-        this.systemPrompt
-      )) {
-        this.throwIfAborted(signal);
-
-        if (chunk.type === 'text') {
-          assistantBlocks.push({ type: 'text', text: chunk.delta });
-          onChunk(chunk);
-          continue;
-        }
-
-        if (chunk.type === 'tool_use') {
-          assistantBlocks.push(chunk);
-          continue;
-        }
-
-        if (chunk.type === 'usage') {
-          this.usage = mergeUsage(this.usage, chunk.usage);
-          onChunk(chunk);
-          continue;
-        }
-
-        if (chunk.type === 'done') {
-          break;
-        }
-      }
-
-      if (assistantBlocks.length > 0) {
-        this.messages.push({
-          role: 'assistant',
-          content: assistantBlocks,
-        });
-      }
-
-      const toolCalls = assistantBlocks.filter((block): block is ToolCall => block.type === 'tool_use');
-
-      if (toolCalls.length === 0) {
-        this.emit({
-          type: 'turn_completed',
-          sessionId: this.sessionId,
-          turnId,
-        });
-        return;
-      }
-
-      const toolResults: MessageBlock[] = [];
-      for (const tc of toolCalls) {
-        this.emit({
-          type: 'tool_started',
-          sessionId: this.sessionId,
-          turnId,
-          toolName: tc.name,
-          toolInput: tc.input,
-        });
-        const result = await this.registry.executeTool(tc.name, tc.input);
-        const isError = result.startsWith('Error');
-        this.emit({
-          type: 'tool_finished',
-          sessionId: this.sessionId,
-          turnId,
-          toolName: tc.name,
-          ok: !isError,
-        });
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: tc.id,
-          content: result,
-          is_error: isError,
-        });
-      }
-
-      this.messages.push({ role: 'user', content: toolResults });
+    if (signal?.aborted) {
+      throw new Error('agent aborted');
     }
 
-    throw new Error('agent reached max iterations');
+    const turnId = `turn_${(this.turnCount += 1)}`;
+
+    await this.runtime.run(
+      userInput,
+      (event) => {
+        this.emitLegacyHook(event, turnId);
+
+        const chunk = toLegacyStreamChunk(event);
+        if (chunk) {
+          onChunk(chunk);
+        }
+      },
+      signal,
+    );
   }
 
-  /** 清空历史记录（会话结束时调用） */
   clearHistory(): void {
-    this.messages = [];
-    this.usage = { inputTokens: 0, outputTokens: 0 };
+    this.session = new AgentSessionState();
+    this.runtime = this.createRuntime();
   }
 
-  /** 手动触发 context 压缩 */
   forceCompact(): void {
-    this.messages = compactMessages(this.messages, '[context compacted]');
+    this.session.forceCompact('[context compacted]');
   }
 
   getUsage(): UsageStats {
-    return this.usage;
+    return this.session.getUsage();
   }
 
   setAdapter(adapter: ModelAdapter): void {
     this.adapter = adapter;
+    this.runtime.setAdapter(adapter);
   }
 
   setSystemPrompt(systemPrompt: string): void {
     this.systemPrompt = systemPrompt;
+    this.runtime.setSystemPrompt(systemPrompt);
   }
 
-  private throwIfAborted(signal?: AbortSignal): void {
-    if (signal?.aborted) {
-      throw new Error('agent aborted');
+  private createRuntime(): AgentRuntime {
+    return new AgentRuntime({
+      adapter: this.adapter,
+      registry: this.registry,
+      session: this.session,
+      controller: this.controller,
+      systemPrompt: this.systemPrompt,
+      maxIterations: this.options.maxIterations,
+      contextLimit: this.options.contextLimit,
+      compactThreshold: this.options.compactThreshold,
+      compactPlaceholder: this.options.compactPlaceholder,
+    });
+  }
+
+  private emitLegacyHook(event: AgentRuntimeEvent, turnId: string): void {
+    if (!this.options.hooks) {
+      return;
     }
-  }
 
-  private emit(event: RuntimeEvent): void {
-    this.options.hooks?.emit(event);
+    if (event.type === 'run_started') {
+      this.options.hooks.emit({
+        type: 'turn_started',
+        sessionId: this.sessionId,
+        turnId,
+      });
+      return;
+    }
+
+    if (event.type === 'run_completed') {
+      this.options.hooks.emit({
+        type: 'turn_completed',
+        sessionId: this.sessionId,
+        turnId,
+      });
+      return;
+    }
+
+    if (event.type === 'tool_started') {
+      this.options.hooks.emit({
+        type: 'tool_started',
+        sessionId: this.sessionId,
+        turnId,
+        toolName: event.toolName,
+        toolInput: event.input,
+      });
+      return;
+    }
+
+    if (event.type === 'tool_finished') {
+      this.options.hooks.emit({
+        type: 'tool_finished',
+        sessionId: this.sessionId,
+        turnId,
+        toolName: event.toolName,
+        ok: event.ok,
+      });
+      return;
+    }
+
+    if (event.type === 'compact_triggered') {
+      this.options.hooks.emit({
+        type: 'compact_triggered',
+        sessionId: this.sessionId,
+        turnId,
+      });
+    }
   }
 }

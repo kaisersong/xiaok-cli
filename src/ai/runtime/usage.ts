@@ -27,12 +27,22 @@ export function shouldCompact(estimatedTokens: number, contextLimit: number, thr
 }
 
 export function mergeUsage(base: UsageStats, next: UsageStats): UsageStats {
-  return {
+  const merged: UsageStats = {
     inputTokens: next.inputTokens,
     outputTokens: next.outputTokens,
-    cacheCreationInputTokens: next.cacheCreationInputTokens ?? base.cacheCreationInputTokens,
-    cacheReadInputTokens: next.cacheReadInputTokens ?? base.cacheReadInputTokens,
   };
+
+  const cacheCreationInputTokens = next.cacheCreationInputTokens ?? base.cacheCreationInputTokens;
+  if (cacheCreationInputTokens !== undefined) {
+    merged.cacheCreationInputTokens = cacheCreationInputTokens;
+  }
+
+  const cacheReadInputTokens = next.cacheReadInputTokens ?? base.cacheReadInputTokens;
+  if (cacheReadInputTokens !== undefined) {
+    merged.cacheReadInputTokens = cacheReadInputTokens;
+  }
+
+  return merged;
 }
 
 export function compactMessages(

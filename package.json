@@ -9,8 +9,12 @@
   "scripts": {
     "build": "tsc && chmod +x dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "npm run test:sandbox",
+    "test:full": "vitest run",
+    "test:watch": "vitest",
+    "test:sandbox:build": "tsc -p tsconfig.tests.json",
+    "test:sandbox:run": "node -r ./tests/support/vite-net-use-patch.cjs ./node_modules/vitest/vitest.mjs run --config vitest.sandbox.config.mjs --configLoader runner",
+    "test:sandbox": "npm run test:sandbox:build && npm run test:sandbox:run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
