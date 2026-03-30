@@ -147,6 +147,7 @@ export class InputReader {
                     this.menuOpen = false;
                     this.menuItems = [];
                     this.menuIdx = 0;
+                    redraw();
                 }
             };
             const done = (result) => {
@@ -182,7 +183,6 @@ export class InputReader {
                         input = selected;
                         cursor = selected.length;
                         closeMenu();
-                        redraw();
                         return;
                     }
                     if (input.trim()) {
@@ -268,7 +268,6 @@ export class InputReader {
                         input = selected;
                         cursor = selected.length;
                         closeMenu();
-                        redraw();
                     }
                     else if (input.startsWith('/')) {
                         const matches = getFilteredCommands(input);

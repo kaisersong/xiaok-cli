@@ -1,4 +1,3 @@
-import * as readline from 'readline';
 import type { Command } from 'commander';
 import { loadConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
@@ -17,7 +16,7 @@ import { createSkillCatalog, parseSlashCommand } from '../ai/skills/loader.js';
 import { createSkillTool, formatSkillPayload } from '../ai/skills/tool.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
-import { renderWelcomeScreen, renderInputSeparator, renderInputPrompt, renderUserInput, boldCyan, dim, startSpinner } from '../ui/render.js';
+import { renderWelcomeScreen, renderInputSeparator, renderInputPrompt, renderUserInput, dim, startSpinner } from '../ui/render.js';
 import { InputReader } from '../ui/input.js';
 import { selectModel } from '../ui/model-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
@@ -70,11 +69,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     })),
   });
   const systemPrompt = await buildPrompt();
-
-  // 创建 registry
-  // rl 在交互模式下赋值，confirm() 复用它避免 stdin 嵌套冲突；
-  // 单次任务模式下 rl 保持未赋值，confirm() 内部会创建临时接口（仅作兜底）
-  let rl!: readline.Interface;
 
   const permissionManager = new PermissionManager({ mode: autoMode ? 'auto' : 'default' });
 
@@ -168,7 +162,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const provider = config.defaultModel ?? 'claude';
 
   // 显示欢迎界面（不清屏，让它可以滚动）
-  const welcomeLines = renderWelcomeScreen({
+  renderWelcomeScreen({
     model: provider,
     cwd: process.cwd(),
     sessionId,
@@ -222,13 +216,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const handleResize = () => {
     if (resizeTimeout) clearTimeout(resizeTimeout);
     resizeTimeout = setTimeout(() => {
-      const rows = process.stdout.rows ?? 24;
-      // 重新设置滚动区域
-      process.stderr.write('\x1b[r');
-      process.stderr.write(`\x1b[1;${rows - 3}r`);
-      // 清除并重新渲染状态栏
-      process.stderr.write(`\x1b[${rows};1H\x1b[K`);
-      statusBar.render();
+      // 普通文档流模式下不做底部重绘，后续输出自然适配新尺寸
     }, 100);
   };
   process.stdout.on('resize', handleResize);
@@ -245,19 +233,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   while (true) {
     await refreshSkills();
 
-    // 在固定位置渲染分割线和输入提示符
-    const rows = process.stdout.rows ?? 24;
-
-    // 移动到倒数第3行渲染分割线
-    process.stderr.write(`\x1b[${rows - 2};1H\x1b[K`);
-    const cols = process.stdout.columns ?? 80;
-    const totalWidth = Math.min(cols - 2, 100);
-    const line = dim("─".repeat(totalWidth));
-    process.stderr.write(line);
-
-    // 移动到倒数第2行准备输入
-    process.stderr.write(`\x1b[${rows - 1};1H\x1b[K`);
-    process.stderr.write(boldCyan('> '));
+    renderInputSeparator();
+    renderInputPrompt();
 
     const input = await inputReader.read('');
 
@@ -330,11 +307,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
       continue;
     }
-
-    // 输入后，将光标移回滚动区域继续输出
-    // 移动到滚动区域的最后一行
-    const termRows = process.stdout.rows ?? 24;
-    process.stdout.write(`\x1b[${termRows - 3};1H`);
 
     // 输入后的分隔线
     renderInputSeparator();

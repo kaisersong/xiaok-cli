@@ -106,6 +106,17 @@ describe('InputReader', () => {
   });
 
   describe('slash command menu', () => {
+    it('should include slash menu candidates for "/" input', () => {
+      const skills: SkillMeta[] = [
+        { name: 'browse', description: 'Browser skill', content: '', path: '' },
+      ];
+
+      const commands = getSlashCommands(skills);
+
+      expect(commands.some((item) => item.cmd === '/browse')).toBe(true);
+      expect(commands.some((item) => item.cmd === '/exit')).toBe(true);
+    });
+
     it('should filter commands based on input', () => {
       const skills: SkillMeta[] = [
         { name: 'test-skill', description: 'A test skill', content: '', path: '' },

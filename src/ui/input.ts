@@ -162,6 +162,7 @@ export class InputReader {
           this.menuOpen = false;
           this.menuItems = [];
           this.menuIdx = 0;
+          redraw();
         }
       };
 
@@ -203,7 +204,6 @@ export class InputReader {
             input = selected;
             cursor = selected.length;
             closeMenu();
-            redraw();
             return;
           }
 
@@ -295,7 +295,6 @@ export class InputReader {
             input = selected;
             cursor = selected.length;
             closeMenu();
-            redraw();
           } else if (input.startsWith('/')) {
             const matches = getFilteredCommands(input);
             if (matches.length === 1) {
