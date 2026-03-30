@@ -26,7 +26,7 @@ export declare class StatusBar {
     setFields(fields: StatusBarField[]): void;
     /** Build the status string (no newline). */
     getStatusLine(): string;
-    /** Print the status bar at fixed position (bottom line). */
+    /** Print the status bar as footer after AI response. */
     render(): void;
     /** No-op — no terminal state to restore in inline mode. */
     destroy(): void;

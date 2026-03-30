@@ -43,37 +43,31 @@ export class StatusBar {
         if (!this.enabled)
             return "";
         const parts = [];
+        // Project name (directory name)
+        const projectName = this.cwd.split('/').filter(Boolean).pop() || 'xiaok';
+        parts.push(projectName);
         // Model name
         parts.push(this.model);
         // Branch (if set)
         if (this.branch) {
             parts.push(this.branch);
         }
-        // Token usage: "26% used"
+        // Token usage: "26%"
         if (this.usage.budget && this.usage.budget > 0) {
             const total = this.usage.inputTokens + this.usage.outputTokens;
             const pct = Math.round((total / this.usage.budget) * 100);
-            parts.push(`${pct}% used`);
-            // Tokens left: "148k left"
-            const left = Math.round((this.usage.budget - total) / 1000);
-            parts.push(`${left}k left`);
+            parts.push(`${pct}%`);
         }
-        // Current path (replace HOME with ~)
-        const displayPath = this.cwd.replace(process.env.HOME || '', '~');
-        parts.push(displayPath);
         return dim(parts.join(' · '));
     }
-    /** Print the status bar at fixed position (bottom line). */
+    /** Print the status bar as footer after AI response. */
     render() {
         if (!this.enabled)
             return;
         const statusLine = this.getStatusLine();
         if (!statusLine)
             return;
-        const rows = process.stdout.rows ?? 24;
-        // 移动到最后一行渲染状态栏
-        process.stdout.write(`\x1b[${rows};1H\x1b[K`);
-        process.stdout.write(statusLine);
+        process.stdout.write('\n' + statusLine + '\n');
     }
     /** No-op — no terminal state to restore in inline mode. */
     destroy() { }

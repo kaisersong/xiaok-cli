@@ -72,6 +72,10 @@ export class InputReader {
             const renderMenu = () => {
                 if (this.menuItems.length === 0)
                     return;
+                // 保存当前光标位置（相对于输入行）
+                const cursorOffset = input.length - cursor;
+                // 菜单显示在输入框下方
+                // 输出菜单项
                 for (let m = 0; m < this.menuItems.length; m++) {
                     const item = this.menuItems[m];
                     const isSelected = m === this.menuIdx;
@@ -80,19 +84,26 @@ export class InputReader {
                     const descStr = dim(item.desc);
                     stdout.write(`\n  ${prefix} ${cmdStr}  ${descStr}`);
                 }
+                // 向上移动光标回到输入行
                 stdout.write(`\x1b[${this.menuItems.length}A`);
-                const back = input.length - cursor;
-                if (back > 0)
-                    stdout.write(`\x1b[${back}D`);
+                // 恢复光标位置
+                if (cursorOffset > 0)
+                    stdout.write(`\x1b[${cursorOffset}D`);
             };
             const clearMenu = () => {
                 if (this.menuItems.length === 0)
                     return;
-                stdout.write('\x1b7');
+                // 向上移动到菜单区域
+                stdout.write(`\x1b[${this.menuItems.length}A`);
+                // 清除每一行
                 for (let m = 0; m < this.menuItems.length; m++) {
-                    stdout.write('\n\x1b[2K');
+                    stdout.write('\x1b[2K');
+                    if (m < this.menuItems.length - 1) {
+                        stdout.write('\n');
+                    }
                 }
-                stdout.write('\x1b8');
+                // 回到输入行开头
+                stdout.write('\r');
             };
             const getFilteredCommands = (text) => getSlashCommands(this.skills).filter((c) => c.cmd.startsWith(text));
             const openMenu = (text) => {

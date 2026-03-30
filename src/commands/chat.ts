@@ -134,6 +134,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     agent.setSystemPrompt(await buildPrompt(skills));
   };
 
+  // 初始化状态栏（在单次任务模式之前）
+  const fullModelName = adapter.getModelName();
+  statusBar.init(fullModelName, sessionId, process.cwd(), opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : undefined);
+  const branch = await getCurrentBranch(process.cwd());
+  if (branch) statusBar.updateBranch(branch);
+  statusBar.update({ inputTokens: 0, outputTokens: 0, budget: config.contextBudget });
+
   // 单次任务模式
   if (initialInput) {
     process.stdout.write('\n');
@@ -159,9 +166,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   // 交互模式 - 显示欢迎界面
   const provider = config.defaultModel ?? 'claude';
 
-  // 获取完整的模型名称用于状态栏显示
-  const fullModelName = adapter.getModelName();
-
   // 显示欢迎界面（不清屏，让它可以滚动）
   const welcomeLines = renderWelcomeScreen({
     model: provider,
@@ -170,15 +174,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
   });
 
-  // 初始化状态栏（在底部）
-  statusBar.init(fullModelName, sessionId, process.cwd(), opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : undefined);
-
-  // 同步获取 git branch
-  const branch = await getCurrentBranch(process.cwd());
-  if (branch) statusBar.updateBranch(branch);
-
-  // 立即渲染状态栏
-  statusBar.render();
+  // 设置初始 usage
+  statusBar.update({ inputTokens: 0, outputTokens: 0, budget: config.contextBudget });
 
   if (opts.dryRun) process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
 

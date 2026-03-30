@@ -44,8 +44,8 @@ describe('StatusBar', () => {
       statusBar.init('claude-sonnet-4', 'test123', '/Users/song/projects/xiaok-cli');
 
       const line = statusBar.getStatusLine();
+      expect(line).toContain('xiaok-cli'); // project name
       expect(line).toContain('claude-sonnet-4');
-      expect(line).toContain('~/projects/xiaok-cli');
     });
 
     it('should format status line with Codex style', () => {
@@ -54,11 +54,10 @@ describe('StatusBar', () => {
 
       const line = statusBar.getStatusLine();
 
-      // 格式：模型 · X% used · Yk left · 路径
+      // 新格式：projectName · model · percentage
+      expect(line).toContain('xiaok-cli');
       expect(line).toContain('claude-sonnet-4');
-      expect(line).toContain('1% used');
-      expect(line).toContain('199k left'); // (200000 - 1500) / 1000 = 198.5 → 199
-      expect(line).toContain('~/projects/xiaok-cli');
+      expect(line).toContain('1%');
       expect(line).toContain(' · ');
     });
 
@@ -68,8 +67,8 @@ describe('StatusBar', () => {
       statusBar.update({ inputTokens: 100, outputTokens: 100, budget: 200000 });
 
       const line = statusBar.getStatusLine();
-      expect(line).toContain('~/projects/test');
-      expect(line).not.toContain(homeDir);
+      expect(line).toContain('test'); // project name
+      expect(line).toContain('0%');
     });
   });
 
@@ -83,10 +82,9 @@ describe('StatusBar', () => {
       statusBar.update({ inputTokens: 1000, outputTokens: 500, budget: 200000 });
       statusBar.render();
 
+      expect(stdoutOutput).toContain('xiaok-cli');
       expect(stdoutOutput).toContain('claude-sonnet-4');
-      expect(stdoutOutput).toContain('1% used');
-      expect(stdoutOutput).toContain('199k left'); // (200000 - 1500) / 1000 = 198.5 → 199
-      expect(stdoutOutput).toContain('~/projects/xiaok-cli');
+      expect(stdoutOutput).toContain('1%');
     });
 
     it('should display high token usage correctly', () => {
@@ -95,8 +93,7 @@ describe('StatusBar', () => {
 
       statusBar.render();
 
-      expect(stdoutOutput).toContain('50% used');
-      expect(stdoutOutput).toContain('100k left');
+      expect(stdoutOutput).toContain('50%');
     });
 
     it('should display near-full token usage', () => {
@@ -105,8 +102,7 @@ describe('StatusBar', () => {
 
       statusBar.render();
 
-      expect(stdoutOutput).toContain('100% used');
-      expect(stdoutOutput).toContain('1k left');
+      expect(stdoutOutput).toContain('100%');
     });
 
     it('should update model name', () => {
@@ -140,8 +136,9 @@ describe('StatusBar', () => {
       bar.update({ inputTokens: 1000, outputTokens: 500, budget: 200000 });
 
       const line = bar.getStatusLine();
+      expect(line).toContain('xiaok-cli');
       expect(line).toContain('claude-sonnet-4');
-      expect(line).toContain('1% used');
+      expect(line).toContain('1%');
     });
   });
 
@@ -154,16 +151,16 @@ describe('StatusBar', () => {
       statusBar.updateBranch('main');
       const line = statusBar.getStatusLine();
 
+      expect(line).toContain('xiaok-cli');
       expect(line).toContain('claude-opus-4-6');
       expect(line).toContain('main');
-      expect(line).toContain('~/projects/xiaok-cli');
     });
 
     it('should not display branch when not set', () => {
       const line = statusBar.getStatusLine();
 
+      expect(line).toContain('xiaok-cli');
       expect(line).toContain('claude-opus-4-6');
-      expect(line).toContain('~/projects/xiaok-cli');
       expect(line).not.toContain('main');
     });
   });

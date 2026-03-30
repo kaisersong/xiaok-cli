@@ -3,7 +3,8 @@ function normalizeForComparison(filePath) {
     return process.platform === 'win32' ? filePath.toLowerCase() : filePath;
 }
 export function assertWorkspacePath(filePath, cwd, mode, allowOutsideCwd = false) {
-    const resolvedPath = resolve(cwd, filePath);
+    // 对于绝对路径，直接使用；对于相对路径，相对于 cwd 解析
+    const resolvedPath = resolve(filePath);
     if (allowOutsideCwd) {
         return resolvedPath;
     }
