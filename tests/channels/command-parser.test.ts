@@ -21,10 +21,26 @@ describe('parseYZJCommand', () => {
     });
   });
 
-  it('parses cancel and skill commands', () => {
+  it('parses cancel, approval, bind, and skill commands', () => {
     expect(parseYZJCommand('/cancel task_3')).toEqual({
       kind: 'cancel',
       taskId: 'task_3',
+    });
+    expect(parseYZJCommand('/approve approval_3')).toEqual({
+      kind: 'approve',
+      approvalId: 'approval_3',
+    });
+    expect(parseYZJCommand('/deny approval_4')).toEqual({
+      kind: 'deny',
+      approvalId: 'approval_4',
+    });
+    expect(parseYZJCommand('/bind D:\\projects\\workspace\\xiaok-cli')).toEqual({
+      kind: 'bind',
+      cwd: 'D:\\projects\\workspace\\xiaok-cli',
+    });
+    expect(parseYZJCommand('/bind clear')).toEqual({
+      kind: 'bind',
+      clear: true,
     });
     expect(parseYZJCommand('/skill review 当前分支是否可合并')).toEqual({
       kind: 'skill',
@@ -35,6 +51,9 @@ describe('parseYZJCommand', () => {
 
   it('falls back to help for malformed control commands', () => {
     expect(parseYZJCommand('/cancel')).toEqual({ kind: 'help' });
+    expect(parseYZJCommand('/approve')).toEqual({ kind: 'help' });
+    expect(parseYZJCommand('/deny')).toEqual({ kind: 'help' });
+    expect(parseYZJCommand('/bind')).toEqual({ kind: 'help' });
     expect(parseYZJCommand('/skill')).toEqual({ kind: 'help' });
     expect(parseYZJCommand('/')).toEqual({ kind: 'help' });
   });

@@ -1,3 +1,5 @@
+import type { ChannelReplyTarget } from './types.js';
+
 export type RemoteTaskStatus =
   | 'queued'
   | 'running'
@@ -12,6 +14,7 @@ export interface RemoteTask {
   channel: 'yzj';
   status: RemoteTaskStatus;
   prompt: string;
+  replyTarget: ChannelReplyTarget;
   createdAt: number;
   updatedAt: number;
   startedAt?: number;
@@ -19,22 +22,40 @@ export interface RemoteTask {
   replySummary?: string;
   replyLength?: number;
   errorMessage?: string;
+  latestEvent?: string;
+  approvalId?: string;
+  cwd?: string;
+  repoRoot?: string;
+  branch?: string;
+}
+
+export interface CreateRemoteTaskInput {
+  sessionId: string;
+  prompt: string;
+  replyTarget: ChannelReplyTarget;
+  cwd?: string;
+  repoRoot?: string;
+  branch?: string;
 }
 
 export class InMemoryTaskStore {
   private readonly tasks = new Map<string, RemoteTask>();
   private nextId = 1;
 
-  create(sessionId: string, prompt: string): RemoteTask {
+  create(input: CreateRemoteTaskInput): RemoteTask {
     const now = Date.now();
     const task: RemoteTask = {
       taskId: `task_${this.nextId++}`,
-      sessionId,
+      sessionId: input.sessionId,
       channel: 'yzj',
       status: 'queued',
-      prompt,
+      prompt: input.prompt,
+      replyTarget: input.replyTarget,
       createdAt: now,
       updatedAt: now,
+      cwd: input.cwd,
+      repoRoot: input.repoRoot,
+      branch: input.branch,
     };
     this.tasks.set(task.taskId, task);
     return task;

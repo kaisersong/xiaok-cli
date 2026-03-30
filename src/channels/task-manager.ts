@@ -1,6 +1,8 @@
 import type { ChannelRequest } from './webhook.js';
+import type { ApprovalAction, ApprovalRequest, ChannelReplyTarget } from './types.js';
 import type { ChannelAgentExecutionResult } from './agent-service.js';
 import { InMemoryTaskStore, type RemoteTask } from './task-store.js';
+import type { SessionBinding } from './session-binding-store.js';
 
 export interface TaskExecutionRequest {
   request: ChannelRequest;
@@ -15,14 +17,21 @@ export interface TaskManagerOptions {
   notify(request: ChannelRequest, text: string): Promise<void> | void;
 }
 
-type RunningTask = {
+interface RunningTask {
   sessionId: string;
   abortController: AbortController;
-};
+}
+
+export interface TaskStartOptions {
+  binding?: SessionBinding | null;
+  ackText?: string;
+}
 
 export class TaskManager {
   private readonly store: InMemoryTaskStore;
   private readonly running = new Map<string, RunningTask>();
+  private readonly sessionTails = new Map<string, Promise<void>>();
+  private readonly activeBySession = new Map<string, string>();
   private readonly executeTask: TaskManagerOptions['execute'];
   private readonly notify: TaskManagerOptions['notify'];
 
@@ -32,18 +41,29 @@ export class TaskManager {
     this.notify = options.notify;
   }
 
-  async createAndStart(request: ChannelRequest, sessionId: string): Promise<RemoteTask> {
-    const task = this.store.create(sessionId, request.message);
+  async createAndStart(request: ChannelRequest, sessionId: string, options: TaskStartOptions = {}): Promise<RemoteTask> {
+    const task = this.store.create({
+      sessionId,
+      prompt: request.message,
+      replyTarget: request.replyTarget,
+      cwd: options.binding?.cwd,
+      repoRoot: options.binding?.repoRoot,
+      branch: options.binding?.branch,
+    });
     await this.notify(
       request,
-      `已创建任务 ${task.taskId}\n状态：queued\n发送 /status ${task.taskId} 查看进度`
+      options.ackText ?? this.buildAckMessage(task)
     );
 
     const abortController = new AbortController();
     this.running.set(task.taskId, { sessionId, abortController });
-    queueMicrotask(() => {
-      void this.runTask(task.taskId, request, sessionId, abortController);
-    });
+    const previous = this.sessionTails.get(sessionId) ?? Promise.resolve();
+    const scheduled = previous
+      .catch(() => undefined)
+      .then(async () => {
+        await this.runTask(task.taskId, request, sessionId, abortController);
+      });
+    this.sessionTails.set(sessionId, scheduled.then(() => undefined, () => undefined));
     return this.store.get(task.taskId)!;
   }
 
@@ -57,6 +77,57 @@ export class TaskManager {
 
   listTasks(sessionId: string): RemoteTask[] {
     return this.store.listBySession(sessionId);
+  }
+
+  getActiveTask(sessionId: string): RemoteTask | undefined {
+    const taskId = this.activeBySession.get(sessionId);
+    return taskId ? this.store.get(taskId) : undefined;
+  }
+
+  getActiveReplyTarget(sessionId: string): ChannelReplyTarget | undefined {
+    return this.getActiveTask(sessionId)?.replyTarget;
+  }
+
+  setTaskEvent(taskId: string, latestEvent: string): RemoteTask | undefined {
+    return this.store.update(taskId, { latestEvent });
+  }
+
+  setSessionProgress(sessionId: string, latestEvent: string): RemoteTask | undefined {
+    const task = this.getActiveTask(sessionId);
+    if (!task) {
+      return undefined;
+    }
+    return this.store.update(task.taskId, { latestEvent });
+  }
+
+  markWaitingApproval(sessionId: string, approval: ApprovalRequest): RemoteTask | undefined {
+    const task = this.getActiveTask(sessionId);
+    if (!task) {
+      return undefined;
+    }
+
+    return this.store.update(task.taskId, {
+      status: 'waiting_approval',
+      approvalId: approval.approvalId,
+      latestEvent: approval.summary,
+    });
+  }
+
+  resumeFromApproval(approval: ApprovalRequest, action: ApprovalAction | 'expired'): RemoteTask | undefined {
+    if (!approval.taskId) {
+      return undefined;
+    }
+
+    const nextEvent =
+      action === 'expired'
+        ? `审批 ${approval.approvalId} 已超时失效`
+        : `审批 ${approval.approvalId} 已${action === 'approve' ? '通过' : '拒绝'}`;
+
+    return this.store.update(approval.taskId, {
+      status: 'running',
+      approvalId: undefined,
+      latestEvent: nextEvent,
+    });
   }
 
   cancelTask(taskId: string): { ok: boolean; message: string; task?: RemoteTask } {
@@ -95,8 +166,12 @@ export class TaskManager {
       `状态：${task.status}`,
       `创建时间：${new Date(task.createdAt).toLocaleString()}`,
     ];
+    if (task.cwd) lines.push(`工作区：${task.cwd}`);
+    if (task.branch) lines.push(`分支：${task.branch}`);
     if (task.startedAt) lines.push(`开始时间：${new Date(task.startedAt).toLocaleString()}`);
     if (task.finishedAt) lines.push(`结束时间：${new Date(task.finishedAt).toLocaleString()}`);
+    if (task.latestEvent) lines.push(`最近进展：${task.latestEvent}`);
+    if (task.approvalId) lines.push(`待审批：${task.approvalId}`);
     if (task.replyLength) lines.push(`回复长度：${task.replyLength}`);
     if (task.replySummary) lines.push(`回复摘要：${task.replySummary}`);
     if (task.errorMessage) lines.push(`错误：${task.errorMessage}`);
@@ -114,9 +189,11 @@ export class TaskManager {
         return;
       }
 
+      this.activeBySession.set(sessionId, taskId);
       this.store.update(taskId, {
         status: 'running',
         startedAt: Date.now(),
+        latestEvent: '任务开始执行',
       });
 
       const result = await this.executeTask({
@@ -136,22 +213,62 @@ export class TaskManager {
       }
 
       if (result.ok) {
-        this.store.update(taskId, {
+        const completed = this.store.update(taskId, {
           status: 'completed',
           finishedAt: Date.now(),
           replyLength: result.replyLength,
           replySummary: result.replyPreview,
+          latestEvent: result.replyLength > 0 ? '任务完成并已发送结果' : '任务完成',
         });
+        if (completed && (completed.replyLength ?? 0) > 1200) {
+          await this.notify(request, this.buildCompletionSummary(completed));
+        }
         return;
       }
 
-      this.store.update(taskId, {
+      const failed = this.store.update(taskId, {
         status: result.cancelled ? 'cancelled' : 'failed',
         finishedAt: Date.now(),
         errorMessage: result.errorMessage,
+        latestEvent: result.cancelled ? '任务已取消' : '任务执行失败',
       });
+      if (failed) {
+        await this.notify(request, this.buildCompletionSummary(failed));
+      }
     } finally {
       this.running.delete(taskId);
+      if (this.activeBySession.get(sessionId) === taskId) {
+        this.activeBySession.delete(sessionId);
+      }
     }
+  }
+
+  private buildAckMessage(task: RemoteTask): string {
+    const lines = [
+      `已创建任务 ${task.taskId}`,
+      `状态：${task.status}`,
+    ];
+    if (task.cwd) {
+      lines.push(`工作区：${task.cwd}`);
+    } else {
+      lines.push('当前未绑定工作区，涉及仓库文件时可先发送 /bind <cwd>');
+    }
+    lines.push(`发送 /status ${task.taskId} 查看进度`);
+    return lines.join('\n');
+  }
+
+  private buildCompletionSummary(task: RemoteTask): string {
+    const lines = [
+      `任务 ${task.taskId} 已${task.status === 'completed' ? '完成' : task.status === 'cancelled' ? '取消' : '结束'}`,
+      `状态：${task.status}`,
+    ];
+    if (task.replySummary) {
+      lines.push(`摘要：${task.replySummary}`);
+    }
+    if (task.errorMessage) {
+      lines.push(`错误：${task.errorMessage}`);
+    }
+    lines.push(`发送 /status ${task.taskId} 查看详情`);
+    return lines.join('\n');
   }
 }

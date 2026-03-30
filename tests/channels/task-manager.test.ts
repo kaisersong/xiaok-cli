@@ -112,4 +112,45 @@ describe('TaskManager', () => {
       });
     });
   });
+
+  it('tracks approval waiting and resume state on the active task', async () => {
+    const manager = new TaskManager({
+      notify: async () => undefined,
+      execute: async () => ({
+        ok: true,
+        generationMs: 0,
+        deliveryMs: 0,
+        replyLength: 0,
+      }),
+    });
+
+    const task = await manager.createAndStart(createRequest('等审批'), 'sess_1');
+
+    await waitFor(() => {
+      expect(manager.getTask(task.taskId)?.status).toBe('completed');
+    });
+
+    manager.setTaskEvent(task.taskId, '初始进展');
+    manager.markWaitingApproval('sess_1', {
+      approvalId: 'approval_1',
+      sessionId: 'sess_1',
+      turnId: 'turn_1',
+      summary: '执行 bash 命令：git status',
+      taskId: task.taskId,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    });
+
+    manager.resumeFromApproval({
+      approvalId: 'approval_1',
+      sessionId: 'sess_1',
+      turnId: 'turn_1',
+      summary: '执行 bash 命令：git status',
+      taskId: task.taskId,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    }, 'approve');
+
+    expect(manager.getTask(task.taskId)?.latestEvent).toContain('已通过');
+  });
 });

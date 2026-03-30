@@ -3,12 +3,15 @@ import type { StreamChunk } from '../types.js';
 import type { ChannelRequest } from './webhook.js';
 
 export interface ChannelAgentSessionFactory {
-  createAgent(): Agent;
+  createSession(sessionId: string): Promise<{
+    agent: Agent;
+    dispose?(): void;
+  }>;
 }
 
 export interface ChannelAgentResponder {
-  reply(request: ChannelRequest, text: string): Promise<void> | void;
-  onError?(request: ChannelRequest, error: unknown): Promise<void> | void;
+  reply(request: ChannelRequest, text: string, context: { sessionId: string }): Promise<void> | void;
+  onError?(request: ChannelRequest, error: unknown, context: { sessionId: string }): Promise<void> | void;
 }
 
 export interface ChannelAgentExecutionResult {
@@ -23,11 +26,13 @@ export interface ChannelAgentExecutionResult {
 
 interface SessionState {
   agent: Agent;
+  dispose?: () => void;
   tail: Promise<void>;
 }
 
 export class ChannelAgentService {
   private readonly sessions = new Map<string, SessionState>();
+  private readonly sessionPromises = new Map<string, Promise<SessionState>>();
 
   constructor(
     private readonly factory: ChannelAgentSessionFactory,
@@ -35,7 +40,7 @@ export class ChannelAgentService {
   ) {}
 
   async execute(request: ChannelRequest, sessionId: string, signal?: AbortSignal): Promise<ChannelAgentExecutionResult> {
-    const session = this.getOrCreateSession(sessionId);
+    const session = await this.getOrCreateSession(sessionId);
     const execution = session.tail.then(async (): Promise<ChannelAgentExecutionResult> => {
       const chunks: string[] = [];
       const generationStartedAt = Date.now();
@@ -50,7 +55,7 @@ export class ChannelAgentService {
         const reply = chunks.join('').trim();
         if (reply) {
           const deliveryStartedAt = Date.now();
-          await this.responder.reply(request, reply);
+          await this.responder.reply(request, reply, { sessionId });
           return {
             ok: true,
             generationMs,
@@ -80,7 +85,7 @@ export class ChannelAgentService {
         let deliveryMs = 0;
         if (this.responder.onError) {
           const deliveryStartedAt = Date.now();
-          await this.responder.onError(request, error);
+          await this.responder.onError(request, error, { sessionId });
           deliveryMs = Date.now() - deliveryStartedAt;
         }
         return {
@@ -98,18 +103,42 @@ export class ChannelAgentService {
     return execution;
   }
 
-  private getOrCreateSession(sessionId: string): SessionState {
+  private async getOrCreateSession(sessionId: string): Promise<SessionState> {
     const existing = this.sessions.get(sessionId);
     if (existing) {
       return existing;
     }
 
-    const created: SessionState = {
-      agent: this.factory.createAgent(),
-      tail: Promise.resolve(),
-    };
-    this.sessions.set(sessionId, created);
-    return created;
+    const pending = this.sessionPromises.get(sessionId);
+    if (pending) {
+      return pending;
+    }
+
+    const createdPromise = this.factory.createSession(sessionId).then((createdSession) => {
+      const created: SessionState = {
+        agent: createdSession.agent,
+        dispose: createdSession.dispose,
+        tail: Promise.resolve(),
+      };
+      this.sessions.set(sessionId, created);
+      this.sessionPromises.delete(sessionId);
+      return created;
+    }, (error) => {
+      this.sessionPromises.delete(sessionId);
+      throw error;
+    });
+    this.sessionPromises.set(sessionId, createdPromise);
+    return createdPromise;
+  }
+
+  resetSession(sessionId: string): void {
+    const existing = this.sessions.get(sessionId);
+    this.sessionPromises.delete(sessionId);
+    if (!existing) {
+      return;
+    }
+    existing.dispose?.();
+    this.sessions.delete(sessionId);
   }
 }
 

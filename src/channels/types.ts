@@ -45,8 +45,13 @@ export interface ApprovalRequestInput {
   sessionId: string;
   turnId: string;
   summary: string;
+  taskId?: string;
+  toolName?: string;
+  timeoutMs?: number;
 }
 
 export interface ApprovalRequest extends ApprovalRequestInput {
   approvalId: string;
+  createdAt: number;
+  expiresAt: number;
 }

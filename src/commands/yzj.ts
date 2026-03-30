@@ -10,21 +10,27 @@ import { buildSystemPrompt } from '../ai/context/yzj-context.js';
 import { Agent } from '../ai/agent.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
 import { ToolRegistry, buildToolList } from '../ai/tools/index.js';
-import { createSkillCatalog } from '../ai/skills/loader.js';
+import { bashTool } from '../ai/tools/bash.js';
+import { createSkillCatalog, type SkillCatalog } from '../ai/skills/loader.js';
 import { createSkillTool, formatSkillPayload } from '../ai/skills/tool.js';
+import { createRuntimeHooks } from '../runtime/hooks.js';
+import type { Tool, YZJChannelConfig } from '../types.js';
 import { ChannelAgentService } from '../channels/agent-service.js';
+import { InMemoryApprovalStore } from '../channels/approval-store.js';
 import { parseYZJCommand } from '../channels/command-parser.js';
 import { InMemoryChannelSessionStore } from '../channels/session-store.js';
+import { InMemorySessionBindingStore, type SessionBinding } from '../channels/session-binding-store.js';
 import { TaskManager } from '../channels/task-manager.js';
+import type { ApprovalAction, ChannelReplyTarget } from '../channels/types.js';
+import type { ChannelRequest } from '../channels/webhook.js';
+import { handleChannelRequest } from '../channels/worker.js';
 import { YZJInboundDedupeStore } from '../channels/yzj-dedupe-store.js';
+import { YZJRuntimeNotifier } from '../channels/yzj-runtime-notifier.js';
 import { createYZJWebhookHandler } from '../channels/yzj-webhook.js';
 import { YZJWebSocketClient } from '../channels/yzj-websocket-client.js';
 import { YZJTransport } from '../channels/yzj-transport.js';
 import { parseYZJMessage, resolveYZJConfig } from '../channels/yzj.js';
 import { deriveYZJWebSocketUrl } from '../channels/yzj-ws-url.js';
-import type { YZJChannelConfig } from '../types.js';
-import type { ChannelRequest } from '../channels/webhook.js';
-import { handleChannelRequest } from '../channels/worker.js';
 
 interface YZJServeOptions {
   sendMsgUrl?: string;
@@ -34,6 +40,11 @@ interface YZJServeOptions {
   secret?: string;
   webhook?: boolean;
   dryRun?: boolean;
+}
+
+interface SessionSkillCatalogState {
+  cwd: string;
+  catalog: SkillCatalog;
 }
 
 function buildOverrides(options: YZJServeOptions): Partial<YZJChannelConfig> {
@@ -136,8 +147,6 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
   const config = await loadConfig();
   const yzjConfig = resolveYZJConfig(config, buildOverrides(options));
   const enableWebhook = options.webhook ?? true;
-  const skillCatalog = createSkillCatalog();
-  const skills = await skillCatalog.reload();
 
   if (yzjConfig.inboundMode === 'webhook' && !enableWebhook) {
     throw new Error('inboundMode=webhook 时不能关闭 webhook server');
@@ -149,71 +158,33 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
   });
   const sessionStore = new InMemoryChannelSessionStore();
   const dedupeStore = new YZJInboundDedupeStore();
+  const approvalStore = new InMemoryApprovalStore();
+  const bindingStore = new InMemorySessionBindingStore();
+  const sessionSkillCatalogs = new Map<string, SessionSkillCatalogState>();
 
-  let agentService: ChannelAgentService | null = null;
-  if (!options.dryRun) {
-    const adapter = createAdapter(config);
-    const creds = await loadCredentials();
-    const devApp = await getDevAppIdentity();
-    const customAgents = await loadCustomAgents();
-
-    const systemPrompt = await buildSystemPrompt({
-      enterpriseId: creds?.enterpriseId ?? null,
-      devApp,
-      cwd: process.cwd(),
-      budget: config.contextBudget,
-      skills,
-      agents: customAgents.map((agent) => ({
-        name: agent.name,
-        model: agent.model,
-        allowedTools: agent.allowedTools,
-      })),
-    });
-
-    agentService = new ChannelAgentService(
-      {
-        createAgent: () => {
-          const permissionManager = new PermissionManager({ mode: 'auto' });
-          const skillTool = createSkillTool(skillCatalog);
-          const tools = buildToolList(skillTool, { cwd: process.cwd() });
-          const registry = new ToolRegistry({ permissionManager, dryRun: false }, tools);
-          return new Agent(adapter, registry, systemPrompt);
-        },
-      },
-      {
-        reply: async (request, text) => {
-          await transport.deliver({
-            channel: 'yzj',
-            target: request.replyTarget,
-            text,
-            kind: 'result',
-          });
-        },
-        onError: async (request, error) => {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error(`[yzj] agent run failed: ${errorMessage}`);
-          await transport.deliver({
-            channel: 'yzj',
-            target: request.replyTarget,
-            text: `抱歉，处理你的消息时出错：${errorMessage}`,
-            kind: 'result',
-          });
-        },
-      }
-    );
-  }
-
-  const notifyText = async (request: ChannelRequest, text: string): Promise<void> => {
+  const deliverText = async (
+    target: ChannelReplyTarget,
+    text: string,
+    kind: 'status' | 'approval' | 'result' = 'result'
+  ): Promise<void> => {
     if (options.dryRun) {
-      console.info(`[yzj][dry-run] outbound text: ${text}`);
+      console.info(`[yzj][dry-run] outbound ${kind}: ${text}`);
       return;
     }
     await transport.deliver({
       channel: 'yzj',
-      target: request.replyTarget,
+      target,
       text,
-      kind: 'result',
+      kind,
     });
+  };
+
+  const notifyText = async (
+    request: ChannelRequest,
+    text: string,
+    kind: 'status' | 'approval' | 'result' = 'result'
+  ): Promise<void> => {
+    await deliverText(request.replyTarget, text, kind);
   };
 
   const taskManager = new TaskManager({
@@ -238,14 +209,127 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
           generationMs: 0,
           deliveryMs: 0,
           replyLength: 0,
+          replyPreview: buildReplyPreview(request.message),
         };
       }
       return agentService.execute(request, sessionId, signal);
     },
-    notify: notifyText,
+    notify: async (request, text) => {
+      await notifyText(request, text, 'status');
+    },
   });
 
-  const processInboundMessage = async (rawMessage: Parameters<typeof parseYZJMessage>[0], source: 'webhook' | 'websocket') => {
+  const runtimeNotifier = new YZJRuntimeNotifier(
+    {
+      send: async (target, text) => {
+        await deliverText(target, text, 'status');
+      },
+    },
+    taskManager,
+    approvalStore
+  );
+
+  let agentService: ChannelAgentService | null = null;
+  if (!options.dryRun) {
+    const adapter = createAdapter(config);
+    const creds = await loadCredentials();
+    const devApp = await getDevAppIdentity();
+    const customAgents = await loadCustomAgents();
+
+    agentService = new ChannelAgentService(
+      {
+        createSession: async (sessionId) => {
+          const binding = bindingStore.get(sessionId);
+          const cwd = binding?.cwd ?? process.cwd();
+          const skillState = ensureSessionSkillCatalog(sessionSkillCatalogs, sessionId, cwd);
+          const skills = await skillState.catalog.reload();
+          const systemPrompt = await buildSystemPrompt({
+            enterpriseId: creds?.enterpriseId ?? null,
+            devApp,
+            cwd,
+            budget: config.contextBudget,
+            skills,
+            agents: customAgents.map((agent) => ({
+              name: agent.name,
+              model: agent.model,
+              allowedTools: agent.allowedTools,
+            })),
+          });
+
+          const hooks = createRuntimeHooks();
+          let currentTurnId = 'turn_pending';
+          const detachTurnTracker = hooks.on('turn_started', (event) => {
+            currentTurnId = event.turnId;
+          });
+          const detachNotifier = runtimeNotifier.bind(sessionId, hooks);
+          const permissionManager = new PermissionManager({ mode: 'default' });
+          const skillTool = createSkillTool(skillState.catalog);
+          const tools = buildBoundToolList(skillTool, cwd);
+          const registry = new ToolRegistry(
+            {
+              permissionManager,
+              dryRun: false,
+              onPrompt: async (toolName, input) => {
+                const task = taskManager.getActiveTask(sessionId);
+                const approval = approvalStore.create({
+                  sessionId,
+                  turnId: currentTurnId,
+                  taskId: task?.taskId,
+                  toolName,
+                  summary: buildApprovalSummary(toolName, input),
+                });
+                hooks.emit({
+                  type: 'approval_required',
+                  sessionId,
+                  turnId: currentTurnId,
+                  approvalId: approval.approvalId,
+                });
+                const decision = await approvalStore.waitForDecision(approval.approvalId);
+                taskManager.resumeFromApproval(approval, decision ?? 'expired');
+                return decision === 'approve';
+              },
+            },
+            tools
+          );
+
+          return {
+            agent: new Agent(adapter, registry, systemPrompt, { hooks }),
+            dispose: () => {
+              detachTurnTracker();
+              detachNotifier();
+            },
+          };
+        },
+      },
+      {
+        reply: async (request, text, context) => {
+          const task = taskManager.getActiveTask(context.sessionId);
+          await deliverText(
+            request.replyTarget,
+            formatFinalReply(task?.taskId, text),
+            'result'
+          );
+        },
+        onError: async (request, error, context) => {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const task = taskManager.getActiveTask(context.sessionId);
+          console.error(`[yzj] agent run failed: ${errorMessage}`);
+          await deliverText(
+            request.replyTarget,
+            task
+              ? `任务 ${task.taskId} 执行失败\n错误：${errorMessage}\n发送 /status ${task.taskId} 查看详情`
+              : `抱歉，处理你的消息时出错：${errorMessage}`,
+            'result'
+          );
+        },
+      }
+    );
+  }
+
+  const processInboundMessage = async (
+    rawMessage: Parameters<typeof parseYZJMessage>[0],
+    source: 'webhook' | 'websocket'
+  ) => {
     if (!dedupeStore.markSeen(rawMessage.msgId)) {
       console.info(`[yzj] duplicate inbound dropped from ${source}: ${rawMessage.msgId}`);
       return;
@@ -259,9 +343,12 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
           `[yzj] accepted ${source} message msgId=${rawMessage.msgId} session=${sessionId} from=${rawMessage.operatorOpenid} chars=${input.message.length}`,
         );
         const command = parseYZJCommand(input.message);
+        const binding = bindingStore.get(sessionId) ?? null;
+        const skillState = ensureSessionSkillCatalog(sessionSkillCatalogs, sessionId, binding?.cwd ?? process.cwd());
+        const skills = await skillState.catalog.reload();
 
         if (command.kind === 'help') {
-          await notifyText(input, formatYZJHelp(skills.map((skill) => skill.name)));
+          await notifyText(input, formatYZJHelp(skills.map((skill) => skill.name)), 'status');
           return;
         }
 
@@ -269,37 +356,81 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
           const task = command.taskId
             ? resolveSessionTask(taskManager, sessionId, command.taskId)
             : taskManager.getLatestTask(sessionId);
-          await notifyText(input, task ? taskManager.formatStatus(task) : buildMissingTaskMessage(command.taskId));
+          await notifyText(input, task ? taskManager.formatStatus(task) : buildMissingTaskMessage(command.taskId), 'status');
           return;
         }
 
         if (command.kind === 'cancel') {
           const task = resolveSessionTask(taskManager, sessionId, command.taskId);
           if (!task) {
-            await notifyText(input, buildMissingTaskMessage(command.taskId));
+            await notifyText(input, buildMissingTaskMessage(command.taskId), 'status');
             return;
           }
           const cancellation = taskManager.cancelTask(command.taskId);
-          await notifyText(input, cancellation.message);
+          await notifyText(input, cancellation.message, 'status');
+          return;
+        }
+
+        if (command.kind === 'approve' || command.kind === 'deny') {
+          await handleApprovalCommand(input, sessionId, command.approvalId, command.kind, approvalStore, taskManager, notifyText);
+          return;
+        }
+
+        if (command.kind === 'bind') {
+          if (hasPendingTasks(taskManager, sessionId)) {
+            await notifyText(input, '当前会话还有未完成任务，完成后再切换工作区', 'status');
+            return;
+          }
+
+          if (command.clear) {
+            const cleared = bindingStore.clear(sessionId);
+            agentService?.resetSession(sessionId);
+            sessionSkillCatalogs.delete(sessionId);
+            await notifyText(
+              input,
+              cleared ? '已清除当前会话的工作区绑定，后续任务将使用默认目录' : '当前会话还没有绑定工作区',
+              'status'
+            );
+            return;
+          }
+
+          try {
+            const nextBinding = await bindingStore.bind({
+              sessionId,
+              chatId: input.sessionKey.chatId,
+              userId: input.sessionKey.userId,
+              cwd: command.cwd!,
+            });
+            agentService?.resetSession(sessionId);
+            sessionSkillCatalogs.delete(sessionId);
+            await notifyText(input, formatBindingMessage(nextBinding), 'status');
+          } catch (error) {
+            await notifyText(input, `绑定失败：${error instanceof Error ? error.message : String(error)}`, 'status');
+          }
           return;
         }
 
         if (command.kind === 'skill') {
-          const skill = skillCatalog.get(command.skillName);
+          const skill = skillState.catalog.get(command.skillName);
           if (!skill) {
             await notifyText(
               input,
-              `找不到 skill "${command.skillName}"。可用 skills：${skills.map((item) => '/' + item.name).join(', ') || '（无）'}`
+              `找不到 skill "${command.skillName}"。可用 skills：${skills.map((item) => '/' + item.name).join(', ') || '（无）'}`,
+              'status'
             );
             return;
           }
 
           const skillRequest = buildSkillRequest(input, skill.name, formatSkillPayload(skill), command.args);
-          await taskManager.createAndStart(skillRequest, sessionId);
+          await taskManager.createAndStart(skillRequest, sessionId, {
+            binding,
+          });
           return;
         }
 
-        await taskManager.createAndStart(input, sessionId);
+        await taskManager.createAndStart(input, sessionId, {
+          binding,
+        });
       },
     });
     console.info(`[yzj] session ${result.sessionId} handled ${source} message ${rawMessage.msgId} totalMs=${Date.now() - inboundStartedAt}`);
@@ -393,6 +524,53 @@ async function updateYZJConfig(
   await saveConfig(config);
 }
 
+function ensureSessionSkillCatalog(
+  sessionSkillCatalogs: Map<string, SessionSkillCatalogState>,
+  sessionId: string,
+  cwd: string
+): SessionSkillCatalogState {
+  const existing = sessionSkillCatalogs.get(sessionId);
+  if (existing && existing.cwd === cwd) {
+    return existing;
+  }
+
+  const created: SessionSkillCatalogState = {
+    cwd,
+    catalog: createSkillCatalog(undefined, cwd),
+  };
+  sessionSkillCatalogs.set(sessionId, created);
+  return created;
+}
+
+async function handleApprovalCommand(
+  request: ChannelRequest,
+  sessionId: string,
+  approvalId: string,
+  action: ApprovalAction,
+  approvalStore: InMemoryApprovalStore,
+  taskManager: TaskManager,
+  notifyText: (request: ChannelRequest, text: string, kind?: 'status' | 'approval' | 'result') => Promise<void>
+): Promise<void> {
+  const approval = approvalStore.get(approvalId);
+  if (!approval || approval.sessionId !== sessionId) {
+    await notifyText(request, `未找到当前会话下的审批单 ${approvalId}`, 'status');
+    return;
+  }
+
+  const resolved = approvalStore.resolve(approvalId, action);
+  if (!resolved) {
+    await notifyText(request, `审批单 ${approvalId} 已失效`, 'status');
+    return;
+  }
+
+  taskManager.resumeFromApproval(approval, resolved);
+  await notifyText(
+    request,
+    `已${resolved === 'approve' ? '批准' : '拒绝'} ${approvalId}${approval.taskId ? `，任务 ${approval.taskId} 将继续执行` : ''}`,
+    'status'
+  );
+}
+
 function buildSkillRequest(
   request: ChannelRequest,
   skillName: string,
@@ -415,6 +593,12 @@ function resolveSessionTask(taskManager: TaskManager, sessionId: string, taskId:
   return task;
 }
 
+function hasPendingTasks(taskManager: TaskManager, sessionId: string): boolean {
+  return taskManager.listTasks(sessionId).some((task) =>
+    task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval'
+  );
+}
+
 function buildMissingTaskMessage(taskId?: string): string {
   if (taskId) {
     return `未找到当前会话下的任务 ${taskId}`;
@@ -428,10 +612,83 @@ function formatYZJHelp(skillNames: string[]): string {
     '/help',
     '/status [taskId]',
     '/cancel <taskId>',
+    '/approve <approvalId>',
+    '/deny <approvalId>',
+    '/bind <cwd>',
+    '/bind clear',
     '/skill <name> [args]',
   ];
   if (skillNames.length > 0) {
     lines.push(`可用 skills：${skillNames.map((name) => `/${name}`).join(', ')}`);
   }
   return lines.join('\n');
+}
+
+function formatBindingMessage(binding: SessionBinding): string {
+  const lines = [
+    '已绑定当前会话工作区',
+    `cwd：${binding.cwd}`,
+  ];
+  if (binding.repoRoot) {
+    lines.push(`repo：${binding.repoRoot}`);
+  }
+  if (binding.branch) {
+    lines.push(`branch：${binding.branch}`);
+  }
+  return lines.join('\n');
+}
+
+function buildApprovalSummary(toolName: string, input: Record<string, unknown>): string {
+  if (toolName === 'bash' && typeof input.command === 'string') {
+    return `执行 bash 命令：${truncate(input.command, 120)}`;
+  }
+  if ((toolName === 'write' || toolName === 'edit') && typeof input.file_path === 'string') {
+    return `${toolName} 文件：${truncate(input.file_path, 120)}`;
+  }
+  return `${toolName} 操作需要确认`;
+}
+
+function buildBoundToolList(skillTool: Tool, cwd: string): Tool[] {
+  return buildToolList(skillTool, { cwd }).map((tool) => {
+    if (tool.definition.name !== 'bash') {
+      return tool;
+    }
+    return {
+      ...bashTool,
+      execute: async (input) => {
+        const payload = {
+          ...input,
+          workdir: typeof input.workdir === 'string' ? input.workdir : cwd,
+        };
+        return bashTool.execute(payload);
+      },
+    };
+  });
+}
+
+function formatFinalReply(taskId: string | undefined, text: string): string {
+  const reply = text.trim();
+  if (!taskId || reply.length <= 800) {
+    return reply;
+  }
+  return [
+    `任务 ${taskId} 已完成`,
+    `摘要：${buildReplyPreview(reply)}`,
+    '详细结果：',
+    reply,
+  ].join('\n\n');
+}
+
+function buildReplyPreview(reply: string, maxLength = 160): string {
+  if (reply.length <= maxLength) {
+    return reply;
+  }
+  return `${reply.slice(0, maxLength)}...`;
+}
+
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength)}...`;
 }
