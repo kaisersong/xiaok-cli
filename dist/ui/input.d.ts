@@ -7,6 +7,8 @@ export declare function getSlashCommands(skills: SkillMeta[]): Array<{
     cmd: string;
     desc: string;
 }>;
+export declare function truncateMenuDescription(desc: string, maxWidth: number): string;
+export declare function getMenuClearSequence(lineCount: number): string;
 export declare class InputReader {
     private history;
     private historyIdx;

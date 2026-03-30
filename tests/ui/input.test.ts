@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { InputReader, getSlashCommands, wordBoundaryLeft, wordBoundaryRight } from '../../src/ui/input.js';
+import {
+  InputReader,
+  getMenuClearSequence,
+  getSlashCommands,
+  truncateMenuDescription,
+  wordBoundaryLeft,
+  wordBoundaryRight,
+} from '../../src/ui/input.js';
 import type { SkillMeta } from '../../src/ai/skills/loader.js';
 
 describe('getSlashCommands', () => {
@@ -202,5 +209,19 @@ describe('word navigation helpers', () => {
     expect(wordBoundaryRight('hello world', 5)).toBe(11);
     expect(wordBoundaryRight('hello world', 6)).toBe(11);
     expect(wordBoundaryRight('', 0)).toBe(0);
+  });
+});
+
+describe('menu rendering helpers', () => {
+  it('truncateMenuDescription should keep descriptions to one line', () => {
+    expect(truncateMenuDescription('line1\nline2', 20)).toBe('line1 line2');
+  });
+
+  it('truncateMenuDescription should truncate long descriptions', () => {
+    expect(truncateMenuDescription('abcdefghijklmnopqrstuvwxyz', 10)).toBe('abcdefg...');
+  });
+
+  it('getMenuClearSequence should clear lines below the prompt and return to input row', () => {
+    expect(getMenuClearSequence(2)).toBe('\x1b[1B\r\x1b[2K\x1b[1B\r\x1b[2K\x1b[2A\r');
   });
 });

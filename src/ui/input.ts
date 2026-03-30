@@ -50,6 +50,25 @@ export function getSlashCommands(skills: SkillMeta[]): Array<{ cmd: string; desc
   return commands.sort((a, b) => a.cmd.localeCompare(b.cmd));
 }
 
+export function truncateMenuDescription(desc: string, maxWidth: number): string {
+  const singleLine = desc.replace(/\s+/g, ' ').trim();
+  if (maxWidth <= 0 || singleLine.length === 0) return '';
+  if (singleLine.length <= maxWidth) return singleLine;
+  if (maxWidth <= 3) return '.'.repeat(maxWidth);
+  return `${singleLine.slice(0, maxWidth - 3)}...`;
+}
+
+export function getMenuClearSequence(lineCount: number): string {
+  if (lineCount <= 0) return '';
+
+  let sequence = '';
+  for (let i = 0; i < lineCount; i++) {
+    sequence += '\x1b[1B\r\x1b[2K';
+  }
+  sequence += `\x1b[${lineCount}A\r`;
+  return sequence;
+}
+
 export class InputReader {
   private history: string[] = [];
   private historyIdx = 0;
@@ -88,44 +107,27 @@ export class InputReader {
         if (this.menuItems.length === 0) return;
 
         log(`renderMenu: items=${this.menuItems.length} idx=${this.menuIdx}`);
-
-        // 保存当前光标位置（相对于输入行）
-        const cursorOffset = input.length - cursor;
+        const columns = stdout.columns ?? 80;
 
         // 菜单显示在输入框下方
-        // 输出菜单项
         for (let m = 0; m < this.menuItems.length; m++) {
           const item = this.menuItems[m];
           const isSelected = m === this.menuIdx;
           const prefix = isSelected ? boldCyan('\u276f') : ' ';
           const cmdStr = isSelected ? boldCyan(item.cmd) : dim(item.cmd);
-          const descStr = dim(item.desc);
-          stdout.write(`\n  ${prefix} ${cmdStr}  ${descStr}`);
+          const descWidth = Math.max(columns - item.cmd.length - 8, 0);
+          const desc = truncateMenuDescription(item.desc, descWidth);
+          const descStr = desc ? `  ${dim(desc)}` : '';
+          stdout.write(`\n  ${prefix} ${cmdStr}${descStr}`);
         }
 
-        // 向上移动光标回到输入行
-        stdout.write(`\x1b[${this.menuItems.length}A`);
-
-        // 恢复光标位置
-        if (cursorOffset > 0) stdout.write(`\x1b[${cursorOffset}D`);
+        stdout.write(`\x1b[${this.menuItems.length}A\r`);
+        redraw();
       };
 
       const clearMenu = () => {
         if (this.menuItems.length === 0) return;
-
-        // 向上移动到菜单区域
-        stdout.write(`\x1b[${this.menuItems.length}A`);
-
-        // 清除每一行
-        for (let m = 0; m < this.menuItems.length; m++) {
-          stdout.write('\x1b[2K');
-          if (m < this.menuItems.length - 1) {
-            stdout.write('\n');
-          }
-        }
-
-        // 回到输入行开头
-        stdout.write('\r');
+        stdout.write(getMenuClearSequence(this.menuItems.length));
       };
 
       const getFilteredCommands = (text: string) =>
