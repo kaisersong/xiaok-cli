@@ -42,6 +42,19 @@ export class InMemoryTaskStore {
   private readonly tasks = new Map<string, RemoteTask>();
   private nextId = 1;
 
+  private compareTasks(a: RemoteTask, b: RemoteTask): number {
+    if (a.createdAt !== b.createdAt) {
+      return b.createdAt - a.createdAt;
+    }
+
+    return this.extractTaskSequence(b.taskId) - this.extractTaskSequence(a.taskId);
+  }
+
+  private extractTaskSequence(taskId: string): number {
+    const match = /(\d+)$/.exec(taskId);
+    return match ? Number(match[1]) : 0;
+  }
+
   create(input: CreateRemoteTaskInput): RemoteTask {
     const now = Date.now();
     const task: RemoteTask = {
@@ -80,6 +93,6 @@ export class InMemoryTaskStore {
   listBySession(sessionId: string): RemoteTask[] {
     return [...this.tasks.values()]
       .filter((task) => task.sessionId === sessionId)
-      .sort((a, b) => b.createdAt - a.createdAt);
+      .sort((a, b) => this.compareTasks(a, b));
   }
 }

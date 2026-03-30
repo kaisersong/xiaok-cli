@@ -1,6 +1,7 @@
-import { describe, expect, it, vi, waitFor } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TaskManager } from '../../src/channels/task-manager.js';
 import type { ChannelRequest } from '../../src/channels/webhook.js';
+import { waitFor } from '../support/wait-for.js';
 
 function createRequest(message: string): ChannelRequest {
   return {

@@ -1,8 +1,9 @@
-import { describe, expect, it, vi, waitFor } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createRuntimeHooks } from '../../src/runtime/hooks.js';
 import { InMemoryApprovalStore } from '../../src/channels/approval-store.js';
 import { TaskManager } from '../../src/channels/task-manager.js';
 import { YZJRuntimeNotifier } from '../../src/channels/yzj-runtime-notifier.js';
+import { waitFor } from '../support/wait-for.js';
 
 describe('yzj runtime notifier', () => {
   it('emits approval and progress messages for the active task', async () => {
