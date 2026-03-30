@@ -10,6 +10,26 @@ const BASE_SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   { cmd: '/help', desc: 'Show help' },
 ];
 
+/** 向左找词边界（Ctrl+W / Alt+Left 用） */
+export function wordBoundaryLeft(text: string, cursor: number): number {
+  let i = cursor;
+  // 跳过光标左侧的空白
+  while (i > 0 && text[i - 1] === ' ') i--;
+  // 跳过非空白（即当前词）
+  while (i > 0 && text[i - 1] !== ' ') i--;
+  return i;
+}
+
+/** 向右找词边界（Alt+Right 用） */
+export function wordBoundaryRight(text: string, cursor: number): number {
+  let i = cursor;
+  // 跳过空白
+  while (i < text.length && text[i] === ' ') i++;
+  // 跳过非空白（下一个词）
+  while (i < text.length && text[i] !== ' ') i++;
+  return i;
+}
+
 export function getSlashCommands(skills: SkillMeta[]): Array<{ cmd: string; desc: string }> {
   const commands = [...BASE_SLASH_COMMANDS];
   for (const skill of skills) {
@@ -254,6 +274,36 @@ export class InputReader {
               openMenu(input);
             }
           }
+          return;
+        }
+
+        // Ctrl+W — 删除光标左侧一个词
+        if (key === '\x17') {
+          const newCursor = wordBoundaryLeft(input, cursor);
+          if (newCursor < cursor) {
+            input = input.slice(0, newCursor) + input.slice(cursor);
+            cursor = newCursor;
+            redraw();
+            if (input.startsWith('/') && input.length > 0) {
+              updateMenu(input);
+            } else {
+              closeMenu();
+            }
+          }
+          return;
+        }
+
+        // Alt+Left (ESC b) — 词跳左
+        if (key === '\x1bb') {
+          cursor = wordBoundaryLeft(input, cursor);
+          redraw();
+          return;
+        }
+
+        // Alt+Right (ESC f) — 词跳右
+        if (key === '\x1bf') {
+          cursor = wordBoundaryRight(input, cursor);
+          redraw();
           return;
         }
 

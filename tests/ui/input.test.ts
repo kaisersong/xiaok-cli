@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { InputReader, getSlashCommands } from '../../src/ui/input.js';
+import { InputReader, getSlashCommands, wordBoundaryLeft, wordBoundaryRight } from '../../src/ui/input.js';
 import type { SkillMeta } from '../../src/ai/skills/loader.js';
 
 describe('getSlashCommands', () => {
@@ -103,5 +103,21 @@ describe('InputReader', () => {
       // The actual behavior is tested in integration tests
       expect(reader).toBeDefined();
     });
+  });
+});
+
+describe('word navigation helpers', () => {
+  it('wordBoundaryLeft should find previous word start', () => {
+    expect(wordBoundaryLeft('hello world', 11)).toBe(6);
+    expect(wordBoundaryLeft('hello world', 6)).toBe(0);
+    expect(wordBoundaryLeft('hello world', 5)).toBe(0);
+    expect(wordBoundaryLeft('', 0)).toBe(0);
+  });
+
+  it('wordBoundaryRight should find next word end', () => {
+    expect(wordBoundaryRight('hello world', 0)).toBe(5);
+    expect(wordBoundaryRight('hello world', 5)).toBe(11);
+    expect(wordBoundaryRight('hello world', 6)).toBe(11);
+    expect(wordBoundaryRight('', 0)).toBe(0);
   });
 });
