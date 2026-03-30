@@ -195,4 +195,27 @@ description: 发布技能
       tier: 'project',
     });
   });
+
+  it('reloads a newly installed directory-based skill through the persistent catalog', async () => {
+    const catalog = createSkillCatalog(globalDir, projectDir, { builtinRoots: [] });
+
+    await catalog.reload();
+    expect(catalog.get('installer')).toBeUndefined();
+
+    const installerDir = join(projectDir, '.xiaok', 'skills', 'installer');
+    mkdirSync(installerDir, { recursive: true });
+    writeFileSync(join(installerDir, 'SKILL.md'), `---
+name: installer
+description: 安装器
+---
+Install stuff.`);
+
+    await catalog.reload();
+
+    expect(catalog.get('installer')).toMatchObject({
+      name: 'installer',
+      path: join(installerDir, 'SKILL.md'),
+      source: 'project',
+    });
+  });
 });
