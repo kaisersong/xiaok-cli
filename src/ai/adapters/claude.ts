@@ -12,6 +12,10 @@ export class ClaudeAdapter implements ModelAdapter {
     this.model = model;
   }
 
+  getModelName(): string {
+    return this.model;
+  }
+
   async *stream(
     messages: Message[],
     tools: ToolDefinition[],

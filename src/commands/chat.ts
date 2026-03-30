@@ -157,18 +157,21 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   }
 
   // 交互模式 - 显示欢迎界面
-  let modelName = config.defaultModel ?? 'claude';
+  const provider = config.defaultModel ?? 'claude';
+
+  // 获取完整的模型名称用于状态栏显示
+  const fullModelName = adapter.getModelName();
 
   // 显示欢迎界面（不清屏，让它可以滚动）
   const welcomeLines = renderWelcomeScreen({
-    model: modelName,
+    model: provider,
     cwd: process.cwd(),
     sessionId,
     mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
   });
 
   // 初始化状态栏（在底部）
-  statusBar.init(modelName, sessionId, process.cwd(), opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : undefined);
+  statusBar.init(fullModelName, sessionId, process.cwd(), opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : undefined);
 
   // 同步获取 git branch
   const branch = await getCurrentBranch(process.cwd());
@@ -272,7 +275,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (trimmed === '/clear') {
       process.stdout.write('\x1b[2J\x1b[H');
       renderWelcomeScreen({
-        model: modelName,
+        model: provider,
         cwd: process.cwd(),
         sessionId,
         mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',

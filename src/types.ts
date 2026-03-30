@@ -12,6 +12,7 @@ export interface ModelAdapter {
     tools: ToolDefinition[],
     systemPrompt: string
   ): AsyncIterable<StreamChunk>;
+  getModelName(): string;
 }
 
 export type StreamChunk =
