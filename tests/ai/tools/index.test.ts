@@ -117,4 +117,49 @@ describe('ToolRegistry', () => {
 
     expect(await registry.executeTool('echo_tool', {})).toBe('ok');
   });
+
+  it('blocks execution when a pre hook denies the tool call', async () => {
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      hooksRunner: {
+        runPreHooks: async () => ({ ok: false, message: 'blocked by hook' }),
+        runPostHooks: async () => [],
+      },
+    }, [{
+      permission: 'write',
+      definition: {
+        name: 'write',
+        description: 'mock write',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      execute: async () => 'should not run',
+    }]);
+
+    const result = await registry.executeTool('write', { file_path: '/tmp/x', content: 'x' });
+
+    expect(result).toContain('blocked by hook');
+  });
+
+  it('appends post hook warnings without failing the tool result', async () => {
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      hooksRunner: {
+        runPreHooks: async () => ({ ok: true }),
+        runPostHooks: async () => ['post hook warning'],
+      },
+    }, [{
+      permission: 'safe',
+      definition: {
+        name: 'echo_tool',
+        description: 'echo',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      execute: async () => 'ok',
+    }]);
+
+    const result = await registry.executeTool('echo_tool', {});
+
+    expect(result).toContain('ok');
+    expect(result).toContain('Warning: post hook warning');
+  });
 });

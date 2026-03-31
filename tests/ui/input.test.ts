@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   InputReader,
+  cyclePermissionMode,
   getMenuClearSequence,
   getSlashCommands,
   truncateMenuDescription,
@@ -228,5 +229,20 @@ describe('menu rendering helpers', () => {
 
   it('getMenuClearSequence should clear lines below the prompt and return to input row', () => {
     expect(getMenuClearSequence(2)).toBe('\x1b[1B\r\x1b[2K\x1b[1B\r\x1b[2K\x1b[2A\r');
+  });
+});
+
+describe('permission mode helpers', () => {
+  it('cycles permission mode in the expected order', () => {
+    expect(cyclePermissionMode('default')).toBe('auto');
+    expect(cyclePermissionMode('auto')).toBe('plan');
+    expect(cyclePermissionMode('plan')).toBe('default');
+  });
+
+  it('allows registering a mode cycle callback', () => {
+    const reader = new InputReader();
+    const handler = () => 'auto' as const;
+
+    expect(() => reader.setModeCycleHandler(handler)).not.toThrow();
   });
 });

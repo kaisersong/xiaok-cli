@@ -3,6 +3,7 @@ import { stdin, stdout } from 'process';
 import { boldCyan, dim } from './render.js';
 import type { SkillMeta } from '../ai/skills/loader.js';
 import { appendFileSync } from 'fs';
+import type { PermissionMode } from '../ai/permissions/manager.js';
 
 const DEBUG_LOG = '/tmp/xiaok-debug.log';
 
@@ -74,6 +75,12 @@ export function getMenuClearSequence(lineCount: number): string {
   return sequence;
 }
 
+export function cyclePermissionMode(mode: PermissionMode): PermissionMode {
+  if (mode === 'default') return 'auto';
+  if (mode === 'auto') return 'plan';
+  return 'default';
+}
+
 export class InputReader {
   private history: string[] = [];
   private historyIdx = 0;
@@ -81,9 +88,14 @@ export class InputReader {
   private menuItems: Array<{ cmd: string; desc: string }> = [];
   private menuIdx = 0;
   private skills: SkillMeta[] = [];
+  private onModeCycle?: () => PermissionMode;
 
   setSkills(skills: SkillMeta[]): void {
     this.skills = skills;
+  }
+
+  setModeCycleHandler(handler: () => PermissionMode): void {
+    this.onModeCycle = handler;
   }
 
   async read(prompt: string): Promise<string | null> {
@@ -247,6 +259,15 @@ export class InputReader {
           if (cursor < input.length) {
             cursor++;
             stdout.write('\x1b[C');
+          }
+          return;
+        }
+
+        if (key === '\x1b[Z') {
+          if (this.onModeCycle) {
+            const nextMode = this.onModeCycle();
+            stdout.write(`\n${dim(`权限模式已切换为 ${nextMode}`)}\n`);
+            redraw();
           }
           return;
         }
