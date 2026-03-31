@@ -23,6 +23,9 @@ export function parseAgentFile(name, raw) {
         maxIterations: metadata.has('max_iterations')
             ? Number(metadata.get('max_iterations'))
             : undefined,
+        background: metadata.get('background') === 'true',
+        isolation: metadata.get('isolation') === 'worktree' ? 'worktree' : undefined,
+        team: metadata.get('team') || undefined,
     };
 }
 function loadAgentsFromDir(dir, source) {

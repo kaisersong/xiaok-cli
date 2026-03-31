@@ -4,6 +4,9 @@ export interface CustomAgentDef {
     allowedTools?: string[];
     model?: string;
     maxIterations?: number;
+    background?: boolean;
+    isolation?: 'shared' | 'worktree';
+    team?: string;
     source?: 'global' | 'project';
 }
 export declare function parseAgentFile(name: string, raw: string): CustomAgentDef;

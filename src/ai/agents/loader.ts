@@ -8,6 +8,9 @@ export interface CustomAgentDef {
   allowedTools?: string[];
   model?: string;
   maxIterations?: number;
+  background?: boolean;
+  isolation?: 'shared' | 'worktree';
+  team?: string;
   source?: 'global' | 'project';
 }
 
@@ -36,6 +39,9 @@ export function parseAgentFile(name: string, raw: string): CustomAgentDef {
     maxIterations: metadata.has('max_iterations')
       ? Number(metadata.get('max_iterations'))
       : undefined,
+    background: metadata.get('background') === 'true',
+    isolation: metadata.get('isolation') === 'worktree' ? 'worktree' : undefined,
+    team: metadata.get('team') || undefined,
   };
 }
 
