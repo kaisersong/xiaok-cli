@@ -1,5 +1,6 @@
 import type { Tool, ToolDefinition } from '../../types.js';
 import { PermissionManager } from '../permissions/manager.js';
+import type { HooksRunner } from '../../runtime/hooks-runner.js';
 import { type WorkspaceToolOptions } from './read.js';
 export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions, extraTools?: Tool[]): Tool[];
 export interface RegistryOptions {
@@ -7,6 +8,7 @@ export interface RegistryOptions {
     autoMode?: boolean;
     dryRun?: boolean;
     onPrompt?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
+    hooksRunner?: HooksRunner;
 }
 export declare class ToolRegistry {
     private tools;

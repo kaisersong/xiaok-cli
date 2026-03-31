@@ -72,6 +72,13 @@ export function getMenuClearSequence(lineCount) {
     sequence += `\x1b[${lineCount}A\r`;
     return sequence;
 }
+export function cyclePermissionMode(mode) {
+    if (mode === 'default')
+        return 'auto';
+    if (mode === 'auto')
+        return 'plan';
+    return 'default';
+}
 export class InputReader {
     history = [];
     historyIdx = 0;
@@ -79,8 +86,12 @@ export class InputReader {
     menuItems = [];
     menuIdx = 0;
     skills = [];
+    onModeCycle;
     setSkills(skills) {
         this.skills = skills;
+    }
+    setModeCycleHandler(handler) {
+        this.onModeCycle = handler;
     }
     async read(prompt) {
         if (!stdin.isTTY) {
@@ -227,6 +238,14 @@ export class InputReader {
                     if (cursor < input.length) {
                         cursor++;
                         stdout.write('\x1b[C');
+                    }
+                    return;
+                }
+                if (key === '\x1b[Z') {
+                    if (this.onModeCycle) {
+                        const nextMode = this.onModeCycle();
+                        stdout.write(`\n${dim(`权限模式已切换为 ${nextMode}`)}\n`);
+                        redraw();
                     }
                     return;
                 }

@@ -16,4 +16,21 @@ describe('PermissionManager', () => {
 
     expect(await pm.check('bash', { command: 'git status --short' })).toBe('allow');
   });
+
+  it('supports session deny rules with higher priority than allow rules', async () => {
+    const pm = new PermissionManager({
+      mode: 'default',
+      allowRules: ['bash:git status*'],
+    });
+
+    pm.addSessionDenyRule('bash:git status*');
+
+    expect(await pm.check('bash', { command: 'git status --short' })).toBe('deny');
+  });
+
+  it('cycles permission modes in workflow order', () => {
+    expect(PermissionManager.nextMode('default')).toBe('auto');
+    expect(PermissionManager.nextMode('auto')).toBe('plan');
+    expect(PermissionManager.nextMode('plan')).toBe('default');
+  });
 });

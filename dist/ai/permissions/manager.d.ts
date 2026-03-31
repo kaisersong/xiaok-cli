@@ -13,6 +13,8 @@ export declare class PermissionManager {
     getMode(): PermissionMode;
     setMode(mode: PermissionMode): void;
     addSessionRule(rule: string): void;
+    addSessionDenyRule(rule: string): void;
+    static nextMode(mode: PermissionMode): PermissionMode;
     check(toolName: string, input: Record<string, unknown>): Promise<PermissionDecision>;
     private matches;
     private getRuleTarget;

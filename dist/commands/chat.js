@@ -7,6 +7,7 @@ import { PermissionManager } from '../ai/permissions/manager.js';
 import { ToolRegistry, buildToolList } from '../ai/tools/index.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
 import { createTaskTools } from '../ai/tools/tasks.js';
+import { createHooksRunner } from '../runtime/hooks-runner.js';
 import { buildSystemPrompt } from '../ai/context/yzj-context.js';
 import { Agent } from '../ai/agent.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
@@ -105,10 +106,17 @@ async function runChat(initialInput, opts) {
     });
     const systemPrompt = await buildPrompt();
     const permissionManager = new PermissionManager({ mode: autoMode ? 'auto' : 'default' });
+    inputReader.setModeCycleHandler(() => {
+        const nextMode = PermissionManager.nextMode(permissionManager.getMode());
+        permissionManager.setMode(nextMode);
+        statusBar.updateMode(nextMode);
+        return nextMode;
+    });
     const cwd = process.cwd();
     const registry = new ToolRegistry({
         permissionManager,
         dryRun: opts.dryRun,
+        hooksRunner: createHooksRunner(),
         onPrompt: async (name, input) => {
             const choice = await showPermissionPrompt(name, input);
             // 处理不同的选择

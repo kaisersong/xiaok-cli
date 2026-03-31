@@ -18,6 +18,18 @@ export class PermissionManager {
             this.allowRules.push(rule);
         }
     }
+    addSessionDenyRule(rule) {
+        if (!this.denyRules.includes(rule)) {
+            this.denyRules.push(rule);
+        }
+    }
+    static nextMode(mode) {
+        if (mode === 'default')
+            return 'auto';
+        if (mode === 'auto')
+            return 'plan';
+        return 'default';
+    }
     async check(toolName, input) {
         if (this.matches(this.denyRules, toolName, input)) {
             return 'deny';

@@ -97,8 +97,17 @@ export class ToolRegistry {
             if (!approved)
                 return `（已取消: ${name}）`;
         }
+        const preHookResult = await this.options.hooksRunner?.runPreHooks(name, input);
+        if (preHookResult && !preHookResult.ok) {
+            return `Error: ${preHookResult.message ?? `${name} blocked by pre hook`}`;
+        }
         try {
-            return await tool.execute(input);
+            const result = await tool.execute(input);
+            const warnings = await this.options.hooksRunner?.runPostHooks(name, input) ?? [];
+            if (warnings.length === 0) {
+                return result;
+            }
+            return `${result}\nWarning: ${warnings.join('\nWarning: ')}`;
         }
         catch (e) {
             return `Error: ${String(e)}`;
