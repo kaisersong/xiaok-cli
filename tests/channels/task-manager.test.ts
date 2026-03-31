@@ -75,6 +75,33 @@ describe('TaskManager', () => {
     expect(manager.listTasks('sess_1').map((task) => task.taskId)).toEqual([second.taskId, first.taskId]);
   });
 
+  it('prefers an active task over a newer recovered failure for default status views', async () => {
+    const manager = new TaskManager({
+      notify: async () => undefined,
+      execute: async () => ({
+        ok: true,
+        generationMs: 0,
+        deliveryMs: 0,
+        replyLength: 0,
+      }),
+    });
+
+    const running = await manager.createAndStart(createRequest('仍在执行'), 'sess_1');
+    const recovered = await manager.createAndStart(createRequest('重启前中断'), 'sess_1');
+
+    manager.setTaskEvent(running.taskId, '仍在执行');
+    manager.setTaskEvent(recovered.taskId, '重启后标记失败');
+    (manager as unknown as { updateTask(taskId: string, patch: Record<string, unknown>): void }).updateTask(running.taskId, { status: 'running' });
+    (manager as unknown as { updateTask(taskId: string, patch: Record<string, unknown>): void }).updateTask(recovered.taskId, {
+      status: 'failed',
+      errorMessage: 'task interrupted by process restart',
+      finishedAt: Date.now(),
+    });
+
+    expect(manager.getLatestTask('sess_1')?.taskId).toBe(recovered.taskId);
+    expect(manager.getPreferredStatusTask('sess_1')?.taskId).toBe(running.taskId);
+  });
+
   it('cancels a running task through AbortController', async () => {
     const execute = vi.fn(async ({ signal }: { signal: AbortSignal }) => {
       await new Promise<void>((resolve) => {

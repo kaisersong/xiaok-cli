@@ -27,6 +27,13 @@ export class TaskManager extends SerialTaskManager {
     getActiveTask(sessionId) {
         return super.getActiveTask(sessionId);
     }
+    getPreferredStatusTask(sessionId) {
+        const active = this.getActiveTask(sessionId);
+        if (active) {
+            return active;
+        }
+        return this.listTasks(sessionId).find((task) => task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval') ?? this.getLatestTask(sessionId);
+    }
     getActiveReplyTarget(sessionId) {
         return this.getActiveTask(sessionId)?.replyTarget;
     }

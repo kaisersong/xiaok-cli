@@ -59,6 +59,17 @@ export class TaskManager extends SerialTaskManager<ChannelRequest, RemoteTask, {
     return super.getActiveTask(sessionId);
   }
 
+  getPreferredStatusTask(sessionId: string): RemoteTask | undefined {
+    const active = this.getActiveTask(sessionId);
+    if (active) {
+      return active;
+    }
+
+    return this.listTasks(sessionId).find((task) =>
+      task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval'
+    ) ?? this.getLatestTask(sessionId);
+  }
+
   getActiveReplyTarget(sessionId: string): ChannelReplyTarget | undefined {
     return this.getActiveTask(sessionId)?.replyTarget;
   }

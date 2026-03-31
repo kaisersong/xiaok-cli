@@ -398,7 +398,7 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
         if (command.kind === 'status') {
           const task = command.taskId
             ? resolveSessionTask(taskManager, sessionId, command.taskId)
-            : taskManager.getLatestTask(sessionId);
+            : taskManager.getPreferredStatusTask(sessionId);
           await notifyText(
             input,
             formatSessionRuntimeSnapshot({
