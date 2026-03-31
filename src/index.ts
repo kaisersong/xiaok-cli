@@ -3,6 +3,8 @@ import { Command } from 'commander';
 import { registerAuthCommands } from './commands/auth.js';
 import { registerConfigCommands } from './commands/config.js';
 import { registerChatCommands } from './commands/chat.js';
+import { registerDoctorCommands } from './commands/doctor.js';
+import { registerInitCommands } from './commands/init.js';
 import { registerYZJCommands } from './commands/yzj.js';
 
 const program = new Command();
@@ -14,6 +16,8 @@ program
 
 registerAuthCommands(program);
 registerConfigCommands(program);
+registerDoctorCommands(program);
+registerInitCommands(program);
 registerChatCommands(program);
 registerYZJCommands(program);
 
