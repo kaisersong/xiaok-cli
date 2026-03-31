@@ -7,6 +7,7 @@ export interface BackgroundJobRecord {
   jobId: string;
   sessionId: string;
   source: string;
+  taskId?: string;
   inputSummary: string;
   status: BackgroundJobStatus;
   createdAt: number;
@@ -20,6 +21,7 @@ export interface BackgroundJobRecord {
 export interface StartBackgroundJobInput {
   sessionId: string;
   source: string;
+  taskId?: string;
   input: unknown;
 }
 
@@ -71,6 +73,18 @@ class FileBackgroundJobStore {
     return this.jobs.get(jobId);
   }
 
+  listBySession(sessionId: string): BackgroundJobRecord[] {
+    return [...this.jobs.values()]
+      .filter((job) => job.sessionId === sessionId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  listByTask(taskId: string): BackgroundJobRecord[] {
+    return [...this.jobs.values()]
+      .filter((job) => job.taskId === taskId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
   update(jobId: string, patch: Partial<BackgroundJobRecord>): BackgroundJobRecord | undefined {
     const current = this.jobs.get(jobId);
     if (!current) {
@@ -101,7 +115,19 @@ class FileBackgroundJobStore {
       }
 
       const { schemaVersion: _schemaVersion, ...job } = parsed;
-      this.jobs.set(job.jobId, job);
+      const recovered = job.status === 'queued' || job.status === 'running'
+        ? {
+            ...job,
+            status: 'failed' as const,
+            finishedAt: job.finishedAt ?? Date.now(),
+            errorMessage: job.errorMessage ?? 'background job interrupted by process restart',
+            updatedAt: Date.now(),
+          }
+        : job;
+      this.jobs.set(recovered.jobId, recovered);
+      if (recovered !== job) {
+        this.persist(recovered);
+      }
       const seq = Number(job.jobId.replace(/^job_/, ''));
       if (Number.isFinite(seq) && seq >= this.nextId) {
         this.nextId = seq + 1;
@@ -122,6 +148,8 @@ class FileBackgroundJobStore {
 export interface BackgroundRunner {
   start(input: StartBackgroundJobInput): Promise<BackgroundJobRecord>;
   get(jobId: string): BackgroundJobRecord | undefined;
+  listBySession(sessionId: string): BackgroundJobRecord[];
+  listByTask(taskId: string): BackgroundJobRecord[];
 }
 
 function summarizeInput(input: unknown): string {
@@ -140,6 +168,7 @@ export function createBackgroundRunner(options: BackgroundRunnerOptions): Backgr
       const job = store.create({
         sessionId: input.sessionId,
         source: input.source,
+        taskId: input.taskId,
         inputSummary: summarizeInput(input.input),
         status: 'queued',
       });
@@ -174,6 +203,14 @@ export function createBackgroundRunner(options: BackgroundRunnerOptions): Backgr
 
     get(jobId) {
       return store.get(jobId);
+    },
+
+    listBySession(sessionId) {
+      return store.listBySession(sessionId);
+    },
+
+    listByTask(taskId) {
+      return store.listByTask(taskId);
     },
   };
 }

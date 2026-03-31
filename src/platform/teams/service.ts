@@ -1,4 +1,4 @@
-import { InMemoryTeamStore, type TeamMessageRecord, type TeamRecord } from './store.js';
+import type { TeamMessageRecord, TeamRecord, TeamStore } from './store.js';
 
 export interface CreateTeamInput {
   name: string;
@@ -14,7 +14,7 @@ export interface SendTeamMessageInput {
 }
 
 export interface TeamServiceOptions {
-  store: InMemoryTeamStore;
+  store: TeamStore;
 }
 
 export interface TeamService {

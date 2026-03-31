@@ -11,6 +11,8 @@ interface ContextOptions {
     skills?: SkillMeta[];
     deferredTools?: Array<Pick<ToolDefinition, 'name' | 'description'>>;
     agents?: Array<Pick<CustomAgentDef, 'name' | 'model' | 'allowedTools'>>;
+    pluginCommands?: string[];
+    lspDiagnostics?: string;
     autoContext?: LoadedContext;
 }
 export declare function buildSystemPrompt(opts: ContextOptions): Promise<string>;

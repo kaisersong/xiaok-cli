@@ -3,6 +3,7 @@ export interface BackgroundJobRecord {
     jobId: string;
     sessionId: string;
     source: string;
+    taskId?: string;
     inputSummary: string;
     status: BackgroundJobStatus;
     createdAt: number;
@@ -15,6 +16,7 @@ export interface BackgroundJobRecord {
 export interface StartBackgroundJobInput {
     sessionId: string;
     source: string;
+    taskId?: string;
     input: unknown;
 }
 export interface BackgroundExecutionResult {
@@ -34,5 +36,7 @@ export interface BackgroundRunnerOptions {
 export interface BackgroundRunner {
     start(input: StartBackgroundJobInput): Promise<BackgroundJobRecord>;
     get(jobId: string): BackgroundJobRecord | undefined;
+    listBySession(sessionId: string): BackgroundJobRecord[];
+    listByTask(taskId: string): BackgroundJobRecord[];
 }
 export declare function createBackgroundRunner(options: BackgroundRunnerOptions): BackgroundRunner;

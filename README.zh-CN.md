@@ -4,6 +4,8 @@
 
 `xiaok-cli` 是一个面向金蝶云之家开发者的 AI 编程命令行工具。它同时提供本地终端助手、skill 机制，以及云之家 IM 网关，让同一套 agent runtime 能在终端和移动端会话里复用。
 
+当前这套 runtime 已经不只是一个本地对话壳。终端和 IM 会话现在共用一层平台运行时，包含持久化通道状态、可恢复任务元数据、后台 subagent 执行、worktree 隔离，以及插件驱动的 MCP/LSP 集成。
+
 ## 能做什么
 
 - 在终端里运行交互式 AI 编程助手
@@ -15,6 +17,9 @@
 - 支持 print/json 单次输出、图片输入，以及 web fetch/search 工具
 - 通过 WebSocket 或 webhook 接入云之家 IM
 - 把云之家消息转成带状态、审批和工作区绑定的异步任务
+- 云之家会话、reply target、审批单、任务和去重状态可跨重启持久化
+- 通过共享 registry 把声明式 subagent 接到前台/后台执行链路，并支持独立 worktree
+- 通过插件声明加载 MCP、LSP、hooks 和 skills 到共享平台 runtime
 
 ## 项目能力
 
@@ -37,6 +42,9 @@
 - 自动加载 `AGENTS.md`、`CLAUDE.md`、git 分支、脏状态和最近提交
 - `web_fetch` / `web_search`
 - read/glob/grep/bash 共享截断与分页输出
+- 共享平台 runtime，统一装配 MCP/LSP/plugin 能力
+- 声明式 subagent，可按需后台运行
+- 支持 worktree 隔离的 subagent 执行
 
 ### 云之家 IM 网关
 
@@ -55,6 +63,10 @@
 - runtime 过程通知
 - 审批等待与回流
 - 长结果摘要化输出
+- 会话绑定、reply target、审批单、任务和入站去重的持久化
+- 审批、任务、后台任务在重启后的中断收敛
+- `/status` 输出会话级运行时快照
+- 共享 runtime 中可装配插件提供的 MCP 工具和 LSP 诊断
 
 ## 环境要求
 
@@ -81,6 +93,8 @@ npm run dev -- --help
 ```bash
 node dist/index.js --help
 ```
+
+当前分支包版本：`0.1.2`
 
 ## 配置
 
@@ -202,6 +216,24 @@ xiaok yzj serve "https://www.yunzhijia.com/gateway/robot/webhook/send?..." --dry
 /skill review 看下当前 diff 是否安全
 ```
 
+### 持久化状态与恢复语义
+
+云之家网关的运行状态存放在 `~/.xiaok/state/yzj`，包括：
+
+- 会话到频道的映射
+- 任务元数据与任务状态
+- 待审批记录
+- 最近一次 reply target
+- 入站消息去重记录
+
+工作区级的平台状态存放在 `<workspace>/.xiaok/state`，包括：
+
+- 后台任务元数据
+- agent team 与消息状态
+- MCP/LSP 的能力健康快照
+
+如果进程在任务、审批或后台任务未完成时重启，runtime 会把它们收敛为“已中断”状态，而不是无限挂起。随后 `/status` 会用用户可读的快照把这些恢复信息展示出来。
+
 ## 开发
 
 构建：
@@ -230,6 +262,7 @@ src/
   auth/        认证与 token 存储
   channels/    channel 网关、任务/审批/session 抽象
   commands/    CLI 命令入口
+  platform/    共享 runtime 装配：plugins、MCP、LSP、sandbox、teams、worktrees
   runtime/     runtime event hooks
   ui/          终端 UI
   utils/       配置和辅助工具
@@ -240,17 +273,18 @@ data/
 
 ## 架构说明
 
-- 终端 CLI 和云之家网关复用同一套核心 agent runtime
+- 终端 CLI 和云之家网关复用同一套核心 agent runtime 与平台 registry 装配
 - channel 集成位于边界层 `src/channels`
 - 共享 tasking 基础设施位于 `src/runtime/tasking`
-- 云之家任务和 CLI workflow task 目前都还是单进程内存态实现
+- 工作区平台状态存放在 `<cwd>/.xiaok/state`
+- 云之家网关状态存放在 `~/.xiaok/state/yzj`
 - runtime events 会被复用为移动端进展通知
 
 ## 当前限制
 
-- task 状态不会跨进程重启持久化
 - `ask_user` 只在带 TTY 的交互式 CLI 里可用
 - 云之家接入当前主要面向文本工作流，还没有做富文本卡片
+- `/status` 当前更偏向运维排障快照，而不是富交互面板
 - 在受限 Windows 沙箱里，`vitest` 可能会报 `spawn EPERM`
 - 工作区外的用户配置文件修改，可能需要在本机直接执行命令
 

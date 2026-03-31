@@ -2,12 +2,9 @@ import { loadConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
 import { createAdapter } from '../ai/models.js';
-import { loadCustomAgents } from '../ai/agents/loader.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
-import { ToolRegistry, buildToolList } from '../ai/tools/index.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
 import { createTaskTools } from '../ai/tools/tasks.js';
-import { createHooksRunner } from '../runtime/hooks-runner.js';
 import { buildSystemPrompt } from '../ai/context/yzj-context.js';
 import { Agent } from '../ai/agent.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
@@ -34,6 +31,8 @@ import { runReviewCommand } from './review.js';
 import { runPrCommand } from './pr.js';
 import { runDoctorCommand } from './doctor.js';
 import { runInitCommand } from './init.js';
+import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
+import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
 async function runChat(initialInput, opts) {
     if ((opts.print || opts.json) && !initialInput) {
         writeError('print/json 模式需要提供单次输入');
@@ -56,7 +55,11 @@ async function runChat(initialInput, opts) {
     }
     const creds = await loadCredentials();
     const devApp = await getDevAppIdentity();
-    const customAgents = await loadCustomAgents();
+    const cwd = process.cwd();
+    const builtinCommands = ['chat', 'doctor', 'init', 'review', 'pr', 'commit', 'settings', 'context'];
+    const platform = await createPlatformRuntimeContext({ cwd, builtinCommands });
+    const pluginRuntime = platform.pluginRuntime;
+    const customAgents = platform.customAgents;
     const sessionStore = new FileSessionStore();
     let persistedSession = null;
     if (opts.resume) {
@@ -73,7 +76,7 @@ async function runChat(initialInput, opts) {
     const sessionCreatedAt = persistedSession?.createdAt ?? Date.now();
     const forkedFromSessionId = persistedSession?.forkedFromSessionId;
     // 加载 skills
-    const skillCatalog = createSkillCatalog();
+    const skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginRuntime.skillRoots });
     let skills = await skillCatalog.reload();
     const inputReader = new InputReader();
     const skillTool = createSkillTool(skillCatalog);
@@ -94,14 +97,15 @@ async function runChat(initialInput, opts) {
         }),
         ...createTaskTools({ board: taskBoard, sessionId }),
     ];
-    const tools = buildToolList(skillTool, { cwd: process.cwd() }, workflowTools);
     // 构建系统提示
-    const buildPrompt = async (nextSkills = skills) => buildSystemPrompt({
+    const buildPrompt = async (nextSkills = skills, promptCwd = cwd) => buildSystemPrompt({
         enterpriseId: creds?.enterpriseId ?? null,
         devApp,
-        cwd: process.cwd(),
+        cwd: promptCwd,
         budget: config.contextBudget,
         skills: nextSkills,
+        pluginCommands: pluginRuntime.commandDeclarations,
+        lspDiagnostics: platform.lspManager.getSummary(),
         agents: customAgents.map((agent) => ({
             name: agent.name,
             model: agent.model,
@@ -109,6 +113,7 @@ async function runChat(initialInput, opts) {
         })),
     });
     const systemPrompt = await buildPrompt();
+    const capabilityHealthNotice = buildCapabilityHealthNotice(platform.health);
     const permissionManager = new PermissionManager({ mode: autoMode ? 'auto' : 'default' });
     inputReader.setModeCycleHandler(() => {
         const nextMode = PermissionManager.nextMode(permissionManager.getMode());
@@ -116,14 +121,17 @@ async function runChat(initialInput, opts) {
         statusBar.updateMode(nextMode);
         return nextMode;
     });
-    const cwd = process.cwd();
-    const registry = new ToolRegistry({
-        permissionManager,
+    const registryFactory = createPlatformRegistryFactory({
+        platform,
+        source: 'chat',
+        sessionId,
+        adapter: () => adapter,
+        skillTool,
+        workflowTools,
         dryRun: opts.dryRun,
-        hooksRunner: createHooksRunner(),
+        permissionManager,
         onPrompt: async (name, input) => {
             const choice = await showPermissionPrompt(name, input);
-            // 处理不同的选择
             if (choice.action === 'deny') {
                 return false;
             }
@@ -131,25 +139,27 @@ async function runChat(initialInput, opts) {
                 return true;
             }
             if (choice.action === 'allow_session') {
-                // 添加到会话规则（内存中）
                 permissionManager.addSessionRule(choice.rule);
                 return true;
             }
             if (choice.action === 'allow_project') {
-                // 保存到项目 settings.json
                 await addAllowRule('project', choice.rule, cwd);
                 permissionManager.addSessionRule(choice.rule);
                 return true;
             }
             if (choice.action === 'allow_global') {
-                // 保存到全局 settings.json
                 await addAllowRule('global', choice.rule, cwd);
                 permissionManager.addSessionRule(choice.rule);
                 return true;
             }
             return false;
         },
-    }, tools);
+        buildSystemPrompt: async (promptCwd) => buildPrompt(skills, promptCwd),
+        notifyBackgroundJob: async (job) => {
+            process.stdout.write(`\n[background] ${job.jobId} ${job.status}${job.resultSummary ? `: ${job.resultSummary}` : ''}\n`);
+        },
+    });
+    const registry = registryFactory.createRegistry(cwd);
     const runtimeHooks = createRuntimeHooks();
     const agent = new Agent(adapter, registry, systemPrompt, { hooks: runtimeHooks });
     if (persistedSession) {
@@ -194,6 +204,9 @@ async function runChat(initialInput, opts) {
             process.stdout.write('\n');
         }
         try {
+            if (capabilityHealthNotice) {
+                process.stderr.write(`${capabilityHealthNotice}\n`);
+            }
             await refreshSkills();
             await agent.runTurn(inputBlocks, (chunk) => {
                 if (chunk.type === 'text') {
@@ -226,6 +239,9 @@ async function runChat(initialInput, opts) {
             writeError(String(e));
             process.exit(1);
         }
+        finally {
+            await platform.dispose();
+        }
         if (!opts.print && !opts.json) {
             process.stdout.write('\n');
         }
@@ -242,6 +258,9 @@ async function runChat(initialInput, opts) {
     });
     // 设置初始 usage
     statusBar.update({ inputTokens: 0, outputTokens: 0, budget: config.contextBudget });
+    if (capabilityHealthNotice) {
+        process.stdout.write(`${capabilityHealthNotice}\n\n`);
+    }
     if (opts.dryRun)
         process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
     // 创建输入读取器
@@ -291,6 +310,7 @@ async function runChat(initialInput, opts) {
     process.stdout.on('resize', handleResize);
     // SIGINT 处理
     process.on('SIGINT', () => {
+        void platform.dispose();
         process.stdout.off('resize', handleResize);
         statusBar.destroy();
         process.stdout.write('\n已退出。\n');
@@ -562,6 +582,13 @@ async function runChat(initialInput, opts) {
         }
         process.stdout.write('\n');
     }
+    await platform.dispose();
+}
+function buildCapabilityHealthNotice(health) {
+    if (!health.hasDegradedCapabilities()) {
+        return '';
+    }
+    return [`[platform] degraded capabilities detected`, health.summary()].join('\n');
 }
 export function registerChatCommands(program) {
     program

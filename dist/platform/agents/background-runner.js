@@ -24,6 +24,16 @@ class FileBackgroundJobStore {
     get(jobId) {
         return this.jobs.get(jobId);
     }
+    listBySession(sessionId) {
+        return [...this.jobs.values()]
+            .filter((job) => job.sessionId === sessionId)
+            .sort((a, b) => b.createdAt - a.createdAt);
+    }
+    listByTask(taskId) {
+        return [...this.jobs.values()]
+            .filter((job) => job.taskId === taskId)
+            .sort((a, b) => b.createdAt - a.createdAt);
+    }
     update(jobId, patch) {
         const current = this.jobs.get(jobId);
         if (!current) {
@@ -50,7 +60,19 @@ class FileBackgroundJobStore {
                 continue;
             }
             const { schemaVersion: _schemaVersion, ...job } = parsed;
-            this.jobs.set(job.jobId, job);
+            const recovered = job.status === 'queued' || job.status === 'running'
+                ? {
+                    ...job,
+                    status: 'failed',
+                    finishedAt: job.finishedAt ?? Date.now(),
+                    errorMessage: job.errorMessage ?? 'background job interrupted by process restart',
+                    updatedAt: Date.now(),
+                }
+                : job;
+            this.jobs.set(recovered.jobId, recovered);
+            if (recovered !== job) {
+                this.persist(recovered);
+            }
             const seq = Number(job.jobId.replace(/^job_/, ''));
             if (Number.isFinite(seq) && seq >= this.nextId) {
                 this.nextId = seq + 1;
@@ -79,6 +101,7 @@ export function createBackgroundRunner(options) {
             const job = store.create({
                 sessionId: input.sessionId,
                 source: input.source,
+                taskId: input.taskId,
                 inputSummary: summarizeInput(input.input),
                 status: 'queued',
             });
@@ -109,6 +132,12 @@ export function createBackgroundRunner(options) {
         },
         get(jobId) {
             return store.get(jobId);
+        },
+        listBySession(sessionId) {
+            return store.listBySession(sessionId);
+        },
+        listByTask(taskId) {
+            return store.listByTask(taskId);
         },
     };
 }

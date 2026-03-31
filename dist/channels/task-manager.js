@@ -64,6 +64,18 @@ export class TaskManager extends SerialTaskManager {
             latestEvent: nextEvent,
         });
     }
+    markApprovalInterrupted(approval, reason = '审批在恢复前已失效') {
+        if (!approval.taskId) {
+            return undefined;
+        }
+        return this.updateTask(approval.taskId, {
+            status: 'failed',
+            approvalId: undefined,
+            finishedAt: Date.now(),
+            errorMessage: reason,
+            latestEvent: reason,
+        });
+    }
     formatStatus(task) {
         const lines = [
             `任务 ${task.taskId}`,

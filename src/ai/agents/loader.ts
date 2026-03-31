@@ -74,15 +74,20 @@ function loadAgentsFromDir(dir: string, source: 'global' | 'project'): CustomAge
 export async function loadCustomAgents(
   xiaokConfigDir = join(homedir(), '.xiaok'),
   cwd = process.cwd(),
+  extraDirs: string[] = [],
 ): Promise<CustomAgentDef[]> {
   const globalAgents = loadAgentsFromDir(join(xiaokConfigDir, 'agents'), 'global');
   const projectAgents = loadAgentsFromDir(join(cwd, '.xiaok', 'agents'), 'project');
+  const pluginAgents = extraDirs.flatMap((dir) => loadAgentsFromDir(dir, 'project'));
 
   const merged = new Map<string, CustomAgentDef>();
   for (const agent of globalAgents) {
     merged.set(agent.name, agent);
   }
   for (const agent of projectAgents) {
+    merged.set(agent.name, agent);
+  }
+  for (const agent of pluginAgents) {
     merged.set(agent.name, agent);
   }
 

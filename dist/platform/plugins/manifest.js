@@ -18,5 +18,13 @@ export function parsePluginManifest(raw, pluginDir) {
                 command: String(entry.command ?? ''),
             }))
             : undefined,
+        lspServers: Array.isArray(raw.lspServers)
+            ? raw.lspServers
+                .filter((entry) => Boolean(entry) && typeof entry === 'object')
+                .map((entry) => ({
+                name: String(entry.name ?? ''),
+                command: String(entry.command ?? ''),
+            }))
+            : undefined,
     };
 }

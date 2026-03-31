@@ -21,3 +21,55 @@ export function decodeLspFrames(input) {
     }
     return messages;
 }
+export function createLspClient(transport, manager) {
+    let nextId = 1;
+    const unsubscribe = transport.onMessage((message) => {
+        if (message.method) {
+            manager.applyMessage(message);
+        }
+    });
+    async function request(method, params) {
+        const response = await transport.send({
+            jsonrpc: '2.0',
+            id: nextId++,
+            method,
+            params,
+        });
+        if (!response) {
+            return undefined;
+        }
+        if (response.error) {
+            throw new Error(response.error.message);
+        }
+        return response.result;
+    }
+    async function notify(method, params) {
+        await transport.send({
+            jsonrpc: '2.0',
+            method,
+            params,
+        });
+    }
+    return {
+        async initialize(rootUri) {
+            await request('initialize', {
+                processId: process.pid,
+                rootUri,
+                capabilities: {},
+            });
+            await notify('initialized', {});
+        },
+        async didOpenDocument(document) {
+            await notify('textDocument/didOpen', {
+                textDocument: {
+                    ...document,
+                    version: document.version ?? 1,
+                },
+            });
+        },
+        dispose() {
+            unsubscribe();
+            transport.dispose?.();
+        },
+    };
+}

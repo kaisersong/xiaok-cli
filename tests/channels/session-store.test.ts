@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { InMemoryChannelSessionStore } from '../../src/channels/session-store.js';
+import { mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { FileChannelSessionStore, InMemoryChannelSessionStore } from '../../src/channels/session-store.js';
 
 describe('channel session store', () => {
   it('returns the same session for the same channel thread key', () => {
@@ -38,5 +41,31 @@ describe('channel session store', () => {
     });
 
     expect(a.sessionId).not.toBe(b.sessionId);
+  });
+
+  it('persists the same session id across store instances', () => {
+    const root = join(tmpdir(), `xiaok-session-store-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const filePath = join(root, 'sessions.json');
+
+    try {
+      const first = new FileChannelSessionStore(filePath);
+      const created = first.getOrCreate({
+        channel: 'yzj',
+        chatId: 'robot-1',
+        userId: 'openid-1',
+      });
+
+      const second = new FileChannelSessionStore(filePath);
+      const restored = second.getOrCreate({
+        channel: 'yzj',
+        chatId: 'robot-1',
+        userId: 'openid-1',
+      });
+
+      expect(restored.sessionId).toBe(created.sessionId);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

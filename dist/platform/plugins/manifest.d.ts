@@ -10,5 +10,6 @@ export interface PluginManifest {
     hooks: string[];
     commands: string[];
     mcpServers?: PluginManifestServer[];
+    lspServers?: PluginManifestServer[];
 }
 export declare function parsePluginManifest(raw: Record<string, unknown>, pluginDir: string): PluginManifest;

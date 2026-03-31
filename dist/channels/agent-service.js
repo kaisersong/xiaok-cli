@@ -103,6 +103,12 @@ export class ChannelAgentService {
         existing.dispose?.();
         this.sessions.delete(sessionId);
     }
+    closeAll() {
+        for (const sessionId of [...this.sessions.keys()]) {
+            this.resetSession(sessionId);
+        }
+        this.sessionPromises.clear();
+    }
 }
 function buildReplyPreview(reply, maxLength = 120) {
     if (reply.length <= maxLength)

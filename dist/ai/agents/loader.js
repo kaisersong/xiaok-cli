@@ -52,14 +52,18 @@ function loadAgentsFromDir(dir, source) {
     }
     return agents;
 }
-export async function loadCustomAgents(xiaokConfigDir = join(homedir(), '.xiaok'), cwd = process.cwd()) {
+export async function loadCustomAgents(xiaokConfigDir = join(homedir(), '.xiaok'), cwd = process.cwd(), extraDirs = []) {
     const globalAgents = loadAgentsFromDir(join(xiaokConfigDir, 'agents'), 'global');
     const projectAgents = loadAgentsFromDir(join(cwd, '.xiaok', 'agents'), 'project');
+    const pluginAgents = extraDirs.flatMap((dir) => loadAgentsFromDir(dir, 'project'));
     const merged = new Map();
     for (const agent of globalAgents) {
         merged.set(agent.name, agent);
     }
     for (const agent of projectAgents) {
+        merged.set(agent.name, agent);
+    }
+    for (const agent of pluginAgents) {
         merged.set(agent.name, agent);
     }
     return [...merged.values()];

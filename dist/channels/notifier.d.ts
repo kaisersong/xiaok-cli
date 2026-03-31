@@ -1,12 +1,12 @@
 import type { RuntimeHooks, RuntimeHookUnsubscribe } from '../runtime/hooks.js';
-import type { InMemoryApprovalStore } from './approval-store.js';
+import type { ApprovalStore } from './approval-store.js';
 import type { ChannelAddress, OutboundChannelMessage } from './types.js';
 export interface ChannelDeliveryTransport {
     deliver(message: OutboundChannelMessage): Promise<void> | void;
 }
 export interface RuntimeNotificationBindings {
     resolveTarget(sessionId: string): ChannelAddress | undefined;
-    approvalStore: InMemoryApprovalStore;
+    approvalStore: ApprovalStore;
 }
 export declare class ChannelNotifier {
     private readonly transport;

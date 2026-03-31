@@ -1,4 +1,4 @@
-import type { InMemoryChannelSessionStore } from './session-store.js';
+import type { ChannelSessionStore } from './session-store.js';
 import type { ChannelRequest } from './webhook.js';
 export interface ChannelWorkerResult {
     accepted: true;
@@ -7,4 +7,4 @@ export interface ChannelWorkerResult {
 export interface ChannelRequestExecutor {
     execute(input: ChannelRequest, sessionId: string): Promise<void> | void;
 }
-export declare function handleChannelRequest(input: ChannelRequest, sessionStore: InMemoryChannelSessionStore, executor?: ChannelRequestExecutor): Promise<ChannelWorkerResult>;
+export declare function handleChannelRequest(input: ChannelRequest, sessionStore: ChannelSessionStore, executor?: ChannelRequestExecutor): Promise<ChannelWorkerResult>;

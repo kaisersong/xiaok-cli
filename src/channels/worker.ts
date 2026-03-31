@@ -1,4 +1,4 @@
-import type { InMemoryChannelSessionStore } from './session-store.js';
+import type { ChannelSessionStore } from './session-store.js';
 import type { ChannelRequest } from './webhook.js';
 
 export interface ChannelWorkerResult {
@@ -12,7 +12,7 @@ export interface ChannelRequestExecutor {
 
 export async function handleChannelRequest(
   input: ChannelRequest,
-  sessionStore: InMemoryChannelSessionStore,
+  sessionStore: ChannelSessionStore,
   executor?: ChannelRequestExecutor
 ): Promise<ChannelWorkerResult> {
   const session = sessionStore.getOrCreate(input.sessionKey);

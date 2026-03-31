@@ -13,6 +13,7 @@ export interface PluginManifest {
   hooks: string[];
   commands: string[];
   mcpServers?: PluginManifestServer[];
+  lspServers?: PluginManifestServer[];
 }
 
 export function parsePluginManifest(raw: Record<string, unknown>, pluginDir: string): PluginManifest {
@@ -30,6 +31,14 @@ export function parsePluginManifest(raw: Record<string, unknown>, pluginDir: str
     commands: Array.isArray(raw.commands) ? raw.commands.filter((entry): entry is string => typeof entry === 'string') : [],
     mcpServers: Array.isArray(raw.mcpServers)
       ? raw.mcpServers
+          .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
+          .map((entry) => ({
+            name: String(entry.name ?? ''),
+            command: String(entry.command ?? ''),
+          }))
+      : undefined,
+    lspServers: Array.isArray(raw.lspServers)
+      ? raw.lspServers
           .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
           .map((entry) => ({
             name: String(entry.name ?? ''),

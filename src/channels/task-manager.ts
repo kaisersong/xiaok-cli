@@ -1,7 +1,7 @@
 import type { ChannelRequest } from './webhook.js';
 import type { ApprovalAction, ApprovalRequest, ChannelReplyTarget } from './types.js';
 import type { ChannelAgentExecutionResult } from './agent-service.js';
-import { InMemoryTaskStore, type RemoteTask } from './task-store.js';
+import { InMemoryTaskStore, type RemoteTask, type RemoteTaskStore } from './task-store.js';
 import type { SessionBinding } from './session-binding-store.js';
 import { SerialTaskManager } from '../runtime/tasking/manager.js';
 
@@ -13,7 +13,7 @@ export interface TaskExecutionRequest {
 }
 
 export interface TaskManagerOptions {
-  store?: InMemoryTaskStore;
+  store?: RemoteTaskStore;
   execute(request: TaskExecutionRequest): Promise<ChannelAgentExecutionResult>;
   notify(request: ChannelRequest, text: string): Promise<void> | void;
 }
@@ -102,6 +102,20 @@ export class TaskManager extends SerialTaskManager<ChannelRequest, RemoteTask, {
       status: 'running',
       approvalId: undefined,
       latestEvent: nextEvent,
+    });
+  }
+
+  markApprovalInterrupted(approval: ApprovalRequest, reason = '审批在恢复前已失效'): RemoteTask | undefined {
+    if (!approval.taskId) {
+      return undefined;
+    }
+
+    return this.updateTask(approval.taskId, {
+      status: 'failed',
+      approvalId: undefined,
+      finishedAt: Date.now(),
+      errorMessage: reason,
+      latestEvent: reason,
     });
   }
 

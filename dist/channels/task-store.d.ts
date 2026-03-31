@@ -17,6 +17,24 @@ export interface CreateRemoteTaskInput {
     repoRoot?: string;
     branch?: string;
 }
-export declare class InMemoryTaskStore extends SharedInMemoryTaskStore<RemoteTask, CreateRemoteTaskInput> {
+export interface RemoteTaskStore {
+    create(input: CreateRemoteTaskInput): RemoteTask;
+    get(taskId: string): RemoteTask | undefined;
+    update(taskId: string, patch: Partial<RemoteTask>): RemoteTask | undefined;
+    listBySession(sessionId: string): RemoteTask[];
+}
+export declare class InMemoryTaskStore extends SharedInMemoryTaskStore<RemoteTask, CreateRemoteTaskInput> implements RemoteTaskStore {
     constructor();
+}
+export declare class FileTaskStore implements RemoteTaskStore {
+    private readonly filePath;
+    private readonly tasks;
+    private nextId;
+    constructor(filePath: string);
+    create(input: CreateRemoteTaskInput): RemoteTask;
+    get(taskId: string): RemoteTask | undefined;
+    update(taskId: string, patch: Partial<RemoteTask>): RemoteTask | undefined;
+    listBySession(sessionId: string): RemoteTask[];
+    private load;
+    private persist;
 }

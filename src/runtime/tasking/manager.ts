@@ -1,6 +1,13 @@
 import type { BaseTaskRecord, TaskExecutionResult } from './types.js';
 import { InMemoryTaskStore } from './store.js';
 
+export interface TaskStore<TTask extends BaseTaskRecord, TCreateInput> {
+  create(input: TCreateInput): TTask;
+  get(taskId: string): TTask | undefined;
+  update(taskId: string, patch: Partial<TTask>): TTask | undefined;
+  listBySession(sessionId: string): TTask[];
+}
+
 export interface TaskExecutionRequest<TRequest> {
   request: TRequest;
   sessionId: string;
@@ -14,7 +21,7 @@ interface RunningTask {
 }
 
 export interface SerialTaskManagerOptions<TRequest, TTask extends BaseTaskRecord, TCreateInput> {
-  store: InMemoryTaskStore<TTask, TCreateInput>;
+  store: TaskStore<TTask, TCreateInput>;
   createTaskInput(request: TRequest, sessionId: string, options?: unknown): TCreateInput;
   buildAckMessage(task: TTask, options?: unknown): string;
   buildCompletionSummary(task: TTask): string;
@@ -23,7 +30,7 @@ export interface SerialTaskManagerOptions<TRequest, TTask extends BaseTaskRecord
 }
 
 export class SerialTaskManager<TRequest, TTask extends BaseTaskRecord, TCreateInput> {
-  protected readonly store: InMemoryTaskStore<TTask, TCreateInput>;
+  protected readonly store: TaskStore<TTask, TCreateInput>;
   private readonly running = new Map<string, RunningTask>();
   private readonly sessionTails = new Map<string, Promise<void>>();
   private readonly activeBySession = new Map<string, string>();

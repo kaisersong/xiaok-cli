@@ -8,6 +8,7 @@ export interface SkillMeta {
 }
 export interface SkillLoadOptions {
     builtinRoots?: string[];
+    extraRoots?: string[];
 }
 export interface SkillCatalog {
     reload(): Promise<SkillMeta[]>;

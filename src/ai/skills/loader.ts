@@ -14,6 +14,7 @@ export interface SkillMeta {
 
 export interface SkillLoadOptions {
   builtinRoots?: string[];
+  extraRoots?: string[];
 }
 
 export interface SkillCatalog {
@@ -91,7 +92,10 @@ export async function loadSkills(
   cwd = process.cwd(),
   options?: SkillLoadOptions,
 ): Promise<SkillMeta[]> {
-  const builtinRoots = options?.builtinRoots ?? getBuiltinSkillRoots();
+  const builtinRoots = [
+    ...(options?.builtinRoots ?? getBuiltinSkillRoots()),
+    ...(options?.extraRoots ?? []),
+  ];
   const globalSkillsDir = join(xiaokConfigDir, 'skills');
   const projectSkillsDir = join(cwd, '.xiaok', 'skills');
 

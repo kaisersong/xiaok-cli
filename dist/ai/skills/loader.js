@@ -61,7 +61,10 @@ function loadSkillsFromDir(dir, source, tier) {
  * @param cwd             当前工作目录（用于查找 .xiaok/skills/）
  */
 export async function loadSkills(xiaokConfigDir = join(homedir(), '.xiaok'), cwd = process.cwd(), options) {
-    const builtinRoots = options?.builtinRoots ?? getBuiltinSkillRoots();
+    const builtinRoots = [
+        ...(options?.builtinRoots ?? getBuiltinSkillRoots()),
+        ...(options?.extraRoots ?? []),
+    ];
     const globalSkillsDir = join(xiaokConfigDir, 'skills');
     const projectSkillsDir = join(cwd, '.xiaok', 'skills');
     const builtinSkills = builtinRoots.flatMap((root) => loadSkillsFromDir(root, 'builtin', 'system'));

@@ -1,5 +1,5 @@
 import type { RuntimeHooks, RuntimeHookUnsubscribe } from '../runtime/hooks.js';
-import type { InMemoryApprovalStore } from './approval-store.js';
+import type { ApprovalStore } from './approval-store.js';
 import type { ChannelReplyTarget } from './types.js';
 import type { TaskManager } from './task-manager.js';
 
@@ -18,7 +18,7 @@ export class YZJRuntimeNotifier {
   constructor(
     private readonly transport: YZJRuntimeNotificationTransport,
     private readonly taskManager: TaskManager,
-    private readonly approvalStore: InMemoryApprovalStore,
+    private readonly approvalStore: ApprovalStore,
     private readonly flushDelayMs = 1500
   ) {}
 

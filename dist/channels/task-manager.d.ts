@@ -1,7 +1,7 @@
 import type { ChannelRequest } from './webhook.js';
 import type { ApprovalAction, ApprovalRequest, ChannelReplyTarget } from './types.js';
 import type { ChannelAgentExecutionResult } from './agent-service.js';
-import { InMemoryTaskStore, type RemoteTask } from './task-store.js';
+import { type RemoteTask, type RemoteTaskStore } from './task-store.js';
 import type { SessionBinding } from './session-binding-store.js';
 import { SerialTaskManager } from '../runtime/tasking/manager.js';
 export interface TaskExecutionRequest {
@@ -11,7 +11,7 @@ export interface TaskExecutionRequest {
     signal: AbortSignal;
 }
 export interface TaskManagerOptions {
-    store?: InMemoryTaskStore;
+    store?: RemoteTaskStore;
     execute(request: TaskExecutionRequest): Promise<ChannelAgentExecutionResult>;
     notify(request: ChannelRequest, text: string): Promise<void> | void;
 }
@@ -34,6 +34,7 @@ export declare class TaskManager extends SerialTaskManager<ChannelRequest, Remot
     setSessionProgress(sessionId: string, latestEvent: string): RemoteTask | undefined;
     markWaitingApproval(sessionId: string, approval: ApprovalRequest): RemoteTask | undefined;
     resumeFromApproval(approval: ApprovalRequest, action: ApprovalAction | 'expired'): RemoteTask | undefined;
+    markApprovalInterrupted(approval: ApprovalRequest, reason?: string): RemoteTask | undefined;
     formatStatus(task: RemoteTask): string;
     private buildAckText;
     private buildCompletionText;

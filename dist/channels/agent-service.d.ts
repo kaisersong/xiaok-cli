@@ -32,4 +32,5 @@ export declare class ChannelAgentService {
     execute(request: ChannelRequest, sessionId: string, signal?: AbortSignal): Promise<ChannelAgentExecutionResult>;
     private getOrCreateSession;
     resetSession(sessionId: string): void;
+    closeAll(): void;
 }

@@ -10,4 +10,4 @@ export interface CustomAgentDef {
     source?: 'global' | 'project';
 }
 export declare function parseAgentFile(name: string, raw: string): CustomAgentDef;
-export declare function loadCustomAgents(xiaokConfigDir?: string, cwd?: string): Promise<CustomAgentDef[]>;
+export declare function loadCustomAgents(xiaokConfigDir?: string, cwd?: string, extraDirs?: string[]): Promise<CustomAgentDef[]>;

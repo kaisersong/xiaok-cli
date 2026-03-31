@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { createServer } from 'node:http';
 
 import type { Command } from 'commander';
@@ -5,32 +7,36 @@ import { loadConfig, saveConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
 import { createAdapter } from '../ai/models.js';
-import { loadCustomAgents } from '../ai/agents/loader.js';
 import { buildSystemPrompt } from '../ai/context/yzj-context.js';
 import { Agent } from '../ai/agent.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
-import { ToolRegistry, buildToolList } from '../ai/tools/index.js';
-import { bashTool } from '../ai/tools/bash.js';
 import { createSkillCatalog, type SkillCatalog } from '../ai/skills/loader.js';
 import { createSkillTool, formatSkillPayload } from '../ai/skills/tool.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
-import type { Tool, YZJChannelConfig } from '../types.js';
+import type { YZJChannelConfig } from '../types.js';
 import { ChannelAgentService } from '../channels/agent-service.js';
-import { InMemoryApprovalStore } from '../channels/approval-store.js';
+import { FileApprovalStore, type ApprovalStore } from '../channels/approval-store.js';
 import { parseYZJCommand } from '../channels/command-parser.js';
-import { InMemoryChannelSessionStore } from '../channels/session-store.js';
-import { InMemorySessionBindingStore, type SessionBinding } from '../channels/session-binding-store.js';
+import { FileChannelSessionStore } from '../channels/session-store.js';
+import type { SessionBinding } from '../channels/session-binding-store.js';
+import { FileSessionBindingStore } from '../channels/session-binding-store.js';
 import { TaskManager } from '../channels/task-manager.js';
+import { FileTaskStore } from '../channels/task-store.js';
+import { FileReplyTargetStore } from '../channels/reply-target-store.js';
+import { formatSessionRuntimeSnapshot } from '../channels/session-runtime-snapshot.js';
 import type { ApprovalAction, ChannelReplyTarget } from '../channels/types.js';
 import type { ChannelRequest } from '../channels/webhook.js';
 import { handleChannelRequest } from '../channels/worker.js';
-import { YZJInboundDedupeStore } from '../channels/yzj-dedupe-store.js';
+import { FileYZJInboundDedupeStore } from '../channels/yzj-dedupe-store.js';
 import { YZJRuntimeNotifier } from '../channels/yzj-runtime-notifier.js';
 import { createYZJWebhookHandler } from '../channels/yzj-webhook.js';
 import { YZJWebSocketClient } from '../channels/yzj-websocket-client.js';
 import { YZJTransport } from '../channels/yzj-transport.js';
 import { parseYZJMessage, resolveYZJConfig } from '../channels/yzj.js';
 import { deriveYZJWebSocketUrl } from '../channels/yzj-ws-url.js';
+import { createPlatformRuntimeContext, type PlatformRuntimeContext } from '../platform/runtime/context.js';
+import { FileCapabilityHealthStore } from '../platform/runtime/health-store.js';
+import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
 
 interface YZJServeOptions {
   sendMsgUrl?: string;
@@ -45,6 +51,7 @@ interface YZJServeOptions {
 interface SessionSkillCatalogState {
   cwd: string;
   catalog: SkillCatalog;
+  platform: PlatformRuntimeContext;
 }
 
 function buildOverrides(options: YZJServeOptions): Partial<YZJChannelConfig> {
@@ -156,11 +163,13 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
     sendMsgUrl: yzjConfig.sendMsgUrl,
     logger: console,
   });
-  const sessionStore = new InMemoryChannelSessionStore();
-  const dedupeStore = new YZJInboundDedupeStore();
-  const approvalStore = new InMemoryApprovalStore();
-  const bindingStore = new InMemorySessionBindingStore();
+  const stateDir = join(homedir(), '.xiaok', 'state', 'yzj');
+  const sessionStore = new FileChannelSessionStore(join(stateDir, 'sessions.json'));
+  const dedupeStore = new FileYZJInboundDedupeStore(join(stateDir, 'inbound-dedupe.json'));
+  const approvalStore = new FileApprovalStore(join(stateDir, 'approvals.json'));
+  const bindingStore = new FileSessionBindingStore(join(stateDir, 'bindings.json'));
   const sessionSkillCatalogs = new Map<string, SessionSkillCatalogState>();
+  const latestReplyTargets = new FileReplyTargetStore(join(stateDir, 'reply-targets.json'));
 
   const deliverText = async (
     target: ChannelReplyTarget,
@@ -188,6 +197,7 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
   };
 
   const taskManager = new TaskManager({
+    store: new FileTaskStore(join(stateDir, 'tasks.json')),
     execute: async ({ request, sessionId, signal }) => {
       console.info(
         `[yzj] task execute session=${sessionId} chars=${request.message.length} aborted=${signal.aborted ? 'yes' : 'no'}`
@@ -228,27 +238,30 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
     taskManager,
     approvalStore
   );
+  expireRecoveredApprovals(approvalStore, taskManager);
 
   let agentService: ChannelAgentService | null = null;
   if (!options.dryRun) {
     const adapter = createAdapter(config);
     const creds = await loadCredentials();
     const devApp = await getDevAppIdentity();
-    const customAgents = await loadCustomAgents();
 
     agentService = new ChannelAgentService(
       {
         createSession: async (sessionId) => {
           const binding = bindingStore.get(sessionId);
           const cwd = binding?.cwd ?? process.cwd();
-          const skillState = ensureSessionSkillCatalog(sessionSkillCatalogs, sessionId, cwd);
+          const skillState = await ensureSessionSkillCatalog(sessionSkillCatalogs, sessionId, cwd);
           const skills = await skillState.catalog.reload();
+          const customAgents = skillState.platform.customAgents;
           const systemPrompt = await buildSystemPrompt({
             enterpriseId: creds?.enterpriseId ?? null,
             devApp,
             cwd,
             budget: config.contextBudget,
             skills,
+            pluginCommands: skillState.platform.pluginRuntime.commandDeclarations,
+            lspDiagnostics: skillState.platform.lspManager.getSummary(),
             agents: customAgents.map((agent) => ({
               name: agent.name,
               model: agent.model,
@@ -264,33 +277,62 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
           const detachNotifier = runtimeNotifier.bind(sessionId, hooks);
           const permissionManager = new PermissionManager({ mode: 'default' });
           const skillTool = createSkillTool(skillState.catalog);
-          const tools = buildBoundToolList(skillTool, cwd);
-          const registry = new ToolRegistry(
-            {
-              permissionManager,
-              dryRun: false,
-              onPrompt: async (toolName, input) => {
-                const task = taskManager.getActiveTask(sessionId);
-                const approval = approvalStore.create({
-                  sessionId,
-                  turnId: currentTurnId,
-                  taskId: task?.taskId,
-                  toolName,
-                  summary: buildApprovalSummary(toolName, input),
-                });
-                hooks.emit({
-                  type: 'approval_required',
-                  sessionId,
-                  turnId: currentTurnId,
-                  approvalId: approval.approvalId,
-                });
-                const decision = await approvalStore.waitForDecision(approval.approvalId);
-                taskManager.resumeFromApproval(approval, decision ?? 'expired');
-                return decision === 'approve';
-              },
+          const registryFactory = createPlatformRegistryFactory({
+            platform: skillState.platform,
+            source: 'yzj',
+            sessionId,
+            adapter: () => adapter,
+            skillTool,
+            workflowTools: [],
+            dryRun: false,
+            permissionManager,
+            getCurrentTaskId: () => taskManager.getActiveTask(sessionId)?.taskId,
+            onPrompt: async (toolName, input) => {
+              const task = taskManager.getActiveTask(sessionId);
+              const approval = approvalStore.create({
+                sessionId,
+                turnId: currentTurnId,
+                taskId: task?.taskId,
+                toolName,
+                summary: buildApprovalSummary(toolName, input),
+              });
+              hooks.emit({
+                type: 'approval_required',
+                sessionId,
+                turnId: currentTurnId,
+                approvalId: approval.approvalId,
+              });
+              const decision = await approvalStore.waitForDecision(approval.approvalId);
+              taskManager.resumeFromApproval(approval, decision ?? 'expired');
+              return decision === 'approve';
             },
-            tools
-          );
+            buildSystemPrompt: async (promptCwd) => buildSystemPrompt({
+              enterpriseId: creds?.enterpriseId ?? null,
+              devApp,
+              cwd: promptCwd,
+              budget: config.contextBudget,
+              skills,
+              pluginCommands: skillState.platform.pluginRuntime.commandDeclarations,
+              lspDiagnostics: skillState.platform.lspManager.getSummary(),
+              agents: customAgents.map((agent) => ({
+                name: agent.name,
+                model: agent.model,
+                allowedTools: agent.allowedTools,
+              })),
+            }),
+            notifyBackgroundJob: async (job) => {
+              const replyTarget = latestReplyTargets.get(sessionId);
+              if (!replyTarget) {
+                return;
+              }
+              await deliverText(
+                replyTarget,
+                `后台任务 ${job.jobId} ${job.status}${job.resultSummary ? `：${job.resultSummary}` : ''}`,
+                'status',
+              );
+            },
+          });
+          const registry = registryFactory.createRegistry(cwd);
 
           return {
             agent: new Agent(adapter, registry, systemPrompt, { hooks }),
@@ -339,12 +381,13 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
     const inboundStartedAt = Date.now();
     const result = await handleChannelRequest(request, sessionStore, {
       execute: async (input, sessionId) => {
+        latestReplyTargets.set(sessionId, input.replyTarget);
         console.info(
           `[yzj] accepted ${source} message msgId=${rawMessage.msgId} session=${sessionId} from=${rawMessage.operatorOpenid} chars=${input.message.length}`,
         );
         const command = parseYZJCommand(input.message);
         const binding = bindingStore.get(sessionId) ?? null;
-        const skillState = ensureSessionSkillCatalog(sessionSkillCatalogs, sessionId, binding?.cwd ?? process.cwd());
+        const skillState = await ensureSessionSkillCatalog(sessionSkillCatalogs, sessionId, binding?.cwd ?? process.cwd());
         const skills = await skillState.catalog.reload();
 
         if (command.kind === 'help') {
@@ -356,7 +399,24 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
           const task = command.taskId
             ? resolveSessionTask(taskManager, sessionId, command.taskId)
             : taskManager.getLatestTask(sessionId);
-          await notifyText(input, task ? taskManager.formatStatus(task) : buildMissingTaskMessage(command.taskId), 'status');
+          await notifyText(
+            input,
+            formatSessionRuntimeSnapshot({
+              sessionId,
+              binding,
+              taskStatus: task ? taskManager.formatStatus(task) : buildMissingTaskMessage(command.taskId),
+              backgroundJobs: formatBackgroundJobStatus(skillState.platform, sessionId, task?.taskId),
+              approvals: approvalStore
+                .listPending()
+                .filter((approval) => approval.sessionId === sessionId)
+                .map((approval) => ({
+                  approvalId: approval.approvalId,
+                  summary: approval.summary,
+                })),
+              capabilityHealth: formatCapabilityHealthStatus(skillState.platform, binding?.cwd ?? skillState.cwd),
+            }),
+            'status',
+          );
           return;
         }
 
@@ -385,7 +445,8 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
           if (command.clear) {
             const cleared = bindingStore.clear(sessionId);
             agentService?.resetSession(sessionId);
-            sessionSkillCatalogs.delete(sessionId);
+            disposeSessionSkillCatalog(sessionSkillCatalogs, sessionId);
+            latestReplyTargets.delete(sessionId);
             await notifyText(
               input,
               cleared ? '已清除当前会话的工作区绑定，后续任务将使用默认目录' : '当前会话还没有绑定工作区',
@@ -402,7 +463,7 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
               cwd: command.cwd!,
             });
             agentService?.resetSession(sessionId);
-            sessionSkillCatalogs.delete(sessionId);
+            disposeSessionSkillCatalog(sessionSkillCatalogs, sessionId);
             await notifyText(input, formatBindingMessage(nextBinding), 'status');
           } catch (error) {
             await notifyText(input, `绑定失败：${error instanceof Error ? error.message : String(error)}`, 'status');
@@ -433,6 +494,7 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
         });
       },
     });
+    latestReplyTargets.set(result.sessionId, request.replyTarget);
     console.info(`[yzj] session ${result.sessionId} handled ${source} message ${rawMessage.msgId} totalMs=${Date.now() - inboundStartedAt}`);
   };
 
@@ -500,6 +562,8 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
       shutdown.signal.addEventListener('abort', () => resolve(), { once: true });
     });
   } finally {
+    agentService?.closeAll();
+    await disposeAllSessionSkillCatalogs(sessionSkillCatalogs);
     websocketClient?.stop();
     if (server) {
       await new Promise<void>((resolve, reject) => {
@@ -524,22 +588,50 @@ async function updateYZJConfig(
   await saveConfig(config);
 }
 
-function ensureSessionSkillCatalog(
+async function ensureSessionSkillCatalog(
   sessionSkillCatalogs: Map<string, SessionSkillCatalogState>,
   sessionId: string,
   cwd: string
-): SessionSkillCatalogState {
+): Promise<SessionSkillCatalogState> {
   const existing = sessionSkillCatalogs.get(sessionId);
   if (existing && existing.cwd === cwd) {
     return existing;
   }
 
+  const platform = await createPlatformRuntimeContext({
+    cwd,
+    builtinCommands: ['chat', 'doctor', 'init', 'review', 'pr', 'commit', 'settings', 'context', 'yzj'],
+  });
   const created: SessionSkillCatalogState = {
     cwd,
-    catalog: createSkillCatalog(undefined, cwd),
+    catalog: createSkillCatalog(undefined, cwd, { extraRoots: platform.pluginRuntime.skillRoots }),
+    platform,
   };
   sessionSkillCatalogs.set(sessionId, created);
   return created;
+}
+
+function disposeSessionSkillCatalog(
+  sessionSkillCatalogs: Map<string, SessionSkillCatalogState>,
+  sessionId: string,
+): void {
+  const state = sessionSkillCatalogs.get(sessionId);
+  if (!state) {
+    return;
+  }
+
+  void state.platform.dispose();
+  sessionSkillCatalogs.delete(sessionId);
+}
+
+async function disposeAllSessionSkillCatalogs(
+  sessionSkillCatalogs: Map<string, SessionSkillCatalogState>,
+): Promise<void> {
+  const states = [...sessionSkillCatalogs.values()];
+  sessionSkillCatalogs.clear();
+  for (const state of states) {
+    await state.platform.dispose();
+  }
 }
 
 async function handleApprovalCommand(
@@ -547,7 +639,7 @@ async function handleApprovalCommand(
   sessionId: string,
   approvalId: string,
   action: ApprovalAction,
-  approvalStore: InMemoryApprovalStore,
+  approvalStore: ApprovalStore,
   taskManager: TaskManager,
   notifyText: (request: ChannelRequest, text: string, kind?: 'status' | 'approval' | 'result') => Promise<void>
 ): Promise<void> {
@@ -638,6 +730,41 @@ function formatBindingMessage(binding: SessionBinding): string {
   return lines.join('\n');
 }
 
+function formatCapabilityHealthStatus(
+  platform: PlatformRuntimeContext,
+  cwd: string,
+): string {
+  const healthStore = new FileCapabilityHealthStore(join(cwd, '.xiaok', 'state', 'capability-health.json'));
+  const persisted = healthStore.get(cwd);
+  const summary = persisted?.summary ?? platform.health.summary();
+  const capabilities = persisted?.capabilities ?? platform.health.capabilities;
+  if (!capabilities.some((entry) => entry.status === 'degraded')) {
+    return `平台能力状态：正常\n${summary}`;
+  }
+
+  return `平台能力状态：降级\n${summary}`;
+}
+
+function formatBackgroundJobStatus(platform: PlatformRuntimeContext, sessionId: string, taskId?: string) {
+  const jobs = (taskId
+    ? platform.listBackgroundJobs(sessionId).filter((job) => job.taskId === taskId)
+    : platform.listBackgroundJobs(sessionId))
+    .slice(0, 5);
+
+  return jobs.map((job) => ({
+    jobId: job.jobId,
+    status: job.status,
+    detail: job.resultSummary ?? job.errorMessage ?? job.inputSummary,
+  }));
+}
+
+function expireRecoveredApprovals(approvalStore: ApprovalStore, taskManager: TaskManager): void {
+  for (const approval of approvalStore.listPending()) {
+    approvalStore.expire(approval.approvalId);
+    taskManager.markApprovalInterrupted(approval, '网关重启后审批已失效，请重新发起任务');
+  }
+}
+
 function buildApprovalSummary(toolName: string, input: Record<string, unknown>): string {
   if (toolName === 'bash' && typeof input.command === 'string') {
     return `执行 bash 命令：${truncate(input.command, 120)}`;
@@ -646,24 +773,6 @@ function buildApprovalSummary(toolName: string, input: Record<string, unknown>):
     return `${toolName} 文件：${truncate(input.file_path, 120)}`;
   }
   return `${toolName} 操作需要确认`;
-}
-
-function buildBoundToolList(skillTool: Tool, cwd: string): Tool[] {
-  return buildToolList(skillTool, { cwd }).map((tool) => {
-    if (tool.definition.name !== 'bash') {
-      return tool;
-    }
-    return {
-      ...bashTool,
-      execute: async (input) => {
-        const payload = {
-          ...input,
-          workdir: typeof input.workdir === 'string' ? input.workdir : cwd,
-        };
-        return bashTool.execute(payload);
-      },
-    };
-  });
 }
 
 function formatFinalReply(taskId: string | undefined, text: string): string {

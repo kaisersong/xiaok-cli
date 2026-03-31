@@ -11,11 +11,13 @@ describe('plugin manifest', () => {
       hooks: ['hooks/pre.js'],
       commands: ['doctor'],
       mcpServers: [{ name: 'docs', command: 'node docs-server.js' }],
+      lspServers: [{ name: 'ts', command: 'node lsp-server.js' }],
     }, '/plugins/acme');
 
     expect(manifest.name).toBe('acme-tools');
     expect(manifest.skills).toEqual(['/plugins/acme/skills/review.md']);
     expect(manifest.commands).toEqual(['doctor']);
     expect(manifest.mcpServers?.[0].name).toBe('docs');
+    expect(manifest.lspServers?.[0].name).toBe('ts');
   });
 });

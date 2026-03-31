@@ -50,6 +50,12 @@ export async function buildSystemPrompt(opts) {
             .join('\n');
         sections.push(`可用自定义 agents：\n${agentSummary}`);
     }
+    if (opts.pluginCommands && opts.pluginCommands.length > 0) {
+        sections.push(`可用插件命令声明：\n${opts.pluginCommands.slice(0, 20).map((command) => `- ${command}`).join('\n')}`);
+    }
+    if (opts.lspDiagnostics) {
+        sections.push(`当前 LSP 诊断摘要：\n${opts.lspDiagnostics}`);
+    }
     const autoContext = opts.autoContext ?? await loadAutoContext({
         cwd: opts.cwd,
         maxChars: Math.max(1_200, opts.budget * 2),

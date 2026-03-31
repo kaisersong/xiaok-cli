@@ -36,10 +36,12 @@ describe('plugin loader', () => {
       name: 'acme',
       version: '1.0.0',
       commands: ['doctor'],
+      lspServers: [{ name: 'ts', command: 'node lsp-server.js' }],
     }));
 
     const loaded = await loadPlugins([pluginDir], { builtinCommands: ['doctor', 'chat'] });
 
     expect(loaded[0].collisions).toEqual(['command:doctor']);
+    expect(loaded[0].lspServers?.[0]?.name).toBe('ts');
   });
 });

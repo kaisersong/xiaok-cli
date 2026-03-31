@@ -105,4 +105,80 @@ describe('background runner', () => {
       });
     });
   });
+
+  it('marks in-flight jobs as interrupted when reloading after process restart', async () => {
+    const runner = createBackgroundRunner({
+      rootDir: testDir,
+      execute: async () => {
+        await new Promise(() => undefined);
+        return { ok: true, summary: 'never' };
+      },
+      notify: async () => undefined,
+    });
+
+    const job = await runner.start({
+      sessionId: 'sess_restart',
+      source: 'yzj',
+      input: 'long running task',
+    });
+
+    const reloaded = createBackgroundRunner({
+      rootDir: testDir,
+      execute: async () => ({ ok: true, summary: 'unused' }),
+      notify: async () => undefined,
+    });
+
+    expect(reloaded.get(job.jobId)).toMatchObject({
+      jobId: job.jobId,
+      status: 'failed',
+      errorMessage: 'background job interrupted by process restart',
+    });
+  });
+
+  it('lists background jobs by session', async () => {
+    const runner = createBackgroundRunner({
+      rootDir: testDir,
+      execute: async ({ input }) => ({ ok: true, summary: String(input) }),
+      notify: async () => undefined,
+    });
+
+    await runner.start({
+      sessionId: 'sess_list',
+      source: 'chat',
+      input: 'job one',
+    });
+    await runner.start({
+      sessionId: 'sess_other',
+      source: 'chat',
+      input: 'job two',
+    });
+
+    await waitFor(() => {
+      expect(runner.listBySession('sess_list')[0]).toMatchObject({
+        sessionId: 'sess_list',
+      });
+    });
+  });
+
+  it('associates background jobs with a task id and can list them by task', async () => {
+    const runner = createBackgroundRunner({
+      rootDir: testDir,
+      execute: async ({ input }) => ({ ok: true, summary: String(input) }),
+      notify: async () => undefined,
+    });
+
+    await runner.start({
+      sessionId: 'sess_task',
+      source: 'yzj',
+      taskId: 'task_42',
+      input: 'background follow-up',
+    });
+
+    await waitFor(() => {
+      expect(runner.listByTask('task_42')[0]).toMatchObject({
+        sessionId: 'sess_task',
+        taskId: 'task_42',
+      });
+    });
+  });
 });

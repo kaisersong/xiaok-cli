@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 export class YZJInboundDedupeStore {
     ttlMs;
     seen = new Map();
@@ -19,5 +21,51 @@ export class YZJInboundDedupeStore {
                 this.seen.delete(messageId);
             }
         }
+    }
+}
+export class FileYZJInboundDedupeStore extends YZJInboundDedupeStore {
+    filePath;
+    constructor(filePath, ttlMs = 5 * 60_000) {
+        super(ttlMs);
+        this.filePath = filePath;
+        this.load();
+    }
+    markSeen(messageId) {
+        const accepted = super.markSeen(messageId);
+        this.persist();
+        return accepted;
+    }
+    load() {
+        if (!existsSync(this.filePath)) {
+            return;
+        }
+        try {
+            const parsed = JSON.parse(readFileSync(this.filePath, 'utf8'));
+            if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.entries)) {
+                return;
+            }
+            const now = Date.now();
+            for (const entry of parsed.entries) {
+                if (entry?.messageId && typeof entry.expiresAt === 'number' && entry.expiresAt > now) {
+                    this.seen.set(entry.messageId, entry.expiresAt);
+                }
+            }
+            this.persist();
+        }
+        catch {
+            return;
+        }
+    }
+    persist() {
+        mkdirSync(dirname(this.filePath), { recursive: true });
+        const now = Date.now();
+        const entries = [...this.seen.entries()]
+            .filter(([, expiresAt]) => expiresAt > now)
+            .map(([messageId, expiresAt]) => ({ messageId, expiresAt }));
+        const doc = {
+            schemaVersion: 1,
+            entries,
+        };
+        writeFileSync(this.filePath, JSON.stringify(doc, null, 2), 'utf8');
     }
 }

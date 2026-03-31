@@ -1,5 +1,10 @@
 import type { BaseTaskRecord, TaskExecutionResult } from './types.js';
-import { InMemoryTaskStore } from './store.js';
+export interface TaskStore<TTask extends BaseTaskRecord, TCreateInput> {
+    create(input: TCreateInput): TTask;
+    get(taskId: string): TTask | undefined;
+    update(taskId: string, patch: Partial<TTask>): TTask | undefined;
+    listBySession(sessionId: string): TTask[];
+}
 export interface TaskExecutionRequest<TRequest> {
     request: TRequest;
     sessionId: string;
@@ -7,7 +12,7 @@ export interface TaskExecutionRequest<TRequest> {
     signal: AbortSignal;
 }
 export interface SerialTaskManagerOptions<TRequest, TTask extends BaseTaskRecord, TCreateInput> {
-    store: InMemoryTaskStore<TTask, TCreateInput>;
+    store: TaskStore<TTask, TCreateInput>;
     createTaskInput(request: TRequest, sessionId: string, options?: unknown): TCreateInput;
     buildAckMessage(task: TTask, options?: unknown): string;
     buildCompletionSummary(task: TTask): string;
@@ -15,7 +20,7 @@ export interface SerialTaskManagerOptions<TRequest, TTask extends BaseTaskRecord
     notify(request: TRequest, text: string): Promise<void> | void;
 }
 export declare class SerialTaskManager<TRequest, TTask extends BaseTaskRecord, TCreateInput> {
-    protected readonly store: InMemoryTaskStore<TTask, TCreateInput>;
+    protected readonly store: TaskStore<TTask, TCreateInput>;
     private readonly running;
     private readonly sessionTails;
     private readonly activeBySession;
