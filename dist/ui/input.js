@@ -12,6 +12,9 @@ function log(msg) {
 const BASE_SLASH_COMMANDS = [
     { cmd: '/exit', desc: 'Exit the chat' },
     { cmd: '/clear', desc: 'Clear the screen' },
+    { cmd: '/commit', desc: 'Commit staged changes' },
+    { cmd: '/review', desc: 'Summarize current git changes' },
+    { cmd: '/pr', desc: 'Create or preview a pull request' },
     { cmd: '/models', desc: 'Switch model' },
     { cmd: '/mode', desc: 'Show or change permission mode' },
     { cmd: '/tasks', desc: 'List workflow tasks' },

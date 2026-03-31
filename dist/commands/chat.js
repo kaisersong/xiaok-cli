@@ -26,6 +26,9 @@ import { InputReader } from '../ui/input.js';
 import { parseInputBlocks } from '../ui/image-input.js';
 import { selectModel } from '../ui/model-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
+import { runCommitCommand } from './commit.js';
+import { runReviewCommand } from './review.js';
+import { runPrCommand } from './pr.js';
 async function runChat(initialInput, opts) {
     if ((opts.print || opts.json) && !initialInput) {
         writeError('print/json 模式需要提供单次输入');
@@ -312,6 +315,9 @@ async function runChat(initialInput, opts) {
             process.stdout.write('\n可用命令：\n');
             process.stdout.write('  /exit    - 退出\n');
             process.stdout.write('  /clear   - 清屏\n');
+            process.stdout.write('  /commit [message] - 提交已暂存改动\n');
+            process.stdout.write('  /review  - 查看当前 git 改动概览\n');
+            process.stdout.write('  /pr      - 创建或预览 PR\n');
             process.stdout.write('  /models  - 切换模型\n');
             process.stdout.write('  /mode [default|auto|plan] - 查看或切换权限模式\n');
             process.stdout.write('  /tasks   - 查看当前会话任务\n');
@@ -396,6 +402,34 @@ async function runChat(initialInput, opts) {
             }
             else {
                 process.stdout.write('已取消\n\n');
+            }
+            continue;
+        }
+        if (trimmed.startsWith('/commit')) {
+            const message = trimmed.slice('/commit'.length).trim() || undefined;
+            try {
+                process.stdout.write(`${await runCommitCommand(cwd, message)}\n\n`);
+            }
+            catch (e) {
+                writeError(String(e));
+            }
+            continue;
+        }
+        if (trimmed === '/review') {
+            try {
+                process.stdout.write(`${await runReviewCommand(cwd)}\n\n`);
+            }
+            catch (e) {
+                writeError(String(e));
+            }
+            continue;
+        }
+        if (trimmed === '/pr') {
+            try {
+                process.stdout.write(`${await runPrCommand(cwd)}\n\n`);
+            }
+            catch (e) {
+                writeError(String(e));
             }
             continue;
         }

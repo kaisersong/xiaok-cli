@@ -14,4 +14,24 @@ describe('chat workflow wiring', () => {
     expect(source).toContain("trimmed.startsWith('/mode')");
     expect(source).toContain("trimmed === '/tasks'");
   });
+
+  it('intercepts built-in git workflow commands before slash skill dispatch', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+
+    expect(source).toContain("from './commit.js'");
+    expect(source).toContain("from './review.js'");
+    expect(source).toContain("from './pr.js'");
+    expect(source).toContain("trimmed === '/review'");
+    expect(source).toContain("trimmed === '/pr'");
+    expect(source).toContain("trimmed.startsWith('/commit')");
+    expect(source).toContain('runCommitCommand');
+    expect(source).toContain('runReviewCommand');
+    expect(source).toContain('runPrCommand');
+
+    const reviewIndex = source.indexOf("trimmed === '/review'");
+    const slashIndex = source.indexOf('const slash = parseSlashCommand(trimmed);');
+    expect(reviewIndex).toBeGreaterThan(-1);
+    expect(slashIndex).toBeGreaterThan(-1);
+    expect(reviewIndex).toBeLessThan(slashIndex);
+  });
 });
