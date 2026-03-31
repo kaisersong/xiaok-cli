@@ -176,6 +176,16 @@ Examples:
 /deploy prepare a release checklist
 ```
 
+## Docs Workflow
+
+Project documentation for `xiaok-cli` now lives in the sibling repository path `../mydocs/xiaok-cli`.
+
+- In this repo, `docs` is a symlink to `../mydocs/xiaok-cli`
+- Commit documentation content in the `mydocs` repository
+- Keep code, tests, and runtime changes in the `xiaok-cli` repository
+
+The local pre-commit hook blocks staging `docs/...` content inside `xiaok-cli` so docs do not drift back into the project repo.
+
 ## Yunzhijia Gateway
 
 Configure the Yunzhijia robot URL:

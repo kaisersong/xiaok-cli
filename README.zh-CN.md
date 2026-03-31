@@ -169,6 +169,16 @@ skills 会从以下位置加载：
 /deploy 生成一份发布检查清单
 ```
 
+## 文档工作流
+
+`xiaok-cli` 的项目文档现在放在同级仓库路径 `../mydocs/xiaok-cli`。
+
+- 当前仓库里的 `docs` 是指向 `../mydocs/xiaok-cli` 的符号链接
+- 文档内容提交到 `mydocs` 仓库
+- 代码、测试和运行时改动继续提交到 `xiaok-cli` 仓库
+
+本地 pre-commit hook 会阻止把 `docs/...` 实体内容重新提交回 `xiaok-cli`，避免两个仓库再次漂移。
+
 ## 云之家接入
 
 先配置云之家机器人 `sendMsgUrl`：
