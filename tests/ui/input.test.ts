@@ -15,11 +15,14 @@ describe('getSlashCommands', () => {
 
     expect(commands).toContainEqual({ cmd: '/exit', desc: 'Exit the chat' });
     expect(commands).toContainEqual({ cmd: '/clear', desc: 'Clear the screen' });
+    expect(commands).toContainEqual({ cmd: '/commit', desc: 'Commit staged changes' });
+    expect(commands).toContainEqual({ cmd: '/review', desc: 'Summarize current git changes' });
+    expect(commands).toContainEqual({ cmd: '/pr', desc: 'Create or preview a pull request' });
     expect(commands).toContainEqual({ cmd: '/models', desc: 'Switch model' });
     expect(commands).toContainEqual({ cmd: '/mode', desc: 'Show or change permission mode' });
     expect(commands).toContainEqual({ cmd: '/tasks', desc: 'List workflow tasks' });
     expect(commands).toContainEqual({ cmd: '/help', desc: 'Show help' });
-    expect(commands.length).toBe(6);
+    expect(commands.length).toBe(9);
   });
 
   it('should include skills in command list', () => {
@@ -35,7 +38,7 @@ describe('getSlashCommands', () => {
     const commands = getSlashCommands(skills);
 
     expect(commands).toContainEqual({ cmd: '/test-skill', desc: 'A test skill' });
-    expect(commands.length).toBe(7); // 6 base + 1 skill
+    expect(commands.length).toBe(10); // 9 base + 1 skill
   });
 
   it('should sort commands alphabetically', () => {
@@ -73,7 +76,7 @@ describe('getSlashCommands', () => {
 
     const commands = getSlashCommands(skills);
 
-    expect(commands.length).toBe(9); // 6 base + 3 skills
+    expect(commands.length).toBe(12); // 9 base + 3 skills
   });
 });
 
@@ -180,8 +183,8 @@ describe('InputReader', () => {
 
       const commands = getSlashCommands(skills);
 
-      // 6 base commands + 20 skills = 26 total
-      expect(commands.length).toBe(26);
+      // 9 base commands + 20 skills = 29 total
+      expect(commands.length).toBe(29);
     });
 
     it('should preserve command descriptions', () => {
