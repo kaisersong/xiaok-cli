@@ -17,9 +17,11 @@ import { SessionTaskBoard } from '../runtime/tasking/board.js';
 import { writeError, isTTY } from '../utils/ui.js';
 import { showPermissionPrompt } from '../ui/permission-prompt.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
+import { loadSettings, mergeRules } from '../ai/permissions/settings.js';
 import { createSkillCatalog, parseSlashCommand } from '../ai/skills/loader.js';
 import { createSkillTool, formatSkillPayload } from '../ai/skills/tool.js';
 import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
+import { loadAutoContext, formatLoadedContext } from '../ai/runtime/context-loader.js';
 import { FileSessionStore, type PersistedSessionSnapshot } from '../ai/runtime/session-store.js';
 import { formatPrintOutput } from './chat-print-mode.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
@@ -32,6 +34,8 @@ import { getCurrentBranch } from '../utils/git.js';
 import { runCommitCommand } from './commit.js';
 import { runReviewCommand } from './review.js';
 import { runPrCommand } from './pr.js';
+import { runDoctorCommand } from './doctor.js';
+import { runInitCommand } from './init.js';
 
 interface ChatOptions {
   auto: boolean;
@@ -371,10 +375,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       process.stdout.write('  /exit    - 退出\n');
       process.stdout.write('  /clear   - 清屏\n');
       process.stdout.write('  /commit [message] - 提交已暂存改动\n');
+      process.stdout.write('  /context - 查看当前加载的仓库上下文\n');
+      process.stdout.write('  /doctor  - 检查本地 CLI 环境\n');
+      process.stdout.write('  /init    - 初始化项目配置\n');
       process.stdout.write('  /review  - 查看当前 git 改动概览\n');
       process.stdout.write('  /pr      - 创建或预览 PR\n');
       process.stdout.write('  /models  - 切换模型\n');
       process.stdout.write('  /mode [default|auto|plan] - 查看或切换权限模式\n');
+      process.stdout.write('  /settings - 查看当前生效配置\n');
       process.stdout.write('  /tasks   - 查看当前会话任务\n');
       process.stdout.write('  /task <id> - 查看任务详情\n');
       process.stdout.write('  /compact - 手动压缩上下文\n');
@@ -490,6 +498,48 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (trimmed === '/pr') {
       try {
         process.stdout.write(`${await runPrCommand(cwd)}\n\n`);
+      } catch (e) {
+        writeError(String(e));
+      }
+      continue;
+    }
+
+    if (trimmed === '/doctor') {
+      try {
+        process.stdout.write(`${await runDoctorCommand(cwd)}\n\n`);
+      } catch (e) {
+        writeError(String(e));
+      }
+      continue;
+    }
+
+    if (trimmed === '/init') {
+      try {
+        process.stdout.write(`${await runInitCommand(cwd)}\n\n`);
+      } catch (e) {
+        writeError(String(e));
+      }
+      continue;
+    }
+
+    if (trimmed === '/settings') {
+      try {
+        const settings = await loadSettings(cwd);
+        const rules = mergeRules(settings);
+        process.stdout.write(`${JSON.stringify({
+          config,
+          permissions: rules,
+        }, null, 2)}\n\n`);
+      } catch (e) {
+        writeError(String(e));
+      }
+      continue;
+    }
+
+    if (trimmed === '/context') {
+      try {
+        const context = await loadAutoContext({ cwd });
+        process.stdout.write(`${formatLoadedContext(context) || '当前没有可展示的仓库上下文。'}\n\n`);
       } catch (e) {
         writeError(String(e));
       }

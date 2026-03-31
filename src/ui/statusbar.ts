@@ -60,28 +60,29 @@ export class StatusBar {
     if (!this.enabled) return "";
 
     const parts: string[] = [];
-
-    // Project name (directory name)
     const projectName = this.cwd.split('/').filter(Boolean).pop() || 'xiaok';
-    parts.push(projectName);
 
-    // Model name
-    parts.push(this.model);
+    for (const field of this.fields) {
+      if (field === "session" && projectName) {
+        parts.push(projectName);
+      }
+      if (field === "model" && this.model) {
+        parts.push(this.model);
+      }
+      if (field === "mode" && this.mode && this.mode !== "default") {
+        parts.push(this.mode);
+      }
+      if (field === "tokens" && this.usage.budget && this.usage.budget > 0) {
+        const total = this.usage.inputTokens + this.usage.outputTokens;
+        const pct = Math.round((total / this.usage.budget) * 100);
+        parts.push(`${pct}%`);
+      }
+    }
 
-    // Branch (if set)
-    if (this.branch) {
+    if (!this.fields.includes("mode") && this.branch) {
       parts.push(this.branch);
-    }
-
-    if (this.mode && this.mode !== "default") {
-      parts.push(this.mode);
-    }
-
-    // Token usage: "26%"
-    if (this.usage.budget && this.usage.budget > 0) {
-      const total = this.usage.inputTokens + this.usage.outputTokens;
-      const pct = Math.round((total / this.usage.budget) * 100);
-      parts.push(`${pct}%`);
+    } else if (this.fields.includes("mode") && this.fields.includes("session") && this.branch) {
+      parts.splice(Math.min(parts.length, 2), 0, this.branch);
     }
 
     return dim(parts.join(' · '));

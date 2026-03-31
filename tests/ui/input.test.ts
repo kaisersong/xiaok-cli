@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   InputReader,
   cyclePermissionMode,
@@ -19,11 +21,15 @@ describe('getSlashCommands', () => {
     expect(commands).toContainEqual({ cmd: '/commit', desc: 'Commit staged changes' });
     expect(commands).toContainEqual({ cmd: '/review', desc: 'Summarize current git changes' });
     expect(commands).toContainEqual({ cmd: '/pr', desc: 'Create or preview a pull request' });
+    expect(commands).toContainEqual({ cmd: '/doctor', desc: 'Inspect local CLI health' });
+    expect(commands).toContainEqual({ cmd: '/init', desc: 'Initialize project xiaok settings' });
+    expect(commands).toContainEqual({ cmd: '/settings', desc: 'Show active CLI settings' });
+    expect(commands).toContainEqual({ cmd: '/context', desc: 'Show loaded repo context' });
     expect(commands).toContainEqual({ cmd: '/models', desc: 'Switch model' });
     expect(commands).toContainEqual({ cmd: '/mode', desc: 'Show or change permission mode' });
     expect(commands).toContainEqual({ cmd: '/tasks', desc: 'List workflow tasks' });
     expect(commands).toContainEqual({ cmd: '/help', desc: 'Show help' });
-    expect(commands.length).toBe(9);
+    expect(commands.length).toBe(13);
   });
 
   it('should include skills in command list', () => {
@@ -39,7 +45,7 @@ describe('getSlashCommands', () => {
     const commands = getSlashCommands(skills);
 
     expect(commands).toContainEqual({ cmd: '/test-skill', desc: 'A test skill' });
-    expect(commands.length).toBe(10); // 9 base + 1 skill
+    expect(commands.length).toBe(14); // 13 base + 1 skill
   });
 
   it('should sort commands alphabetically', () => {
@@ -77,15 +83,22 @@ describe('getSlashCommands', () => {
 
     const commands = getSlashCommands(skills);
 
-    expect(commands.length).toBe(12); // 9 base + 3 skills
+    expect(commands.length).toBe(16); // 13 base + 3 skills
   });
 });
 
 describe('InputReader', () => {
   let reader: InputReader;
+  let originalIsTTY: boolean | undefined;
 
   beforeEach(() => {
     reader = new InputReader();
+    originalIsTTY = process.stdin.isTTY;
+  });
+
+  afterEach(() => {
+    process.stdin.isTTY = originalIsTTY;
+    vi.restoreAllMocks();
   });
 
   describe('setSkills', () => {
@@ -115,6 +128,11 @@ describe('InputReader', () => {
       // This test verifies that the input line is cleared after Enter is pressed
       // The actual behavior is tested in integration tests
       expect(reader).toBeDefined();
+    });
+
+    it('uses stdout for readline output in non-tty mode', async () => {
+      const source = readFileSync(join(process.cwd(), 'src', 'ui', 'input.ts'), 'utf8');
+      expect(source).toContain("readline.createInterface({ input: stdin, output: stdout })");
     });
   });
 
@@ -184,8 +202,8 @@ describe('InputReader', () => {
 
       const commands = getSlashCommands(skills);
 
-      // 9 base commands + 20 skills = 29 total
-      expect(commands.length).toBe(29);
+      // 13 base commands + 20 skills = 33 total
+      expect(commands.length).toBe(33);
     });
 
     it('should preserve command descriptions', () => {

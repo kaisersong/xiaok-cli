@@ -13,10 +13,14 @@ const BASE_SLASH_COMMANDS = [
     { cmd: '/exit', desc: 'Exit the chat' },
     { cmd: '/clear', desc: 'Clear the screen' },
     { cmd: '/commit', desc: 'Commit staged changes' },
+    { cmd: '/context', desc: 'Show loaded repo context' },
+    { cmd: '/doctor', desc: 'Inspect local CLI health' },
+    { cmd: '/init', desc: 'Initialize project xiaok settings' },
     { cmd: '/review', desc: 'Summarize current git changes' },
     { cmd: '/pr', desc: 'Create or preview a pull request' },
     { cmd: '/models', desc: 'Switch model' },
     { cmd: '/mode', desc: 'Show or change permission mode' },
+    { cmd: '/settings', desc: 'Show active CLI settings' },
     { cmd: '/tasks', desc: 'List workflow tasks' },
     { cmd: '/help', desc: 'Show help' },
 ];
@@ -79,6 +83,47 @@ export function cyclePermissionMode(mode) {
         return 'plan';
     return 'default';
 }
+export function createInputHistoryState() {
+    return { undoStack: [], redoStack: [] };
+}
+export function pushInputHistory(state, input, cursor) {
+    const last = state.undoStack[state.undoStack.length - 1];
+    if (last && last.input === input && last.cursor === cursor) {
+        return state;
+    }
+    return {
+        undoStack: [...state.undoStack, { input, cursor }],
+        redoStack: [],
+    };
+}
+export function undoInputHistory(state, currentInput, currentCursor) {
+    if (state.undoStack.length <= 1) {
+        return { history: state, input: currentInput, cursor: currentCursor };
+    }
+    const previous = state.undoStack[state.undoStack.length - 2];
+    return {
+        history: {
+            undoStack: state.undoStack.slice(0, -1),
+            redoStack: [{ input: currentInput, cursor: currentCursor }, ...state.redoStack],
+        },
+        input: previous.input,
+        cursor: previous.cursor,
+    };
+}
+export function redoInputHistory(state, currentInput, currentCursor) {
+    const [next, ...remainingRedo] = state.redoStack;
+    if (!next) {
+        return { history: state, input: currentInput, cursor: currentCursor };
+    }
+    return {
+        history: {
+            undoStack: [...state.undoStack, { input: currentInput, cursor: currentCursor }, next],
+            redoStack: remainingRedo,
+        },
+        input: next.input,
+        cursor: next.cursor,
+    };
+}
 export class InputReader {
     history = [];
     historyIdx = 0;
@@ -95,7 +140,7 @@ export class InputReader {
     }
     async read(prompt) {
         if (!stdin.isTTY) {
-            const rl = readline.createInterface({ input: stdin, output: stdin });
+            const rl = readline.createInterface({ input: stdin, output: stdout });
             return new Promise((resolve) => {
                 rl.question(prompt, (answer) => {
                     rl.close();
@@ -107,6 +152,7 @@ export class InputReader {
             let input = '';
             let cursor = 0;
             let resolved = false;
+            let historyState = pushInputHistory(createInputHistoryState(), '', 0);
             const redraw = () => {
                 stdout.write(`\r\x1b[K${prompt}${input}`);
                 const back = input.length - cursor;
@@ -217,6 +263,7 @@ export class InputReader {
                     if (cursor > 0) {
                         input = input.slice(0, cursor - 1) + input.slice(cursor);
                         cursor--;
+                        historyState = pushInputHistory(historyState, input, cursor);
                         redraw();
                         if (input.startsWith('/')) {
                             updateMenu(input);
@@ -313,12 +360,29 @@ export class InputReader {
                     }
                     return;
                 }
+                if (key === '\x1a') {
+                    const undone = undoInputHistory(historyState, input, cursor);
+                    historyState = undone.history;
+                    input = undone.input;
+                    cursor = undone.cursor;
+                    redraw();
+                    return;
+                }
+                if (key === '\x1b[122;6u') {
+                    const redone = redoInputHistory(historyState, input, cursor);
+                    historyState = redone.history;
+                    input = redone.input;
+                    cursor = redone.cursor;
+                    redraw();
+                    return;
+                }
                 // Ctrl+W — 删除光标左侧一个词
                 if (key === '\x17') {
                     const newCursor = wordBoundaryLeft(input, cursor);
                     if (newCursor < cursor) {
                         input = input.slice(0, newCursor) + input.slice(cursor);
                         cursor = newCursor;
+                        historyState = pushInputHistory(historyState, input, cursor);
                         redraw();
                         if (input.startsWith('/') && input.length > 0) {
                             updateMenu(input);
@@ -350,6 +414,7 @@ export class InputReader {
                 if (key.length >= 1 && key >= ' ' && !/[\x1b\x7f]/.test(key)) {
                     input = input.slice(0, cursor) + key + input.slice(cursor);
                     cursor += key.length;
+                    historyState = pushInputHistory(historyState, input, cursor);
                     redraw();
                     if (input.startsWith('/')) {
                         if (this.menuOpen) {
