@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { registerAuthCommands } from './commands/auth.js';
 import { registerConfigCommands } from './commands/config.js';
@@ -6,11 +7,12 @@ import { registerChatCommands } from './commands/chat.js';
 import { registerDoctorCommands } from './commands/doctor.js';
 import { registerInitCommands } from './commands/init.js';
 import { registerYZJCommands } from './commands/yzj.js';
+const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const program = new Command();
 program
     .name('xiaok')
     .description('面向云之家开发者的 AI 编程助手 CLI')
-    .version('0.1.0');
+    .version(version);
 registerAuthCommands(program);
 registerConfigCommands(program);
 registerDoctorCommands(program);

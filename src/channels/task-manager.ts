@@ -67,7 +67,19 @@ export class TaskManager extends SerialTaskManager<ChannelRequest, RemoteTask, {
 
     return this.listTasks(sessionId).find((task) =>
       task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval'
-    ) ?? this.getLatestTask(sessionId);
+    );
+  }
+
+  listRecoveredInterruptedTasks(sessionId: string): RemoteTask[] {
+    return this.listTasks(sessionId).filter((task) => {
+      if (task.status !== 'failed' || !task.errorMessage) {
+        return false;
+      }
+
+      return task.errorMessage.includes('interrupted by process restart')
+        || task.errorMessage.includes('网关重启后审批已失效')
+        || task.errorMessage.includes('审批流程已中断');
+    });
   }
 
   getActiveReplyTarget(sessionId: string): ChannelReplyTarget | undefined {

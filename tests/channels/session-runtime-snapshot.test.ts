@@ -49,4 +49,39 @@ describe('session runtime snapshot', () => {
     expect(snapshot).not.toContain('task interrupted by process restart');
     expect(snapshot).not.toContain('background job interrupted by process restart');
   });
+
+  it('shows recovered interrupted tasks in a separate section from the current task', () => {
+    const snapshot = formatSessionRuntimeSnapshot({
+      sessionId: 'sess_3',
+      taskStatus: '任务 task_live\n状态：running',
+      recoveredTasks: [
+        '任务 task_old\n状态：failed\n错误：task interrupted by process restart',
+      ],
+      backgroundJobs: [],
+      approvals: [],
+      capabilityHealth: '平台能力状态：正常\ncapabilities: none declared',
+    });
+
+    expect(snapshot).toContain('任务 task_live');
+    expect(snapshot).toContain('最近恢复任务：');
+    expect(snapshot).toContain('任务 task_old');
+    expect(snapshot).toContain('错误：进程重启后任务已中断，请重新发起');
+  });
+
+  it('shows that there is no active task when only recovered tasks remain', () => {
+    const snapshot = formatSessionRuntimeSnapshot({
+      sessionId: 'sess_4',
+      taskStatus: '当前任务：无',
+      recoveredTasks: [
+        '任务 task_recovered\n状态：failed\n错误：task interrupted by process restart',
+      ],
+      backgroundJobs: [],
+      approvals: [],
+      capabilityHealth: '平台能力状态：正常\ncapabilities: none declared',
+    });
+
+    expect(snapshot).toContain('当前任务：无');
+    expect(snapshot).toContain('最近恢复任务：');
+    expect(snapshot).toContain('任务 task_recovered');
+  });
 });

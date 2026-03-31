@@ -404,7 +404,18 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
             formatSessionRuntimeSnapshot({
               sessionId,
               binding,
-              taskStatus: task ? taskManager.formatStatus(task) : buildMissingTaskMessage(command.taskId),
+              taskStatus: task
+                ? taskManager.formatStatus(task)
+                : command.taskId
+                  ? buildMissingTaskMessage(command.taskId)
+                  : '当前任务：无',
+              recoveredTasks: command.taskId
+                ? []
+                : taskManager
+                    .listRecoveredInterruptedTasks(sessionId)
+                    .filter((entry) => entry.taskId !== task?.taskId)
+                    .slice(0, 3)
+                    .map((entry) => taskManager.formatStatus(entry)),
               backgroundJobs: formatBackgroundJobStatus(skillState.platform, sessionId, task?.taskId),
               approvals: approvalStore
                 .listPending()

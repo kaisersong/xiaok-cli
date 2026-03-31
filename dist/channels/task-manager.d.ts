@@ -30,6 +30,7 @@ export declare class TaskManager extends SerialTaskManager<ChannelRequest, Remot
     constructor(options: TaskManagerOptions);
     getActiveTask(sessionId: string): RemoteTask | undefined;
     getPreferredStatusTask(sessionId: string): RemoteTask | undefined;
+    listRecoveredInterruptedTasks(sessionId: string): RemoteTask[];
     getActiveReplyTarget(sessionId: string): ChannelReplyTarget | undefined;
     setTaskEvent(taskId: string, latestEvent: string): RemoteTask | undefined;
     setSessionProgress(sessionId: string, latestEvent: string): RemoteTask | undefined;

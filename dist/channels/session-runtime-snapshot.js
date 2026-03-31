@@ -15,6 +15,13 @@ export function formatSessionRuntimeSnapshot(input) {
     lines.push('');
     lines.push(normalizeRuntimeStatusText(input.taskStatus));
     lines.push('');
+    if ((input.recoveredTasks?.length ?? 0) > 0) {
+        lines.push('最近恢复任务：');
+        for (const task of input.recoveredTasks ?? []) {
+            lines.push(normalizeRuntimeStatusText(task));
+            lines.push('');
+        }
+    }
     if (input.backgroundJobs.length === 0) {
         lines.push('后台任务：无');
     }

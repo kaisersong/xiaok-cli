@@ -100,6 +100,30 @@ describe('TaskManager', () => {
 
     expect(manager.getLatestTask('sess_1')?.taskId).toBe(recovered.taskId);
     expect(manager.getPreferredStatusTask('sess_1')?.taskId).toBe(running.taskId);
+    expect(manager.listRecoveredInterruptedTasks('sess_1').map((task) => task.taskId)).toEqual([recovered.taskId]);
+  });
+
+  it('returns no preferred status task when a session only has recovered interrupted tasks', async () => {
+    const manager = new TaskManager({
+      notify: async () => undefined,
+      execute: async () => ({
+        ok: true,
+        generationMs: 0,
+        deliveryMs: 0,
+        replyLength: 0,
+      }),
+    });
+
+    const recovered = await manager.createAndStart(createRequest('重启前中断'), 'sess_1');
+    (manager as unknown as { updateTask(taskId: string, patch: Record<string, unknown>): void }).updateTask(recovered.taskId, {
+      status: 'failed',
+      errorMessage: 'task interrupted by process restart',
+      finishedAt: Date.now(),
+    });
+
+    expect(manager.getLatestTask('sess_1')?.taskId).toBe(recovered.taskId);
+    expect(manager.getPreferredStatusTask('sess_1')).toBeUndefined();
+    expect(manager.listRecoveredInterruptedTasks('sess_1').map((task) => task.taskId)).toEqual([recovered.taskId]);
   });
 
   it('cancels a running task through AbortController', async () => {

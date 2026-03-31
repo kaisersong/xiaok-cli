@@ -94,7 +94,7 @@ npm run dev -- --help
 node dist/index.js --help
 ```
 
-当前分支包版本：`0.1.2`
+当前分支包版本：`0.1.3`
 
 ## 配置
 

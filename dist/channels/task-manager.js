@@ -32,7 +32,17 @@ export class TaskManager extends SerialTaskManager {
         if (active) {
             return active;
         }
-        return this.listTasks(sessionId).find((task) => task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval') ?? this.getLatestTask(sessionId);
+        return this.listTasks(sessionId).find((task) => task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval');
+    }
+    listRecoveredInterruptedTasks(sessionId) {
+        return this.listTasks(sessionId).filter((task) => {
+            if (task.status !== 'failed' || !task.errorMessage) {
+                return false;
+            }
+            return task.errorMessage.includes('interrupted by process restart')
+                || task.errorMessage.includes('网关重启后审批已失效')
+                || task.errorMessage.includes('审批流程已中断');
+        });
     }
     getActiveReplyTarget(sessionId) {
         return this.getActiveTask(sessionId)?.replyTarget;

@@ -12,6 +12,7 @@ export interface SessionRuntimeSnapshotInput {
     sessionId: string;
     binding?: SessionBinding | null;
     taskStatus: string;
+    recoveredTasks?: string[];
     backgroundJobs: SessionRuntimeSnapshotBackgroundJob[];
     approvals: SessionRuntimeSnapshotApproval[];
     capabilityHealth: string;

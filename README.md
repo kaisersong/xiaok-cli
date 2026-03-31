@@ -94,7 +94,7 @@ Run built CLI:
 node dist/index.js --help
 ```
 
-Package version in this branch: `0.1.2`
+Package version in this branch: `0.1.3`
 
 ## Configuration
 
