@@ -140,13 +140,16 @@ export function renderWelcomeScreen(opts) {
     const modelInfo = `${opts.model} · ${opts.mode}`;
     const sessionInfo = `Session: ${opts.sessionId}`;
     const sessionWidth = getDisplayWidth(sessionInfo);
+    const versionInfo = `Version: ${opts.version}`;
+    const versionWidth = getDisplayWidth(versionInfo);
     const modelLine = " " + dim(modelInfo) + " ".repeat(leftWidth - modelInfo.length - 1);
     const sessionLine = " " + dim(sessionInfo) + " ".repeat(rightWidth - sessionWidth - 1);
     console.log(dim("│") + modelLine + dim("│") + sessionLine + dim("│"));
     lineCount++;
     const cwdShort = opts.cwd.length > leftWidth - 2 ? "..." + opts.cwd.slice(-(leftWidth - 5)) : opts.cwd;
     const cwdLine = " " + dim(cwdShort) + " ".repeat(leftWidth - cwdShort.length - 1);
-    console.log(dim("│") + cwdLine + dim("│") + " ".repeat(rightWidth) + dim("│"));
+    const versionLine = " " + dim(versionInfo) + " ".repeat(rightWidth - versionWidth - 1);
+    console.log(dim("│") + cwdLine + dim("│") + versionLine + dim("│"));
     lineCount++;
     console.log(dim("╰") + dim("─".repeat(leftWidth)) + dim("┴") + dim("─".repeat(rightWidth)) + dim("╯"));
     lineCount++;

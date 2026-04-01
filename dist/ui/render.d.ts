@@ -28,6 +28,7 @@ export declare function renderWelcomeScreen(opts: {
     cwd: string;
     sessionId: string;
     mode: string;
+    version: string;
 }): number;
 export declare function renderInputSeparator(): void;
 export declare function renderInputPrompt(): void;

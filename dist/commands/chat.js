@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { loadConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
@@ -40,6 +41,7 @@ import { createInstallSkillTool } from '../ai/tools/install-skill.js';
 import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
 import { executeNamedSubAgent } from '../ai/agents/subagent-executor.js';
 import { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
+const { version: cliVersion } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 async function runChat(initialInput, opts) {
     if ((opts.print || opts.json) && !initialInput) {
         writeError('print/json 模式需要提供单次输入');
@@ -314,6 +316,7 @@ async function runChat(initialInput, opts) {
             cwd: process.cwd(),
             sessionId,
             mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
+            version: cliVersion,
         });
         // 设置初始 usage
         statusBar.update({ inputTokens: 0, outputTokens: 0, budget: config.contextBudget });
@@ -372,6 +375,7 @@ async function runChat(initialInput, opts) {
                     cwd: process.cwd(),
                     sessionId,
                     mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
+                    version: cliVersion,
                 });
                 statusBar.render();
                 continue;

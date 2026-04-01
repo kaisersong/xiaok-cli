@@ -4,6 +4,8 @@ import {
   formatToolActivity,
   renderInputSeparator,
   renderInputPrompt,
+  renderWelcomeScreen,
+  setColorsEnabled,
 } from '../../src/ui/render.js';
 
 describe('renderInputSeparator', () => {
@@ -125,5 +127,46 @@ describe('formatToolActivity', () => {
     const output = formatToolActivity('web_fetch', { url: 'https://example.com' }, 120, 'en');
 
     expect(output).toBe('• Fetch page https://example.com');
+  });
+});
+
+describe('renderWelcomeScreen', () => {
+  let originalColumns: number | undefined;
+  let originalConsoleLog: typeof console.log;
+
+  beforeEach(() => {
+    originalColumns = process.stdout.columns;
+    originalConsoleLog = console.log;
+    setColorsEnabled(false);
+  });
+
+  afterEach(() => {
+    if (originalColumns !== undefined) {
+      process.stdout.columns = originalColumns;
+    }
+    console.log = originalConsoleLog;
+  });
+
+  it('renders version below the session info', () => {
+    process.stdout.columns = 100;
+
+    const lines: string[] = [];
+    console.log = ((...args: unknown[]) => {
+      lines.push(args.join(' '));
+    }) as typeof console.log;
+
+    renderWelcomeScreen({
+      model: 'gpt-5.4',
+      cwd: '/Users/song/projects/xiaok-cli',
+      sessionId: 'session-123',
+      mode: 'default',
+      version: '0.1.4',
+    });
+
+    const sessionLineIndex = lines.findIndex((line) => line.includes('Session: session-123'));
+    const versionLineIndex = lines.findIndex((line) => line.includes('Version: 0.1.4'));
+
+    expect(sessionLineIndex).toBeGreaterThanOrEqual(0);
+    expect(versionLineIndex).toBe(sessionLineIndex + 1);
   });
 });

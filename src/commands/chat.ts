@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { Command } from 'commander';
 import type { ModelAdapter } from '../types.js';
 import { loadConfig } from '../utils/config.js';
@@ -43,6 +44,10 @@ import { createInstallSkillTool } from '../ai/tools/install-skill.js';
 import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
 import { executeNamedSubAgent } from '../ai/agents/subagent-executor.js';
 import { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
+
+const { version: cliVersion } = JSON.parse(
+  readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+) as { version: string };
 
 interface ChatOptions {
   auto: boolean;
@@ -354,6 +359,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       cwd: process.cwd(),
       sessionId,
       mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
+      version: cliVersion,
     });
 
     // 设置初始 usage
@@ -423,6 +429,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         cwd: process.cwd(),
         sessionId,
         mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
+        version: cliVersion,
       });
       statusBar.render();
       continue;
