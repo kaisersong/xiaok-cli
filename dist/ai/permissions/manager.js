@@ -1,3 +1,4 @@
+import { PermissionPolicyEngine, matches } from './policy-engine.js';
 export class PermissionManager {
     mode;
     allowRules;
@@ -31,7 +32,16 @@ export class PermissionManager {
         return 'default';
     }
     async check(toolName, input) {
-        if (this.matches(this.denyRules, toolName, input)) {
+        const policy = new PermissionPolicyEngine({
+            globalAllow: this.allowRules,
+            globalDeny: this.denyRules,
+            projectAllow: [],
+            projectDeny: [],
+            sessionAllow: [],
+            sessionDeny: [],
+        });
+        const evaluation = await policy.evaluate(toolName, input);
+        if (evaluation.action === 'deny') {
             return 'deny';
         }
         if (this.mode === 'plan' && ['write', 'edit', 'bash'].includes(toolName)) {
@@ -43,21 +53,20 @@ export class PermissionManager {
         if (['read', 'glob', 'grep', 'skill', 'tool_search'].includes(toolName)) {
             return 'allow';
         }
-        if (this.matches(this.allowRules, toolName, input)) {
+        if (evaluation.action === 'allow') {
             return 'allow';
         }
         return 'prompt';
     }
     matches(rules, toolName, input) {
-        return rules.some((rule) => {
-            const [ruleTool, pattern = '*'] = rule.includes(':') ? rule.split(':', 2) : [toolName, rule];
-            if (ruleTool !== toolName) {
-                return false;
-            }
-            const target = this.getRuleTarget(input);
-            const regex = new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
-            return regex.test(target);
-        });
+        return matches(rules, toolName, input);
+    }
+    buildRuleRegex(pattern) {
+        if (pattern.endsWith(' *')) {
+            const prefix = pattern.slice(0, -2);
+            return new RegExp(`^${prefix.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}(?: .*)?$`);
+        }
+        return new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
     }
     getRuleTarget(input) {
         if (typeof input.command === 'string') {

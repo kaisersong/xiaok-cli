@@ -17,5 +17,6 @@ export declare class PermissionManager {
     static nextMode(mode: PermissionMode): PermissionMode;
     check(toolName: string, input: Record<string, unknown>): Promise<PermissionDecision>;
     private matches;
+    private buildRuleRegex;
     private getRuleTarget;
 }

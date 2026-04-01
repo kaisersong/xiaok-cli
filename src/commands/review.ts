@@ -1,3 +1,4 @@
+import type { Command } from 'commander';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
@@ -46,4 +47,14 @@ export async function runReviewCommand(cwd: string): Promise<string> {
     '未暂存改动：',
     unstaged || '无',
   ].join('\n');
+}
+
+export function registerReviewCommands(program: Command): void {
+  program
+    .command('review')
+    .description('汇总当前工作区改动，生成本地评审概览')
+    .action(async () => {
+      const result = await runReviewCommand(process.cwd());
+      console.log(result);
+    });
 }

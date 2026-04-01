@@ -1,4 +1,5 @@
 import { PermissionManager } from '../permissions/manager.js';
+import { formatErrorText } from '../../utils/ui.js';
 import { createReadTool } from './read.js';
 import { createWriteTool } from './write.js';
 import { createEditTool } from './edit.js';
@@ -8,6 +9,8 @@ import { globTool } from './glob.js';
 import { createToolSearchTool } from './search.js';
 import { webFetchTool } from './web-fetch.js';
 import { webSearchTool } from './web-search.js';
+import { installSkillTool } from './install-skill.js';
+import { uninstallSkillTool } from './uninstall-skill.js';
 export function buildToolList(skillTool, workspace, extraTools = []) {
     const tools = [
         createReadTool(workspace),
@@ -18,6 +21,8 @@ export function buildToolList(skillTool, workspace, extraTools = []) {
         globTool,
         webFetchTool,
         webSearchTool,
+        installSkillTool,
+        uninstallSkillTool,
         ...extraTools,
     ];
     if (skillTool)
@@ -37,9 +42,9 @@ export class ToolRegistry {
                 : 'default';
         this.permissionManager = options.permissionManager ?? new PermissionManager({ mode });
         this.options = {
-            dryRun: false,
-            onPrompt: async () => false,
             ...options,
+            dryRun: options.dryRun ?? false,
+            onPrompt: options.onPrompt ?? (async () => false),
             permissionManager: this.permissionManager,
         };
         for (const tool of tools ?? buildToolList()) {
@@ -52,9 +57,22 @@ export class ToolRegistry {
     }
     registerTool(tool) {
         this.tools.set(tool.definition.name, tool);
+        this.options.capabilityRegistry?.register({
+            kind: 'tool',
+            name: tool.definition.name,
+            description: tool.definition.description,
+            inputSchema: tool.definition.inputSchema,
+            execute: async (input) => tool.execute(input),
+        });
     }
     registerDeferredTool(definition) {
         this.deferredTools.set(definition.name, definition);
+        this.options.capabilityRegistry?.register({
+            kind: 'tool',
+            name: definition.name,
+            description: definition.description,
+            inputSchema: definition.inputSchema,
+        });
     }
     registerDeferredTools(definitions) {
         for (const definition of definitions) {
@@ -81,7 +99,45 @@ export class ToolRegistry {
                 tool.description.toLowerCase().includes(normalizedQuery));
         });
     }
-    async executeTool(name, input) {
+    searchTools(query) {
+        const activeTools = this.getToolDefinitions();
+        if (query.startsWith('select:')) {
+            const names = query
+                .slice('select:'.length)
+                .split(',')
+                .map((value) => value.trim())
+                .filter(Boolean);
+            const activeMap = new Map(activeTools.map((tool) => [tool.name, tool]));
+            const deferredMap = new Map(this.searchDeferredTools(query).map((tool) => [tool.name, tool]));
+            return names
+                .map((name) => activeMap.get(name) ?? deferredMap.get(name))
+                .filter((tool) => Boolean(tool));
+        }
+        const normalizedQuery = query.trim().toLowerCase();
+        const matches = normalizedQuery
+            ? activeTools.filter((tool) => {
+                return (tool.name.toLowerCase().includes(normalizedQuery) ||
+                    tool.description.toLowerCase().includes(normalizedQuery));
+            })
+            : activeTools;
+        const merged = new Map(matches.map((tool) => [tool.name, tool]));
+        for (const tool of this.searchDeferredTools(query)) {
+            if (!merged.has(tool.name)) {
+                merged.set(tool.name, tool);
+            }
+        }
+        for (const capability of this.options.capabilityRegistry?.search(query) ?? []) {
+            if (!merged.has(capability.name)) {
+                merged.set(capability.name, {
+                    name: capability.name,
+                    description: capability.description,
+                    inputSchema: capability.inputSchema ?? { type: 'object', properties: {} },
+                });
+            }
+        }
+        return [...merged.values()];
+    }
+    async executeTool(name, input, context) {
         const tool = this.tools.get(name);
         if (!tool)
             return `Error: 未知工具: ${name}`;
@@ -92,7 +148,7 @@ export class ToolRegistry {
         if (decision === 'deny') {
             return `Error: 权限不足: ${name}`;
         }
-        if (decision === 'prompt') {
+        if (decision === 'prompt' && tool.permission !== 'safe') {
             const approved = await this.options.onPrompt(name, input);
             if (!approved)
                 return `（已取消: ${name}）`;
@@ -102,7 +158,7 @@ export class ToolRegistry {
             return `Error: ${preHookResult.message ?? `${name} blocked by pre hook`}`;
         }
         try {
-            const result = await tool.execute(input);
+            const result = await tool.execute(input, context);
             const warnings = await this.options.hooksRunner?.runPostHooks(name, input) ?? [];
             if (warnings.length === 0) {
                 return result;
@@ -110,7 +166,7 @@ export class ToolRegistry {
             return `${result}\nWarning: ${warnings.join('\nWarning: ')}`;
         }
         catch (e) {
-            return `Error: ${String(e)}`;
+            return `Error: ${formatErrorText(String(e))}`;
         }
     }
     /** 用户输入 y! 后，切换当前 registry 为 auto 模式 */

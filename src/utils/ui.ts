@@ -12,7 +12,11 @@ export function writeLine(text: string): void {
 
 /** 输出错误行 */
 export function writeError(text: string): void {
-  console.error(`\x1b[31mError:\x1b[0m ${text}`);
+  console.error(`\x1b[31mError:\x1b[0m ${formatErrorText(text)}`);
+}
+
+export function formatErrorText(text: string): string {
+  return text.replace(/^Error:\s*/u, '');
 }
 
 /** 检测 stdin 是否为 TTY */

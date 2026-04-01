@@ -1,4 +1,12 @@
 import { truncateText } from './truncation.js';
+function stripHtml(text) {
+    return text
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
 function decodeHtml(text) {
     return text
         .replace(/&amp;/gi, '&')
@@ -8,6 +16,22 @@ function decodeHtml(text) {
         .replace(/&quot;/gi, '"')
         .replace(/\s+/g, ' ')
         .trim();
+}
+function normalizeSearchError(error) {
+    const raw = error instanceof Error ? error.message : String(error);
+    const status = raw.match(/\b([45]\d{2})\b/)?.[1];
+    const stripped = decodeHtml(stripHtml(raw)).replace(/^Error:\s*/i, '').trim();
+    const looksLikeHtml = /<!doctype html>|<html\b|<body\b|<head\b/i.test(raw);
+    const summary = status
+        ? `搜索请求失败 (${status})`
+        : '搜索请求失败';
+    if (looksLikeHtml) {
+        return `Error: ${summary}`;
+    }
+    if (stripped.length === 0) {
+        return `Error: ${summary}`;
+    }
+    return `Error: ${summary}: ${stripped}`;
 }
 function parseDuckDuckGoResults(html) {
     const results = [];
@@ -45,7 +69,7 @@ export function createWebSearchTool(options = {}) {
                 const url = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
                 const response = await fetchFn(url);
                 if (!response.ok) {
-                    return `Error: 搜索失败 (${response.status} ${response.statusText})`;
+                    return `Error: 搜索请求失败 (${response.status} ${response.statusText})`;
                 }
                 const html = await response.text();
                 const results = parseDuckDuckGoResults(html).slice(0, Math.max(1, count));
@@ -58,7 +82,7 @@ export function createWebSearchTool(options = {}) {
                 return truncateText(formatted, max_chars).text;
             }
             catch (error) {
-                return `Error: ${String(error)}`;
+                return normalizeSearchError(error);
             }
         },
     };

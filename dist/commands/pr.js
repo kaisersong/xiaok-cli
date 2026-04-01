@@ -57,3 +57,12 @@ export async function runPrCommand(cwd) {
         return ['PR 预览', '', `Title: ${title}`, '', body, '', '未检测到 gh，未自动创建 PR。'].join('\n');
     }
 }
+export function registerPrCommands(program) {
+    program
+        .command('pr')
+        .description('生成 PR 标题和正文，并在可用时调用 gh 创建 PR')
+        .action(async () => {
+        const result = await runPrCommand(process.cwd());
+        console.log(result);
+    });
+}

@@ -6,6 +6,7 @@ import type { WorktreeManager } from '../../platform/worktrees/manager.js';
 interface SubAgentToolOptions {
     source: string;
     sessionId: string;
+    cwd?: string;
     adapter: () => ModelAdapter;
     agents: CustomAgentDef[];
     createRegistry(cwd: string, allowedTools?: string[]): ToolRegistry;

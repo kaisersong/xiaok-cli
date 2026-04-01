@@ -11,11 +11,13 @@ import { createSandboxPolicy } from '../sandbox/policy.js';
 import { FileTeamStore } from '../teams/store.js';
 import { createTeamService } from '../teams/service.js';
 import { createWorktreeManager } from '../worktrees/manager.js';
+import { CapabilityRegistry } from './capability-registry.js';
 import { FileCapabilityHealthStore } from './health-store.js';
 export async function createPlatformRuntimeContext(options) {
     const pluginRuntime = await loadPlatformPluginRuntime(options.cwd, options.builtinCommands);
     const customAgents = await loadCustomAgents(undefined, options.cwd, pluginRuntime.agentDirs);
     const lspManager = createLspManager();
+    const capabilityRegistry = new CapabilityRegistry();
     const capabilityHealth = [];
     const disposables = [];
     const stateRootDir = join(options.cwd, '.xiaok', 'state');
@@ -40,6 +42,21 @@ export async function createPlatformRuntimeContext(options) {
         }),
     });
     const mcpTools = await connectWorkspaceMcpServers(pluginRuntime, capabilityHealth, disposables);
+    for (const agent of customAgents) {
+        capabilityRegistry.register({
+            kind: 'agent',
+            name: agent.name,
+            description: agent.model ? `subagent:${agent.model}` : 'subagent',
+        });
+    }
+    for (const tool of mcpTools) {
+        capabilityRegistry.register({
+            kind: 'mcp',
+            name: tool.definition.name,
+            description: tool.definition.description,
+            inputSchema: tool.definition.inputSchema,
+        });
+    }
     await connectWorkspaceLspServers(pluginRuntime, lspManager, options.cwd, capabilityHealth, disposables);
     const health = createPlatformRuntimeHealth(capabilityHealth);
     healthStore.set(options.cwd, health.snapshot());
@@ -51,6 +68,7 @@ export async function createPlatformRuntimeContext(options) {
         sandboxEnforcer,
         worktreeManager,
         mcpTools,
+        capabilityRegistry,
         health,
         async dispose() {
             for (const disposable of disposables.splice(0).reverse()) {
@@ -65,6 +83,7 @@ export async function createPlatformRuntimeContext(options) {
         listBackgroundJobs(sessionId) {
             return createBackgroundRunner({
                 rootDir: join(stateRootDir, 'background-jobs'),
+                recoverInterruptedJobs: false,
                 execute: async () => ({ ok: true, summary: 'unused' }),
                 notify: async () => undefined,
             }).listBySession(sessionId);
@@ -80,10 +99,14 @@ export async function createPlatformRuntimeContext(options) {
                     const result = await execute({
                         agent: payload.agent,
                         prompt: payload.prompt,
+                        cwd: payload.cwd,
                     });
                     return { ok: true, summary: result.slice(0, 200) };
                 },
-                notify,
+                notify: async (job) => {
+                    await notifyBackgroundTeam(job, teamService);
+                    await notify(job);
+                },
             });
         },
     };
@@ -187,4 +210,23 @@ function createPlatformRuntimeHealth(capabilities) {
             };
         },
     };
+}
+async function notifyBackgroundTeam(job, teamService) {
+    const teamName = job.metadata?.team?.trim();
+    if (!teamName) {
+        return;
+    }
+    const team = teamService.findTeamByName(teamName);
+    if (!team) {
+        return;
+    }
+    const from = job.metadata?.agent ?? 'background';
+    const status = job.status;
+    const detail = job.resultSummary ?? job.errorMessage ?? job.inputSummary;
+    teamService.sendMessage({
+        teamId: team.teamId,
+        from,
+        to: team.name,
+        body: `[background ${status}] ${detail}`,
+    });
 }

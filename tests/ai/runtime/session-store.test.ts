@@ -31,8 +31,13 @@ describe('FileSessionStore', () => {
       model: 'claude-opus-4-6',
       createdAt: 100,
       updatedAt: 200,
+      lineage: ['sess_alpha'],
       messages,
       usage,
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
     });
 
     await expect(store.load('sess_alpha')).resolves.toEqual({
@@ -41,8 +46,13 @@ describe('FileSessionStore', () => {
       model: 'claude-opus-4-6',
       createdAt: 100,
       updatedAt: 200,
+      lineage: ['sess_alpha'],
       messages,
       usage,
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
     });
   });
 
@@ -54,16 +64,26 @@ describe('FileSessionStore', () => {
       cwd: 'D:/projects/old',
       createdAt: 100,
       updatedAt: 110,
+      lineage: ['sess_old'],
       messages: [],
       usage: { inputTokens: 0, outputTokens: 0 },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
     });
     await store.save({
       sessionId: 'sess_new',
       cwd: 'D:/projects/new',
       createdAt: 120,
       updatedAt: 220,
+      lineage: ['sess_new'],
       messages: [{ role: 'user', content: [{ type: 'text', text: 'latest' }] }],
       usage: { inputTokens: 3, outputTokens: 1 },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
     });
 
     await expect(store.list()).resolves.toEqual([
@@ -91,17 +111,29 @@ describe('FileSessionStore', () => {
       model: 'claude-opus-4-6',
       createdAt: 100,
       updatedAt: 200,
+      lineage: ['sess_source'],
       messages: [{ role: 'assistant', content: [{ type: 'text', text: 'original' }] }],
       usage: { inputTokens: 7, outputTokens: 9 },
+      compactions: [{ id: 'cmp_1', createdAt: 150, summary: 'summary', replacedMessages: 2 }],
+      promptSnapshotId: 'prompt_1',
+      memoryRefs: ['mem_1'],
+      approvalRefs: ['apr_1'],
+      backgroundJobRefs: ['bg_1'],
     });
 
     const forked = await store.fork('sess_source');
 
     expect(forked.sessionId).not.toBe('sess_source');
     expect(forked.forkedFromSessionId).toBe('sess_source');
+    expect(forked.lineage).toEqual(['sess_source']);
     expect(forked.messages).toEqual([
       { role: 'assistant', content: [{ type: 'text', text: 'original' }] },
     ]);
     expect(forked.usage).toEqual({ inputTokens: 7, outputTokens: 9 });
+    expect(forked.compactions).toEqual([{ id: 'cmp_1', createdAt: 150, summary: 'summary', replacedMessages: 2 }]);
+    expect(forked.promptSnapshotId).toBe('prompt_1');
+    expect(forked.memoryRefs).toEqual(['mem_1']);
+    expect(forked.approvalRefs).toEqual(['apr_1']);
+    expect(forked.backgroundJobRefs).toEqual(['bg_1']);
   });
 });

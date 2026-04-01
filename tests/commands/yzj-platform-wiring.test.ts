@@ -8,6 +8,8 @@ describe('yzj platform wiring', () => {
 
     expect(source).toContain('createPlatformRuntimeContext');
     expect(source).toContain('createPlatformRegistryFactory');
+    expect(source).toContain("from '../ai/prompts/builder.js'");
+    expect(source).toContain("from '../ai/runtime/runtime-facade.js'");
     expect(source).toContain('pluginCommands: skillState.platform.pluginRuntime.commandDeclarations');
     expect(source).toContain('lspDiagnostics: skillState.platform.lspManager.getSummary()');
     expect(source).toContain('notifyBackgroundJob');

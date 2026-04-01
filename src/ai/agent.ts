@@ -11,6 +11,7 @@ import type { AgentRuntimeEvent } from './runtime/events.js';
 import { toLegacyStreamChunk } from './runtime/events.js';
 import { AgentRuntime } from './runtime/agent-runtime.js';
 import { AgentSessionState, type AgentSessionSnapshot } from './runtime/session.js';
+import type { PromptSnapshot } from './prompts/types.js';
 
 export type OnChunk = (chunk: StreamChunk) => void;
 
@@ -82,6 +83,10 @@ export class Agent {
     this.session.restoreSnapshot(snapshot);
   }
 
+  getSessionState(): AgentSessionState {
+    return this.session;
+  }
+
   setAdapter(adapter: ModelAdapter): void {
     this.adapter = adapter;
     this.runtime.setAdapter(adapter);
@@ -90,6 +95,10 @@ export class Agent {
   setSystemPrompt(systemPrompt: string): void {
     this.systemPrompt = systemPrompt;
     this.runtime.setSystemPrompt(systemPrompt);
+  }
+
+  setPromptSnapshot(promptSnapshot: PromptSnapshot | undefined): void {
+    this.runtime.setPromptSnapshot(promptSnapshot);
   }
 
   private createRuntime(): AgentRuntime {

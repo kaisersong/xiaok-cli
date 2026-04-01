@@ -7,6 +7,11 @@ export interface UsageStats {
   cacheReadInputTokens?: number;
 }
 
+export interface CompactionSummary {
+  text: string;
+  replacedMessages: number;
+}
+
 export function estimateTokens(messages: Message[]): number {
   let chars = 0;
 
@@ -46,20 +51,85 @@ export function mergeUsage(base: UsageStats, next: UsageStats): UsageStats {
   return merged;
 }
 
+function takeUnique(entries: string[], maxItems: number): string[] {
+  const seen = new Set<string>();
+  const results: string[] = [];
+  for (const entry of entries) {
+    const normalized = entry.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    results.push(normalized);
+    if (results.length >= maxItems) break;
+  }
+  return results;
+}
+
+export function summarizeMessagesForCompaction(messages: Message[]): CompactionSummary {
+  const rawUserIntents: string[] = [];
+  const rawAssistantOutputs: string[] = [];
+  const rawToolUses: string[] = [];
+
+  for (const message of messages) {
+    for (const block of message.content) {
+      if (block.type === 'text' && message.role === 'user') {
+        rawUserIntents.push(block.text);
+      }
+      if (block.type === 'text' && message.role === 'assistant') {
+        rawAssistantOutputs.push(block.text);
+      }
+      if (block.type === 'tool_use') {
+        rawToolUses.push(`${block.name}(${JSON.stringify(block.input)})`);
+      }
+    }
+  }
+
+  const userIntents = takeUnique(rawUserIntents, 3);
+  const assistantOutputs = takeUnique(rawAssistantOutputs, 3);
+  const toolUses = takeUnique(rawToolUses, 4);
+
+  const lines = ['[context compacted summary]'];
+  if (userIntents.length > 0) {
+    lines.push(`user intents: ${userIntents.join(' | ')}`);
+  }
+  if (assistantOutputs.length > 0) {
+    lines.push(`assistant outputs: ${assistantOutputs.join(' | ')}`);
+  }
+  if (toolUses.length > 0) {
+    lines.push(`tool activity: ${toolUses.join(' | ')}`);
+  }
+
+  return {
+    text: lines.join('\n'),
+    replacedMessages: messages.length,
+  };
+}
+
 export function compactMessages(
   messages: Message[],
   placeholder = '[context compacted]',
-  keepRecent = 2
-): Message[] {
+  keepRecent = 2,
+): { messages: Message[]; summary: CompactionSummary } {
   if (messages.length <= keepRecent) {
-    return messages;
+    return {
+      messages,
+      summary: {
+        text: placeholder,
+        replacedMessages: 0,
+      },
+    };
   }
 
-  return [
-    {
-      role: 'assistant',
-      content: [{ type: 'text', text: placeholder }],
-    },
-    ...messages.slice(-keepRecent),
-  ];
+  const compactedMessages = messages.slice(0, -keepRecent);
+  const summary = summarizeMessagesForCompaction(compactedMessages);
+
+  return {
+    messages: [
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: summary.text || placeholder }],
+      },
+      ...messages.slice(-keepRecent),
+    ],
+    summary,
+  };
 }

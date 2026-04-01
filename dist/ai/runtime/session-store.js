@@ -29,7 +29,14 @@ export class FileSessionStore {
             return null;
         }
         const { schemaVersion: _schemaVersion, ...snapshot } = parsed;
-        return snapshot;
+        return {
+            ...snapshot,
+            lineage: snapshot.lineage ?? [snapshot.sessionId ?? sessionId].filter(Boolean),
+            compactions: snapshot.compactions ?? [],
+            memoryRefs: snapshot.memoryRefs ?? [],
+            approvalRefs: snapshot.approvalRefs ?? [],
+            backgroundJobRefs: snapshot.backgroundJobRefs ?? [],
+        };
     }
     async list() {
         if (!existsSync(this.rootDir)) {
@@ -54,14 +61,23 @@ export class FileSessionStore {
             throw new Error(`session not found: ${sessionId}`);
         }
         const now = Date.now();
+        const sourceLineage = source.lineage ?? [source.sessionId];
+        const lineage = sourceLineage.at(-1) === source.sessionId
+            ? [...sourceLineage]
+            : [...sourceLineage, source.sessionId];
         const forked = {
             ...source,
             sessionId: this.createSessionId(),
             createdAt: now,
             updatedAt: now,
             forkedFromSessionId: source.sessionId,
+            lineage,
             messages: cloneMessages(source.messages),
             usage: { ...source.usage },
+            compactions: (source.compactions ?? []).map((compaction) => ({ ...compaction })),
+            memoryRefs: [...(source.memoryRefs ?? [])],
+            approvalRefs: [...(source.approvalRefs ?? [])],
+            backgroundJobRefs: [...(source.backgroundJobRefs ?? [])],
         };
         await this.save(forked);
         return forked;

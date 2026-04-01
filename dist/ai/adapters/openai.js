@@ -2,13 +2,20 @@ import OpenAI from 'openai';
 const MAX_RETRIES = 3;
 export class OpenAIAdapter {
     client;
+    apiKey;
+    baseUrl;
     model;
     constructor(apiKey, model = 'gpt-4o', baseUrl) {
+        this.apiKey = apiKey;
+        this.baseUrl = baseUrl;
         this.client = new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: MAX_RETRIES });
         this.model = model;
     }
     getModelName() {
         return this.model;
+    }
+    cloneWithModel(model) {
+        return new OpenAIAdapter(this.apiKey, model, this.baseUrl);
     }
     async *stream(messages, tools, systemPrompt, _options) {
         const openaiMessages = [

@@ -27,7 +27,7 @@ export interface PlatformRegistryFactory {
 }
 
 export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOptions): PlatformRegistryFactory {
-  const runNamedSubAgent = async (agentName: string, prompt: string): Promise<string> => {
+  const runNamedSubAgent = async (agentName: string, prompt: string, cwd?: string): Promise<string> => {
     const agentDef = options.platform.customAgents.find((agent) => agent.name === agentName);
     if (!agentDef) {
       throw new Error(`unknown subagent: ${agentName}`);
@@ -37,6 +37,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
       agentDef,
       prompt,
       sessionId: options.sessionId,
+      cwd,
       adapter: options.adapter,
       createRegistry: createRegistryForCwd,
       buildSystemPrompt: options.buildSystemPrompt,
@@ -45,7 +46,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
   };
 
   const backgroundRunner = options.platform.createBackgroundRunner(
-    async ({ agent, prompt }) => runNamedSubAgent(agent, prompt),
+    async ({ agent, prompt, cwd }) => runNamedSubAgent(agent, prompt, cwd),
     options.notifyBackgroundJob,
   );
 
@@ -57,6 +58,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
       createSubAgentTool({
         source: options.source,
         sessionId: options.sessionId,
+        cwd,
         adapter: options.adapter,
         agents: options.platform.customAgents,
         createRegistry: createRegistryForCwd,
@@ -75,6 +77,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
       : allTools;
 
     return new ToolRegistry({
+      capabilityRegistry: options.platform.capabilityRegistry,
       permissionManager: options.permissionManager,
       dryRun: options.dryRun,
       hooksRunner: createHooksRunner({

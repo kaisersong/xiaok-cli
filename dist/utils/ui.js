@@ -9,7 +9,10 @@ export function writeLine(text) {
 }
 /** 输出错误行 */
 export function writeError(text) {
-    console.error(`\x1b[31mError:\x1b[0m ${text}`);
+    console.error(`\x1b[31mError:\x1b[0m ${formatErrorText(text)}`);
+}
+export function formatErrorText(text) {
+    return text.replace(/^Error:\s*/u, '');
 }
 /** 检测 stdin 是否为 TTY */
 export function isTTY() {

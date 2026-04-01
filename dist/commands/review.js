@@ -42,3 +42,12 @@ export async function runReviewCommand(cwd) {
         unstaged || '无',
     ].join('\n');
 }
+export function registerReviewCommands(program) {
+    program
+        .command('review')
+        .description('汇总当前工作区改动，生成本地评审概览')
+        .action(async () => {
+        const result = await runReviewCommand(process.cwd());
+        console.log(result);
+    });
+}

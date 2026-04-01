@@ -1,9 +1,14 @@
 export type BackgroundJobStatus = 'queued' | 'running' | 'completed' | 'failed';
+export interface BackgroundJobMetadata {
+    agent?: string;
+    team?: string;
+}
 export interface BackgroundJobRecord {
     jobId: string;
     sessionId: string;
     source: string;
     taskId?: string;
+    metadata?: BackgroundJobMetadata;
     inputSummary: string;
     status: BackgroundJobStatus;
     createdAt: number;
@@ -17,6 +22,7 @@ export interface StartBackgroundJobInput {
     sessionId: string;
     source: string;
     taskId?: string;
+    metadata?: BackgroundJobMetadata;
     input: unknown;
 }
 export interface BackgroundExecutionResult {
@@ -30,6 +36,7 @@ export interface BackgroundExecutionContext {
 }
 export interface BackgroundRunnerOptions {
     rootDir: string;
+    recoverInterruptedJobs?: boolean;
     execute(context: BackgroundExecutionContext): Promise<BackgroundExecutionResult>;
     notify(job: BackgroundJobRecord): Promise<void> | void;
 }

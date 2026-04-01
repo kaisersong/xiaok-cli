@@ -13,11 +13,25 @@ export class ChannelAgentService {
             const chunks = [];
             const generationStartedAt = Date.now();
             try {
-                await session.agent.runTurn(request.message, (chunk) => {
-                    if (chunk.type === 'text') {
-                        chunks.push(chunk.delta);
-                    }
-                }, signal);
+                if (session.runtimeFacade) {
+                    await session.runtimeFacade.runTurn({
+                        sessionId,
+                        cwd: session.cwd ?? process.cwd(),
+                        source: 'yzj',
+                        input: request.message,
+                    }, (chunk) => {
+                        if (chunk.type === 'text') {
+                            chunks.push(chunk.delta);
+                        }
+                    }, signal);
+                }
+                else {
+                    await session.agent.runTurn(request.message, (chunk) => {
+                        if (chunk.type === 'text') {
+                            chunks.push(chunk.delta);
+                        }
+                    }, signal);
+                }
                 const generationMs = Date.now() - generationStartedAt;
                 const reply = chunks.join('').trim();
                 if (reply) {
@@ -81,6 +95,8 @@ export class ChannelAgentService {
         const createdPromise = this.factory.createSession(sessionId).then((createdSession) => {
             const created = {
                 agent: createdSession.agent,
+                runtimeFacade: createdSession.runtimeFacade,
+                cwd: createdSession.cwd,
                 dispose: createdSession.dispose,
                 tail: Promise.resolve(),
             };
@@ -108,6 +124,9 @@ export class ChannelAgentService {
             this.resetSession(sessionId);
         }
         this.sessionPromises.clear();
+    }
+    getSessionSnapshot(sessionId) {
+        return this.sessions.get(sessionId)?.agent.exportSession();
     }
 }
 function buildReplyPreview(reply, maxLength = 120) {

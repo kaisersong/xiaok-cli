@@ -188,4 +188,68 @@ describe('AgentRuntime', () => {
       },
     });
   });
+
+  it('fails explicitly when the model returns no text, tool call, or usage', async () => {
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () => mockStream([{ type: 'done' }]),
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    await expect(runtime.run('hi', () => {})).rejects.toThrow(/未返回任何文本或工具调用/);
+  });
+
+  it('passes the active prompt snapshot into tool execution context', async () => {
+    let capturedContext: unknown;
+    let streamCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () => {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          return mockStream([
+            { type: 'tool_use', id: 'tu_1', name: 'read', input: { file: 'a.ts' } },
+            { type: 'done' },
+          ]);
+        }
+        return mockStream([{ type: 'text', delta: 'done' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock({
+        executeTool: async (_name, _input, context) => {
+          capturedContext = context;
+          return 'ok';
+        },
+      }) as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+      promptSnapshot: {
+        id: 'prompt_1',
+        createdAt: 1,
+        cwd: '/repo',
+        channel: 'chat',
+        rendered: 'system',
+        segments: [],
+        memoryRefs: ['mem_1'],
+      },
+    });
+
+    await runtime.run('hi', () => {});
+
+    expect(capturedContext).toMatchObject({
+      promptSnapshot: {
+        id: 'prompt_1',
+        memoryRefs: ['mem_1'],
+      },
+    });
+  });
 });

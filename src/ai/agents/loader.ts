@@ -10,6 +10,7 @@ export interface CustomAgentDef {
   maxIterations?: number;
   background?: boolean;
   isolation?: 'shared' | 'worktree';
+  cleanup?: 'keep' | 'delete';
   team?: string;
   source?: 'global' | 'project';
 }
@@ -41,6 +42,7 @@ export function parseAgentFile(name: string, raw: string): CustomAgentDef {
       : undefined,
     background: metadata.get('background') === 'true',
     isolation: metadata.get('isolation') === 'worktree' ? 'worktree' : undefined,
+    cleanup: metadata.get('cleanup') === 'delete' ? 'delete' : undefined,
     team: metadata.get('team') || undefined,
   };
 }

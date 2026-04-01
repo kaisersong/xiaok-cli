@@ -1,5 +1,9 @@
 import { dim } from "./render.js";
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 const DEFAULT_FIELDS = ["model", "mode", "tokens", "session"];
+const VALID_FIELDS = new Set(DEFAULT_FIELDS);
 /**
  * Inline status bar — prints a status line after input prompt.
  * No ANSI scroll regions, no absolute cursor positioning.
@@ -20,6 +24,7 @@ export class StatusBar {
         this.model = model;
         this.sessionId = sessionId;
         this.cwd = cwd;
+        this.fields = loadConfiguredFields(cwd) ?? DEFAULT_FIELDS;
         if (mode)
             this.mode = mode;
     }
@@ -80,4 +85,30 @@ export class StatusBar {
     }
     /** No-op — no terminal state to restore in inline mode. */
     destroy() { }
+}
+function loadConfiguredFields(cwd) {
+    const configDir = process.env.XIAOK_CONFIG_DIR ?? join(homedir(), '.xiaok');
+    const settingsPaths = [
+        join(configDir, 'settings.json'),
+        join(cwd, '.xiaok', 'settings.json'),
+    ];
+    let configured;
+    for (const path of settingsPaths) {
+        if (!existsSync(path)) {
+            continue;
+        }
+        try {
+            const parsed = JSON.parse(readFileSync(path, 'utf8'));
+            const fields = parsed.ui?.statusBar?.fields;
+            if (!Array.isArray(fields)) {
+                continue;
+            }
+            const validFields = fields.filter((field) => VALID_FIELDS.has(field));
+            if (validFields.length > 0) {
+                configured = validFields;
+            }
+        }
+        catch { }
+    }
+    return configured;
 }

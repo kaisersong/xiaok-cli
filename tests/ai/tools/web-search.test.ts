@@ -37,4 +37,23 @@ describe('webSearchTool', () => {
 
     expect(result).toContain('无搜索结果');
   });
+
+  it('sanitizes upstream gateway failures instead of echoing raw html', async () => {
+    const tool = createWebSearchTool({
+      fetchFn: async () => {
+        throw new Error(`502 <!DOCTYPE html>
+<html>
+<head><title>jlypx.de | 502: Bad gateway</title></head>
+<body>bad gateway</body>
+</html>`);
+      },
+    });
+
+    const result = await tool.execute({ query: '查询项目根目录最新的图片' });
+
+    expect(result).toContain('搜索请求失败');
+    expect(result).toContain('502');
+    expect(result).not.toContain('<!DOCTYPE html>');
+    expect(result).not.toContain('Error: Error:');
+  });
 });

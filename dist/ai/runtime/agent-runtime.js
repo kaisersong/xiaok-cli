@@ -13,12 +13,14 @@ export class AgentRuntime {
     compactThreshold;
     compactPlaceholder;
     supportsPromptCaching;
+    promptSnapshot;
     constructor(options) {
         this.adapter = options.adapter;
         this.registry = options.registry;
         this.session = options.session;
         this.controller = options.controller;
         this.systemPrompt = options.systemPrompt;
+        this.promptSnapshot = options.promptSnapshot;
         this.maxIterations = options.maxIterations ?? 12;
         this.contextLimitOverride = options.contextLimit;
         this.compactThresholdOverride = options.compactThreshold;
@@ -35,6 +37,9 @@ export class AgentRuntime {
     setSystemPrompt(systemPrompt) {
         this.systemPrompt = systemPrompt;
     }
+    setPromptSnapshot(promptSnapshot) {
+        this.promptSnapshot = promptSnapshot;
+    }
     async run(input, onEvent, externalSignal) {
         this.throwIfAborted(externalSignal);
         const run = this.controller.startRun();
@@ -49,8 +54,13 @@ export class AgentRuntime {
             for (let iteration = 0; iteration < this.maxIterations; iteration += 1) {
                 this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
                 if (shouldCompact(estimateTokens(this.session.getMessages()), this.contextLimit, this.compactThreshold)) {
-                    this.session.forceCompact(this.compactPlaceholder);
-                    onEvent({ type: 'compact_triggered', runId: run.runId });
+                    const compaction = this.session.forceCompact(this.compactPlaceholder);
+                    onEvent({
+                        type: 'compact_triggered',
+                        runId: run.runId,
+                        summary: compaction?.summary ?? this.compactPlaceholder,
+                        compactionId: compaction?.id,
+                    });
                 }
                 const assistantBlocks = [];
                 for await (const chunk of this.adapter.stream(this.session.getMessages(), this.registry.getToolDefinitions(), this.systemPrompt, this.buildInvocationOptions())) {
@@ -74,12 +84,16 @@ export class AgentRuntime {
                     }
                 }
                 this.session.appendAssistantBlocks(assistantBlocks);
+                if (assistantBlocks.length === 0) {
+                    throw new Error('模型未返回任何文本或工具调用');
+                }
                 const toolCalls = assistantBlocks.filter((block) => block.type === 'tool_use');
                 if (toolCalls.length === 0) {
                     onEvent({ type: 'run_completed', runId: run.runId });
                     return;
                 }
                 const toolResults = [];
+                const toolExecutionContext = this.buildToolExecutionContext();
                 for (const toolCall of toolCalls) {
                     this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
                     onEvent({
@@ -88,7 +102,7 @@ export class AgentRuntime {
                         toolName: toolCall.name,
                         input: toolCall.input,
                     });
-                    const result = await this.registry.executeTool(toolCall.name, toolCall.input);
+                    const result = await this.registry.executeTool(toolCall.name, toolCall.input, toolExecutionContext);
                     const ok = !result.startsWith('Error');
                     onEvent({
                         type: 'tool_finished',
@@ -141,8 +155,29 @@ export class AgentRuntime {
         if (!this.supportsPromptCaching) {
             return undefined;
         }
+        const toolDefinitions = this.registry.getToolDefinitions()
+            .slice()
+            .sort((left, right) => left.name.localeCompare(right.name));
         return {
-            promptCache: buildPromptCacheSegments(this.systemPrompt, this.registry.getToolDefinitions(), this.session.getMessages()),
+            promptCache: buildPromptCacheSegments(this.systemPrompt, toolDefinitions, this.session.getMessages()),
+        };
+    }
+    buildToolExecutionContext() {
+        const toolDefinitions = this.registry.getToolDefinitions()
+            .slice()
+            .sort((left, right) => left.name.localeCompare(right.name));
+        return {
+            session: this.session.exportSnapshot(),
+            messages: this.session.getMessages().map((message) => ({
+                role: message.role,
+                content: message.content.map((block) => ({ ...block })),
+            })),
+            systemPrompt: this.systemPrompt,
+            toolDefinitions,
+            promptSnapshot: this.promptSnapshot,
+            promptCache: this.supportsPromptCaching
+                ? buildPromptCacheSegments(this.systemPrompt, toolDefinitions, this.session.getMessages())
+                : undefined,
         };
     }
 }

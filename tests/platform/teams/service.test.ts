@@ -60,4 +60,15 @@ describe('team service', () => {
 
     expect(service.findTeamsByMember('agent-b').map((team) => team.teamId)).toEqual([team1.teamId]);
   });
+
+  it('finds teams by name', () => {
+    const service = createTeamService({ store: new InMemoryTeamStore() });
+    const team = service.createTeam({
+      name: 'platform',
+      members: ['agent-a'],
+      owner: 'agent-a',
+    });
+
+    expect(service.findTeamByName('platform')?.teamId).toBe(team.teamId);
+  });
 });

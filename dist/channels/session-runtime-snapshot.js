@@ -32,6 +32,9 @@ export function formatSessionRuntimeSnapshot(input) {
         }
     }
     lines.push('');
+    lines.push(`Prompt Snapshot：${input.promptSnapshotId ?? '无'}`);
+    lines.push(`Memory Refs：${(input.memoryRefs ?? []).join(', ') || '无'}`);
+    lines.push('');
     if (input.approvals.length === 0) {
         lines.push('待审批：无');
     }

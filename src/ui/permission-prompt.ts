@@ -2,18 +2,38 @@ import { stdin, stdout } from 'process';
 import { dirname } from 'path';
 import { boldCyan, dim, yellow, bold } from './render.js';
 import type { PermissionChoice } from '../types.js';
+import { getUiCopy, type UiLocale } from './locale.js';
+import type { TranscriptLogger } from './transcript.js';
+import type { ReplRenderer } from './repl-renderer.js';
 
 interface PromptOption {
   label: string;
   choice: PermissionChoice;
 }
 
+interface PromptRenderOption {
+  label: string;
+  selected: boolean;
+}
+
+export interface PermissionRequestPayload {
+  toolName: string;
+  summary: string;
+  input: Record<string, unknown>;
+  rule: string;
+}
+
+function singleLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
 /** 从工具输入中提取关键参数用于展示 */
-function extractTarget(input: Record<string, unknown>): { key: string; value: string } | null {
-  if (typeof input.command === 'string') return { key: '命令', value: input.command };
-  if (typeof input.file_path === 'string') return { key: '文件', value: input.file_path };
-  if (typeof input.path === 'string') return { key: '路径', value: input.path };
-  if (typeof input.pattern === 'string') return { key: '模式', value: input.pattern };
+function extractTarget(input: Record<string, unknown>, locale: UiLocale = 'zh-CN'): { key: string; value: string } | null {
+  const labels = getUiCopy(locale).targetLabels;
+  if (typeof input.command === 'string') return { key: labels.command, value: singleLine(input.command) };
+  if (typeof input.file_path === 'string') return { key: labels.file, value: singleLine(input.file_path) };
+  if (typeof input.path === 'string') return { key: labels.path, value: singleLine(input.path) };
+  if (typeof input.pattern === 'string') return { key: labels.pattern, value: singleLine(input.pattern) };
   return null;
 }
 
@@ -43,6 +63,47 @@ function truncate(text: string, max: number): string {
   return text.slice(0, max - 3) + '...';
 }
 
+export function buildPermissionRequest(toolName: string, input: Record<string, unknown>): PermissionRequestPayload {
+  const target = extractTarget(input);
+  return {
+    toolName,
+    summary: target ? `${toolName}: ${target.value}` : toolName,
+    input,
+    rule: deriveRule(toolName, input),
+  };
+}
+
+export function formatPermissionDecisionSummary(_choice: PermissionChoice): string {
+  return '';
+}
+
+export function formatPermissionPromptLines(
+  toolName: string,
+  input: Record<string, unknown>,
+  options: PromptRenderOption[],
+  locale: UiLocale = 'zh-CN',
+): string[] {
+  const copy = getUiCopy(locale);
+  const target = extractTarget(input, locale);
+  const lines: string[] = [
+    `${yellow('⚡')} ${copy.approvalTitle}`,
+    `${copy.toolLabel}: ${boldCyan(toolName)}`,
+  ];
+
+  if (target) {
+    lines.push(`${target.key}: ${dim(truncate(target.value, 80))}`);
+  }
+
+  for (const option of options) {
+    const prefix = option.selected ? boldCyan('❯') : dim(' ');
+    const label = option.selected ? boldCyan(option.label) : dim(option.label);
+    lines.push(`${prefix} ${label}`);
+  }
+
+  lines.push(dim(copy.hint));
+  return lines;
+}
+
 /**
  * 交互式权限确认选择器。
  * 显示工具信息 + 箭头键可选的多行选项列表。
@@ -50,12 +111,24 @@ function truncate(text: string, max: number): string {
 export async function showPermissionPrompt(
   toolName: string,
   input: Record<string, unknown>,
+  config?: {
+    transcriptLogger?: TranscriptLogger;
+    renderer?: ReplRenderer;
+  },
 ): Promise<PermissionChoice> {
-  const target = extractTarget(input);
   const rule = deriveRule(toolName, input);
+  const transcriptLogger = config?.transcriptLogger;
+  const renderer = config?.renderer;
+  const useRenderer = Boolean(
+    renderer &&
+    (
+      renderer.getState().prompt !== '' ||
+      renderer.getState().input.value !== ''
+    ),
+  );
 
   // 构建选项列表
-  const options: PromptOption[] = [
+  const promptOptions: PromptOption[] = [
     { label: '允许一次', choice: { action: 'allow_once' } },
     { label: `本次会话始终允许 ${bold(rule)}`, choice: { action: 'allow_session', rule } },
     { label: `始终允许 ${bold(rule)} (保存到项目)`, choice: { action: 'allow_project', rule } },
@@ -72,40 +145,43 @@ export async function showPermissionPrompt(
 
   return new Promise((resolve) => {
     let resolved = false;
-
-    // 计算 header 行数（用于清理）
-    const headerLines: string[] = [];
-    headerLines.push('');
-    headerLines.push(`  ${yellow('⚡')} xiaok 想要执行以下操作：`);
-    headerLines.push('');
-    headerLines.push(`  工具：  ${boldCyan(toolName)}`);
-    if (target) {
-      headerLines.push(`  ${target.key}：  ${dim(truncate(target.value, 80))}`);
-    }
-    headerLines.push('');
-
-    const totalLines = headerLines.length + options.length + 2; // +2: hint line + trailing
+    transcriptLogger?.record({ type: 'permission_prompt_open', toolName, timestamp: Date.now() });
 
     const renderAll = () => {
-      // Header
-      for (const line of headerLines) {
+      const lines = formatPermissionPromptLines(
+        toolName,
+        input,
+        promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx })),
+      );
+
+      if (useRenderer && renderer) {
+        renderer.openPermissionModal({
+          toolName,
+          targetLines: lines.slice(2, lines.length - (promptOptions.length + 1)),
+          options: promptOptions.map((option) => option.label),
+        });
+        for (let index = 0; index < selectedIdx; index += 1) {
+          renderer.handleKey('\x1b[B');
+        }
+        return;
+      }
+
+      for (const line of lines) {
         stdout.write(line + '\n');
       }
-      // Options
-      for (let i = 0; i < options.length; i++) {
-        const opt = options[i];
-        const isSelected = i === selectedIdx;
-        const prefix = isSelected ? boldCyan('❯') : ' ';
-        const label = isSelected ? boldCyan(opt.label) : dim(opt.label);
-        stdout.write(`  ${prefix} ${label}\n`);
-      }
-      // Hint
-      stdout.write(`\n  ${dim('↑↓ 选择  Enter 确认  Esc 取消')}`);
-      // Move cursor back to top of rendered block
-      stdout.write(`\x1b[${totalLines - 1}A`);
+      stdout.write(`\x1b[${lines.length}A\r`);
     };
 
     const clearAll = () => {
+      if (useRenderer && renderer) {
+        renderer.closeModal();
+        return;
+      }
+      const totalLines = formatPermissionPromptLines(
+        toolName,
+        input,
+        promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx })),
+      ).length;
       stdout.write('\x1b7'); // save cursor
       for (let i = 0; i < totalLines; i++) {
         stdout.write('\n\x1b[2K');
@@ -121,13 +197,10 @@ export async function showPermissionPrompt(
       stdin.setRawMode(false);
       stdin.pause();
 
-      // 显示选择结果的简短摘要（左对齐，无缩进）
-      const summary = choice.action === 'deny' ? '已拒绝' :
-        choice.action === 'allow_once' ? '已允许（一次）' :
-        choice.action === 'allow_session' ? `已允许（会话：${(choice as any).rule}）` :
-        choice.action === 'allow_project' ? `已允许（项目：${(choice as any).rule}）` :
-        `已允许（全局：${(choice as any).rule}）`;
-      stdout.write(`${dim(summary)}\n`);
+      const summary = formatPermissionDecisionSummary(choice);
+      if (summary) {
+        stdout.write(`${dim(summary)}\n`);
+      }
 
       resolve(choice);
     };
@@ -143,23 +216,38 @@ export async function showPermissionPrompt(
 
       // Enter → 选择当前项
       if (key === '\r' || key === '\n') {
-        done(options[selectedIdx].choice);
+        transcriptLogger?.record({
+          type: 'permission_prompt_decision',
+          action: promptOptions[selectedIdx].choice.action,
+          timestamp: Date.now(),
+        });
+        done(promptOptions[selectedIdx].choice);
         return;
       }
 
       // Up arrow
       if (key === '\x1b[A') {
-        clearAll();
-        selectedIdx = (selectedIdx - 1 + options.length) % options.length;
-        renderAll();
+        transcriptLogger?.record({ type: 'permission_prompt_navigate', direction: 'up', timestamp: Date.now() });
+        selectedIdx = (selectedIdx - 1 + promptOptions.length) % promptOptions.length;
+        if (useRenderer && renderer) {
+          renderer.handleKey('\x1b[A');
+        } else {
+          clearAll();
+          renderAll();
+        }
         return;
       }
 
       // Down arrow
       if (key === '\x1b[B') {
-        clearAll();
-        selectedIdx = (selectedIdx + 1) % options.length;
-        renderAll();
+        transcriptLogger?.record({ type: 'permission_prompt_navigate', direction: 'down', timestamp: Date.now() });
+        selectedIdx = (selectedIdx + 1) % promptOptions.length;
+        if (useRenderer && renderer) {
+          renderer.handleKey('\x1b[B');
+        } else {
+          clearAll();
+          renderAll();
+        }
         return;
       }
     };

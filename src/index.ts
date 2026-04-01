@@ -4,8 +4,12 @@ import { Command } from 'commander';
 import { registerAuthCommands } from './commands/auth.js';
 import { registerConfigCommands } from './commands/config.js';
 import { registerChatCommands } from './commands/chat.js';
+import { registerCommitCommands } from './commands/commit.js';
 import { registerDoctorCommands } from './commands/doctor.js';
 import { registerInitCommands } from './commands/init.js';
+import { registerPrCommands } from './commands/pr.js';
+import { registerReviewCommands } from './commands/review.js';
+import { registerTranscriptCommands } from './commands/transcript.js';
 import { registerYZJCommands } from './commands/yzj.js';
 
 const { version } = JSON.parse(
@@ -21,8 +25,12 @@ program
 
 registerAuthCommands(program);
 registerConfigCommands(program);
+registerCommitCommands(program);
 registerDoctorCommands(program);
 registerInitCommands(program);
+registerPrCommands(program);
+registerReviewCommands(program);
+registerTranscriptCommands(program);
 registerChatCommands(program);
 registerYZJCommands(program);
 

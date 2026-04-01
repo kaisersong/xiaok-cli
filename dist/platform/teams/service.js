@@ -11,6 +11,9 @@ export function createTeamService(options) {
         getTeam(teamId) {
             return store.getTeam(teamId);
         },
+        findTeamByName(name) {
+            return store.listTeams().find((team) => team.name === name);
+        },
         deleteTeam(teamId) {
             store.deleteTeam(teamId);
         },

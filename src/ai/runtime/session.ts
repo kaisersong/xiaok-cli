@@ -1,88 +1,100 @@
 import type { Message, MessageBlock, UsageStats } from '../../types.js';
 import { compactMessages, mergeUsage } from './usage.js';
+import { AgentSessionGraph, type CompactionRecord, type SessionGraphSnapshot } from './session-graph.js';
 
-export interface AgentSessionSnapshot {
-  messages: Message[];
-  usage: UsageStats;
-}
+export type { CompactionRecord } from './session-graph.js';
+export interface AgentSessionSnapshot extends SessionGraphSnapshot {}
+
+let nextCompactionId = 0;
 
 export class AgentSessionState {
-  private messages: Message[] = [];
-  private usage: UsageStats = { inputTokens: 0, outputTokens: 0 };
+  private graph = new AgentSessionGraph({
+    sessionId: 'transient',
+    cwd: process.cwd(),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    lineage: ['transient'],
+  });
 
   getMessages(): Message[] {
-    return this.messages;
+    return this.graph.getMessages();
   }
 
   getUsage(): UsageStats {
-    return this.usage;
+    return this.graph.getUsage();
+  }
+
+  getCompactions(): CompactionRecord[] {
+    return this.graph.getCompactions();
   }
 
   updateUsage(next: UsageStats): UsageStats {
-    this.usage = mergeUsage(this.usage, next);
-    return this.usage;
+    return this.graph.updateUsage(mergeUsage(this.graph.getUsage(), next));
   }
 
   appendUserText(text: string): void {
-    this.appendUserBlocks([{ type: 'text', text }]);
+    this.graph.appendUserText(text);
   }
 
   appendUserBlocks(blocks: MessageBlock[]): void {
-    this.messages.push({
-      role: 'user',
-      content: blocks,
-    });
+    this.graph.appendUserBlocks(blocks);
   }
 
   appendAssistantBlocks(blocks: MessageBlock[]): void {
-    if (blocks.length === 0) {
-      return;
-    }
-
-    this.messages.push({
-      role: 'assistant',
-      content: blocks,
-    });
+    this.graph.appendAssistantBlocks(blocks);
   }
 
   appendUserToolResults(blocks: MessageBlock[]): void {
-    if (blocks.length === 0) {
-      return;
-    }
-
-    this.messages.push({
-      role: 'user',
-      content: blocks,
-    });
+    this.graph.appendUserToolResults(blocks);
   }
 
   replaceMessages(messages: Message[]): void {
-    this.messages = messages;
+    this.graph.replaceMessages(messages);
   }
 
   replaceUsage(usage: UsageStats): void {
-    this.usage = usage;
+    this.graph.replaceUsage(usage);
   }
 
-  forceCompact(placeholder = '[context compacted]'): void {
-    this.messages = compactMessages(this.messages, placeholder);
+  replaceCompactions(compactions: CompactionRecord[]): void {
+    this.graph.replaceCompactions(compactions);
+  }
+
+  attachPromptSnapshot(promptSnapshotId: string, memoryRefs: string[]): void {
+    this.graph.attachPromptSnapshot(promptSnapshotId, memoryRefs);
+  }
+
+  recordApproval(approvalId: string): void {
+    this.graph.recordApproval(approvalId);
+  }
+
+  recordBackgroundJob(jobId: string): void {
+    this.graph.recordBackgroundJob(jobId);
+  }
+
+  forceCompact(placeholder = '[context compacted]'): CompactionRecord | null {
+    const compacted = compactMessages(this.graph.getMessages(), placeholder);
+    this.graph.replaceMessages(compacted.messages);
+
+    if (compacted.summary.replacedMessages <= 0) {
+      return null;
+    }
+
+    const record: CompactionRecord = {
+      id: `cmp_${Date.now().toString(36)}_${nextCompactionId += 1}`,
+      createdAt: Date.now(),
+      summary: compacted.summary.text,
+      replacedMessages: compacted.summary.replacedMessages,
+    };
+    this.graph.recordCompaction(record);
+    return record;
   }
 
   exportSnapshot(): AgentSessionSnapshot {
-    return {
-      messages: this.messages.map((message) => ({
-        role: message.role,
-        content: message.content.map((block) => ({ ...block })),
-      })),
-      usage: { ...this.usage },
-    };
+    return this.graph.exportSnapshot();
   }
 
   restoreSnapshot(snapshot: AgentSessionSnapshot): void {
-    this.replaceMessages(snapshot.messages.map((message) => ({
-      role: message.role,
-      content: message.content.map((block) => ({ ...block })),
-    })));
-    this.replaceUsage({ ...snapshot.usage });
+    this.graph.restoreSnapshot(snapshot);
   }
 }

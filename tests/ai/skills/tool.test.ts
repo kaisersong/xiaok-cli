@@ -27,21 +27,19 @@ description: 打招呼技能
     const result = await tool.execute({ name: 'greet' });
     const payload = JSON.parse(result) as {
       type: string;
-      name: string;
-      description: string;
-      source: string;
-      tier: string;
-      path: string;
-      content: string;
+      requested: string[];
+      strategy: string;
+      primarySkill: string;
+      resolved: Array<{ name: string; description: string; executionContext: string; content: string }>;
     };
 
-    expect(payload.type).toBe('skill');
-    expect(payload.name).toBe('greet');
-    expect(payload.description).toContain('打招呼');
-    expect(payload.source).toBe('global');
-    expect(payload.tier).toBe('user');
-    expect(payload.path).toContain('greet.md');
-    expect(payload.content).toContain('中文');
+    expect(payload.type).toBe('skill_plan');
+    expect(payload.requested).toEqual(['greet']);
+    expect(payload.primarySkill).toBe('greet');
+    expect(payload.strategy).toBe('inline');
+    expect(payload.resolved[0]?.name).toBe('greet');
+    expect(payload.resolved[0]?.description).toContain('打招呼');
+    expect(payload.resolved[0]?.content).toContain('中文');
   });
 
   it('returns error message for unknown skill', async () => {
@@ -76,8 +74,8 @@ description: 发布技能
     await catalog.reload();
     result = await tool.execute({ name: 'deploy' });
 
-    const payload = JSON.parse(result) as { name: string; content: string };
-    expect(payload.name).toBe('deploy');
-    expect(payload.content).toContain('检查 CI');
+    const payload = JSON.parse(result) as { primarySkill: string; resolved: Array<{ content: string }> };
+    expect(payload.primarySkill).toBe('deploy');
+    expect(payload.resolved[0]?.content).toContain('检查 CI');
   });
 });

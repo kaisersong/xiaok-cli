@@ -23,6 +23,8 @@ export type AgentRuntimeEvent = {
 } | {
     type: 'compact_triggered';
     runId: string;
+    summary: string;
+    compactionId?: string;
 } | {
     type: 'run_completed';
     runId: string;

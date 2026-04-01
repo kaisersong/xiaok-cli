@@ -8,7 +8,7 @@ async function* mockStream(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
 
 function createRegistryMock(overrides?: {
   getToolDefinitions?: () => ToolDefinition[];
-  executeTool?: (name: string, input: Record<string, unknown>) => Promise<string>;
+  executeTool?: (name: string, input: Record<string, unknown>, context?: Record<string, unknown>) => Promise<string>;
 }) {
   return {
     getToolDefinitions: overrides?.getToolDefinitions ?? (() => []),
@@ -71,14 +71,14 @@ describe('Agent', () => {
           ]);
         }
         // 第二轮：模型收到 dry-run 结果后返回纯文本（无工具调用），循环结束
-        return mockStream([{ type: 'done' }]);
+        return mockStream([{ type: 'text', delta: 'done' }, { type: 'done' }]);
       },
     };
     const registry = new ToolRegistry({ autoMode: false, dryRun: true, onPrompt: async () => true });
     vi.spyOn(registry, 'executeTool').mockResolvedValue('[dry-run] bash({"command":"rm -rf /"})');
     const agent = new Agent(adapter, registry, 'system');
     await agent.runTurn('bad', () => {});
-    expect(registry.executeTool).toHaveBeenCalledWith('bash', { command: 'rm -rf /' });
+    expect(registry.executeTool).toHaveBeenCalledWith('bash', { command: 'rm -rf /' }, expect.any(Object));
   });
 
   it('stops when max iterations is reached', async () => {
@@ -158,7 +158,7 @@ describe('Agent', () => {
 
     expect(seenMessages[1]?.[0]?.content).toContainEqual({
       type: 'text',
-      text: '[context compacted]',
+      text: expect.stringContaining('[context compacted summary]'),
     });
   });
 
@@ -220,7 +220,7 @@ describe('Agent', () => {
     const adapter: ModelAdapter = {
       stream: (_messages, _tools, systemPrompt) => {
         prompts.push(systemPrompt);
-        return mockStream([{ type: 'done' }]);
+        return mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]);
       },
     };
     const registry = createRegistryMock();

@@ -2,13 +2,20 @@ import Anthropic from '@anthropic-ai/sdk';
 const MAX_RETRIES = 3;
 export class ClaudeAdapter {
     client;
+    apiKey;
+    baseUrl;
     model;
     constructor(apiKey, model = 'claude-opus-4-6', baseUrl) {
+        this.apiKey = apiKey;
+        this.baseUrl = baseUrl;
         this.client = new Anthropic({ apiKey, baseURL: baseUrl, maxRetries: MAX_RETRIES });
         this.model = model;
     }
     getModelName() {
         return this.model;
+    }
+    cloneWithModel(model) {
+        return new ClaudeAdapter(this.apiKey, model, this.baseUrl);
     }
     async *stream(messages, tools, systemPrompt, options) {
         const sourceMessages = options?.promptCache?.messages ?? messages;

@@ -12,5 +12,7 @@ describe('chat platform wiring', () => {
     expect(source).toContain('platform.lspManager.getSummary()');
     expect(source).toContain('platform.dispose()');
     expect(source).toContain('buildCapabilityHealthNotice(platform.health)');
+    expect(source).toContain('loadSettings(cwd)');
+    expect(source).toContain('mergeRules(persistedPermissionSettings)');
   });
 });

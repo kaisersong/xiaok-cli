@@ -6,15 +6,23 @@ const MAX_RETRIES = 3;
 
 export class ClaudeAdapter implements ModelAdapter {
   client: Anthropic;
+  private readonly apiKey: string;
+  private readonly baseUrl?: string;
   private model: string;
 
   constructor(apiKey: string, model = 'claude-opus-4-6', baseUrl?: string) {
+    this.apiKey = apiKey;
+    this.baseUrl = baseUrl;
     this.client = new Anthropic({ apiKey, baseURL: baseUrl, maxRetries: MAX_RETRIES });
     this.model = model;
   }
 
   getModelName(): string {
     return this.model;
+  }
+
+  cloneWithModel(model: string): ClaudeAdapter {
+    return new ClaudeAdapter(this.apiKey, model, this.baseUrl);
   }
 
   async *stream(

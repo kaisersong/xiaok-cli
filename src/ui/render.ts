@@ -4,6 +4,8 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { getToolActivityLabel, type UiLocale } from './locale.js';
+import { getDisplayWidth } from './display-width.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOGO_PATH = join(__dirname, '../../data/logo.txt');
@@ -113,23 +115,6 @@ export function renderError(message: string): void {
   process.stderr.write(`\n${red("Error:")} ${message}\n`);
 }
 
-// 计算字符串的显示宽度（中文字符算2个宽度）
-function displayWidth(str: string): number {
-  // 移除 ANSI 转义序列
-  const clean = str.replace(/\x1b\[[0-9;]*m/g, "");
-  let width = 0;
-  for (let i = 0; i < clean.length; i++) {
-    const code = clean.charCodeAt(i);
-    // 中文字符范围
-    if (code >= 0x4e00 && code <= 0x9fff) {
-      width += 2;
-    } else {
-      width += 1;
-    }
-  }
-  return width;
-}
-
 export function renderWelcomeScreen(opts: {
   model: string;
   cwd: string;
@@ -182,7 +167,7 @@ export function renderWelcomeScreen(opts: {
 
   // Welcome
   const welcome = "欢迎使用 xiaok code!";
-  const welcomeWidth = displayWidth(welcome);
+  const welcomeWidth = getDisplayWidth(welcome);
   const welcomePad = Math.floor((leftWidth - welcomeWidth) / 2);
   const welcomeLeft = " ".repeat(welcomePad) + boldCyan(welcome) + " ".repeat(leftWidth - welcomePad - welcomeWidth);
   console.log(line(welcomeLeft, ""));
@@ -194,7 +179,7 @@ export function renderWelcomeScreen(opts: {
     const logoLine = " ".repeat(logoPad) + cyan(logo[i]) + " ".repeat(leftWidth - logoPad - logo[i].length);
 
     const tip = tips[i] || "";
-    const tipWidth = displayWidth(tip);
+    const tipWidth = getDisplayWidth(tip);
     const tipLine = " " + tip + " ".repeat(rightWidth - tipWidth - 1);
 
     console.log(dim("│") + logoLine + dim("│") + tipLine + dim("│"));
@@ -207,7 +192,7 @@ export function renderWelcomeScreen(opts: {
   // Bottom info
   const modelInfo = `${opts.model} · ${opts.mode}`;
   const sessionInfo = `Session: ${opts.sessionId}`;
-  const sessionWidth = displayWidth(sessionInfo);
+  const sessionWidth = getDisplayWidth(sessionInfo);
 
   const modelLine = " " + dim(modelInfo) + " ".repeat(leftWidth - modelInfo.length - 1);
   const sessionLine = " " + dim(sessionInfo) + " ".repeat(rightWidth - sessionWidth - 1);
@@ -238,8 +223,48 @@ export function renderInputPrompt(): void {
   process.stdout.write(boldCyan('> '));
 }
 
+function singleLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function truncatePlain(text: string, maxWidth: number): string {
+  if (maxWidth <= 0) return '';
+  if (text.length <= maxWidth) return text;
+  if (maxWidth <= 3) return '.'.repeat(maxWidth);
+  return `${text.slice(0, maxWidth - 3)}...`;
+}
+
+function extractToolActivityTarget(input: Record<string, unknown>): string {
+  if (typeof input.command === 'string') return singleLine(input.command);
+  if (typeof input.url === 'string') return singleLine(input.url);
+  if (typeof input.file_path === 'string') return singleLine(input.file_path);
+  if (typeof input.path === 'string') return singleLine(input.path);
+  if (typeof input.pattern === 'string') return singleLine(input.pattern);
+  if (typeof input.query === 'string') return singleLine(input.query);
+  return '';
+}
+
+export function formatSubmittedInput(text: string): string {
+  return `${bgDarkGray(` ${text} `)}\n`;
+}
+
 export function renderUserInput(text: string): void {
-  process.stdout.write(`${bgDarkGray(` ${text} `)}\n`);
+  process.stdout.write(formatSubmittedInput(text));
+}
+
+export function formatToolActivity(
+  toolName: string,
+  input: Record<string, unknown>,
+  maxWidth = process.stdout.columns ?? 80,
+  locale: UiLocale = 'zh-CN',
+): string {
+  const prefix = `• ${getToolActivityLabel(toolName, locale)}`;
+  const target = extractToolActivityTarget(input);
+  if (!target) return prefix;
+
+  const available = Math.max(maxWidth - prefix.length - 1, 0);
+  const truncated = truncatePlain(target, available);
+  return truncated ? `${prefix} ${truncated}` : prefix;
 }
 
 export function renderBanner(opts: {

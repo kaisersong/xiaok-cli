@@ -57,4 +57,40 @@ describe('createAdapter', () => {
       .toThrow(/API Key/); // should still throw — unprefixed var not used
     delete process.env.XIAOK_API_KEY;
   });
+
+  it('routes claude-compatible custom endpoints to ClaudeAdapter', () => {
+    const config: Config = {
+      ...BASE_CONFIG,
+      defaultModel: 'custom',
+      models: {
+        custom: {
+          baseUrl: 'http://ccr.client.yzjop.com/claude-code',
+          apiKey: 'sk-custom',
+          model: 'sonnet4.6',
+        },
+      },
+    };
+
+    const adapter = createAdapter(config);
+
+    expect(adapter.constructor.name).toBe('ClaudeAdapter');
+  });
+
+  it('keeps gpt-style custom endpoints on OpenAIAdapter', () => {
+    const config: Config = {
+      ...BASE_CONFIG,
+      defaultModel: 'custom',
+      models: {
+        custom: {
+          baseUrl: 'https://cc.sub.258000.sbs',
+          apiKey: 'sk-custom',
+          model: 'gpt-5.4',
+        },
+      },
+    };
+
+    const adapter = createAdapter(config);
+
+    expect(adapter.constructor.name).toBe('OpenAIAdapter');
+  });
 });

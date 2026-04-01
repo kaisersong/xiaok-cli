@@ -1,16 +1,23 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { buildSlashMenuOverlayLines } from '../../src/ui/repl-state.js';
+import { getDisplayWidth, stripAnsi } from '../../src/ui/text-metrics.js';
 import {
   InputReader,
   cyclePermissionMode,
   getMenuClearSequence,
+  getVisibleMenuItems,
   getSlashCommands,
   truncateMenuDescription,
   wordBoundaryLeft,
   wordBoundaryRight,
 } from '../../src/ui/input.js';
 import type { SkillMeta } from '../../src/ai/skills/loader.js';
+import { createTtyHarness } from '../support/tty.js';
+import type { TranscriptLogger } from '../../src/ui/transcript.js';
+import { ReplRenderer } from '../../src/ui/repl-renderer.js';
 
 describe('getSlashCommands', () => {
   it('should return base commands when no skills provided', () => {
@@ -90,14 +97,30 @@ describe('getSlashCommands', () => {
 describe('InputReader', () => {
   let reader: InputReader;
   let originalIsTTY: boolean | undefined;
+  let originalConfigDir: string | undefined;
+  let configDir: string;
+  const tempDirs: string[] = [];
 
   beforeEach(() => {
     reader = new InputReader();
     originalIsTTY = process.stdin.isTTY;
+    originalConfigDir = process.env.XIAOK_CONFIG_DIR;
+    configDir = join(tmpdir(), `xiaok-input-config-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(configDir);
+    mkdirSync(configDir, { recursive: true });
+    process.env.XIAOK_CONFIG_DIR = configDir;
   });
 
   afterEach(() => {
     process.stdin.isTTY = originalIsTTY;
+    if (originalConfigDir === undefined) {
+      delete process.env.XIAOK_CONFIG_DIR;
+    } else {
+      process.env.XIAOK_CONFIG_DIR = originalConfigDir;
+    }
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
     vi.restoreAllMocks();
   });
 
@@ -133,6 +156,177 @@ describe('InputReader', () => {
     it('uses stdout for readline output in non-tty mode', async () => {
       const source = readFileSync(join(process.cwd(), 'src', 'ui', 'input.ts'), 'utf8');
       expect(source).toContain("readline.createInterface({ input: stdin, output: stdout })");
+    });
+
+    it('replays slash-menu interaction without appending each typed character onto a new line', async () => {
+      const harness = createTtyHarness();
+      reader.setSkills([
+        { name: 'kai-report-creator', description: 'Handles reports', content: '', path: '' },
+      ]);
+
+      const pending = reader.read('> ');
+      harness.send('/');
+      harness.send('k');
+      harness.send('a');
+      harness.send('\r');
+      harness.send('\r');
+
+      await expect(pending).resolves.toBe('/kai-report-creator');
+      expect(harness.output.normalized).not.toContain('/\n/');
+      expect(harness.output.normalized).not.toContain('/k\n/ka');
+      expect(harness.output.normalized).not.toContain('> /\n> /k');
+      expect(harness.output.normalized).not.toContain('> /k\n> /ka');
+      expect(harness.output.normalized).not.toContain('> /ka\n> /kai');
+
+      harness.restore();
+    });
+
+    it('re-renders slash menu in place when navigating with arrow keys', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+      reader.setSkills([
+        { name: 'debug', description: '先定位根因，再提出修复方案', content: '', path: '' },
+        { name: 'simplify', description: '识别可删减的复杂度，优先做小而稳的重构', content: '', path: '' },
+      ]);
+
+      const pending = reader.read('> ');
+      harness.send('/');
+      harness.send('\x1b[B');
+
+      expect(harness.screen.lines()).toEqual([
+        '> /',
+        '    /clear  Clear the screen',
+        '  ❯ /commit  Commit staged changes',
+        '    /context  Show loaded repo context',
+        '    /debug  先定位根因，再提出修复...',
+        '    /doctor  Inspect local CLI health',
+        '    /exit  Exit the chat',
+        '    /help  Show help',
+        '    /init  Initialize project xi...',
+      ]);
+
+      harness.send('\x03');
+
+      await expect(pending).resolves.toBeNull();
+
+      harness.restore();
+    });
+
+    it('does not accumulate duplicated prompt rows when repeatedly navigating past slash menu edges', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+      reader.setSkills([
+        { name: 'debug', description: '先定位根因，再提出修复方案', content: '', path: '' },
+        { name: 'simplify', description: '识别可删减的复杂度，优先做小而稳的重构', content: '', path: '' },
+      ]);
+
+      const pending = reader.read('> ');
+      harness.send('/');
+
+      for (let index = 0; index < 20; index += 1) {
+        harness.send('\x1b[A');
+      }
+
+      for (let index = 0; index < 20; index += 1) {
+        harness.send('\x1b[B');
+      }
+
+      const promptLines = harness.screen.lines().filter((line) => line === '> /');
+      expect(promptLines).toHaveLength(1);
+
+      harness.send('\x03');
+      await expect(pending).resolves.toBeNull();
+
+      harness.restore();
+    });
+
+    it('keeps the cursor aligned when moving across CJK text', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+
+      const pending = reader.read('> ');
+      harness.send('为');
+      harness.send('什');
+      harness.send('么');
+      harness.send('\x1b[D');
+      harness.send('\x1b[D');
+
+      expect(harness.screen.lines()).toEqual(['> 为什么']);
+
+      harness.send('\x03');
+      await expect(pending).resolves.toBeNull();
+
+      harness.restore();
+    });
+
+    it('records key and submit events to the transcript logger', async () => {
+      const harness = createTtyHarness();
+      const events: Array<Record<string, unknown>> = [];
+      const logger: TranscriptLogger = {
+        record(event) {
+          events.push(event as Record<string, unknown>);
+        },
+        recordOutput() {},
+      };
+
+      reader.setTranscriptLogger(logger);
+
+      const pending = reader.read('> ');
+      harness.send('h');
+      harness.send('i');
+      harness.send('\r');
+
+      await expect(pending).resolves.toBe('hi');
+      expect(events.some((event) => event.type === 'input_key' && event.key === 'h')).toBe(true);
+      expect(events.some((event) => event.type === 'input_submit' && event.value === 'hi')).toBe(true);
+
+      harness.restore();
+    });
+
+    it('does not clear and redraw twice for slash-menu arrow navigation when using the shared renderer', async () => {
+      const harness = createTtyHarness();
+      const renderInput = vi.fn();
+      const clearOverlay = vi.fn();
+      reader = new InputReader({
+        renderInput,
+        clearOverlay,
+      } as unknown as ReplRenderer);
+      reader.setSkills([
+        { name: 'debug', description: '先定位根因，再提出修复方案', content: '', path: '' },
+      ]);
+
+      const pending = reader.read('> ');
+      harness.send('/');
+      renderInput.mockClear();
+      clearOverlay.mockClear();
+
+      harness.send('\x1b[A');
+
+      expect(clearOverlay).not.toHaveBeenCalled();
+      expect(renderInput).toHaveBeenCalledTimes(1);
+
+      harness.send('\x03');
+      await expect(pending).resolves.toBeNull();
+
+      harness.restore();
+    });
+
+    it('loads custom keybindings and can remap ctrl+c from cancel to submit', async () => {
+      const harness = createTtyHarness();
+      writeFileSync(
+        join(configDir, 'keybindings.json'),
+        JSON.stringify([{ key: 'ctrl+c', action: 'submit' }], null, 2),
+        'utf8',
+      );
+
+      const pending = reader.read('> ');
+      harness.send('o');
+      harness.send('k');
+      harness.send('\x03');
+
+      await expect(pending).resolves.toBe('ok');
+
+      harness.restore();
     });
   });
 
@@ -217,6 +411,38 @@ describe('InputReader', () => {
       expect(testCmd).toBeDefined();
       expect(testCmd?.desc).toBe('This is a test skill with a long description');
     });
+
+    it('truncates mixed-width skill descriptions to the visible terminal width', () => {
+      const lines = buildSlashMenuOverlayLines(
+        [{
+          cmd: '/kai-report-creator',
+          desc: 'Use when the user wants to CREATE or GENERATE a report, business summary, data dashboard, or research doc — 报告/数据看板/商业报告/研究文档/KPI仪表盘. Handles Chinese and English equally.',
+        }],
+        0,
+        50,
+        8,
+      );
+
+      expect(lines).toHaveLength(1);
+      expect(getDisplayWidth(stripAnsi(lines[0] ?? ''))).toBeLessThanOrEqual(50);
+    });
+
+    it('caps slash-menu description width even when the terminal is wide', () => {
+      const lines = buildSlashMenuOverlayLines(
+        [{
+          cmd: '/kai-report-creator',
+          desc: 'Use when the user wants to CREATE or GENERATE a report, business summary, data dashboard, or research doc — 报告/数据看板/商业报告/研究文档/KPI仪表盘. Handles Chinese and English equally.',
+        }],
+        0,
+        80,
+        8,
+      );
+
+      const plainLine = stripAnsi(lines[0] ?? '');
+      const description = plainLine.split('/kai-report-creator  ')[1] ?? '';
+
+      expect(getDisplayWidth(description)).toBeLessThanOrEqual(24);
+    });
   });
 });
 
@@ -247,6 +473,49 @@ describe('menu rendering helpers', () => {
 
   it('getMenuClearSequence should clear lines below the prompt and return to input row', () => {
     expect(getMenuClearSequence(2)).toBe('\x1b[1B\r\x1b[2K\x1b[1B\r\x1b[2K\x1b[2A\r');
+  });
+
+  it('getVisibleMenuItems should cap long menus to eight rows', () => {
+    const items = Array.from({ length: 12 }, (_, i) => ({
+      cmd: `/cmd-${i}`,
+      desc: `Command ${i}`,
+    }));
+
+    const visible = getVisibleMenuItems(items, 0, 8);
+
+    expect(visible.items).toHaveLength(8);
+    expect(visible.start).toBe(0);
+    expect(visible.items[0]?.cmd).toBe('/cmd-0');
+    expect(visible.items[7]?.cmd).toBe('/cmd-7');
+  });
+
+  it('getVisibleMenuItems should scroll down to keep lower selections visible', () => {
+    const items = Array.from({ length: 12 }, (_, i) => ({
+      cmd: `/cmd-${i}`,
+      desc: `Command ${i}`,
+    }));
+
+    const visible = getVisibleMenuItems(items, 10, 8);
+
+    expect(visible.items).toHaveLength(8);
+    expect(visible.start).toBe(3);
+    expect(visible.items[0]?.cmd).toBe('/cmd-3');
+    expect(visible.items[7]?.cmd).toBe('/cmd-10');
+    expect(visible.selectedOffset).toBe(7);
+  });
+
+  it('getVisibleMenuItems should scroll back up when selection returns near the top', () => {
+    const items = Array.from({ length: 12 }, (_, i) => ({
+      cmd: `/cmd-${i}`,
+      desc: `Command ${i}`,
+    }));
+
+    const visible = getVisibleMenuItems(items, 1, 8);
+
+    expect(visible.start).toBe(0);
+    expect(visible.items[0]?.cmd).toBe('/cmd-0');
+    expect(visible.items[7]?.cmd).toBe('/cmd-7');
+    expect(visible.selectedOffset).toBe(1);
   });
 });
 

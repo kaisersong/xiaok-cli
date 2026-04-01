@@ -25,17 +25,34 @@ describe('loadSkills', () => {
     writeFileSync(join(globalDir, 'skills', 'hello.md'), `---
 name: hello
 description: 打招呼
+allowed-tools:
+  - read
+  - grep
+context: fork
+agent: researcher
+depends-on:
+  - common
 ---
 # Hello Skill
 说你好。`);
+    writeFileSync(join(globalDir, 'skills', 'common.md'), `---
+name: common
+description: 通用技能
+---
+通用技能。`);
     const skills = await loadSkills(globalDir, projectDir, { builtinRoots: [] });
-    expect(skills).toHaveLength(1);
-    expect(skills[0].name).toBe('hello');
-    expect(skills[0].description).toBe('打招呼');
-    expect(skills[0].source).toBe('global');
-    expect(skills[0].tier).toBe('user');
-    expect(skills[0].path).toContain('hello.md');
-    expect(skills[0].content).toContain('说你好');
+    const hello = skills.find((skill) => skill.name === 'hello');
+    expect(skills).toHaveLength(2);
+    expect(hello?.name).toBe('hello');
+    expect(hello?.description).toBe('打招呼');
+    expect(hello?.source).toBe('global');
+    expect(hello?.tier).toBe('user');
+    expect(hello?.path).toContain('hello.md');
+    expect(hello?.content).toContain('说你好');
+    expect(hello?.allowedTools).toEqual(['read', 'grep']);
+    expect(hello?.executionContext).toBe('fork');
+    expect(hello?.agent).toBe('researcher');
+    expect(hello?.dependsOn).toEqual(['common']);
   });
 
   it('loads skills from project-local directory', async () => {
@@ -162,5 +179,25 @@ description: 发布技能
       source: 'project',
       tier: 'project',
     });
+  });
+
+  it('resolves skill dependencies in deterministic order', async () => {
+    writeFileSync(join(projectDir, '.xiaok', 'skills', 'base.md'), `---
+name: base
+description: base
+---
+Base.`);
+    writeFileSync(join(projectDir, '.xiaok', 'skills', 'report.md'), `---
+name: report
+description: report
+depends-on:
+  - base
+---
+Report.`);
+
+    const catalog = createSkillCatalog(globalDir, projectDir, { builtinRoots: [] });
+    await catalog.reload();
+
+    expect(catalog.resolve(['report']).map((skill) => skill.name)).toEqual(['base', 'report']);
   });
 });

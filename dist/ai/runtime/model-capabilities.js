@@ -43,8 +43,9 @@ export function resolveModelCapabilities(modelOrAdapter) {
     };
 }
 function addCacheControlToLastTool(tools) {
-    return tools.map((tool, index) => {
-        if (index !== tools.length - 1) {
+    const stableTools = tools.slice().sort((left, right) => left.name.localeCompare(right.name));
+    return stableTools.map((tool, index) => {
+        if (index !== stableTools.length - 1) {
             return { ...tool };
         }
         return {
@@ -60,7 +61,7 @@ function addCacheControlToHistory(messages) {
             content: message.content.map((block) => ({ ...block })),
         }));
     }
-    const anchorIndex = messages.length - 2;
+    const anchorIndex = Math.max(0, messages.length - 2);
     return messages.map((message, messageIndex) => ({
         role: message.role,
         content: message.content.map((block, blockIndex) => {

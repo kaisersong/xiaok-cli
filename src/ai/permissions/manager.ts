@@ -1,5 +1,6 @@
 export type PermissionMode = 'default' | 'auto' | 'plan';
 export type PermissionDecision = 'allow' | 'deny' | 'prompt';
+import { PermissionPolicyEngine, matches } from './policy-engine.js';
 
 export interface PermissionManagerOptions {
   mode: PermissionMode;
@@ -45,7 +46,16 @@ export class PermissionManager {
   }
 
   async check(toolName: string, input: Record<string, unknown>): Promise<PermissionDecision> {
-    if (this.matches(this.denyRules, toolName, input)) {
+    const policy = new PermissionPolicyEngine({
+      globalAllow: this.allowRules,
+      globalDeny: this.denyRules,
+      projectAllow: [],
+      projectDeny: [],
+      sessionAllow: [],
+      sessionDeny: [],
+    });
+    const evaluation = await policy.evaluate(toolName, input);
+    if (evaluation.action === 'deny') {
       return 'deny';
     }
 
@@ -61,7 +71,7 @@ export class PermissionManager {
       return 'allow';
     }
 
-    if (this.matches(this.allowRules, toolName, input)) {
+    if (evaluation.action === 'allow') {
       return 'allow';
     }
 
@@ -69,18 +79,18 @@ export class PermissionManager {
   }
 
   private matches(rules: string[], toolName: string, input: Record<string, unknown>): boolean {
-    return rules.some((rule) => {
-      const [ruleTool, pattern = '*'] = rule.includes(':') ? rule.split(':', 2) : [toolName, rule];
-      if (ruleTool !== toolName) {
-        return false;
-      }
+    return matches(rules, toolName, input);
+  }
 
-      const target = this.getRuleTarget(input);
-      const regex = new RegExp(
-        `^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`,
-      );
-      return regex.test(target);
-    });
+  private buildRuleRegex(pattern: string): RegExp {
+    if (pattern.endsWith(' *')) {
+      const prefix = pattern.slice(0, -2);
+      return new RegExp(`^${prefix.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}(?: .*)?$`);
+    }
+
+    return new RegExp(
+      `^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`,
+    );
   }
 
   private getRuleTarget(input: Record<string, unknown>): string {

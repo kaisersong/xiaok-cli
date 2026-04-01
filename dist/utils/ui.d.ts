@@ -5,6 +5,7 @@ export declare function writeChunk(text: string): void;
 export declare function writeLine(text: string): void;
 /** 输出错误行 */
 export declare function writeError(text: string): void;
+export declare function formatErrorText(text: string): string;
 /** 检测 stdin 是否为 TTY */
 export declare function isTTY(): boolean;
 /**

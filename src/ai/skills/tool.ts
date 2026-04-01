@@ -1,5 +1,7 @@
 import type { Tool } from '../../types.js';
+import type { CapabilityRegistry } from '../../platform/runtime/capability-registry.js';
 import type { SkillCatalog, SkillMeta } from './loader.js';
+import { buildSkillExecutionPlan } from './planner.js';
 
 export function formatSkillPayload(skill: SkillMeta): string {
   return JSON.stringify({
@@ -9,6 +11,14 @@ export function formatSkillPayload(skill: SkillMeta): string {
     path: skill.path,
     source: skill.source,
     tier: skill.tier,
+    allowedTools: skill.allowedTools,
+    executionContext: skill.executionContext,
+    agent: skill.agent,
+    model: skill.model,
+    effort: skill.effort,
+    dependsOn: skill.dependsOn,
+    userInvocable: skill.userInvocable,
+    whenToUse: skill.whenToUse,
     content: skill.content,
   }, null, 2);
 }
@@ -17,14 +27,7 @@ function isSkillCatalog(value: SkillMeta[] | SkillCatalog): value is SkillCatalo
   return !Array.isArray(value);
 }
 
-export function createSkillTool(skills: SkillMeta[] | SkillCatalog): Tool {
-  const getSkill = (name: string): SkillMeta | undefined => {
-    if (isSkillCatalog(skills)) {
-      return skills.get(name);
-    }
-    return skills.find((skill) => skill.name === name);
-  };
-
+export function createSkillTool(skills: SkillMeta[] | SkillCatalog, capabilityRegistry?: CapabilityRegistry): Tool {
   const listSkillNames = (): string[] => {
     if (isSkillCatalog(skills)) {
       return skills.list().map((skill) => skill.name);
@@ -32,30 +35,64 @@ export function createSkillTool(skills: SkillMeta[] | SkillCatalog): Tool {
     return skills.map((skill) => skill.name);
   };
 
+  const listSkillRecords = (): SkillMeta[] => {
+    if (isSkillCatalog(skills)) {
+      return skills.list();
+    }
+    return skills;
+  };
+
+  const syncCapabilities = (): void => {
+    for (const skill of listSkillRecords()) {
+      capabilityRegistry?.register({
+        kind: 'skill',
+        name: skill.name,
+        description: skill.description,
+      });
+    }
+  };
+
+  syncCapabilities();
+
   return {
     permission: 'safe',
     definition: {
       name: 'skill',
-      description: '按名称加载 skill 内容并注入到当前对话上下文。当用户请求匹配某个 skill 的描述时使用。',
+      description: '按名称加载一个或多个 skill，并返回包含依赖与执行上下文的 skill plan。',
       inputSchema: {
         type: 'object',
         properties: {
           name: {
             type: 'string',
-            description: 'skill 名称（不含 / 前缀）',
+            description: '单个 skill 名称（不含 / 前缀）',
+          },
+          names: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '多个 skill 名称。会自动解析依赖并去重。',
           },
         },
-        required: ['name'],
       },
     },
     async execute(input) {
-      const { name } = input as { name: string };
-      const skill = getSkill(name);
-      if (!skill) {
-        const available = listSkillNames().join(', ') || '（无）';
-        return `Error: 找不到 skill "${name}"。可用 skills：${available}`;
+      syncCapabilities();
+      const { name, names } = input as { name?: string; names?: string[] };
+      const requested = [
+        ...(Array.isArray(names) ? names : []),
+        ...(name ? [name] : []),
+      ].filter(Boolean);
+
+      if (requested.length === 0) {
+        return 'Error: skill 工具至少需要提供 name 或 names';
       }
-      return formatSkillPayload(skill);
+
+      try {
+        const plan = buildSkillExecutionPlan(requested, skills);
+        return JSON.stringify(plan, null, 2);
+      } catch {
+        const available = listSkillNames().join(', ') || '（无）';
+        return `Error: 找不到 skill "${requested.join(', ')}"。可用 skills：${available}`;
+      }
     },
   };
 }

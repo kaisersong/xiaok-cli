@@ -1,5 +1,15 @@
 import { ClaudeAdapter } from './adapters/claude.js';
 import { OpenAIAdapter } from './adapters/openai.js';
+function isClaudeCompatibleCustomEndpoint(baseUrl, model) {
+    const normalizedBaseUrl = baseUrl.toLowerCase();
+    const normalizedModel = (model ?? '').toLowerCase();
+    if (normalizedBaseUrl.includes('claude')
+        || normalizedBaseUrl.includes('anthropic')
+        || normalizedBaseUrl.includes('/messages')) {
+        return true;
+    }
+    return /claude|sonnet|opus|haiku/.test(normalizedModel);
+}
 export function createAdapter(config) {
     const provider = config.defaultModel;
     // 按提供商读取 API Key：环境变量优先于配置文件
@@ -28,6 +38,9 @@ export function createAdapter(config) {
         if (!m?.baseUrl)
             throw new Error('custom 模型需要配置 baseUrl。请运行: xiaok config set model custom --base-url <url>');
         const apiKey = process.env.XIAOK_CUSTOM_API_KEY ?? m.apiKey ?? '';
+        if (isClaudeCompatibleCustomEndpoint(m.baseUrl, m.model)) {
+            return new ClaudeAdapter(apiKey, m.model ?? 'claude-opus-4-6', m.baseUrl);
+        }
         // 自定义端点的 model 名称从配置中读取，未配置时使用 'default'（部分 provider 忽略此字段）
         return new OpenAIAdapter(apiKey, m.model ?? 'default', m.baseUrl);
     }

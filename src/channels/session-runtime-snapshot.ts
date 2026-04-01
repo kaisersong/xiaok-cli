@@ -19,6 +19,8 @@ export interface SessionRuntimeSnapshotInput {
   backgroundJobs: SessionRuntimeSnapshotBackgroundJob[];
   approvals: SessionRuntimeSnapshotApproval[];
   capabilityHealth: string;
+  promptSnapshotId?: string;
+  memoryRefs?: string[];
 }
 
 export function formatSessionRuntimeSnapshot(input: SessionRuntimeSnapshotInput): string {
@@ -57,6 +59,9 @@ export function formatSessionRuntimeSnapshot(input: SessionRuntimeSnapshotInput)
     }
   }
 
+  lines.push('');
+  lines.push(`Prompt Snapshot：${input.promptSnapshotId ?? '无'}`);
+  lines.push(`Memory Refs：${(input.memoryRefs ?? []).join(', ') || '无'}`);
   lines.push('');
 
   if (input.approvals.length === 0) {

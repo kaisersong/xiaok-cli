@@ -26,6 +26,7 @@
 ### 本地 CLI
 
 - `xiaok` 或 `xiaok chat`
+- `xiaok doctor` / `xiaok init` / `xiaok transcript <sessionId>`
 - 交互式对话模式
 - 单次任务模式
 - `-p` / `--json` 打印模式
@@ -36,6 +37,7 @@
 - `/tasks`
 - `/task <id>`
 - 带权限控制的工具调用
+- 交互式审批弹窗，并支持会话/项目/全局级持久化允许规则
 - `ask_user` 工具，可在运行中向操作者提问
 - 会话级 `task_create` / `task_update` / `task_list` / `task_get`
 - 按模型能力调整上下文策略，并支持 prompt caching
@@ -45,6 +47,8 @@
 - 共享平台 runtime，统一装配 MCP/LSP/plugin 能力
 - 声明式 subagent，可按需后台运行
 - 支持 worktree 隔离的 subagent 执行
+- 输入框支持撤销/重做、可配置快捷键，以及可配置的行内状态栏字段
+- 支持 transcript 记录与事后分析，便于排查 prompt/审批重放问题
 
 ### 云之家 IM 网关
 
@@ -94,7 +98,7 @@ npm run dev -- --help
 node dist/index.js --help
 ```
 
-当前分支包版本：`0.1.3`
+当前分支包版本：`0.1.4`
 
 ## 配置
 
@@ -134,6 +138,36 @@ XIAOK_CONFIG_DIR=/path/to/config
 }
 ```
 
+项目级与 UI 设置存放在 `<repo>/.xiaok/settings.json`，可持久化权限规则、hook 命令和状态栏字段等偏好：
+
+```json
+{
+  "permissions": {
+    "allow": [],
+    "deny": []
+  },
+  "ui": {
+    "statusBar": {
+      "fields": ["model", "mode", "tokens", "session"]
+    }
+  },
+  "hooks": {
+    "pre": [],
+    "post": [],
+    "timeoutMs": 5000
+  }
+}
+```
+
+终端快捷键可以放在 `~/.xiaok/keybindings.json` 或 `$XIAOK_CONFIG_DIR/keybindings.json`：
+
+```json
+[
+  { "key": "ctrl+c", "action": "submit" },
+  { "key": "ctrl+l", "action": "clear-screen" }
+]
+```
+
 ## 基本使用
 
 启动交互模式：
@@ -152,6 +186,24 @@ xiaok "review the current workspace changes"
 
 ```bash
 xiaok chat --help
+```
+
+检查本地 CLI / runtime 健康状态：
+
+```bash
+xiaok doctor
+```
+
+初始化项目设置：
+
+```bash
+xiaok init
+```
+
+分析某次交互 transcript：
+
+```bash
+xiaok transcript sess_demo
 ```
 
 ## Skills

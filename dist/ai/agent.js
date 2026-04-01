@@ -49,6 +49,9 @@ export class Agent {
     restoreSession(snapshot) {
         this.session.restoreSnapshot(snapshot);
     }
+    getSessionState() {
+        return this.session;
+    }
     setAdapter(adapter) {
         this.adapter = adapter;
         this.runtime.setAdapter(adapter);
@@ -56,6 +59,9 @@ export class Agent {
     setSystemPrompt(systemPrompt) {
         this.systemPrompt = systemPrompt;
         this.runtime.setSystemPrompt(systemPrompt);
+    }
+    setPromptSnapshot(promptSnapshot) {
+        this.runtime.setPromptSnapshot(promptSnapshot);
     }
     createRuntime() {
         return new AgentRuntime({

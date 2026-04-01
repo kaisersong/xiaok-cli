@@ -14,14 +14,15 @@ describe('custom agent loader', () => {
     expect(agent.systemPrompt).toBe('You are a reviewer.');
   });
 
-  it('parses background, isolation and team policy frontmatter', () => {
+  it('parses background, isolation, cleanup, and team policy frontmatter', () => {
     const agent = parseAgentFile(
       'planner',
-      '---\nbackground: true\nisolation: worktree\nteam: platform\n---\nYou plan tasks.',
+      '---\nbackground: true\nisolation: worktree\ncleanup: delete\nteam: platform\n---\nYou plan tasks.',
     );
 
     expect(agent.background).toBe(true);
     expect(agent.isolation).toBe('worktree');
+    expect(agent.cleanup).toBe('delete');
     expect(agent.team).toBe('platform');
   });
 });

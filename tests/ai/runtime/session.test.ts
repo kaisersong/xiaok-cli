@@ -27,12 +27,28 @@ describe('AgentSessionState', () => {
     state.appendUserText('first');
     state.appendAssistantBlocks([{ type: 'text', text: 'second' }]);
     state.appendUserToolResults([{ type: 'tool_result', tool_use_id: 'tu_1', content: 'ok' }]);
-    state.forceCompact('[compacted]');
+    const compaction = state.forceCompact('[compacted]');
 
-    expect(state.getMessages()[0]).toEqual({
-      role: 'assistant',
-      content: [{ type: 'text', text: '[compacted]' }],
-    });
+    expect(compaction?.summary).toContain('[context compacted summary]');
+    expect(compaction?.replacedMessages).toBe(1);
+    expect(state.getCompactions()).toHaveLength(1);
+    expect(state.getMessages()[0]?.role).toBe('assistant');
+    expect((state.getMessages()[0]?.content[0] as { text: string }).text).toContain('[context compacted summary]');
     expect(state.getMessages()).toHaveLength(3);
+  });
+
+  it('exports prompt snapshot and approval metadata with the session snapshot', () => {
+    const state = new AgentSessionState();
+
+    state.attachPromptSnapshot('prompt_1', ['mem_1']);
+    state.recordApproval('apr_1');
+    state.recordBackgroundJob('bg_1');
+
+    expect(state.exportSnapshot()).toMatchObject({
+      promptSnapshotId: 'prompt_1',
+      memoryRefs: ['mem_1'],
+      approvalRefs: ['apr_1'],
+      backgroundJobRefs: ['bg_1'],
+    });
   });
 });

@@ -5,7 +5,7 @@ import { executeNamedSubAgent } from '../../ai/agents/subagent-executor.js';
 import { applySandboxToTools } from '../sandbox/tool-wrappers.js';
 import { createTeamTools } from '../teams/tools.js';
 export function createPlatformRegistryFactory(options) {
-    const runNamedSubAgent = async (agentName, prompt) => {
+    const runNamedSubAgent = async (agentName, prompt, cwd) => {
         const agentDef = options.platform.customAgents.find((agent) => agent.name === agentName);
         if (!agentDef) {
             throw new Error(`unknown subagent: ${agentName}`);
@@ -14,13 +14,14 @@ export function createPlatformRegistryFactory(options) {
             agentDef,
             prompt,
             sessionId: options.sessionId,
+            cwd,
             adapter: options.adapter,
             createRegistry: createRegistryForCwd,
             buildSystemPrompt: options.buildSystemPrompt,
             worktreeManager: options.platform.worktreeManager,
         });
     };
-    const backgroundRunner = options.platform.createBackgroundRunner(async ({ agent, prompt }) => runNamedSubAgent(agent, prompt), options.notifyBackgroundJob);
+    const backgroundRunner = options.platform.createBackgroundRunner(async ({ agent, prompt, cwd }) => runNamedSubAgent(agent, prompt, cwd), options.notifyBackgroundJob);
     function createRegistryForCwd(cwd, allowedTools) {
         const extraTools = [
             ...(options.workflowTools ?? []),
@@ -29,6 +30,7 @@ export function createPlatformRegistryFactory(options) {
             createSubAgentTool({
                 source: options.source,
                 sessionId: options.sessionId,
+                cwd,
                 adapter: options.adapter,
                 agents: options.platform.customAgents,
                 createRegistry: createRegistryForCwd,
@@ -43,6 +45,7 @@ export function createPlatformRegistryFactory(options) {
             ? allTools.filter((tool) => allowedTools.includes(tool.definition.name))
             : allTools;
         return new ToolRegistry({
+            capabilityRegistry: options.platform.capabilityRegistry,
             permissionManager: options.permissionManager,
             dryRun: options.dryRun,
             hooksRunner: createHooksRunner({

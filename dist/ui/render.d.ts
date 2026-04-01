@@ -1,3 +1,4 @@
+import { type UiLocale } from './locale.js';
 export declare function setColorsEnabled(enabled: boolean): void;
 export type Theme = "default" | "minimal" | "plain";
 export declare function getTheme(): Theme;
@@ -30,7 +31,9 @@ export declare function renderWelcomeScreen(opts: {
 }): number;
 export declare function renderInputSeparator(): void;
 export declare function renderInputPrompt(): void;
+export declare function formatSubmittedInput(text: string): string;
 export declare function renderUserInput(text: string): void;
+export declare function formatToolActivity(toolName: string, input: Record<string, unknown>, maxWidth?: number, locale?: UiLocale): string;
 export declare function renderBanner(opts: {
     model: string;
     cwd: string;

@@ -1,4 +1,5 @@
 import type { Message, UsageStats } from '../../types.js';
+import type { CompactionRecord } from './session.js';
 export interface PersistedSessionSnapshot {
     sessionId: string;
     cwd: string;
@@ -6,8 +7,14 @@ export interface PersistedSessionSnapshot {
     createdAt: number;
     updatedAt: number;
     forkedFromSessionId?: string;
+    lineage: string[];
     messages: Message[];
     usage: UsageStats;
+    compactions: CompactionRecord[];
+    promptSnapshotId?: string;
+    memoryRefs: string[];
+    approvalRefs: string[];
+    backgroundJobRefs: string[];
 }
 export interface SessionListEntry {
     sessionId: string;

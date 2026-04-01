@@ -4,6 +4,19 @@ import { ToolRegistry } from '../../../src/ai/tools/index.js';
 import { createToolSearchTool } from '../../../src/ai/tools/search.js';
 
 describe('tool_search', () => {
+  it('returns active tool schemas by name', async () => {
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'default' }),
+      dryRun: false,
+      onPrompt: async () => true,
+    });
+
+    const toolSearchTool = createToolSearchTool(registry);
+    const result = await toolSearchTool.execute({ query: 'select:uninstall_skill' });
+
+    expect(result).toContain('uninstall_skill');
+  });
+
   it('returns deferred tool schemas by name', async () => {
     const registry = new ToolRegistry({
       permissionManager: new PermissionManager({ mode: 'default' }),

@@ -6,7 +6,7 @@ export type AgentRuntimeEvent =
   | { type: 'tool_started'; runId: string; toolName: string; input: Record<string, unknown> }
   | { type: 'tool_finished'; runId: string; toolName: string; ok: boolean }
   | { type: 'usage_updated'; runId: string; usage: UsageStats }
-  | { type: 'compact_triggered'; runId: string }
+  | { type: 'compact_triggered'; runId: string; summary: string; compactionId?: string }
   | { type: 'run_completed'; runId: string }
   | { type: 'run_failed'; runId: string; error: Error }
   | { type: 'run_aborted'; runId: string };

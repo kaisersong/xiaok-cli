@@ -5,6 +5,7 @@ import { tmpdir } from 'os';
 import { Command } from 'commander';
 import { runDoctorCommand, registerDoctorCommands } from '../../src/commands/doctor.js';
 import { runInitCommand, registerInitCommands } from '../../src/commands/init.js';
+import { runTranscriptCommand, registerTranscriptCommands } from '../../src/commands/transcript.js';
 
 describe('operator commands', () => {
   let testDir: string;
@@ -42,9 +43,11 @@ describe('operator commands', () => {
   it('runInitCommand creates project settings scaffold', async () => {
     const result = await runInitCommand(testDir);
     const settingsPath = join(testDir, '.xiaok', 'settings.json');
+    const settingsText = readFileSync(settingsPath, 'utf8');
 
     expect(result).toContain('.xiaok/settings.json');
-    expect(readFileSync(settingsPath, 'utf8')).toContain('"permissions"');
+    expect(settingsText).toContain('"permissions"');
+    expect(settingsText).toContain('"statusBar"');
   });
 
   it('registers doctor and init top-level commands', () => {
@@ -52,9 +55,32 @@ describe('operator commands', () => {
 
     registerDoctorCommands(program);
     registerInitCommands(program);
+    registerTranscriptCommands(program);
 
     const commandNames = program.commands.map((command) => command.name());
     expect(commandNames).toContain('doctor');
     expect(commandNames).toContain('init');
+    expect(commandNames).toContain('transcript');
+  });
+
+  it('runTranscriptCommand reports repeated prompt growth from a transcript file', async () => {
+    const transcriptDir = join(process.env.XIAOK_CONFIG_DIR!, 'transcripts');
+    mkdirSync(transcriptDir, { recursive: true });
+    writeFileSync(
+      join(transcriptDir, 'sess_demo.jsonl'),
+      [
+        JSON.stringify({ type: 'output', stream: 'stdout', raw: '> /\n', normalized: '> /\n', timestamp: 1 }),
+        JSON.stringify({ type: 'output', stream: 'stdout', raw: '> /k\n', normalized: '> /k\n', timestamp: 2 }),
+        JSON.stringify({ type: 'output', stream: 'stdout', raw: '> /ka\n', normalized: '> /ka\n', timestamp: 3 }),
+        JSON.stringify({ type: 'output', stream: 'stdout', raw: '⚡ xiaok 想要执行以下操作\n', normalized: '⚡ xiaok 想要执行以下操作\n', timestamp: 4 }),
+        JSON.stringify({ type: 'output', stream: 'stdout', raw: '⚡ xiaok 想要执行以下操作\n', normalized: '⚡ xiaok 想要执行以下操作\n', timestamp: 5 }),
+      ].join('\n') + '\n',
+    );
+
+    const result = await runTranscriptCommand('sess_demo');
+
+    expect(result).toContain('Transcript Analysis');
+    expect(result).toContain('slashPromptGrowth=2');
+    expect(result).toContain('approvalTitleRepeats=1');
   });
 });

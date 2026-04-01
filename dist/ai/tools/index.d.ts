@@ -1,9 +1,11 @@
-import type { Tool, ToolDefinition } from '../../types.js';
+import type { Tool, ToolDefinition, ToolExecutionContext } from '../../types.js';
 import { PermissionManager } from '../permissions/manager.js';
 import type { HooksRunner } from '../../runtime/hooks-runner.js';
+import type { CapabilityRegistry } from '../../platform/runtime/capability-registry.js';
 import { type WorkspaceToolOptions } from './read.js';
 export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions, extraTools?: Tool[]): Tool[];
 export interface RegistryOptions {
+    capabilityRegistry?: CapabilityRegistry;
     permissionManager?: PermissionManager;
     autoMode?: boolean;
     dryRun?: boolean;
@@ -21,7 +23,8 @@ export declare class ToolRegistry {
     registerDeferredTool(definition: ToolDefinition): void;
     registerDeferredTools(definitions: ToolDefinition[]): void;
     searchDeferredTools(query: string): ToolDefinition[];
-    executeTool(name: string, input: Record<string, unknown>): Promise<string>;
+    searchTools(query: string): ToolDefinition[];
+    executeTool(name: string, input: Record<string, unknown>, context?: ToolExecutionContext): Promise<string>;
     /** 用户输入 y! 后，切换当前 registry 为 auto 模式 */
     enableAutoMode(): void;
 }

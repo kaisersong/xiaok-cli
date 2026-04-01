@@ -181,4 +181,41 @@ describe('background runner', () => {
       });
     });
   });
+
+  it('does not surface notify failures as unhandled rejections after job completion', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandledRejection = (error: unknown) => {
+      unhandled.push(error);
+    };
+    process.on('unhandledRejection', onUnhandledRejection);
+
+    try {
+      const runner = createBackgroundRunner({
+        rootDir: testDir,
+        execute: async ({ input }) => ({ ok: true, summary: String(input) }),
+        notify: async () => {
+          throw new Error('notify failed');
+        },
+      });
+
+      const job = await runner.start({
+        sessionId: 'sess_notify',
+        source: 'chat',
+        input: 'background completion',
+      });
+
+      await waitFor(() => {
+        expect(runner.get(job.jobId)).toMatchObject({
+          jobId: job.jobId,
+          status: 'completed',
+          resultSummary: 'background completion',
+        });
+      });
+
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+    }
+  });
 });

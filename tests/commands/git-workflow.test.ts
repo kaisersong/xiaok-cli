@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFile } from 'child_process';
+import { Command } from 'commander';
 
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
@@ -9,13 +10,27 @@ vi.mock('util', () => ({
   promisify: (fn: any) => fn,
 }));
 
-import { runCommitCommand } from '../../src/commands/commit.js';
-import { runReviewCommand } from '../../src/commands/review.js';
-import { runPrCommand } from '../../src/commands/pr.js';
+import { runCommitCommand, registerCommitCommands } from '../../src/commands/commit.js';
+import { runReviewCommand, registerReviewCommands } from '../../src/commands/review.js';
+import { runPrCommand, registerPrCommands } from '../../src/commands/pr.js';
 
 describe('git workflow commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('registers commit, review, and pr as top-level commands', () => {
+    const program = new Command();
+
+    registerCommitCommands(program);
+    registerReviewCommands(program);
+    registerPrCommands(program);
+
+    const commandNames = program.commands.map((command) => command.name());
+
+    expect(commandNames).toContain('commit');
+    expect(commandNames).toContain('review');
+    expect(commandNames).toContain('pr');
   });
 
   it('runCommitCommand should ask the user to stage files first when index is empty', async () => {
@@ -67,6 +82,15 @@ describe('git workflow commands', () => {
     expect(result).toContain('未暂存改动');
   });
 
+  it('runReviewCommand should explain when cwd is not a git repo', async () => {
+    const mockExecFile = vi.mocked(execFile) as any;
+    mockExecFile.mockRejectedValueOnce(new Error('not a git repo'));
+
+    const result = await runReviewCommand('/repo');
+
+    expect(result).toContain('当前目录不是 Git 仓库');
+  });
+
   it('runPrCommand should generate a preview when gh is unavailable', async () => {
     const mockExecFile = vi.mocked(execFile) as any;
     mockExecFile.mockResolvedValueOnce({ stdout: '/repo\n', stderr: '' });
@@ -80,5 +104,15 @@ describe('git workflow commands', () => {
     expect(result).toContain('PR 预览');
     expect(result).toContain('feat: workflow support');
     expect(result).toContain('未检测到 gh');
+  });
+
+  it('runPrCommand should refuse to create a PR from the main branch', async () => {
+    const mockExecFile = vi.mocked(execFile) as any;
+    mockExecFile.mockResolvedValueOnce({ stdout: '/repo\n', stderr: '' });
+    mockExecFile.mockResolvedValueOnce({ stdout: 'main\n', stderr: '' });
+
+    const result = await runPrCommand('/repo');
+
+    expect(result).toContain('主分支');
   });
 });

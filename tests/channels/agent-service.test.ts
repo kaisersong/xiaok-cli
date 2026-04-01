@@ -11,6 +11,37 @@ async function* mockStream(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
 }
 
 describe('ChannelAgentService', () => {
+  it('uses runtime facade when the session exposes one', async () => {
+    const runtimeFacade = {
+      runTurn: vi.fn(async (_request, onChunk) => {
+        onChunk({ type: 'text', delta: 'facade reply' });
+      }),
+    };
+    const service = new ChannelAgentService(
+      {
+        async createSession() {
+          return {
+            agent: {} as Agent,
+            runtimeFacade: runtimeFacade as never,
+            cwd: '/repo',
+          };
+        },
+      },
+      {
+        reply: async () => undefined,
+      },
+    );
+
+    const result = await service.execute({
+      sessionKey: { channel: 'yzj', chatId: 'robot-1', userId: 'user-1' },
+      message: 'hello',
+      replyTarget: { chatId: 'robot-1', userId: 'user-1' },
+    }, 'sess_1');
+
+    expect(runtimeFacade.runTurn).toHaveBeenCalled();
+    expect(result.replyPreview).toContain('facade reply');
+  });
+
   it('disposes existing sessions when resetSession or closeAll is called', async () => {
     const dispose1 = vi.fn();
     const dispose2 = vi.fn();

@@ -15,7 +15,7 @@ export function createSubAgentTool(options) {
                 required: ['agent', 'prompt'],
             },
         },
-        async execute(input) {
+        async execute(input, context) {
             const invocation = input;
             const agentDef = options.agents.find((agent) => agent.name === invocation.agent);
             if (!agentDef) {
@@ -30,9 +30,14 @@ export function createSubAgentTool(options) {
                     sessionId: options.sessionId,
                     source: options.source,
                     taskId: options.getTaskId?.(),
+                    metadata: {
+                        agent: agentDef.name,
+                        team: agentDef.team,
+                    },
                     input: {
                         agent: agentDef.name,
                         prompt: invocation.prompt,
+                        cwd: options.cwd,
                     },
                 });
                 return `background subagent queued: ${job.jobId}`;
@@ -41,10 +46,12 @@ export function createSubAgentTool(options) {
                 agentDef,
                 prompt: invocation.prompt,
                 sessionId: options.sessionId,
+                cwd: options.cwd,
                 adapter: options.adapter,
                 createRegistry: options.createRegistry,
                 buildSystemPrompt: options.buildSystemPrompt,
                 worktreeManager: options.worktreeManager,
+                forkContext: context,
             });
         },
     };

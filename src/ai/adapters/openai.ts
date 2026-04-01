@@ -6,15 +6,23 @@ const MAX_RETRIES = 3;
 
 export class OpenAIAdapter implements ModelAdapter {
   client: OpenAI;
+  private readonly apiKey: string;
+  private readonly baseUrl?: string;
   private model: string;
 
   constructor(apiKey: string, model = 'gpt-4o', baseUrl?: string) {
+    this.apiKey = apiKey;
+    this.baseUrl = baseUrl;
     this.client = new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: MAX_RETRIES });
     this.model = model;
   }
 
   getModelName(): string {
     return this.model;
+  }
+
+  cloneWithModel(model: string): OpenAIAdapter {
+    return new OpenAIAdapter(this.apiKey, model, this.baseUrl);
   }
 
   async *stream(

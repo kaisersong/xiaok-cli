@@ -7,6 +7,11 @@ const DEFAULT_PROJECT_SETTINGS = {
     allow: [],
     deny: [],
   },
+  ui: {
+    statusBar: {
+      fields: ['model', 'mode', 'tokens', 'session'],
+    },
+  },
   hooks: {
     pre: [],
     post: [],

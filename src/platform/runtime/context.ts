@@ -12,6 +12,7 @@ import { createSandboxPolicy } from '../sandbox/policy.js';
 import { FileTeamStore } from '../teams/store.js';
 import { createTeamService, type TeamService } from '../teams/service.js';
 import { createWorktreeManager, type WorktreeManager } from '../worktrees/manager.js';
+import { CapabilityRegistry } from './capability-registry.js';
 import { FileCapabilityHealthStore } from './health-store.js';
 
 export interface PlatformRuntimeContext {
@@ -22,11 +23,12 @@ export interface PlatformRuntimeContext {
   sandboxEnforcer: ReturnType<typeof createSandboxEnforcer>;
   worktreeManager: WorktreeManager;
   mcpTools: Tool[];
+  capabilityRegistry: CapabilityRegistry;
   health: PlatformRuntimeHealth;
   dispose(): Promise<void>;
   listBackgroundJobs(sessionId: string): BackgroundJobRecord[];
   createBackgroundRunner(
-    execute: (input: { agent: string; prompt: string }) => Promise<string>,
+    execute: (input: { agent: string; prompt: string; cwd?: string }) => Promise<string>,
     notify?: (job: BackgroundJobRecord) => Promise<void> | void,
   ): ReturnType<typeof createBackgroundRunner>;
 }
@@ -60,6 +62,7 @@ export async function createPlatformRuntimeContext(
   const pluginRuntime = await loadPlatformPluginRuntime(options.cwd, options.builtinCommands);
   const customAgents = await loadCustomAgents(undefined, options.cwd, pluginRuntime.agentDirs);
   const lspManager = createLspManager();
+  const capabilityRegistry = new CapabilityRegistry();
   const capabilityHealth: PlatformCapabilityHealth[] = [];
   const disposables: Array<{ dispose(): void }> = [];
   const stateRootDir = join(options.cwd, '.xiaok', 'state');
@@ -85,6 +88,21 @@ export async function createPlatformRuntimeContext(
       }),
   });
   const mcpTools = await connectWorkspaceMcpServers(pluginRuntime, capabilityHealth, disposables);
+  for (const agent of customAgents) {
+    capabilityRegistry.register({
+      kind: 'agent',
+      name: agent.name,
+      description: agent.model ? `subagent:${agent.model}` : 'subagent',
+    });
+  }
+  for (const tool of mcpTools) {
+    capabilityRegistry.register({
+      kind: 'mcp',
+      name: tool.definition.name,
+      description: tool.definition.description,
+      inputSchema: tool.definition.inputSchema,
+    });
+  }
   await connectWorkspaceLspServers(pluginRuntime, lspManager, options.cwd, capabilityHealth, disposables);
   const health = createPlatformRuntimeHealth(capabilityHealth);
   healthStore.set(options.cwd, health.snapshot());
@@ -97,6 +115,7 @@ export async function createPlatformRuntimeContext(
     sandboxEnforcer,
     worktreeManager,
     mcpTools,
+    capabilityRegistry,
     health,
     async dispose() {
       for (const disposable of disposables.splice(0).reverse()) {
@@ -110,6 +129,7 @@ export async function createPlatformRuntimeContext(
     listBackgroundJobs(sessionId: string) {
       return createBackgroundRunner({
         rootDir: join(stateRootDir, 'background-jobs'),
+        recoverInterruptedJobs: false,
         execute: async () => ({ ok: true, summary: 'unused' }),
         notify: async () => undefined,
       }).listBySession(sessionId);
@@ -118,7 +138,7 @@ export async function createPlatformRuntimeContext(
       return createBackgroundRunner({
         rootDir: join(stateRootDir, 'background-jobs'),
         execute: async ({ input }) => {
-          const payload = input as { agent?: string; prompt?: string };
+          const payload = input as { agent?: string; prompt?: string; cwd?: string };
           if (!payload.agent || !payload.prompt) {
             return { ok: false, errorMessage: 'invalid background subagent payload' };
           }
@@ -126,10 +146,14 @@ export async function createPlatformRuntimeContext(
           const result = await execute({
             agent: payload.agent,
             prompt: payload.prompt,
+            cwd: payload.cwd,
           });
           return { ok: true, summary: result.slice(0, 200) };
         },
-        notify,
+        notify: async (job) => {
+          await notifyBackgroundTeam(job, teamService);
+          await notify(job);
+        },
       });
     },
   };
@@ -251,4 +275,26 @@ function createPlatformRuntimeHealth(capabilities: PlatformCapabilityHealth[]): 
       };
     },
   };
+}
+
+async function notifyBackgroundTeam(job: BackgroundJobRecord, teamService: TeamService): Promise<void> {
+  const teamName = job.metadata?.team?.trim();
+  if (!teamName) {
+    return;
+  }
+
+  const team = teamService.findTeamByName(teamName);
+  if (!team) {
+    return;
+  }
+
+  const from = job.metadata?.agent ?? 'background';
+  const status = job.status;
+  const detail = job.resultSummary ?? job.errorMessage ?? job.inputSummary;
+  teamService.sendMessage({
+    teamId: team.teamId,
+    from,
+    to: team.name,
+    body: `[background ${status}] ${detail}`,
+  });
 }

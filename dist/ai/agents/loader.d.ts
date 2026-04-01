@@ -6,6 +6,7 @@ export interface CustomAgentDef {
     maxIterations?: number;
     background?: boolean;
     isolation?: 'shared' | 'worktree';
+    cleanup?: 'keep' | 'delete';
     team?: string;
     source?: 'global' | 'project';
 }

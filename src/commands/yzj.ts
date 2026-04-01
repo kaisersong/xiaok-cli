@@ -7,11 +7,13 @@ import { loadConfig, saveConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
 import { createAdapter } from '../ai/models.js';
-import { buildSystemPrompt } from '../ai/context/yzj-context.js';
 import { Agent } from '../ai/agent.js';
+import { PromptBuilder } from '../ai/prompts/builder.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
+import { loadSettings, mergeRules } from '../ai/permissions/settings.js';
 import { createSkillCatalog, type SkillCatalog } from '../ai/skills/loader.js';
 import { createSkillTool, formatSkillPayload } from '../ai/skills/tool.js';
+import { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
 import type { YZJChannelConfig } from '../types.js';
 import { ChannelAgentService } from '../channels/agent-service.js';
@@ -37,6 +39,7 @@ import { deriveYZJWebSocketUrl } from '../channels/yzj-ws-url.js';
 import { createPlatformRuntimeContext, type PlatformRuntimeContext } from '../platform/runtime/context.js';
 import { FileCapabilityHealthStore } from '../platform/runtime/health-store.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
+import { buildPermissionRequest } from '../ui/permission-prompt.js';
 
 interface YZJServeOptions {
   sendMsgUrl?: string;
@@ -52,6 +55,13 @@ interface SessionSkillCatalogState {
   cwd: string;
   catalog: SkillCatalog;
   platform: PlatformRuntimeContext;
+}
+
+export function shouldStartYZJWebSocket(
+  yzjConfig: Pick<YZJChannelConfig, 'inboundMode'>,
+  options: Pick<YZJServeOptions, 'dryRun'>,
+): boolean {
+  return yzjConfig.inboundMode === 'websocket' && !options.dryRun;
 }
 
 function buildOverrides(options: YZJServeOptions): Partial<YZJChannelConfig> {
@@ -254,10 +264,10 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
           const skillState = await ensureSessionSkillCatalog(sessionSkillCatalogs, sessionId, cwd);
           const skills = await skillState.catalog.reload();
           const customAgents = skillState.platform.customAgents;
-          const systemPrompt = await buildSystemPrompt({
+          const promptBuilder = new PromptBuilder();
+          const getPromptInput = async () => ({
             enterpriseId: creds?.enterpriseId ?? null,
             devApp,
-            cwd,
             budget: config.contextBudget,
             skills,
             pluginCommands: skillState.platform.pluginRuntime.commandDeclarations,
@@ -268,6 +278,11 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
               allowedTools: agent.allowedTools,
             })),
           });
+          const initialPromptSnapshot = await promptBuilder.build({
+            ...(await getPromptInput()),
+            cwd,
+            channel: 'yzj',
+          });
 
           const hooks = createRuntimeHooks();
           let currentTurnId = 'turn_pending';
@@ -275,8 +290,14 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
             currentTurnId = event.turnId;
           });
           const detachNotifier = runtimeNotifier.bind(sessionId, hooks);
-          const permissionManager = new PermissionManager({ mode: 'default' });
-          const skillTool = createSkillTool(skillState.catalog);
+          const persistedPermissionSettings = await loadSettings(cwd);
+          const persistedPermissionRules = mergeRules(persistedPermissionSettings);
+          const permissionManager = new PermissionManager({
+            mode: 'default',
+            allowRules: persistedPermissionRules.allowRules,
+            denyRules: persistedPermissionRules.denyRules,
+          });
+          const skillTool = createSkillTool(skillState.catalog, skillState.platform.capabilityRegistry);
           const registryFactory = createPlatformRegistryFactory({
             platform: skillState.platform,
             source: 'yzj',
@@ -294,7 +315,7 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
                 turnId: currentTurnId,
                 taskId: task?.taskId,
                 toolName,
-                summary: buildApprovalSummary(toolName, input),
+                summary: buildPermissionRequest(toolName, input).summary,
               });
               hooks.emit({
                 type: 'approval_required',
@@ -306,20 +327,13 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
               taskManager.resumeFromApproval(approval, decision ?? 'expired');
               return decision === 'approve';
             },
-            buildSystemPrompt: async (promptCwd) => buildSystemPrompt({
-              enterpriseId: creds?.enterpriseId ?? null,
-              devApp,
-              cwd: promptCwd,
-              budget: config.contextBudget,
-              skills,
-              pluginCommands: skillState.platform.pluginRuntime.commandDeclarations,
-              lspDiagnostics: skillState.platform.lspManager.getSummary(),
-              agents: customAgents.map((agent) => ({
-                name: agent.name,
-                model: agent.model,
-                allowedTools: agent.allowedTools,
-              })),
-            }),
+            buildSystemPrompt: async (promptCwd) => (
+              await promptBuilder.build({
+                ...(await getPromptInput()),
+                cwd: promptCwd,
+                channel: 'yzj',
+              })
+            ).rendered,
             notifyBackgroundJob: async (job) => {
               const replyTarget = latestReplyTargets.get(sessionId);
               if (!replyTarget) {
@@ -334,8 +348,19 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
           });
           const registry = registryFactory.createRegistry(cwd);
 
+          const agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks });
+          agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
+          agent.setPromptSnapshot(initialPromptSnapshot);
+          const runtimeFacade = new RuntimeFacade({
+            promptBuilder,
+            getPromptInput,
+            agent,
+          });
+
           return {
-            agent: new Agent(adapter, registry, systemPrompt, { hooks }),
+            agent,
+            runtimeFacade,
+            cwd,
             dispose: () => {
               detachTurnTracker();
               detachNotifier();
@@ -399,6 +424,7 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
           const task = command.taskId
             ? resolveSessionTask(taskManager, sessionId, command.taskId)
             : taskManager.getPreferredStatusTask(sessionId);
+          const runtimeSnapshot = agentService?.getSessionSnapshot(sessionId);
           await notifyText(
             input,
             formatSessionRuntimeSnapshot({
@@ -425,6 +451,8 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
                   summary: approval.summary,
                 })),
               capabilityHealth: formatCapabilityHealthStatus(skillState.platform, binding?.cwd ?? skillState.cwd),
+              promptSnapshotId: runtimeSnapshot?.promptSnapshotId,
+              memoryRefs: runtimeSnapshot?.memoryRefs,
             }),
             'status',
           );
@@ -550,7 +578,7 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
   }
 
   let websocketClient: YZJWebSocketClient | null = null;
-  if (yzjConfig.inboundMode === 'websocket') {
+  if (shouldStartYZJWebSocket(yzjConfig, options)) {
     const websocketUrl = deriveYZJWebSocketUrl(yzjConfig.sendMsgUrl);
     websocketClient = new YZJWebSocketClient({
       url: websocketUrl,
@@ -776,16 +804,6 @@ function expireRecoveredApprovals(approvalStore: ApprovalStore, taskManager: Tas
   }
 }
 
-function buildApprovalSummary(toolName: string, input: Record<string, unknown>): string {
-  if (toolName === 'bash' && typeof input.command === 'string') {
-    return `执行 bash 命令：${truncate(input.command, 120)}`;
-  }
-  if ((toolName === 'write' || toolName === 'edit') && typeof input.file_path === 'string') {
-    return `${toolName} 文件：${truncate(input.file_path, 120)}`;
-  }
-  return `${toolName} 操作需要确认`;
-}
-
 function formatFinalReply(taskId: string | undefined, text: string): string {
   const reply = text.trim();
   if (!taskId || reply.length <= 800) {
@@ -804,11 +822,4 @@ function buildReplyPreview(reply: string, maxLength = 160): string {
     return reply;
   }
   return `${reply.slice(0, maxLength)}...`;
-}
-
-function truncate(value: string, maxLength: number): string {
-  if (value.length <= maxLength) {
-    return value;
-  }
-  return `${value.slice(0, maxLength)}...`;
 }

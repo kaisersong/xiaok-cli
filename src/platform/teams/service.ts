@@ -20,6 +20,7 @@ export interface TeamServiceOptions {
 export interface TeamService {
   createTeam(input: CreateTeamInput): TeamRecord;
   getTeam(teamId: string): TeamRecord | undefined;
+  findTeamByName(name: string): TeamRecord | undefined;
   deleteTeam(teamId: string): void;
   sendMessage(input: SendTeamMessageInput): TeamMessageRecord;
   listMessages(teamId: string): TeamMessageRecord[];
@@ -40,6 +41,10 @@ export function createTeamService(options: TeamServiceOptions): TeamService {
 
     getTeam(teamId) {
       return store.getTeam(teamId);
+    },
+
+    findTeamByName(name) {
+      return store.listTeams().find((team) => team.name === name);
     },
 
     deleteTeam(teamId) {

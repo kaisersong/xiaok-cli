@@ -1,8 +1,12 @@
 import { dim, boldCyan, dimCyan } from "./render.js";
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 
 export type StatusBarField = "model" | "mode" | "tokens" | "session";
 
 const DEFAULT_FIELDS: StatusBarField[] = ["model", "mode", "tokens", "session"];
+const VALID_FIELDS = new Set<StatusBarField>(DEFAULT_FIELDS);
 
 export interface UsageStats {
   inputTokens: number;
@@ -32,6 +36,7 @@ export class StatusBar {
     this.model = model;
     this.sessionId = sessionId;
     this.cwd = cwd;
+    this.fields = loadConfiguredFields(cwd) ?? DEFAULT_FIELDS;
     if (mode) this.mode = mode;
   }
 
@@ -99,4 +104,35 @@ export class StatusBar {
 
   /** No-op — no terminal state to restore in inline mode. */
   destroy(): void {}
+}
+
+function loadConfiguredFields(cwd: string): StatusBarField[] | undefined {
+  const configDir = process.env.XIAOK_CONFIG_DIR ?? join(homedir(), '.xiaok');
+  const settingsPaths = [
+    join(configDir, 'settings.json'),
+    join(cwd, '.xiaok', 'settings.json'),
+  ];
+
+  let configured: StatusBarField[] | undefined;
+  for (const path of settingsPaths) {
+    if (!existsSync(path)) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+        ui?: { statusBar?: { fields?: string[] } };
+      };
+      const fields = parsed.ui?.statusBar?.fields;
+      if (!Array.isArray(fields)) {
+        continue;
+      }
+      const validFields = fields.filter((field): field is StatusBarField => VALID_FIELDS.has(field as StatusBarField));
+      if (validFields.length > 0) {
+        configured = validFields;
+      }
+    } catch {}
+  }
+
+  return configured;
 }

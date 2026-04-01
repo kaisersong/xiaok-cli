@@ -6,6 +6,7 @@ import { type PlatformPluginRuntimeState } from '../plugins/runtime.js';
 import { createSandboxEnforcer } from '../sandbox/enforcer.js';
 import { type TeamService } from '../teams/service.js';
 import { type WorktreeManager } from '../worktrees/manager.js';
+import { CapabilityRegistry } from './capability-registry.js';
 export interface PlatformRuntimeContext {
     pluginRuntime: PlatformPluginRuntimeState;
     customAgents: CustomAgentDef[];
@@ -14,12 +15,14 @@ export interface PlatformRuntimeContext {
     sandboxEnforcer: ReturnType<typeof createSandboxEnforcer>;
     worktreeManager: WorktreeManager;
     mcpTools: Tool[];
+    capabilityRegistry: CapabilityRegistry;
     health: PlatformRuntimeHealth;
     dispose(): Promise<void>;
     listBackgroundJobs(sessionId: string): BackgroundJobRecord[];
     createBackgroundRunner(execute: (input: {
         agent: string;
         prompt: string;
+        cwd?: string;
     }) => Promise<string>, notify?: (job: BackgroundJobRecord) => Promise<void> | void): ReturnType<typeof createBackgroundRunner>;
 }
 export interface PlatformCapabilityHealth {

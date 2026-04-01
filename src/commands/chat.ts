@@ -8,8 +8,8 @@ import { PermissionManager } from '../ai/permissions/manager.js';
 import { ToolRegistry } from '../ai/tools/index.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
 import { createTaskTools } from '../ai/tools/tasks.js';
-import { buildSystemPrompt } from '../ai/context/yzj-context.js';
 import { Agent } from '../ai/agent.js';
+import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
 import { SessionTaskBoard } from '../runtime/tasking/board.js';
 import { writeError, isTTY } from '../utils/ui.js';
@@ -17,15 +17,17 @@ import { showPermissionPrompt } from '../ui/permission-prompt.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
 import { loadSettings, mergeRules } from '../ai/permissions/settings.js';
 import { createSkillCatalog, parseSlashCommand } from '../ai/skills/loader.js';
-import { createSkillTool, formatSkillPayload } from '../ai/skills/tool.js';
+import { createSkillTool } from '../ai/skills/tool.js';
+import { buildSkillExecutionPlan } from '../ai/skills/planner.js';
 import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
 import { loadAutoContext, formatLoadedContext } from '../ai/runtime/context-loader.js';
 import { FileSessionStore, type PersistedSessionSnapshot } from '../ai/runtime/session-store.js';
 import { formatPrintOutput } from './chat-print-mode.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
-import { renderWelcomeScreen, renderInputSeparator, renderInputPrompt, renderUserInput, dim, startSpinner } from '../ui/render.js';
+import { renderWelcomeScreen, renderInputSeparator, dim, formatSubmittedInput, formatToolActivity } from '../ui/render.js';
 import { InputReader } from '../ui/input.js';
+import { ReplRenderer } from '../ui/repl-renderer.js';
 import { parseInputBlocks } from '../ui/image-input.js';
 import { selectModel } from '../ui/model-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
@@ -36,6 +38,11 @@ import { runDoctorCommand } from './doctor.js';
 import { runInitCommand } from './init.js';
 import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
+import { FileTranscriptLogger } from '../ui/transcript.js';
+import { createInstallSkillTool } from '../ai/tools/install-skill.js';
+import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
+import { executeNamedSubAgent } from '../ai/agents/subagent-executor.js';
+import { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
 
 interface ChatOptions {
   auto: boolean;
@@ -92,13 +99,57 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const sessionId = persistedSession?.sessionId ?? sessionStore.createSessionId();
   const sessionCreatedAt = persistedSession?.createdAt ?? Date.now();
   const forkedFromSessionId = persistedSession?.forkedFromSessionId;
+  const sessionLineage = persistedSession?.lineage ?? [sessionId];
+  const transcriptLogger = new FileTranscriptLogger(sessionId);
 
   // 加载 skills
   const skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginRuntime.skillRoots });
   let skills = await skillCatalog.reload();
-  const inputReader = new InputReader();
-  const skillTool = createSkillTool(skillCatalog);
+  const replRenderer = new ReplRenderer(process.stdout);
+  const inputReader = new InputReader(replRenderer);
+  const skillTool = createSkillTool(skillCatalog, platform.capabilityRegistry);
   const taskBoard = new SessionTaskBoard('cli');
+  const promptBuilder = new PromptBuilder();
+  let agent: Agent | undefined;
+  let runtimeFacade: RuntimeFacade | undefined;
+
+  const getPromptInput = async (promptCwd = cwd, nextSkills = skills) => ({
+    enterpriseId: creds?.enterpriseId ?? null,
+    devApp,
+    budget: config.contextBudget,
+    skills: nextSkills,
+    pluginCommands: pluginRuntime.commandDeclarations,
+    lspDiagnostics: platform.lspManager.getSummary(),
+    agents: customAgents.map((item) => ({
+      name: item.name,
+      model: item.model,
+      allowedTools: item.allowedTools,
+    })),
+    autoContext: await loadAutoContext({
+      cwd: promptCwd,
+      maxChars: Math.max(1_200, config.contextBudget * 2),
+    }),
+  });
+
+  const buildPromptSnapshot = async (
+    promptCwd = cwd,
+    nextSkills = skills,
+    channel: 'chat' | 'yzj' = 'chat',
+  ) => promptBuilder.build({
+    ...(await getPromptInput(promptCwd, nextSkills)),
+    cwd: promptCwd,
+    channel,
+  });
+
+  const buildPrompt = async (nextSkills = skills, promptCwd = cwd) => (
+    await buildPromptSnapshot(promptCwd, nextSkills)
+  ).rendered;
+
+  const refreshSkills = async (): Promise<void> => {
+    skills = await skillCatalog.reload();
+    inputReader.setSkills(skills);
+  };
+
   const workflowTools = [
     createAskUserTool({
       ask: async (question, placeholder) => {
@@ -115,27 +166,28 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       },
     }),
     ...createTaskTools({ board: taskBoard, sessionId }),
+    createInstallSkillTool({
+      cwd,
+      capabilityRegistry: platform.capabilityRegistry,
+      onInstall: refreshSkills,
+    }),
+    createUninstallSkillTool({
+      cwd,
+      capabilityRegistry: platform.capabilityRegistry,
+      onUninstall: refreshSkills,
+    }),
   ];
 
-  // 构建系统提示
-  const buildPrompt = async (nextSkills = skills, promptCwd = cwd) => buildSystemPrompt({
-    enterpriseId: creds?.enterpriseId ?? null,
-    devApp,
-    cwd: promptCwd,
-    budget: config.contextBudget,
-    skills: nextSkills,
-    pluginCommands: pluginRuntime.commandDeclarations,
-    lspDiagnostics: platform.lspManager.getSummary(),
-    agents: customAgents.map((agent) => ({
-      name: agent.name,
-      model: agent.model,
-      allowedTools: agent.allowedTools,
-    })),
-  });
-  const systemPrompt = await buildPrompt();
+  const initialPromptSnapshot = await buildPromptSnapshot();
   const capabilityHealthNotice = buildCapabilityHealthNotice(platform.health);
+  const persistedPermissionSettings = await loadSettings(cwd);
+  const persistedPermissionRules = mergeRules(persistedPermissionSettings);
 
-  const permissionManager = new PermissionManager({ mode: autoMode ? 'auto' : 'default' });
+  const permissionManager = new PermissionManager({
+    mode: autoMode ? 'auto' : 'default',
+    allowRules: persistedPermissionRules.allowRules,
+    denyRules: persistedPermissionRules.denyRules,
+  });
   inputReader.setModeCycleHandler(() => {
     const nextMode = PermissionManager.nextMode(permissionManager.getMode());
     permissionManager.setMode(nextMode);
@@ -153,7 +205,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     dryRun: opts.dryRun,
     permissionManager,
     onPrompt: async (name, input) => {
-      const choice = await showPermissionPrompt(name, input);
+      const choice = await showPermissionPrompt(name, input, { transcriptLogger, renderer: replRenderer });
 
       if (choice.action === 'deny') {
         return false;
@@ -185,13 +237,17 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const registry = registryFactory.createRegistry(cwd);
 
   const runtimeHooks = createRuntimeHooks();
-  const agent = new Agent(adapter, registry, systemPrompt, { hooks: runtimeHooks });
+  agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks: runtimeHooks });
+  agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
+  agent.setPromptSnapshot(initialPromptSnapshot);
+  runtimeFacade = new RuntimeFacade({
+    promptBuilder,
+    getPromptInput: async (promptCwd) => getPromptInput(promptCwd, skills),
+    agent,
+  });
 
   if (persistedSession) {
-    agent.restoreSession({
-      messages: persistedSession.messages,
-      usage: persistedSession.usage,
-    });
+    agent.restoreSession(persistedSession);
   }
 
   // 创建 UI 组件
@@ -201,21 +257,15 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const persistSession = async (): Promise<void> => {
     const snapshot = agent.exportSession();
     await sessionStore.save({
+      ...snapshot,
       sessionId,
       cwd: process.cwd(),
       model: adapter.getModelName(),
       createdAt: sessionCreatedAt,
       updatedAt: Date.now(),
       forkedFromSessionId,
-      messages: snapshot.messages,
-      usage: snapshot.usage,
+      lineage: sessionLineage,
     });
-  };
-
-  const refreshSkills = async (): Promise<void> => {
-    skills = await skillCatalog.reload();
-    inputReader.setSkills(skills);
-    agent.setSystemPrompt(await buildPrompt(skills));
   };
 
   // 初始化状态栏（在单次任务模式之前）
@@ -240,7 +290,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         process.stderr.write(`${capabilityHealthNotice}\n`);
       }
       await refreshSkills();
-      await agent.runTurn(inputBlocks, (chunk) => {
+      await runtimeFacade.runTurn({
+        sessionId,
+        cwd,
+        source: 'chat',
+        input: inputBlocks,
+      }, (chunk) => {
         if (chunk.type === 'text') {
           printChunks.push(chunk.delta);
           if (!opts.print && !opts.json) {
@@ -278,59 +333,50 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   // 交互模式 - 显示欢迎界面
   const provider = config.defaultModel ?? 'claude';
+  inputReader.setTranscriptLogger(transcriptLogger);
+  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+  const originalStderrWrite = process.stderr.write.bind(process.stderr);
+  process.stdout.write = ((chunk: any, ...args: any[]) => {
+    const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    transcriptLogger.recordOutput('stdout', text);
+    return originalStdoutWrite(chunk, ...args);
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: any, ...args: any[]) => {
+    const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    transcriptLogger.recordOutput('stderr', text);
+    return originalStderrWrite(chunk, ...args);
+  }) as typeof process.stderr.write;
 
-  // 显示欢迎界面（不清屏，让它可以滚动）
-  renderWelcomeScreen({
-    model: provider,
-    cwd: process.cwd(),
-    sessionId,
-    mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
-  });
+  try {
+    // 显示欢迎界面（不清屏，让它可以滚动）
+    renderWelcomeScreen({
+      model: provider,
+      cwd: process.cwd(),
+      sessionId,
+      mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
+    });
 
-  // 设置初始 usage
-  statusBar.update({ inputTokens: 0, outputTokens: 0, budget: config.contextBudget });
-  if (capabilityHealthNotice) {
-    process.stdout.write(`${capabilityHealthNotice}\n\n`);
-  }
+    // 设置初始 usage
+    statusBar.update({ inputTokens: 0, outputTokens: 0, budget: config.contextBudget });
+    if (capabilityHealthNotice) {
+      process.stdout.write(`${capabilityHealthNotice}\n\n`);
+    }
 
-  if (opts.dryRun) process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
+    if (opts.dryRun) process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
 
-  // 创建输入读取器
-  inputReader.setSkills(skills);
-
-  // 工具调用可视化 — 用 startSpinner
-  const activeSpinners = new Map<string, () => void>();
+    // 创建输入读取器
+    inputReader.setSkills(skills);
 
   runtimeHooks.on('tool_started', (e) => {
-    const displayValue = extractToolDisplay(e.toolInput);
-    const msg = displayValue ? `${e.toolName}(${displayValue})` : e.toolName;
-    const stopSpinner = startSpinner(msg);
-    activeSpinners.set(e.toolName, stopSpinner);
+    process.stdout.write(`${formatToolActivity(e.toolName, e.toolInput)}\n`);
   });
 
-  runtimeHooks.on('tool_finished', (e) => {
-    const stop = activeSpinners.get(e.toolName);
-    if (stop) {
-      stop();
-      activeSpinners.delete(e.toolName);
-    }
-    const icon = e.ok ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
-    process.stdout.write(`  ${icon} ${e.toolName}\n`);
-  });
+  runtimeHooks.on('tool_finished', (_e) => {});
 
   // Context 压缩通知
   runtimeHooks.on('compact_triggered', () => {
     process.stdout.write(`\n  ${dim('⚠ 上下文已压缩，保留最近对话')}\n\n`);
   });
-
-  // Helper: 从工具输入提取展示值
-  function extractToolDisplay(input: Record<string, unknown>): string {
-    if (typeof input.command === 'string') return input.command.slice(0, 40);
-    if (typeof input.file_path === 'string') return input.file_path;
-    if (typeof input.path === 'string') return input.path;
-    if (typeof input.pattern === 'string') return input.pattern;
-    return '';
-  }
 
   // 处理终端窗口大小调整
   let resizeTimeout: NodeJS.Timeout | null = null;
@@ -351,14 +397,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     process.exit(0);
   });
 
-  // 交互循环
-  while (true) {
-    await refreshSkills();
+    // 交互循环
+    while (true) {
+      await refreshSkills();
 
     renderInputSeparator();
-    renderInputPrompt();
-
-    const input = await inputReader.read('');
+    const input = await inputReader.read('> ');
 
     if (input === null || input.trim() === '/exit') {
       statusBar.destroy();
@@ -560,13 +604,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       continue;
     }
 
+    replRenderer.prepareBlockOutput();
+
     // 输入后的分隔线
     renderInputSeparator();
 
     // 显示用户输入（带背景色）
-    process.stdout.write('\n');
-    renderUserInput(trimmed);
-    process.stdout.write('\n');
+    process.stdout.write(formatSubmittedInput(trimmed));
 
     // 斜杠命令：直接触发对应 skill
     const slash = parseSlashCommand(trimmed);
@@ -577,23 +621,58 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         skill = skills.find(s => s.name === slash.skillName);
       }
       if (skill) {
-        const skillPayload = formatSkillPayload(skill);
-        const userMsg = slash.rest
-          ? `执行 skill "${skill.name}"，用户补充说明：${slash.rest}\n\n${skillPayload}`
-          : `执行 skill：\n\n${skillPayload}`;
-        process.stdout.write('\n');
-        mdRenderer.reset();
         try {
-          await agent.runTurn(userMsg, (chunk) => {
-            if (chunk.type === 'text') mdRenderer.write(chunk.delta);
-            if (chunk.type === 'usage') {
-              statusBar.update({ ...chunk.usage, budget: config.contextBudget });
-            }
-          });
-          await persistSession();
+          const plan = buildSkillExecutionPlan([skill.name], skills);
+          const primaryStep = plan.resolved[plan.resolved.length - 1];
+
+          process.stdout.write('\n');
+          mdRenderer.reset();
+
+          if (plan.strategy === 'fork' && primaryStep?.agent) {
+            const result = await executeNamedSubAgent({
+              agentDef: customAgents.find((item) => item.name === primaryStep.agent) ?? {
+                name: primaryStep.name,
+                systemPrompt: primaryStep.content,
+                allowedTools: primaryStep.allowedTools,
+                model: primaryStep.model,
+              },
+              prompt: slash.rest
+                ? `执行 skill "${primaryStep.name}"。用户补充说明：${slash.rest}`
+                : `执行 skill "${primaryStep.name}"。`,
+              sessionId,
+              adapter: () => adapter,
+              createRegistry: (subCwd, allowedTools) => registryFactory.createRegistry(subCwd, allowedTools),
+              buildSystemPrompt: async (promptCwd) => buildPrompt(skills, promptCwd),
+              worktreeManager: platform.worktreeManager,
+              forkContext: {
+                session: agent.exportSession(),
+                messages: agent.exportSession().messages,
+                systemPrompt: await buildPrompt(skills),
+                toolDefinitions: registry.getToolDefinitions(),
+              },
+            });
+            mdRenderer.write(result);
+          } else {
+            const userMsg = slash.rest
+              ? `执行 skill plan "${plan.primarySkill}"，用户补充说明：${slash.rest}\n\n${JSON.stringify(plan, null, 2)}`
+              : `执行 skill plan：\n\n${JSON.stringify(plan, null, 2)}`;
+
+            await runtimeFacade.runTurn({
+              sessionId,
+              cwd,
+              source: 'chat',
+              input: userMsg,
+            }, (chunk) => {
+              if (chunk.type === 'text') mdRenderer.write(chunk.delta);
+              if (chunk.type === 'usage') {
+                statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+              }
+            });
+            await persistSession();
+          }
+
           mdRenderer.flush();
           process.stdout.write('\n');
-          // 状态栏作为一行文本输出，不使用固定定位
           const statusLine = statusBar.getStatusLine();
           if (statusLine) process.stdout.write(statusLine + '\n');
         } catch (e) {
@@ -615,7 +694,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         resolveModelCapabilities(adapter).supportsImageInput,
       );
 
-      await agent.runTurn(inputBlocks, (chunk) => {
+      await runtimeFacade.runTurn({
+        sessionId,
+        cwd,
+        source: 'chat',
+        input: inputBlocks,
+      }, (chunk) => {
         if (chunk.type === 'text') mdRenderer.write(chunk.delta);
         if (chunk.type === 'usage') {
           statusBar.update({ ...chunk.usage, budget: config.contextBudget });
@@ -629,10 +713,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     } catch (e) {
       writeError(String(e));
     }
-    process.stdout.write('\n');
+      process.stdout.write('\n');
+    }
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+    process.stderr.write = originalStderrWrite;
+    await platform.dispose();
   }
-
-  await platform.dispose();
 }
 
 function buildCapabilityHealthNotice(health: Awaited<ReturnType<typeof createPlatformRuntimeContext>>['health']): string {

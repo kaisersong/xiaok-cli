@@ -49,6 +49,19 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('/review');
   });
 
+  it('instructs the agent to search remote sources before giving up on missing skills', async () => {
+    const prompt = await buildSystemPrompt({
+      enterpriseId: null,
+      devApp: null,
+      cwd: '/tmp/demo',
+      budget: 2000,
+    });
+
+    expect(prompt).toContain('web_search');
+    expect(prompt).toContain('web_fetch');
+    expect(prompt).toContain('install_skill');
+  });
+
   it('includes auto-loaded prompt docs and git context in the system prompt', async () => {
     const prompt = await buildSystemPrompt({
       enterpriseId: null,

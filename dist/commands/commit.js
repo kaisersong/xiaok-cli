@@ -41,3 +41,15 @@ export async function runCommitCommand(cwd, message) {
     await execFileAsync('git', ['commit', '-m', commitMessage], { cwd });
     return `已创建提交：${commitMessage}`;
 }
+export function registerCommitCommands(program) {
+    program
+        .command('commit [message...]')
+        .description('基于已暂存改动创建提交')
+        .action(async (messageParts) => {
+        const message = Array.isArray(messageParts) && messageParts.length > 0
+            ? messageParts.join(' ').trim()
+            : undefined;
+        const result = await runCommitCommand(process.cwd(), message);
+        console.log(result);
+    });
+}

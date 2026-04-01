@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { PermissionManager } from '../../../src/ai/permissions/manager.js';
 import { ToolRegistry } from '../../../src/ai/tools/index.js';
 import type { Tool } from '../../../src/types.js';
+import { CapabilityRegistry } from '../../../src/platform/runtime/capability-registry.js';
 
 describe('ToolRegistry', () => {
   it('safe tools execute without prompting', async () => {
@@ -17,6 +18,25 @@ describe('ToolRegistry', () => {
     expect(result).toBeTruthy();
   });
 
+  it('custom safe tools do not prompt in default mode', async () => {
+    const prompted: string[] = [];
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'default' }),
+      onPrompt: async (name) => { prompted.push(name); return false; },
+    }, [{
+      permission: 'safe',
+      definition: {
+        name: 'team_create',
+        description: 'create a team',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      execute: async () => 'team created: team_1 (platform)',
+    }]);
+
+    await expect(registry.executeTool('team_create', {})).resolves.toContain('team created');
+    expect(prompted).toEqual([]);
+  });
+
   it('write tools prompt in default mode', async () => {
     const prompted: string[] = [];
     const registry = new ToolRegistry({
@@ -27,6 +47,23 @@ describe('ToolRegistry', () => {
     const result = await registry.executeTool('write', { file_path: '/tmp/x', content: 'x' });
     expect(prompted).toContain('write');
     expect(result).toContain('已取消');
+  });
+
+  it('falls back to the default prompt handler when onPrompt is omitted', async () => {
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'default' }),
+    }, [{
+      permission: 'write',
+      definition: {
+        name: 'write',
+        description: 'mock write',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      execute: async () => 'should not run',
+    }]);
+
+    await expect(registry.executeTool('write', { file_path: '/tmp/x', content: 'x' }))
+      .resolves.toContain('已取消');
   });
 
   it('write tools skip prompt in auto mode', async () => {
@@ -73,6 +110,8 @@ describe('ToolRegistry', () => {
     expect(defs.map(d => d.name)).toContain('write');
     expect(defs.map(d => d.name)).toContain('web_fetch');
     expect(defs.map(d => d.name)).toContain('web_search');
+    expect(defs.map(d => d.name)).toContain('install_skill');
+    expect(defs.map(d => d.name)).toContain('uninstall_skill');
   });
 
   it('denies write tools in plan mode without prompting', async () => {
@@ -118,6 +157,24 @@ describe('ToolRegistry', () => {
     expect(await registry.executeTool('echo_tool', {})).toBe('ok');
   });
 
+  it('normalizes thrown tool errors without duplicating the Error prefix', async () => {
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+    }, [{
+      permission: 'safe',
+      definition: {
+        name: 'broken_tool',
+        description: 'broken',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      execute: async () => {
+        throw new Error('boom');
+      },
+    }]);
+
+    await expect(registry.executeTool('broken_tool', {})).resolves.toBe('Error: boom');
+  });
+
   it('blocks execution when a pre hook denies the tool call', async () => {
     const registry = new ToolRegistry({
       permissionManager: new PermissionManager({ mode: 'auto' }),
@@ -161,5 +218,24 @@ describe('ToolRegistry', () => {
 
     expect(result).toContain('ok');
     expect(result).toContain('Warning: post hook warning');
+  });
+
+  it('merges capability registry matches into tool search results', () => {
+    const capabilityRegistry = new CapabilityRegistry();
+    capabilityRegistry.register({
+      kind: 'skill',
+      name: 'cognitive-coach',
+      description: 'think deeper',
+      execute: async () => 'ok',
+    });
+
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'default' }),
+      capabilityRegistry,
+    }, []);
+
+    expect(registry.searchTools('cognitive')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'cognitive-coach' }),
+    ]));
   });
 });

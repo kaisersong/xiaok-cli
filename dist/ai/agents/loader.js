@@ -25,6 +25,7 @@ export function parseAgentFile(name, raw) {
             : undefined,
         background: metadata.get('background') === 'true',
         isolation: metadata.get('isolation') === 'worktree' ? 'worktree' : undefined,
+        cleanup: metadata.get('cleanup') === 'delete' ? 'delete' : undefined,
         team: metadata.get('team') || undefined,
     };
 }

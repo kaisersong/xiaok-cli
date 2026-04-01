@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 const DEFAULT_BINDINGS = [
@@ -31,12 +32,40 @@ const DEFAULT_BINDINGS = [
     { key: 'shift+tab', action: 'shift-tab' },
 ];
 let bindingMap = null;
-export async function loadKeybindings() {
+function buildDefaultBindingMap() {
     const map = new Map();
     for (const b of DEFAULT_BINDINGS) {
         map.set(b.key, b.action);
     }
-    const configPath = path.join(os.homedir(), '.xiaok', 'keybindings.json');
+    return map;
+}
+function getKeybindingsPath() {
+    const configDir = process.env.XIAOK_CONFIG_DIR ?? path.join(os.homedir(), '.xiaok');
+    return path.join(configDir, 'keybindings.json');
+}
+export function loadKeybindingsSync() {
+    const map = buildDefaultBindingMap();
+    const configPath = getKeybindingsPath();
+    try {
+        const raw = readFileSync(configPath, 'utf-8');
+        const entries = JSON.parse(raw);
+        if (Array.isArray(entries)) {
+            for (const e of entries) {
+                if (e.key && e.action) {
+                    map.set(e.key, e.action);
+                }
+            }
+        }
+    }
+    catch {
+        // Config file doesn't exist or is invalid, use defaults
+    }
+    bindingMap = map;
+    return map;
+}
+export async function loadKeybindings() {
+    const map = buildDefaultBindingMap();
+    const configPath = getKeybindingsPath();
     try {
         const raw = await fs.readFile(configPath, 'utf-8');
         const entries = JSON.parse(raw);
@@ -56,10 +85,7 @@ export async function loadKeybindings() {
 }
 export function getBindingMap() {
     if (!bindingMap) {
-        bindingMap = new Map();
-        for (const b of DEFAULT_BINDINGS) {
-            bindingMap.set(b.key, b.action);
-        }
+        bindingMap = buildDefaultBindingMap();
     }
     return bindingMap;
 }

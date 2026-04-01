@@ -26,6 +26,7 @@ The current runtime is no longer just a local chat wrapper. It now has a shared 
 ### Local CLI
 
 - `xiaok` or `xiaok chat`
+- `xiaok doctor` / `xiaok init` / `xiaok transcript <sessionId>`
 - interactive chat mode
 - single-shot task mode
 - `-p` / `--json` print modes
@@ -36,6 +37,7 @@ The current runtime is no longer just a local chat wrapper. It now has a shared 
 - `/tasks`
 - `/task <id>`
 - tool execution with permission control
+- interactive approval prompt with persisted session/project/global allow rules
 - `ask_user` tool for interactive operator questions
 - session-scoped `task_create` / `task_update` / `task_list` / `task_get`
 - model-aware context policy and prompt caching support
@@ -45,6 +47,8 @@ The current runtime is no longer just a local chat wrapper. It now has a shared 
 - shared platform runtime with MCP/LSP/plugin wiring
 - declared subagents with optional background execution
 - worktree-isolated subagent execution
+- undo/redo input editing, configurable keybindings, and configurable inline status bar fields
+- transcript logging plus post-run transcript analysis for prompt/approval replay issues
 
 ### Yunzhijia IM Gateway
 
@@ -94,7 +98,7 @@ Run built CLI:
 node dist/index.js --help
 ```
 
-Package version in this branch: `0.1.3`
+Package version in this branch: `0.1.4`
 
 ## Configuration
 
@@ -134,6 +138,36 @@ Example config:
 }
 ```
 
+Project and UI settings live in `<repo>/.xiaok/settings.json`. They can persist permission rules, hook commands, and UI preferences such as inline status bar fields:
+
+```json
+{
+  "permissions": {
+    "allow": [],
+    "deny": []
+  },
+  "ui": {
+    "statusBar": {
+      "fields": ["model", "mode", "tokens", "session"]
+    }
+  },
+  "hooks": {
+    "pre": [],
+    "post": [],
+    "timeoutMs": 5000
+  }
+}
+```
+
+Custom terminal keybindings can be stored in `~/.xiaok/keybindings.json` or `$XIAOK_CONFIG_DIR/keybindings.json`:
+
+```json
+[
+  { "key": "ctrl+c", "action": "submit" },
+  { "key": "ctrl+l", "action": "clear-screen" }
+]
+```
+
 ## Authentication
 
 The project includes auth commands and token storage for Yunzhijia-related flows. Depending on your setup, you will typically configure:
@@ -159,6 +193,24 @@ Show chat help:
 
 ```bash
 xiaok chat --help
+```
+
+Inspect local CLI/runtime health:
+
+```bash
+xiaok doctor
+```
+
+Initialize project settings:
+
+```bash
+xiaok init
+```
+
+Analyze a recorded interactive transcript:
+
+```bash
+xiaok transcript sess_demo
 ```
 
 ## Skills

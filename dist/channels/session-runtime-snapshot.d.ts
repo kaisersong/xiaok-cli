@@ -16,5 +16,7 @@ export interface SessionRuntimeSnapshotInput {
     backgroundJobs: SessionRuntimeSnapshotBackgroundJob[];
     approvals: SessionRuntimeSnapshotApproval[];
     capabilityHealth: string;
+    promptSnapshotId?: string;
+    memoryRefs?: string[];
 }
 export declare function formatSessionRuntimeSnapshot(input: SessionRuntimeSnapshotInput): string;

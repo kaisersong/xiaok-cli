@@ -1,6 +1,7 @@
 import type { MessageBlock, ModelAdapter, RuntimeHookSink, StreamChunk, UsageStats } from '../types.js';
 import type { ToolRegistry } from './tools/index.js';
-import { type AgentSessionSnapshot } from './runtime/session.js';
+import { AgentSessionState, type AgentSessionSnapshot } from './runtime/session.js';
+import type { PromptSnapshot } from './prompts/types.js';
 export type OnChunk = (chunk: StreamChunk) => void;
 export interface AgentOptions {
     maxIterations?: number;
@@ -26,8 +27,10 @@ export declare class Agent {
     getUsage(): UsageStats;
     exportSession(): AgentSessionSnapshot;
     restoreSession(snapshot: AgentSessionSnapshot): void;
+    getSessionState(): AgentSessionState;
     setAdapter(adapter: ModelAdapter): void;
     setSystemPrompt(systemPrompt: string): void;
+    setPromptSnapshot(promptSnapshot: PromptSnapshot | undefined): void;
     private createRuntime;
     private emitLegacyHook;
 }

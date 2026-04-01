@@ -1,0 +1,19 @@
+import type { Agent } from '../agent.js';
+import type { MessageBlock, StreamChunk } from '../../types.js';
+import type { PromptBuilder, PromptBuilderInput } from '../prompts/builder.js';
+export interface RuntimeTurnRequest {
+    sessionId: string;
+    cwd: string;
+    source: 'chat' | 'yzj';
+    input: string | MessageBlock[];
+}
+export interface RuntimeFacadeOptions {
+    promptBuilder: Pick<PromptBuilder, 'build'>;
+    getPromptInput(cwd: string): Promise<Omit<PromptBuilderInput, 'cwd' | 'channel'>>;
+    agent: Pick<Agent, 'getSessionState' | 'setPromptSnapshot' | 'setSystemPrompt' | 'runTurn'>;
+}
+export declare class RuntimeFacade {
+    private readonly options;
+    constructor(options: RuntimeFacadeOptions);
+    runTurn(request: RuntimeTurnRequest, onChunk: (chunk: StreamChunk) => void, signal?: AbortSignal): Promise<void>;
+}

@@ -1,6 +1,7 @@
 import type { Tool, ToolDefinition } from '../../types.js';
 
 export interface DeferredToolSearch {
+  searchTools(query: string): ToolDefinition[];
   searchDeferredTools(query: string): ToolDefinition[];
 }
 
@@ -9,7 +10,7 @@ export function createToolSearchTool(registry: DeferredToolSearch): Tool {
     permission: 'safe',
     definition: {
       name: 'tool_search',
-      description: '搜索 deferred tools 并返回对应 schema',
+      description: '搜索当前可用 tools 与 deferred tools，并返回对应 schema',
       inputSchema: {
         type: 'object',
         properties: {
@@ -20,7 +21,7 @@ export function createToolSearchTool(registry: DeferredToolSearch): Tool {
     },
     async execute(input) {
       const query = typeof input.query === 'string' ? input.query : '';
-      const tools = registry.searchDeferredTools(query);
+      const tools = registry.searchTools(query);
       return JSON.stringify(tools, null, 2);
     },
   };

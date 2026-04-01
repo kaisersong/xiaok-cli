@@ -3,8 +3,11 @@ import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../t
 import type { ModelInvocationOptions } from '../runtime/model-capabilities.js';
 export declare class ClaudeAdapter implements ModelAdapter {
     client: Anthropic;
+    private readonly apiKey;
+    private readonly baseUrl?;
     private model;
     constructor(apiKey: string, model?: string, baseUrl?: string);
     getModelName(): string;
+    cloneWithModel(model: string): ClaudeAdapter;
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: ModelInvocationOptions): AsyncIterable<StreamChunk>;
 }

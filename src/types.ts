@@ -3,6 +3,9 @@
 import type { MessageBlock } from './ai/runtime/blocks.js';
 import type { UsageStats } from './ai/runtime/usage.js';
 import type { RuntimeEvent } from './runtime/events.js';
+import type { AgentSessionSnapshot } from './ai/runtime/session.js';
+import type { PromptCacheSegments } from './ai/runtime/model-capabilities.js';
+import type { PromptSnapshot } from './ai/prompts/types.js';
 
 export type { MessageBlock, UsageStats };
 
@@ -36,12 +39,21 @@ export interface ToolDefinition {
   inputSchema: Record<string, unknown>;
 }
 
+export interface ToolExecutionContext {
+  session: AgentSessionSnapshot;
+  messages: Message[];
+  systemPrompt: string;
+  toolDefinitions: ToolDefinition[];
+  promptCache?: PromptCacheSegments;
+  promptSnapshot?: PromptSnapshot;
+}
+
 export type PermissionClass = 'safe' | 'write' | 'bash';
 
 export interface Tool {
   definition: ToolDefinition;
   permission: PermissionClass;
-  execute(input: Record<string, unknown>): Promise<string>;
+  execute(input: Record<string, unknown>, context?: ToolExecutionContext): Promise<string>;
 }
 
 export interface RuntimeHookSink {

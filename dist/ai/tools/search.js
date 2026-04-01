@@ -3,7 +3,7 @@ export function createToolSearchTool(registry) {
         permission: 'safe',
         definition: {
             name: 'tool_search',
-            description: '搜索 deferred tools 并返回对应 schema',
+            description: '搜索当前可用 tools 与 deferred tools，并返回对应 schema',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -14,7 +14,7 @@ export function createToolSearchTool(registry) {
         },
         async execute(input) {
             const query = typeof input.query === 'string' ? input.query : '';
-            const tools = registry.searchDeferredTools(query);
+            const tools = registry.searchTools(query);
             return JSON.stringify(tools, null, 2);
         },
     };

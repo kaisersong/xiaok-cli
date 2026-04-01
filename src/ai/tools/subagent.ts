@@ -1,4 +1,4 @@
-import type { Tool, ModelAdapter } from '../../types.js';
+import type { Tool, ModelAdapter, ToolExecutionContext } from '../../types.js';
 import type { CustomAgentDef } from '../agents/loader.js';
 import type { ToolRegistry } from './index.js';
 import type { BackgroundRunner } from '../../platform/agents/background-runner.js';
@@ -8,6 +8,7 @@ import { executeNamedSubAgent } from '../agents/subagent-executor.js';
 interface SubAgentToolOptions {
   source: string;
   sessionId: string;
+  cwd?: string;
   adapter: () => ModelAdapter;
   agents: CustomAgentDef[];
   createRegistry(cwd: string, allowedTools?: string[]): ToolRegistry;
@@ -39,7 +40,7 @@ export function createSubAgentTool(options: SubAgentToolOptions): Tool {
         required: ['agent', 'prompt'],
       },
     },
-    async execute(input) {
+    async execute(input, context) {
       const invocation = input as unknown as SubAgentInvocation;
       const agentDef = options.agents.find((agent) => agent.name === invocation.agent);
       if (!agentDef) {
@@ -56,9 +57,14 @@ export function createSubAgentTool(options: SubAgentToolOptions): Tool {
           sessionId: options.sessionId,
           source: options.source,
           taskId: options.getTaskId?.(),
+          metadata: {
+            agent: agentDef.name,
+            team: agentDef.team,
+          },
           input: {
             agent: agentDef.name,
             prompt: invocation.prompt,
+            cwd: options.cwd,
           },
         });
         return `background subagent queued: ${job.jobId}`;
@@ -68,10 +74,12 @@ export function createSubAgentTool(options: SubAgentToolOptions): Tool {
         agentDef,
         prompt: invocation.prompt,
         sessionId: options.sessionId,
+        cwd: options.cwd,
         adapter: options.adapter,
         createRegistry: options.createRegistry,
         buildSystemPrompt: options.buildSystemPrompt,
         worktreeManager: options.worktreeManager,
+        forkContext: context as ToolExecutionContext | undefined,
       });
     },
   };

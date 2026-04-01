@@ -15,6 +15,10 @@ export interface PlatformPluginRuntimeState {
         command: string;
     }>;
 }
+export declare function resolvePluginShellCommand(command: string, platform?: NodeJS.Platform): {
+    command: string;
+    args: string[];
+};
 export declare function loadPlatformPluginRuntime(cwd: string, builtinCommands: string[]): Promise<PlatformPluginRuntimeState>;
 export declare function connectDeclaredMcpServer(declaration: {
     name: string;

@@ -16,6 +16,7 @@ export interface TeamServiceOptions {
 export interface TeamService {
     createTeam(input: CreateTeamInput): TeamRecord;
     getTeam(teamId: string): TeamRecord | undefined;
+    findTeamByName(name: string): TeamRecord | undefined;
     deleteTeam(teamId: string): void;
     sendMessage(input: SendTeamMessageInput): TeamMessageRecord;
     listMessages(teamId: string): TeamMessageRecord[];

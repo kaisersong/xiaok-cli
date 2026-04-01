@@ -3,11 +3,17 @@ import { join } from 'path';
 
 export type BackgroundJobStatus = 'queued' | 'running' | 'completed' | 'failed';
 
+export interface BackgroundJobMetadata {
+  agent?: string;
+  team?: string;
+}
+
 export interface BackgroundJobRecord {
   jobId: string;
   sessionId: string;
   source: string;
   taskId?: string;
+  metadata?: BackgroundJobMetadata;
   inputSummary: string;
   status: BackgroundJobStatus;
   createdAt: number;
@@ -22,6 +28,7 @@ export interface StartBackgroundJobInput {
   sessionId: string;
   source: string;
   taskId?: string;
+  metadata?: BackgroundJobMetadata;
   input: unknown;
 }
 
@@ -38,6 +45,7 @@ export interface BackgroundExecutionContext {
 
 export interface BackgroundRunnerOptions {
   rootDir: string;
+  recoverInterruptedJobs?: boolean;
   execute(context: BackgroundExecutionContext): Promise<BackgroundExecutionResult>;
   notify(job: BackgroundJobRecord): Promise<void> | void;
 }
@@ -52,7 +60,10 @@ class FileBackgroundJobStore {
   private readonly jobs = new Map<string, BackgroundJobRecord>();
   private nextId = 1;
 
-  constructor(private readonly rootDir: string) {
+  constructor(
+    private readonly rootDir: string,
+    private readonly recoverInterruptedJobs: boolean,
+  ) {
     this.loadExisting();
   }
 
@@ -115,7 +126,7 @@ class FileBackgroundJobStore {
       }
 
       const { schemaVersion: _schemaVersion, ...job } = parsed;
-      const recovered = job.status === 'queued' || job.status === 'running'
+      const recovered = this.recoverInterruptedJobs && (job.status === 'queued' || job.status === 'running')
         ? {
             ...job,
             status: 'failed' as const,
@@ -161,7 +172,10 @@ function summarizeInput(input: unknown): string {
 }
 
 export function createBackgroundRunner(options: BackgroundRunnerOptions): BackgroundRunner {
-  const store = new FileBackgroundJobStore(options.rootDir);
+  const store = new FileBackgroundJobStore(
+    options.rootDir,
+    options.recoverInterruptedJobs ?? true,
+  );
 
   return {
     async start(input) {
@@ -169,6 +183,7 @@ export function createBackgroundRunner(options: BackgroundRunnerOptions): Backgr
         sessionId: input.sessionId,
         source: input.source,
         taskId: input.taskId,
+        metadata: input.metadata,
         inputSummary: summarizeInput(input.input),
         status: 'queued',
       });
@@ -195,7 +210,11 @@ export function createBackgroundRunner(options: BackgroundRunnerOptions): Backgr
           }) ?? current;
         }
 
-        await options.notify(current);
+        try {
+          await options.notify(current);
+        } catch {
+          // Notification failures should not destabilize the background job lifecycle.
+        }
       })();
 
       return job;

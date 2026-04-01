@@ -3,10 +3,12 @@ import { join } from 'path';
 const SCHEMA_VERSION = 1;
 class FileBackgroundJobStore {
     rootDir;
+    recoverInterruptedJobs;
     jobs = new Map();
     nextId = 1;
-    constructor(rootDir) {
+    constructor(rootDir, recoverInterruptedJobs) {
         this.rootDir = rootDir;
+        this.recoverInterruptedJobs = recoverInterruptedJobs;
         this.loadExisting();
     }
     create(input) {
@@ -60,7 +62,7 @@ class FileBackgroundJobStore {
                 continue;
             }
             const { schemaVersion: _schemaVersion, ...job } = parsed;
-            const recovered = job.status === 'queued' || job.status === 'running'
+            const recovered = this.recoverInterruptedJobs && (job.status === 'queued' || job.status === 'running')
                 ? {
                     ...job,
                     status: 'failed',
@@ -95,13 +97,14 @@ function summarizeInput(input) {
     return JSON.stringify(input);
 }
 export function createBackgroundRunner(options) {
-    const store = new FileBackgroundJobStore(options.rootDir);
+    const store = new FileBackgroundJobStore(options.rootDir, options.recoverInterruptedJobs ?? true);
     return {
         async start(input) {
             const job = store.create({
                 sessionId: input.sessionId,
                 source: input.source,
                 taskId: input.taskId,
+                metadata: input.metadata,
                 inputSummary: summarizeInput(input.input),
                 status: 'queued',
             });
@@ -126,7 +129,12 @@ export function createBackgroundRunner(options) {
                         errorMessage: error instanceof Error ? error.message : String(error),
                     }) ?? current;
                 }
-                await options.notify(current);
+                try {
+                    await options.notify(current);
+                }
+                catch {
+                    // Notification failures should not destabilize the background job lifecycle.
+                }
             })();
             return job;
         },

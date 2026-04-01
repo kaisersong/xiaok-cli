@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from 'node:path';
 import type { Message, UsageStats } from '../../types.js';
 import { getConfigDir } from '../../utils/config.js';
+import type { CompactionRecord } from './session.js';
 
 const SESSION_SCHEMA_VERSION = 1;
 
@@ -12,8 +13,14 @@ export interface PersistedSessionSnapshot {
   createdAt: number;
   updatedAt: number;
   forkedFromSessionId?: string;
+  lineage: string[];
   messages: Message[];
   usage: UsageStats;
+  compactions: CompactionRecord[];
+  promptSnapshotId?: string;
+  memoryRefs: string[];
+  approvalRefs: string[];
+  backgroundJobRefs: string[];
 }
 
 interface PersistedSessionDocument extends PersistedSessionSnapshot {
@@ -60,7 +67,14 @@ export class FileSessionStore {
       ...snapshot
     } = parsed as PersistedSessionDocument;
 
-    return snapshot;
+    return {
+      ...snapshot,
+      lineage: snapshot.lineage ?? [snapshot.sessionId ?? sessionId].filter(Boolean),
+      compactions: snapshot.compactions ?? [],
+      memoryRefs: snapshot.memoryRefs ?? [],
+      approvalRefs: snapshot.approvalRefs ?? [],
+      backgroundJobRefs: snapshot.backgroundJobRefs ?? [],
+    } as PersistedSessionSnapshot;
   }
 
   async list(): Promise<SessionListEntry[]> {
@@ -91,14 +105,23 @@ export class FileSessionStore {
     }
 
     const now = Date.now();
+    const sourceLineage = source.lineage ?? [source.sessionId];
+    const lineage = sourceLineage.at(-1) === source.sessionId
+      ? [...sourceLineage]
+      : [...sourceLineage, source.sessionId];
     const forked: PersistedSessionSnapshot = {
       ...source,
       sessionId: this.createSessionId(),
       createdAt: now,
       updatedAt: now,
       forkedFromSessionId: source.sessionId,
+      lineage,
       messages: cloneMessages(source.messages),
       usage: { ...source.usage },
+      compactions: (source.compactions ?? []).map((compaction) => ({ ...compaction })),
+      memoryRefs: [...(source.memoryRefs ?? [])],
+      approvalRefs: [...(source.approvalRefs ?? [])],
+      backgroundJobRefs: [...(source.backgroundJobRefs ?? [])],
     };
     await this.save(forked);
     return forked;

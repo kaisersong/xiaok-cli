@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { renderInputSeparator, renderInputPrompt } from '../../src/ui/render.js';
+import {
+  formatSubmittedInput,
+  formatToolActivity,
+  renderInputSeparator,
+  renderInputPrompt,
+} from '../../src/ui/render.js';
 
 describe('renderInputSeparator', () => {
   let originalColumns: number | undefined;
@@ -90,5 +95,35 @@ describe('renderInputPrompt', () => {
     expect(output).not.toContain('─');
     // Should NOT end with newline
     expect(output).not.toMatch(/\n$/);
+  });
+});
+
+describe('formatSubmittedInput', () => {
+  it('renders a single highlighted line without extra blank lines', () => {
+    const output = formatSubmittedInput('安装 https://github.com/kaisersong/slide-creator 技能');
+
+    expect(output).toContain('安装 https://github.com/kaisersong/slide-creator 技能');
+    expect(output.match(/\n/g)?.length ?? 0).toBe(1);
+  });
+});
+
+describe('formatToolActivity', () => {
+  it('formats web fetch with its target on a single line', () => {
+    expect(formatToolActivity('web_fetch', { url: 'https://example.com/very/long/path' }, 120))
+      .toBe('• 获取网页 https://example.com/very/long/path');
+  });
+
+  it('formats bash with command preview and truncates long content', () => {
+    const output = formatToolActivity('bash', { command: 'ls -la ~/.claude/skills && echo --- && test -d ~/.claude' }, 36);
+
+    expect(output.startsWith('• 执行命令 ls -la ~/.claude/skills')).toBe(true);
+    expect(output.endsWith('...')).toBe(true);
+    expect(output.includes('\n')).toBe(false);
+  });
+
+  it('supports localized human labels for tool activity', () => {
+    const output = formatToolActivity('web_fetch', { url: 'https://example.com' }, 120, 'en');
+
+    expect(output).toBe('• Fetch page https://example.com');
   });
 });

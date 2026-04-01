@@ -1,5 +1,6 @@
 import type { MessageBlock, ModelAdapter } from '../../types.js';
 import type { ToolRegistry } from '../tools/index.js';
+import type { PromptSnapshot } from '../prompts/types.js';
 import { AgentRunController } from './controller.js';
 import type { AgentRuntimeEvent } from './events.js';
 import { AgentSessionState } from './session.js';
@@ -9,6 +10,7 @@ export interface AgentRuntimeOptions {
     session: AgentSessionState;
     controller: AgentRunController;
     systemPrompt: string;
+    promptSnapshot?: PromptSnapshot;
     maxIterations?: number;
     contextLimit?: number;
     compactThreshold?: number;
@@ -27,12 +29,15 @@ export declare class AgentRuntime {
     private compactThreshold;
     private readonly compactPlaceholder;
     private supportsPromptCaching;
+    private promptSnapshot?;
     constructor(options: AgentRuntimeOptions);
     setAdapter(adapter: ModelAdapter): void;
     setSystemPrompt(systemPrompt: string): void;
+    setPromptSnapshot(promptSnapshot: PromptSnapshot | undefined): void;
     run(input: string | MessageBlock[], onEvent: (event: AgentRuntimeEvent) => void, externalSignal?: AbortSignal): Promise<void>;
     private throwIfAborted;
     private isAbortError;
     private refreshModelPolicy;
     private buildInvocationOptions;
+    private buildToolExecutionContext;
 }

@@ -1,10 +1,14 @@
 import { Agent } from '../ai/agent.js';
+import type { AgentSessionSnapshot } from '../ai/runtime/session.js';
+import type { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
 import type { StreamChunk } from '../types.js';
 import type { ChannelRequest } from './webhook.js';
 
 export interface ChannelAgentSessionFactory {
   createSession(sessionId: string): Promise<{
     agent: Agent;
+    runtimeFacade?: RuntimeFacade;
+    cwd?: string;
     dispose?(): void;
   }>;
 }
@@ -26,6 +30,8 @@ export interface ChannelAgentExecutionResult {
 
 interface SessionState {
   agent: Agent;
+  runtimeFacade?: RuntimeFacade;
+  cwd?: string;
   dispose?: () => void;
   tail: Promise<void>;
 }
@@ -45,11 +51,24 @@ export class ChannelAgentService {
       const chunks: string[] = [];
       const generationStartedAt = Date.now();
       try {
-        await session.agent.runTurn(request.message, (chunk: StreamChunk) => {
-          if (chunk.type === 'text') {
-            chunks.push(chunk.delta);
-          }
-        }, signal);
+        if (session.runtimeFacade) {
+          await session.runtimeFacade.runTurn({
+            sessionId,
+            cwd: session.cwd ?? process.cwd(),
+            source: 'yzj',
+            input: request.message,
+          }, (chunk: StreamChunk) => {
+            if (chunk.type === 'text') {
+              chunks.push(chunk.delta);
+            }
+          }, signal);
+        } else {
+          await session.agent.runTurn(request.message, (chunk: StreamChunk) => {
+            if (chunk.type === 'text') {
+              chunks.push(chunk.delta);
+            }
+          }, signal);
+        }
 
         const generationMs = Date.now() - generationStartedAt;
         const reply = chunks.join('').trim();
@@ -117,6 +136,8 @@ export class ChannelAgentService {
     const createdPromise = this.factory.createSession(sessionId).then((createdSession) => {
       const created: SessionState = {
         agent: createdSession.agent,
+        runtimeFacade: createdSession.runtimeFacade,
+        cwd: createdSession.cwd,
         dispose: createdSession.dispose,
         tail: Promise.resolve(),
       };
@@ -146,6 +167,10 @@ export class ChannelAgentService {
       this.resetSession(sessionId);
     }
     this.sessionPromises.clear();
+  }
+
+  getSessionSnapshot(sessionId: string): AgentSessionSnapshot | undefined {
+    return this.sessions.get(sessionId)?.agent.exportSession();
   }
 }
 
