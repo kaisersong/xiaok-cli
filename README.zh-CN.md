@@ -100,6 +100,25 @@ node dist/index.js --help
 
 当前分支包版本：`0.1.4`
 
+## 仓库卫生
+
+让 `/Users/song/projects/xiaok-cli` 始终保持干净，并且和 `origin/master` 同步。不要直接在主仓库目录里做功能开发。
+
+每个需求都从独立 worktree 开始：
+
+```bash
+npm run worktree:new -- feature/my-change
+cd .worktrees/feature-my-change
+```
+
+在开工前、每半天一次、以及收工前，固定执行一次仓库卫生检查：
+
+```bash
+npm run hygiene:check
+```
+
+这个检查会在 `master` 出现真实跟踪改动或落后/领先 `origin/master` 时失败；如果只是运行噪音或全局 `xiaok` 链接漂移，则给出警告。
+
 ## 配置
 
 默认配置文件位置：

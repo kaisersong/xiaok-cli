@@ -9,12 +9,14 @@
   "scripts": {
     "build": "tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
     "dev": "tsx src/index.ts",
+    "hygiene:check": "node scripts/check-repo-hygiene.mjs",
     "test": "npm run test:sandbox",
     "test:full": "vitest run",
     "test:watch": "vitest",
     "test:sandbox:build": "tsc -p tsconfig.tests.json",
     "test:sandbox:run": "node -r ./tests/support/vite-net-use-patch.cjs ./node_modules/vitest/vitest.mjs run --config vitest.sandbox.config.mjs --configLoader runner",
-    "test:sandbox": "npm run test:sandbox:build && npm run test:sandbox:run"
+    "test:sandbox": "npm run test:sandbox:build && npm run test:sandbox:run",
+    "worktree:new": "node scripts/new-worktree.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

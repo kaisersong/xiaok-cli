@@ -1,4 +1,5 @@
 export default {
+  cacheDir: '.test-cache/vitest-sandbox',
   test: {
     globals: true,
     environment: 'node',

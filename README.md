@@ -100,6 +100,25 @@ node dist/index.js --help
 
 Package version in this branch: `0.1.4`
 
+## Repo Hygiene
+
+Keep `/Users/song/projects/xiaok-cli` clean and synced to `origin/master`. Do not do feature work directly on the main repo checkout.
+
+Use a worktree for every feature branch:
+
+```bash
+npm run worktree:new -- feature/my-change
+cd .worktrees/feature-my-change
+```
+
+Run the hygiene check at the start of work, once every half day, and before finishing work:
+
+```bash
+npm run hygiene:check
+```
+
+The hygiene check fails when `master` has real tracked changes or drifts away from `origin/master`, and warns when runtime noise or a global `xiaok` symlink points at the wrong checkout.
+
 ## Configuration
 
 Config is stored in:

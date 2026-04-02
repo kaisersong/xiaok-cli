@@ -1,2 +1,6 @@
 .test-dist/
 .worktrees/
+.test-cache/
+.DS_Store
+.xiaok/state/
+.xiaok-test/
