@@ -40,6 +40,7 @@ import { createPlatformRuntimeContext, type PlatformRuntimeContext } from '../pl
 import { FileCapabilityHealthStore } from '../platform/runtime/health-store.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
 import { buildPermissionRequest } from '../ui/permission-prompt.js';
+import { PidLock } from '../utils/pid-lock.js';
 
 interface YZJServeOptions {
   sendMsgUrl?: string;
@@ -161,6 +162,17 @@ export function registerYZJCommands(program: Command): void {
 }
 
 async function runYZJServe(options: YZJServeOptions): Promise<void> {
+  const stateDir = join(homedir(), '.xiaok', 'state', 'yzj');
+  const pidLock = new PidLock(join(stateDir, 'serve.pid'));
+  const lockResult = pidLock.acquire();
+  if (!lockResult.acquired) {
+    console.error(
+      `错误：已有一个 yzj serve 进程在运行 (PID ${lockResult.existingPid})。\n`
+      + `请先停止该进程（kill ${lockResult.existingPid}），再启动新的 serve。`,
+    );
+    process.exit(1);
+  }
+
   const config = await loadConfig();
   const yzjConfig = resolveYZJConfig(config, buildOverrides(options));
   const enableWebhook = options.webhook ?? true;
@@ -173,7 +185,6 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
     sendMsgUrl: yzjConfig.sendMsgUrl,
     logger: console,
   });
-  const stateDir = join(homedir(), '.xiaok', 'state', 'yzj');
   const sessionStore = new FileChannelSessionStore(join(stateDir, 'sessions.json'));
   const dedupeStore = new FileYZJInboundDedupeStore(join(stateDir, 'inbound-dedupe.json'));
   const approvalStore = new FileApprovalStore(join(stateDir, 'approvals.json'));
