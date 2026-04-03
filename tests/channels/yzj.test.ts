@@ -143,4 +143,55 @@ describe('yzj channel helpers', () => {
 
     expect(sentChunks.every((chunk) => chunk.length <= 10)).toBe(true);
   });
+
+  it('retries on 429 and succeeds', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls += 1;
+      if (calls < 3) {
+        return { ok: false, status: 429, text: async () => 'rate limited' };
+      }
+      return { ok: true, text: async () => '' };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const transport = new YZJTransport({
+      sendMsgUrl: 'https://example.com/send',
+    });
+
+    const promise = transport.deliver({
+      channel: 'yzj',
+      target: { chatId: 'r1' },
+      text: 'hello',
+    });
+
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(calls).toBe(3);
+    vi.useRealTimers();
+  });
+
+  it('throws YZJTransportError with status 401 without retrying', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      text: async () => 'unauthorized',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { YZJTransportError } = await import('../../src/channels/yzj-transport.js');
+    const transport = new YZJTransport({
+      sendMsgUrl: 'https://example.com/send',
+    });
+
+    await expect(transport.deliver({
+      channel: 'yzj',
+      target: { chatId: 'r1' },
+      text: 'hello',
+    })).rejects.toThrow('认证失败');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

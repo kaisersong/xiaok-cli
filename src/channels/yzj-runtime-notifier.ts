@@ -2,6 +2,7 @@ import type { RuntimeHooks, RuntimeHookUnsubscribe } from '../runtime/hooks.js';
 import type { ApprovalStore } from './approval-store.js';
 import type { ChannelReplyTarget } from './types.js';
 import type { TaskManager } from './task-manager.js';
+import { describeToolActivity } from '../ui/render.js';
 
 export interface YZJRuntimeNotificationTransport {
   send(target: ChannelReplyTarget, text: string): Promise<void> | void;
@@ -38,7 +39,10 @@ export class YZJRuntimeNotifier {
           return;
         }
         this.taskManager.setTaskEvent(task.taskId, `执行工具 ${event.toolName}`);
-        this.enqueueProgress(sessionId, `开始 ${event.toolName}${formatToolInput(event.toolInput)}`);
+        const activity = describeToolActivity(event.toolName, event.toolInput);
+        if (activity) {
+          this.enqueueProgress(sessionId, activity);
+        }
       }),
       hooks.on('tool_finished', (event) => {
         const task = this.taskManager.getActiveTask(sessionId);
@@ -122,7 +126,9 @@ export class YZJRuntimeNotifier {
       return;
     }
 
-    await this.transport.send(target, [`任务 ${task.taskId} 进展：`, ...lines].join('\n'));
+    await this.transport.send(target, [`任务 ${task.taskId} 进展：`, ...lines].join('\n')).catch((error) => {
+      console.error(`[yzj] notification delivery failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 
   private async sendForSession(sessionId: string, text: string): Promise<void> {
@@ -130,26 +136,8 @@ export class YZJRuntimeNotifier {
     if (!target) {
       return;
     }
-    await this.transport.send(target, text);
+    await this.transport.send(target, text).catch((error) => {
+      console.error(`[yzj] session message delivery failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
-}
-
-function formatToolInput(input: Record<string, unknown>): string {
-  if (typeof input.command === 'string') {
-    return ` (${truncate(input.command, 60)})`;
-  }
-  if (typeof input.file_path === 'string') {
-    return ` (${truncate(input.file_path, 60)})`;
-  }
-  if (typeof input.path === 'string') {
-    return ` (${truncate(input.path, 60)})`;
-  }
-  return '';
-}
-
-function truncate(value: string, maxLength: number): string {
-  if (value.length <= maxLength) {
-    return value;
-  }
-  return `${value.slice(0, maxLength)}...`;
 }

@@ -190,12 +190,16 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
       console.info(`[yzj][dry-run] outbound ${kind}: ${text}`);
       return;
     }
-    await transport.deliver({
-      channel: 'yzj',
-      target,
-      text,
-      kind,
-    });
+    try {
+      await transport.deliver({
+        channel: 'yzj',
+        target,
+        text,
+        kind,
+      });
+    } catch (error) {
+      console.error(`[yzj] outbound delivery failed (${kind}): ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   const notifyText = async (
