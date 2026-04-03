@@ -156,7 +156,9 @@ describe('chat CLI smoke', () => {
         },
       );
 
-      expect(stderr).toBe('');
+      // Ignore Node deprecation warnings (e.g. punycode DEP0040 on Node 22+)
+      const significantStderr = stderr.replace(/\(node:\d+\) \[DEP\d+\].*\n?/g, '').replace(/\(Use `node --trace-deprecation.*\n?/g, '').trim();
+      expect(significantStderr).toBe('');
       expect(JSON.parse(stdout)).toMatchObject({
         text: 'PONG',
       });

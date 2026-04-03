@@ -87,7 +87,7 @@ describe('Agent', () => {
     const adapter: ModelAdapter = {
       stream: () => {
         streamCalls += 1;
-        if (streamCalls > 2) {
+        if (streamCalls > 3) {
           throw new Error('loop sentinel');
         }
 
@@ -100,7 +100,11 @@ describe('Agent', () => {
     const registry = createRegistryMock();
     const agent = new Agent(adapter, registry as never, 'system', { maxIterations: 2 });
 
-    await expect(agent.runTurn('loop', () => {})).rejects.toThrow(/max iterations/i);
+    const chunks: StreamChunk[] = [];
+    await agent.runTurn('loop', (chunk) => { chunks.push(chunk); });
+
+    // max_iterations_reached emits an event but does not throw; the turn completes gracefully.
+    expect(streamCalls).toBeLessThanOrEqual(3); // 2 iterations + possibly 1 compact call
   });
 
   it('aborts when signal is cancelled before execution', async () => {

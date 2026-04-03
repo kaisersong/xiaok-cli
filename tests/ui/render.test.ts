@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
+  formatProgressNote,
   formatSubmittedInput,
   formatToolActivity,
   renderInputSeparator,
@@ -101,11 +102,25 @@ describe('renderInputPrompt', () => {
 });
 
 describe('formatSubmittedInput', () => {
-  it('renders a single highlighted line without extra blank lines', () => {
+  it('renders the submitted input as a distinct user block', () => {
+    setColorsEnabled(false);
     const output = formatSubmittedInput('安装 https://github.com/kaisersong/slide-creator 技能');
 
+    expect(output).toContain('  You');
+    expect(output).toContain('  安装 https://github.com/kaisersong/slide-creator 技能');
     expect(output).toContain('安装 https://github.com/kaisersong/slide-creator 技能');
-    expect(output.match(/\n/g)?.length ?? 0).toBe(1);
+    expect(output).not.toContain('╭─ You');
+    expect(output.match(/\n/g)?.length ?? 0).toBe(2);
+    setColorsEnabled(true);
+  });
+});
+
+describe('formatProgressNote', () => {
+  it('renders subtle secondary status lines with a consistent gutter', () => {
+    setColorsEnabled(false);
+    expect(formatProgressNote('Still working: tracing code paths and references (48s)'))
+      .toContain('  · Still working: tracing code paths and references (48s)\n');
+    setColorsEnabled(true);
   });
 });
 
@@ -115,12 +130,24 @@ describe('formatToolActivity', () => {
       .toBe('• 获取网页 https://example.com/very/long/path');
   });
 
-  it('formats bash with command preview and truncates long content', () => {
-    const output = formatToolActivity('bash', { command: 'ls -la ~/.claude/skills && echo --- && test -d ~/.claude' }, 36);
+  it('hides low-signal file inspection activity by default', () => {
+    expect(formatToolActivity('read', { file_path: '/tmp/demo/README.md' }, 120)).toBe('');
+    expect(formatToolActivity('glob', { pattern: '/tmp/demo/**/*.ts' }, 120)).toBe('');
+    expect(formatToolActivity('tool_search', { query: 'select:skill,bash,read' }, 120)).toBe('');
+    expect(formatToolActivity('skill', { name: 'kai-report-creator' }, 120)).toBe('');
+  });
 
-    expect(output.startsWith('• 执行命令 ls -la ~/.claude/skills')).toBe(true);
-    expect(output.endsWith('...')).toBe(true);
-    expect(output.includes('\n')).toBe(false);
+  it('hides exploratory bash commands by default', () => {
+    const output = formatToolActivity('bash', { command: 'ls -la ~/.claude/skills && echo --- && test -d ~/.claude' }, 120);
+
+    expect(output).toBe('');
+  });
+
+  it('keeps meaningful side-effect tool activity concise', () => {
+    expect(formatToolActivity('write', { file_path: '/tmp/demo/report.md' }, 120))
+      .toBe('• 写入文件 report.md');
+    expect(formatToolActivity('bash', { command: 'python3 export-pptx.py slides.html slides.pptx' }, 120))
+      .toBe('• 执行命令 导出 PPT');
   });
 
   it('supports localized human labels for tool activity', () => {
@@ -147,7 +174,7 @@ describe('renderWelcomeScreen', () => {
     console.log = originalConsoleLog;
   });
 
-  it('renders version below the session info', () => {
+  it('renders version below the session info in the original welcome layout', () => {
     process.stdout.columns = 100;
 
     const lines: string[] = [];
@@ -163,10 +190,13 @@ describe('renderWelcomeScreen', () => {
       version: '0.1.4',
     });
 
+    const welcomeLineIndex = lines.findIndex((line) => line.includes('欢迎使用 xiaok code!'));
     const sessionLineIndex = lines.findIndex((line) => line.includes('Session: session-123'));
     const versionLineIndex = lines.findIndex((line) => line.includes('Version: 0.1.4'));
 
+    expect(welcomeLineIndex).toBeGreaterThanOrEqual(0);
     expect(sessionLineIndex).toBeGreaterThanOrEqual(0);
     expect(versionLineIndex).toBe(sessionLineIndex + 1);
+    expect(lines.some((line) => line.includes('██╗  ██╗'))).toBe(true);
   });
 });

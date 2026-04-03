@@ -10,6 +10,14 @@ import { createTtyHarness } from '../support/tty.js';
 import type { TranscriptLogger } from '../../src/ui/transcript.js';
 import { ReplRenderer } from '../../src/ui/repl-renderer.js';
 
+function strip(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+function stripAll(lines: string[]): string[] {
+  return lines.map(strip);
+}
+
 describe('permission-prompt', () => {
   describe('deriveRule', () => {
     it('derives bash rule from command', () => {
@@ -67,11 +75,11 @@ describe('permission-prompt', () => {
     });
 
     it('renders tool metadata as compact single-line key value rows', () => {
-      const lines = formatPermissionPromptLines(
+      const lines = stripAll(formatPermissionPromptLines(
         'web_fetch',
         { path: 'https://example.com/deep/path' },
         [{ label: '允许一次', selected: true }],
-      );
+      ));
 
       expect(lines).toContain('工具: web_fetch');
       expect(lines).toContain('路径: https://example.com/deep/path');
@@ -102,12 +110,12 @@ describe('permission-prompt', () => {
     });
 
     it('supports english prompt copy without changing layout structure', () => {
-      const lines = formatPermissionPromptLines(
+      const lines = stripAll(formatPermissionPromptLines(
         'bash',
         { command: 'ls' },
         [{ label: 'Allow once', selected: true }],
         'en',
-      );
+      ));
 
       expect(lines[0]).toContain('xiaok wants to run');
       expect(lines).toContain('Tool: bash');

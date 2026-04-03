@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { FileCapabilityHealthStore } from '../../../../src/platform/runtime/health-store.js';
+import { FileCapabilityHealthStore } from '../../../src/platform/runtime/health-store.js';
 
 describe('capability health store', () => {
   it('persists health snapshots by cwd across store instances', () => {
