@@ -1,19 +1,33 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
 import type { CachedToolDefinition, ModelInvocationOptions, SystemPromptBlock } from '../runtime/model-capabilities.js';
 
 const MAX_RETRIES = 3;
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
+
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const status = (error as Record<string, unknown>).status;
+    if (typeof status === 'number' && RETRYABLE_STATUS.has(status)) return true;
+    if (/overload|502|503|timeout|ECONNRESET|Bad gateway/i.test(error.message)) return true;
+  }
+  return false;
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class ClaudeAdapter implements ModelAdapter {
-  client: Anthropic;
+  client?: Anthropic;
   private readonly apiKey: string;
   private readonly baseUrl?: string;
   private model: string;
+  private clientPromise: Promise<Anthropic> | null = null;
 
   constructor(apiKey: string, model = 'claude-opus-4-6', baseUrl?: string) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
-    this.client = new Anthropic({ apiKey, baseURL: baseUrl, maxRetries: MAX_RETRIES });
     this.model = model;
   }
 
@@ -25,7 +39,49 @@ export class ClaudeAdapter implements ModelAdapter {
     return new ClaudeAdapter(this.apiKey, model, this.baseUrl);
   }
 
+  private async getClient(): Promise<Anthropic> {
+    if (this.client) {
+      return this.client;
+    }
+
+    if (!this.clientPromise) {
+      this.clientPromise = import('@anthropic-ai/sdk').then(({ default: AnthropicSdk }) => {
+        const client = new AnthropicSdk({
+          apiKey: this.apiKey,
+          baseURL: this.baseUrl,
+          maxRetries: MAX_RETRIES,
+        });
+        this.client = client;
+        return client;
+      });
+    }
+
+    return this.clientPromise;
+  }
+
   async *stream(
+    messages: Message[],
+    tools: ToolDefinition[],
+    systemPrompt: string,
+    options?: ModelInvocationOptions,
+  ): AsyncIterable<StreamChunk> {
+    let attempt = 0;
+    while (true) {
+      try {
+        yield* this.streamOnce(messages, tools, systemPrompt, options);
+        return;
+      } catch (error) {
+        if (!isRetryableError(error) || attempt >= MAX_RETRIES) {
+          throw error;
+        }
+        const delayMs = Math.min(1000 * 2 ** attempt, 16000);
+        await sleep(delayMs);
+        attempt += 1;
+      }
+    }
+  }
+
+  private async *streamOnce(
     messages: Message[],
     tools: ToolDefinition[],
     systemPrompt: string,
@@ -91,7 +147,8 @@ export class ClaudeAdapter implements ModelAdapter {
       cache_control: (t as CachedToolDefinition).cache_control,
     }));
 
-    const stream = this.client.messages.stream({
+    const client = await this.getClient();
+    const stream = client.messages.stream({
       model: this.model,
       max_tokens: 8192,
       system: (options?.promptCache?.systemPrompt ?? systemPrompt) as string | SystemPromptBlock[],

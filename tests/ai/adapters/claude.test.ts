@@ -182,6 +182,75 @@ describe('ClaudeAdapter', () => {
     });
   });
 
+  it('retries up to 3 times on 529 overload then succeeds', async () => {
+    vi.useFakeTimers();
+    const { ClaudeAdapter } = await import('../../../src/ai/adapters/claude.js');
+
+    let calls = 0;
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const instance = new Anthropic({ apiKey: 'test' });
+    vi.spyOn(instance.messages, 'stream').mockImplementation(() => {
+      calls += 1;
+      if (calls < 3) {
+        const err = Object.assign(new Error('overload'), { status: 529 });
+        throw err;
+      }
+      return (async function* () { yield { type: 'message_stop' }; })() as never;
+    });
+
+    const adapter = new ClaudeAdapter('test-key', 'claude-opus-4-6');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const streamPromise = (async () => {
+      const chunks: string[] = [];
+      for await (const chunk of adapter.stream([], [], 'sys')) {
+        chunks.push(chunk.type);
+      }
+      return chunks;
+    })();
+
+    // 推进所有定时器
+    await vi.runAllTimersAsync();
+    const chunks = await streamPromise;
+
+    expect(calls).toBe(3);
+    expect(chunks).toContain('done');
+    vi.useRealTimers();
+  });
+
+  it('throws after exhausting all retries', async () => {
+    vi.useFakeTimers();
+    const { ClaudeAdapter } = await import('../../../src/ai/adapters/claude.js');
+
+    let calls = 0;
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const instance = new Anthropic({ apiKey: 'test' });
+    vi.spyOn(instance.messages, 'stream').mockImplementation(() => {
+      calls += 1;
+      const err = Object.assign(new Error('overload'), { status: 529 });
+      throw err;
+    });
+
+    const adapter = new ClaudeAdapter('test-key', 'claude-opus-4-6');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    let caughtError: Error | undefined;
+    const streamPromise = (async () => {
+      try {
+        for await (const _ of adapter.stream([], [], 'sys')) { /* drain */ }
+      } catch (e) {
+        caughtError = e as Error;
+      }
+    })();
+
+    await vi.runAllTimersAsync();
+    await streamPromise;
+
+    expect(caughtError?.message).toBe('overload');
+    expect(calls).toBe(4); // 1 initial + 3 retries
+    vi.useRealTimers();
+  });
+
   it('serializes image blocks for Claude-compatible payloads', async () => {
     const { ClaudeAdapter } = await import('../../../src/ai/adapters/claude.js');
 
