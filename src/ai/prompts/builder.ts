@@ -1,11 +1,8 @@
 import { FileMemoryStore } from '../memory/store.js';
-import {
-  renderPromptSections,
-  type ContextOptions,
-} from '../context/yzj-context.js';
+import { assembleSystemPrompt, type AssemblerOptions } from './assembler.js';
 import type { PromptSegment, PromptSnapshot } from './types.js';
 
-export interface PromptBuilderInput extends ContextOptions {
+export interface PromptBuilderInput extends AssemblerOptions {
   channel: 'chat' | 'yzj';
 }
 
@@ -19,13 +16,13 @@ export class PromptBuilder {
       query: input.cwd,
     });
 
-    const allSections = await renderPromptSections(input);
+    // Inject memories into assembler options for per-turn memory injection
+    const assemblerOpts: AssemblerOptions = {
+      ...input,
+      memories: memories.length > 0 ? memories.slice(0, 10) : undefined,
+    };
 
-    // First section is static role definition (no cwd/enterprise).
-    // Remaining sections contain dynamic info (cwd, enterprise, autoContext, etc.).
-    const [firstSection, ...restSections] = allSections;
-    const staticText = firstSection ?? '';
-    const dynamicText = restSections.filter(Boolean).join('\n\n');
+    const assembled = await assembleSystemPrompt(assemblerOpts);
 
     const memoryText = memories.length > 0
       ? memories.map((record) => `- ${record.title}: ${record.summary}`).join('\n')
@@ -35,16 +32,16 @@ export class PromptBuilder {
       {
         key: 'static_identity',
         title: 'Static Identity',
-        text: staticText,
+        text: assembled.staticText,
         cacheable: true,
       },
     ];
 
-    if (dynamicText) {
+    if (assembled.dynamicText) {
       segments.push({
         key: 'dynamic_context',
         title: 'Dynamic Context',
-        text: dynamicText,
+        text: assembled.dynamicText,
         cacheable: false,
       });
     }
@@ -58,14 +55,12 @@ export class PromptBuilder {
       });
     }
 
-    const rendered = [staticText, dynamicText, memoryText].filter(Boolean).join('\n\n');
-
     return {
       id: `prompt_${Date.now().toString(36)}`,
       createdAt: Date.now(),
       cwd: input.cwd,
       channel: input.channel,
-      rendered,
+      rendered: assembled.rendered,
       segments,
       memoryRefs: memories.map((record) => record.id),
     };
