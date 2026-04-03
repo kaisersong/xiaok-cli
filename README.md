@@ -6,12 +6,14 @@ An AI coding CLI for Kingdee Cosmic (苍穹) and Yunzhijia (云之家) developer
 
 ## Highlights
 
+- **7-layer prompt architecture**: CC-style system prompt with independent section functions, static/dynamic boundary, and per-turn session guidance
 - **Multi-model**: Claude and OpenAI adapters with automatic retry and exponential backoff (429/502/503/529)
+- **Bash security**: Command safety classifier (block/warn/safe) prevents destructive operations like `rm -rf /`, fork bombs, and `curl|sh` pipe execution
 - **Skill system**: Built-in, global, and project skills with dependency resolution and allowed-tools enforcement
 - **Yunzhijia IM**: Same agent runtime accessible from mobile chat with async tasks, approvals, and workspace binding
 - **Smart context management**: AI-driven compaction with NO_TOOLS_PREAMBLE protection, tool result microcompaction (8K char limit), and memory re-injection after compact
-- **Prompt cache optimization**: Static/dynamic system prompt segmentation for higher cache hit rates on Claude models
-- **Typed memory**: Persistent memory store with `user`/`feedback`/`project`/`reference` type classification and filtered retrieval
+- **Built-in agents**: Explore (read-only), Plan (architecture-only), and Verification (adversarial testing) specialized agents
+- **Typed memory**: Persistent memory store with `user`/`feedback`/`project`/`reference` type classification
 - **Platform runtime**: MCP/LSP plugin wiring, worktree isolation, background subagent execution, and durable channel state
 
 ## Quick Start
@@ -41,17 +43,60 @@ xiaok yzj serve
 
 ```text
 src/
-  ai/          agent runtime, model adapters, tools, skills, memory
-  auth/        auth and token storage
-  channels/    channel gateways, task/approval/session abstractions
-  commands/    CLI commands (chat, commit, review, pr, doctor, init, transcript)
-  platform/    shared runtime: plugins, MCP, LSP, sandbox, teams, worktrees
-  runtime/     runtime event hooks, tasking primitives
-  ui/          terminal UI: streaming markdown, status bar, permission prompts
-  utils/       config and helper utilities
+  ai/
+    prompts/
+      sections/    7 independent section functions (intro, system, doing-tasks, actions, using-tools, tone-and-style, output-efficiency)
+      assembler.ts static/dynamic prompt assembly entry point
+      builder.ts   PromptSnapshot generation with cache segmentation
+    adapters/      Claude (with retry) and OpenAI model adapters
+    agents/        custom agent loader + built-in explore/plan/verification agents
+    context/       backward-compat yzj-context wrapper
+    memory/        typed file-based memory store
+    runtime/       agent runtime, compact runner, session graph, model capabilities
+    skills/        skill loader, planner, tool integration
+    tools/         read, write, edit, bash (with safety), grep, glob, web, skills, tasks
+    permissions/   3-layer permission policy engine
+  auth/            auth and token storage
+  channels/        channel gateways, task/approval/session abstractions
+  commands/        CLI commands (chat, commit, review, pr, doctor, init, transcript)
+  platform/        shared runtime: plugins, MCP, LSP, sandbox, teams, worktrees
+  runtime/         runtime event hooks (CC-aligned), tasking primitives
+  ui/              terminal UI: streaming markdown, status bar, permission prompts
+  utils/           config and helper utilities
 ```
 
-The terminal CLI and Yunzhijia gateway share the same core agent runtime. Channel integrations are boundary adapters under `src/channels/`. Workspace state lives in `<cwd>/.xiaok/state`; gateway state in `~/.xiaok/state/yzj`.
+## System Prompt Architecture
+
+The system prompt follows a CC-style 7-layer design with explicit static/dynamic boundary:
+
+### Static Prefix (cacheable, stable across turns)
+
+| Layer | Section | Language | Content |
+|-------|---------|----------|---------|
+| 1 | Intro | Chinese | Role & identity — Kingdee Cosmic + Yunzhijia developer assistant |
+| 2 | System | English | Runtime reality — permission mode, system-reminder tags, prompt injection awareness, context compression |
+| 3 | DoingTasks | English | Task philosophy — no unnecessary features, read before edit, no time estimates, OWASP awareness |
+| 4 | Actions | English | Risk boundary — destructive/hard-to-reverse/shared-state confirmation rules |
+| 5 | UsingTools | English | Tool grammar — read not cat, edit not sed, glob not find, parallel when independent |
+| 6 | ToneAndStyle | English | Interaction style — no emoji, concise, file_path:line_number format |
+| 7 | OutputEfficiency | English | Brevity — lead with answer, skip preamble, one sentence over three |
+
+### Dynamic Suffix (per-turn, not cached)
+
+| Section | Condition |
+|---------|-----------|
+| Session context | Always — cwd, enterprise, devApp |
+| Skills list | When skills installed |
+| Session guidance | Per-turn — permission mode, active tool restrictions, tool count |
+| MCP instructions | When MCP servers connected |
+| Memory | Per-turn — top-K relevant memories (not just after compact) |
+| Token budget | Always — remaining context window with simplification hint |
+| Deferred tools | When available |
+| Agents / Plugins / LSP | When configured |
+| Auto context | Always — CLAUDE.md, AGENTS.md, git state |
+| API overview + CLI help | Budget-managed — API overview priority over CLI help |
+
+Each static section is an independent function in `src/ai/prompts/sections/`, testable and modifiable in isolation.
 
 ## Agent Runtime
 
@@ -64,20 +109,31 @@ The terminal CLI and Yunzhijia gateway share the same core agent runtime. Channe
 
 ### Context Management
 
-The runtime manages context through three layers:
+Three-layer context management:
 
 1. **Microcompaction** — Tool results exceeding 8,000 characters are truncated before entering the context window
-2. **AI-driven compaction** — When context reaches 85% capacity, an AI summarization call (with `NO_TOOLS_PREAMBLE` to prevent tool invocation during summary) replaces old messages. Falls back to local string truncation on failure
-3. **Memory re-injection** — After compaction, referenced memory records are re-injected into the session so key context is not lost
+2. **AI-driven compaction** — When context reaches 85% capacity, an AI summarization call (with `NO_TOOLS_PREAMBLE`) replaces old messages. Falls back to local truncation on failure
+3. **Memory re-injection** — After compaction, referenced memory records are re-injected into the session
 
-### Prompt Cache Boundary
+### Bash Security
 
-The system prompt is split into static and dynamic segments:
+Command safety classifier (`src/ai/tools/bash-safety.ts`) with three risk levels:
 
-- **Static** (role definition, behavior rules): marked with `cache_control: ephemeral`, stable across turns
-- **Dynamic** (cwd, enterprise context, auto-loaded docs): changes each turn, no cache marking
+- **Block** (rejected): `rm -rf /`, `mkfs`, `dd if=`, fork bombs, `curl|sh` pipe execution, `chmod -R 777 /`
+- **Warn** (needs confirmation): `rm -rf`, `git reset --hard`, `git push --force`, `DROP TABLE`, `kill -9`
+- **Safe**: all other commands
 
-This separation maximizes prompt cache hit rates on Claude models.
+### Tool Input Validation
+
+Lightweight JSON Schema validator runs before every tool call — checks required fields and type constraints. Unknown fields are allowed (model may pass extra params).
+
+### Built-in Agents
+
+| Agent | Role | Tools |
+|-------|------|-------|
+| Explore | Read-only code exploration — no file creation/modification | read, grep, glob, bash (ls/git only) |
+| Plan | Architecture only — outputs step-by-step plans without editing | read, grep, glob |
+| Verification | Adversarial testing — tries to break code, outputs PASS/FAIL/PARTIAL | read, grep, glob, bash |
 
 ### Skill System
 
@@ -87,40 +143,25 @@ Skills are markdown files with YAML frontmatter loaded from three tiers:
 - Global: `~/.xiaok/skills/`
 - Project: `<repo>/.xiaok/skills/`
 
-Features:
-- Dependency resolution with cycle detection
-- `allowed-tools` frontmatter enforced at runtime — `ToolRegistry` blocks tools not in the skill's whitelist
-- User-invocable skills via `/skill-name` slash commands
-- Install/uninstall with automatic catalog reload
+Features: dependency resolution, `allowed-tools` enforcement, slash commands, install/uninstall with catalog reload.
 
-### Memory Store
+### Hook System
 
-Persistent file-based memory with typed records:
+Pre/post tool hooks with structured JSON return values:
 
-```typescript
-type MemoryType = 'user' | 'feedback' | 'project' | 'reference';
+- `updatedInput` — modify tool input before execution
+- `preventContinuation` — stop the agent loop after this tool
+- `additionalContext` — append context to the tool result
 
-interface MemoryRecord {
-  id: string;
-  scope: 'global' | 'project';
-  type?: MemoryType;
-  title: string;
-  summary: string;
-  tags: string[];
-}
-```
-
-Retrieval supports scope filtering (global vs project), keyword matching, and optional `typeFilter` for targeted queries.
+Hooks support CC-aligned event types: PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, SessionStart, SessionEnd, and more.
 
 ### Permission System
 
-Three-layer rule evaluation: global → project → session. Modes:
+Three-layer rule evaluation: global → project → session. Modes: default (prompt), auto (allow all), plan (deny writes). Interactive approval with persisted rules.
 
-- **default**: safe tools auto-allowed, others prompt
-- **auto**: all tools allowed
-- **plan**: write/edit/bash denied
+### Memory Store
 
-Interactive approval prompt with persisted rules and `y!` to switch to auto mode.
+Persistent file-based memory with typed records (`user`/`feedback`/`project`/`reference`). Retrieval supports scope filtering, keyword matching, and `typeFilter`.
 
 ## CLI Commands
 
@@ -203,20 +244,35 @@ Keybindings: `~/.xiaok/keybindings.json` — custom terminal key mappings.
 
 ```bash
 npm run build       # Build
-npm test            # Run tests (550 tests across 130 files)
+npm test            # Run tests (580 tests across 132 files)
 npm run test:watch  # Watch mode
 npm run dev -- --help  # Run from source
 ```
 
-## What's New in v0.2.0
+## Changelog
 
-- **API retry with backoff**: `ClaudeAdapter` retries overload/502/503/529 errors with exponential backoff (up to 3 retries, max 16s delay)
-- **Skill allowed-tools enforcement**: `ToolRegistry.setAllowedTools()` blocks tools not declared in a skill's `allowed-tools` frontmatter
-- **Tool result microcompaction**: Results exceeding 8,000 characters are truncated before entering the context window
-- **AI-driven compact**: Context compaction uses an AI summarization call instead of local string truncation, with `NO_TOOLS_PREAMBLE` to prevent tool invocation during summary
-- **Memory re-injection after compact**: Referenced memory records are re-injected into the session after compaction
-- **Typed memory records**: `MemoryRecord` gains a `type` field (`user`/`feedback`/`project`/`reference`) with filtered retrieval via `typeFilter`
-- **Prompt cache boundary**: System prompt split into static (cacheable) and dynamic segments for higher prompt cache hit rates
+### v0.4.0 — 7-Layer System Prompt Architecture
+- System prompt refactored into 7 independent section functions with CC-style static/dynamic boundary
+- New `assembler.ts` as prompt assembly entry point
+- Dynamic session guidance: permission mode, tool restrictions, token budget, MCP instructions
+- Memory injected every turn (not just after compact)
+- Static sections in English for model stability and cache efficiency
+
+### v0.3.0 — Behavior Governance & Security Hardening
+- Bash command safety classifier (block/warn/safe)
+- Tool input JSON Schema validation
+- Built-in explore/plan/verification agents
+- Enhanced hook return values (updatedInput, preventContinuation, additionalContext)
+- CC-aligned hook event types
+
+### v0.2.0 — Runtime Hardening & Context Intelligence
+- API retry with exponential backoff (429/502/503/529)
+- Skill allowed-tools enforcement
+- Tool result microcompaction (8K char limit)
+- AI-driven compact with NO_TOOLS_PREAMBLE
+- Memory re-injection after compact
+- Typed memory records
+- Prompt cache boundary (static/dynamic segments)
 
 ## License
 
