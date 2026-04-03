@@ -43,7 +43,7 @@ import { buildPermissionRequest } from '../ui/permission-prompt.js';
 import { PidLock } from '../utils/pid-lock.js';
 
 interface YZJServeOptions {
-  sendMsgUrl?: string;
+  webhookUrl?: string;
   inboundMode?: 'webhook' | 'websocket';
   webhookPath?: string;
   webhookPort?: string;
@@ -67,7 +67,7 @@ export function shouldStartYZJWebSocket(
 
 function buildOverrides(options: YZJServeOptions): Partial<YZJChannelConfig> {
   return {
-    sendMsgUrl: options.sendMsgUrl,
+    webhookUrl: options.webhookUrl,
     inboundMode: options.inboundMode,
     webhookPath: options.webhookPath,
     webhookPort: options.webhookPort ? Number(options.webhookPort) : undefined,
@@ -76,7 +76,7 @@ function buildOverrides(options: YZJServeOptions): Partial<YZJChannelConfig> {
 }
 
 export function registerYZJCommands(program: Command): void {
-  const yzj = program.command('yzj').description('运行云之家 IM channel gateway');
+  const yzj = program.command('yzjchannel').description('云之家 IM channel gateway');
   const yzjConfigCmd = yzj.command('config').description('管理 YZJ 配置');
 
   yzjConfigCmd
@@ -88,11 +88,11 @@ export function registerYZJCommands(program: Command): void {
     });
 
   yzjConfigCmd
-    .command('set-send-msg-url <url>')
-    .description('设置 YZJ sendMsgUrl')
+    .command('set-webhook-url <url>')
+    .description('设置云之家 webhookUrl')
     .action(async (url: string) => {
-      await updateYZJConfig((current) => ({ ...current, sendMsgUrl: url }));
-      console.log('已设置 channels.yzj.sendMsgUrl');
+      await updateYZJConfig((current) => ({ ...current, webhookUrl: url }));
+      console.log('已设置 channels.yzj.webhookUrl');
     });
 
   yzjConfigCmd
@@ -139,8 +139,8 @@ export function registerYZJCommands(program: Command): void {
   const serve = yzj
     .command('serve')
     .description('启动 YZJ WebSocket/Webhook 常驻网关')
-    .argument('[sendMsgUrl]', '云之家 webhook/sendMsgUrl；提供后默认按 websocket 模式连接')
-    .option('--send-msg-url <url>', '覆盖 channels.yzj.sendMsgUrl')
+    .argument('[webhookUrl]', '云之家 webhookUrl；提供后默认按 websocket 模式连接')
+    .option('--webhook-url <url>', '覆盖 channels.yzj.webhookUrl')
     .option('--inbound-mode <mode>', '入站模式：websocket | webhook')
     .option('--webhook-path <path>', 'Webhook 接收路径')
     .option('--webhook-port <port>', 'Webhook 监听端口')
@@ -149,14 +149,14 @@ export function registerYZJCommands(program: Command): void {
     .option('--dry-run', '验证网关收发链路，不要求模型 API Key，也不实际回发 YZJ 消息');
 
   serve.action(async (...args: unknown[]) => {
-    const sendMsgUrl = typeof args[0] === 'string' ? args[0] : undefined;
+    const webhookUrl = typeof args[0] === 'string' ? args[0] : undefined;
     const command = args.find((arg): arg is Command => typeof (arg as Command | undefined)?.opts === 'function');
     const options = command
       ? command.opts<YZJServeOptions>()
       : (args.find((arg): arg is YZJServeOptions => Boolean(arg) && typeof arg === 'object') ?? {});
     await runYZJServe({
       ...options,
-      sendMsgUrl: options.sendMsgUrl ?? sendMsgUrl,
+      webhookUrl: options.webhookUrl ?? webhookUrl,
     });
   });
 }
@@ -182,7 +182,7 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
   }
 
   const transport = new YZJTransport({
-    sendMsgUrl: yzjConfig.sendMsgUrl,
+    webhookUrl: yzjConfig.webhookUrl,
     logger: console,
   });
   const sessionStore = new FileChannelSessionStore(join(stateDir, 'sessions.json'));
@@ -594,7 +594,7 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
 
   let websocketClient: YZJWebSocketClient | null = null;
   if (shouldStartYZJWebSocket(yzjConfig, options)) {
-    const websocketUrl = deriveYZJWebSocketUrl(yzjConfig.sendMsgUrl);
+    const websocketUrl = deriveYZJWebSocketUrl(yzjConfig.webhookUrl);
     websocketClient = new YZJWebSocketClient({
       url: websocketUrl,
       logger: console,

@@ -81,10 +81,32 @@ function parseFrontmatter(raw: string): ParsedFrontmatter | null {
   const fields = new Map<string, string>();
   const listFields = new Map<string, string[]>();
   let currentListKey: string | null = null;
+  // For YAML block scalars (>-, |-, >, |)
+  let blockScalarKey: string | null = null;
+  let blockScalarLines: string[] = [];
+
+  const flushBlockScalar = () => {
+    if (blockScalarKey !== null) {
+      fields.set(blockScalarKey, blockScalarLines.join(' ').trim().replace(/\s+/g, ' '));
+      blockScalarKey = null;
+      blockScalarLines = [];
+    }
+  };
 
   for (const rawLine of lines) {
     const line = rawLine.replace(/\r$/, '');
     const trimmed = line.trim();
+
+    // Continuation of a block scalar (indented line)
+    if (blockScalarKey !== null) {
+      if (line.startsWith('  ') || line.startsWith('\t')) {
+        blockScalarLines.push(trimmed);
+        continue;
+      }
+      // Non-indented line ends the block scalar
+      flushBlockScalar();
+    }
+
     if (!trimmed) {
       currentListKey = null;
       continue;
@@ -106,6 +128,13 @@ function parseFrontmatter(raw: string): ParsedFrontmatter | null {
     const value = line.slice(colonIdx + 1).trim();
     if (!key) continue;
 
+    // YAML block scalar indicators: >-, |-, >, |
+    if (value === '>-' || value === '|-' || value === '>' || value === '|') {
+      blockScalarKey = key;
+      blockScalarLines = [];
+      continue;
+    }
+
     if (value.length === 0) {
       currentListKey = key;
       listFields.set(key, listFields.get(key) ?? []);
@@ -114,6 +143,8 @@ function parseFrontmatter(raw: string): ParsedFrontmatter | null {
 
     fields.set(key, stripWrappingQuotes(value));
   }
+
+  flushBlockScalar();
 
   const name = fields.get('name');
   const description = fields.get('description');
@@ -278,28 +309,28 @@ export function createSkillCatalog(
   };
 }
 
+const SKILL_DESCRIPTION_MAX_CHARS = 250;
+
+function formatSkillDescription(skill: SkillMeta): string {
+  const text = skill.whenToUse
+    ? `${skill.description} - ${skill.whenToUse}`
+    : skill.description;
+  return text.length > SKILL_DESCRIPTION_MAX_CHARS
+    ? text.slice(0, SKILL_DESCRIPTION_MAX_CHARS - 1) + '…'
+    : text;
+}
+
+export function formatSkillEntry(skill: SkillMeta): string {
+  return `- ${skill.name}: ${formatSkillDescription(skill)}`;
+}
+
 export function formatSkillsContext(skills: SkillMeta[]): string {
   if (skills.length === 0) return '';
+  return skills.map(formatSkillEntry).join('\n');
+}
 
-  const builtinSkills = skills.filter((skill) => skill.tier === 'system');
-  const customSkills = skills.filter((skill) => skill.tier !== 'system');
-  const render = (skill: SkillMeta) => {
-    const hints: string[] = [];
-    if ((skill.executionContext ?? 'inline') === 'fork') hints.push('fork');
-    if (skill.agent) hints.push(`agent=${skill.agent}`);
-    if ((skill.dependsOn ?? []).length > 0) hints.push(`deps=${(skill.dependsOn ?? []).join(',')}`);
-    return `- /${skill.name}: ${skill.description}${hints.length > 0 ? ` [${hints.join(' ')}]` : ''}`;
-  };
-
-  const sections: string[] = [];
-  if (builtinSkills.length > 0) {
-    sections.push(`## 默认 Skills\n\n${builtinSkills.map(render).join('\n')}`);
-  }
-  if (customSkills.length > 0) {
-    sections.push(`## 扩展 Skills\n\n${customSkills.map(render).join('\n')}`);
-  }
-  sections.push('通过 /skill-name 或 skill 工具调用方式使用。多 skills 场景应先解析依赖并按计划执行。');
-  return sections.join('\n\n');
+export function toSkillEntries(skills: SkillMeta[]): Array<{ name: string; listing: string }> {
+  return skills.map((skill) => ({ name: skill.name, listing: formatSkillEntry(skill) }));
 }
 
 export function parseSlashCommand(input: string): { skillName: string; rest: string } | null {

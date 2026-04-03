@@ -9,7 +9,7 @@ describe('yzj channel helpers', () => {
     vi.unstubAllGlobals();
   });
 
-  it('derives websocket URL from sendMsgUrl', () => {
+  it('derives websocket URL from webhookUrl', () => {
     expect(
       deriveYZJWebSocketUrl('https://yunzhijia.com/gateway/robot/webhook/send?yzjtype=12&yzjtoken=abc')
     ).toBe('wss://yunzhijia.com/xuntong/websocket?yzjtoken=abc');
@@ -69,7 +69,7 @@ describe('yzj channel helpers', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const transport = new YZJTransport({
-      sendMsgUrl: 'https://yunzhijia.com/gateway/robot/webhook/send?yzjtype=12&yzjtoken=abc',
+      webhookUrl: 'https://yunzhijia.com/gateway/robot/webhook/send?yzjtype=12&yzjtoken=abc',
     });
 
     await transport.deliver({
@@ -120,7 +120,7 @@ describe('yzj channel helpers', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const transport = new YZJTransport({
-      sendMsgUrl: 'https://yunzhijia.com/gateway/robot/webhook/send?yzjtype=12&yzjtoken=abc',
+      webhookUrl: 'https://yunzhijia.com/gateway/robot/webhook/send?yzjtype=12&yzjtoken=abc',
       chunkLimit: 10,
     });
 
@@ -157,7 +157,7 @@ describe('yzj channel helpers', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const transport = new YZJTransport({
-      sendMsgUrl: 'https://example.com/send',
+      webhookUrl: 'https://example.com/send',
     });
 
     const promise = transport.deliver({
@@ -183,7 +183,7 @@ describe('yzj channel helpers', () => {
 
     const { YZJTransportError } = await import('../../src/channels/yzj-transport.js');
     const transport = new YZJTransport({
-      sendMsgUrl: 'https://example.com/send',
+      webhookUrl: 'https://example.com/send',
     });
 
     await expect(transport.deliver({

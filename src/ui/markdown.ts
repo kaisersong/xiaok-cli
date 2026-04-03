@@ -1,6 +1,8 @@
 import { bold, dim, cyan, yellow, green, magenta, getTheme } from "./render.js";
 import { highlightLine } from "./highlight.js";
 
+const BODY_GUTTER = "";
+
 /**
  * Line-buffered markdown renderer for streaming terminal output.
  * Buffers text until newlines, then renders each complete line
@@ -32,6 +34,9 @@ export class MarkdownRenderer {
 
     if (this.buffer.length > this.pendingLen) {
       const newChars = this.buffer.slice(this.pendingLen);
+      if (this.pendingLen === 0) {
+        process.stdout.write(this.getPendingPrefix());
+      }
       process.stdout.write(newChars);
       this.pendingLen = this.buffer.length;
     }
@@ -65,12 +70,14 @@ export class MarkdownRenderer {
       if (this.inCodeBlock) {
         this.inCodeBlock = false;
         this.codeLang = "";
-        if (theme === "default") process.stdout.write(dim("  ╰─"));
+        if (theme === "default") process.stdout.write(`${BODY_GUTTER}${dim("╰─")}`);
+        else process.stdout.write(BODY_GUTTER);
       } else {
         this.inCodeBlock = true;
         const lang = line.trimStart().slice(3).trim();
         this.codeLang = lang.toLowerCase();
-        if (theme === "default") process.stdout.write(dim(`  ╭─ ${lang ? magenta(lang) : ""}`));
+        if (theme === "default") process.stdout.write(`${BODY_GUTTER}${dim(`╭─ ${lang ? magenta(lang) : ""}`)}`);
+        else process.stdout.write(BODY_GUTTER);
       }
       return;
     }
@@ -79,9 +86,9 @@ export class MarkdownRenderer {
     if (this.inCodeBlock) {
       const highlighted = this.codeLang ? highlightLine(line, this.codeLang) : green(line);
       if (theme === "default") {
-        process.stdout.write(`  ${dim("│")} ${highlighted}`);
+        process.stdout.write(`${BODY_GUTTER}${dim("│")} ${highlighted}`);
       } else {
-        process.stdout.write(`  ${highlighted}`);
+        process.stdout.write(`${BODY_GUTTER}${highlighted}`);
       }
       return;
     }
@@ -89,37 +96,37 @@ export class MarkdownRenderer {
     // Headings
     const headerMatch = line.match(/^(#{1,6})\s+(.*)/);
     if (headerMatch) {
-      process.stdout.write(bold(headerMatch[2]));
+      process.stdout.write(`${BODY_GUTTER}${bold(headerMatch[2])}`);
       return;
     }
 
     // Blockquotes
     if (line.startsWith("> ")) {
-      process.stdout.write(`${dim("│")} ${dim(this.inlineFormat(line.slice(2)))}`);
+      process.stdout.write(`${BODY_GUTTER}${dim("│")} ${dim(this.inlineFormat(line.slice(2)))}`);
       return;
     }
 
     // Horizontal rule
     if (/^[-*_]{3,}\s*$/.test(line)) {
-      process.stdout.write(dim("─".repeat(40)));
+      process.stdout.write(`${BODY_GUTTER}${dim("─".repeat(40))}`);
       return;
     }
 
     // List items
     const ulMatch = line.match(/^(\s*)[-*+]\s+(.*)/);
     if (ulMatch) {
-      process.stdout.write(`${ulMatch[1]}${dim("•")} ${this.inlineFormat(ulMatch[2])}`);
+      process.stdout.write(`${BODY_GUTTER}${ulMatch[1]}${dim("•")} ${this.inlineFormat(ulMatch[2])}`);
       return;
     }
 
     const olMatch = line.match(/^(\s*)(\d+)\.\s+(.*)/);
     if (olMatch) {
-      process.stdout.write(`${olMatch[1]}${dim(olMatch[2] + ".")} ${this.inlineFormat(olMatch[3])}`);
+      process.stdout.write(`${BODY_GUTTER}${olMatch[1]}${dim(olMatch[2] + ".")} ${this.inlineFormat(olMatch[3])}`);
       return;
     }
 
     // Regular text
-    process.stdout.write(this.inlineFormat(line));
+    process.stdout.write(`${BODY_GUTTER}${this.inlineFormat(line)}`);
   }
 
   /** Apply inline formatting. */
@@ -130,5 +137,13 @@ export class MarkdownRenderer {
     text = text.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, s: string) => dim(s));
     text = text.replace(/~~(.+?)~~/g, (_, s: string) => dim(s));
     return text;
+  }
+
+  private getPendingPrefix(): string {
+    if (this.inCodeBlock && getTheme() === "default") {
+      return `${BODY_GUTTER}${dim("│")} `;
+    }
+
+    return BODY_GUTTER;
   }
 }

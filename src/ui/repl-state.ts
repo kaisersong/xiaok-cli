@@ -5,6 +5,7 @@ export interface ReplInputFrame {
   prompt: string;
   input: string;
   overlayLines: string[];
+  footerLines?: string[];
   cursor: number;
 }
 

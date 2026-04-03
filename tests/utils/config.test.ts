@@ -73,7 +73,7 @@ describe('config', () => {
         contextBudget: 4000,
         channels: {
           yzj: {
-            sendMsgUrl: 'https://www.yunzhijia.com/gateway/robot/webhook/send?yzjtype=12&yzjtoken=abc',
+            webhookUrl: 'https://www.yunzhijia.com/gateway/robot/webhook/send?yzjtype=12&yzjtoken=abc',
             webhookPort: 3100,
           },
         },
@@ -82,7 +82,7 @@ describe('config', () => {
 
     const config = await loadConfig();
 
-    expect(config.channels?.yzj?.sendMsgUrl).toContain('yzjtoken=abc');
+    expect(config.channels?.yzj?.webhookUrl).toContain('yzjtoken=abc');
     expect(config.channels?.yzj?.webhookPort).toBe(3100);
   });
 

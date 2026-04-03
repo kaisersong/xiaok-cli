@@ -1,9 +1,9 @@
-export function deriveYZJWebSocketUrl(sendMsgUrl: string): string {
+export function deriveYZJWebSocketUrl(webhookUrl: string): string {
   let parsed: URL;
   try {
-    parsed = new URL(sendMsgUrl);
+    parsed = new URL(webhookUrl);
   } catch {
-    throw new Error('invalid sendMsgUrl');
+    throw new Error('invalid webhookUrl');
   }
 
   const token = parsed.searchParams.get('yzjtoken')?.trim();

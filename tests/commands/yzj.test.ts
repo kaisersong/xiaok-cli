@@ -6,7 +6,7 @@ describe('yzj command helpers', () => {
     expect(
       shouldStartYZJWebSocket(
         {
-          sendMsgUrl: 'https://example.com/hook',
+          webhookUrl: 'https://example.com/hook',
           inboundMode: 'websocket',
           webhookPath: '/yzj/webhook',
           webhookPort: 3001,
@@ -20,7 +20,7 @@ describe('yzj command helpers', () => {
     expect(
       shouldStartYZJWebSocket(
         {
-          sendMsgUrl: 'https://example.com/hook',
+          webhookUrl: 'https://example.com/hook',
           inboundMode: 'websocket',
           webhookPath: '/yzj/webhook',
           webhookPort: 3001,

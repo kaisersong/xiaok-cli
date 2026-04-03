@@ -212,6 +212,54 @@ describe('InputReader', () => {
       harness.restore();
     });
 
+    it('renders the footer status immediately below the prompt before the first keypress', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+      reader.setStatusLineProvider(() => ['  xiaok-cli · claude-sonnet-4 · 1%']);
+
+      const pending = reader.read('> ');
+
+      expect(harness.screen.lines()).toEqual([
+        '>',
+        '  xiaok-cli · claude-sonnet-4 · 1%',
+      ]);
+
+      harness.send('\x03');
+      await expect(pending).resolves.toBeNull();
+
+      harness.restore();
+    });
+
+    it('hides the footer status while the slash menu is open', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+      reader.setStatusLineProvider(() => ['  xiaok-cli · claude-sonnet-4 · 1%']);
+      reader.setSkills([
+        { name: 'debug', description: '先定位根因，再提出修复方案', content: '', path: '' },
+      ]);
+
+      const pending = reader.read('> ');
+      harness.send('/');
+
+      expect(harness.screen.lines()).toEqual([
+        '> /',
+        '  ❯ /clear  Clear the screen',
+        '    /commit  Commit staged changes',
+        '    /context  Show loaded repo context',
+        '    /debug  先定位根因，再提出修复...',
+        '    /doctor  Inspect local CLI health',
+        '    /exit  Exit the chat',
+        '    /help  Show help',
+        '    /init  Initialize project xi...',
+      ]);
+      expect(harness.screen.text()).not.toContain('xiaok-cli · claude-sonnet-4 · 1%');
+
+      harness.send('\x03');
+      await expect(pending).resolves.toBeNull();
+
+      harness.restore();
+    });
+
     it('does not accumulate duplicated prompt rows when repeatedly navigating past slash menu edges', async () => {
       const harness = createTtyHarness();
       reader = new InputReader(new ReplRenderer(process.stdout));

@@ -3,7 +3,7 @@ import type { OutboundChannelMessage } from './types.js';
 import type { YZJLogger } from './yzj-types.js';
 
 export interface YZJTransportOptions {
-  sendMsgUrl: string;
+  webhookUrl: string;
   logger?: YZJLogger;
   chunkLimit?: number;
   maxRetries?: number;
@@ -29,7 +29,7 @@ function classifyHttpError(status: number, body: string): YZJTransportError {
   switch (status) {
     case 401:
       return new YZJTransportError(
-        `认证失败 (401): token 无效或已过期，请检查 sendMsgUrl 配置。${body}`,
+        `认证失败 (401): token 无效或已过期，请检查 webhookUrl 配置。${body}`,
         401, false,
       );
     case 403:
@@ -112,7 +112,7 @@ export class YZJTransport implements ChannelDeliveryTransport {
       let lastError: YZJTransportError | undefined;
 
       for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-        const response = await fetch(this.options.sendMsgUrl, {
+        const response = await fetch(this.options.webhookUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),

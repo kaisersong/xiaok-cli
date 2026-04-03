@@ -14,6 +14,7 @@ export interface TerminalController {
   setPrompt(prompt: string): void;
   setTerminalSize(columns: number, rows: number): void;
   setSlashCommands(commands: SlashOverlayItem[]): void;
+  setFooterLines(lines: string[]): void;
   setOverlayLines(lines: string[]): void;
   insertText(text: string): void;
   moveCursorLeft(): void;
@@ -48,6 +49,7 @@ export function createTerminalController({ prompt }: { prompt: string }): Termin
     prompt,
     transcript: [],
     input: inputModel.getState(),
+    footerLines: [],
     overlay: null,
     modal: null,
     focusTarget: 'input',
@@ -99,6 +101,12 @@ export function createTerminalController({ prompt }: { prompt: string }): Termin
     setSlashCommands(commands) {
       slashCommands = commands;
       syncSlashOverlay();
+    },
+    setFooterLines(lines) {
+      state = {
+        ...state,
+        footerLines: lines,
+      };
     },
     setOverlayLines(lines) {
       state = {

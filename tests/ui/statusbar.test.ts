@@ -175,4 +175,154 @@ describe('StatusBar', () => {
       expect(line).toContain('plan');
     });
   });
+
+  describe('live activity', () => {
+    beforeEach(() => {
+      statusBar.init('claude-opus-4-6', 'test123', '/Users/song/projects/xiaok-cli');
+      statusBar.update({ inputTokens: 1000, outputTokens: 500, budget: 200000 });
+    });
+
+    it('renders animated live activity with elapsed time while a run is active', () => {
+      statusBar.beginActivity('Exploring codebase', 0);
+
+      const line = statusBar.getLiveStatusLine(24_000, 1);
+
+      expect(line).toContain('Digging through repo');
+      expect(line).toContain('24s');
+      expect(line).toContain('xiaok-cli');
+      expect(line).toContain('claude-opus-4-6');
+    });
+
+    it('suppresses live activity for very short operations to avoid flicker', () => {
+      statusBar.beginActivity('Thinking', 0);
+
+      expect(statusBar.getLiveStatusLine(300, 0)).toBe('');
+      expect(statusBar.getLiveStatusLine(800, 0)).toContain('Thinking');
+    });
+
+    it('upgrades generic thinking copy during long waits', () => {
+      statusBar.beginActivity('Thinking', 0);
+
+      const line = statusBar.getLiveStatusLine(16_000, 0);
+
+      expect(line).toContain('Still working');
+      expect(line).toContain('16s');
+    });
+
+    it('reaches a finalizing stage for very long generic waits', () => {
+      statusBar.beginActivity('Thinking', 0);
+
+      const line = statusBar.getLiveStatusLine(95_000, 0);
+
+      expect(line).toContain('Finalizing response');
+      expect(line).toContain('1m 35s');
+    });
+
+    it('adds a deeper long-wait stage for repo exploration', () => {
+      statusBar.beginActivity('Exploring codebase', 0);
+
+      const line = statusBar.getLiveStatusLine(48_000, 0);
+
+      expect(line).toContain('Tracing references');
+      expect(line).toContain('48s');
+    });
+
+    it('adds a deeper long-wait stage for file updates', () => {
+      statusBar.beginActivity('Updating files', 0);
+
+      const line = statusBar.getLiveStatusLine(41_000, 0);
+
+      expect(line).toContain('Finishing edits');
+      expect(line).toContain('41s');
+    });
+
+    it('adds a deeper long-wait stage for verification', () => {
+      statusBar.beginActivity('Running verification', 0);
+
+      const line = statusBar.getLiveStatusLine(52_000, 0);
+
+      expect(line).toContain('Checking for regressions');
+      expect(line).toContain('52s');
+    });
+
+    it('adds long-wait stages for skill updates', () => {
+      statusBar.beginActivity('Updating skills', 0);
+
+      const line = statusBar.getLiveStatusLine(34_000, 0);
+
+      expect(line).toContain('Refreshing skill catalog');
+      expect(line).toContain('34s');
+    });
+
+    it('adds long-wait stages for presentation export', () => {
+      statusBar.beginActivity('Exporting presentation', 0);
+
+      const line = statusBar.getLiveStatusLine(22_000, 0);
+
+      expect(line).toContain('Packaging slides');
+      expect(line).toContain('22s');
+    });
+
+    it('adds long-wait stages for workspace inspection', () => {
+      statusBar.beginActivity('Inspecting workspace', 0);
+
+      const line = statusBar.getLiveStatusLine(37_000, 0);
+
+      expect(line).toContain('Reviewing findings');
+      expect(line).toContain('37s');
+    });
+
+    it('adds long-wait stages for local command execution', () => {
+      statusBar.beginActivity('Running command', 0);
+
+      const line = statusBar.getLiveStatusLine(24_000, 0);
+
+      expect(line).toContain('Waiting for command output');
+      expect(line).toContain('24s');
+    });
+
+    it('keeps generic work states feeling active during long waits', () => {
+      statusBar.beginActivity('Working', 0);
+
+      const line = statusBar.getLiveStatusLine(33_000, 0);
+
+      expect(line).toContain('Making progress');
+      expect(line).toContain('33s');
+    });
+
+    it('emits low-frequency reassurance copy for long-running exploration', () => {
+      statusBar.beginActivity('Exploring codebase', 0);
+
+      const tick = statusBar.getReassuranceTick(48_000, -1);
+
+      expect(tick?.bucket).toBe(2);
+      expect(tick?.line).toContain('Still working');
+      expect(tick?.line).toContain('tracing code paths and references');
+      expect(tick?.line).toContain('48s');
+    });
+
+    it('emits targeted reassurance copy for command execution', () => {
+      statusBar.beginActivity('Running command', 0);
+
+      const tick = statusBar.getReassuranceTick(44_000, -1);
+
+      expect(tick?.bucket).toBe(2);
+      expect(tick?.line).toContain('Still working');
+      expect(tick?.line).toContain('waiting for command output');
+      expect(tick?.line).toContain('44s');
+    });
+
+    it('does not emit duplicate reassurance for the same time bucket', () => {
+      statusBar.beginActivity('Thinking', 0);
+
+      expect(statusBar.getReassuranceTick(25_000, 1)).toBeNull();
+    });
+
+    it('stops rendering live activity after the run ends', () => {
+      statusBar.beginActivity('Thinking', 0);
+      statusBar.endActivity();
+
+      expect(statusBar.getLiveStatusLine(10_000, 0)).toBe('');
+    });
+  });
 });

@@ -138,6 +138,25 @@ export class Agent {
       return;
     }
 
+    if (event.type === 'run_failed') {
+      this.options.hooks.emit({
+        type: 'turn_failed',
+        sessionId: this.sessionId,
+        turnId,
+        error: event.error,
+      });
+      return;
+    }
+
+    if (event.type === 'run_aborted') {
+      this.options.hooks.emit({
+        type: 'turn_aborted',
+        sessionId: this.sessionId,
+        turnId,
+      });
+      return;
+    }
+
     if (event.type === 'tool_started') {
       this.options.hooks.emit({
         type: 'tool_started',

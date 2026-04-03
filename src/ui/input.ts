@@ -197,6 +197,7 @@ export class InputReader {
   private skills: SkillMeta[] = [];
   private onModeCycle?: () => PermissionMode;
   private transcriptLogger?: TranscriptLogger;
+  private statusLineProvider?: () => string[];
   constructor(private readonly renderer?: ReplRenderer) {}
 
   setSkills(skills: SkillMeta[]): void {
@@ -209,6 +210,10 @@ export class InputReader {
 
   setTranscriptLogger(logger: TranscriptLogger | undefined): void {
     this.transcriptLogger = logger;
+  }
+
+  setStatusLineProvider(provider: (() => string[]) | undefined): void {
+    this.statusLineProvider = provider;
   }
 
   async read(prompt: string): Promise<string | null> {
@@ -240,8 +245,9 @@ export class InputReader {
               MAX_MENU_VISIBLE_ITEMS,
             )
             : [];
+          const footerLines = this.statusLineProvider?.() ?? [];
           this.renderedMenuRows = overlayLines.length;
-          this.renderer.renderInput({ prompt, input, cursor, overlayLines });
+          this.renderer.renderInput({ prompt, input, cursor, overlayLines, footerLines });
           return;
         }
         stdout.write(`\r\x1b[K${prompt}${input}`);
@@ -648,7 +654,11 @@ export class InputReader {
         }
       };
 
-      stdout.write(prompt);
+      if (this.renderer) {
+        redraw();
+      } else {
+        stdout.write(prompt);
+      }
       stdin.setRawMode(true);
       stdin.resume();
       stdin.on('data', onData);

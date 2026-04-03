@@ -94,4 +94,72 @@ describe('yzj runtime notifier', () => {
 
     finishTask?.();
   });
+
+  it('does not push low-signal inspection tools to the user', async () => {
+    const sent: string[] = [];
+    const hooks = createRuntimeHooks();
+    const approvals = new InMemoryApprovalStore();
+    let finishTask: (() => void) | undefined;
+    const manager = new TaskManager({
+      notify: async () => undefined,
+      execute: async () => {
+        await new Promise<void>((resolve) => {
+          finishTask = resolve;
+        });
+        return {
+          ok: true,
+          generationMs: 0,
+          deliveryMs: 0,
+          replyLength: 0,
+        };
+      },
+    });
+
+    await manager.createAndStart(
+      {
+        sessionKey: {
+          channel: 'yzj',
+          chatId: 'robot-1',
+          userId: 'openid-1',
+        },
+        message: '开始执行',
+        replyTarget: {
+          chatId: 'robot-1',
+          userId: 'openid-1',
+        },
+      },
+      'sess_2'
+    );
+
+    await waitFor(() => {
+      expect(manager.getActiveTask('sess_2')).toBeTruthy();
+    });
+
+    const notifier = new YZJRuntimeNotifier(
+      {
+        send: async (_target, text) => {
+          sent.push(text);
+        },
+      },
+      manager,
+      approvals,
+      0
+    );
+
+    notifier.bind('sess_2', hooks);
+    hooks.emit({
+      type: 'tool_started',
+      sessionId: 'sess_2',
+      turnId: 'turn_1',
+      toolName: 'read',
+      toolInput: {
+        file_path: '/tmp/demo/README.md',
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(sent).toEqual([]);
+
+    finishTask?.();
+  });
 });

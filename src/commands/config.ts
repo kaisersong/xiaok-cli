@@ -68,17 +68,17 @@ export function registerConfigCommands(program: Command): void {
     });
 
   configSet
-    .command('yzj-send-msg-url <url>')
-    .description('设置云之家机器人 sendMsgUrl')
+    .command('yzj-webhook-url <url>')
+    .description('设置云之家 webhookUrl')
     .action(async (url: string) => {
       const cfg = await loadConfig();
       cfg.channels = cfg.channels ?? {};
       cfg.channels.yzj = {
         ...(cfg.channels.yzj ?? {}),
-        sendMsgUrl: url,
+        webhookUrl: url,
       };
       await saveConfig(cfg);
-      console.log('已设置 channels.yzj.sendMsgUrl');
+      console.log('已设置 channels.yzj.webhookUrl');
     });
 
   configSet
@@ -156,8 +156,8 @@ export function registerConfigCommands(program: Command): void {
         console.log(`${cfg.defaultModel}${'model' in (m ?? {}) ? '/' + (m as { model: string }).model : ''}`);
       } else if (key === 'yzj') {
         console.log(JSON.stringify(cfg.channels?.yzj ?? null, null, 2));
-      } else if (key === 'yzj.send-msg-url') {
-        console.log(cfg.channels?.yzj?.sendMsgUrl ?? '');
+      } else if (key === 'yzj.webhook-url') {
+        console.log(cfg.channels?.yzj?.webhookUrl ?? '');
       } else if (key === 'yzj.inbound-mode') {
         console.log(cfg.channels?.yzj?.inboundMode ?? '');
       } else if (key === 'yzj.webhook-path') {

@@ -15,13 +15,13 @@ export function resolveYZJConfig(config: Config, overrides: Partial<YZJChannelCo
     ...overrides,
   };
 
-  const sendMsgUrl = merged.sendMsgUrl?.trim();
-  if (!sendMsgUrl) {
-    throw new Error('YZJ sendMsgUrl 未配置。请在 config.json 的 channels.yzj.sendMsgUrl 中配置，或通过命令行传入 --send-msg-url');
+  const webhookUrl = merged.webhookUrl?.trim();
+  if (!webhookUrl) {
+    throw new Error('YZJ webhookUrl 未配置。请在 config.json 的 channels.yzj.webhookUrl 中配置，或通过命令行传入 --webhook-url');
   }
 
   return {
-    sendMsgUrl,
+    webhookUrl,
     inboundMode: merged.inboundMode ?? 'websocket',
     webhookPath: normalizeWebhookPath(merged.webhookPath),
     webhookPort: merged.webhookPort ?? 3001,

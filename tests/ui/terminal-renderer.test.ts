@@ -22,6 +22,7 @@ describe('terminal-frame', () => {
       prompt: '> ',
       transcript: [],
       input: { value: 'hello', cursorOffset: 5, history: [] },
+      footerLines: [],
       overlay: null,
       modal: {
         type: 'permission',
@@ -36,5 +37,46 @@ describe('terminal-frame', () => {
 
     expect(frame.lines.some((line) => line.includes('工具:'))).toBe(true);
     expect(frame.lines.some((line) => line.includes('❯'))).toBe(true);
+  });
+
+  it('renders footer status below the prompt when there is no overlay', () => {
+    const frame = buildTerminalFrame({
+      prompt: '> ',
+      transcript: [],
+      input: { value: '', cursorOffset: 0, history: [] },
+      footerLines: ['  xiaok-cli · claude-sonnet-4 · 1%'],
+      overlay: null,
+      modal: null,
+      focusTarget: 'input',
+      terminalSize: { columns: 80, rows: 24 },
+    });
+
+    expect(frame.lines).toEqual([
+      '> ',
+      '  xiaok-cli · claude-sonnet-4 · 1%',
+    ]);
+    expect(frame.cursor).toEqual({ line: 0, column: 2 });
+  });
+
+  it('suppresses footer status when an overlay is visible', () => {
+    const frame = buildTerminalFrame({
+      prompt: '> ',
+      transcript: [],
+      input: { value: '/c', cursorOffset: 2, history: [] },
+      footerLines: ['  xiaok-cli · claude-sonnet-4 · 1%'],
+      overlay: {
+        type: 'lines',
+        lines: ['  /clear  Clear the screen'],
+      },
+      modal: null,
+      focusTarget: 'input',
+      terminalSize: { columns: 80, rows: 24 },
+    });
+
+    expect(frame.lines).toEqual([
+      '> /c',
+      '  /clear  Clear the screen',
+    ]);
+    expect(frame.cursor).toEqual({ line: 0, column: 4 });
   });
 });

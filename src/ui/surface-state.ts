@@ -8,6 +8,7 @@ export interface SurfaceState {
   prompt: string;
   transcript: string[];
   input: InputStateSnapshot;
+  footerLines?: string[];
   overlay: OverlayState | null;
   modal: ModalState | null;
   focusTarget: FocusTarget;

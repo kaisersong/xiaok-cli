@@ -2,7 +2,7 @@
 // Respects NO_COLOR (https://no-color.org) and --no-color flag
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { basename, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getToolActivityLabel, type UiLocale } from './locale.js';
 import { getDisplayWidth } from './display-width.js';
@@ -78,6 +78,7 @@ export const bgDarkGray = (s: string) =>
   colorsEnabled ? `\x1b[48;5;235m${s}\x1b[0m` : s;
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const RAIL_INDENT = "  ";
 
 export function startSpinner(message: string): () => void {
   if (!colorsEnabled) {
@@ -98,17 +99,17 @@ export function startSpinner(message: string): () => void {
 
 // ── Box drawing ──
 
-function boxHeader(label: string, detail?: string): string {
+export function formatRailHeader(label: string, detail?: string): string {
   const detailStr = detail ? ` ${dim(detail)}` : "";
-  return `  ${dimCyan("╭─")} ${boldCyan(label)}${detailStr}`;
+  return `${RAIL_INDENT}${dimCyan("╭─")} ${boldCyan(label)}${detailStr}`;
 }
 
-function boxLine(content: string): string {
-  return `  ${dimCyan("│")} ${content}`;
+export function formatRailLine(content: string): string {
+  return `${RAIL_INDENT}${dimCyan("│")} ${content}`;
 }
 
-function boxFooter(): string {
-  return `  ${dimCyan("╰─")}`;
+export function formatRailFooter(): string {
+  return `${RAIL_INDENT}${dimCyan("╰─")}`;
 }
 
 export function renderError(message: string): void {
@@ -133,13 +134,11 @@ export function renderWelcomeScreen(opts: {
     return dim("│") + leftPart + dim("│") + rightPart + dim("│");
   };
 
-  // 从文件读取 logo
   let logo: string[] = [];
   if (existsSync(LOGO_PATH)) {
     const logoContent = readFileSync(LOGO_PATH, 'utf-8');
     logo = logoContent.split('\n').filter(line => line.length > 0);
   } else {
-    // 如果文件不存在，使用默认 logo
     logo = [
       "  .-------.",
       " /         \\",
@@ -166,7 +165,6 @@ export function renderWelcomeScreen(opts: {
   console.log(dim("╭") + dim("─".repeat(leftWidth)) + dim("┬") + dim("─".repeat(rightWidth)) + dim("╮"));
   lineCount++;
 
-  // Welcome
   const welcome = "欢迎使用 xiaok code!";
   const welcomeWidth = getDisplayWidth(welcome);
   const welcomePad = Math.floor((leftWidth - welcomeWidth) / 2);
@@ -174,7 +172,6 @@ export function renderWelcomeScreen(opts: {
   console.log(line(welcomeLeft, ""));
   lineCount++;
 
-  // Logo and tips
   for (let i = 0; i < logo.length; i++) {
     const logoPad = Math.floor((leftWidth - logo[i].length) / 2);
     const logoLine = " ".repeat(logoPad) + cyan(logo[i]) + " ".repeat(leftWidth - logoPad - logo[i].length);
@@ -190,7 +187,6 @@ export function renderWelcomeScreen(opts: {
   console.log(dim("├") + dim("─".repeat(leftWidth)) + dim("┼") + dim("─".repeat(rightWidth)) + dim("┤"));
   lineCount++;
 
-  // Bottom info
   const modelInfo = `${opts.model} · ${opts.mode}`;
   const sessionInfo = `Session: ${opts.sessionId}`;
   const sessionWidth = getDisplayWidth(sessionInfo);
@@ -238,6 +234,18 @@ function truncatePlain(text: string, maxWidth: number): string {
   return `${text.slice(0, maxWidth - 3)}...`;
 }
 
+const LOW_SIGNAL_TOOL_NAMES = new Set([
+  'glob',
+  'grep',
+  'read',
+  'skill',
+  'task_create',
+  'task_get',
+  'task_list',
+  'task_update',
+  'tool_search',
+]);
+
 function extractToolActivityTarget(input: Record<string, unknown>): string {
   if (typeof input.command === 'string') return singleLine(input.command);
   if (typeof input.url === 'string') return singleLine(input.url);
@@ -249,11 +257,96 @@ function extractToolActivityTarget(input: Record<string, unknown>): string {
 }
 
 export function formatSubmittedInput(text: string): string {
-  return `${bgDarkGray(` ${text} `)}\n`;
+  const lines = text.split(/\r?\n/);
+  return [
+    `${RAIL_INDENT}${boldCyan('You')}`,
+    ...lines.map((line) => `${RAIL_INDENT}${bgDarkGray(` ${line} `)}`),
+  ].join('\n') + '\n';
+}
+
+export function formatProgressNote(text: string): string {
+  return `  ${dim('·')} ${dim(text)}\n`;
 }
 
 export function renderUserInput(text: string): void {
   process.stdout.write(formatSubmittedInput(text));
+}
+
+function localizeSummary(locale: UiLocale, zh: string, en: string): string {
+  return locale === 'zh-CN' ? zh : en;
+}
+
+function summarizePath(input: Record<string, unknown>, verbose: boolean): string {
+  const target = extractToolActivityTarget(input);
+  if (!target) return '';
+  return verbose ? target : basename(target) || target;
+}
+
+function summarizeBashCommand(command: string, locale: UiLocale, verbose: boolean): string {
+  const normalized = singleLine(command);
+  if (!normalized) return '';
+  if (verbose) return normalized;
+
+  const lower = normalized.toLowerCase();
+
+  const inspectionPatterns = [
+    /^(ls|find|rg|grep|cat|sed|head|tail|pwd)\b/,
+    /^git (status|diff|log|show)\b/,
+    /^python\d?(?:\s+--version|\s+-m\s+pip\s+--version)\b/,
+  ];
+  if (inspectionPatterns.some((pattern) => pattern.test(lower))) {
+    return '';
+  }
+
+  if (lower.includes('export-pptx.py') || /\.pptx\b/.test(lower)) {
+    return localizeSummary(locale, '导出 PPT', 'Export PPT');
+  }
+
+  if (/^(npm|pnpm|yarn|bun)\s+(test|run test)/.test(lower) || /^(vitest|pytest|go test|cargo test)\b/.test(lower)) {
+    return localizeSummary(locale, '运行测试', 'Run tests');
+  }
+
+  if (/^git (commit|push|merge|rebase|checkout|switch|tag)\b/.test(lower)) {
+    return localizeSummary(locale, '执行 Git 操作', 'Run Git operation');
+  }
+
+  if (/^(npm|pnpm|yarn|bun)\s+(install|add)\b/.test(lower) || /^pip(?:3)?\s+install\b/.test(lower)) {
+    return localizeSummary(locale, '安装依赖', 'Install dependencies');
+  }
+
+  if (/^(python\d?|node|tsx|bun|ruby|perl|sh|bash)\b/.test(lower) || /<<['"]?[a-z_]+['"]?/i.test(normalized) || /cat\s+>/.test(lower)) {
+    return '';
+  }
+
+  return localizeSummary(locale, '执行本地命令', 'Run local command');
+}
+
+export function describeToolActivity(
+  toolName: string,
+  input: Record<string, unknown>,
+  locale: UiLocale = 'zh-CN',
+  verbose = isVerbose(),
+): string {
+  if (!verbose && LOW_SIGNAL_TOOL_NAMES.has(toolName)) {
+    return '';
+  }
+
+  const label = getToolActivityLabel(toolName, locale);
+  let detail = '';
+
+  if (toolName === 'bash') {
+    const command = typeof input.command === 'string' ? input.command : '';
+    detail = summarizeBashCommand(command, locale, verbose);
+    if (!detail) return '';
+  } else if (toolName === 'write' || toolName === 'edit') {
+    detail = summarizePath(input, verbose);
+  } else if (toolName === 'install_skill' || toolName === 'uninstall_skill') {
+    detail = summarizePath(input, verbose) || (typeof input.source === 'string' ? singleLine(input.source) : '');
+  } else {
+    detail = extractToolActivityTarget(input);
+  }
+
+  return detail ? `${label} ${detail}` : label;
 }
 
 export function formatToolActivity(
@@ -262,12 +355,12 @@ export function formatToolActivity(
   maxWidth = process.stdout.columns ?? 80,
   locale: UiLocale = 'zh-CN',
 ): string {
-  const prefix = `• ${getToolActivityLabel(toolName, locale)}`;
-  const target = extractToolActivityTarget(input);
-  if (!target) return prefix;
+  const description = describeToolActivity(toolName, input, locale);
+  if (!description) return '';
 
+  const prefix = '•';
   const available = Math.max(maxWidth - prefix.length - 1, 0);
-  const truncated = truncatePlain(target, available);
+  const truncated = truncatePlain(description, available);
   return truncated ? `${prefix} ${truncated}` : prefix;
 }
 
