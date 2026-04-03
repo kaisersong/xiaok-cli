@@ -2,376 +2,166 @@
 
 [English](./README.md) | 简体中文
 
-`xiaok-cli` 是一个面向金蝶苍穹和云之家开发者的 AI 编程命令行工具。它同时提供本地终端助手、skill 机制，以及云之家 IM 网关，让同一套 agent runtime 能在终端和移动端会话里复用。苍穹 CLI 和云之家 CLI 的集成正在进行中。
+面向金蝶苍穹与云之家开发者的 AI 编程 CLI。它将本地终端代理、可扩展技能体系与云之家 IM 网关统一在同一套 agent runtime 之上，苍穹 CLI 和云之家 CLI 的集成正在进行中。
 
-当前这套 runtime 已经不只是一个本地对话壳。终端和 IM 会话现在共用一层平台运行时，包含持久化通道状态、可恢复任务元数据、后台 subagent 执行、worktree 隔离，以及插件驱动的 MCP/LSP 集成。
+## 产品亮点
 
-## 能做什么
+- **7 层 Prompt 架构**：CC 风格独立 section 函数，静态/动态分界，每 turn 动态注入 Session Guidance
+- **多模型支持**：Claude 与 OpenAI 适配器，支持自动重试与指数退避（429/502/503/529）
+- **Bash 安全分类器**：block/warn/safe 三级风险分类，拦截 `rm -rf /`、fork bomb、`curl|sh` 等危险命令
+- **工具输入校验**：轻量 JSON Schema 验证器，每次工具调用前校验必填字段和类型
+- **技能系统**：内置、全局、项目级技能分层加载，支持依赖解析与 allowed-tools 白名单约束
+- **内置专业化 Agent**：Explore（只读探索）、Plan（只规划不编辑）、Verification（对抗式验证）
+- **云之家 IM 接入**：终端与移动聊天共用同一套 agent runtime，支持异步任务与审批流
+- **上下文管理**：工具结果微压缩（8K 阈值）、AI 驱动压缩（NO_TOOLS_PREAMBLE 保护）、记忆回注
+- **云之家网关加固**：HTTP 错误码细分（401/403/429/5xx）+ 429 限流退避 + 出站 try-catch 保护
+- **类型化记忆**：支持 `user`/`feedback`/`project`/`reference` 类型分类与过滤检索
+- **增强 Hook 系统**：PreToolUse hook 支持 updatedInput / preventContinuation / additionalContext
+- **平台运行时**：MCP/LSP 插件接入、worktree 隔离、后台 subagent 与持久状态
 
-- 在终端里运行交互式 AI 编程助手
-- 支持 Claude 和 OpenAI 适配器
-- 加载内置、全局和项目级 skills
-- 通过共享 agent runtime 执行文件、搜索、shell 等工具
-- 支持会话持久化、恢复和分叉
-- 自动把项目指令文件和 git 上下文注入 runtime
-- 支持 print/json 单次输出、图片输入，以及 web fetch/search 工具
-- 通过 WebSocket 或 webhook 接入云之家 IM
-- 把云之家消息转成带状态、审批和工作区绑定的异步任务
-- 云之家会话、reply target、审批单、任务和去重状态可跨重启持久化
-- 通过共享 registry 把声明式 subagent 接到前台/后台执行链路，并支持独立 worktree
-- 通过插件声明加载 MCP、LSP、hooks 和 skills 到共享平台 runtime
+## 快速上手
 
-## 项目能力
+```bash
+# 安装与构建
+npm install
+npm run build
 
-### 本地 CLI
+# 交互式对话
+xiaok
 
-- `xiaok` 或 `xiaok chat`
-- `xiaok doctor` / `xiaok init` / `xiaok transcript <sessionId>`
-- 交互式对话模式
-- 单次任务模式
-- `-p` / `--json` 打印模式
-- `--resume <id>` / `--fork-session <id>`
-- 支持本地图片路径输入到多模态模型
-- 斜杠命令触发 skills
-- `/mode [default|auto|plan]`
-- `/tasks`
-- `/task <id>`
-- 带权限控制的工具调用
-- 交互式审批弹窗，并支持会话/项目/全局级持久化允许规则
-- `ask_user` 工具，可在运行中向操作者提问
-- 会话级 `task_create` / `task_update` / `task_list` / `task_get`
-- 按模型能力调整上下文策略，并支持 prompt caching
-- 自动加载 `AGENTS.md`、`CLAUDE.md`、git 分支、脏状态和最近提交
-- `web_fetch` / `web_search`
-- read/glob/grep/bash 共享截断与分页输出
-- 共享平台 runtime，统一装配 MCP/LSP/plugin 能力
-- 声明式 subagent，可按需后台运行
-- 支持 worktree 隔离的 subagent 执行
-- 输入框支持撤销/重做、可配置快捷键，以及可配置的行内状态栏字段
-- 支持 transcript 记录与事后分析，便于排查 prompt/审批重放问题
+# 单次任务
+xiaok "review the current workspace changes"
 
-### 云之家 IM 网关
-
-- `xiaok yzj serve`
-- WebSocket 入站
-- webhook fallback 入站
-- 普通消息异步任务化
-- `/help`
-- `/status [taskId]`
-- `/cancel <taskId>`
-- `/approve <approvalId>`
-- `/deny <approvalId>`
-- `/bind <cwd>`
-- `/bind clear`
-- `/skill <name> [args]`
-- runtime 过程通知
-- 审批等待与回流
-- 长结果摘要化输出
-- 会话绑定、reply target、审批单、任务和入站去重的持久化
-- 审批、任务、后台任务在重启后的中断收敛
-- `/status` 输出会话级运行时快照
-- 共享 runtime 中可装配插件提供的 MCP 工具和 LSP 诊断
+# 启动云之家 IM 网关
+xiaok yzj serve
+```
 
 ## 环境要求
 
 - Node.js 20+
-- Windows、macOS 或 Linux
 - 可用的 Claude 或 OpenAI API Key
-- 如果要接入云之家 IM，需要有效的机器人 `sendMsgUrl`
+- 云之家机器人 `sendMsgUrl`（如需使用网关场景）
 
-## 安装
-
-```bash
-npm install
-npm run build
-```
-
-从源码直接运行：
-
-```bash
-npm run dev -- --help
-```
-
-运行构建产物：
-
-```bash
-node dist/index.js --help
-```
-
-当前分支包版本：`0.2.0`
-
-## 仓库卫生
-
-让 `/Users/song/projects/xiaok-cli` 始终保持干净，并且和 `origin/master` 同步。不要直接在主仓库目录里做功能开发。
-
-每个需求都从独立 worktree 开始：
-
-```bash
-npm run worktree:new -- feature/my-change
-cd .worktrees/feature-my-change
-```
-
-在开工前、每半天一次、以及收工前，固定执行一次仓库卫生检查：
-
-```bash
-npm run hygiene:check
-```
-
-这个检查会在 `master` 出现真实跟踪改动或落后/领先 `origin/master` 时失败；如果只是运行噪音或全局 `xiaok` 链接漂移，则给出警告。
-
-## 配置
-
-默认配置文件位置：
-
-- Windows：`%USERPROFILE%\.xiaok\config.json`
-- macOS/Linux：`~/.xiaok/config.json`
-
-也可以通过环境变量覆盖配置目录：
-
-```bash
-XIAOK_CONFIG_DIR=/path/to/config
-```
-
-配置示例：
-
-```json
-{
-  "schemaVersion": 1,
-  "defaultModel": "claude",
-  "models": {
-    "claude": {
-      "model": "claude-opus-4-6",
-      "apiKey": "your-api-key"
-    }
-  },
-  "defaultMode": "interactive",
-  "contextBudget": 4000,
-  "channels": {
-    "yzj": {
-      "sendMsgUrl": "https://www.yunzhijia.com/gateway/robot/webhook/send?...",
-      "inboundMode": "websocket",
-      "webhookPath": "/yzj/webhook",
-      "webhookPort": 3001
-    }
-  }
-}
-```
-
-项目级与 UI 设置存放在 `<repo>/.xiaok/settings.json`，可持久化权限规则、hook 命令和状态栏字段等偏好：
-
-```json
-{
-  "permissions": {
-    "allow": [],
-    "deny": []
-  },
-  "ui": {
-    "statusBar": {
-      "fields": ["model", "mode", "tokens", "session"]
-    }
-  },
-  "hooks": {
-    "pre": [],
-    "post": [],
-    "timeoutMs": 5000
-  }
-}
-```
-
-终端快捷键可以放在 `~/.xiaok/keybindings.json` 或 `$XIAOK_CONFIG_DIR/keybindings.json`：
-
-```json
-[
-  { "key": "ctrl+c", "action": "submit" },
-  { "key": "ctrl+l", "action": "clear-screen" }
-]
-```
-
-## 基本使用
-
-启动交互模式：
-
-```bash
-xiaok
-```
-
-执行单次任务：
-
-```bash
-xiaok "review the current workspace changes"
-```
-
-查看聊天命令帮助：
-
-```bash
-xiaok chat --help
-```
-
-检查本地 CLI / runtime 健康状态：
-
-```bash
-xiaok doctor
-```
-
-初始化项目设置：
-
-```bash
-xiaok init
-```
-
-分析某次交互 transcript：
-
-```bash
-xiaok transcript sess_demo
-```
-
-## Skills
-
-skills 会从以下位置加载：
-
-- 内置 skill 目录：`data/skills`
-- 用户全局 skill：`~/.xiaok/skills`
-- 项目本地 skill：`<repo>/.xiaok/skills`
-
-示例：
-
-```text
-/review 看一下当前改动是否适合合并
-/deploy 生成一份发布检查清单
-```
-
-## 文档工作流
-
-`xiaok-cli` 的项目文档现在放在同级仓库路径 `../mydocs/xiaok-cli`。
-
-- 当前仓库里的 `docs` 是指向 `../mydocs/xiaok-cli` 的符号链接
-- 文档内容提交到 `mydocs` 仓库
-- 代码、测试和运行时改动继续提交到 `xiaok-cli` 仓库
-
-本地 pre-commit hook 会阻止把 `docs/...` 实体内容重新提交回 `xiaok-cli`，避免两个仓库再次漂移。
-
-## 云之家接入
-
-先配置云之家机器人 `sendMsgUrl`：
-
-```bash
-xiaok yzj config set-send-msg-url "https://www.yunzhijia.com/gateway/robot/webhook/send?..."
-xiaok yzj config set-inbound-mode websocket
-```
-
-查看当前配置：
-
-```bash
-xiaok yzj config show
-```
-
-启动网关：
-
-```bash
-xiaok yzj serve
-```
-
-也可以直接在命令里传 URL：
-
-```bash
-xiaok yzj serve "https://www.yunzhijia.com/gateway/robot/webhook/send?..."
-```
-
-只验证链路、不实际调用模型时：
-
-```bash
-xiaok yzj serve "https://www.yunzhijia.com/gateway/robot/webhook/send?..." --dry-run
-```
-
-### 云之家里的常见命令
-
-```text
-/help
-/bind D:\projects\workspace\xiaok-cli
-帮我看看当前工作区的构建错误
-/status
-/status task_3
-/approve approval_2
-/deny approval_2
-/cancel task_3
-/skill review 看下当前 diff 是否安全
-```
-
-### 持久化状态与恢复语义
-
-云之家网关的运行状态存放在 `~/.xiaok/state/yzj`，包括：
-
-- 会话到频道的映射
-- 任务元数据与任务状态
-- 待审批记录
-- 最近一次 reply target
-- 入站消息去重记录
-
-工作区级的平台状态存放在 `<workspace>/.xiaok/state`，包括：
-
-- 后台任务元数据
-- agent team 与消息状态
-- MCP/LSP 的能力健康快照
-
-如果进程在任务、审批或后台任务未完成时重启，runtime 会把它们收敛为“已中断”状态，而不是无限挂起。随后 `/status` 会用用户可读的快照把这些恢复信息展示出来。
-
-## 开发
-
-构建：
-
-```bash
-npm run build
-```
-
-测试：
-
-```bash
-npm test
-```
-
-监听测试：
-
-```bash
-npm run test:watch
-```
-
-## 目录结构
+## 架构概览
 
 ```text
 src/
-  ai/          agent runtime、模型适配器、tools、skills
-  auth/        认证与 token 存储
-  channels/    channel 网关、任务/审批/session 抽象
-  commands/    CLI 命令入口
-  platform/    共享 runtime 装配：plugins、MCP、LSP、sandbox、teams、worktrees
-  runtime/     runtime event hooks
-  ui/          终端 UI
-  utils/       配置和辅助工具
-tests/
-docs/
-data/
+  ai/
+    prompts/
+      sections/    7 个独立 section 函数
+      assembler.ts 静态/动态 prompt 组装入口
+      builder.ts   PromptSnapshot 生成与 cache 分段
+    adapters/      Claude（含重试）和 OpenAI 模型适配器
+    agents/        自定义 agent 加载器 + 内置 explore/plan/verification
+    memory/        类型化文件记忆存储
+    runtime/       agent runtime、compact runner、session graph
+    skills/        skill 加载器、规划器、工具集成
+    tools/         read/write/edit/bash（含安全）/grep/glob/web/skills/tasks
+    permissions/   三层权限策略引擎
+  auth/            认证与 token 存储
+  channels/        渠道网关、任务/审批/会话抽象
+  commands/        CLI 命令（chat/commit/review/pr/doctor/init/transcript）
+  platform/        插件、MCP、LSP、sandbox、teams、worktrees
+  runtime/         运行时 hooks 与任务原语
+  ui/              终端 UI：流式 Markdown、状态栏、权限提示
+  utils/           配置与辅助工具
 ```
 
-## 架构说明
+## System Prompt 7 层架构
 
-- 终端 CLI 和云之家网关复用同一套核心 agent runtime 与平台 registry 装配
-- channel 集成位于边界层 `src/channels`
-- 共享 tasking 基础设施位于 `src/runtime/tasking`
-- 工作区平台状态存放在 `<cwd>/.xiaok/state`
-- 云之家网关状态存放在 `~/.xiaok/state/yzj`
-- runtime events 会被复用为移动端进展通知
+### 静态前缀（可缓存，跨 turn 稳定）
 
-## 当前限制
+| 层 | Section | 语言 | 内容 |
+|---|---------|------|------|
+| 1 | Intro | 中文 | 角色定义 — 金蝶苍穹 + 云之家开发者助手 |
+| 2 | System | 英文 | 运行时规则 — permission mode、prompt injection 防护 |
+| 3 | DoingTasks | 英文 | 做任务哲学 — 不加多余功能、先读再改、OWASP 安全意识 |
+| 4 | Actions | 英文 | 风险边界 — destructive 操作需确认 |
+| 5 | UsingTools | 英文 | 工具语法 — read 不用 cat、无依赖工具并行 |
+| 6 | ToneAndStyle | 英文 | 交互风格 — 简洁、file_path:line_number |
+| 7 | OutputEfficiency | 英文 | 输出效率 — 先说结论不铺垫 |
 
-- `ask_user` 只在带 TTY 的交互式 CLI 里可用
-- 云之家接入当前主要面向文本工作流，还没有做富文本卡片
-- `/status` 当前更偏向运维排障快照，而不是富交互面板
-- 在受限 Windows 沙箱里，`vitest` 可能会报 `spawn EPERM`
-- 工作区外的用户配置文件修改，可能需要在本机直接执行命令
+### 动态后缀（每 turn 重建）
 
-## 相关文档
+| Section | 条件 |
+|---------|------|
+| 会话上下文 | 始终 — cwd、enterprise、devApp |
+| Session Guidance | 每 turn — 权限模式、工具限制、工具数量 |
+| Memory | 每 turn — 前 K 条相关记忆 |
+| Token Budget | 始终 — 剩余窗口百分比 |
+| 自动上下文 | 始终 — CLAUDE.md、AGENTS.md、git 状态 |
 
-- [YZJ remote-agent 实现记录](./docs/analysis/2026-03-31-xiaok-yzj-remote-agent-implementation-record.md)
-- [YZJ 集成交接说明](./docs/analysis/2026-03-31-xiaok-yzj-integration-handoff.md)
-- [YZJ remote-agent 实施计划](./docs/superpowers/plans/2026-03-31-xiaok-yzj-remote-agent.md)
-- [YZJ remote-agent 设计文档](./docs/superpowers/specs/2026-03-31-xiaok-yzj-remote-agent-design.md)
+## 核心命令
+
+| 命令 | 说明 |
+|---|---|
+| `xiaok` / `xiaok chat` | 交互式对话 |
+| `xiaok "task"` | 单次任务执行 |
+| `xiaok chat --resume <id>` | 恢复历史会话 |
+| `xiaok commit` | AI 辅助提交 |
+| `xiaok review` | AI 辅助代码审查 |
+| `xiaok pr` | AI 辅助拉取请求 |
+| `xiaok doctor` | 检查健康状态 |
+| `xiaok init` | 初始化项目设置 |
+| `xiaok yzj serve` | 启动云之家网关 |
+
+## 云之家 IM 命令
+
+```text
+/help                    显示帮助
+/bind <cwd>              绑定工作区
+/status [taskId]         查看任务状态
+/approve <approvalId>    批准待审批动作
+/deny <approvalId>       拒绝待审批动作
+/cancel <taskId>         取消运行中任务
+/skill <name> [args]     调用 skill
+```
+
+## 配置
+
+全局配置：`~/.xiaok/config.json`
+项目配置：`<repo>/.xiaok/settings.json`
+快捷键：`~/.xiaok/keybindings.json`
+
+## 开发
+
+```bash
+npm run build       # 构建
+npm test            # 运行测试（582 个测试，132 个文件）
+npm run test:watch  # 监听模式
+npm run dev -- --help  # 从源码运行
+```
+
+## 更新日志
+
+### v0.4.1 — 云之家网关加固
+- HTTP 错误码细分：`YZJTransportError` 区分 401/403/429/5xx，带产品化诊断文本
+- 429 限流指数退避重试（最多 3 次）
+- 出站消息 try-catch 保护：发送失败不再导致入站处理崩溃
+- Runtime notifier 发送失败改为日志记录
+
+### v0.4.0 — 7 层 System Prompt 架构
+- System prompt 重构为 7 个独立 section 函数，CC 风格静态/动态分界
+- 新增 `assembler.ts` 作为 prompt 组装入口
+- 动态 Session Guidance：权限模式、工具限制、Token Budget、MCP Instructions
+- Memory 每 turn 注入（不仅 compact 后）
+- 静态 section 用英文，提升模型稳定性和缓存效率
+
+### v0.3.0 — 行为治理与安全加固
+- Bash 命令安全分类器（block/warn/safe）
+- 工具输入 JSON Schema 校验
+- 内置 explore/plan/verification agent
+- 增强 Hook 返回值（updatedInput、preventContinuation、additionalContext）
+
+### v0.2.0 — 运行时加固与上下文智能
+- API 指数退避重试（429/502/503/529）
+- Skill allowed-tools 执行时生效
+- 工具结果微压缩（8K 阈值）
+- AI 驱动压缩 + NO_TOOLS_PREAMBLE 保护
+- compact 后 Memory 回注
+- 类型化 Memory 记录
+- Prompt cache 静态/动态分段
+
+## 许可
+
+Private — 金蝶内部使用。
