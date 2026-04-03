@@ -50,9 +50,17 @@ export async function loadPlatformPluginRuntime(
   const plugins = await loadPlugins(pluginDirs, { builtinCommands });
 
   const rawHooks = plugins.flatMap((plugin) => plugin.hooks);
-  const hookConfigs: HookConfigOrCommand[] = rawHooks.map((h) =>
-    typeof h === 'string' ? h : h as PluginManifestHook,
-  );
+  const hookConfigs: HookConfigOrCommand[] = rawHooks.map((h) => {
+    if (typeof h === 'string') return h;
+    // Convert PluginManifestHook to the appropriate HookConfig variant
+    if (h.type === 'http' && h.url) {
+      return { type: 'http' as const, url: h.url, events: h.events, matcher: h.matcher, tools: h.tools, timeoutMs: h.timeoutMs, async: h.async, asyncRewake: h.asyncRewake, once: h.once, statusMessage: h.statusMessage, headers: h.headers };
+    }
+    if (h.type === 'prompt' && h.prompt) {
+      return { type: 'prompt' as const, prompt: h.prompt, events: h.events, matcher: h.matcher, tools: h.tools, timeoutMs: h.timeoutMs, async: h.async, asyncRewake: h.asyncRewake, once: h.once, statusMessage: h.statusMessage, model: h.model };
+    }
+    return { type: 'command' as const, command: h.command, events: h.events, matcher: h.matcher, tools: h.tools, timeoutMs: h.timeoutMs, async: h.async, asyncRewake: h.asyncRewake, once: h.once, statusMessage: h.statusMessage };
+  });
   const hookCommands: string[] = rawHooks.map((h) =>
     typeof h === 'string' ? h : h.command,
   );
