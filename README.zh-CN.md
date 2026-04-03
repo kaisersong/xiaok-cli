@@ -98,7 +98,7 @@ npm run dev -- --help
 node dist/index.js --help
 ```
 
-当前分支包版本：`0.1.4`
+当前分支包版本：`0.2.0`
 
 ## 仓库卫生
 
