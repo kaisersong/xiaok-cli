@@ -244,12 +244,19 @@ Keybindings: `~/.xiaok/keybindings.json` — custom terminal key mappings.
 
 ```bash
 npm run build       # Build
-npm test            # Run tests (580 tests across 132 files)
+npm test            # Run tests (582 tests across 132 files)
 npm run test:watch  # Watch mode
 npm run dev -- --help  # Run from source
 ```
 
 ## Changelog
+
+### v0.4.1 — Yunzhijia Transport Hardening
+- HTTP error classification: `YZJTransportError` with separate handling for 401/403/429/5xx
+- 429 rate-limit retry with exponential backoff (up to 3 retries)
+- Outbound message try-catch protection: delivery failures no longer crash inbound processing
+- Runtime notifier send failures logged instead of propagated
+- 582 tests passing across 132 files
 
 ### v0.4.0 — 7-Layer System Prompt Architecture
 - System prompt refactored into 7 independent section functions with CC-style static/dynamic boundary
