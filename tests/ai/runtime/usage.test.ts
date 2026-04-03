@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { estimateTokens, mergeUsage, shouldCompact } from '../../../src/ai/runtime/usage.js';
+import { estimateTokens, mergeUsage, shouldCompact, truncateToolResult } from '../../../src/ai/runtime/usage.js';
 
 describe('runtime usage helpers', () => {
   it('estimates tokens from block content', () => {
@@ -25,5 +25,26 @@ describe('runtime usage helpers', () => {
       inputTokens: 10,
       outputTokens: 5,
     });
+  });
+});
+
+describe('truncateToolResult', () => {
+  it('returns content unchanged when under threshold', () => {
+    const short = 'a'.repeat(7999);
+    expect(truncateToolResult(short)).toBe(short);
+  });
+
+  it('truncates content exceeding threshold and appends notice', () => {
+    const long = 'a'.repeat(12000);
+    const result = truncateToolResult(long);
+    expect(result.length).toBeLessThan(long.length);
+    expect(result).toContain('truncated');
+  });
+
+  it('respects custom threshold', () => {
+    const content = 'x'.repeat(200);
+    const result = truncateToolResult(content, 100);
+    expect(result.length).toBeLessThan(200);
+    expect(result).toContain('truncated');
   });
 });

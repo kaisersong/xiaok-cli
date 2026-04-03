@@ -10,7 +10,7 @@ import {
   type ModelInvocationOptions,
 } from './model-capabilities.js';
 import { AgentSessionState } from './session.js';
-import { estimateTokens, shouldCompact } from './usage.js';
+import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
 
 export interface AgentRuntimeOptions {
   adapter: ModelAdapter;
@@ -31,7 +31,7 @@ export class AgentRuntime {
   private readonly session: AgentSessionState;
   private readonly controller: AgentRunController;
   private systemPrompt: string;
-  private readonly maxIterations: number;
+  private readonly maxIterations?: number;
   private readonly contextLimitOverride?: number;
   private readonly compactThresholdOverride?: number;
   private contextLimit: number;
@@ -47,7 +47,7 @@ export class AgentRuntime {
     this.controller = options.controller;
     this.systemPrompt = options.systemPrompt;
     this.promptSnapshot = options.promptSnapshot;
-    this.maxIterations = options.maxIterations ?? 12;
+    this.maxIterations = options.maxIterations;
     this.contextLimitOverride = options.contextLimit;
     this.compactThresholdOverride = options.compactThreshold;
     this.contextLimit = 200_000;
@@ -86,8 +86,21 @@ export class AgentRuntime {
     }
 
     try {
-      for (let iteration = 0; iteration < this.maxIterations; iteration += 1) {
+      let iteration = 0;
+      while (true) {
         this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
+
+        // Check if we've reached the max iterations limit (Claude Code style)
+        if (this.maxIterations !== undefined && iteration >= this.maxIterations) {
+          onEvent({
+            type: 'max_iterations_reached',
+            runId: run.runId,
+            maxIterations: this.maxIterations,
+            currentIteration: iteration,
+          });
+          onEvent({ type: 'run_completed', runId: run.runId });
+          return;
+        }
 
         if (shouldCompact(estimateTokens(this.session.getMessages()), this.contextLimit, this.compactThreshold)) {
           const compaction = this.session.forceCompact(this.compactPlaceholder);
@@ -164,15 +177,14 @@ export class AgentRuntime {
           toolResults.push({
             type: 'tool_result',
             tool_use_id: toolCall.id,
-            content: result,
+            content: truncateToolResult(result),
             is_error: !ok,
           });
         }
 
         this.session.appendUserToolResults(toolResults);
+        iteration += 1;
       }
-
-      throw new Error('agent runtime reached max iterations');
     } catch (error) {
       if (this.isAbortError(error)) {
         throw error;
