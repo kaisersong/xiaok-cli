@@ -1,6 +1,10 @@
 import { existsSync, readdirSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { homedir } from 'os';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const BUILTIN_AGENTS_DIR = join(__dirname, '../../../data/agents');
 
 export interface CustomAgentDef {
   name: string;
@@ -12,7 +16,7 @@ export interface CustomAgentDef {
   isolation?: 'shared' | 'worktree';
   cleanup?: 'keep' | 'delete';
   team?: string;
-  source?: 'global' | 'project';
+  source?: 'builtin' | 'global' | 'project';
 }
 
 export function parseAgentFile(name: string, raw: string): CustomAgentDef {
@@ -47,7 +51,7 @@ export function parseAgentFile(name: string, raw: string): CustomAgentDef {
   };
 }
 
-function loadAgentsFromDir(dir: string, source: 'global' | 'project'): CustomAgentDef[] {
+function loadAgentsFromDir(dir: string, source: 'builtin' | 'global' | 'project'): CustomAgentDef[] {
   if (!existsSync(dir)) {
     return [];
   }
@@ -78,19 +82,24 @@ export async function loadCustomAgents(
   cwd = process.cwd(),
   extraDirs: string[] = [],
 ): Promise<CustomAgentDef[]> {
+  const builtinAgents = loadAgentsFromDir(BUILTIN_AGENTS_DIR, 'builtin');
   const globalAgents = loadAgentsFromDir(join(xiaokConfigDir, 'agents'), 'global');
   const projectAgents = loadAgentsFromDir(join(cwd, '.xiaok', 'agents'), 'project');
   const pluginAgents = extraDirs.flatMap((dir) => loadAgentsFromDir(dir, 'project'));
 
+  // Priority: project > global > builtin (later entries override earlier ones)
   const merged = new Map<string, CustomAgentDef>();
-  for (const agent of globalAgents) {
+  for (const agent of builtinAgents) {
     merged.set(agent.name, agent);
   }
-  for (const agent of projectAgents) {
-    merged.set(agent.name, agent);
+  for (const globalAgent of globalAgents) {
+    merged.set(globalAgent.name, globalAgent);
   }
-  for (const agent of pluginAgents) {
-    merged.set(agent.name, agent);
+  for (const projectAgent of projectAgents) {
+    merged.set(projectAgent.name, projectAgent);
+  }
+  for (const pluginAgent of pluginAgents) {
+    merged.set(pluginAgent.name, pluginAgent);
   }
 
   return [...merged.values()];
