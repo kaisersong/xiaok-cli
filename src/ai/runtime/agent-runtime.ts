@@ -11,6 +11,7 @@ import {
 } from './model-capabilities.js';
 import { AgentSessionState } from './session.js';
 import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
+import { CompactRunner } from './compact-runner.js';
 
 export interface AgentRuntimeOptions {
   adapter: ModelAdapter;
@@ -39,6 +40,7 @@ export class AgentRuntime {
   private readonly compactPlaceholder: string;
   private supportsPromptCaching: boolean;
   private promptSnapshot?: PromptSnapshot;
+  private compactRunner: CompactRunner;
 
   constructor(options: AgentRuntimeOptions) {
     this.adapter = options.adapter;
@@ -55,11 +57,13 @@ export class AgentRuntime {
     this.compactPlaceholder = options.compactPlaceholder ?? '[context compacted]';
     this.supportsPromptCaching = false;
     this.refreshModelPolicy();
+    this.compactRunner = new CompactRunner(this.adapter);
   }
 
   setAdapter(adapter: ModelAdapter): void {
     this.adapter = adapter;
     this.refreshModelPolicy();
+    this.compactRunner = new CompactRunner(adapter);
   }
 
   setSystemPrompt(systemPrompt: string): void {
@@ -103,7 +107,14 @@ export class AgentRuntime {
         }
 
         if (shouldCompact(estimateTokens(this.session.getMessages()), this.contextLimit, this.compactThreshold)) {
-          const compaction = this.session.forceCompact(this.compactPlaceholder);
+          const messages = this.session.getMessages();
+          let summaryText: string;
+          try {
+            summaryText = await this.compactRunner.run(messages);
+          } catch {
+            summaryText = '';
+          }
+          const compaction = this.session.forceCompact(summaryText || this.compactPlaceholder);
           onEvent({
             type: 'compact_triggered',
             runId: run.runId,
