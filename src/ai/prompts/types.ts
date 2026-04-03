@@ -1,5 +1,7 @@
 export interface PromptSegment {
   key:
+    | 'static_identity'
+    | 'dynamic_context'
     | 'core_identity'
     | 'session_context'
     | 'skills'

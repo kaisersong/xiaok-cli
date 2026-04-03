@@ -18,19 +18,36 @@ export class PromptBuilder {
       cwd: input.cwd,
       query: input.cwd,
     });
-    const promptSections = await renderPromptSections(input);
+
+    const allSections = await renderPromptSections(input);
+
+    // First section is static role definition (no cwd/enterprise).
+    // Remaining sections contain dynamic info (cwd, enterprise, autoContext, etc.).
+    const [firstSection, ...restSections] = allSections;
+    const staticText = firstSection ?? '';
+    const dynamicText = restSections.filter(Boolean).join('\n\n');
+
     const memoryText = memories.length > 0
       ? memories.map((record) => `- ${record.title}: ${record.summary}`).join('\n')
       : '';
 
     const segments: PromptSegment[] = [
       {
-        key: 'core_identity',
-        title: 'Core Identity',
-        text: promptSections.join('\n\n'),
+        key: 'static_identity',
+        title: 'Static Identity',
+        text: staticText,
         cacheable: true,
       },
     ];
+
+    if (dynamicText) {
+      segments.push({
+        key: 'dynamic_context',
+        title: 'Dynamic Context',
+        text: dynamicText,
+        cacheable: false,
+      });
+    }
 
     if (memoryText) {
       segments.push({
@@ -41,12 +58,14 @@ export class PromptBuilder {
       });
     }
 
+    const rendered = [staticText, dynamicText, memoryText].filter(Boolean).join('\n\n');
+
     return {
       id: `prompt_${Date.now().toString(36)}`,
       createdAt: Date.now(),
       cwd: input.cwd,
       channel: input.channel,
-      rendered: [...promptSections, memoryText].filter(Boolean).join('\n\n'),
+      rendered,
       segments,
       memoryRefs: memories.map((record) => record.id),
     };

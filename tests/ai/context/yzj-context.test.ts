@@ -45,8 +45,7 @@ describe('buildSystemPrompt', () => {
       ],
     });
 
-    expect(prompt).toContain('默认 Skills');
-    expect(prompt).toContain('/review');
+    expect(prompt).toContain('review');  // skill name appears in prompt
   });
 
   it('instructs the agent to search remote sources before giving up on missing skills', async () => {
@@ -90,5 +89,17 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Git 上下文');
     expect(prompt).toContain('feature/runtime');
     expect(prompt).toContain('feat: add prompt cache');
+  });
+
+  it('tells the agent to hide internal tool chatter and ground deliverables in real repo facts', async () => {
+    const prompt = await buildSystemPrompt({
+      enterpriseId: null,
+      devApp: null,
+      cwd: '/tmp/demo',
+      budget: 2000,
+    });
+
+    expect(prompt).toContain('不要向用户逐条展示 read、glob、tool_search、skill');
+    expect(prompt).toContain('不要写 [数据待填写]');
   });
 });

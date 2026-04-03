@@ -251,9 +251,20 @@ export class AgentRuntime {
       .slice()
       .sort((left, right) => left.name.localeCompare(right.name));
 
+    // Use segments for multi-block system prompt cache boundary if available.
+    const snapshot = this.promptSnapshot;
+    const systemSegments = snapshot?.segments
+      .filter((seg) => seg.key !== 'memory_summary')
+      .filter((seg) => seg.text)
+      .map((seg) => ({ text: seg.text, cacheable: seg.cacheable }));
+
+    const systemPromptInput = systemSegments && systemSegments.length > 1
+      ? systemSegments
+      : this.systemPrompt;
+
     return {
       promptCache: buildPromptCacheSegments(
-        this.systemPrompt,
+        systemPromptInput,
         toolDefinitions,
         this.session.getMessages(),
       ),

@@ -38,3 +38,35 @@ describe('PromptBuilder', () => {
     expect(snapshot.segments.some((segment) => segment.cacheable)).toBe(true);
   });
 });
+
+describe('PromptBuilder static/dynamic split', () => {
+  it('produces a static_identity segment and a dynamic_context segment', async () => {
+    const builder = new PromptBuilder();
+    const snapshot = await builder.build({
+      cwd: '/repo',
+      enterpriseId: 'ent_123',
+      devApp: null,
+      budget: 2000,
+      channel: 'chat',
+      skills: [],
+      deferredTools: [],
+      agents: [],
+      pluginCommands: [],
+      lspDiagnostics: '',
+      autoContext: { docs: [], git: null },
+    });
+
+    const keys = snapshot.segments.map((s) => s.key);
+    expect(keys).toContain('static_identity');
+    expect(keys).toContain('dynamic_context');
+
+    const staticSeg = snapshot.segments.find((s) => s.key === 'static_identity')!;
+    const dynamicSeg = snapshot.segments.find((s) => s.key === 'dynamic_context')!;
+
+    expect(staticSeg.cacheable).toBe(true);
+    expect(dynamicSeg.cacheable).toBe(false);
+    expect(dynamicSeg.text).toContain('/repo');
+    expect(dynamicSeg.text).toContain('ent_123');
+    expect(staticSeg.text).not.toContain('/repo');
+  });
+});
