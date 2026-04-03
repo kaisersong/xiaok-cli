@@ -6,10 +6,16 @@ import { createLspClient, type LspEnvelope } from '../lsp/client.js';
 import { createStdioLspTransport, startLspServerProcess } from '../lsp/server-process.js';
 import { loadPlugins, type LoadedPlugin } from './loader.js';
 
+import type { PluginManifestHook } from './manifest.js';
+import type { HookConfigOrCommand } from '../../runtime/hooks-runner.js';
+
 export interface PlatformPluginRuntimeState {
   plugins: LoadedPlugin[];
   skillRoots: string[];
   agentDirs: string[];
+  /** Structured hook configs (new) or legacy command strings */
+  hookConfigs: HookConfigOrCommand[];
+  /** @deprecated Use hookConfigs. Retained for backward compat. */
   hookCommands: string[];
   commandDeclarations: string[];
   mcpServers: Array<{ name: string; command: string }>;
@@ -43,11 +49,20 @@ export async function loadPlatformPluginRuntime(
   ];
   const plugins = await loadPlugins(pluginDirs, { builtinCommands });
 
+  const rawHooks = plugins.flatMap((plugin) => plugin.hooks);
+  const hookConfigs: HookConfigOrCommand[] = rawHooks.map((h) =>
+    typeof h === 'string' ? h : h as PluginManifestHook,
+  );
+  const hookCommands: string[] = rawHooks.map((h) =>
+    typeof h === 'string' ? h : h.command,
+  );
+
   return {
     plugins,
     skillRoots: plugins.flatMap((plugin) => plugin.skills),
     agentDirs: plugins.flatMap((plugin) => plugin.agents),
-    hookCommands: plugins.flatMap((plugin) => plugin.hooks),
+    hookConfigs,
+    hookCommands,
     commandDeclarations: plugins.flatMap((plugin) => plugin.commands),
     mcpServers: plugins.flatMap((plugin) => plugin.mcpServers ?? []),
     lspServers: plugins.flatMap((plugin) => plugin.lspServers ?? []),

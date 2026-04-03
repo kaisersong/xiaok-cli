@@ -7,7 +7,7 @@ const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 
 function isRetryableError(error: unknown): boolean {
   if (error instanceof Error) {
-    const status = (error as Record<string, unknown>).status;
+    const status = (error as unknown as Record<string, unknown>).status;
     if (typeof status === 'number' && RETRYABLE_STATUS.has(status)) return true;
     if (/overload|502|503|timeout|ECONNRESET|Bad gateway/i.test(error.message)) return true;
   }

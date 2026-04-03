@@ -81,7 +81,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
       permissionManager: options.permissionManager,
       dryRun: options.dryRun,
       hooksRunner: createHooksRunner({
-        pre: options.platform.pluginRuntime.hookCommands.map((command) => ({ command })),
+        hooks: options.platform.pluginRuntime.hookConfigs,
       }),
       onPrompt: options.onPrompt,
     }, filteredTools);
