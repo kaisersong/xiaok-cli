@@ -183,9 +183,10 @@ export class ToolRegistry {
 
   async executeTool(
     name: string,
-    input: Record<string, unknown>,
+    rawInput: Record<string, unknown>,
     context?: ToolExecutionContext,
   ): Promise<string> {
+    let input = rawInput;
     if (this.allowedToolsFilter !== null && !this.allowedToolsFilter.has(name)) {
       return `Error: tool "${name}" is not allowed in current skill context`;
     }
@@ -217,8 +218,22 @@ export class ToolRegistry {
       return `Error: ${preHookResult.message ?? `${name} blocked by pre hook`}`;
     }
 
+    // Apply hook-provided input overrides
+    if (preHookResult?.updatedInput) {
+      input = { ...input, ...preHookResult.updatedInput };
+    }
+
     try {
-      const result = await tool.execute(input, context);
+      let result = await tool.execute(input, context);
+
+      // Append hook-provided additional context
+      if (preHookResult?.additionalContext) {
+        result = `${result}\n${preHookResult.additionalContext}`;
+      }
+      if (preHookResult?.preventContinuation) {
+        result = `${result}\n[agent loop should stop after this tool]`;
+      }
+
       const warnings = await this.options.hooksRunner?.runPostHooks(name, input) ?? [];
       if (warnings.length === 0) {
         return result;

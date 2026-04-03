@@ -14,6 +14,9 @@ export interface HooksRunnerConfig {
 export interface HookRunResult {
   ok: boolean;
   message?: string;
+  updatedInput?: Record<string, unknown>;
+  preventContinuation?: boolean;
+  additionalContext?: string;
 }
 
 export interface HooksRunner {
@@ -35,8 +38,9 @@ async function runCommand(
   timeoutMs: number,
   toolName: string,
   input: Record<string, unknown>,
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
+): Promise<Partial<HookRunResult>> {
+  return new Promise<Partial<HookRunResult>>((resolve, reject) => {
+    let stdout = '';
     const child = exec(command, {
       env: {
         ...process.env,
@@ -48,8 +52,23 @@ async function runCommand(
         reject(error);
         return;
       }
-      resolve();
+      // Try to parse structured JSON from stdout
+      const trimmed = stdout.trim();
+      if (trimmed.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(trimmed) as Partial<HookRunResult>;
+          resolve(parsed);
+          return;
+        } catch {
+          // Not valid JSON, ignore
+        }
+      }
+      resolve({});
     });
+
+    if (child.stdout) {
+      child.stdout.on('data', (data: string) => { stdout += data; });
+    }
 
     const timer = setTimeout(() => {
       child.kill();
@@ -68,17 +87,30 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
 
   return {
     async runPreHooks(toolName, input) {
+      const merged: HookRunResult = { ok: true };
+
       for (const hook of config.pre ?? []) {
         if (!matchesTool(hook.tools, toolName)) continue;
 
         try {
-          await runCommand(hook.command, timeoutMs, toolName, input);
+          const result = await runCommand(hook.command, timeoutMs, toolName, input);
+          if (result.updatedInput) {
+            merged.updatedInput = { ...(merged.updatedInput ?? {}), ...result.updatedInput };
+          }
+          if (result.preventContinuation) {
+            merged.preventContinuation = true;
+          }
+          if (result.additionalContext) {
+            merged.additionalContext = merged.additionalContext
+              ? `${merged.additionalContext}\n${result.additionalContext}`
+              : result.additionalContext;
+          }
         } catch (error) {
           return { ok: false, message: String(error) };
         }
       }
 
-      return { ok: true };
+      return merged;
     },
 
     async runPostHooks(toolName, input) {
