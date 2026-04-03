@@ -2,7 +2,7 @@
 
 English | [简体中文](./README.zh-CN.md)
 
-An AI coding CLI for Kingdee Yunzhijia developers. Local terminal agent, extensible skill system, and Yunzhijia IM gateway — all sharing the same agent runtime.
+An AI coding CLI for Kingdee Cosmic (苍穹) and Yunzhijia (云之家) developers. Local terminal agent, extensible skill system, and Yunzhijia IM gateway — all sharing the same agent runtime. Cosmic CLI and Yunzhijia CLI integration is in progress.
 
 ## Highlights
 

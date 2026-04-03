@@ -2,7 +2,7 @@
 
 [English](./README.md) | 简体中文
 
-`xiaok-cli` 是一个面向金蝶云之家开发者的 AI 编程命令行工具。它同时提供本地终端助手、skill 机制，以及云之家 IM 网关，让同一套 agent runtime 能在终端和移动端会话里复用。
+`xiaok-cli` 是一个面向金蝶苍穹和云之家开发者的 AI 编程命令行工具。它同时提供本地终端助手、skill 机制，以及云之家 IM 网关，让同一套 agent runtime 能在终端和移动端会话里复用。苍穹 CLI 和云之家 CLI 的集成正在进行中。
 
 当前这套 runtime 已经不只是一个本地对话壳。终端和 IM 会话现在共用一层平台运行时，包含持久化通道状态、可恢复任务元数据、后台 subagent 执行、worktree 隔离，以及插件驱动的 MCP/LSP 集成。
 
