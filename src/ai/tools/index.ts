@@ -51,6 +51,11 @@ export class ToolRegistry {
   private deferredTools = new Map<string, ToolDefinition>();
   private permissionManager: PermissionManager;
   private options: Required<Pick<RegistryOptions, 'dryRun' | 'onPrompt'>> & RegistryOptions;
+  private allowedToolsFilter: Set<string> | null = null;
+
+  setAllowedTools(names: string[] | null): void {
+    this.allowedToolsFilter = names ? new Set(names) : null;
+  }
 
   constructor(options: RegistryOptions, tools?: Tool[]) {
     const mode = options.permissionManager
@@ -180,6 +185,10 @@ export class ToolRegistry {
     input: Record<string, unknown>,
     context?: ToolExecutionContext,
   ): Promise<string> {
+    if (this.allowedToolsFilter !== null && !this.allowedToolsFilter.has(name)) {
+      return `Error: tool "${name}" is not allowed in current skill context`;
+    }
+
     const tool = this.tools.get(name);
     if (!tool) return `Error: 未知工具: ${name}`;
 
