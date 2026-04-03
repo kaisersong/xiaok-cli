@@ -43,7 +43,7 @@ describe('RuntimeFacade', () => {
     await facade.runTurn({ sessionId: 'sess_1', cwd: '/repo', source: 'chat', input: 'hello' }, () => {});
 
     expect(promptBuilder.build).toHaveBeenCalledOnce();
-    expect(sessionState.attachPromptSnapshot).toHaveBeenCalledWith('prompt_1', ['mem_1']);
+    expect(sessionState.attachPromptSnapshot).toHaveBeenCalledWith('prompt_1', ['mem_1'], '/repo');
     expect(agent.setPromptSnapshot).toHaveBeenCalledWith(expect.objectContaining({ id: 'prompt_1' }));
   });
 });

@@ -3,6 +3,8 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getConfigDir } from '../../utils/config.js';
 
+export type MemoryType = 'user' | 'feedback' | 'project' | 'reference';
+
 export interface MemoryRecord {
   id: string;
   scope: 'global' | 'project';
@@ -11,6 +13,7 @@ export interface MemoryRecord {
   summary: string;
   tags: string[];
   updatedAt: number;
+  type?: MemoryType;
 }
 
 export class FileMemoryStore {
@@ -21,7 +24,7 @@ export class FileMemoryStore {
     await writeFile(join(this.rootDir, `${record.id}.json`), JSON.stringify(record, null, 2) + '\n', 'utf8');
   }
 
-  async listRelevant(input: { cwd: string; query: string }): Promise<MemoryRecord[]> {
+  async listRelevant(input: { cwd: string; query: string; typeFilter?: MemoryType }): Promise<MemoryRecord[]> {
     if (!existsSync(this.rootDir)) {
       return [];
     }
@@ -33,6 +36,7 @@ export class FileMemoryStore {
 
     return records
       .filter((record) => record.scope === 'global' || record.cwd === input.cwd)
+      .filter((record) => !input.typeFilter || record.type === input.typeFilter)
       .sort((left, right) => {
         const leftMatches = Number(
           left.title.includes(input.query)

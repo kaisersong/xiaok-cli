@@ -156,10 +156,14 @@ describe('Agent', () => {
     await agent.runTurn('12345678901234567890', () => {});
     await agent.runTurn('abcdefghijklmnopqrstuvwxyz', () => {});
 
-    expect(seenMessages[1]?.[0]?.content).toContainEqual({
-      type: 'text',
-      text: expect.stringContaining('[context compacted summary]'),
-    });
+    // CompactRunner makes an extra stream call for AI summarization.
+    // Find any turn that received a compacted history.
+    const turnWithCompaction = seenMessages.find((msgs) =>
+      msgs.some((m) => m.content.some((b) =>
+        b.type === 'text' && (b as { type: 'text'; text: string }).text.includes('[context compacted summary]')
+      ))
+    );
+    expect(turnWithCompaction).toBeDefined();
   });
 
   it('emits turn lifecycle events through runtime hooks', async () => {
@@ -212,6 +216,28 @@ describe('Agent', () => {
 
     expect(events).toContain('tool_started');
     expect(events).toContain('tool_finished');
+  });
+
+  it('emits failure lifecycle events through runtime hooks', async () => {
+    const { Agent } = await import('../../src/ai/agent.js');
+    const events: string[] = [];
+    const adapter: ModelAdapter = {
+      stream: () => {
+        throw new Error('tool_failed');
+      },
+    };
+    const registry = createRegistryMock();
+    const agent = new Agent(adapter, registry as never, 'system', {
+      hooks: {
+        emit: (event) => {
+          events.push(event.type);
+        },
+      },
+    });
+
+    await expect(agent.runTurn('hi', () => {})).rejects.toThrow('tool_failed');
+
+    expect(events).toEqual(['turn_started', 'turn_failed']);
   });
 
   it('uses an updated system prompt for subsequent turns', async () => {
