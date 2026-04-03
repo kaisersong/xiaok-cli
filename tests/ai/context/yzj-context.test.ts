@@ -15,8 +15,9 @@ describe('buildSystemPrompt', () => {
 
   it('truncates to token budget', async () => {
     const prompt = await buildSystemPrompt({ enterpriseId: null, devApp: null, cwd: '/tmp', budget: 50 });
-    // rough estimate: 50 tokens ≈ 200 chars
-    expect(prompt.length).toBeLessThan(1000);
+    // Budget controls API overview and yzj help truncation, not static behavior sections.
+    // Static sections are always included. With budget=50, no API/yzj content should be added.
+    expect(prompt.length).toBeLessThan(5000);
   });
 
   it('resolves successfully when yzj CLI is not installed or times out', async () => {
@@ -59,6 +60,30 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('web_search');
     expect(prompt).toContain('web_fetch');
     expect(prompt).toContain('install_skill');
+  });
+
+  it('includes behavior governance sections in the system prompt', async () => {
+    const prompt = await buildSystemPrompt({
+      enterpriseId: null,
+      devApp: null,
+      cwd: '/tmp/demo',
+      budget: 4000,
+    });
+
+    // System Reality
+    expect(prompt).toContain('permission mode');
+    expect(prompt).toContain('prompt injection');
+    // DoingTasks
+    expect(prompt).toContain('不要加用户没要求的功能');
+    expect(prompt).toContain('OWASP');
+    // Actions
+    expect(prompt).toContain('不可逆');
+    expect(prompt).toContain('merge conflict');
+    // UsingTools
+    expect(prompt).toContain('read 工具');
+    expect(prompt).toContain('edit 工具');
+    // ToneAndStyle
+    expect(prompt).toContain('file_path:line_number');
   });
 
   it('includes auto-loaded prompt docs and git context in the system prompt', async () => {
