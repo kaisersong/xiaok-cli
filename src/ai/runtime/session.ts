@@ -16,6 +16,10 @@ export class AgentSessionState {
     lineage: ['transient'],
   });
 
+  private promptSnapshotId?: string;
+  private promptMemoryRefs?: string[];
+  private promptCwd?: string;
+
   getMessages(): Message[] {
     return this.graph.getMessages();
   }
@@ -60,8 +64,20 @@ export class AgentSessionState {
     this.graph.replaceCompactions(compactions);
   }
 
-  attachPromptSnapshot(promptSnapshotId: string, memoryRefs: string[]): void {
+  attachPromptSnapshot(promptSnapshotId: string, memoryRefs: string[], cwd?: string): void {
+    this.promptSnapshotId = promptSnapshotId;
+    this.promptMemoryRefs = memoryRefs;
+    this.promptCwd = cwd;
     this.graph.attachPromptSnapshot(promptSnapshotId, memoryRefs);
+  }
+
+  getPromptSnapshot(): { id: string; cwd: string; memoryRefs: string[] } | undefined {
+    if (!this.promptSnapshotId) return undefined;
+    return {
+      id: this.promptSnapshotId,
+      cwd: this.promptCwd ?? '',
+      memoryRefs: this.promptMemoryRefs ?? [],
+    };
   }
 
   recordApproval(approvalId: string): void {

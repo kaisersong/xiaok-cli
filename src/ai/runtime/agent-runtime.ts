@@ -12,6 +12,7 @@ import {
 import { AgentSessionState } from './session.js';
 import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
 import { CompactRunner } from './compact-runner.js';
+import type { FileMemoryStore } from '../memory/store.js';
 
 export interface AgentRuntimeOptions {
   adapter: ModelAdapter;
@@ -24,6 +25,7 @@ export interface AgentRuntimeOptions {
   contextLimit?: number;
   compactThreshold?: number;
   compactPlaceholder?: string;
+  memoryStore?: FileMemoryStore;
 }
 
 export class AgentRuntime {
@@ -41,6 +43,7 @@ export class AgentRuntime {
   private supportsPromptCaching: boolean;
   private promptSnapshot?: PromptSnapshot;
   private compactRunner: CompactRunner;
+  private readonly memoryStore?: FileMemoryStore;
 
   constructor(options: AgentRuntimeOptions) {
     this.adapter = options.adapter;
@@ -58,6 +61,7 @@ export class AgentRuntime {
     this.supportsPromptCaching = false;
     this.refreshModelPolicy();
     this.compactRunner = new CompactRunner(this.adapter);
+    this.memoryStore = options.memoryStore;
   }
 
   setAdapter(adapter: ModelAdapter): void {
@@ -121,6 +125,7 @@ export class AgentRuntime {
             summary: compaction?.summary ?? this.compactPlaceholder,
             compactionId: compaction?.id,
           });
+          await this.injectMemoryAfterCompact();
         }
 
         const assistantBlocks: MessageBlock[] = [];
@@ -273,5 +278,20 @@ export class AgentRuntime {
         ? buildPromptCacheSegments(this.systemPrompt, toolDefinitions, this.session.getMessages())
         : undefined,
     };
+  }
+
+  private async injectMemoryAfterCompact(): Promise<void> {
+    if (!this.memoryStore) return;
+    const snapshot = this.session.getPromptSnapshot();
+    if (!snapshot?.memoryRefs?.length) return;
+
+    const memories = await this.memoryStore.listRelevant({ cwd: snapshot.cwd, query: '' });
+    const relevant = memories.filter((m) => snapshot.memoryRefs.includes(m.id));
+    if (relevant.length === 0) return;
+
+    const memText = relevant.map((m) => `- ${m.title}: ${m.summary}`).join('\n');
+    this.session.appendUserText(
+      `<system-reminder>\n[Memory restored after compact]\n${memText}\n</system-reminder>`,
+    );
   }
 }

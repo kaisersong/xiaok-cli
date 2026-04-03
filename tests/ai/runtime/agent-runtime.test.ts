@@ -253,3 +253,54 @@ describe('AgentRuntime', () => {
     });
   });
 });
+
+import { FileMemoryStore } from '../../../src/ai/memory/store.js';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
+describe('AgentRuntime compact memory injection', () => {
+  it('appends memory summary message after compact', async () => {
+    const memDir = join(tmpdir(), `xiaok-compact-mem-${Date.now()}`);
+    const store = new FileMemoryStore(memDir);
+    await store.save({
+      id: 'mem_1',
+      scope: 'global',
+      title: 'Test Rule',
+      summary: 'Always write tests first.',
+      tags: [],
+      updatedAt: 1,
+    });
+
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () => mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]),
+    };
+
+    const session = new AgentSessionState();
+    for (let i = 0; i < 5; i++) {
+      session.appendUserText('a'.repeat(500));
+      session.appendAssistantBlocks([{ type: 'text', text: 'b'.repeat(500) }]);
+    }
+    session.attachPromptSnapshot('snap_1', ['mem_1'], '/any');
+
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+      contextLimit: 100,
+      memoryStore: store,
+    });
+
+    const events: string[] = [];
+    await runtime.run('next', (event) => events.push(event.type));
+
+    expect(events).toContain('compact_triggered');
+    const msgs = session.getMessages();
+    const memMsg = msgs.find((m) =>
+      m.content.some((b) => b.type === 'text' && (b as { type: 'text'; text: string }).text.includes('Always write tests first.'))
+    );
+    expect(memMsg).toBeDefined();
+  });
+});
