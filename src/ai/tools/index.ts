@@ -3,6 +3,7 @@ import { PermissionManager } from '../permissions/manager.js';
 import type { HooksRunner } from '../../runtime/hooks-runner.js';
 import { formatErrorText } from '../../utils/ui.js';
 import type { CapabilityRegistry } from '../../platform/runtime/capability-registry.js';
+import { validateToolInput } from './validate-input.js';
 import { createReadTool, type WorkspaceToolOptions } from './read.js';
 import { createWriteTool } from './write.js';
 import { createEditTool } from './edit.js';
@@ -191,6 +192,11 @@ export class ToolRegistry {
 
     const tool = this.tools.get(name);
     if (!tool) return `Error: 未知工具: ${name}`;
+
+    const validation = validateToolInput(tool.definition.inputSchema, input);
+    if (!validation.valid) {
+      return `Error: 输入校验失败: ${validation.errors.join('; ')}`;
+    }
 
     if (this.options.dryRun) {
       return `[dry-run] ${name}(${JSON.stringify(input)})`;
