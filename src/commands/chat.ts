@@ -46,6 +46,11 @@ import { createInstallSkillTool } from '../ai/tools/install-skill.js';
 import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
 import { executeNamedSubAgent } from '../ai/agents/subagent-executor.js';
 import { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
+import { EmbeddedYZJChannel } from '../channels/embedded-yzj.js';
+import { selectYZJChannel } from '../ui/channel-selector.js';
+import { resolveYZJConfig } from '../channels/yzj.js';
+import { YZJTransport } from '../channels/yzj-transport.js';
+import { InMemoryApprovalStore } from '../channels/approval-store.js';
 
 const { version: cliVersion } = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
@@ -239,6 +244,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     return line ? [line] : [];
   });
 
+  // 嵌入式 channel 管理
+  const embeddedChannels: EmbeddedYZJChannel[] = [];
+  const embeddedApprovalStore = new InMemoryApprovalStore();
+
   const registryFactory = createPlatformRegistryFactory({
     platform,
     source: 'chat',
@@ -249,29 +258,19 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     dryRun: opts.dryRun,
     permissionManager,
     onPrompt: async (name, input) => {
-      const choice = await showPermissionPrompt(name, input, { transcriptLogger, renderer: replRenderer });
-
-      if (choice.action === 'deny') {
+      const tuiDecide = async () => {
+        const choice = await showPermissionPrompt(name, input, { transcriptLogger, renderer: replRenderer });
+        if (choice.action === 'deny') return false;
+        if (choice.action === 'allow_once') return true;
+        if (choice.action === 'allow_session') { permissionManager.addSessionRule(choice.rule); return true; }
+        if (choice.action === 'allow_project') { await addAllowRule('project', choice.rule, cwd); permissionManager.addSessionRule(choice.rule); return true; }
+        if (choice.action === 'allow_global') { await addAllowRule('global', choice.rule, cwd); permissionManager.addSessionRule(choice.rule); return true; }
         return false;
+      };
+      if (embeddedChannels.length > 0) {
+        return embeddedChannels[0]!.makeOnPrompt(tuiDecide)(name, input);
       }
-      if (choice.action === 'allow_once') {
-        return true;
-      }
-      if (choice.action === 'allow_session') {
-        permissionManager.addSessionRule(choice.rule);
-        return true;
-      }
-      if (choice.action === 'allow_project') {
-        await addAllowRule('project', choice.rule, cwd);
-        permissionManager.addSessionRule(choice.rule);
-        return true;
-      }
-      if (choice.action === 'allow_global') {
-        await addAllowRule('global', choice.rule, cwd);
-        permissionManager.addSessionRule(choice.rule);
-        return true;
-      }
-      return false;
+      return tuiDecide();
     },
     buildSystemPrompt: async (promptCwd) => buildPrompt(skills, promptCwd),
     notifyBackgroundJob: async (job) => {
@@ -592,6 +591,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   process.on('SIGINT', () => {
     stopActivity();
     void platform.dispose();
+    for (const ch of embeddedChannels) {
+      void ch.cleanup();
+    }
     process.stdout.off('resize', handleResize);
     statusBar.destroy();
     process.stdout.write('\n已退出。\n');
@@ -645,6 +647,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       process.stdout.write('  /tasks   - 查看当前会话任务\n');
       process.stdout.write('  /task <id> - 查看任务详情\n');
       process.stdout.write('  /compact - 手动压缩上下文\n');
+      process.stdout.write('  /yzjchannel - 连接云之家 channel（嵌入式，关闭 chat 即断开）\n');
       process.stdout.write('  /help    - 显示帮助\n');
       if (skills.length > 0) {
         process.stdout.write('\n可用 skills：\n');
@@ -653,6 +656,42 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         }
       }
       process.stdout.write('\n');
+      continue;
+    }
+
+    if (trimmed === '/yzjchannel') {
+      const yzjConfig = (() => {
+        try {
+          return resolveYZJConfig(config);
+        } catch {
+          process.stdout.write('YZJ 未配置，请先运行 xiaok yzjchannel config set-webhook-url <url>\n\n');
+          return null;
+        }
+      })();
+      if (!yzjConfig) continue;
+
+      const namedChannels = config.channels?.yzj?.namedChannels ?? [];
+      const selectedChannel = await selectYZJChannel(namedChannels);
+      if (!selectedChannel) {
+        process.stdout.write('已取消。\n\n');
+        continue;
+      }
+
+      const transport = new YZJTransport({ webhookUrl: yzjConfig.webhookUrl });
+      const embedded = new EmbeddedYZJChannel({
+        runtimeFacade: runtimeFacade!,
+        runtimeHooks,
+        approvalStore: embeddedApprovalStore,
+        onPromptOverride: async () => true,
+        transport,
+        selectedChannel,
+        yzjConfig,
+        sessionId,
+        cwd,
+      });
+
+      await embedded.start();
+      embeddedChannels.push(embedded);
       continue;
     }
 
