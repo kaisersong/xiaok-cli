@@ -169,7 +169,7 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
     tuiOnPrompt: (toolName: string, input: Record<string, unknown>) => Promise<boolean>,
   ): (toolName: string, input: Record<string, unknown>) => Promise<boolean> {
     return async (toolName: string, input: Record<string, unknown>) => {
-      // 两侧都会执行到底，Promise.race 取最先 resolve 的结果
+      // Promise.race 取最先 resolve 的结果；另一侧 Promise 会继续运行至自然结束（副作用可重入）
       const result = await Promise.race([
         tuiOnPrompt(toolName, input),
         this.options.onPromptOverride(toolName, input),
