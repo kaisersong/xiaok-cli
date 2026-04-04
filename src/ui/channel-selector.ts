@@ -5,6 +5,14 @@ import { boldCyan, dim } from './render.js';
 export async function selectYZJChannel(
   channels: YZJNamedChannel[],
 ): Promise<YZJNamedChannel | null> {
+  if (!process.stdin.isTTY) {
+    const first = channels[0];
+    if (first) {
+      return first;
+    }
+    return null;
+  }
+
   if (channels.length === 0) {
     stdout.write(
       '未配置任何 namedChannels。请在 config.json 的 channels.yzj.namedChannels 中配置。\n'

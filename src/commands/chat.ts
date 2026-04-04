@@ -660,6 +660,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
 
     if (trimmed === '/yzjchannel') {
+      if (embeddedChannels.length > 0) {
+        process.stdout.write('已有活跃的云之家 channel，请先关闭当前 chat 进程再重新连接。\n\n');
+        continue;
+      }
       const yzjConfig = (() => {
         try {
           return resolveYZJConfig(config);
@@ -987,6 +991,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     process.stdout.write = originalStdoutWrite;
     process.stderr.write = originalStderrWrite;
     await platform.dispose();
+    for (const ch of embeddedChannels) {
+      await ch.cleanup();
+    }
   }
 }
 
