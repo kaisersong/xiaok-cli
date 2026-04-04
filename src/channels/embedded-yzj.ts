@@ -5,7 +5,7 @@ import type { YZJTransport } from './yzj-transport.js';
 import { parseYZJCommand } from './command-parser.js';
 import { deriveYZJWebSocketUrl } from './yzj-ws-url.js';
 import type { ApprovalStore } from './approval-store.js';
-import type { ApprovalAction, ChannelReplyTarget, OutboundChannelMessage } from './types.js';
+import type { ChannelReplyTarget, OutboundChannelMessage } from './types.js';
 import type { YZJIncomingMessage, YZJResolvedConfig } from './yzj-types.js';
 import type { YZJNamedChannel } from '../types.js';
 import type { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
@@ -90,12 +90,12 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
     const command = parseYZJCommand(msg.content);
 
     if (command.kind === 'approve') {
-      approvalStore.resolve(command.approvalId, 'approve' as ApprovalAction);
+      approvalStore.resolve(command.approvalId, 'approve');
       return;
     }
 
     if (command.kind === 'deny') {
-      approvalStore.resolve(command.approvalId, 'deny' as ApprovalAction);
+      approvalStore.resolve(command.approvalId, 'deny');
       return;
     }
 
@@ -107,10 +107,15 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
       }
     };
 
-    await runtimeFacade.runTurn(
-      { sessionId, cwd, source: 'yzj', input: msg.content },
-      onChunk,
-    );
+    try {
+      await runtimeFacade.runTurn(
+        { sessionId, cwd, source: 'yzj', input: msg.content },
+        onChunk,
+      );
+    } catch (err) {
+      process.stderr.write(`[yzjchannel] runTurn error: ${String(err)}\n`);
+      return;
+    }
 
     const reply = textParts.join('');
     if (!reply.trim()) {
@@ -164,12 +169,12 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
     tuiOnPrompt: (toolName: string, input: Record<string, unknown>) => Promise<boolean>,
   ): (toolName: string, input: Record<string, unknown>) => Promise<boolean> {
     return async (toolName: string, input: Record<string, unknown>) => {
-      // TUI 和 channel 竞争审批，先到先得
-      const tuiResult = await Promise.race([
+      // 两侧都会执行到底，Promise.race 取最先 resolve 的结果
+      const result = await Promise.race([
         tuiOnPrompt(toolName, input),
         this.options.onPromptOverride(toolName, input),
       ]);
-      return tuiResult;
+      return result;
     };
   }
 
