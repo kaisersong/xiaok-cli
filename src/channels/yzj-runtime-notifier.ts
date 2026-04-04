@@ -126,7 +126,7 @@ export class YZJRuntimeNotifier {
       return;
     }
 
-    await this.transport.send(target, [`任务 ${task.taskId} 进展：`, ...lines].join('\n')).catch((error) => {
+    await Promise.resolve(this.transport.send(target, [`任务 ${task.taskId} 进展：`, ...lines].join('\n'))).catch((error: unknown) => {
       console.error(`[yzj] notification delivery failed: ${error instanceof Error ? error.message : String(error)}`);
     });
   }
@@ -136,7 +136,7 @@ export class YZJRuntimeNotifier {
     if (!target) {
       return;
     }
-    await this.transport.send(target, text).catch((error) => {
+    await Promise.resolve(this.transport.send(target, text)).catch((error: unknown) => {
       console.error(`[yzj] session message delivery failed: ${error instanceof Error ? error.message : String(error)}`);
     });
   }

@@ -1,51 +1,121 @@
-import { dim, cyan, green, red } from './render.js';
-export class ToolExplorer {
-    calls = [];
-    collapsed = true;
-    addCall(name, input) {
-        this.calls.push({ name, input });
-    }
-    setResult(index, result, isError) {
-        if (this.calls[index]) {
-            this.calls[index].result = result;
-            this.calls[index].isError = isError;
-        }
-    }
-    render() {
-        if (this.calls.length === 0)
-            return;
-        const header = this.collapsed
-            ? dim(`  Explored (${this.calls.length} tools)`)
-            : dim(`  Explored`);
-        process.stdout.write(`\n${header}\n`);
-        if (!this.collapsed) {
-            for (const call of this.calls) {
-                const icon = call.isError ? red('✗') : green('✓');
-                const name = cyan(call.name);
-                const summary = this.getSummary(call);
-                process.stdout.write(`    ${icon} ${name} ${dim(summary)}\n`);
-            }
-        }
-    }
-    getSummary(call) {
-        if (call.name === 'read')
-            return call.input.file_path;
-        if (call.name === 'write')
-            return call.input.file_path;
-        if (call.name === 'bash') {
-            const cmd = call.input.command;
-            return cmd.length > 50 ? cmd.substring(0, 47) + '...' : cmd;
-        }
-        if (call.name === 'edit')
-            return call.input.file_path;
-        if (call.name === 'glob')
-            return call.input.pattern;
-        if (call.name === 'grep')
-            return call.input.pattern;
+import { basename } from 'node:path';
+import { describeToolActivity, formatRailHeader, formatRailLine, formatToolActivity } from './render.js';
+function singleLine(text) {
+    return text.replace(/\s+/g, ' ').trim();
+}
+function summarizePath(input) {
+    const target = typeof input.file_path === 'string'
+        ? input.file_path
+        : typeof input.path === 'string'
+            ? input.path
+            : '';
+    if (!target)
         return '';
+    return basename(target) || target;
+}
+function describeGroupedActivity(toolName, input) {
+    if (toolName === 'tool_search') {
+        const query = typeof input.query === 'string' ? singleLine(input.query) : '';
+        return query ? { group: 'Explored', item: `Search ${query}` } : null;
+    }
+    if (toolName === 'grep' || toolName === 'glob' || toolName === 'web_search') {
+        const query = typeof input.pattern === 'string'
+            ? singleLine(input.pattern)
+            : typeof input.query === 'string'
+                ? singleLine(input.query)
+                : '';
+        return query ? { group: 'Explored', item: `Search ${query}` } : null;
+    }
+    if (toolName === 'read') {
+        const file = summarizePath(input);
+        return file ? { group: 'Explored', item: `Read ${file}` } : null;
+    }
+    if (toolName === 'skill') {
+        const name = typeof input.name === 'string'
+            ? singleLine(input.name)
+            : typeof input.path === 'string'
+                ? summarizePath(input)
+                : '';
+        return name ? { group: 'Explored', item: `Load ${name}` } : null;
+    }
+    if (toolName === 'web_fetch') {
+        const url = typeof input.url === 'string' ? singleLine(input.url) : '';
+        return url ? { group: 'Explored', item: `Fetch ${url}` } : null;
+    }
+    return null;
+}
+function stripKnownLabel(description, labels) {
+    for (const label of labels) {
+        if (description.startsWith(label)) {
+            return description.slice(label.length).trim();
+        }
+    }
+    return description.trim();
+}
+function describeDirectActivity(toolName, input) {
+    if (toolName === 'bash') {
+        const description = describeToolActivity(toolName, input, 'zh-CN');
+        const item = stripKnownLabel(description, ['执行命令', 'Run command']);
+        return item ? { group: 'Ran', item } : null;
+    }
+    if (toolName === 'write') {
+        const file = summarizePath(input);
+        return file ? { group: 'Changed', item: `Wrote ${file}` } : null;
+    }
+    if (toolName === 'edit') {
+        const file = summarizePath(input);
+        return file ? { group: 'Changed', item: `Edited ${file}` } : null;
+    }
+    if (toolName === 'install_skill') {
+        const target = summarizePath(input)
+            || (typeof input.source === 'string' ? singleLine(input.source) : '');
+        return target ? { group: 'Skills', item: `Installed ${target}` } : null;
+    }
+    if (toolName === 'uninstall_skill') {
+        const target = summarizePath(input)
+            || (typeof input.name === 'string' ? singleLine(input.name) : '');
+        return target ? { group: 'Skills', item: `Removed ${target}` } : null;
+    }
+    return null;
+}
+export class ToolExplorer {
+    formatActivity;
+    activeGroup = null;
+    constructor(formatActivity = formatToolActivity) {
+        this.formatActivity = formatActivity;
+    }
+    record(name, input) {
+        const grouped = describeGroupedActivity(name, input);
+        if (grouped) {
+            const lines = [];
+            if (this.activeGroup && this.activeGroup !== grouped.group) {
+                lines.push('\n');
+            }
+            if (this.activeGroup !== grouped.group) {
+                lines.push(`${formatRailHeader(grouped.group)}\n`);
+            }
+            lines.push(`${formatRailLine(grouped.item)}\n`);
+            this.activeGroup = grouped.group;
+            return lines.join('');
+        }
+        const direct = describeDirectActivity(name, input);
+        if (direct) {
+            const lines = [];
+            if (this.activeGroup && this.activeGroup !== direct.group) {
+                lines.push('\n');
+            }
+            if (this.activeGroup !== direct.group) {
+                lines.push(`${formatRailHeader(direct.group)}\n`);
+            }
+            lines.push(`${formatRailLine(direct.item)}\n`);
+            this.activeGroup = direct.group;
+            return lines.join('');
+        }
+        this.activeGroup = null;
+        const fallback = this.formatActivity(name, input);
+        return fallback ? `${fallback}\n` : '';
     }
     reset() {
-        this.calls = [];
-        this.collapsed = true;
+        this.activeGroup = null;
     }
 }

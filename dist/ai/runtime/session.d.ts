@@ -5,6 +5,9 @@ export interface AgentSessionSnapshot extends SessionGraphSnapshot {
 }
 export declare class AgentSessionState {
     private graph;
+    private promptSnapshotId?;
+    private promptMemoryRefs?;
+    private promptCwd?;
     getMessages(): Message[];
     getUsage(): UsageStats;
     getCompactions(): CompactionRecord[];
@@ -16,7 +19,12 @@ export declare class AgentSessionState {
     replaceMessages(messages: Message[]): void;
     replaceUsage(usage: UsageStats): void;
     replaceCompactions(compactions: CompactionRecord[]): void;
-    attachPromptSnapshot(promptSnapshotId: string, memoryRefs: string[]): void;
+    attachPromptSnapshot(promptSnapshotId: string, memoryRefs: string[], cwd?: string): void;
+    getPromptSnapshot(): {
+        id: string;
+        cwd: string;
+        memoryRefs: string[];
+    } | undefined;
     recordApproval(approvalId: string): void;
     recordBackgroundJob(jobId: string): void;
     forceCompact(placeholder?: string): CompactionRecord | null;

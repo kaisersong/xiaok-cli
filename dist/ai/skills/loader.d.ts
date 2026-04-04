@@ -27,7 +27,12 @@ export interface SkillCatalog {
 }
 export declare function loadSkills(xiaokConfigDir?: string, cwd?: string, options?: SkillLoadOptions): Promise<SkillMeta[]>;
 export declare function createSkillCatalog(xiaokConfigDir?: string, cwd?: string, options?: SkillLoadOptions): SkillCatalog;
+export declare function formatSkillEntry(skill: SkillMeta): string;
 export declare function formatSkillsContext(skills: SkillMeta[]): string;
+export declare function toSkillEntries(skills: SkillMeta[]): Array<{
+    name: string;
+    listing: string;
+}>;
 export declare function parseSlashCommand(input: string): {
     skillName: string;
     rest: string;

@@ -14,7 +14,7 @@ import { writeError, isTTY } from '../utils/ui.js';
 import { showPermissionPrompt } from '../ui/permission-prompt.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
 import { loadSettings, mergeRules } from '../ai/permissions/settings.js';
-import { createSkillCatalog, parseSlashCommand } from '../ai/skills/loader.js';
+import { createSkillCatalog, parseSlashCommand, toSkillEntries } from '../ai/skills/loader.js';
 import { createSkillTool } from '../ai/skills/tool.js';
 import { buildSkillExecutionPlan } from '../ai/skills/planner.js';
 import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
@@ -23,9 +23,11 @@ import { FileSessionStore } from '../ai/runtime/session-store.js';
 import { formatPrintOutput } from './chat-print-mode.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
-import { renderWelcomeScreen, renderInputSeparator, dim, formatSubmittedInput, formatToolActivity } from '../ui/render.js';
+import { renderWelcomeScreen, renderInputSeparator, dim, formatProgressNote, formatSubmittedInput, formatToolActivity } from '../ui/render.js';
 import { InputReader } from '../ui/input.js';
 import { ReplRenderer } from '../ui/repl-renderer.js';
+import { ToolExplorer } from '../ui/tool-explorer.js';
+import { TurnLayout } from '../ui/turn-layout.js';
 import { parseInputBlocks } from '../ui/image-input.js';
 import { selectModel } from '../ui/model-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
@@ -42,6 +44,31 @@ import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
 import { executeNamedSubAgent } from '../ai/agents/subagent-executor.js';
 import { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
 const { version: cliVersion } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+function describeLiveActivity(toolName, input) {
+    if (['tool_search', 'grep', 'glob', 'read', 'skill', 'web_fetch', 'web_search'].includes(toolName)) {
+        return 'Exploring codebase';
+    }
+    if (toolName === 'write' || toolName === 'edit') {
+        return 'Updating files';
+    }
+    if (toolName === 'install_skill' || toolName === 'uninstall_skill') {
+        return 'Updating skills';
+    }
+    if (toolName === 'bash') {
+        const command = typeof input.command === 'string' ? input.command.toLowerCase() : '';
+        if (/(^|\s)(npm|pnpm|yarn|bun)\s+(test|run test|run build|build)\b/.test(command) || /^(vitest|pytest|go test|cargo test)\b/.test(command)) {
+            return 'Running verification';
+        }
+        if (command.includes('export-pptx.py') || command.includes('.pptx')) {
+            return 'Exporting presentation';
+        }
+        if (/^(ls|find|rg|grep|cat|sed|head|tail|pwd)\b/.test(command) || /^git (status|diff|log|show)\b/.test(command)) {
+            return 'Inspecting workspace';
+        }
+        return 'Running command';
+    }
+    return 'Working';
+}
 async function runChat(initialInput, opts) {
     if ((opts.print || opts.json) && !initialInput) {
         writeError('print/json 模式需要提供单次输入');
@@ -91,6 +118,8 @@ async function runChat(initialInput, opts) {
     let skills = await skillCatalog.reload();
     const replRenderer = new ReplRenderer(process.stdout);
     const inputReader = new InputReader(replRenderer);
+    const toolExplorer = new ToolExplorer(formatToolActivity);
+    const turnLayout = new TurnLayout();
     const skillTool = createSkillTool(skillCatalog, platform.capabilityRegistry);
     const taskBoard = new SessionTaskBoard('cli');
     const promptBuilder = new PromptBuilder();
@@ -122,6 +151,7 @@ async function runChat(initialInput, opts) {
     const refreshSkills = async () => {
         skills = await skillCatalog.reload();
         inputReader.setSkills(skills);
+        runtimeFacade?.resetSkillTracking();
     };
     const workflowTools = [
         createAskUserTool({
@@ -163,6 +193,10 @@ async function runChat(initialInput, opts) {
         permissionManager.setMode(nextMode);
         statusBar.updateMode(nextMode);
         return nextMode;
+    });
+    inputReader.setStatusLineProvider(() => {
+        const line = statusBar.getStatusLine();
+        return line ? [line] : [];
     });
     const registryFactory = createPlatformRegistryFactory({
         platform,
@@ -211,6 +245,7 @@ async function runChat(initialInput, opts) {
         promptBuilder,
         getPromptInput: async (promptCwd) => getPromptInput(promptCwd, skills),
         agent,
+        getSkillEntries: () => toSkillEntries(skills),
     });
     if (persistedSession) {
         agent.restoreSession(persistedSession);
@@ -218,6 +253,115 @@ async function runChat(initialInput, opts) {
     // 创建 UI 组件
     const mdRenderer = new MarkdownRenderer();
     const statusBar = new StatusBar();
+    let liveActivityTimer = null;
+    let resumeActivityTimer = null;
+    let reassuranceTimer = null;
+    let liveActivityFrame = 0;
+    let liveActivityVisible = false;
+    let responseStarted = false;
+    let lastReassuranceBucket = -1;
+    const renderLiveActivity = () => {
+        statusBar.renderLive(Date.now(), liveActivityFrame++);
+        liveActivityVisible = true;
+    };
+    const beginActivity = (label, restart = false) => {
+        if (resumeActivityTimer) {
+            clearTimeout(resumeActivityTimer);
+            resumeActivityTimer = null;
+        }
+        if (restart || !liveActivityTimer) {
+            statusBar.beginActivity(label, Date.now());
+        }
+        else {
+            statusBar.updateActivity(label);
+        }
+        if (!liveActivityTimer) {
+            renderLiveActivity();
+            liveActivityTimer = setInterval(() => {
+                renderLiveActivity();
+            }, 120);
+            return;
+        }
+        renderLiveActivity();
+    };
+    const scheduleActivityResume = (label, delayMs = 180) => {
+        if (resumeActivityTimer) {
+            clearTimeout(resumeActivityTimer);
+        }
+        resumeActivityTimer = setTimeout(() => {
+            resumeActivityTimer = null;
+            beginActivity(label);
+        }, delayMs);
+    };
+    const scheduleActivityPause = (delayMs = 180) => {
+        if (resumeActivityTimer) {
+            clearTimeout(resumeActivityTimer);
+            resumeActivityTimer = null;
+        }
+        setTimeout(() => {
+            pauseActivity();
+        }, delayMs);
+    };
+    const ensureReassuranceTimer = () => {
+        if (reassuranceTimer) {
+            return;
+        }
+        reassuranceTimer = setInterval(() => {
+            if (responseStarted) {
+                return;
+            }
+            const tick = statusBar.getReassuranceTick(Date.now(), lastReassuranceBucket);
+            if (!tick) {
+                return;
+            }
+            lastReassuranceBucket = tick.bucket;
+            turnLayout.noteProgressNote();
+            pauseActivity();
+            process.stdout.write(formatProgressNote(tick.line));
+            if (liveActivityTimer && !responseStarted) {
+                scheduleActivityResume(statusBar.getActivityLabel() || 'Thinking', 240);
+            }
+        }, 1000);
+    };
+    const pauseActivity = () => {
+        if (!liveActivityTimer || !liveActivityVisible) {
+            return;
+        }
+        statusBar.clearLive();
+        liveActivityVisible = false;
+    };
+    const stopActivity = () => {
+        if (reassuranceTimer) {
+            clearInterval(reassuranceTimer);
+            reassuranceTimer = null;
+        }
+        if (resumeActivityTimer) {
+            clearTimeout(resumeActivityTimer);
+            resumeActivityTimer = null;
+        }
+        if (liveActivityTimer) {
+            clearInterval(liveActivityTimer);
+            liveActivityTimer = null;
+        }
+        if (liveActivityVisible) {
+            statusBar.clearLive();
+            liveActivityVisible = false;
+        }
+        liveActivityFrame = 0;
+        responseStarted = false;
+        lastReassuranceBucket = -1;
+        statusBar.endActivity();
+    };
+    const resetTurnChrome = () => {
+        stopActivity();
+        toolExplorer.reset();
+        turnLayout.reset();
+        mdRenderer.reset();
+    };
+    const handleTurnFailure = (error) => {
+        resetTurnChrome();
+        writeError(String(error));
+    };
     const persistSession = async () => {
         const snapshot = agent.exportSession();
         await sessionStore.save({
@@ -277,9 +421,6 @@ async function runChat(initialInput, opts) {
             else {
                 mdRenderer.flush();
                 process.stdout.write('\n');
-                const statusLine = statusBar.getStatusLine();
-                if (statusLine)
-                    process.stdout.write(statusLine + '\n');
             }
         }
         catch (e) {
@@ -327,13 +468,45 @@ async function runChat(initialInput, opts) {
             process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
         // 创建输入读取器
         inputReader.setSkills(skills);
-        runtimeHooks.on('tool_started', (e) => {
-            process.stdout.write(`${formatToolActivity(e.toolName, e.toolInput)}\n`);
+        runtimeHooks.on('turn_started', () => {
+            toolExplorer.reset();
+            turnLayout.reset();
+            responseStarted = false;
+            lastReassuranceBucket = -1;
+            beginActivity('Thinking', true);
+            ensureReassuranceTimer();
         });
-        runtimeHooks.on('tool_finished', (_e) => { });
+        runtimeHooks.on('tool_started', (e) => {
+            beginActivity(describeLiveActivity(e.toolName, e.toolInput));
+            const activity = toolExplorer.record(e.toolName, e.toolInput);
+            if (activity) {
+                turnLayout.noteToolActivity();
+                pauseActivity();
+                process.stdout.write(activity);
+                scheduleActivityResume(describeLiveActivity(e.toolName, e.toolInput), 220);
+            }
+        });
+        runtimeHooks.on('tool_finished', (_e) => {
+            if (liveActivityTimer) {
+                scheduleActivityResume('Thinking', 160);
+            }
+        });
+        runtimeHooks.on('turn_completed', () => {
+            toolExplorer.reset();
+            stopActivity();
+        });
+        runtimeHooks.on('turn_failed', () => {
+            resetTurnChrome();
+        });
+        runtimeHooks.on('turn_aborted', () => {
+            resetTurnChrome();
+        });
         // Context 压缩通知
         runtimeHooks.on('compact_triggered', () => {
-            process.stdout.write(`\n  ${dim('⚠ 上下文已压缩，保留最近对话')}\n\n`);
+            beginActivity('Compacting context');
+            turnLayout.noteProgressNote();
+            pauseActivity();
+            process.stdout.write(formatProgressNote('⚠ 上下文已压缩，保留最近对话'));
         });
         // 处理终端窗口大小调整
         let resizeTimeout = null;
@@ -347,6 +520,7 @@ async function runChat(initialInput, opts) {
         process.stdout.on('resize', handleResize);
         // SIGINT 处理
         process.on('SIGINT', () => {
+            stopActivity();
             void platform.dispose();
             process.stdout.off('resize', handleResize);
             statusBar.destroy();
@@ -377,7 +551,6 @@ async function runChat(initialInput, opts) {
                     mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
                     version: cliVersion,
                 });
-                statusBar.render();
                 continue;
             }
             if (trimmed === '/help') {
@@ -602,8 +775,24 @@ async function runChat(initialInput, opts) {
                                 source: 'chat',
                                 input: userMsg,
                             }, (chunk) => {
-                                if (chunk.type === 'text')
+                                if (chunk.type === 'text') {
+                                    if (/\S/.test(chunk.delta)) {
+                                        if (!responseStarted) {
+                                            responseStarted = true;
+                                            process.stdout.write(turnLayout.consumeAssistantLeadIn());
+                                            beginActivity('Answering');
+                                            scheduleActivityPause(220);
+                                        }
+                                        else {
+                                            if (resumeActivityTimer) {
+                                                clearTimeout(resumeActivityTimer);
+                                                resumeActivityTimer = null;
+                                            }
+                                            pauseActivity();
+                                        }
+                                    }
                                     mdRenderer.write(chunk.delta);
+                                }
                                 if (chunk.type === 'usage') {
                                     statusBar.update({ ...chunk.usage, budget: config.contextBudget });
                                 }
@@ -612,12 +801,9 @@ async function runChat(initialInput, opts) {
                         }
                         mdRenderer.flush();
                         process.stdout.write('\n');
-                        const statusLine = statusBar.getStatusLine();
-                        if (statusLine)
-                            process.stdout.write(statusLine + '\n');
                     }
                     catch (e) {
-                        writeError(String(e));
+                        handleTurnFailure(e);
                     }
                     process.stdout.write('\n');
                 }
@@ -637,8 +823,24 @@ async function runChat(initialInput, opts) {
                     source: 'chat',
                     input: inputBlocks,
                 }, (chunk) => {
-                    if (chunk.type === 'text')
+                    if (chunk.type === 'text') {
+                        if (/\S/.test(chunk.delta)) {
+                            if (!responseStarted) {
+                                responseStarted = true;
+                                process.stdout.write(turnLayout.consumeAssistantLeadIn());
+                                beginActivity('Answering');
+                                scheduleActivityPause(220);
+                            }
+                            else {
+                                if (resumeActivityTimer) {
+                                    clearTimeout(resumeActivityTimer);
+                                    resumeActivityTimer = null;
+                                }
+                                pauseActivity();
+                            }
+                        }
                         mdRenderer.write(chunk.delta);
+                    }
                     if (chunk.type === 'usage') {
                         statusBar.update({ ...chunk.usage, budget: config.contextBudget });
                     }
@@ -646,12 +848,9 @@ async function runChat(initialInput, opts) {
                 await persistSession();
                 mdRenderer.flush();
                 process.stdout.write('\n');
-                const statusLine = statusBar.getStatusLine();
-                if (statusLine)
-                    process.stdout.write(statusLine + '\n');
             }
             catch (e) {
-                writeError(String(e));
+                handleTurnFailure(e);
             }
             process.stdout.write('\n');
         }

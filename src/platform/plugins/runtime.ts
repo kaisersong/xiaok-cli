@@ -119,6 +119,14 @@ export async function connectDeclaredLspServer(
   return {
     didOpenDocument: (document: { uri: string; languageId: string; version?: number; text: string }) =>
       client.didOpenDocument(document),
+    goToDefinition: (uri: string, line: number, character: number) =>
+      client.goToDefinition(uri, line, character),
+    findReferences: (uri: string, line: number, character: number) =>
+      client.findReferences(uri, line, character),
+    hover: (uri: string, line: number, character: number) =>
+      client.hover(uri, line, character),
+    documentSymbols: (uri: string) =>
+      client.documentSymbols(uri),
     dispose: () => client.dispose(),
   };
 }

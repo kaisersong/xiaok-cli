@@ -1,9 +1,10 @@
+import type { UiLocale } from './locale.js';
+type ToolActivityFormatter = (toolName: string, input: Record<string, unknown>, maxWidth?: number, locale?: UiLocale) => string;
 export declare class ToolExplorer {
-    private calls;
-    private collapsed;
-    addCall(name: string, input: Record<string, unknown>): void;
-    setResult(index: number, result: string, isError: boolean): void;
-    render(): void;
-    private getSummary;
+    private readonly formatActivity;
+    private activeGroup;
+    constructor(formatActivity?: ToolActivityFormatter);
+    record(name: string, input: Record<string, unknown>): string;
     reset(): void;
 }
+export {};

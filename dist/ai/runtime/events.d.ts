@@ -26,6 +26,11 @@ export type AgentRuntimeEvent = {
     summary: string;
     compactionId?: string;
 } | {
+    type: 'max_iterations_reached';
+    runId: string;
+    maxIterations: number;
+    currentIteration: number;
+} | {
     type: 'run_completed';
     runId: string;
 } | {

@@ -17,4 +17,5 @@ export declare class MarkdownRenderer {
     private renderLine;
     /** Apply inline formatting. */
     private inlineFormat;
+    private getPendingPrefix;
 }

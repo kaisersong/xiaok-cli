@@ -66,7 +66,7 @@ export interface Credentials {
 export type YZJInboundMode = 'webhook' | 'websocket';
 export interface YZJChannelConfig {
     enabled?: boolean;
-    sendMsgUrl?: string;
+    webhookUrl?: string;
     inboundMode?: YZJInboundMode;
     webhookPath?: string;
     webhookPort?: number;

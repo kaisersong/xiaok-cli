@@ -57,13 +57,14 @@ export async function createPlatformRuntimeContext(options) {
             inputSchema: tool.definition.inputSchema,
         });
     }
-    await connectWorkspaceLspServers(pluginRuntime, lspManager, options.cwd, capabilityHealth, disposables);
+    const lspClient = await connectWorkspaceLspServers(pluginRuntime, lspManager, options.cwd, capabilityHealth, disposables);
     const health = createPlatformRuntimeHealth(capabilityHealth);
     healthStore.set(options.cwd, health.snapshot());
     return {
         pluginRuntime,
         customAgents,
         lspManager,
+        lspClient,
         teamService,
         sandboxEnforcer,
         worktreeManager,
@@ -114,6 +115,7 @@ export async function createPlatformRuntimeContext(options) {
 async function connectWorkspaceLspServers(pluginRuntime, lspManager, cwd, capabilityHealth, disposables) {
     const rootUri = pathToFileUri(cwd);
     const openableDocuments = collectLspSeedDocuments(cwd);
+    let firstClient;
     for (const declaration of pluginRuntime.lspServers) {
         try {
             const connection = await connectDeclaredLspServer(declaration, lspManager, rootUri);
@@ -121,6 +123,7 @@ async function connectWorkspaceLspServers(pluginRuntime, lspManager, cwd, capabi
                 await connection.didOpenDocument(document);
             }
             disposables.push(connection);
+            firstClient ??= connection;
             capabilityHealth.push({
                 kind: 'lsp',
                 name: declaration.name,
@@ -138,6 +141,7 @@ async function connectWorkspaceLspServers(pluginRuntime, lspManager, cwd, capabi
             continue;
         }
     }
+    return firstClient;
 }
 async function connectWorkspaceMcpServers(pluginRuntime, capabilityHealth, disposables) {
     const tools = [];

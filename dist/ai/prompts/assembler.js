@@ -1,0 +1,136 @@
+import { readFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { spawnSync } from 'child_process';
+import { formatLoadedContext, loadAutoContext } from '../runtime/context-loader.js';
+import { formatSkillsContext } from '../skills/loader.js';
+import { getIntroSection, getSystemSection, getDoingTasksSection, getActionsSection, getUsingToolsSection, getToneAndStyleSection, getOutputEfficiencySection, getSessionGuidanceSection, } from './sections/index.js';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const API_OVERVIEW_PATH = join(__dirname, '../../../data/yzj-api-overview.md');
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function estimateTokens(text) {
+    return Math.ceil(text.length / 4);
+}
+function truncateToTokens(text, maxTokens) {
+    const maxChars = maxTokens * 4;
+    if (text.length <= maxChars)
+        return text;
+    return text.slice(0, maxChars) + '\n...(truncated)';
+}
+function loadYzjHelp() {
+    const result = spawnSync('yzj', ['--help'], { encoding: 'utf-8', timeout: 3000 });
+    if (result.error || result.status !== 0)
+        return '';
+    return result.stdout?.trim() ?? '';
+}
+// ---------------------------------------------------------------------------
+// Assembler
+// ---------------------------------------------------------------------------
+/**
+ * Assemble the system prompt from static sections (cacheable) and dynamic
+ * sections (per-turn). Mirrors Claude Code's 7-layer static prefix +
+ * dynamic suffix architecture.
+ */
+export async function assembleSystemPrompt(opts) {
+    // -----------------------------------------------------------------------
+    // STATIC PREFIX — stable across turns, cache-friendly
+    // -----------------------------------------------------------------------
+    const staticSections = [
+        getIntroSection(),
+        getSystemSection(),
+        getDoingTasksSection(),
+        getActionsSection(),
+        getUsingToolsSection(),
+        getToneAndStyleSection(),
+        getOutputEfficiencySection(),
+    ];
+    const staticText = staticSections.join('\n\n');
+    // -----------------------------------------------------------------------
+    // SYSTEM_PROMPT_DYNAMIC_BOUNDARY
+    // Everything below changes per-turn and should NOT be cached.
+    // -----------------------------------------------------------------------
+    const dynamicSections = [];
+    // 1. Session context (cwd, enterprise, devApp)
+    const ctxLines = [`当前工作目录：${opts.cwd}`];
+    if (opts.enterpriseId)
+        ctxLines.push(`登录企业 ID：${opts.enterpriseId}`);
+    if (opts.devApp)
+        ctxLines.push(`开发者应用：appKey=${opts.devApp.appKey}`);
+    dynamicSections.push(ctxLines.join('\n'));
+    // 2. Skills list
+    if (opts.skills && opts.skills.length > 0) {
+        dynamicSections.push(formatSkillsContext(opts.skills));
+    }
+    // 3. Skill install/uninstall rules
+    dynamicSections.push('When the user asks to install a skill or mentions one that is not locally available, search GitHub/ClawHub via web_search/web_fetch to locate a reliable skill Markdown file, then call install_skill.');
+    dynamicSections.push('When the user asks to uninstall a skill, call uninstall_skill. After uninstalling, re-check the current catalog.');
+    // 4. Session guidance (dynamic based on current state)
+    const guidance = getSessionGuidanceSection({
+        permissionMode: opts.permissionMode,
+        allowedToolsActive: opts.allowedToolsActive,
+        toolCount: opts.toolCount,
+        mcpInstructions: opts.mcpInstructions,
+        memories: opts.memories,
+        currentTokenUsage: opts.currentTokenUsage,
+        contextLimit: opts.contextLimit,
+    });
+    if (guidance)
+        dynamicSections.push(guidance);
+    // 5. Deferred tools
+    if (opts.deferredTools && opts.deferredTools.length > 0) {
+        const summary = opts.deferredTools
+            .slice(0, 20)
+            .map((t) => `- ${t.name}: ${t.description}`)
+            .join('\n');
+        dynamicSections.push(`Discoverable tools (use tool_search for full schema):\n${summary}`);
+    }
+    // 6. Custom agents
+    if (opts.agents && opts.agents.length > 0) {
+        const summary = opts.agents
+            .slice(0, 20)
+            .map((a) => `- @${a.name}${a.model ? ` (${a.model})` : ''}${a.allowedTools?.length ? ` tools=${a.allowedTools.join(',')}` : ''}`)
+            .join('\n');
+        dynamicSections.push(`Available agents:\n${summary}`);
+    }
+    // 7. Plugin commands
+    if (opts.pluginCommands && opts.pluginCommands.length > 0) {
+        dynamicSections.push(`Plugin commands:\n${opts.pluginCommands.slice(0, 20).map((c) => `- ${c}`).join('\n')}`);
+    }
+    // 8. LSP diagnostics
+    if (opts.lspDiagnostics) {
+        dynamicSections.push(`LSP diagnostics:\n${opts.lspDiagnostics}`);
+    }
+    // 9. Auto context (CLAUDE.md, AGENTS.md, git)
+    const autoContext = opts.autoContext ?? await loadAutoContext({
+        cwd: opts.cwd,
+        maxChars: Math.max(1_200, opts.budget * 2),
+    });
+    const autoContextSection = formatLoadedContext(autoContext);
+    if (autoContextSection) {
+        dynamicSections.push(autoContextSection);
+    }
+    // 10. Yunzhijia API overview (budget-managed)
+    const base = [staticText, ...dynamicSections].join('\n\n');
+    let remaining = opts.budget - estimateTokens(base);
+    let apiOverview = '';
+    if (existsSync(API_OVERVIEW_PATH)) {
+        apiOverview = readFileSync(API_OVERVIEW_PATH, 'utf-8');
+    }
+    const yzjHelp = loadYzjHelp();
+    if (apiOverview && remaining > 50) {
+        const reserveForYzj = yzjHelp ? 100 : 0;
+        const maxApiTokens = Math.max(0, remaining - reserveForYzj);
+        const truncated = truncateToTokens(apiOverview, maxApiTokens);
+        dynamicSections.push(truncated);
+        remaining -= estimateTokens(truncated);
+    }
+    // 11. yzj CLI help
+    if (yzjHelp && remaining > 0) {
+        dynamicSections.push(truncateToTokens(`## yzj CLI usage\n${yzjHelp}`, remaining));
+    }
+    const dynamicText = dynamicSections.filter(Boolean).join('\n\n');
+    const rendered = [staticText, dynamicText].filter(Boolean).join('\n\n');
+    return { staticText, dynamicText, rendered };
+}

@@ -19,6 +19,7 @@ export class FileMemoryStore {
         const records = await Promise.all(files.map(async (entry) => JSON.parse(await readFile(join(this.rootDir, entry), 'utf8'))));
         return records
             .filter((record) => record.scope === 'global' || record.cwd === input.cwd)
+            .filter((record) => !input.typeFilter || record.type === input.typeFilter)
             .sort((left, right) => {
             const leftMatches = Number(left.title.includes(input.query)
                 || left.summary.includes(input.query)

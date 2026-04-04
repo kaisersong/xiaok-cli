@@ -1,14 +1,27 @@
-import Anthropic from '@anthropic-ai/sdk';
 const MAX_RETRIES = 3;
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
+function isRetryableError(error) {
+    if (error instanceof Error) {
+        const status = error.status;
+        if (typeof status === 'number' && RETRYABLE_STATUS.has(status))
+            return true;
+        if (/overload|502|503|timeout|ECONNRESET|Bad gateway/i.test(error.message))
+            return true;
+    }
+    return false;
+}
+async function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 export class ClaudeAdapter {
     client;
     apiKey;
     baseUrl;
     model;
+    clientPromise = null;
     constructor(apiKey, model = 'claude-opus-4-6', baseUrl) {
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
-        this.client = new Anthropic({ apiKey, baseURL: baseUrl, maxRetries: MAX_RETRIES });
         this.model = model;
     }
     getModelName() {
@@ -17,7 +30,41 @@ export class ClaudeAdapter {
     cloneWithModel(model) {
         return new ClaudeAdapter(this.apiKey, model, this.baseUrl);
     }
+    async getClient() {
+        if (this.client) {
+            return this.client;
+        }
+        if (!this.clientPromise) {
+            this.clientPromise = import('@anthropic-ai/sdk').then(({ default: AnthropicSdk }) => {
+                const client = new AnthropicSdk({
+                    apiKey: this.apiKey,
+                    baseURL: this.baseUrl,
+                    maxRetries: MAX_RETRIES,
+                });
+                this.client = client;
+                return client;
+            });
+        }
+        return this.clientPromise;
+    }
     async *stream(messages, tools, systemPrompt, options) {
+        let attempt = 0;
+        while (true) {
+            try {
+                yield* this.streamOnce(messages, tools, systemPrompt, options);
+                return;
+            }
+            catch (error) {
+                if (!isRetryableError(error) || attempt >= MAX_RETRIES) {
+                    throw error;
+                }
+                const delayMs = Math.min(1000 * 2 ** attempt, 16000);
+                await sleep(delayMs);
+                attempt += 1;
+            }
+        }
+    }
+    async *streamOnce(messages, tools, systemPrompt, options) {
         const sourceMessages = options?.promptCache?.messages ?? messages;
         const anthropicMessages = sourceMessages.map((message) => {
             const content = [];
@@ -71,7 +118,8 @@ export class ClaudeAdapter {
             input_schema: t.inputSchema,
             cache_control: t.cache_control,
         }));
-        const stream = this.client.messages.stream({
+        const client = await this.getClient();
+        const stream = client.messages.stream({
             model: this.model,
             max_tokens: 8192,
             system: (options?.promptCache?.systemPrompt ?? systemPrompt),

@@ -157,6 +157,7 @@ export class InputReader {
     skills = [];
     onModeCycle;
     transcriptLogger;
+    statusLineProvider;
     constructor(renderer) {
         this.renderer = renderer;
     }
@@ -168,6 +169,9 @@ export class InputReader {
     }
     setTranscriptLogger(logger) {
         this.transcriptLogger = logger;
+    }
+    setStatusLineProvider(provider) {
+        this.statusLineProvider = provider;
     }
     async read(prompt) {
         if (!stdin.isTTY) {
@@ -190,8 +194,9 @@ export class InputReader {
                     const overlayLines = this.menuOpen
                         ? buildSlashMenuOverlayLines(this.menuItems, this.menuIdx, stdout.columns ?? 80, MAX_MENU_VISIBLE_ITEMS)
                         : [];
+                    const footerLines = this.statusLineProvider?.() ?? [];
                     this.renderedMenuRows = overlayLines.length;
-                    this.renderer.renderInput({ prompt, input, cursor, overlayLines });
+                    this.renderer.renderInput({ prompt, input, cursor, overlayLines, footerLines });
                     return;
                 }
                 stdout.write(`\r\x1b[K${prompt}${input}`);
@@ -567,7 +572,12 @@ export class InputReader {
                     }
                 }
             };
-            stdout.write(prompt);
+            if (this.renderer) {
+                redraw();
+            }
+            else {
+                stdout.write(prompt);
+            }
             stdin.setRawMode(true);
             stdin.resume();
             stdin.on('data', onData);

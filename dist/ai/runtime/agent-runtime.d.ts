@@ -4,6 +4,7 @@ import type { PromptSnapshot } from '../prompts/types.js';
 import { AgentRunController } from './controller.js';
 import type { AgentRuntimeEvent } from './events.js';
 import { AgentSessionState } from './session.js';
+import type { FileMemoryStore } from '../memory/store.js';
 export interface AgentRuntimeOptions {
     adapter: ModelAdapter;
     registry: ToolRegistry;
@@ -15,6 +16,7 @@ export interface AgentRuntimeOptions {
     contextLimit?: number;
     compactThreshold?: number;
     compactPlaceholder?: string;
+    memoryStore?: FileMemoryStore;
 }
 export declare class AgentRuntime {
     private adapter;
@@ -22,7 +24,7 @@ export declare class AgentRuntime {
     private readonly session;
     private readonly controller;
     private systemPrompt;
-    private readonly maxIterations;
+    private readonly maxIterations?;
     private readonly contextLimitOverride?;
     private readonly compactThresholdOverride?;
     private contextLimit;
@@ -30,6 +32,8 @@ export declare class AgentRuntime {
     private readonly compactPlaceholder;
     private supportsPromptCaching;
     private promptSnapshot?;
+    private compactRunner;
+    private readonly memoryStore?;
     constructor(options: AgentRuntimeOptions);
     setAdapter(adapter: ModelAdapter): void;
     setSystemPrompt(systemPrompt: string): void;
@@ -40,4 +44,5 @@ export declare class AgentRuntime {
     private refreshModelPolicy;
     private buildInvocationOptions;
     private buildToolExecutionContext;
+    private injectMemoryAfterCompact;
 }

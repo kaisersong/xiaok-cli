@@ -50,10 +50,12 @@ export declare class InputReader {
     private skills;
     private onModeCycle?;
     private transcriptLogger?;
+    private statusLineProvider?;
     constructor(renderer?: ReplRenderer | undefined);
     setSkills(skills: SkillMeta[]): void;
     setModeCycleHandler(handler: () => PermissionMode): void;
     setTranscriptLogger(logger: TranscriptLogger | undefined): void;
+    setStatusLineProvider(provider: (() => string[]) | undefined): void;
     read(prompt: string): Promise<string | null>;
 }
 export {};

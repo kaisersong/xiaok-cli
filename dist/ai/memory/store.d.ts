@@ -1,3 +1,4 @@
+export type MemoryType = 'user' | 'feedback' | 'project' | 'reference';
 export interface MemoryRecord {
     id: string;
     scope: 'global' | 'project';
@@ -6,6 +7,7 @@ export interface MemoryRecord {
     summary: string;
     tags: string[];
     updatedAt: number;
+    type?: MemoryType;
 }
 export declare class FileMemoryStore {
     private readonly rootDir;
@@ -14,5 +16,6 @@ export declare class FileMemoryStore {
     listRelevant(input: {
         cwd: string;
         query: string;
+        typeFilter?: MemoryType;
     }): Promise<MemoryRecord[]>;
 }

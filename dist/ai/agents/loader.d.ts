@@ -8,7 +8,7 @@ export interface CustomAgentDef {
     isolation?: 'shared' | 'worktree';
     cleanup?: 'keep' | 'delete';
     team?: string;
-    source?: 'global' | 'project';
+    source?: 'builtin' | 'global' | 'project';
 }
 export declare function parseAgentFile(name: string, raw: string): CustomAgentDef;
 export declare function loadCustomAgents(xiaokConfigDir?: string, cwd?: string, extraDirs?: string[]): Promise<CustomAgentDef[]>;

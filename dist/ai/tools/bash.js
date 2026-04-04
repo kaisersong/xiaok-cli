@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { truncateText } from './truncation.js';
+import { classifyBashCommand } from './bash-safety.js';
 const DEFAULT_TIMEOUT_MS = 30_000;
 export const bashTool = {
     permission: 'bash',
@@ -19,6 +20,10 @@ export const bashTool = {
     },
     async execute(input) {
         const { command, timeout_ms = DEFAULT_TIMEOUT_MS, workdir = process.cwd(), max_chars = 12_000 } = input;
+        const risk = classifyBashCommand(command);
+        if (risk.level === 'block') {
+            return `Error: 命令被安全策略拦截: ${risk.reason}`;
+        }
         return new Promise(resolve => {
             const shell = process.platform === 'win32' ? 'cmd' : 'sh';
             const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-c', command];

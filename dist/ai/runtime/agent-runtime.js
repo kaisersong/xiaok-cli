@@ -1,5 +1,6 @@
 import { buildPromptCacheSegments, resolveModelCapabilities, } from './model-capabilities.js';
-import { estimateTokens, shouldCompact } from './usage.js';
+import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
+import { CompactRunner } from './compact-runner.js';
 export class AgentRuntime {
     adapter;
     registry;
@@ -14,6 +15,8 @@ export class AgentRuntime {
     compactPlaceholder;
     supportsPromptCaching;
     promptSnapshot;
+    compactRunner;
+    memoryStore;
     constructor(options) {
         this.adapter = options.adapter;
         this.registry = options.registry;
@@ -21,7 +24,7 @@ export class AgentRuntime {
         this.controller = options.controller;
         this.systemPrompt = options.systemPrompt;
         this.promptSnapshot = options.promptSnapshot;
-        this.maxIterations = options.maxIterations ?? 12;
+        this.maxIterations = options.maxIterations;
         this.contextLimitOverride = options.contextLimit;
         this.compactThresholdOverride = options.compactThreshold;
         this.contextLimit = 200_000;
@@ -29,10 +32,13 @@ export class AgentRuntime {
         this.compactPlaceholder = options.compactPlaceholder ?? '[context compacted]';
         this.supportsPromptCaching = false;
         this.refreshModelPolicy();
+        this.compactRunner = new CompactRunner(this.adapter);
+        this.memoryStore = options.memoryStore;
     }
     setAdapter(adapter) {
         this.adapter = adapter;
         this.refreshModelPolicy();
+        this.compactRunner = new CompactRunner(adapter);
     }
     setSystemPrompt(systemPrompt) {
         this.systemPrompt = systemPrompt;
@@ -51,16 +57,37 @@ export class AgentRuntime {
             this.session.appendUserBlocks(input);
         }
         try {
-            for (let iteration = 0; iteration < this.maxIterations; iteration += 1) {
+            let iteration = 0;
+            while (true) {
                 this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
+                // Check if we've reached the max iterations limit (Claude Code style)
+                if (this.maxIterations !== undefined && iteration >= this.maxIterations) {
+                    onEvent({
+                        type: 'max_iterations_reached',
+                        runId: run.runId,
+                        maxIterations: this.maxIterations,
+                        currentIteration: iteration,
+                    });
+                    onEvent({ type: 'run_completed', runId: run.runId });
+                    return;
+                }
                 if (shouldCompact(estimateTokens(this.session.getMessages()), this.contextLimit, this.compactThreshold)) {
-                    const compaction = this.session.forceCompact(this.compactPlaceholder);
+                    const messages = this.session.getMessages();
+                    let summaryText;
+                    try {
+                        summaryText = await this.compactRunner.run(messages);
+                    }
+                    catch {
+                        summaryText = '';
+                    }
+                    const compaction = this.session.forceCompact(summaryText || this.compactPlaceholder);
                     onEvent({
                         type: 'compact_triggered',
                         runId: run.runId,
                         summary: compaction?.summary ?? this.compactPlaceholder,
                         compactionId: compaction?.id,
                     });
+                    await this.injectMemoryAfterCompact();
                 }
                 const assistantBlocks = [];
                 for await (const chunk of this.adapter.stream(this.session.getMessages(), this.registry.getToolDefinitions(), this.systemPrompt, this.buildInvocationOptions())) {
@@ -113,13 +140,13 @@ export class AgentRuntime {
                     toolResults.push({
                         type: 'tool_result',
                         tool_use_id: toolCall.id,
-                        content: result,
+                        content: truncateToolResult(result),
                         is_error: !ok,
                     });
                 }
                 this.session.appendUserToolResults(toolResults);
+                iteration += 1;
             }
-            throw new Error('agent runtime reached max iterations');
         }
         catch (error) {
             if (this.isAbortError(error)) {
@@ -158,8 +185,17 @@ export class AgentRuntime {
         const toolDefinitions = this.registry.getToolDefinitions()
             .slice()
             .sort((left, right) => left.name.localeCompare(right.name));
+        // Use segments for multi-block system prompt cache boundary if available.
+        const snapshot = this.promptSnapshot;
+        const systemSegments = snapshot?.segments
+            .filter((seg) => seg.key !== 'memory_summary')
+            .filter((seg) => seg.text)
+            .map((seg) => ({ text: seg.text, cacheable: seg.cacheable }));
+        const systemPromptInput = systemSegments && systemSegments.length > 1
+            ? systemSegments
+            : this.systemPrompt;
         return {
-            promptCache: buildPromptCacheSegments(this.systemPrompt, toolDefinitions, this.session.getMessages()),
+            promptCache: buildPromptCacheSegments(systemPromptInput, toolDefinitions, this.session.getMessages()),
         };
     }
     buildToolExecutionContext() {
@@ -179,5 +215,18 @@ export class AgentRuntime {
                 ? buildPromptCacheSegments(this.systemPrompt, toolDefinitions, this.session.getMessages())
                 : undefined,
         };
+    }
+    async injectMemoryAfterCompact() {
+        if (!this.memoryStore)
+            return;
+        const snapshot = this.session.getPromptSnapshot();
+        if (!snapshot?.memoryRefs?.length)
+            return;
+        const memories = await this.memoryStore.listRelevant({ cwd: snapshot.cwd, query: '' });
+        const relevant = memories.filter((m) => snapshot.memoryRefs.includes(m.id));
+        if (relevant.length === 0)
+            return;
+        const memText = relevant.map((m) => `- ${m.title}: ${m.summary}`).join('\n');
+        this.session.appendUserText(`<system-reminder>\n[Memory restored after compact]\n${memText}\n</system-reminder>`);
     }
 }

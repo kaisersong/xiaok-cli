@@ -1,9 +1,13 @@
 import { type LspEnvelope } from '../lsp/client.js';
 import { type LoadedPlugin } from './loader.js';
+import type { HookConfigOrCommand } from '../../runtime/hooks-runner.js';
 export interface PlatformPluginRuntimeState {
     plugins: LoadedPlugin[];
     skillRoots: string[];
     agentDirs: string[];
+    /** Structured hook configs (new) or legacy command strings */
+    hookConfigs: HookConfigOrCommand[];
+    /** @deprecated Use hookConfigs. Retained for backward compat. */
     hookCommands: string[];
     commandDeclarations: string[];
     mcpServers: Array<{
@@ -40,5 +44,9 @@ export declare function connectDeclaredLspServer(declaration: {
         version?: number;
         text: string;
     }) => Promise<void>;
+    goToDefinition: (uri: string, line: number, character: number) => Promise<unknown>;
+    findReferences: (uri: string, line: number, character: number) => Promise<unknown>;
+    hover: (uri: string, line: number, character: number) => Promise<unknown>;
+    documentSymbols: (uri: string) => Promise<unknown>;
     dispose: () => void;
 }>;

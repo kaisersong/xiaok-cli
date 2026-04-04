@@ -1,4 +1,5 @@
 import { ToolRegistry, buildToolList } from '../../ai/tools/index.js';
+import { createLspTool } from '../../ai/tools/lsp.js';
 import { createSubAgentTool } from '../../ai/tools/subagent.js';
 import { createHooksRunner } from '../../runtime/hooks-runner.js';
 import { executeNamedSubAgent } from '../../ai/agents/subagent-executor.js';
@@ -27,6 +28,7 @@ export function createPlatformRegistryFactory(options) {
             ...(options.workflowTools ?? []),
             ...createTeamTools(options.platform.teamService),
             ...options.platform.mcpTools,
+            createLspTool({ getLspClient: () => options.platform.lspClient, cwd }),
             createSubAgentTool({
                 source: options.source,
                 sessionId: options.sessionId,
@@ -49,7 +51,7 @@ export function createPlatformRegistryFactory(options) {
             permissionManager: options.permissionManager,
             dryRun: options.dryRun,
             hooksRunner: createHooksRunner({
-                pre: options.platform.pluginRuntime.hookCommands.map((command) => ({ command })),
+                hooks: options.platform.pluginRuntime.hookConfigs,
             }),
             onPrompt: options.onPrompt,
         }, filteredTools);

@@ -9,6 +9,9 @@ export class AgentSessionState {
         updatedAt: Date.now(),
         lineage: ['transient'],
     });
+    promptSnapshotId;
+    promptMemoryRefs;
+    promptCwd;
     getMessages() {
         return this.graph.getMessages();
     }
@@ -42,8 +45,20 @@ export class AgentSessionState {
     replaceCompactions(compactions) {
         this.graph.replaceCompactions(compactions);
     }
-    attachPromptSnapshot(promptSnapshotId, memoryRefs) {
+    attachPromptSnapshot(promptSnapshotId, memoryRefs, cwd) {
+        this.promptSnapshotId = promptSnapshotId;
+        this.promptMemoryRefs = memoryRefs;
+        this.promptCwd = cwd;
         this.graph.attachPromptSnapshot(promptSnapshotId, memoryRefs);
+    }
+    getPromptSnapshot() {
+        if (!this.promptSnapshotId)
+            return undefined;
+        return {
+            id: this.promptSnapshotId,
+            cwd: this.promptCwd ?? '',
+            memoryRefs: this.promptMemoryRefs ?? [],
+        };
     }
     recordApproval(approvalId) {
         this.graph.recordApproval(approvalId);

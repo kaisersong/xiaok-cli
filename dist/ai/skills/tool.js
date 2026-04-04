@@ -48,7 +48,25 @@ export function createSkillTool(skills, capabilityRegistry) {
         permission: 'safe',
         definition: {
             name: 'skill',
-            description: '按名称加载一个或多个 skill，并返回包含依赖与执行上下文的 skill plan。',
+            description: `Execute a skill within the main conversation
+
+When users ask you to perform tasks, check if any of the available skills match. Skills provide specialized capabilities and domain knowledge.
+
+When users reference a "slash command" or "/<something>" (e.g., "/kai-report-creator", "/kai-slide-creator"), they are referring to a skill. Use this tool to invoke it.
+
+How to invoke:
+- Use this tool with the skill name and optional arguments
+- Examples:
+  - name: "kai-report-creator" - invoke the report creator skill
+  - name: "kai-slide-creator" - invoke the slide creator skill
+  - name: "kai-html-export" - invoke the export skill
+
+Important:
+- Available skills are listed in system-reminder messages in the conversation
+- When a skill matches the user's request, this is a BLOCKING REQUIREMENT: invoke the relevant Skill tool BEFORE generating any other response about the task
+- NEVER mention a skill without actually calling this tool
+- Do not invoke a skill that is already running
+- If you see skill content already loaded in the current conversation turn, follow the instructions directly instead of calling this tool again`,
             inputSchema: {
                 type: 'object',
                 properties: {

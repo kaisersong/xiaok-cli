@@ -1,1 +1,1 @@
-export declare function deriveYZJWebSocketUrl(sendMsgUrl: string): string;
+export declare function deriveYZJWebSocketUrl(webhookUrl: string): string;

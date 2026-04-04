@@ -75,9 +75,22 @@ function addCacheControlToHistory(messages) {
         }),
     }));
 }
-export function buildPromptCacheSegments(systemPrompt, tools, messages) {
+export function buildPromptCacheSegments(systemPromptOrSegments, tools, messages) {
+    let systemPromptBlocks;
+    if (typeof systemPromptOrSegments === 'string') {
+        systemPromptBlocks = [{ type: 'text', text: systemPromptOrSegments, cache_control: { type: 'ephemeral' } }];
+    }
+    else {
+        systemPromptBlocks = systemPromptOrSegments
+            .filter((seg) => seg.text)
+            .map((seg) => ({
+            type: 'text',
+            text: seg.text,
+            ...(seg.cacheable ? { cache_control: { type: 'ephemeral' } } : {}),
+        }));
+    }
     return {
-        systemPrompt: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+        systemPrompt: systemPromptBlocks,
         tools: addCacheControlToLastTool(tools),
         messages: addCacheControlToHistory(messages),
     };

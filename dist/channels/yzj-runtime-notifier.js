@@ -1,3 +1,4 @@
+import { describeToolActivity } from '../ui/render.js';
 export class YZJRuntimeNotifier {
     transport;
     taskManager;
@@ -26,7 +27,10 @@ export class YZJRuntimeNotifier {
                     return;
                 }
                 this.taskManager.setTaskEvent(task.taskId, `执行工具 ${event.toolName}`);
-                this.enqueueProgress(sessionId, `开始 ${event.toolName}${formatToolInput(event.toolInput)}`);
+                const activity = describeToolActivity(event.toolName, event.toolInput);
+                if (activity) {
+                    this.enqueueProgress(sessionId, activity);
+                }
             }),
             hooks.on('tool_finished', (event) => {
                 const task = this.taskManager.getActiveTask(sessionId);
@@ -101,31 +105,17 @@ export class YZJRuntimeNotifier {
         if (!task || !target) {
             return;
         }
-        await this.transport.send(target, [`任务 ${task.taskId} 进展：`, ...lines].join('\n'));
+        await Promise.resolve(this.transport.send(target, [`任务 ${task.taskId} 进展：`, ...lines].join('\n'))).catch((error) => {
+            console.error(`[yzj] notification delivery failed: ${error instanceof Error ? error.message : String(error)}`);
+        });
     }
     async sendForSession(sessionId, text) {
         const target = this.taskManager.getActiveReplyTarget(sessionId);
         if (!target) {
             return;
         }
-        await this.transport.send(target, text);
+        await Promise.resolve(this.transport.send(target, text)).catch((error) => {
+            console.error(`[yzj] session message delivery failed: ${error instanceof Error ? error.message : String(error)}`);
+        });
     }
-}
-function formatToolInput(input) {
-    if (typeof input.command === 'string') {
-        return ` (${truncate(input.command, 60)})`;
-    }
-    if (typeof input.file_path === 'string') {
-        return ` (${truncate(input.file_path, 60)})`;
-    }
-    if (typeof input.path === 'string') {
-        return ` (${truncate(input.path, 60)})`;
-    }
-    return '';
-}
-function truncate(value, maxLength) {
-    if (value.length <= maxLength) {
-        return value;
-    }
-    return `${value.slice(0, maxLength)}...`;
 }

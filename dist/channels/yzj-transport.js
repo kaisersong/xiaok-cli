@@ -1,3 +1,31 @@
+export class YZJTransportError extends Error {
+    status;
+    retryable;
+    constructor(message, status, retryable) {
+        super(message);
+        this.status = status;
+        this.retryable = retryable;
+        this.name = 'YZJTransportError';
+    }
+}
+function classifyHttpError(status, body) {
+    switch (status) {
+        case 401:
+            return new YZJTransportError(`认证失败 (401): token 无效或已过期，请检查 webhookUrl 配置。${body}`, 401, false);
+        case 403:
+            return new YZJTransportError(`权限不足 (403): 当前应用无此 API 调用权限。${body}`, 403, false);
+        case 429:
+            return new YZJTransportError(`请求频率超限 (429): 请稍后重试。${body}`, 429, true);
+        default:
+            if (status >= 500) {
+                return new YZJTransportError(`服务端错误 (${status}): ${body}`, status, true);
+            }
+            return new YZJTransportError(`YZJ send failed: HTTP ${status} ${body}`, status, false);
+    }
+}
+async function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 export class YZJTransport {
     options;
     constructor(options) {
@@ -10,6 +38,7 @@ export class YZJTransport {
         if (message.channel !== 'yzj') {
             throw new Error(`YZJ transport cannot deliver channel ${message.channel}`);
         }
+        const maxRetries = this.options.maxRetries ?? 3;
         const startAt = Date.now();
         const operatorName = typeof message.target.metadata?.operatorName === 'string'
             ? message.target.metadata.operatorName
@@ -42,16 +71,25 @@ export class YZJTransport {
                 payload.paramType = 3;
             }
             const chunkStartedAt = Date.now();
-            const response = await fetch(this.options.sendMsgUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(payload),
-            });
-            if (!response.ok) {
+            let lastError;
+            for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+                const response = await fetch(this.options.webhookUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (response.ok) {
+                    lastError = undefined;
+                    break;
+                }
                 const body = await response.text();
-                throw new Error(`YZJ send failed: HTTP ${response.status} ${body}`);
+                lastError = classifyHttpError(response.status, body);
+                if (!lastError.retryable || attempt >= maxRetries) {
+                    throw lastError;
+                }
+                const delayMs = Math.min(1000 * 2 ** attempt, 16000);
+                this.options.logger?.info?.(`[yzj] retryable error ${response.status}, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+                await sleep(delayMs);
             }
             this.options.logger?.info?.(`[yzj] outbound delivered chunk ${index + 1}/${chunks.length} chars=${chunk.length} in ${Date.now() - chunkStartedAt}ms`);
         }

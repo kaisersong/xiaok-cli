@@ -17,6 +17,8 @@ export declare class ToolRegistry {
     private deferredTools;
     private permissionManager;
     private options;
+    private allowedToolsFilter;
+    setAllowedTools(names: string[] | null): void;
     constructor(options: RegistryOptions, tools?: Tool[]);
     getToolDefinitions(): ToolDefinition[];
     registerTool(tool: Tool): void;
@@ -24,7 +26,7 @@ export declare class ToolRegistry {
     registerDeferredTools(definitions: ToolDefinition[]): void;
     searchDeferredTools(query: string): ToolDefinition[];
     searchTools(query: string): ToolDefinition[];
-    executeTool(name: string, input: Record<string, unknown>, context?: ToolExecutionContext): Promise<string>;
+    executeTool(name: string, rawInput: Record<string, unknown>, context?: ToolExecutionContext): Promise<string>;
     /** 用户输入 y! 后，切换当前 registry 为 auto 模式 */
     enableAutoMode(): void;
 }

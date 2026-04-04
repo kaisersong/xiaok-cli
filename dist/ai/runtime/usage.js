@@ -106,3 +106,11 @@ export function compactMessages(messages, placeholder = '[context compacted]', k
         summary,
     };
 }
+const DEFAULT_TOOL_RESULT_LIMIT = 8000;
+export function truncateToolResult(content, limit = DEFAULT_TOOL_RESULT_LIMIT) {
+    if (content.length <= limit)
+        return content;
+    const kept = content.slice(0, limit);
+    const omitted = content.length - limit;
+    return `${kept}\n...[truncated ${omitted} chars]`;
+}

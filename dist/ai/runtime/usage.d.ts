@@ -17,3 +17,4 @@ export declare function compactMessages(messages: Message[], placeholder?: strin
     messages: Message[];
     summary: CompactionSummary;
 };
+export declare function truncateToolResult(content: string, limit?: number): string;

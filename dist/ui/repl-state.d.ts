@@ -2,6 +2,7 @@ export interface ReplInputFrame {
     prompt: string;
     input: string;
     overlayLines: string[];
+    footerLines?: string[];
     cursor: number;
 }
 export declare const MAX_MENU_DESCRIPTION_WIDTH = 24;

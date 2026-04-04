@@ -15,10 +15,20 @@ import { createWorktreeManager, type WorktreeManager } from '../worktrees/manage
 import { CapabilityRegistry } from './capability-registry.js';
 import { FileCapabilityHealthStore } from './health-store.js';
 
+export interface LspClientLike {
+  didOpenDocument(document: { uri: string; languageId: string; version?: number; text: string }): Promise<void>;
+  goToDefinition(uri: string, line: number, character: number): Promise<unknown>;
+  findReferences(uri: string, line: number, character: number): Promise<unknown>;
+  hover(uri: string, line: number, character: number): Promise<unknown>;
+  documentSymbols(uri: string): Promise<unknown>;
+  dispose(): void;
+}
+
 export interface PlatformRuntimeContext {
   pluginRuntime: PlatformPluginRuntimeState;
   customAgents: CustomAgentDef[];
   lspManager: ReturnType<typeof createLspManager>;
+  lspClient: LspClientLike | undefined;
   teamService: TeamService;
   sandboxEnforcer: ReturnType<typeof createSandboxEnforcer>;
   worktreeManager: WorktreeManager;
@@ -103,7 +113,7 @@ export async function createPlatformRuntimeContext(
       inputSchema: tool.definition.inputSchema,
     });
   }
-  await connectWorkspaceLspServers(pluginRuntime, lspManager, options.cwd, capabilityHealth, disposables);
+  const lspClient = await connectWorkspaceLspServers(pluginRuntime, lspManager, options.cwd, capabilityHealth, disposables);
   const health = createPlatformRuntimeHealth(capabilityHealth);
   healthStore.set(options.cwd, health.snapshot());
 
@@ -111,6 +121,7 @@ export async function createPlatformRuntimeContext(
     pluginRuntime,
     customAgents,
     lspManager,
+    lspClient,
     teamService,
     sandboxEnforcer,
     worktreeManager,
@@ -165,9 +176,10 @@ async function connectWorkspaceLspServers(
   cwd: string,
   capabilityHealth: PlatformCapabilityHealth[],
   disposables: Array<{ dispose(): void }>,
-): Promise<void> {
+): Promise<LspClientLike | undefined> {
   const rootUri = pathToFileUri(cwd);
   const openableDocuments = collectLspSeedDocuments(cwd);
+  let firstClient: LspClientLike | undefined;
 
   for (const declaration of pluginRuntime.lspServers) {
     try {
@@ -176,6 +188,7 @@ async function connectWorkspaceLspServers(
         await connection.didOpenDocument(document);
       }
       disposables.push(connection);
+      firstClient ??= connection;
       capabilityHealth.push({
         kind: 'lsp',
         name: declaration.name,
@@ -192,6 +205,7 @@ async function connectWorkspaceLspServers(
       continue;
     }
   }
+  return firstClient;
 }
 
 async function connectWorkspaceMcpServers(

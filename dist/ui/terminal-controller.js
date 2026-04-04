@@ -19,6 +19,7 @@ export function createTerminalController({ prompt }) {
         prompt,
         transcript: [],
         input: inputModel.getState(),
+        footerLines: [],
         overlay: null,
         modal: null,
         focusTarget: 'input',
@@ -67,6 +68,12 @@ export function createTerminalController({ prompt }) {
         setSlashCommands(commands) {
             slashCommands = commands;
             syncSlashOverlay();
+        },
+        setFooterLines(lines) {
+            state = {
+                ...state,
+                footerLines: lines,
+            };
         },
         setOverlayLines(lines) {
             state = {

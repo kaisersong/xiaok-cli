@@ -18,6 +18,7 @@
 - **类型化记忆**：支持 `user`/`feedback`/`project`/`reference` 类型分类与过滤检索
 - **增强 Hook 系统**：PreToolUse hook 支持 updatedInput / preventContinuation / additionalContext
 - **平台运行时**：MCP/LSP 插件接入、worktree 隔离、后台 subagent 与持久状态
+- **LSP 工具**：`lsp` 内置工具提供跳转定义、查找引用、悬停文档、文档符号列表四种代码智能操作
 
 ## 快速上手
 
@@ -56,7 +57,7 @@ src/
     memory/        类型化文件记忆存储
     runtime/       agent runtime、compact runner、session graph
     skills/        skill 加载器、规划器、工具集成
-    tools/         read/write/edit/bash（含安全）/grep/glob/web/skills/tasks
+    tools/         read/write/edit/bash（含安全）/grep/glob/web/skills/tasks/lsp
     permissions/   三层权限策略引擎
   auth/            认证与 token 存储
   channels/        渠道网关、任务/审批/会话抽象
@@ -133,6 +134,13 @@ npm run dev -- --help  # 从源码运行
 ```
 
 ## 更新日志
+
+### v0.4.2 — LSP 代码智能工具
+- 新增内置 `lsp` 工具：跳转定义、查找引用、悬停文档、文档符号列表
+- LSP 客户端扩展完整查询方法（`goToDefinition`/`findReferences`/`hover`/`documentSymbols`）
+- `PlatformRuntimeContext` 暴露 `lspClient` 供工具使用
+- `registry-factory` 在 LSP 服务器连接时自动注册 `lsp` 工具
+- 修复云之家通知器已有类型错误（`void | Promise<void>` catch）
 
 ### v0.4.1 — 云之家网关加固
 - HTTP 错误码细分：`YZJTransportError` 区分 401/403/429/5xx，带产品化诊断文本

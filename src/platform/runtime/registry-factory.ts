@@ -1,5 +1,6 @@
 import type { ModelAdapter, Tool } from '../../types.js';
 import { ToolRegistry, buildToolList } from '../../ai/tools/index.js';
+import { createLspTool } from '../../ai/tools/lsp.js';
 import { createSubAgentTool } from '../../ai/tools/subagent.js';
 import { createHooksRunner } from '../../runtime/hooks-runner.js';
 import { executeNamedSubAgent } from '../../ai/agents/subagent-executor.js';
@@ -55,6 +56,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
       ...(options.workflowTools ?? []),
       ...createTeamTools(options.platform.teamService),
       ...options.platform.mcpTools,
+      createLspTool({ getLspClient: () => options.platform.lspClient, cwd }),
       createSubAgentTool({
         source: options.source,
         sessionId: options.sessionId,

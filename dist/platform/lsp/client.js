@@ -67,6 +67,30 @@ export function createLspClient(transport, manager) {
                 },
             });
         },
+        async goToDefinition(uri, line, character) {
+            return request('textDocument/definition', {
+                textDocument: { uri },
+                position: { line, character },
+            });
+        },
+        async findReferences(uri, line, character, includeDeclaration = true) {
+            return request('textDocument/references', {
+                textDocument: { uri },
+                position: { line, character },
+                context: { includeDeclaration },
+            });
+        },
+        async hover(uri, line, character) {
+            return request('textDocument/hover', {
+                textDocument: { uri },
+                position: { line, character },
+            });
+        },
+        async documentSymbols(uri) {
+            return request('textDocument/documentSymbol', {
+                textDocument: { uri },
+            });
+        },
         dispose() {
             unsubscribe();
             transport.dispose?.();

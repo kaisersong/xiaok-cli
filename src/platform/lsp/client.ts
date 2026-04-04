@@ -101,6 +101,34 @@ export function createLspClient(transport: LspTransport, manager: LspManagerLike
       });
     },
 
+    async goToDefinition(uri: string, line: number, character: number): Promise<unknown> {
+      return request('textDocument/definition', {
+        textDocument: { uri },
+        position: { line, character },
+      });
+    },
+
+    async findReferences(uri: string, line: number, character: number, includeDeclaration = true): Promise<unknown> {
+      return request('textDocument/references', {
+        textDocument: { uri },
+        position: { line, character },
+        context: { includeDeclaration },
+      });
+    },
+
+    async hover(uri: string, line: number, character: number): Promise<unknown> {
+      return request('textDocument/hover', {
+        textDocument: { uri },
+        position: { line, character },
+      });
+    },
+
+    async documentSymbols(uri: string): Promise<unknown> {
+      return request('textDocument/documentSymbol', {
+        textDocument: { uri },
+      });
+    },
+
     dispose(): void {
       unsubscribe();
       transport.dispose?.();

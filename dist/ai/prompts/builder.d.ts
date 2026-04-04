@@ -1,7 +1,7 @@
 import { FileMemoryStore } from '../memory/store.js';
-import { type ContextOptions } from '../context/yzj-context.js';
+import { type AssemblerOptions } from './assembler.js';
 import type { PromptSnapshot } from './types.js';
-export interface PromptBuilderInput extends ContextOptions {
+export interface PromptBuilderInput extends AssemblerOptions {
     channel: 'chat' | 'yzj';
 }
 export declare class PromptBuilder {

@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
 import type { YZJChannelConfig } from '../types.js';
 interface YZJServeOptions {
-    sendMsgUrl?: string;
+    webhookUrl?: string;
     inboundMode?: 'webhook' | 'websocket';
     webhookPath?: string;
     webhookPort?: string;

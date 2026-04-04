@@ -30,6 +30,7 @@ export class ReplRenderer {
         this.controller.closeModal();
         this.controller.setPrompt(frame.prompt);
         this.controller.replaceInput(frame.input, frame.cursor);
+        this.controller.setFooterLines(frame.footerLines ?? []);
         this.controller.setOverlayLines(frame.overlayLines);
         this.render();
     }
@@ -56,6 +57,7 @@ export class ReplRenderer {
     clearPromptLine() {
         this.controller.setPrompt('');
         this.controller.replaceInput('', 0);
+        this.controller.setFooterLines([]);
         this.controller.clearOverlay();
         this.controller.closeModal();
         this.render();

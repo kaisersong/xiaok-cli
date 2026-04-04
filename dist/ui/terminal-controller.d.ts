@@ -10,6 +10,7 @@ export interface TerminalController {
     setPrompt(prompt: string): void;
     setTerminalSize(columns: number, rows: number): void;
     setSlashCommands(commands: SlashOverlayItem[]): void;
+    setFooterLines(lines: string[]): void;
     setOverlayLines(lines: string[]): void;
     insertText(text: string): void;
     moveCursorLeft(): void;

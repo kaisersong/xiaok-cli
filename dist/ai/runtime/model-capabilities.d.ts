@@ -31,4 +31,7 @@ export interface CapabilityAwareAdapter extends ModelAdapter {
 export declare const DEFAULT_MODEL_CAPABILITIES: ModelCapabilities;
 export declare function resolveModelCapabilities(model: string): ModelCapabilities;
 export declare function resolveModelCapabilities(adapter: ModelAdapter): ModelCapabilities;
-export declare function buildPromptCacheSegments(systemPrompt: string, tools: ToolDefinition[], messages: Message[]): PromptCacheSegments;
+export declare function buildPromptCacheSegments(systemPromptOrSegments: string | Array<{
+    text: string;
+    cacheable: boolean;
+}>, tools: ToolDefinition[], messages: Message[]): PromptCacheSegments;

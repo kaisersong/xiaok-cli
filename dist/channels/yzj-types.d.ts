@@ -20,7 +20,7 @@ export interface YZJResponse {
     error?: string;
 }
 export interface YZJResolvedConfig {
-    sendMsgUrl: string;
+    webhookUrl: string;
     inboundMode: YZJInboundMode;
     webhookPath: string;
     webhookPort: number;

@@ -23,9 +23,9 @@ export function buildTerminalFrame(state) {
     const modalLines = buildModalLines(state);
     const promptLine = `${state.prompt}${state.input.value}`;
     const overlayLines = buildOverlayLines(state);
-    const lines = modalLines.length > 0
-        ? [promptLine, ...modalLines]
-        : [promptLine, ...overlayLines];
+    const shouldHideFooter = modalLines.length > 0 || overlayLines.length > 0;
+    const footerLines = shouldHideFooter ? [] : (state.footerLines ?? []);
+    const lines = [promptLine, ...footerLines, ...(modalLines.length > 0 ? modalLines : overlayLines)];
     const promptLineIndex = 0;
     const cursorColumn = getDisplayWidth(state.prompt) + offsetToDisplayColumn(state.input.value, state.input.cursorOffset);
     return {

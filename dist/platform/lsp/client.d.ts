@@ -26,5 +26,9 @@ export declare function createLspClient(transport: LspTransport, manager: LspMan
         version?: number;
         text: string;
     }): Promise<void>;
+    goToDefinition(uri: string, line: number, character: number): Promise<unknown>;
+    findReferences(uri: string, line: number, character: number, includeDeclaration?: boolean): Promise<unknown>;
+    hover(uri: string, line: number, character: number): Promise<unknown>;
+    documentSymbols(uri: string): Promise<unknown>;
     dispose(): void;
 };

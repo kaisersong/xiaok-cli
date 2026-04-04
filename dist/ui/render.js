@@ -1,7 +1,7 @@
 // ANSI color helpers — no dependencies
 // Respects NO_COLOR (https://no-color.org) and --no-color flag
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { basename, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getToolActivityLabel } from './locale.js';
 import { getDisplayWidth } from './display-width.js';
@@ -49,6 +49,7 @@ export const dimCyan = (s) => colorsEnabled ? `\x1b[2;36m${s}\x1b[0m` : s;
 export const bgGray = (s) => colorsEnabled ? `\x1b[48;5;240m${s}\x1b[0m` : s;
 export const bgDarkGray = (s) => colorsEnabled ? `\x1b[48;5;235m${s}\x1b[0m` : s;
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const RAIL_INDENT = "  ";
 export function startSpinner(message) {
     if (!colorsEnabled) {
         process.stderr.write(`  ${message}\n`);
@@ -64,15 +65,15 @@ export function startSpinner(message) {
     };
 }
 // ── Box drawing ──
-function boxHeader(label, detail) {
+export function formatRailHeader(label, detail) {
     const detailStr = detail ? ` ${dim(detail)}` : "";
-    return `  ${dimCyan("╭─")} ${boldCyan(label)}${detailStr}`;
+    return `${RAIL_INDENT}${dimCyan("╭─")} ${boldCyan(label)}${detailStr}`;
 }
-function boxLine(content) {
-    return `  ${dimCyan("│")} ${content}`;
+export function formatRailLine(content) {
+    return `${RAIL_INDENT}${dimCyan("│")} ${content}`;
 }
-function boxFooter() {
-    return `  ${dimCyan("╰─")}`;
+export function formatRailFooter() {
+    return `${RAIL_INDENT}${dimCyan("╰─")}`;
 }
 export function renderError(message) {
     process.stderr.write(`\n${red("Error:")} ${message}\n`);
@@ -87,14 +88,12 @@ export function renderWelcomeScreen(opts) {
         const rightPart = right.padEnd(rightWidth, " ");
         return dim("│") + leftPart + dim("│") + rightPart + dim("│");
     };
-    // 从文件读取 logo
     let logo = [];
     if (existsSync(LOGO_PATH)) {
         const logoContent = readFileSync(LOGO_PATH, 'utf-8');
         logo = logoContent.split('\n').filter(line => line.length > 0);
     }
     else {
-        // 如果文件不存在，使用默认 logo
         logo = [
             "  .-------.",
             " /         \\",
@@ -117,14 +116,12 @@ export function renderWelcomeScreen(opts) {
     lineCount++;
     console.log(dim("╭") + dim("─".repeat(leftWidth)) + dim("┬") + dim("─".repeat(rightWidth)) + dim("╮"));
     lineCount++;
-    // Welcome
     const welcome = "欢迎使用 xiaok code!";
     const welcomeWidth = getDisplayWidth(welcome);
     const welcomePad = Math.floor((leftWidth - welcomeWidth) / 2);
     const welcomeLeft = " ".repeat(welcomePad) + boldCyan(welcome) + " ".repeat(leftWidth - welcomePad - welcomeWidth);
     console.log(line(welcomeLeft, ""));
     lineCount++;
-    // Logo and tips
     for (let i = 0; i < logo.length; i++) {
         const logoPad = Math.floor((leftWidth - logo[i].length) / 2);
         const logoLine = " ".repeat(logoPad) + cyan(logo[i]) + " ".repeat(leftWidth - logoPad - logo[i].length);
@@ -136,7 +133,6 @@ export function renderWelcomeScreen(opts) {
     }
     console.log(dim("├") + dim("─".repeat(leftWidth)) + dim("┼") + dim("─".repeat(rightWidth)) + dim("┤"));
     lineCount++;
-    // Bottom info
     const modelInfo = `${opts.model} · ${opts.mode}`;
     const sessionInfo = `Session: ${opts.sessionId}`;
     const sessionWidth = getDisplayWidth(sessionInfo);
@@ -178,6 +174,17 @@ function truncatePlain(text, maxWidth) {
         return '.'.repeat(maxWidth);
     return `${text.slice(0, maxWidth - 3)}...`;
 }
+const LOW_SIGNAL_TOOL_NAMES = new Set([
+    'glob',
+    'grep',
+    'read',
+    'skill',
+    'task_create',
+    'task_get',
+    'task_list',
+    'task_update',
+    'tool_search',
+]);
 function extractToolActivityTarget(input) {
     if (typeof input.command === 'string')
         return singleLine(input.command);
@@ -194,18 +201,89 @@ function extractToolActivityTarget(input) {
     return '';
 }
 export function formatSubmittedInput(text) {
-    return `${bgDarkGray(` ${text} `)}\n`;
+    const lines = text.split(/\r?\n/);
+    return [
+        `${RAIL_INDENT}${boldCyan('You')}`,
+        ...lines.map((line) => `${RAIL_INDENT}${bgDarkGray(` ${line} `)}`),
+    ].join('\n') + '\n';
+}
+export function formatProgressNote(text) {
+    return `  ${dim('·')} ${dim(text)}\n`;
 }
 export function renderUserInput(text) {
     process.stdout.write(formatSubmittedInput(text));
 }
-export function formatToolActivity(toolName, input, maxWidth = process.stdout.columns ?? 80, locale = 'zh-CN') {
-    const prefix = `• ${getToolActivityLabel(toolName, locale)}`;
+function localizeSummary(locale, zh, en) {
+    return locale === 'zh-CN' ? zh : en;
+}
+function summarizePath(input, verbose) {
     const target = extractToolActivityTarget(input);
     if (!target)
-        return prefix;
+        return '';
+    return verbose ? target : basename(target) || target;
+}
+function summarizeBashCommand(command, locale, verbose) {
+    const normalized = singleLine(command);
+    if (!normalized)
+        return '';
+    if (verbose)
+        return normalized;
+    const lower = normalized.toLowerCase();
+    const inspectionPatterns = [
+        /^(ls|find|rg|grep|cat|sed|head|tail|pwd)\b/,
+        /^git (status|diff|log|show)\b/,
+        /^python\d?(?:\s+--version|\s+-m\s+pip\s+--version)\b/,
+    ];
+    if (inspectionPatterns.some((pattern) => pattern.test(lower))) {
+        return '';
+    }
+    if (lower.includes('export-pptx.py') || /\.pptx\b/.test(lower)) {
+        return localizeSummary(locale, '导出 PPT', 'Export PPT');
+    }
+    if (/^(npm|pnpm|yarn|bun)\s+(test|run test)/.test(lower) || /^(vitest|pytest|go test|cargo test)\b/.test(lower)) {
+        return localizeSummary(locale, '运行测试', 'Run tests');
+    }
+    if (/^git (commit|push|merge|rebase|checkout|switch|tag)\b/.test(lower)) {
+        return localizeSummary(locale, '执行 Git 操作', 'Run Git operation');
+    }
+    if (/^(npm|pnpm|yarn|bun)\s+(install|add)\b/.test(lower) || /^pip(?:3)?\s+install\b/.test(lower)) {
+        return localizeSummary(locale, '安装依赖', 'Install dependencies');
+    }
+    if (/^(python\d?|node|tsx|bun|ruby|perl|sh|bash)\b/.test(lower) || /<<['"]?[a-z_]+['"]?/i.test(normalized) || /cat\s+>/.test(lower)) {
+        return '';
+    }
+    return localizeSummary(locale, '执行本地命令', 'Run local command');
+}
+export function describeToolActivity(toolName, input, locale = 'zh-CN', verbose = isVerbose()) {
+    if (!verbose && LOW_SIGNAL_TOOL_NAMES.has(toolName)) {
+        return '';
+    }
+    const label = getToolActivityLabel(toolName, locale);
+    let detail = '';
+    if (toolName === 'bash') {
+        const command = typeof input.command === 'string' ? input.command : '';
+        detail = summarizeBashCommand(command, locale, verbose);
+        if (!detail)
+            return '';
+    }
+    else if (toolName === 'write' || toolName === 'edit') {
+        detail = summarizePath(input, verbose);
+    }
+    else if (toolName === 'install_skill' || toolName === 'uninstall_skill') {
+        detail = summarizePath(input, verbose) || (typeof input.source === 'string' ? singleLine(input.source) : '');
+    }
+    else {
+        detail = extractToolActivityTarget(input);
+    }
+    return detail ? `${label} ${detail}` : label;
+}
+export function formatToolActivity(toolName, input, maxWidth = process.stdout.columns ?? 80, locale = 'zh-CN') {
+    const description = describeToolActivity(toolName, input, locale);
+    if (!description)
+        return '';
+    const prefix = '•';
     const available = Math.max(maxWidth - prefix.length - 1, 0);
-    const truncated = truncatePlain(target, available);
+    const truncated = truncatePlain(description, available);
     return truncated ? `${prefix} ${truncated}` : prefix;
 }
 export function renderBanner(opts) {

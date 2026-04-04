@@ -15,5 +15,12 @@ export interface ContextOptions {
     lspDiagnostics?: string;
     autoContext?: LoadedContext;
 }
+/**
+ * @deprecated Use assembleSystemPrompt from '../prompts/assembler.js' directly.
+ * Kept for backward compatibility with existing callers.
+ */
 export declare function renderPromptSections(opts: ContextOptions): Promise<string[]>;
+/**
+ * @deprecated Use assembleSystemPrompt from '../prompts/assembler.js' directly.
+ */
 export declare function buildSystemPrompt(opts: ContextOptions): Promise<string>;

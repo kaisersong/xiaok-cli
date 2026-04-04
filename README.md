@@ -15,6 +15,7 @@ An AI coding CLI for Kingdee Cosmic (苍穹) and Yunzhijia (云之家) developer
 - **Built-in agents**: Explore (read-only), Plan (architecture-only), and Verification (adversarial testing) specialized agents
 - **Typed memory**: Persistent memory store with `user`/`feedback`/`project`/`reference` type classification
 - **Platform runtime**: MCP/LSP plugin wiring, worktree isolation, background subagent execution, and durable channel state
+- **LSP tool**: Built-in `lsp` tool for code intelligence — go to definition, find references, hover docs, and document symbols
 
 ## Quick Start
 
@@ -54,7 +55,7 @@ src/
     memory/        typed file-based memory store
     runtime/       agent runtime, compact runner, session graph, model capabilities
     skills/        skill loader, planner, tool integration
-    tools/         read, write, edit, bash (with safety), grep, glob, web, skills, tasks
+    tools/         read, write, edit, bash (with safety), grep, glob, web, skills, tasks, lsp
     permissions/   3-layer permission policy engine
   auth/            auth and token storage
   channels/        channel gateways, task/approval/session abstractions
@@ -126,6 +127,19 @@ Command safety classifier (`src/ai/tools/bash-safety.ts`) with three risk levels
 ### Tool Input Validation
 
 Lightweight JSON Schema validator runs before every tool call — checks required fields and type constraints. Unknown fields are allowed (model may pass extra params).
+
+### LSP Tool
+
+The `lsp` tool provides code intelligence backed by a language server. Configure LSP servers in `.xiaok/plugins/` and the tool becomes available automatically.
+
+| Operation | Description |
+|-----------|-------------|
+| `goToDefinition` | Jump to where a symbol is defined |
+| `findReferences` | List all references to a symbol |
+| `hover` | Show documentation / type info at a position |
+| `documentSymbol` | List all symbols in a file |
+
+All operations take `file_path`, `line`, and `character` (1-based). The tool converts to LSP 0-based coordinates internally.
 
 ### Built-in Agents
 
@@ -250,6 +264,14 @@ npm run dev -- --help  # Run from source
 ```
 
 ## Changelog
+
+### v0.4.2 — LSP Code Intelligence Tool
+- `lsp` built-in tool: go-to-definition, find-references, hover, document-symbols
+- LSP client extended with full query methods (`goToDefinition`, `findReferences`, `hover`, `documentSymbols`)
+- `PlatformRuntimeContext` exposes `lspClient` for use by tools
+- `registry-factory` registers `lsp` tool automatically when an LSP server is connected
+- Fixed pre-existing `yzj-runtime-notifier` type errors (`void | Promise<void>` catch)
+- 34 tests covering LSP tool operations, location formatting, and error paths
 
 ### v0.4.1 — Yunzhijia Transport Hardening
 - HTTP error classification: `YZJTransportError` with separate handling for 401/403/429/5xx

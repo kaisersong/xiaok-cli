@@ -1,13 +1,16 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
 import type { ModelInvocationOptions } from '../runtime/model-capabilities.js';
 export declare class ClaudeAdapter implements ModelAdapter {
-    client: Anthropic;
+    client?: Anthropic;
     private readonly apiKey;
     private readonly baseUrl?;
     private model;
+    private clientPromise;
     constructor(apiKey: string, model?: string, baseUrl?: string);
     getModelName(): string;
     cloneWithModel(model: string): ClaudeAdapter;
+    private getClient;
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: ModelInvocationOptions): AsyncIterable<StreamChunk>;
+    private streamOnce;
 }

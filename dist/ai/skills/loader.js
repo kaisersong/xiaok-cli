@@ -33,9 +33,28 @@ function parseFrontmatter(raw) {
     const fields = new Map();
     const listFields = new Map();
     let currentListKey = null;
+    // For YAML block scalars (>-, |-, >, |)
+    let blockScalarKey = null;
+    let blockScalarLines = [];
+    const flushBlockScalar = () => {
+        if (blockScalarKey !== null) {
+            fields.set(blockScalarKey, blockScalarLines.join(' ').trim().replace(/\s+/g, ' '));
+            blockScalarKey = null;
+            blockScalarLines = [];
+        }
+    };
     for (const rawLine of lines) {
         const line = rawLine.replace(/\r$/, '');
         const trimmed = line.trim();
+        // Continuation of a block scalar (indented line)
+        if (blockScalarKey !== null) {
+            if (line.startsWith('  ') || line.startsWith('\t')) {
+                blockScalarLines.push(trimmed);
+                continue;
+            }
+            // Non-indented line ends the block scalar
+            flushBlockScalar();
+        }
         if (!trimmed) {
             currentListKey = null;
             continue;
@@ -55,6 +74,12 @@ function parseFrontmatter(raw) {
         const value = line.slice(colonIdx + 1).trim();
         if (!key)
             continue;
+        // YAML block scalar indicators: >-, |-, >, |
+        if (value === '>-' || value === '|-' || value === '>' || value === '|') {
+            blockScalarKey = key;
+            blockScalarLines = [];
+            continue;
+        }
         if (value.length === 0) {
             currentListKey = key;
             listFields.set(key, listFields.get(key) ?? []);
@@ -62,6 +87,7 @@ function parseFrontmatter(raw) {
         }
         fields.set(key, stripWrappingQuotes(value));
     }
+    flushBlockScalar();
     const name = fields.get('name');
     const description = fields.get('description');
     if (!name || !description) {
@@ -196,30 +222,25 @@ export function createSkillCatalog(xiaokConfigDir = join(homedir(), '.xiaok'), c
         },
     };
 }
+const SKILL_DESCRIPTION_MAX_CHARS = 250;
+function formatSkillDescription(skill) {
+    const text = skill.whenToUse
+        ? `${skill.description} - ${skill.whenToUse}`
+        : skill.description;
+    return text.length > SKILL_DESCRIPTION_MAX_CHARS
+        ? text.slice(0, SKILL_DESCRIPTION_MAX_CHARS - 1) + '…'
+        : text;
+}
+export function formatSkillEntry(skill) {
+    return `- ${skill.name}: ${formatSkillDescription(skill)}`;
+}
 export function formatSkillsContext(skills) {
     if (skills.length === 0)
         return '';
-    const builtinSkills = skills.filter((skill) => skill.tier === 'system');
-    const customSkills = skills.filter((skill) => skill.tier !== 'system');
-    const render = (skill) => {
-        const hints = [];
-        if ((skill.executionContext ?? 'inline') === 'fork')
-            hints.push('fork');
-        if (skill.agent)
-            hints.push(`agent=${skill.agent}`);
-        if ((skill.dependsOn ?? []).length > 0)
-            hints.push(`deps=${(skill.dependsOn ?? []).join(',')}`);
-        return `- /${skill.name}: ${skill.description}${hints.length > 0 ? ` [${hints.join(' ')}]` : ''}`;
-    };
-    const sections = [];
-    if (builtinSkills.length > 0) {
-        sections.push(`## 默认 Skills\n\n${builtinSkills.map(render).join('\n')}`);
-    }
-    if (customSkills.length > 0) {
-        sections.push(`## 扩展 Skills\n\n${customSkills.map(render).join('\n')}`);
-    }
-    sections.push('通过 /skill-name 或 skill 工具调用方式使用。多 skills 场景应先解析依赖并按计划执行。');
-    return sections.join('\n\n');
+    return skills.map(formatSkillEntry).join('\n');
+}
+export function toSkillEntries(skills) {
+    return skills.map((skill) => ({ name: skill.name, listing: formatSkillEntry(skill) }));
 }
 export function parseSlashCommand(input) {
     const trimmed = input.trim();

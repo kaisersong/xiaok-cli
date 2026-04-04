@@ -1,5 +1,6 @@
 import { PermissionManager } from '../permissions/manager.js';
 import { formatErrorText } from '../../utils/ui.js';
+import { validateToolInput } from './validate-input.js';
 import { createReadTool } from './read.js';
 import { createWriteTool } from './write.js';
 import { createEditTool } from './edit.js';
@@ -34,6 +35,10 @@ export class ToolRegistry {
     deferredTools = new Map();
     permissionManager;
     options;
+    allowedToolsFilter = null;
+    setAllowedTools(names) {
+        this.allowedToolsFilter = names ? new Set(names) : null;
+    }
     constructor(options, tools) {
         const mode = options.permissionManager
             ? options.permissionManager.getMode()
@@ -137,10 +142,18 @@ export class ToolRegistry {
         }
         return [...merged.values()];
     }
-    async executeTool(name, input, context) {
+    async executeTool(name, rawInput, context) {
+        let input = rawInput;
+        if (this.allowedToolsFilter !== null && !this.allowedToolsFilter.has(name)) {
+            return `Error: tool "${name}" is not allowed in current skill context`;
+        }
         const tool = this.tools.get(name);
         if (!tool)
             return `Error: 未知工具: ${name}`;
+        const validation = validateToolInput(tool.definition.inputSchema, input);
+        if (!validation.valid) {
+            return `Error: 输入校验失败: ${validation.errors.join('; ')}`;
+        }
         if (this.options.dryRun) {
             return `[dry-run] ${name}(${JSON.stringify(input)})`;
         }
@@ -157,8 +170,19 @@ export class ToolRegistry {
         if (preHookResult && !preHookResult.ok) {
             return `Error: ${preHookResult.message ?? `${name} blocked by pre hook`}`;
         }
+        // Apply hook-provided input overrides
+        if (preHookResult?.updatedInput) {
+            input = { ...input, ...preHookResult.updatedInput };
+        }
         try {
-            const result = await tool.execute(input, context);
+            let result = await tool.execute(input, context);
+            // Append hook-provided additional context
+            if (preHookResult?.additionalContext) {
+                result = `${result}\n${preHookResult.additionalContext}`;
+            }
+            if (preHookResult?.preventContinuation) {
+                result = `${result}\n[agent loop should stop after this tool]`;
+            }
             const warnings = await this.options.hooksRunner?.runPostHooks(name, input) ?? [];
             if (warnings.length === 0) {
                 return result;
