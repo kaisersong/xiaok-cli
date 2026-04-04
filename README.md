@@ -10,7 +10,7 @@ An AI coding CLI for Kingdee Cosmic (苍穹) and Yunzhijia (云之家) developer
 - **Multi-model**: Claude and OpenAI adapters with automatic retry and exponential backoff (429/502/503/529)
 - **Bash security**: Command safety classifier (block/warn/safe) prevents destructive operations like `rm -rf /`, fork bombs, and `curl|sh` pipe execution
 - **Skill system**: Built-in, global, and project skills with dependency resolution and allowed-tools enforcement
-- **Yunzhijia IM**: Same agent runtime accessible from mobile chat with async tasks, approvals, and workspace binding
+- **Yunzhijia IM**: Same agent runtime accessible from mobile chat with async tasks, approvals, and workspace binding — or embed a channel directly in `chat` with `/yzjchannel`
 - **Smart context management**: AI-driven compaction with NO_TOOLS_PREAMBLE protection, tool result microcompaction (8K char limit), and memory re-injection after compact
 - **Built-in agents**: Explore (read-only), Plan (architecture-only), and Verification (adversarial testing) specialized agents
 - **Typed memory**: Persistent memory store with `user`/`feedback`/`project`/`reference` type classification
@@ -199,6 +199,7 @@ Persistent file-based memory with typed records (`user`/`feedback`/`project`/`re
 /mode [default|auto|plan]     Switch permission mode
 /tasks                        List active tasks
 /task <id>                    Show task details
+/yzjchannel                   Connect a Yunzhijia channel (embedded, closes with chat)
 /skill-name [args]            Invoke a skill
 ```
 
@@ -243,8 +244,11 @@ Config file: `~/.xiaok/config.json` (override with `XIAOK_CONFIG_DIR`)
   },
   "channels": {
     "yzj": {
-      "sendMsgUrl": "https://...",
-      "inboundMode": "websocket"
+      "webhookUrl": "https://...",
+      "inboundMode": "websocket",
+      "namedChannels": [
+        { "name": "dev-group", "robotId": "robot_xxx" }
+      ]
     }
   }
 }
@@ -258,12 +262,22 @@ Keybindings: `~/.xiaok/keybindings.json` — custom terminal key mappings.
 
 ```bash
 npm run build       # Build
-npm test            # Run tests (582 tests across 132 files)
+npm test            # Run tests (600 tests across 133 files)
 npm run test:watch  # Watch mode
 npm run dev -- --help  # Run from source
 ```
 
 ## Changelog
+
+### v0.4.3 — Embedded Yunzhijia Channel
+- `/yzjchannel` in-session slash command: start a Yunzhijia channel inside `chat`, sharing the same agent session
+- `EmbeddedYZJChannel` class with WebSocket/Webhook transport, inbound routing, approval handling, and reply push
+- `EmbeddedChannel` interface (extensible for Feishu, DingTalk, Telegram)
+- Interactive channel selector (`↑↓` / `Enter` / `Esc`) from `namedChannels` config
+- Permission requests sent to both TUI and channel simultaneously (first to respond wins)
+- Channel lifecycle tied to `chat` process (SIGINT and `/exit` both cleanup)
+- `namedChannels` config field on `channels.yzj` for static channel list
+- 5 new unit tests covering routing, approval, and empty-reply suppression
 
 ### v0.4.2 — LSP Code Intelligence Tool
 - `lsp` built-in tool: go-to-definition, find-references, hover, document-symbols

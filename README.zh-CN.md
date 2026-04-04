@@ -12,7 +12,7 @@
 - **工具输入校验**：轻量 JSON Schema 验证器，每次工具调用前校验必填字段和类型
 - **技能系统**：内置、全局、项目级技能分层加载，支持依赖解析与 allowed-tools 白名单约束
 - **内置专业化 Agent**：Explore（只读探索）、Plan（只规划不编辑）、Verification（对抗式验证）
-- **云之家 IM 接入**：终端与移动聊天共用同一套 agent runtime，支持异步任务与审批流
+- **云之家 IM 接入**：终端与移动聊天共用同一套 agent runtime，支持异步任务与审批流；也可在 `chat` 内用 `/yzjchannel` 直接嵌入 channel
 - **上下文管理**：工具结果微压缩（8K 阈值）、AI 驱动压缩（NO_TOOLS_PREAMBLE 保护）、记忆回注
 - **云之家网关加固**：HTTP 错误码细分（401/403/429/5xx）+ 429 限流退避 + 出站 try-catch 保护
 - **类型化记忆**：支持 `user`/`feedback`/`project`/`reference` 类型分类与过滤检索
@@ -106,6 +106,16 @@ src/
 | `xiaok init` | 初始化项目设置 |
 | `xiaok yzj serve` | 启动云之家网关 |
 
+## 会话内命令
+
+```text
+/mode [default|auto|plan]     切换权限模式
+/tasks                        列出活跃任务
+/task <id>                    查看任务详情
+/yzjchannel                   连接云之家 channel（嵌入式，关闭 chat 即断开）
+/skill-name [args]            调用 skill
+```
+
 ## 云之家 IM 命令
 
 ```text
@@ -128,12 +138,22 @@ src/
 
 ```bash
 npm run build       # 构建
-npm test            # 运行测试（582 个测试，132 个文件）
+npm test            # 运行测试（600 个测试，133 个文件）
 npm run test:watch  # 监听模式
 npm run dev -- --help  # 从源码运行
 ```
 
 ## 更新日志
+
+### v0.4.3 — 嵌入式云之家 Channel
+- `chat` 会话内新增 `/yzjchannel` 斜杠命令，与当前 Agent 会话共享，关 chat 即关 channel
+- `EmbeddedYZJChannel` 类：支持 WebSocket/Webhook 入站、消息路由、审批处理、回复推送
+- `EmbeddedChannel` 接口预留（后续可扩展飞书、钉钉、Telegram）
+- 交互式 channel 选择器（↑↓/Enter/Esc），从 `namedChannels` 配置中选择
+- 权限请求同时推送到 TUI 和 channel，两端先到先得
+- channel 生命周期跟随 chat 进程（SIGINT 与 `/exit` 均 cleanup）
+- `channels.yzj.namedChannels` 新增配置字段（静态 channel 列表）
+- 5 个新单元测试，覆盖消息路由、审批命令、空回复过滤
 
 ### v0.4.2 — LSP 代码智能工具
 - 新增内置 `lsp` 工具：跳转定义、查找引用、悬停文档、文档符号列表
