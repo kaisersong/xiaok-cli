@@ -3,10 +3,10 @@ import { buildSlashMenuOverlayLines } from './repl-state.js';
 import { getDisplayWidth, offsetToDisplayColumn } from './text-metrics.js';
 import type { SurfaceState } from './surface-state.js';
 
-// Input bar: bg=238 (visible above terminal bg ~235), prompt=bold cyan, reset with \x1b[0m at end
+// Input bar: bg=244 (visible above most dark terminal backgrounds)
 // We build the line as: BG_START + PROMPT_FG + '❯' + RESET_FG + ' ' + inputText + padding + BG_END
 // Using \x1b[39m (reset fg only) after ❯ so background persists through the rest of the line.
-const INPUT_BG = '\x1b[48;5;238m';
+const INPUT_BG = '\x1b[48;5;244m';
 const PROMPT_FG = '\x1b[1;36m';   // bold cyan
 const RESET_FG  = '\x1b[22;39m';  // reset bold + fg, keep bg
 const RESET_ALL = '\x1b[0m';

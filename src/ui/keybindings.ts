@@ -144,6 +144,8 @@ export function identifyKey(data: string, offset: number): { key: string; consum
         '1;5D': 'ctrl+left',
         'Z': 'shift+tab',
         '13;2u': 'shift+enter',
+        '13;2~': 'shift+enter',
+        '27;2;13~': 'shift+enter',
         '122;6u': 'ctrl+shift+z',
         '3~': 'delete',
       };

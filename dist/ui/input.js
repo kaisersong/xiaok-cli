@@ -297,6 +297,35 @@ export class InputReader {
                 const key = data.toString('utf8');
                 log(`key pressed: ${JSON.stringify(key)} input=${JSON.stringify(input)} cursor=${cursor}`);
                 this.transcriptLogger?.record({ type: 'input_key', key, timestamp: Date.now() });
+                // OSC 1337: paste image (iTerm2, Terminal.app, etc.)
+                // Format: \x1b]1337;File=name=...;inline=1:<base64>\x07
+                if (key.startsWith('\x1b]1337;File=')) {
+                    const endMarker = key.indexOf('\x07');
+                    if (endMarker !== -1) {
+                        const oscContent = key.slice(7, endMarker); // skip \x1b]
+                        const base64Start = oscContent.indexOf(':');
+                        if (base64Start !== -1) {
+                            const base64Data = oscContent.slice(base64Start + 1);
+                            // Extract filename if available
+                            const nameMatch = oscContent.match(/name=([^;]+)/);
+                            const filename = nameMatch ? Buffer.from(nameMatch[1], 'base64').toString('utf8') : 'pasted-image.png';
+                            // Store as file reference for image-input.ts to handle
+                            const tempPath = `/tmp/xiaok-pasted-${Date.now()}.png`;
+                            require('fs').writeFileSync(tempPath, Buffer.from(base64Data, 'base64'));
+                            input = input.slice(0, cursor) + tempPath + input.slice(cursor);
+                            cursor += tempPath.length;
+                            historyState = pushInputHistory(historyState, input, cursor);
+                            redraw();
+                            return;
+                        }
+                    }
+                }
+                // Kitty graphics protocol: \x1b_G...;\x1b\\
+                if (key.startsWith('\x1b_G')) {
+                    // Kitty protocol is more complex, for now just note it
+                    // Full implementation would need to parse the transmission
+                    return;
+                }
                 const submitInput = () => {
                     if (this.menuOpen && this.menuItems.length > 0) {
                         const selected = this.menuItems[this.menuIdx].cmd;
@@ -349,6 +378,14 @@ export class InputReader {
                     }
                     if (action === 'submit') {
                         submitInput();
+                        return true;
+                    }
+                    if (action === 'newline') {
+                        // Shift+Enter: insert newline at cursor
+                        input = input.slice(0, cursor) + '\n' + input.slice(cursor);
+                        cursor++;
+                        historyState = pushInputHistory(historyState, input, cursor);
+                        redraw();
                         return true;
                     }
                     if (action === 'delete-back') {

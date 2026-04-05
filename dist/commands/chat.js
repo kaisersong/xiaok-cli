@@ -291,6 +291,30 @@ async function runChat(initialInput, opts) {
     // 创建 UI 组件
     const mdRenderer = new MarkdownRenderer();
     const statusBar = new StatusBar();
+    // 打印历史消息（session resume）
+    if (persistedSession && persistedSession.messages && persistedSession.messages.length > 0) {
+        process.stdout.write('\n');
+        for (const msg of persistedSession.messages) {
+            if (msg.role === 'user') {
+                // 用户消息
+                const textBlock = msg.content.find((b) => b.type === 'text');
+                const text = textBlock && textBlock.type === 'text' ? textBlock.text : '';
+                process.stdout.write(formatSubmittedInput(text));
+            }
+            else if (msg.role === 'assistant') {
+                // Assistant 消息
+                mdRenderer.reset();
+                const textBlock = msg.content.find((b) => b.type === 'text');
+                const text = textBlock && textBlock.type === 'text' ? textBlock.text : '';
+                if (text) {
+                    mdRenderer.write(text);
+                    mdRenderer.flush();
+                    process.stdout.write('\n');
+                }
+            }
+        }
+        process.stdout.write('\n');
+    }
     let liveActivityTimer = null;
     let resumeActivityTimer = null;
     let reassuranceTimer = null;
