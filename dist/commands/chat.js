@@ -5,6 +5,7 @@ import { getDevAppIdentity } from '../auth/identity.js';
 import { createAdapter } from '../ai/models.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
+import { createAskUserQuestionTool } from '../ai/tools/ask-user-question.js';
 import { createTaskTools } from '../ai/tools/tasks.js';
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
@@ -183,6 +184,7 @@ async function runChat(initialInput, opts) {
             },
         }),
         ...createTaskTools({ board: taskBoard, sessionId }),
+        createAskUserQuestionTool(),
         createInstallSkillTool({
             cwd,
             capabilityRegistry: platform.capabilityRegistry,

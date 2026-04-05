@@ -48,6 +48,7 @@ export const bgCyan = (s) => colorsEnabled ? `\x1b[46;30m${s}\x1b[0m` : s;
 export const dimCyan = (s) => colorsEnabled ? `\x1b[2;36m${s}\x1b[0m` : s;
 export const bgGray = (s) => colorsEnabled ? `\x1b[48;5;240m${s}\x1b[0m` : s;
 export const bgDarkGray = (s) => colorsEnabled ? `\x1b[48;5;235m${s}\x1b[0m` : s;
+export const bgInputGray = (s) => colorsEnabled ? `\x1b[48;5;238m${s}\x1b[0m` : s;
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const RAIL_INDENT = "  ";
 export function startSpinner(message) {

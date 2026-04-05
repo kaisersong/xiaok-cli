@@ -8,6 +8,7 @@ import { createAdapter } from '../ai/models.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
 import { ToolRegistry } from '../ai/tools/index.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
+import { createAskUserQuestionTool } from '../ai/tools/ask-user-question.js';
 import { createTaskTools } from '../ai/tools/tasks.js';
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
@@ -222,6 +223,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       },
     }),
     ...createTaskTools({ board: taskBoard, sessionId }),
+    createAskUserQuestionTool(),
     createInstallSkillTool({
       cwd,
       capabilityRegistry: platform.capabilityRegistry,

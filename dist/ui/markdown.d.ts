@@ -18,4 +18,9 @@ export declare class MarkdownRenderer {
     /** Apply inline formatting. */
     private inlineFormat;
     private getPendingPrefix;
+    /**
+     * Render markdown text to an array of ANSI-formatted lines.
+     * Does not write to stdout — returns lines for embedding in other UI.
+     */
+    static renderToLines(text: string): string[];
 }

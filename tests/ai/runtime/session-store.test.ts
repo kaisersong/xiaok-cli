@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { Message, UsageStats } from '../../../src/types.js';
@@ -135,5 +135,68 @@ describe('FileSessionStore', () => {
     expect(forked.memoryRefs).toEqual(['mem_1']);
     expect(forked.approvalRefs).toEqual(['apr_1']);
     expect(forked.backgroundJobRefs).toEqual(['bg_1']);
+  });
+
+  describe('loadLast', () => {
+    it('returns null when no last_session file exists', async () => {
+      const store = new FileSessionStore(rootDir);
+      await expect(store.loadLast()).resolves.toBeNull();
+    });
+
+    it('loads the most recently saved session', async () => {
+      const store = new FileSessionStore(rootDir);
+      await store.save({
+        sessionId: 'sess_recent',
+        cwd: '/recent',
+        createdAt: 100,
+        updatedAt: 200,
+        lineage: ['sess_recent'],
+        messages: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        compactions: [],
+        memoryRefs: [],
+        approvalRefs: [],
+        backgroundJobRefs: [],
+      });
+
+      const loaded = await store.loadLast();
+      expect(loaded).not.toBeNull();
+      expect(loaded!.sessionId).toBe('sess_recent');
+    });
+
+    it('last_session contains only session ID (no path or extra content)', async () => {
+      const store = new FileSessionStore(rootDir);
+      await store.save({
+        sessionId: 'sess_clean_id',
+        cwd: '/test',
+        createdAt: 100,
+        updatedAt: 200,
+        lineage: ['sess_clean_id'],
+        messages: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        compactions: [],
+        memoryRefs: [],
+        approvalRefs: [],
+        backgroundJobRefs: [],
+      });
+
+      const lastSessionPath = join(rootDir, 'last_session');
+      expect(existsSync(lastSessionPath)).toBe(true);
+
+      const content = readFileSync(lastSessionPath, 'utf-8').trim();
+      expect(content).toBe('sess_clean_id');
+      // Ensure no path separators or extra content
+      expect(content).not.toContain('/');
+      expect(content).not.toContain('\n');
+      expect(content).toMatch(/^sess_[a-z0-9_]+$/);
+    });
+
+    it('returns null if last_session contains corrupted content', async () => {
+      const store = new FileSessionStore(rootDir);
+      // Write corrupted content (e.g., path or garbage)
+      writeFileSync(join(rootDir, 'last_session'), '/some/path/sess_xyz.json\n', 'utf-8');
+
+      await expect(store.loadLast()).resolves.toBeNull();
+    });
   });
 });

@@ -151,7 +151,7 @@ function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithMode
 }
 
 function expectPromptVisible(harness: ReturnType<typeof createTtyHarness>): void {
-  expect(harness.screen.lines().some((line) => line.trim() === '>')).toBe(true);
+  expect(harness.screen.lines().some((line) => line.includes('❯'))).toBe(true);
 }
 
 vi.mock('../../src/ai/models.js', () => ({

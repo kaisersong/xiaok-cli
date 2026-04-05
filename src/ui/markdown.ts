@@ -146,4 +146,42 @@ export class MarkdownRenderer {
 
     return BODY_GUTTER;
   }
+
+  /**
+   * Render markdown text to an array of ANSI-formatted lines.
+   * Does not write to stdout — returns lines for embedding in other UI.
+   */
+  static renderToLines(text: string): string[] {
+    // Process line-by-line directly, bypassing the streaming pending-line logic
+    const r = new MarkdownRenderer();
+    const inputLines = text.split('\n');
+    const result: string[] = [];
+
+    const orig = process.stdout.write.bind(process.stdout);
+    for (const line of inputLines) {
+      let captured = '';
+      (process.stdout.write as unknown) = (chunk: string | Uint8Array) => {
+        const s = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+        captured += s;
+        return true;
+      };
+      // Feed line + newline so renderLine fires immediately
+      r.write(line + '\n');
+      process.stdout.write = orig;
+      // captured ends with \n from renderLine; strip it
+      result.push(captured.replace(/\n$/, ''));
+    }
+    // Flush any remaining buffer
+    let tail = '';
+    (process.stdout.write as unknown) = (chunk: string | Uint8Array) => {
+      const s = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+      tail += s;
+      return true;
+    };
+    r.flush();
+    process.stdout.write = orig;
+    if (tail) result.push(tail.replace(/\n$/, ''));
+
+    return result;
+  }
 }

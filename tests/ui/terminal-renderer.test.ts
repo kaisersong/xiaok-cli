@@ -13,7 +13,11 @@ describe('terminal-frame', () => {
       terminalSize: { columns: 80, rows: 24 },
     });
 
-    expect(frame.lines[0]).toBe('> 为什么没有调用kai-report-creator');
+    // Prompt line now has background color and ❯ symbol
+    expect(frame.lines[0]).toMatch(/❯.*为什么没有调用kai-report-creator/);
+    // Cursor column: 2 (for "❯ ") + 32 (display width of Chinese input at offset 25)
+    // Chinese chars are 2 columns each, so 8 Chinese = 16 cols + 17 ASCII = 17 cols = 33 total display width
+    // But cursorOffset 25 means end of string, which is 32 display columns
     expect(frame.cursor).toEqual({ line: 0, column: 34 });
   });
 
@@ -36,6 +40,7 @@ describe('terminal-frame', () => {
     });
 
     expect(frame.lines.some((line) => line.includes('工具:'))).toBe(true);
+    // Note: ❯ is in the prompt line (with background), not a separate indicator
     expect(frame.lines.some((line) => line.includes('❯'))).toBe(true);
   });
 
@@ -51,10 +56,11 @@ describe('terminal-frame', () => {
       terminalSize: { columns: 80, rows: 24 },
     });
 
-    expect(frame.lines).toEqual([
-      '> ',
-      '  xiaok-cli · claude-sonnet-4 · 1%',
-    ]);
+    // Prompt line now has background color and ❯ symbol
+    expect(frame.lines.length).toBe(2);
+    expect(frame.lines[0]).toMatch(/\x1b\[48;5;238m.*❯/);
+    expect(frame.lines[1]).toBe('  xiaok-cli · claude-sonnet-4 · 1%');
+    // Cursor should be at column 2 (after "❯ ")
     expect(frame.cursor).toEqual({ line: 0, column: 2 });
   });
 
@@ -73,10 +79,11 @@ describe('terminal-frame', () => {
       terminalSize: { columns: 80, rows: 24 },
     });
 
-    expect(frame.lines).toEqual([
-      '> /c',
-      '  /clear  Clear the screen',
-    ]);
+    expect(frame.lines.length).toBe(2);
+    // Prompt line has background and styled ❯, followed by /c
+    expect(frame.lines[0]).toMatch(/❯.*\/c/);
+    expect(frame.lines[1]).toBe('  /clear  Clear the screen');
+    // Cursor should be at column 4 (after "❯ /c")
     expect(frame.cursor).toEqual({ line: 0, column: 4 });
   });
 });
