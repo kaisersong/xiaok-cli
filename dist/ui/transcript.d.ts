@@ -38,6 +38,7 @@ export declare class FileTranscriptLogger implements TranscriptLogger {
     private readonly sessionId;
     private readonly rootDir;
     constructor(sessionId: string, rootDir?: string);
+    get path(): string;
     record(event: TranscriptEvent): void;
     recordOutput(stream: 'stdout' | 'stderr', chunk: string): void;
     private getFilePath;

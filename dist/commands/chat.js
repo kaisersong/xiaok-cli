@@ -9,6 +9,7 @@ import { createTaskTools } from '../ai/tools/tasks.js';
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
+import { createHooksRunner } from '../runtime/hooks-runner.js';
 import { SessionTaskBoard } from '../runtime/tasking/board.js';
 import { writeError, isTTY } from '../utils/ui.js';
 import { showPermissionPrompt } from '../ui/permission-prompt.js';
@@ -43,6 +44,11 @@ import { createInstallSkillTool } from '../ai/tools/install-skill.js';
 import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
 import { executeNamedSubAgent } from '../ai/agents/subagent-executor.js';
 import { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
+import { EmbeddedYZJChannel } from '../channels/embedded-yzj.js';
+import { selectYZJChannel } from '../ui/channel-selector.js';
+import { resolveYZJConfig } from '../channels/yzj.js';
+import { YZJTransport } from '../channels/yzj-transport.js';
+import { InMemoryApprovalStore } from '../channels/approval-store.js';
 const { version: cliVersion } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 function describeLiveActivity(toolName, input) {
     if (['tool_search', 'grep', 'glob', 'read', 'skill', 'web_fetch', 'web_search'].includes(toolName)) {
@@ -98,7 +104,14 @@ async function runChat(initialInput, opts) {
     const customAgents = platform.customAgents;
     const sessionStore = new FileSessionStore();
     let persistedSession = null;
-    if (opts.resume) {
+    if (opts.continue) {
+        persistedSession = await sessionStore.loadLast();
+        if (!persistedSession) {
+            writeError('没有可恢复的历史会话');
+            process.exit(1);
+        }
+    }
+    else if (opts.resume) {
         persistedSession = await sessionStore.load(opts.resume);
         if (!persistedSession) {
             writeError(`找不到会话: ${opts.resume}`);
@@ -113,6 +126,8 @@ async function runChat(initialInput, opts) {
     const forkedFromSessionId = persistedSession?.forkedFromSessionId;
     const sessionLineage = persistedSession?.lineage ?? [sessionId];
     const transcriptLogger = new FileTranscriptLogger(sessionId);
+    // 设置环境变量，让 plugin hook 可以 fallback 读取
+    process.env['XIAOK_CODE_SESSION_ID'] = sessionId;
     // 加载 skills
     const skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginRuntime.skillRoots });
     let skills = await skillCatalog.reload();
@@ -198,38 +213,46 @@ async function runChat(initialInput, opts) {
         const line = statusBar.getStatusLine();
         return line ? [line] : [];
     });
+    // 嵌入式 channel 管理
+    const embeddedChannels = [];
+    const embeddedApprovalStore = new InMemoryApprovalStore();
     const registryFactory = createPlatformRegistryFactory({
         platform,
         source: 'chat',
         sessionId,
+        transcriptPath: transcriptLogger.path,
         adapter: () => adapter,
         skillTool,
         workflowTools,
         dryRun: opts.dryRun,
         permissionManager,
         onPrompt: async (name, input) => {
-            const choice = await showPermissionPrompt(name, input, { transcriptLogger, renderer: replRenderer });
-            if (choice.action === 'deny') {
+            const tuiDecide = async () => {
+                const choice = await showPermissionPrompt(name, input, { transcriptLogger, renderer: replRenderer });
+                if (choice.action === 'deny')
+                    return false;
+                if (choice.action === 'allow_once')
+                    return true;
+                if (choice.action === 'allow_session') {
+                    permissionManager.addSessionRule(choice.rule);
+                    return true;
+                }
+                if (choice.action === 'allow_project') {
+                    await addAllowRule('project', choice.rule, cwd);
+                    permissionManager.addSessionRule(choice.rule);
+                    return true;
+                }
+                if (choice.action === 'allow_global') {
+                    await addAllowRule('global', choice.rule, cwd);
+                    permissionManager.addSessionRule(choice.rule);
+                    return true;
+                }
                 return false;
+            };
+            if (embeddedChannels.length > 0) {
+                return embeddedChannels[0].makeOnPrompt(tuiDecide)(name, input);
             }
-            if (choice.action === 'allow_once') {
-                return true;
-            }
-            if (choice.action === 'allow_session') {
-                permissionManager.addSessionRule(choice.rule);
-                return true;
-            }
-            if (choice.action === 'allow_project') {
-                await addAllowRule('project', choice.rule, cwd);
-                permissionManager.addSessionRule(choice.rule);
-                return true;
-            }
-            if (choice.action === 'allow_global') {
-                await addAllowRule('global', choice.rule, cwd);
-                permissionManager.addSessionRule(choice.rule);
-                return true;
-            }
-            return false;
+            return tuiDecide();
         },
         buildSystemPrompt: async (promptCwd) => buildPrompt(skills, promptCwd),
         notifyBackgroundJob: async (job) => {
@@ -237,6 +260,15 @@ async function runChat(initialInput, opts) {
         },
     });
     const registry = registryFactory.createRegistry(cwd);
+    // Top-level hooks runner for lifecycle events (SessionStart / UserPromptSubmit / Stop)
+    const lifecycleHooks = createHooksRunner({
+        hooks: pluginRuntime.hookConfigs,
+        context: {
+            session_id: sessionId,
+            cwd,
+            transcript_path: transcriptLogger.path,
+        },
+    });
     const runtimeHooks = createRuntimeHooks();
     agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks: runtimeHooks });
     agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
@@ -250,6 +282,10 @@ async function runChat(initialInput, opts) {
     if (persistedSession) {
         agent.restoreSession(persistedSession);
     }
+    // 触发 SessionStart hook
+    void lifecycleHooks.runHooks('SessionStart', {
+        source: opts.continue ? 'resume' : opts.resume ? 'resume' : 'startup',
+    });
     // 创建 UI 组件
     const mdRenderer = new MarkdownRenderer();
     const statusBar = new StatusBar();
@@ -522,9 +558,12 @@ async function runChat(initialInput, opts) {
         process.on('SIGINT', () => {
             stopActivity();
             void platform.dispose();
+            for (const ch of embeddedChannels) {
+                void ch.cleanup();
+            }
             process.stdout.off('resize', handleResize);
             statusBar.destroy();
-            process.stdout.write('\n已退出。\n');
+            process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
             process.exit(0);
         });
         // 交互循环
@@ -534,7 +573,7 @@ async function runChat(initialInput, opts) {
             const input = await inputReader.read('> ');
             if (input === null || input.trim() === '/exit') {
                 statusBar.destroy();
-                process.stdout.write('\n再见！\n');
+                process.stdout.write(`\n再见！${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
                 break;
             }
             const trimmed = input.trim();
@@ -569,6 +608,7 @@ async function runChat(initialInput, opts) {
                 process.stdout.write('  /tasks   - 查看当前会话任务\n');
                 process.stdout.write('  /task <id> - 查看任务详情\n');
                 process.stdout.write('  /compact - 手动压缩上下文\n');
+                process.stdout.write('  /yzjchannel - 连接云之家 channel（嵌入式，关闭 chat 即断开）\n');
                 process.stdout.write('  /help    - 显示帮助\n');
                 if (skills.length > 0) {
                     process.stdout.write('\n可用 skills：\n');
@@ -577,6 +617,44 @@ async function runChat(initialInput, opts) {
                     }
                 }
                 process.stdout.write('\n');
+                continue;
+            }
+            if (trimmed === '/yzjchannel') {
+                if (embeddedChannels.length > 0) {
+                    process.stdout.write('已有活跃的云之家 channel，请先关闭当前 chat 进程再重新连接。\n\n');
+                    continue;
+                }
+                const yzjConfig = (() => {
+                    try {
+                        return resolveYZJConfig(config);
+                    }
+                    catch {
+                        process.stdout.write('YZJ 未配置，请先运行 xiaok yzjchannel config set-webhook-url <url>\n\n');
+                        return null;
+                    }
+                })();
+                if (!yzjConfig)
+                    continue;
+                const namedChannels = config.channels?.yzj?.namedChannels ?? [];
+                const selectedChannel = await selectYZJChannel(namedChannels);
+                if (!selectedChannel) {
+                    process.stdout.write('已取消。\n\n');
+                    continue;
+                }
+                const transport = new YZJTransport({ webhookUrl: yzjConfig.webhookUrl });
+                const embedded = new EmbeddedYZJChannel({
+                    runtimeFacade: runtimeFacade,
+                    runtimeHooks,
+                    approvalStore: embeddedApprovalStore,
+                    onPromptOverride: async () => true,
+                    transport,
+                    selectedChannel,
+                    yzjConfig,
+                    sessionId,
+                    cwd,
+                });
+                await embedded.start();
+                embeddedChannels.push(embedded);
                 continue;
             }
             if (trimmed.startsWith('/mode')) {
@@ -816,7 +894,16 @@ async function runChat(initialInput, opts) {
             process.stdout.write('\n');
             mdRenderer.reset();
             try {
-                const inputBlocks = await parseInputBlocks(trimmed, resolveModelCapabilities(adapter).supportsImageInput);
+                // UserPromptSubmit hook — broker 可在此注入额外上下文
+                const promptHookResult = await lifecycleHooks.runHooks('UserPromptSubmit', {
+                    prompt: trimmed,
+                });
+                let effectiveInput = trimmed;
+                if (promptHookResult.additionalContext) {
+                    effectiveInput = `${promptHookResult.additionalContext}\n\n${trimmed}`;
+                }
+                const inputBlocks = await parseInputBlocks(effectiveInput, resolveModelCapabilities(adapter).supportsImageInput);
+                let lastAssistantText = '';
                 await runtimeFacade.runTurn({
                     sessionId,
                     cwd,
@@ -824,6 +911,7 @@ async function runChat(initialInput, opts) {
                     input: inputBlocks,
                 }, (chunk) => {
                     if (chunk.type === 'text') {
+                        lastAssistantText += chunk.delta;
                         if (/\S/.test(chunk.delta)) {
                             if (!responseStarted) {
                                 responseStarted = true;
@@ -848,6 +936,36 @@ async function runChat(initialInput, opts) {
                 await persistSession();
                 mdRenderer.flush();
                 process.stdout.write('\n');
+                // Stop hook — broker 可在此注入新任务（auto-continue）
+                const stopResult = await lifecycleHooks.runHooks('Stop', {
+                    stopHookActive: true,
+                    lastAssistantMessage: lastAssistantText,
+                });
+                if (stopResult.preventContinuation && stopResult.message) {
+                    // broker 返回 block + message：把 message 作为下一轮输入自动继续
+                    process.stdout.write(formatSubmittedInput(stopResult.message));
+                    process.stdout.write('\n');
+                    mdRenderer.reset();
+                    lastAssistantText = '';
+                    const continueBlocks = await parseInputBlocks(stopResult.message, resolveModelCapabilities(adapter).supportsImageInput);
+                    await runtimeFacade.runTurn({
+                        sessionId,
+                        cwd,
+                        source: 'chat',
+                        input: continueBlocks,
+                    }, (chunk) => {
+                        if (chunk.type === 'text') {
+                            lastAssistantText += chunk.delta;
+                            mdRenderer.write(chunk.delta);
+                        }
+                        if (chunk.type === 'usage') {
+                            statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+                        }
+                    });
+                    await persistSession();
+                    mdRenderer.flush();
+                    process.stdout.write('\n');
+                }
             }
             catch (e) {
                 handleTurnFailure(e);
@@ -859,6 +977,9 @@ async function runChat(initialInput, opts) {
         process.stdout.write = originalStdoutWrite;
         process.stderr.write = originalStderrWrite;
         await platform.dispose();
+        for (const ch of embeddedChannels) {
+            await ch.cleanup();
+        }
     }
 }
 function buildCapabilityHealthNotice(health) {
@@ -876,6 +997,7 @@ export function registerChatCommands(program) {
         .option('-p, --print', '以纯文本模式输出单次结果')
         .option('--json', '以 JSON 模式输出单次结果')
         .option('--resume <id>', '恢复已保存会话')
+        .option('-c, --continue', '恢复上一次会话')
         .option('--fork-session <id>', '从已有会话分叉一个新会话')
         .argument('[input]', '单次任务描述（省略则进入交互模式）')
         .action(async (input, opts) => {

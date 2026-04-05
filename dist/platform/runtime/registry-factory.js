@@ -52,6 +52,11 @@ export function createPlatformRegistryFactory(options) {
             dryRun: options.dryRun,
             hooksRunner: createHooksRunner({
                 hooks: options.platform.pluginRuntime.hookConfigs,
+                context: {
+                    session_id: options.sessionId,
+                    cwd,
+                    transcript_path: options.transcriptPath,
+                },
             }),
             onPrompt: options.onPrompt,
         }, filteredTools);

@@ -12,6 +12,7 @@ import { createTaskTools } from '../ai/tools/tasks.js';
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
+import { createHooksRunner } from '../runtime/hooks-runner.js';
 import { SessionTaskBoard } from '../runtime/tasking/board.js';
 import { writeError, isTTY } from '../utils/ui.js';
 import { showPermissionPrompt } from '../ui/permission-prompt.js';
@@ -63,6 +64,7 @@ interface ChatOptions {
   json?: boolean;
   resume?: string;
   forkSession?: string;
+  continue?: boolean;
 }
 
 function describeLiveActivity(toolName: string, input: Record<string, unknown>): string {
@@ -128,7 +130,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const sessionStore = new FileSessionStore();
   let persistedSession: PersistedSessionSnapshot | null = null;
 
-  if (opts.resume) {
+  if (opts.continue) {
+    persistedSession = await sessionStore.loadLast();
+    if (!persistedSession) {
+      writeError('没有可恢复的历史会话');
+      process.exit(1);
+    }
+  } else if (opts.resume) {
     persistedSession = await sessionStore.load(opts.resume);
     if (!persistedSession) {
       writeError(`找不到会话: ${opts.resume}`);
@@ -143,6 +151,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const forkedFromSessionId = persistedSession?.forkedFromSessionId;
   const sessionLineage = persistedSession?.lineage ?? [sessionId];
   const transcriptLogger = new FileTranscriptLogger(sessionId);
+
+  // 设置环境变量，让 plugin hook 可以 fallback 读取
+  process.env['XIAOK_CODE_SESSION_ID'] = sessionId;
 
   // 加载 skills
   const skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginRuntime.skillRoots });
@@ -252,6 +263,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     platform,
     source: 'chat',
     sessionId,
+    transcriptPath: transcriptLogger.path,
     adapter: () => adapter,
     skillTool,
     workflowTools,
@@ -279,6 +291,16 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
   const registry = registryFactory.createRegistry(cwd);
 
+  // Top-level hooks runner for lifecycle events (SessionStart / UserPromptSubmit / Stop)
+  const lifecycleHooks = createHooksRunner({
+    hooks: pluginRuntime.hookConfigs,
+    context: {
+      session_id: sessionId,
+      cwd,
+      transcript_path: transcriptLogger.path,
+    },
+  });
+
   const runtimeHooks = createRuntimeHooks();
   agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks: runtimeHooks });
   agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
@@ -293,6 +315,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   if (persistedSession) {
     agent.restoreSession(persistedSession);
   }
+
+  // 触发 SessionStart hook
+  void lifecycleHooks.runHooks('SessionStart', {
+    source: opts.continue ? 'resume' : opts.resume ? 'resume' : 'startup',
+  });
 
   // 创建 UI 组件
   const mdRenderer = new MarkdownRenderer();
@@ -596,7 +623,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
     process.stdout.off('resize', handleResize);
     statusBar.destroy();
-    process.stdout.write('\n已退出。\n');
+    process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
     process.exit(0);
   });
 
@@ -609,7 +636,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
     if (input === null || input.trim() === '/exit') {
       statusBar.destroy();
-      process.stdout.write('\n再见！\n');
+      process.stdout.write(`\n再见！${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
       break;
     }
 
@@ -947,10 +974,21 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     process.stdout.write('\n');
     mdRenderer.reset();
     try {
+      // UserPromptSubmit hook — broker 可在此注入额外上下文
+      const promptHookResult = await lifecycleHooks.runHooks('UserPromptSubmit', {
+        prompt: trimmed,
+      });
+      let effectiveInput = trimmed;
+      if (promptHookResult.additionalContext) {
+        effectiveInput = `${promptHookResult.additionalContext}\n\n${trimmed}`;
+      }
+
       const inputBlocks = await parseInputBlocks(
-        trimmed,
+        effectiveInput,
         resolveModelCapabilities(adapter).supportsImageInput,
       );
+
+      let lastAssistantText = '';
 
       await runtimeFacade.runTurn({
         sessionId,
@@ -959,6 +997,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         input: inputBlocks,
       }, (chunk) => {
         if (chunk.type === 'text') {
+          lastAssistantText += chunk.delta;
           if (/\S/.test(chunk.delta)) {
             if (!responseStarted) {
               responseStarted = true;
@@ -982,6 +1021,40 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       await persistSession();
       mdRenderer.flush();
       process.stdout.write('\n');
+
+      // Stop hook — broker 可在此注入新任务（auto-continue）
+      const stopResult = await lifecycleHooks.runHooks('Stop', {
+        stopHookActive: true,
+        lastAssistantMessage: lastAssistantText,
+      });
+      if (stopResult.preventContinuation && stopResult.message) {
+        // broker 返回 block + message：把 message 作为下一轮输入自动继续
+        process.stdout.write(formatSubmittedInput(stopResult.message));
+        process.stdout.write('\n');
+        mdRenderer.reset();
+        lastAssistantText = '';
+        const continueBlocks = await parseInputBlocks(
+          stopResult.message,
+          resolveModelCapabilities(adapter).supportsImageInput,
+        );
+        await runtimeFacade.runTurn({
+          sessionId,
+          cwd,
+          source: 'chat',
+          input: continueBlocks,
+        }, (chunk) => {
+          if (chunk.type === 'text') {
+            lastAssistantText += chunk.delta;
+            mdRenderer.write(chunk.delta);
+          }
+          if (chunk.type === 'usage') {
+            statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+          }
+        });
+        await persistSession();
+        mdRenderer.flush();
+        process.stdout.write('\n');
+      }
     } catch (e) {
       handleTurnFailure(e);
     }
@@ -1014,6 +1087,7 @@ export function registerChatCommands(program: Command): void {
     .option('-p, --print', '以纯文本模式输出单次结果')
     .option('--json', '以 JSON 模式输出单次结果')
     .option('--resume <id>', '恢复已保存会话')
+    .option('-c, --continue', '恢复上一次会话')
     .option('--fork-session <id>', '从已有会话分叉一个新会话')
     .argument('[input]', '单次任务描述（省略则进入交互模式）')
     .action(async (input: string | undefined, opts: ChatOptions) => {

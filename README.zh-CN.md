@@ -19,6 +19,8 @@
 - **增强 Hook 系统**：PreToolUse hook 支持 updatedInput / preventContinuation / additionalContext
 - **平台运行时**：MCP/LSP 插件接入、worktree 隔离、后台 subagent 与持久状态
 - **LSP 工具**：`lsp` 内置工具提供跳转定义、查找引用、悬停文档、文档符号列表四种代码智能操作
+- **会话恢复**：每次对话自动保存，退出时显示 session ID。`xiaok -c` 恢复上次会话，`xiaok --resume <id>` 恢复指定会话
+- **Intent Broker 集成**：完整 lifecycle hook 接入（SessionStart / UserPromptSubmit / Stop），支持 session_id / transcript_path 上下文注入与 auto-continue 多 Agent 协作
 
 ## 快速上手
 
@@ -29,6 +31,12 @@ npm run build
 
 # 交互式对话
 xiaok
+
+# 恢复上次会话
+xiaok -c
+
+# 恢复指定会话
+xiaok --resume <session-id>
 
 # 单次任务
 xiaok "review the current workspace changes"

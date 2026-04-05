@@ -16,6 +16,8 @@ An AI coding CLI for Kingdee Cosmic (苍穹) and Yunzhijia (云之家) developer
 - **Typed memory**: Persistent memory store with `user`/`feedback`/`project`/`reference` type classification
 - **Platform runtime**: MCP/LSP plugin wiring, worktree isolation, background subagent execution, and durable channel state
 - **LSP tool**: Built-in `lsp` tool for code intelligence — go to definition, find references, hover docs, and document symbols
+- **Session resume**: Every session is auto-saved. Resume the last one with `xiaok -c` or any session with `xiaok --resume <id>`. Session ID is shown on exit.
+- **Intent Broker integration**: Full lifecycle hook support (SessionStart / UserPromptSubmit / Stop) with session context injection and auto-continue for multi-agent workflows.
 
 ## Quick Start
 
@@ -26,6 +28,12 @@ npm run build
 
 # Start interactive mode
 xiaok
+
+# Resume last session
+xiaok -c
+
+# Resume a specific session
+xiaok --resume <session-id>
 
 # Run a single task
 xiaok "review the current workspace changes"

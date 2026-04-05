@@ -11,6 +11,9 @@ export class FileTranscriptLogger {
         this.sessionId = sessionId;
         this.rootDir = rootDir;
     }
+    get path() {
+        return this.getFilePath();
+    }
     record(event) {
         mkdirSync(this.rootDir, { recursive: true });
         appendFileSync(this.getFilePath(), `${JSON.stringify(event)}\n`, 'utf8');

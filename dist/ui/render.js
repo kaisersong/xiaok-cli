@@ -201,10 +201,17 @@ function extractToolActivityTarget(input) {
     return '';
 }
 export function formatSubmittedInput(text) {
+    const termWidth = process.stdout.columns ?? 80;
+    const indentWidth = RAIL_INDENT.length;
     const lines = text.split(/\r?\n/);
     return [
-        `${RAIL_INDENT}${boldCyan('You')}`,
-        ...lines.map((line) => `${RAIL_INDENT}${bgDarkGray(` ${line} `)}`),
+        ...lines.map((line) => {
+            const content = ` › ${line} `;
+            const contentDisplayWidth = getDisplayWidth(content);
+            const availableWidth = termWidth - indentWidth;
+            const padCount = Math.max(0, availableWidth - contentDisplayWidth);
+            return `${RAIL_INDENT}${bgDarkGray(content + ' '.repeat(padCount))}`;
+        }),
     ].join('\n') + '\n';
 }
 export function formatProgressNote(text) {

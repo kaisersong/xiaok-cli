@@ -64,6 +64,10 @@ export interface Credentials {
     expiresAt: string;
 }
 export type YZJInboundMode = 'webhook' | 'websocket';
+export interface YZJNamedChannel {
+    name: string;
+    robotId: string;
+}
 export interface YZJChannelConfig {
     enabled?: boolean;
     webhookUrl?: string;
@@ -71,6 +75,7 @@ export interface YZJChannelConfig {
     webhookPath?: string;
     webhookPort?: number;
     secret?: string;
+    namedChannels?: YZJNamedChannel[];
 }
 export interface Config {
     schemaVersion: 1;

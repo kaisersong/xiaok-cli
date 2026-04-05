@@ -27,6 +27,7 @@ export declare class FileSessionStore {
     constructor(rootDir?: string);
     createSessionId(): string;
     save(snapshot: PersistedSessionSnapshot): Promise<void>;
+    loadLast(): Promise<PersistedSessionSnapshot | null>;
     load(sessionId: string): Promise<PersistedSessionSnapshot | null>;
     list(): Promise<SessionListEntry[]>;
     fork(sessionId: string): Promise<PersistedSessionSnapshot>;

@@ -12,6 +12,7 @@ export interface PlatformRegistryFactoryOptions {
   platform: PlatformRuntimeContext;
   source: string;
   sessionId: string;
+  transcriptPath?: string;
   adapter: () => ModelAdapter;
   skillTool?: Tool;
   workflowTools?: Tool[];
@@ -84,6 +85,11 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
       dryRun: options.dryRun,
       hooksRunner: createHooksRunner({
         hooks: options.platform.pluginRuntime.hookConfigs,
+        context: {
+          session_id: options.sessionId,
+          cwd,
+          transcript_path: options.transcriptPath,
+        },
       }),
       onPrompt: options.onPrompt,
     }, filteredTools);

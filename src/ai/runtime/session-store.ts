@@ -48,6 +48,14 @@ export class FileSessionStore {
       ...snapshot,
     };
     writeFileSync(this.getFilePath(snapshot.sessionId), JSON.stringify(document, null, 2), 'utf-8');
+    writeFileSync(join(this.rootDir, 'last_session'), snapshot.sessionId, 'utf-8');
+  }
+
+  async loadLast(): Promise<PersistedSessionSnapshot | null> {
+    const lastFile = join(this.rootDir, 'last_session');
+    if (!existsSync(lastFile)) return null;
+    const sessionId = readFileSync(lastFile, 'utf-8').trim();
+    return this.load(sessionId);
   }
 
   async load(sessionId: string): Promise<PersistedSessionSnapshot | null> {

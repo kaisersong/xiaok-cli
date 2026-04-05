@@ -5,6 +5,7 @@ export interface PlatformRegistryFactoryOptions {
     platform: PlatformRuntimeContext;
     source: string;
     sessionId: string;
+    transcriptPath?: string;
     adapter: () => ModelAdapter;
     skillTool?: Tool;
     workflowTools?: Tool[];

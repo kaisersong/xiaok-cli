@@ -30,6 +30,10 @@ export class FileTranscriptLogger implements TranscriptLogger {
     private readonly rootDir = join(getConfigDir(), 'transcripts'),
   ) {}
 
+  get path(): string {
+    return this.getFilePath();
+  }
+
   record(event: TranscriptEvent): void {
     mkdirSync(this.rootDir, { recursive: true });
     appendFileSync(this.getFilePath(), `${JSON.stringify(event)}\n`, 'utf8');

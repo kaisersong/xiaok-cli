@@ -120,7 +120,7 @@ export class MarkdownRenderer {
     inlineFormat(text) {
         text = text.replace(/`([^`]+)`/g, (_, code) => cyan(code));
         text = text.replace(/\*\*\*(.+?)\*\*\*/g, (_, s) => bold(s));
-        text = text.replace(/\*\*(.+?)\*\*\*/g, (_, s) => bold(s));
+        text = text.replace(/\*\*(.+?)\*\*/g, (_, s) => bold(s));
         text = text.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, s) => dim(s));
         text = text.replace(/~~(.+?)~~/g, (_, s) => dim(s));
         return text;
