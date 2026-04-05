@@ -373,6 +373,52 @@ export function formatToolActivity(
   return truncated ? `${prefix} ${truncated}` : prefix;
 }
 
+// MessageBlock type definition for formatHistoryBlock (minimal interface)
+export type HistoryMessageBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+
+// Format a single message block for history display during session resume
+export function formatHistoryBlock(block: HistoryMessageBlock): string {
+  if (block.type === 'text') {
+    // Text blocks are formatted with submitted input styling
+    return formatSubmittedInput(block.text);
+  }
+
+  if (block.type === 'thinking') {
+    // Thinking blocks shown as dim summary, truncated to 200 chars
+    const truncated = block.thinking.length > 200
+      ? block.thinking.slice(0, 200) + '...'
+      : block.thinking;
+    return `${dim('  [Thinking]')} ${dim(truncated)}\n`;
+  }
+
+  if (block.type === 'tool_use') {
+    // Tool use shown as activity summary
+    const activity = formatToolActivity(block.name, block.input as Record<string, unknown>);
+    return activity ? `${dim('  ↳')} ${activity}\n` : '';
+  }
+
+  if (block.type === 'tool_result') {
+    // Tool result shown as dim summary, truncated to 100 chars
+    const summary = block.content.length > 100
+      ? block.content.slice(0, 100) + '...'
+      : block.content;
+    const errorPrefix = block.is_error ? red(' (error)') : '';
+    return `${dim('  ↳ Tool result')}${errorPrefix}: ${dim(summary)}\n`;
+  }
+
+  if (block.type === 'image') {
+    return `${dim('  ↳ [Image]')}\n`;
+  }
+
+  // Unknown block type - skip
+  return '';
+}
+
 export function renderBanner(opts: {
   model: string;
   cwd: string;

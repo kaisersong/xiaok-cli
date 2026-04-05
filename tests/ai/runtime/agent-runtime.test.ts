@@ -42,6 +42,93 @@ describe('AgentRuntime', () => {
     expect(events).toEqual(['run_started', 'assistant_text', 'run_completed']);
   });
 
+  it('merges consecutive text chunks into a single text block in session', async () => {
+    const session = new AgentSessionState();
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () => mockStream([
+        { type: 'text', delta: 'Hello' },
+        { type: 'text', delta: ' ' },
+        { type: 'text', delta: 'world' },
+        { type: 'text', delta: '!' },
+        { type: 'done' },
+      ]),
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    await runtime.run('hi', () => {});
+
+    // Should have exactly one assistant message with one merged text block
+    const messages = session.getMessages();
+    const assistantMsg = messages.find((m) => m.role === 'assistant');
+    expect(assistantMsg).toBeDefined();
+
+    const textBlocks = assistantMsg!.content.filter((b) => b.type === 'text');
+    expect(textBlocks).toHaveLength(1);
+
+    const textBlock = textBlocks[0] as { type: 'text'; text: string };
+    expect(textBlock.text).toBe('Hello world!');
+  });
+
+  it('does not merge text blocks separated by tool_use', async () => {
+    let streamCalls = 0;
+    const session = new AgentSessionState();
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () => {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          return mockStream([
+            { type: 'text', delta: 'Before ' },
+            { type: 'text', delta: 'tool' },
+            { type: 'tool_use', id: 'tu_1', name: 'read', input: { file: 'a.ts' } },
+            { type: 'done' },
+          ]);
+        }
+        return mockStream([
+          { type: 'text', delta: 'After ' },
+          { type: 'text', delta: 'tool' },
+          { type: 'done' },
+        ]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    await runtime.run('hi', () => {});
+
+    const messages = session.getMessages();
+    // Should have: user msg, assistant msg (with text + tool_use), user msg (tool_result), assistant msg (with text)
+    expect(messages.length).toBe(4);
+
+    // First assistant message: one merged text block + one tool_use
+    const firstAssistant = messages[1];
+    expect(firstAssistant.role).toBe('assistant');
+    expect(firstAssistant.content).toHaveLength(2);
+    const firstText = firstAssistant.content[0] as { type: 'text'; text: string };
+    expect(firstText.type).toBe('text');
+    expect(firstText.text).toBe('Before tool');
+
+    // Second assistant message: one merged text block
+    const secondAssistant = messages[3];
+    expect(secondAssistant.role).toBe('assistant');
+    expect(secondAssistant.content).toHaveLength(1);
+    const secondText = secondAssistant.content[0] as { type: 'text'; text: string };
+    expect(secondText.type).toBe('text');
+    expect(secondText.text).toBe('After tool');
+  });
+
   it('executes tool calls and continues the loop', async () => {
     let streamCalls = 0;
     const adapter: ModelAdapter = {

@@ -7,6 +7,8 @@ import {
   renderInputPrompt,
   renderWelcomeScreen,
   setColorsEnabled,
+  formatHistoryBlock,
+  type HistoryMessageBlock,
 } from '../../src/ui/render.js';
 
 describe('renderInputSeparator', () => {
@@ -198,5 +200,108 @@ describe('renderWelcomeScreen', () => {
     expect(versionLineIndex).toBe(sessionLineIndex + 1);
     // Logo is loaded from data/logo.txt which may not be available in test-dist
     // Skip logo assertion in test environment
+  });
+});
+
+describe('formatHistoryBlock', () => {
+  beforeEach(() => {
+    setColorsEnabled(false);
+  });
+
+  afterEach(() => {
+    setColorsEnabled(true);
+  });
+
+  it('formats text blocks with submitted input styling', () => {
+    const block: HistoryMessageBlock = { type: 'text', text: 'Hello world' };
+    const output = formatHistoryBlock(block);
+
+    expect(output).toContain('Hello world');
+    expect(output).toContain('›');
+  });
+
+  it('formats thinking blocks as truncated summary', () => {
+    const shortThinking: HistoryMessageBlock = { type: 'thinking', thinking: 'Short thought' };
+    const shortOutput = formatHistoryBlock(shortThinking);
+
+    expect(shortOutput).toContain('[Thinking]');
+    expect(shortOutput).toContain('Short thought');
+
+    const longThinking: HistoryMessageBlock = {
+      type: 'thinking',
+      thinking: 'This is a very long thinking block that should be truncated to 200 characters maximum because we do not want to show the entire thinking content in the history output as it would take up too much space and make the resume output cluttered and hard to read.',
+    };
+    const longOutput = formatHistoryBlock(longThinking);
+
+    expect(longOutput).toContain('[Thinking]');
+    expect(longOutput.length).toBeLessThan(300); // Should be truncated
+    expect(longOutput).toContain('...');
+  });
+
+  it('formats tool_use blocks as activity summary', () => {
+    const block: HistoryMessageBlock = {
+      type: 'tool_use',
+      id: 'tool-123',
+      name: 'write',
+      input: { file_path: '/tmp/test.md' },
+    };
+    const output = formatHistoryBlock(block);
+
+    // Should show the tool activity summary
+    expect(output).toContain('↳');
+    expect(output).toContain('test.md');
+  });
+
+  it('formats tool_result blocks as truncated summary', () => {
+    const shortResult: HistoryMessageBlock = {
+      type: 'tool_result',
+      tool_use_id: 'tool-123',
+      content: 'Success',
+    };
+    const shortOutput = formatHistoryBlock(shortResult);
+
+    expect(shortOutput).toContain('Tool result');
+    expect(shortOutput).toContain('Success');
+    expect(shortOutput).not.toContain('error');
+
+    const errorResult: HistoryMessageBlock = {
+      type: 'tool_result',
+      tool_use_id: 'tool-123',
+      content: 'Failed',
+      is_error: true,
+    };
+    const errorOutput = formatHistoryBlock(errorResult);
+
+    expect(errorOutput).toContain('error');
+
+    const longResult: HistoryMessageBlock = {
+      type: 'tool_result',
+      tool_use_id: 'tool-123',
+      content: 'This is a very long tool result that should be truncated to 100 characters maximum because we want to keep the history display concise and readable without overwhelming the user with too much output content from previous tool executions.',
+    };
+    const longOutput = formatHistoryBlock(longResult);
+
+    expect(longOutput).toContain('...');
+    // Should be truncated around 100 chars + prefix
+    expect(longOutput.length).toBeLessThan(200);
+  });
+
+  it('formats image blocks as placeholder', () => {
+    const block: HistoryMessageBlock = {
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: 'abc123' },
+    };
+    const output = formatHistoryBlock(block);
+
+    expect(output).toContain('[Image]');
+    expect(output).toContain('↳');
+  });
+
+  it('returns empty string for unknown block types', () => {
+    // Cast to bypass TypeScript - simulating unknown type
+    const block = { type: 'unknown' } as HistoryMessageBlock;
+    const output = formatHistoryBlock(block);
+
+    expect(output).toBe('');
   });
 });
