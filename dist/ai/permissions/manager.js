@@ -50,7 +50,7 @@ export class PermissionManager {
         if (this.mode === 'auto') {
             return 'allow';
         }
-        if (['read', 'glob', 'grep', 'skill', 'tool_search'].includes(toolName)) {
+        if (['read', 'glob', 'grep', 'skill', 'tool_search', 'install_skill', 'uninstall_skill'].includes(toolName)) {
             return 'allow';
         }
         if (evaluation.action === 'allow') {

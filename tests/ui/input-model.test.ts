@@ -26,4 +26,36 @@ describe('input-model', () => {
     model.pushHistorySnapshot();
     expect(model.getState().history).toEqual(['ab']);
   });
+
+  it('handles multiline input correctly', () => {
+    const model = createInputModel();
+    // Insert first line
+    model.insertText('ABC');
+    expect(model.getState().value).toBe('ABC');
+    expect(model.getState().cursorOffset).toBe(3);
+    // Insert newline (Shift+Enter)
+    model.insertText('\n');
+    expect(model.getState().value).toBe('ABC\n');
+    expect(model.getState().cursorOffset).toBe(4);
+    // Insert second line
+    model.insertText('DEF');
+    expect(model.getState().value).toBe('ABC\nDEF');
+    expect(model.getState().cursorOffset).toBe(7);
+    // Move cursor to beginning of second line
+    model.setValue('ABC\nDEF', 4);
+    expect(model.getState().cursorOffset).toBe(4);
+    // Insert text at beginning of second line
+    model.insertText('X');
+    expect(model.getState().value).toBe('ABC\nXDEF');
+    // Backspace should delete X
+    model.backspace();
+    expect(model.getState().value).toBe('ABC\nDEF');
+  });
+
+  it('handles backspace across lines correctly', () => {
+    const model = createInputModel('ABC\nDEF', 4); // cursor at start of second line
+    model.backspace(); // should delete the newline
+    expect(model.getState().value).toBe('ABCDEF');
+    expect(model.getState().cursorOffset).toBe(3);
+  });
 });

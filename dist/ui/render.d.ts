@@ -41,6 +41,31 @@ export declare function formatProgressNote(text: string): string;
 export declare function renderUserInput(text: string): void;
 export declare function describeToolActivity(toolName: string, input: Record<string, unknown>, locale?: UiLocale, verbose?: boolean): string;
 export declare function formatToolActivity(toolName: string, input: Record<string, unknown>, maxWidth?: number, locale?: UiLocale): string;
+export type HistoryMessageBlock = {
+    type: 'text';
+    text: string;
+} | {
+    type: 'thinking';
+    thinking: string;
+} | {
+    type: 'tool_use';
+    id: string;
+    name: string;
+    input: Record<string, unknown>;
+} | {
+    type: 'tool_result';
+    tool_use_id: string;
+    content: string;
+    is_error?: boolean;
+} | {
+    type: 'image';
+    source: {
+        type: 'base64';
+        media_type: string;
+        data: string;
+    };
+};
+export declare function formatHistoryBlock(block: HistoryMessageBlock): string;
 export declare function renderBanner(opts: {
     model: string;
     cwd: string;

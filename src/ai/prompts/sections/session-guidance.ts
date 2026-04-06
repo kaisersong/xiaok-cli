@@ -28,6 +28,15 @@ export function getSessionGuidanceSection(opts: SessionGuidanceOptions): string 
     parts.push(`${opts.toolCount} tools available in this session.`);
   }
 
+  // === 新增：权限拒绝处理指导 ===
+  parts.push('If you do not understand why the user has denied a tool call, use AskUserQuestion to ask them.');
+
+  // === 新增：交互式命令执行指导 ===
+  parts.push('If you need the user to run a shell command themselves (e.g., an interactive login like `gcloud auth login`), suggest they type `! <command>` in the prompt — the `!` prefix runs the command in this session so its output lands directly in the conversation.');
+
+  // === 新增：!/command 快捷用法 ===
+  parts.push('If the user types `!/skillname args` or `!/command args`, they want you to execute that skill/command immediately with the given arguments. Treat it as a shortcut for running the skill without confirmation.');
+
   if (opts.mcpInstructions) {
     parts.push(`# MCP Server Instructions\n${opts.mcpInstructions}`);
   }

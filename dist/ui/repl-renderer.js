@@ -63,6 +63,6 @@ export class ReplRenderer {
         this.render();
     }
     prepareBlockOutput() {
-        this.clearPromptLine();
+        this.terminalRenderer.clearAll();
     }
 }

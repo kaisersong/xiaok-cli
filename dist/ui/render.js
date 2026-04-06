@@ -294,6 +294,38 @@ export function formatToolActivity(toolName, input, maxWidth = process.stdout.co
     const truncated = truncatePlain(description, available);
     return truncated ? `${prefix} ${truncated}` : prefix;
 }
+// Format a single message block for history display during session resume
+export function formatHistoryBlock(block) {
+    if (block.type === 'text') {
+        // Text blocks are formatted with submitted input styling
+        return formatSubmittedInput(block.text);
+    }
+    if (block.type === 'thinking') {
+        // Thinking blocks shown as dim summary, truncated to 200 chars
+        const truncated = block.thinking.length > 200
+            ? block.thinking.slice(0, 200) + '...'
+            : block.thinking;
+        return `${dim('  [Thinking]')} ${dim(truncated)}\n`;
+    }
+    if (block.type === 'tool_use') {
+        // Tool use shown as activity summary
+        const activity = formatToolActivity(block.name, block.input);
+        return activity ? `${dim('  ↳')} ${activity}\n` : '';
+    }
+    if (block.type === 'tool_result') {
+        // Tool result shown as dim summary, truncated to 100 chars
+        const summary = block.content.length > 100
+            ? block.content.slice(0, 100) + '...'
+            : block.content;
+        const errorPrefix = block.is_error ? red(' (error)') : '';
+        return `${dim('  ↳ Tool result')}${errorPrefix}: ${dim(summary)}\n`;
+    }
+    if (block.type === 'image') {
+        return `${dim('  ↳ [Image]')}\n`;
+    }
+    // Unknown block type - skip
+    return '';
+}
 export function renderBanner(opts) {
     const w = Math.min(process.stdout.columns ?? 60, 60);
     const line = "─".repeat(w - 4);

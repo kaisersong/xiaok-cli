@@ -169,4 +169,37 @@ describe('ReplRenderer', () => {
 
     expect(writes.slice(-2)).toEqual(['\r', '\x1b[34C']);
   });
+
+  it('does not clear existing content when previousLineCount is 0', () => {
+    // 这个测试验证 bug 修复：AI 输出后，renderInput 不应清除历史输出
+    // 场景：prepareBlockOutput() 后 previousLineCount = 0，然后 renderInput()
+    const harness = createTtyHarness();
+    const renderer = new ReplRenderer(process.stdout);
+
+    // 模拟 AI 输出：写入一些历史内容
+    process.stdout.write('AI response line 1\n');
+    process.stdout.write('AI response line 2\n');
+
+    const linesBeforeRender = harness.screen.lines();
+    expect(linesBeforeRender).toContain('AI response line 1');
+    expect(linesBeforeRender).toContain('AI response line 2');
+
+    // 模拟 prepareBlockOutput() 被调用后渲染输入框
+    // 此时 previousLineCount = 0，光标在 AI 输出末尾
+    renderer.renderInput({
+      prompt: '> ',
+      input: 'test input',
+      cursor: 10,
+      overlayLines: [],
+    });
+
+    // 验证历史输出仍然存在
+    const linesAfterRender = harness.screen.lines();
+    expect(linesAfterRender).toContain('AI response line 1');
+    expect(linesAfterRender).toContain('AI response line 2');
+    // 验证输入框被渲染
+    expect(linesAfterRender.some(line => /❯.*test input/.test(line))).toBe(true);
+
+    harness.restore();
+  });
 });

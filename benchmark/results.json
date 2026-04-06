@@ -1,0 +1,66 @@
+[
+  {
+    "task": "aut-rename",
+    "name": "Autonomy: Rename function",
+    "category": "autonomy",
+    "expectNoAskUser": true,
+    "xiaok": {
+      "success": 1,
+      "total": 1,
+      "duration_median_ms": 27635,
+      "duration_avg_ms": 27635,
+      "input_tokens_avg": 0,
+      "output_tokens_avg": 0,
+      "cache_creation_total": 0,
+      "cache_read_total": 0,
+      "num_turns_avg": 1,
+      "ask_user_calls_avg": 0,
+      "sample_result": "我全仓库搜了 `function test` / `const test =` 等常见定义形式，当前没有找到名为 `test` 的函数定义，所以暂时没有可重命名的目标。\n\n如果你指的是某个特定文件里的 `test`（比如方法名、对象属性方法、或导出别名），告诉我路径或贴一段代码，我可以马上精确改成 `testHelper`。"
+    },
+    "claude": {
+      "success": 0,
+      "total": 1,
+      "duration_median_ms": null,
+      "duration_avg_ms": null,
+      "input_tokens_avg": null,
+      "output_tokens_avg": null,
+      "cache_creation_total": 0,
+      "cache_read_total": 0,
+      "num_turns_avg": null,
+      "ask_user_calls_avg": 0,
+      "sample_result": "(failed)"
+    }
+  },
+  {
+    "task": "eff-simple-qa",
+    "name": "Efficiency: Simple Q&A",
+    "category": "efficiency",
+    "expectNoAskUser": true,
+    "xiaok": {
+      "success": 1,
+      "total": 1,
+      "duration_median_ms": 3813,
+      "duration_avg_ms": 3813,
+      "input_tokens_avg": 0,
+      "output_tokens_avg": 0,
+      "cache_creation_total": 0,
+      "cache_read_total": 0,
+      "num_turns_avg": 1,
+      "ask_user_calls_avg": 0,
+      "sample_result": "Tokyo"
+    },
+    "claude": {
+      "success": 1,
+      "total": 1,
+      "duration_median_ms": 7535,
+      "duration_avg_ms": 7535,
+      "input_tokens_avg": 8959,
+      "output_tokens_avg": 46,
+      "cache_creation_total": 0,
+      "cache_read_total": 27263,
+      "num_turns_avg": 1,
+      "ask_user_calls_avg": 0,
+      "sample_result": "Tokyo"
+    }
+  }
+]

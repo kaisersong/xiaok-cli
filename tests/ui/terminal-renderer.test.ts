@@ -58,7 +58,7 @@ describe('terminal-frame', () => {
 
     // Prompt line now has background color and ❯ symbol
     expect(frame.lines.length).toBe(2);
-    expect(frame.lines[0]).toMatch(/\x1b\[48;5;238m.*❯/);
+    expect(frame.lines[0]).toMatch(/\x1b\[48;5;244m.*❯/);
     expect(frame.lines[1]).toBe('  xiaok-cli · claude-sonnet-4 · 1%');
     // Cursor should be at column 2 (after "❯ ")
     expect(frame.cursor).toEqual({ line: 0, column: 2 });
@@ -85,5 +85,67 @@ describe('terminal-frame', () => {
     expect(frame.lines[1]).toBe('  /clear  Clear the screen');
     // Cursor should be at column 4 (after "❯ /c")
     expect(frame.cursor).toEqual({ line: 0, column: 4 });
+  });
+
+  it('renders multiline input with correct cursor position', () => {
+    // 输入 "第一行\n第二行" 光标在第二行末尾（offset=9）
+    const frame = buildTerminalFrame({
+      prompt: '> ',
+      transcript: [],
+      input: { value: '第一行\n第二行', cursorOffset: 9, history: [] },
+      overlay: null,
+      modal: null,
+      focusTarget: 'input',
+      terminalSize: { columns: 80, rows: 24 },
+    });
+
+    // 应该有两行输入
+    expect(frame.lines.length).toBe(2);
+    // 第一行包含 prompt
+    expect(frame.lines[0]).toMatch(/❯.*第一行/);
+    // 第二行是纯文本（无 prompt）
+    expect(frame.lines[1]).toMatch(/第二行/);
+    // 光标应该在第二行（line=1）
+    expect(frame.cursor?.line).toBe(1);
+    // 光标列应该是 "❯ " 的宽度 + "第二行" 的显示宽度（3个汉字=6列）
+    // 但实际光标在 offset=9，即 "第一行\n第二行" 的末尾
+    // 光标列 = 2 (prefix) + 6 (display width of "第二行") = 8
+    expect(frame.cursor?.column).toBe(8);
+  });
+
+  it('renders multiline input with cursor in middle of second line', () => {
+    // 输入 "第一行\n第二行" 光标在第二行开头（offset=4，即换行符后）
+    const frame = buildTerminalFrame({
+      prompt: '> ',
+      transcript: [],
+      input: { value: '第一行\n第二行', cursorOffset: 4, history: [] },
+      overlay: null,
+      modal: null,
+      focusTarget: 'input',
+      terminalSize: { columns: 80, rows: 24 },
+    });
+
+    // 光标应该在第二行（line=1）开头
+    expect(frame.cursor?.line).toBe(1);
+    // 光标列 = 2 (prefix) + 0 (光标在行首) = 2
+    expect(frame.cursor?.column).toBe(2);
+  });
+
+  it('renders multiline input with cursor on first line', () => {
+    // 输入 "第一行\n第二行" 光标在第一行末尾（offset=3）
+    const frame = buildTerminalFrame({
+      prompt: '> ',
+      transcript: [],
+      input: { value: '第一行\n第二行', cursorOffset: 3, history: [] },
+      overlay: null,
+      modal: null,
+      focusTarget: 'input',
+      terminalSize: { columns: 80, rows: 24 },
+    });
+
+    // 光标应该在第一行（line=0）
+    expect(frame.cursor?.line).toBe(0);
+    // 光标列 = 2 (prefix) + 6 (display width of "第一行") = 8
+    expect(frame.cursor?.column).toBe(8);
   });
 });

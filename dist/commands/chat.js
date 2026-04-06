@@ -25,12 +25,12 @@ import { FileSessionStore } from '../ai/runtime/session-store.js';
 import { formatPrintOutput } from './chat-print-mode.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
-import { renderWelcomeScreen, renderInputSeparator, dim, formatProgressNote, formatSubmittedInput, formatToolActivity } from '../ui/render.js';
+import { renderWelcomeScreen, renderInputSeparator, dim, formatProgressNote, formatSubmittedInput, formatToolActivity, formatHistoryBlock } from '../ui/render.js';
 import { InputReader } from '../ui/input.js';
 import { ReplRenderer } from '../ui/repl-renderer.js';
 import { ToolExplorer } from '../ui/tool-explorer.js';
 import { TurnLayout } from '../ui/turn-layout.js';
-import { parseInputBlocks } from '../ui/image-input.js';
+import { parseInputBlocks, clearPastedImagePaths } from '../ui/image-input.js';
 import { selectModel } from '../ui/model-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
 import { runCommitCommand } from './commit.js';
@@ -230,6 +230,8 @@ async function runChat(initialInput, opts) {
         permissionManager,
         onPrompt: async (name, input) => {
             const tuiDecide = async () => {
+                // 停止 live activity 定时器，避免权限确认时滚动输出
+                stopLiveActivityTimer();
                 const choice = await showPermissionPrompt(name, input, { transcriptLogger, renderer: replRenderer });
                 if (choice.action === 'deny')
                     return false;
@@ -291,30 +293,8 @@ async function runChat(initialInput, opts) {
     // 创建 UI 组件
     const mdRenderer = new MarkdownRenderer();
     const statusBar = new StatusBar();
-    // 打印历史消息（session resume）
-    if (persistedSession && persistedSession.messages && persistedSession.messages.length > 0) {
-        process.stdout.write('\n');
-        for (const msg of persistedSession.messages) {
-            if (msg.role === 'user') {
-                // 用户消息
-                const textBlock = msg.content.find((b) => b.type === 'text');
-                const text = textBlock && textBlock.type === 'text' ? textBlock.text : '';
-                process.stdout.write(formatSubmittedInput(text));
-            }
-            else if (msg.role === 'assistant') {
-                // Assistant 消息
-                mdRenderer.reset();
-                const textBlock = msg.content.find((b) => b.type === 'text');
-                const text = textBlock && textBlock.type === 'text' ? textBlock.text : '';
-                if (text) {
-                    mdRenderer.write(text);
-                    mdRenderer.flush();
-                    process.stdout.write('\n');
-                }
-            }
-        }
-        process.stdout.write('\n');
-    }
+    // 收集历史消息用于稍后打印（在欢迎页之后）
+    const historyMessages = persistedSession?.messages ?? [];
     let liveActivityTimer = null;
     let resumeActivityTimer = null;
     let reassuranceTimer = null;
@@ -392,6 +372,16 @@ async function runChat(initialInput, opts) {
         statusBar.clearLive();
         liveActivityVisible = false;
     };
+    const stopLiveActivityTimer = () => {
+        if (liveActivityTimer) {
+            clearInterval(liveActivityTimer);
+            liveActivityTimer = null;
+        }
+        if (liveActivityVisible) {
+            statusBar.clearLive();
+            liveActivityVisible = false;
+        }
+    };
     const stopActivity = () => {
         if (reassuranceTimer) {
             clearInterval(reassuranceTimer);
@@ -447,7 +437,11 @@ async function runChat(initialInput, opts) {
     // 单次任务模式
     if (initialInput) {
         const inputBlocks = await parseInputBlocks(initialInput, resolveModelCapabilities(adapter).supportsImageInput);
+        clearPastedImagePaths();
         const printChunks = [];
+        const toolCallsList = [];
+        let askUserCalls = 0;
+        const startTime = Date.now();
         if (!opts.print && !opts.json) {
             process.stdout.write('\n');
         }
@@ -468,6 +462,12 @@ async function runChat(initialInput, opts) {
                         mdRenderer.write(chunk.delta);
                     }
                 }
+                if (chunk.type === 'tool_use') {
+                    toolCallsList.push(chunk.name);
+                    if (chunk.name === 'AskUserQuestion') {
+                        askUserCalls += 1;
+                    }
+                }
                 if (chunk.type === 'usage') {
                     statusBar.update({ ...chunk.usage, budget: config.contextBudget });
                 }
@@ -478,6 +478,10 @@ async function runChat(initialInput, opts) {
                     sessionId,
                     text: printChunks.join(''),
                     usage: agent.getUsage(),
+                    num_turns: 1,
+                    ask_user_calls: askUserCalls,
+                    tool_calls: toolCallsList,
+                    duration_ms: Date.now() - startTime,
                 }, Boolean(opts.json)) + '\n');
             }
             else {
@@ -528,6 +532,40 @@ async function runChat(initialInput, opts) {
         }
         if (opts.dryRun)
             process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
+        // 打印历史消息（session resume）- 在欢迎页之后
+        if (historyMessages.length > 0) {
+            process.stdout.write('\n');
+            for (const msg of historyMessages) {
+                if (msg.role === 'user') {
+                    for (const block of msg.content) {
+                        if (block.type === 'text') {
+                            const text = block.text;
+                            // Skip system-reminder content
+                            if (text && !text.startsWith('<system-reminder>')) {
+                                process.stdout.write(formatHistoryBlock(block));
+                            }
+                        }
+                        else {
+                            process.stdout.write(formatHistoryBlock(block));
+                        }
+                    }
+                }
+                else if (msg.role === 'assistant') {
+                    mdRenderer.reset();
+                    for (const block of msg.content) {
+                        if (block.type === 'text') {
+                            mdRenderer.write(block.text);
+                            mdRenderer.flush();
+                            process.stdout.write('\n');
+                        }
+                        else {
+                            process.stdout.write(formatHistoryBlock(block));
+                        }
+                    }
+                }
+            }
+            process.stdout.write('\n');
+        }
         // 创建输入读取器
         inputReader.setSkills(skills);
         runtimeHooks.on('turn_started', () => {
@@ -929,6 +967,7 @@ async function runChat(initialInput, opts) {
                     effectiveInput = `${promptHookResult.additionalContext}\n\n${trimmed}`;
                 }
                 const inputBlocks = await parseInputBlocks(effectiveInput, resolveModelCapabilities(adapter).supportsImageInput);
+                clearPastedImagePaths();
                 let lastAssistantText = '';
                 await runtimeFacade.runTurn({
                     sessionId,
@@ -974,6 +1013,7 @@ async function runChat(initialInput, opts) {
                     mdRenderer.reset();
                     lastAssistantText = '';
                     const continueBlocks = await parseInputBlocks(stopResult.message, resolveModelCapabilities(adapter).supportsImageInput);
+                    clearPastedImagePaths();
                     await runtimeFacade.runTurn({
                         sessionId,
                         cwd,

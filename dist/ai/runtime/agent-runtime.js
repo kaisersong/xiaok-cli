@@ -93,7 +93,14 @@ export class AgentRuntime {
                 for await (const chunk of this.adapter.stream(this.session.getMessages(), this.registry.getToolDefinitions(), this.systemPrompt, this.buildInvocationOptions())) {
                     this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
                     if (chunk.type === 'text') {
-                        assistantBlocks.push({ type: 'text', text: chunk.delta });
+                        // Merge consecutive text blocks to avoid fragmented storage
+                        const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+                        if (lastBlock?.type === 'text') {
+                            lastBlock.text += chunk.delta;
+                        }
+                        else {
+                            assistantBlocks.push({ type: 'text', text: chunk.delta });
+                        }
                         onEvent({ type: 'assistant_text', runId: run.runId, delta: chunk.delta });
                         continue;
                     }
