@@ -77,6 +77,6 @@ export class ReplRenderer {
   }
 
   prepareBlockOutput(): void {
-    this.clearPromptLine();
+    this.terminalRenderer.clearAll();
   }
 }

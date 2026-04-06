@@ -49,4 +49,33 @@ export class TerminalRenderer {
 
     this.previousLineCount = frame.lines.length;
   }
+
+  /**
+   * Clear all rendered lines and reset state. Call this before outputting content.
+   */
+  clearAll(): void {
+    if (this.previousLineCount > 0) {
+      // 清除当前行和下面的行
+      for (let i = 0; i < this.previousLineCount; i++) {
+        this.stream.write('\x1b[2K');
+        if (i < this.previousLineCount - 1) {
+          this.stream.write('\x1b[1B');
+        }
+      }
+      // 回到第一行
+      if (this.previousLineCount > 1) {
+        this.stream.write(`\x1b[${this.previousLineCount - 1}A`);
+      }
+      this.stream.write('\r');
+      this.previousLineCount = 0;
+    }
+  }
+
+  /**
+   * Reset state without rendering. Call this before outputting content
+   * that will move the cursor to a new position.
+   */
+  reset(): void {
+    this.previousLineCount = 0;
+  }
 }

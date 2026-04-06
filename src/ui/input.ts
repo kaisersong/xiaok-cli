@@ -695,12 +695,14 @@ export class InputReader {
       };
 
       if (this.renderer) {
+        stdin.setRawMode(true);
+        stdin.resume();
         redraw();
       } else {
         stdout.write(prompt);
+        stdin.setRawMode(true);
+        stdin.resume();
       }
-      stdin.setRawMode(true);
-      stdin.resume();
       stdin.on('data', onData);
     });
   }
