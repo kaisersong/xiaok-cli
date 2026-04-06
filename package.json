@@ -17,6 +17,7 @@
     "test:sandbox:run": "node -r ./tests/support/vite-net-use-patch.cjs ./node_modules/vitest/vitest.mjs run --config vitest.sandbox.config.mjs --configLoader runner",
     "test:sandbox": "npm run test:sandbox:build && npm run test:sandbox:run",
     "test:autonomy": "vitest run tests/agent/autonomy-test-cases.test.ts",
+    "test:autonomy:check": "npx tsx tests/agent/autonomy-check.ts",
     "eval:run": "node benchmark/run.mjs",
     "eval:quick": "node benchmark/run.mjs --runs 1 --tasks aut-rename,eff-simple-qa,eff-math",
     "worktree:new": "node scripts/new-worktree.mjs"
