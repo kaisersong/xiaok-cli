@@ -52,17 +52,19 @@ export class TerminalRenderer {
 
   /**
    * Clear all rendered lines and reset state. Call this before outputting content.
+   * Note: After render(), cursor is at the FIRST line of the input area.
+   * We only need to clear from current position, not move up.
    */
   clearAll(): void {
     if (this.previousLineCount > 0) {
-      // 清除当前行和下面的行
+      // 光标在输入栏第一行，清除当前行和下面的行
       for (let i = 0; i < this.previousLineCount; i++) {
         this.stream.write('\x1b[2K');
         if (i < this.previousLineCount - 1) {
           this.stream.write('\x1b[1B');
         }
       }
-      // 回到第一行
+      // 回到输入栏第一行的位置（准备输出新内容）
       if (this.previousLineCount > 1) {
         this.stream.write(`\x1b[${this.previousLineCount - 1}A`);
       }
