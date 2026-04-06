@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, rmSync } from 'fs';
 import { homedir } from 'os';
 import { basename, dirname, isAbsolute, join, resolve } from 'path';
+import { execSync } from 'child_process';
 import { getConfigDir } from '../../utils/config.js';
 function parseSkillDocument(raw) {
     const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
@@ -54,18 +55,51 @@ function resolveGitHubUrl(source) {
     }
     return null;
 }
+/**
+ * 解析 GitHub 仓库简写（支持复合技能）
+ * 格式: owner/repo 或 owner/repo#branch
+ */
+function resolveGitHubRepo(source) {
+    // owner/repo#branch 格式
+    const branchMatch = source.match(/^([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_.-]+)#(.+)$/);
+    if (branchMatch) {
+        const [, owner, repo, branch] = branchMatch;
+        return { owner, repo, branch };
+    }
+    // owner/repo 格式（默认 main 分支）
+    const simpleMatch = source.match(/^([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_.-]+)$/);
+    if (simpleMatch) {
+        const [, owner, repo] = simpleMatch;
+        return { owner, repo, branch: 'main' };
+    }
+    return null;
+}
 function resolveSource(source, cwd) {
     const trimmed = source.trim();
     if (!trimmed) {
         throw new Error('缺少 skill 来源');
     }
+    // 1. 检查是否是 GitHub 仓库简写（复合技能）
+    const repoInfo = resolveGitHubRepo(trimmed);
+    if (repoInfo) {
+        return { kind: 'repo', location: `https://github.com/${repoInfo.owner}/${repoInfo.repo}.git` };
+    }
+    // 2. 检查是否是 GitHub 仓库 URL
+    const repoUrlMatch = trimmed.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)(\/)?$/);
+    if (repoUrlMatch) {
+        const [, owner, repo] = repoUrlMatch;
+        return { kind: 'repo', location: `https://github.com/${owner}/${repo}.git` };
+    }
+    // 3. 检查是否是单个 Markdown 文件的 GitHub URL
     const githubUrl = resolveGitHubUrl(trimmed);
     if (githubUrl) {
         return { kind: 'url', location: githubUrl };
     }
+    // 4. 检查是否是其他 URL
     if (/^https?:\/\//i.test(trimmed)) {
         return { kind: 'url', location: trimmed };
     }
+    // 5. 检查是否是本地路径
     if (isLocalPath(trimmed)) {
         const location = trimmed.startsWith('~/')
             ? join(homedir(), trimmed.slice(2))
@@ -78,6 +112,49 @@ function formatDownloadError(status, statusText) {
     const text = statusText.trim();
     return text ? `下载 skill 失败 (${status} ${text})` : `下载 skill 失败 (${status})`;
 }
+/**
+ * 克隆 GitHub 仓库作为复合技能
+ */
+function cloneSkillRepo(repoUrl, targetDir) {
+    try {
+        // 提取仓库名作为技能名
+        const repoName = basename(repoUrl, '.git');
+        const skillDir = join(targetDir, repoName);
+        // 如果目录已存在，先删除
+        if (existsSync(skillDir)) {
+            rmSync(skillDir, { recursive: true, force: true });
+        }
+        // 创建目标目录
+        mkdirSync(targetDir, { recursive: true });
+        // 克隆仓库（浅克隆）
+        execSync(`git clone --single-branch --depth 1 "${repoUrl}" "${skillDir}"`, {
+            stdio: 'pipe',
+            timeout: 60000, // 60秒超时
+        });
+        // 检查是否有 setup 脚本
+        const setupSh = join(skillDir, 'setup');
+        const setupBash = join(skillDir, 'setup.bash');
+        const setupShFile = join(skillDir, 'setup.sh');
+        let setupMessage = '';
+        if (existsSync(setupSh) || existsSync(setupBash) || existsSync(setupShFile)) {
+            setupMessage = '\n注意: 该技能包含 setup 脚本，请运行以下命令完成安装：';
+            setupMessage += `\n  cd ${skillDir} && ./setup`;
+        }
+        return {
+            success: true,
+            message: `已克隆技能仓库到 ${skillDir}${setupMessage}`,
+            skillName: repoName,
+        };
+    }
+    catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        return {
+            success: false,
+            message: `克隆技能仓库失败: ${errorMsg}`,
+            skillName: '',
+        };
+    }
+}
 export function createInstallSkillTool(options = {}) {
     const cwd = options.cwd ?? process.cwd();
     const configDir = options.configDir ?? getConfigDir();
@@ -86,13 +163,13 @@ export function createInstallSkillTool(options = {}) {
         permission: 'write',
         definition: {
             name: 'install_skill',
-            description: '从远程 Markdown URL、GitHub skill 文件链接或本地文件安装 skill 到 project/global scope',
+            description: '从远程 Markdown URL、GitHub 仓库或本地文件安装 skill。支持：\n- 单个 Markdown 文件: owner/repo/path/to/skill.md\n- GitHub 仓库（复合技能）: owner/repo 或 owner/repo#branch\n- 本地文件: ./path/to/skill.md',
             inputSchema: {
                 type: 'object',
                 properties: {
                     source: {
                         type: 'string',
-                        description: 'skill 来源。支持 Markdown URL、GitHub blob/raw URL、owner/repo/path/to/skill.md#ref 或本地路径',
+                        description: 'skill 来源。支持：单个 MD 文件 URL、GitHub 仓库 (owner/repo)、本地路径',
                     },
                     scope: {
                         type: 'string',
@@ -107,6 +184,23 @@ export function createInstallSkillTool(options = {}) {
             const { source, scope = 'project' } = input;
             const targetScope = scope === 'global' ? 'global' : 'project';
             const resolvedSource = resolveSource(source, cwd);
+            // 处理仓库克隆（复合技能）
+            if (resolvedSource.kind === 'repo') {
+                const skillDir = targetScope === 'global'
+                    ? join(configDir, 'skills')
+                    : join(cwd, '.xiaok', 'skills');
+                const result = cloneSkillRepo(resolvedSource.location, skillDir);
+                if (!result.success) {
+                    return `Error: ${result.message}`;
+                }
+                await options.onInstall?.({
+                    name: result.skillName,
+                    path: join(skillDir, result.skillName),
+                    scope: targetScope,
+                });
+                return result.message;
+            }
+            // 处理单个文件下载/读取
             let raw;
             if (resolvedSource.kind === 'file') {
                 if (!existsSync(resolvedSource.location)) {
