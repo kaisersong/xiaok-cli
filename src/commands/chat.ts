@@ -273,6 +273,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     permissionManager,
     onPrompt: async (name, input) => {
       const tuiDecide = async () => {
+        // 停止 live activity 定时器，避免权限确认时滚动输出
+        stopLiveActivityTimer();
         const choice = await showPermissionPrompt(name, input, { transcriptLogger, renderer: replRenderer });
         if (choice.action === 'deny') return false;
         if (choice.action === 'allow_once') return true;
@@ -416,6 +418,17 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     liveActivityVisible = false;
   };
 
+  const stopLiveActivityTimer = (): void => {
+    if (liveActivityTimer) {
+      clearInterval(liveActivityTimer);
+      liveActivityTimer = null;
+    }
+    if (liveActivityVisible) {
+      statusBar.clearLive();
+      liveActivityVisible = false;
+    }
+  };
+
   const stopActivity = (): void => {
     if (reassuranceTimer) {
       clearInterval(reassuranceTimer);
@@ -480,6 +493,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     );
     clearPastedImagePaths();
     const printChunks: string[] = [];
+    const toolCallsList: string[] = [];
+    let askUserCalls = 0;
+    const startTime = Date.now();
+
     if (!opts.print && !opts.json) {
       process.stdout.write('\n');
     }
@@ -500,6 +517,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
             mdRenderer.write(chunk.delta);
           }
         }
+        if (chunk.type === 'tool_use') {
+          toolCallsList.push(chunk.name);
+          if (chunk.name === 'AskUserQuestion') {
+            askUserCalls += 1;
+          }
+        }
         if (chunk.type === 'usage') {
           statusBar.update({ ...chunk.usage, budget: config.contextBudget });
         }
@@ -510,6 +533,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           sessionId,
           text: printChunks.join(''),
           usage: agent.getUsage(),
+          num_turns: 1,
+          ask_user_calls: askUserCalls,
+          tool_calls: toolCallsList,
+          duration_ms: Date.now() - startTime,
         }, Boolean(opts.json)) + '\n');
       } else {
         mdRenderer.flush();
