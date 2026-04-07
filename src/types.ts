@@ -113,7 +113,7 @@ export const DEFAULT_CONFIG: Config = {
     claude: { model: 'claude-opus-4-6' },
   },
   defaultMode: 'interactive',
-  contextBudget: 4000,
+  contextBudget: 200_000, // 200K tokens context window
   channels: {},
 };
 

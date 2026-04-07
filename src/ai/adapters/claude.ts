@@ -160,7 +160,21 @@ export class ClaudeAdapter implements ModelAdapter {
     const toolBuffers = new Map<number, { id: string; name: string; jsonBuffer: string }>();
 
     for await (const event of stream) {
-      if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
+      if (event.type === 'message_start') {
+        // 输出 usage 信息
+        const usage = event.message.usage;
+        if (usage) {
+          yield {
+            type: 'usage',
+            usage: {
+              inputTokens: usage.input_tokens ?? 0,
+              outputTokens: usage.output_tokens ?? 0,
+              cacheCreationInputTokens: usage.cache_creation_input_tokens ?? undefined,
+              cacheReadInputTokens: usage.cache_read_input_tokens ?? undefined,
+            },
+          };
+        }
+      } else if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
         toolBuffers.set(event.index, {
           id: event.content_block.id,
           name: event.content_block.name,
@@ -185,6 +199,18 @@ export class ClaudeAdapter implements ModelAdapter {
           }
           yield { type: 'tool_use', id: buf.id, name: buf.name, input };
           toolBuffers.delete(event.index);
+        }
+      } else if (event.type === 'message_delta') {
+        // 更新 usage 信息
+        const usage = event.usage;
+        if (usage) {
+          yield {
+            type: 'usage',
+            usage: {
+              inputTokens: 0, // message_delta 只包含 output tokens
+              outputTokens: usage.output_tokens ?? 0,
+            },
+          };
         }
       } else if (event.type === 'message_stop') {
         yield { type: 'done' };
