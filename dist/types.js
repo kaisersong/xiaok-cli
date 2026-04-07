@@ -7,7 +7,6 @@ export const DEFAULT_CONFIG = {
         claude: { model: 'claude-opus-4-6' },
     },
     defaultMode: 'interactive',
-    contextBudget: 4000,
     channels: {},
 };
 /** 校验 defaultModel 是否合法，防止脏数据写入 */

@@ -172,7 +172,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const getPromptInput = async (promptCwd = cwd, nextSkills = skills) => ({
     enterpriseId: creds?.enterpriseId ?? null,
     devApp,
-    budget: config.contextBudget,
+    budget: modelCapabilities.contextLimit,
     skills: nextSkills,
     pluginCommands: pluginRuntime.commandDeclarations,
     lspDiagnostics: platform.lspManager.getSummary(),
@@ -183,7 +183,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     })),
     autoContext: await loadAutoContext({
       cwd: promptCwd,
-      maxChars: Math.max(1_200, config.contextBudget * 2),
+      maxChars: Math.max(1_200, modelCapabilities.contextLimit * 2),
     }),
   });
 
@@ -480,10 +480,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   // 初始化状态栏（在单次任务模式之前）
   const fullModelName = adapter.getModelName();
-  statusBar.init(fullModelName, sessionId, process.cwd(), opts.dryRun ? 'dry-run' : permissionManager.getMode());
+  const modelCapabilities = resolveModelCapabilities(adapter);
+  statusBar.init(fullModelName, sessionId, process.cwd(), opts.dryRun ? 'dry-run' : permissionManager.getMode(), {
+    contextLimit: modelCapabilities.contextLimit,
+  });
   const branch = await getCurrentBranch(process.cwd());
   if (branch) statusBar.updateBranch(branch);
-  statusBar.update({ inputTokens: 0, outputTokens: 0, budget: config.contextBudget });
+  statusBar.update({ inputTokens: 0, outputTokens: 0 });
 
   // 单次任务模式
   if (initialInput) {
@@ -524,7 +527,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           }
         }
         if (chunk.type === 'usage') {
-          statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+          statusBar.update(chunk.usage);
         }
       });
       await persistSession();
@@ -581,7 +584,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     });
 
     // 设置初始 usage
-    statusBar.update({ inputTokens: 0, outputTokens: 0, budget: config.contextBudget });
+    statusBar.update({ inputTokens: 0, outputTokens: 0 });
     if (capabilityHealthNotice) {
       process.stdout.write(`${capabilityHealthNotice}\n\n`);
     }
@@ -1035,7 +1038,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
                 mdRenderer.write(chunk.delta);
               }
               if (chunk.type === 'usage') {
-                statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+                statusBar.update(chunk.usage);
               }
             });
             await persistSession();
@@ -1099,7 +1102,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           mdRenderer.write(chunk.delta);
         }
         if (chunk.type === 'usage') {
-          statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+          statusBar.update(chunk.usage);
         }
       });
       await persistSession();
@@ -1133,7 +1136,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
             mdRenderer.write(chunk.delta);
           }
           if (chunk.type === 'usage') {
-            statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+            statusBar.update(chunk.usage);
           }
         });
         await persistSession();

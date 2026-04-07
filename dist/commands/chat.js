@@ -144,7 +144,7 @@ async function runChat(initialInput, opts) {
     const getPromptInput = async (promptCwd = cwd, nextSkills = skills) => ({
         enterpriseId: creds?.enterpriseId ?? null,
         devApp,
-        budget: config.contextBudget,
+        budget: modelCapabilities.contextLimit,
         skills: nextSkills,
         pluginCommands: pluginRuntime.commandDeclarations,
         lspDiagnostics: platform.lspManager.getSummary(),
@@ -155,7 +155,7 @@ async function runChat(initialInput, opts) {
         })),
         autoContext: await loadAutoContext({
             cwd: promptCwd,
-            maxChars: Math.max(1_200, config.contextBudget * 2),
+            maxChars: Math.max(1_200, modelCapabilities.contextLimit * 2),
         }),
     });
     const buildPromptSnapshot = async (promptCwd = cwd, nextSkills = skills, channel = 'chat') => promptBuilder.build({
@@ -429,11 +429,14 @@ async function runChat(initialInput, opts) {
     };
     // 初始化状态栏（在单次任务模式之前）
     const fullModelName = adapter.getModelName();
-    statusBar.init(fullModelName, sessionId, process.cwd(), opts.dryRun ? 'dry-run' : permissionManager.getMode());
+    const modelCapabilities = resolveModelCapabilities(adapter);
+    statusBar.init(fullModelName, sessionId, process.cwd(), opts.dryRun ? 'dry-run' : permissionManager.getMode(), {
+        contextLimit: modelCapabilities.contextLimit,
+    });
     const branch = await getCurrentBranch(process.cwd());
     if (branch)
         statusBar.updateBranch(branch);
-    statusBar.update({ inputTokens: 0, outputTokens: 0, budget: config.contextBudget });
+    statusBar.update({ inputTokens: 0, outputTokens: 0 });
     // 单次任务模式
     if (initialInput) {
         const inputBlocks = await parseInputBlocks(initialInput, resolveModelCapabilities(adapter).supportsImageInput);
@@ -469,7 +472,7 @@ async function runChat(initialInput, opts) {
                     }
                 }
                 if (chunk.type === 'usage') {
-                    statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+                    statusBar.update(chunk.usage);
                 }
             });
             await persistSession();
@@ -526,7 +529,7 @@ async function runChat(initialInput, opts) {
             version: cliVersion,
         });
         // 设置初始 usage
-        statusBar.update({ inputTokens: 0, outputTokens: 0, budget: config.contextBudget });
+        statusBar.update({ inputTokens: 0, outputTokens: 0 });
         if (capabilityHealthNotice) {
             process.stdout.write(`${capabilityHealthNotice}\n\n`);
         }
@@ -672,6 +675,7 @@ async function runChat(initialInput, opts) {
                 process.stdout.write('  /tasks   - 查看当前会话任务\n');
                 process.stdout.write('  /task <id> - 查看任务详情\n');
                 process.stdout.write('  /compact - 手动压缩上下文\n');
+                process.stdout.write('  /skills-reload - 刷新 skill 目录（安装后无需重启即可使用）\n');
                 process.stdout.write('  /yzjchannel - 连接云之家 channel（嵌入式，关闭 chat 即断开）\n');
                 process.stdout.write('  /help    - 显示帮助\n');
                 if (skills.length > 0) {
@@ -681,6 +685,23 @@ async function runChat(initialInput, opts) {
                     }
                 }
                 process.stdout.write('\n');
+                continue;
+            }
+            if (trimmed === '/skills-reload') {
+                const prevCount = skills.length;
+                await refreshSkills();
+                const newCount = skills.length;
+                inputReader.setSkills(skills);
+                const diff = newCount - prevCount;
+                if (diff > 0) {
+                    process.stdout.write(`已刷新 skill 目录，新增 ${diff} 个 skill，当前共 ${newCount} 个。\n\n`);
+                }
+                else if (diff < 0) {
+                    process.stdout.write(`已刷新 skill 目录，移除 ${-diff} 个 skill，当前共 ${newCount} 个。\n\n`);
+                }
+                else {
+                    process.stdout.write(`已刷新 skill 目录，当前共 ${newCount} 个 skill。\n\n`);
+                }
                 continue;
             }
             if (trimmed === '/yzjchannel') {
@@ -936,7 +957,7 @@ async function runChat(initialInput, opts) {
                                     mdRenderer.write(chunk.delta);
                                 }
                                 if (chunk.type === 'usage') {
-                                    statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+                                    statusBar.update(chunk.usage);
                                 }
                             });
                             await persistSession();
@@ -995,7 +1016,7 @@ async function runChat(initialInput, opts) {
                         mdRenderer.write(chunk.delta);
                     }
                     if (chunk.type === 'usage') {
-                        statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+                        statusBar.update(chunk.usage);
                     }
                 });
                 await persistSession();
@@ -1025,7 +1046,7 @@ async function runChat(initialInput, opts) {
                             mdRenderer.write(chunk.delta);
                         }
                         if (chunk.type === 'usage') {
-                            statusBar.update({ ...chunk.usage, budget: config.contextBudget });
+                            statusBar.update(chunk.usage);
                         }
                     });
                     await persistSession();

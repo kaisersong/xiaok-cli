@@ -11,7 +11,12 @@ const VALID_FIELDS = new Set<StatusBarField>(DEFAULT_FIELDS);
 export interface UsageStats {
   inputTokens: number;
   outputTokens: number;
-  budget?: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+}
+
+export interface StatusBarOptions {
+  contextLimit?: number; // Model-specific context window
 }
 
 const LIVE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -37,6 +42,7 @@ export class StatusBar {
   private sessionId = "";
   private mode = "default";
   private usage: UsageStats = { inputTokens: 0, outputTokens: 0 };
+  private contextLimit: number = 200_000; // Default to 200K, updated based on model
   private fields: StatusBarField[] = DEFAULT_FIELDS;
   private enabled: boolean;
   private cwd = "";
@@ -47,12 +53,17 @@ export class StatusBar {
     this.enabled = true; // 始终启用状态栏
   }
 
-  init(model: string, sessionId: string, cwd: string, mode?: string): void {
+  init(model: string, sessionId: string, cwd: string, mode?: string, options?: StatusBarOptions): void {
     this.model = model;
     this.sessionId = sessionId;
     this.cwd = cwd;
     this.fields = loadConfiguredFields(cwd) ?? DEFAULT_FIELDS;
     if (mode) this.mode = mode;
+    if (options?.contextLimit) this.contextLimit = options.contextLimit;
+    // 根据模型名称自动推断 context limit
+    if (!options?.contextLimit) {
+      this.contextLimit = inferContextLimitFromModel(model);
+    }
   }
 
   update(usage: UsageStats): void {
@@ -61,6 +72,8 @@ export class StatusBar {
 
   updateModel(model: string): void {
     this.model = model;
+    // 更新模型时同时更新 context limit
+    this.contextLimit = inferContextLimitFromModel(model);
   }
 
   updateMode(mode: string): void {
@@ -172,9 +185,9 @@ export class StatusBar {
       if (field === "mode" && this.mode && this.mode !== "default") {
         parts.push(this.mode);
       }
-      if (field === "tokens" && this.usage.budget && this.usage.budget > 0) {
+      if (field === "tokens" && this.contextLimit > 0) {
         const total = this.usage.inputTokens + this.usage.outputTokens;
-        const pct = Math.round((total / this.usage.budget) * 100);
+        const pct = Math.round((total / this.contextLimit) * 100);
         parts.push(`${pct}%`);
       }
     }
@@ -216,6 +229,26 @@ function formatElapsed(ms: number): string {
   }
 
   return `${seconds}s`;
+}
+
+/**
+ * Infer context limit from model name.
+ * Matches the logic in resolveModelCapabilities from model-capabilities.ts.
+ */
+function inferContextLimitFromModel(modelName: string): number {
+  if (/^claude-opus/i.test(modelName)) {
+    return 1_000_000; // Claude Opus 4.5/4.6 has 1M context
+  }
+
+  if (/^claude-.*(sonnet|haiku)/i.test(modelName)) {
+    return 200_000; // Claude Sonnet/Haiku has 200K context
+  }
+
+  if (/^(gpt-|o[1-9]|chatgpt)/i.test(modelName)) {
+    return 128_000; // GPT-4 family has 128K context
+  }
+
+  return 200_000; // Default fallback
 }
 
 function resolveActivityLabel(label: string, elapsedMs: number): string {

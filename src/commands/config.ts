@@ -58,16 +58,6 @@ export function registerConfigCommands(program: Command): void {
     });
 
   configSet
-    .command('context-budget <tokens>')
-    .description('设置系统提示 token 预算（默认 4000）')
-    .action(async (tokens: string) => {
-      const cfg = await loadConfig();
-      cfg.contextBudget = parseInt(tokens, 10);
-      await saveConfig(cfg);
-      console.log(`已设置 context-budget 为 ${tokens} tokens`);
-    });
-
-  configSet
     .command('yzj-webhook-url <url>')
     .description('设置云之家 webhookUrl')
     .action(async (url: string) => {

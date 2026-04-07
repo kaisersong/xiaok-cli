@@ -18,7 +18,6 @@ export async function runDoctorCommand(cwd: string): Promise<string> {
     `- path=${configPath}`,
     `- exists=${existsSync(configPath) ? 'yes' : 'no'}`,
     `- defaultModel=${config.defaultModel}`,
-    `- contextBudget=${config.contextBudget}`,
     '',
     'Credentials',
     `- loggedIn=${credentials ? 'yes' : 'no'}`,

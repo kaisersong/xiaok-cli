@@ -101,7 +101,6 @@ export interface Config {
         appSecret: string;
     };
     defaultMode: 'interactive';
-    contextBudget: number;
     channels?: {
         yzj?: YZJChannelConfig;
     };

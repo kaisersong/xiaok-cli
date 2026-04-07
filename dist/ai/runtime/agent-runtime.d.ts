@@ -34,6 +34,7 @@ export declare class AgentRuntime {
     private promptSnapshot?;
     private compactRunner;
     private readonly memoryStore?;
+    private static readonly MAX_EMPTY_RETRIES;
     constructor(options: AgentRuntimeOptions);
     setAdapter(adapter: ModelAdapter): void;
     setSystemPrompt(systemPrompt: string): void;

@@ -16,6 +16,7 @@ export class StatusBar {
     sessionId = "";
     mode = "default";
     usage = { inputTokens: 0, outputTokens: 0 };
+    contextLimit = 200_000; // Default to 200K, updated based on model
     fields = DEFAULT_FIELDS;
     enabled;
     cwd = "";
@@ -24,19 +25,27 @@ export class StatusBar {
     constructor() {
         this.enabled = true; // 始终启用状态栏
     }
-    init(model, sessionId, cwd, mode) {
+    init(model, sessionId, cwd, mode, options) {
         this.model = model;
         this.sessionId = sessionId;
         this.cwd = cwd;
         this.fields = loadConfiguredFields(cwd) ?? DEFAULT_FIELDS;
         if (mode)
             this.mode = mode;
+        if (options?.contextLimit)
+            this.contextLimit = options.contextLimit;
+        // 根据模型名称自动推断 context limit
+        if (!options?.contextLimit) {
+            this.contextLimit = inferContextLimitFromModel(model);
+        }
     }
     update(usage) {
         this.usage = usage;
     }
     updateModel(model) {
         this.model = model;
+        // 更新模型时同时更新 context limit
+        this.contextLimit = inferContextLimitFromModel(model);
     }
     updateMode(mode) {
         this.mode = mode;
@@ -129,9 +138,9 @@ export class StatusBar {
             if (field === "mode" && this.mode && this.mode !== "default") {
                 parts.push(this.mode);
             }
-            if (field === "tokens" && this.usage.budget && this.usage.budget > 0) {
+            if (field === "tokens" && this.contextLimit > 0) {
                 const total = this.usage.inputTokens + this.usage.outputTokens;
-                const pct = Math.round((total / this.usage.budget) * 100);
+                const pct = Math.round((total / this.contextLimit) * 100);
                 parts.push(`${pct}%`);
             }
         }
@@ -168,6 +177,22 @@ function formatElapsed(ms) {
         return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
     }
     return `${seconds}s`;
+}
+/**
+ * Infer context limit from model name.
+ * Matches the logic in resolveModelCapabilities from model-capabilities.ts.
+ */
+function inferContextLimitFromModel(modelName) {
+    if (/^claude-opus/i.test(modelName)) {
+        return 1_000_000; // Claude Opus 4.5/4.6 has 1M context
+    }
+    if (/^claude-.*(sonnet|haiku)/i.test(modelName)) {
+        return 200_000; // Claude Sonnet/Haiku has 200K context
+    }
+    if (/^(gpt-|o[1-9]|chatgpt)/i.test(modelName)) {
+        return 128_000; // GPT-4 family has 128K context
+    }
+    return 200_000; // Default fallback
 }
 function resolveActivityLabel(label, elapsedMs) {
     if (label === 'Thinking') {

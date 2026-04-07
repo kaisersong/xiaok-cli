@@ -7,6 +7,7 @@ import { loadConfig, saveConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
 import { createAdapter } from '../ai/models.js';
+import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
@@ -280,10 +281,12 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
           const skills = await skillState.catalog.reload();
           const customAgents = skillState.platform.customAgents;
           const promptBuilder = new PromptBuilder();
+          const adapter = createAdapter(config);
+          const modelCapabilities = resolveModelCapabilities(adapter);
           const getPromptInput = async () => ({
             enterpriseId: creds?.enterpriseId ?? null,
             devApp,
-            budget: config.contextBudget,
+            budget: modelCapabilities.contextLimit,
             skills,
             pluginCommands: skillState.platform.pluginRuntime.commandDeclarations,
             lspDiagnostics: skillState.platform.lspManager.getSummary(),

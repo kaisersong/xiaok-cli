@@ -250,6 +250,7 @@ export function createInstallSkillTool(options = {}) {
                 `路径: ${targetPath}`,
                 `来源: ${resolvedSource.location}`,
                 `描述: ${parsed.description}`,
+                `提示: 可使用 /skills-reload 命令刷新 skill 目录`,
             ].join('\n');
         },
     };

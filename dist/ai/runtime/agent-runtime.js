@@ -17,6 +17,8 @@ export class AgentRuntime {
     promptSnapshot;
     compactRunner;
     memoryStore;
+    // 空响应自动重试配置
+    static MAX_EMPTY_RETRIES = 2;
     constructor(options) {
         this.adapter = options.adapter;
         this.registry = options.registry;
@@ -58,6 +60,7 @@ export class AgentRuntime {
         }
         try {
             let iteration = 0;
+            let emptyRetries = 0;
             while (true) {
                 this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
                 // Check if we've reached the max iterations limit (Claude Code style)
@@ -117,10 +120,17 @@ export class AgentRuntime {
                         break;
                     }
                 }
-                this.session.appendAssistantBlocks(assistantBlocks);
                 if (assistantBlocks.length === 0) {
-                    throw new Error('模型未返回任何文本或工具调用');
+                    // 空响应自动重试（模型偶尔返回空响应）
+                    if (emptyRetries < AgentRuntime.MAX_EMPTY_RETRIES) {
+                        emptyRetries++;
+                        continue;
+                    }
+                    throw new Error('模型未返回任何文本或工具调用（已重试 2 次）');
                 }
+                // 成功收到响应，重置空响应计数器
+                emptyRetries = 0;
+                this.session.appendAssistantBlocks(assistantBlocks);
                 const toolCalls = assistantBlocks.filter((block) => block.type === 'tool_use');
                 if (toolCalls.length === 0) {
                     onEvent({ type: 'run_completed', runId: run.runId });

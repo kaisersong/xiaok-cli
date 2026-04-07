@@ -98,7 +98,6 @@ export interface Config {
   };
   devApp?: { appKey: string; appSecret: string };
   defaultMode: 'interactive';
-  contextBudget: number;
   channels?: {
     yzj?: YZJChannelConfig;
   };
@@ -113,7 +112,6 @@ export const DEFAULT_CONFIG: Config = {
     claude: { model: 'claude-opus-4-6' },
   },
   defaultMode: 'interactive',
-  contextBudget: 200_000, // 200K tokens context window
   channels: {},
 };
 

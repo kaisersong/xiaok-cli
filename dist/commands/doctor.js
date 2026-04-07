@@ -15,7 +15,6 @@ export async function runDoctorCommand(cwd) {
         `- path=${configPath}`,
         `- exists=${existsSync(configPath) ? 'yes' : 'no'}`,
         `- defaultModel=${config.defaultModel}`,
-        `- contextBudget=${config.contextBudget}`,
         '',
         'Credentials',
         `- loggedIn=${credentials ? 'yes' : 'no'}`,

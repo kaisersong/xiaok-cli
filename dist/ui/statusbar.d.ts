@@ -2,7 +2,11 @@ export type StatusBarField = "model" | "mode" | "tokens" | "session";
 export interface UsageStats {
     inputTokens: number;
     outputTokens: number;
-    budget?: number;
+    cacheCreationInputTokens?: number;
+    cacheReadInputTokens?: number;
+}
+export interface StatusBarOptions {
+    contextLimit?: number;
 }
 interface ReassuranceTick {
     bucket: number;
@@ -17,13 +21,14 @@ export declare class StatusBar {
     private sessionId;
     private mode;
     private usage;
+    private contextLimit;
     private fields;
     private enabled;
     private cwd;
     private branch;
     private activity;
     constructor();
-    init(model: string, sessionId: string, cwd: string, mode?: string): void;
+    init(model: string, sessionId: string, cwd: string, mode?: string, options?: StatusBarOptions): void;
     update(usage: UsageStats): void;
     updateModel(model: string): void;
     updateMode(mode: string): void;
