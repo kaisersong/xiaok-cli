@@ -130,6 +130,15 @@ export function renderWelcomeScreen(opts: {
   const leftWidth = 32;
   const rightWidth = totalWidth - leftWidth - 1;
 
+  // 如果终端太小（小于 50 列），跳过欢迎界面，避免 String.repeat 负数错误
+  if (cols < 50 || rightWidth < 0) {
+    console.log();
+    console.log(boldCyan("欢迎使用 xiaok code!"));
+    console.log(dim(`${opts.model} · ${opts.mode} · ${opts.cwd}`));
+    console.log();
+    return 3;
+  }
+
   const line = (left: string, right: string) => {
     const leftPart = left.padEnd(leftWidth, " ");
     const rightPart = right.padEnd(rightWidth, " ");
@@ -216,7 +225,8 @@ export function renderWelcomeScreen(opts: {
 
 export function renderInputSeparator(): void {
   const cols = process.stdout.columns ?? 80;
-  const totalWidth = Math.min(cols - 2, 100);
+  const totalWidth = Math.min(Math.max(cols - 2, 0), 100);
+  if (totalWidth <= 0) return;  // 终端太小时不渲染分隔线
   const line = dim("─".repeat(totalWidth));
   process.stdout.write(`${line}\n`);
 }
