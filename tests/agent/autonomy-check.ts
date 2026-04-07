@@ -24,6 +24,7 @@ async function main() {
   const checks = [
     // Phase 5 新增（用户授权执行）
     { name: 'User approval execution', pattern: 'User authorization = immediate execution', phase: 5, critical: true },
+    { name: 'Plan approval execution', pattern: 'Plan approval = immediate execution', phase: 5, critical: true },
     { name: 'Interactive command limit', pattern: 'Only ask the user to run', phase: 5, critical: true },
     { name: 'Genuine interactive input', pattern: 'genuine interactive input', phase: 5, critical: true },
 
@@ -107,6 +108,7 @@ async function main() {
   console.log('\n=== 关键指令片段验证 ===\n');
 
   const snippets = [
+    'Plan approval = immediate execution',
     'User authorization = immediate execution',
     'CRITICAL: EXECUTE IMMEDIATELY',
     'Only ask the user to run',

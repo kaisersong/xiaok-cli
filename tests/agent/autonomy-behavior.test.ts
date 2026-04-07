@@ -188,6 +188,30 @@ describe('Agent Autonomy Behavior - Mock Model', () => {
     expect(result.toolCalls[0].name).toBe('Bash');
   });
 
+  it('PLAN APPROVAL CASE: after user says "执行" to a plan, should execute immediately', async () => {
+    // 场景：agent 提出了一个计划，用户说"执行"后，模型应该立即开始工作
+    const adapter = createMockAdapter([
+      [
+        { type: 'tool_use', id: 'tu_1', name: 'Read', input: { file_path: 'src/main.ts' } },
+        { type: 'done' },
+      ],
+      [
+        { type: 'tool_use', id: 'tu_2', name: 'Bash', input: { command: 'npm run build' } },
+        { type: 'done' },
+      ],
+      [{ type: 'text', delta: '已完成实现' }, { type: 'done' }],
+    ]);
+
+    const result = await runAgentAndCollectBehavior(adapter, '执行', systemPrompt);
+
+    // 验证：应该有 tool call，而不是输出"已收到"等空话
+    expect(result.hasToolCall).toBe(true);
+    expect(result.toolCalls.length).toBeGreaterThanOrEqual(1);
+
+    // 验证：不应该有"已收到"或"收到"
+    expect(result.textOutputs.join(' ')).not.toContain('收到');
+  });
+
   it('INVESTIGATION CASE: for errors, should investigate before asking', async () => {
     // 场景：错误排查时，模型应该先调查，不是直接问用户
     const adapter = createMockAdapter([
@@ -275,6 +299,10 @@ describe('Agent Autonomy Behavior - Mock Model', () => {
 
   it('PROMPT CHECK: should include user authorization instruction', async () => {
     expect(systemPrompt).toContain('User authorization = immediate execution');
+  });
+
+  it('PROMPT CHECK: should include plan approval instruction', async () => {
+    expect(systemPrompt).toContain('Plan approval = immediate execution');
   });
 
   it('PROMPT CHECK: should include interactive command boundary', async () => {
