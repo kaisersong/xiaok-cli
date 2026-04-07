@@ -292,6 +292,62 @@ describe('AgentRuntime', () => {
     await expect(runtime.run('hi', () => {})).rejects.toThrow(/未返回任何文本或工具调用/);
   });
 
+  it('retries on empty response and succeeds on second attempt', async () => {
+    let streamCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () => {
+        streamCalls++;
+        // 第一次返回空响应，第二次返回正常响应
+        if (streamCalls === 1) {
+          return mockStream([{ type: 'done' }]);
+        }
+        return mockStream([{ type: 'text', delta: 'hello' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    const events: string[] = [];
+    await runtime.run('hi', (event) => {
+      events.push(event.type);
+    });
+
+    // 应该成功，因为第二次返回了正常响应
+    expect(streamCalls).toBe(2);
+    expect(events).toContain('assistant_text');
+    expect(events.at(-1)).toBe('run_completed');
+  });
+
+  it('fails after max retries on persistent empty responses', async () => {
+    let streamCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () => {
+        streamCalls++;
+        // 总是返回空响应
+        return mockStream([{ type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    await expect(runtime.run('hi', () => {})).rejects.toThrow(/已重试 2 次/);
+
+    // 应该尝试了 1 + 2 = 3 次（初次 + 2 次重试）
+    expect(streamCalls).toBe(3);
+  });
+
   it('passes the active prompt snapshot into tool execution context', async () => {
     let capturedContext: unknown;
     let streamCalls = 0;
