@@ -740,6 +740,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       process.stdout.write('  /tasks   - 查看当前会话任务\n');
       process.stdout.write('  /task <id> - 查看任务详情\n');
       process.stdout.write('  /compact - 手动压缩上下文\n');
+      process.stdout.write('  /skills-reload - 刷新 skill 目录（安装后无需重启即可使用）\n');
       process.stdout.write('  /yzjchannel - 连接云之家 channel（嵌入式，关闭 chat 即断开）\n');
       process.stdout.write('  /help    - 显示帮助\n');
       if (skills.length > 0) {
@@ -749,6 +750,22 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         }
       }
       process.stdout.write('\n');
+      continue;
+    }
+
+    if (trimmed === '/skills-reload') {
+      const prevCount = skills.length;
+      await refreshSkills();
+      const newCount = skills.length;
+      inputReader.setSkills(skills);
+      const diff = newCount - prevCount;
+      if (diff > 0) {
+        process.stdout.write(`已刷新 skill 目录，新增 ${diff} 个 skill，当前共 ${newCount} 个。\n\n`);
+      } else if (diff < 0) {
+        process.stdout.write(`已刷新 skill 目录，移除 ${-diff} 个 skill，当前共 ${newCount} 个。\n\n`);
+      } else {
+        process.stdout.write(`已刷新 skill 目录，当前共 ${newCount} 个 skill。\n\n`);
+      }
       continue;
     }
 
