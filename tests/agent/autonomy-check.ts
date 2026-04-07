@@ -22,6 +22,11 @@ async function main() {
   console.log('=== Prompt 检查结果 ===\n');
 
   const checks = [
+    // Phase 5 新增（用户授权执行）
+    { name: 'User approval execution', pattern: 'CRITICAL: When the user says', phase: 5, critical: true },
+    { name: 'Interactive command limit', pattern: 'Only ask the user to run', phase: 5, critical: true },
+    { name: 'Genuine interactive input', pattern: 'genuine interactive input', phase: 5, critical: true },
+
     // Phase 4 新增（本次修复）
     { name: 'Immediate execution', pattern: 'Immediate execution', phase: 4, critical: true },
     { name: 'just do it', pattern: 'Do not restate what the user said — just do it', phase: 4, critical: true },
@@ -102,6 +107,9 @@ async function main() {
   console.log('\n=== 关键指令片段验证 ===\n');
 
   const snippets = [
+    'CRITICAL: When the user says',
+    'Only ask the user to run',
+    'genuine interactive input',
     'Immediate execution',
     'Do not restate what the user said — just do it',
     'IMPORTANT: Go straight to the point',
