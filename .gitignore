@@ -23,3 +23,9 @@ TEST-*.md
 *.log
 mempalace.yaml
 manual-test.sh
+
+# 项目临时目录
+.test-cache/
+.test-dist/
+.worktrees/
+.xiaok/
