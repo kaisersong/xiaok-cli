@@ -1,4 +1,5 @@
 import type { HookEventName, HookType } from '../../runtime/hooks-runner.js';
+import type { PluginManifestMcpServer } from '../mcp/types.js';
 export interface PluginManifestServer {
     name: string;
     command: string;
@@ -42,7 +43,7 @@ export interface PluginManifest {
     /** Structured hook configs or legacy plain command strings */
     hooks: Array<PluginManifestHook | string>;
     commands: string[];
-    mcpServers?: PluginManifestServer[];
+    mcpServers?: PluginManifestMcpServer[];
     lspServers?: PluginManifestServer[];
 }
 export declare function parsePluginManifest(raw: Record<string, unknown>, pluginDir: string): PluginManifest;

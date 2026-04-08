@@ -190,6 +190,8 @@ export class InputReader {
             let resolved = false;
             let historyState = pushInputHistory(createInputHistoryState(), '', 0);
             const redraw = () => {
+                if (resolved)
+                    return; // don't redraw after done()
                 if (this.renderer) {
                     const overlayLines = this.menuOpen
                         ? buildSlashMenuOverlayLines(this.menuItems, this.menuIdx, stdout.columns ?? 80, MAX_MENU_VISIBLE_ITEMS)
@@ -281,13 +283,15 @@ export class InputReader {
                 if (resolved)
                     return;
                 resolved = true;
+                // Clear prompt line BEFORE closeMenu() to prevent redraw() from re-rendering it
+                if (this.renderer) {
+                    this.renderer.prepareBlockOutput();
+                }
                 closeMenu();
                 stdin.removeListener('data', onData);
                 stdin.setRawMode(false);
                 stdin.pause();
-                // 不清除输入行，因为输入行是固定位置的
-                // 只需要换行即可
-                if (result !== null && result.trim()) {
+                if (result !== null && result.length > 0) {
                     this.history.push(result);
                 }
                 this.historyIdx = this.history.length;
@@ -295,8 +299,83 @@ export class InputReader {
             };
             const onData = (data) => {
                 const key = data.toString('utf8');
-                log(`key pressed: ${JSON.stringify(key)} input=${JSON.stringify(input)} cursor=${cursor}`);
+                log(`RAW KEY pressed: ${JSON.stringify(key)} bytes=${data.length} hex=${data.toString('hex')} input=${JSON.stringify(input)} cursor=${cursor}`);
                 this.transcriptLogger?.record({ type: 'input_key', key, timestamp: Date.now() });
+                // Handle batch input (multiple characters/keys in one data event)
+                // This happens in automated testing (expect/pexpect) and pasted text
+                if (key.length > 1) {
+                    // Process input with ANSI sequence recognition
+                    let i = 0;
+                    while (i < key.length) {
+                        // Try to identify ANSI sequences first
+                        const identified = identifyKey(key, i);
+                        if (identified && identified.consumed > 0) {
+                            // Found an ANSI sequence or control character
+                            const action = resolveAction(identified.key);
+                            if (action) {
+                                // Handle the action
+                                if (action === 'submit') {
+                                    if (input.length > 0) {
+                                        this.transcriptLogger?.record({ type: 'input_submit', value: input, timestamp: Date.now() });
+                                        done(input);
+                                        return;
+                                    }
+                                }
+                                else if (action === 'newline') {
+                                    input = input.slice(0, cursor) + '\n' + input.slice(cursor);
+                                    cursor++;
+                                    historyState = pushInputHistory(historyState, input, cursor);
+                                }
+                                else if (action === 'cancel') {
+                                    done(null);
+                                    return;
+                                }
+                                else if (action === 'eof') {
+                                    if (input.length === 0) {
+                                        done(null);
+                                        return;
+                                    }
+                                }
+                                else if (action === 'delete-back') {
+                                    if (cursor > 0) {
+                                        input = input.slice(0, cursor - 1) + input.slice(cursor);
+                                        cursor--;
+                                        historyState = pushInputHistory(historyState, input, cursor);
+                                    }
+                                }
+                                else if (action === 'cursor-left') {
+                                    if (cursor > 0)
+                                        cursor--;
+                                }
+                                else if (action === 'cursor-right') {
+                                    if (cursor < input.length)
+                                        cursor++;
+                                }
+                                // Skip other actions in batch mode for simplicity
+                            }
+                            i += identified.consumed;
+                        }
+                        else {
+                            // Regular character
+                            const ch = key[i];
+                            if (ch >= ' ' && !/[\x1b\x7f]/.test(ch)) {
+                                // Printable character
+                                const shouldSyncMenu = input.startsWith('/') || ch === '/';
+                                clearMenuIfLegacy();
+                                input = input.slice(0, cursor) + ch + input.slice(cursor);
+                                cursor += 1;
+                                historyState = pushInputHistory(historyState, input, cursor);
+                            }
+                            i++;
+                        }
+                    }
+                    // Redraw once after processing all batch input
+                    redraw();
+                    if (input.startsWith('/')) {
+                        syncMenu(input);
+                    }
+                    return;
+                }
                 // OSC 1337: paste image (iTerm2, Terminal.app, etc.)
                 // Format: \x1b]1337;File=name=...;inline=1:<base64>\x07
                 if (key.startsWith('\x1b]1337;File=')) {
@@ -334,7 +413,9 @@ export class InputReader {
                         closeMenu();
                         return;
                     }
-                    if (input.trim()) {
+                    // Submit ALL input content, including multi-line input
+                    // The input string contains '\n' characters for multi-line content
+                    if (input.length > 0) {
                         this.transcriptLogger?.record({ type: 'input_submit', value: input, timestamp: Date.now() });
                         done(input);
                     }

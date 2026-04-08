@@ -1,6 +1,6 @@
 {
   "name": "xiaok",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "面向云之家开发者的 AI 编程 CLI",
   "type": "module",
   "bin": {
@@ -24,12 +24,18 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^12.0.0",
     "fast-glob": "^3.3.2",
-    "openai": "^4.77.0"
+    "lodash-es": "^4.17.21",
+    "node-pty": "^1.1.0",
+    "openai": "^4.77.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/lodash-es": "^4.17.12",
     "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"

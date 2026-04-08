@@ -1,6 +1,6 @@
 import { formatPermissionPromptLines } from './permission-prompt.js';
 import { buildSlashMenuOverlayLines } from './repl-state.js';
-import { getDisplayWidth, offsetToDisplayColumn } from './text-metrics.js';
+import { getDisplayWidth } from './text-metrics.js';
 // Input bar: bg=244 (visible above most dark terminal backgrounds)
 // We build the line as: BG_START + PROMPT_FG + '❯' + RESET_FG + ' ' + inputText + padding + BG_END
 // Using \x1b[39m (reset fg only) after ❯ so background persists through the rest of the line.
@@ -31,23 +31,27 @@ export function buildTerminalFrame(state) {
     const cols = state.terminalSize.columns ?? 80;
     // Strip leading '> ' from prompt if present
     const rawPrompt = state.prompt.replace(/^>\s/, '');
-    const inputText = rawPrompt + state.input.value;
-    const visibleWidth = getDisplayWidth('❯ ' + inputText);
-    const padCount = Math.max(0, cols - visibleWidth);
-    // Build prompt line with persistent background:
-    // BG stays active across the whole line because we only reset fg, not bg, after ❯
-    const promptLine = `${INPUT_BG}${PROMPT_FG}❯${RESET_FG} ${inputText}${' '.repeat(padCount)}${RESET_ALL}`;
+    const inputLines = (rawPrompt + state.input.value).split('\n');
+    // Build each input line with persistent background
+    const promptLines = inputLines.map((lineText, lineIndex) => {
+        const prefix = lineIndex === 0 ? `${PROMPT_FG}❯${RESET_FG} ` : '  '; // First line has ❯, others just spaces
+        const visibleWidth = getDisplayWidth(prefix + lineText);
+        const padCount = Math.max(0, cols - visibleWidth);
+        return `${INPUT_BG}${prefix}${lineText}${' '.repeat(padCount)}${RESET_ALL}`;
+    });
     const overlayLines = buildOverlayLines(state);
     const shouldHideFooter = modalLines.length > 0 || overlayLines.length > 0;
     const footerLines = shouldHideFooter ? [] : (state.footerLines ?? []);
-    const lines = [promptLine, ...footerLines, ...(modalLines.length > 0 ? modalLines : overlayLines)];
-    const promptLineIndex = 0;
-    // Cursor column = width of '❯ ' + width of rawPrompt + cursor offset into input value
-    const cursorColumn = getDisplayWidth('❯ ' + rawPrompt) + offsetToDisplayColumn(state.input.value, state.input.cursorOffset);
+    const lines = [...promptLines, ...footerLines, ...(modalLines.length > 0 ? modalLines : overlayLines)];
+    // Calculate cursor position across multi-line input
+    const cursorLineIndex = Math.min(rawPrompt.split('\n').length - 1 + state.input.value.slice(0, state.input.cursorOffset).split('\n').length - 1, promptLines.length - 1);
+    const textBeforeCursorOnLine = state.input.value.slice(0, state.input.cursorOffset).split('\n').pop() || '';
+    const prefixWidth = cursorLineIndex === 0 ? getDisplayWidth('❯ ' + rawPrompt.split('\n')[0]) : getDisplayWidth('  ');
+    const cursorColumn = prefixWidth + getDisplayWidth(textBeforeCursorOnLine);
     return {
         lines,
         cursor: state.focusTarget === 'input'
-            ? { line: promptLineIndex, column: cursorColumn }
+            ? { line: cursorLineIndex, column: cursorColumn }
             : null,
     };
 }

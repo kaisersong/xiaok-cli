@@ -141,6 +141,8 @@ async function runChat(initialInput, opts) {
     const promptBuilder = new PromptBuilder();
     let agent;
     let runtimeFacade;
+    // Resolve model capabilities early (needed for getPromptInput)
+    const modelCapabilities = resolveModelCapabilities(adapter);
     const getPromptInput = async (promptCwd = cwd, nextSkills = skills) => ({
         enterpriseId: creds?.enterpriseId ?? null,
         devApp,
@@ -429,7 +431,6 @@ async function runChat(initialInput, opts) {
     };
     // 初始化状态栏（在单次任务模式之前）
     const fullModelName = adapter.getModelName();
-    const modelCapabilities = resolveModelCapabilities(adapter);
     statusBar.init(fullModelName, sessionId, process.cwd(), opts.dryRun ? 'dry-run' : permissionManager.getMode(), {
         contextLimit: modelCapabilities.contextLimit,
     });

@@ -10,5 +10,7 @@ export interface SessionGuidanceOptions {
     memories?: MemoryRecord[];
     currentTokenUsage?: number;
     contextLimit?: number;
+    lastAssistantMessage?: string;
+    lastUserMessage?: string;
 }
 export declare function getSessionGuidanceSection(opts: SessionGuidanceOptions): string;

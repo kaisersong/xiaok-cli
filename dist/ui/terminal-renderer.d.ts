@@ -2,7 +2,13 @@ import type { SurfaceState } from './surface-state.js';
 export declare class TerminalRenderer {
     private readonly stream;
     private previousLineCount;
+    private inputAreaPosition;
     constructor(stream?: NodeJS.WriteStream);
+    /**
+     * Mark current position as input area anchor point.
+     * Call this after output content completes, before starting input.
+     */
+    anchorInputPosition(): void;
     render(state: SurfaceState): void;
     /**
      * Clear all rendered lines and reset state. Call this before outputting content.

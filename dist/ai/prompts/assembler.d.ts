@@ -22,6 +22,8 @@ export interface AssemblerOptions {
     allowedToolsActive?: string[];
     permissionMode?: 'default' | 'auto' | 'plan';
     toolCount?: number;
+    lastAssistantMessage?: string;
+    lastUserMessage?: string;
 }
 export interface AssembledPrompt {
     staticText: string;

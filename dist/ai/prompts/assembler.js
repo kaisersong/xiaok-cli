@@ -75,6 +75,8 @@ export async function assembleSystemPrompt(opts) {
         memories: opts.memories,
         currentTokenUsage: opts.currentTokenUsage,
         contextLimit: opts.contextLimit,
+        lastAssistantMessage: opts.lastAssistantMessage,
+        lastUserMessage: opts.lastUserMessage,
     });
     if (guidance)
         dynamicSections.push(guidance);

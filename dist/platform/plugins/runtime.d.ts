@@ -1,6 +1,7 @@
 import { type LspEnvelope } from '../lsp/client.js';
 import { type LoadedPlugin } from './loader.js';
 import type { HookConfigOrCommand } from '../../runtime/hooks-runner.js';
+import type { PluginManifestMcpServer } from '../mcp/types.js';
 export interface PlatformPluginRuntimeState {
     plugins: LoadedPlugin[];
     skillRoots: string[];
@@ -10,10 +11,7 @@ export interface PlatformPluginRuntimeState {
     /** @deprecated Use hookConfigs. Retained for backward compat. */
     hookCommands: string[];
     commandDeclarations: string[];
-    mcpServers: Array<{
-        name: string;
-        command: string;
-    }>;
+    mcpServers: PluginManifestMcpServer[];
     lspServers: Array<{
         name: string;
         command: string;

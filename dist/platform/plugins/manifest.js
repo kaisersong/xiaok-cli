@@ -43,6 +43,54 @@ export function parsePluginManifest(raw, pluginDir) {
             return String(entry);
         });
     };
+    const parseMcpServers = (value) => {
+        if (!Array.isArray(value))
+            return undefined;
+        return value
+            .filter((entry) => Boolean(entry) && typeof entry === 'object')
+            .map((entry, index) => {
+            // 必须有 name 和 type
+            const name = String(entry.name ?? `plugin-mcp-${index}`);
+            const type = entry.type;
+            if (!type) {
+                throw new Error(`Plugin MCP server "${name}" missing required "type" field`);
+            }
+            // 根据 type 构建 config
+            if (type === 'stdio') {
+                return {
+                    name,
+                    type: 'stdio',
+                    command: String(entry.command ?? ''),
+                    args: Array.isArray(entry.args) ? entry.args.filter((a) => typeof a === 'string') : undefined,
+                    env: entry.env && typeof entry.env === 'object' ? entry.env : undefined,
+                };
+            }
+            if (type === 'sse') {
+                return {
+                    name,
+                    type: 'sse',
+                    url: String(entry.url ?? ''),
+                    headers: entry.headers && typeof entry.headers === 'object' ? entry.headers : undefined,
+                };
+            }
+            if (type === 'http') {
+                return {
+                    name,
+                    type: 'http',
+                    url: String(entry.url ?? ''),
+                    headers: entry.headers && typeof entry.headers === 'object' ? entry.headers : undefined,
+                };
+            }
+            if (type === 'ws') {
+                return {
+                    name,
+                    type: 'ws',
+                    url: String(entry.url ?? ''),
+                };
+            }
+            throw new Error(`Plugin MCP server "${name}" has invalid type: ${type}`);
+        });
+    };
     return {
         name: String(raw.name ?? ''),
         version: String(raw.version ?? ''),
@@ -50,14 +98,7 @@ export function parsePluginManifest(raw, pluginDir) {
         agents: toResolvedList(raw.agents),
         hooks: parseHooks(raw.hooks),
         commands: Array.isArray(raw.commands) ? raw.commands.filter((entry) => typeof entry === 'string') : [],
-        mcpServers: Array.isArray(raw.mcpServers)
-            ? raw.mcpServers
-                .filter((entry) => Boolean(entry) && typeof entry === 'object')
-                .map((entry) => ({
-                name: String(entry.name ?? ''),
-                command: String(entry.command ?? ''),
-            }))
-            : undefined,
+        mcpServers: parseMcpServers(raw.mcpServers),
         lspServers: Array.isArray(raw.lspServers)
             ? raw.lspServers
                 .filter((entry) => Boolean(entry) && typeof entry === 'object')

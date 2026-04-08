@@ -2,11 +2,58 @@ import { buildTerminalFrame } from './terminal-frame.js';
 export class TerminalRenderer {
     stream;
     previousLineCount = 0;
+    inputAreaPosition = null; // Track input area starting line
     constructor(stream = process.stdout) {
         this.stream = stream;
     }
+    /**
+     * Mark current position as input area anchor point.
+     * Call this after output content completes, before starting input.
+     */
+    anchorInputPosition() {
+        // After output, cursor is at the line after the last output line.
+        // The input area will be rendered here (at the bottom of visible content).
+        // We don't move cursor - we just record that future renders should happen at this position.
+        this.inputAreaPosition = null; // Will be established on first render
+    }
     render(state) {
         const frame = buildTerminalFrame(state);
+        const isInitialRender = this.previousLineCount === 0;
+        // On initial render, we need to establish the input area position.
+        // Cursor is at the line after output content.
+        // We render the input frame directly here, without clearing anything above.
+        if (isInitialRender) {
+            // Just render the input frame lines at current position
+            frame.lines.forEach((line, index) => {
+                this.stream.write('\x1b[2K'); // Clear current line
+                this.stream.write(line);
+                if (index < frame.lines.length - 1) {
+                    this.stream.write('\n');
+                }
+            });
+            // Position cursor correctly
+            if (frame.cursor) {
+                // Cursor should be on the prompt line (index 0)
+                // We're at the last line, need to move up
+                const lineDelta = frame.lines.length - 1 - frame.cursor.line;
+                if (lineDelta > 0) {
+                    this.stream.write(`\x1b[${lineDelta}A`);
+                }
+                this.stream.write('\r');
+                if (frame.cursor.column > 0) {
+                    this.stream.write(`\x1b[${frame.cursor.column}C`);
+                }
+            }
+            else if (frame.lines.length > 1) {
+                // Move to first line of input area
+                this.stream.write(`\x1b[${frame.lines.length - 1}A`);
+                this.stream.write('\r');
+            }
+            this.previousLineCount = frame.lines.length;
+            return;
+        }
+        // Subsequent renders: clear previous input area and re-render
+        // We need to clear exactly the previous input area lines
         const linesToClear = Math.max(this.previousLineCount, frame.lines.length);
         this.stream.write('\r');
         for (let index = 0; index < linesToClear; index += 1) {
