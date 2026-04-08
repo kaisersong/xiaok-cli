@@ -6,7 +6,7 @@ import { loadCustomAgents, type CustomAgentDef } from '../../ai/agents/loader.js
 import { buildMcpRuntimeTools } from '../../ai/mcp/runtime/tools.js';
 import { createBackgroundRunner, type BackgroundJobRecord } from '../agents/background-runner.js';
 import { createLspManager } from '../lsp/manager.js';
-import { loadPlatformPluginRuntime, connectDeclaredMcpServer, connectDeclaredLspServer, type PlatformPluginRuntimeState } from '../plugins/runtime.js';
+import { loadPlatformPluginRuntime, connectDeclaredLspServer, type PlatformPluginRuntimeState } from '../plugins/runtime.js';
 import { createSandboxEnforcer } from '../sandbox/enforcer.js';
 import { createSandboxPolicy } from '../sandbox/policy.js';
 import { FileTeamStore } from '../teams/store.js';
@@ -14,6 +14,13 @@ import { createTeamService, type TeamService } from '../teams/service.js';
 import { createWorktreeManager, type WorktreeManager } from '../worktrees/manager.js';
 import { CapabilityRegistry } from './capability-registry.js';
 import { FileCapabilityHealthStore } from './health-store.js';
+import {
+  loadSettingsMcpServers,
+  loadPluginMcpServers,
+  mergeMcpServerConfigs,
+} from '../mcp/config.js';
+import { createMcpClientConnection } from '../mcp/transport.js';
+import type { NamedMcpServerConfig } from '../mcp/types.js';
 
 export interface LspClientLike {
   didOpenDocument(document: { uri: string; languageId: string; version?: number; text: string }): Promise<void>;
@@ -97,7 +104,13 @@ export async function createPlatformRuntimeContext(
         });
       }),
   });
-  const mcpTools = await connectWorkspaceMcpServers(pluginRuntime, capabilityHealth, disposables);
+  // 加载 MCP server 配置（settings.json + plugin manifests）
+  const settingsMcpServers = loadSettingsMcpServers();
+  const pluginMcpServers = loadPluginMcpServers(pluginRuntime);
+  const mergedMcpServers = mergeMcpServerConfigs(settingsMcpServers, pluginMcpServers);
+
+  // 连接 MCP servers
+  const mcpTools = await connectWorkspaceMcpServers(mergedMcpServers, capabilityHealth, disposables);
   for (const agent of customAgents) {
     capabilityRegistry.register({
       kind: 'agent',
@@ -209,28 +222,54 @@ async function connectWorkspaceLspServers(
 }
 
 async function connectWorkspaceMcpServers(
-  pluginRuntime: PlatformPluginRuntimeState,
+  servers: NamedMcpServerConfig[],
   capabilityHealth: PlatformCapabilityHealth[],
   disposables: Array<{ dispose(): void }>,
 ): Promise<Tool[]> {
   const tools: Tool[] = [];
 
-  for (const declaration of pluginRuntime.mcpServers) {
+  for (const server of servers) {
     try {
-      const client = await connectDeclaredMcpServer(declaration);
-      const schemas = await client.listTools();
-      tools.push(...buildMcpRuntimeTools(declaration, client, schemas));
-      disposables.push(client);
+      // 创建 client 连接
+      const connection = await createMcpClientConnection(server.name, server);
+
+      // 列出所有 tools
+      const toolsResult = await connection.client.listTools();
+      const schemas = toolsResult.tools ?? [];
+
+      // 构建 xiaok Tool 对象
+      tools.push(
+        ...buildMcpRuntimeTools(
+          { name: server.name, command: '' }, // declaration 兼容旧接口
+          {
+            listTools: async () => schemas,
+            callTool: async (name, input) => {
+              const result = await connection.client.callTool({ name, arguments: input });
+              // 提取文本内容
+              const content = result.content as Array<{ type: string; text?: string }> | undefined;
+              const text = content
+                ?.filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+                .map((c) => c.text)
+                .join('\n') ?? '';
+              return text;
+            },
+            dispose: connection.dispose,
+          },
+          schemas,
+        ),
+      );
+
+      disposables.push(connection);
       capabilityHealth.push({
         kind: 'mcp',
-        name: declaration.name,
+        name: server.name,
         status: 'connected',
         detail: `${schemas.length} tools`,
       });
     } catch (error) {
       capabilityHealth.push({
         kind: 'mcp',
-        name: declaration.name,
+        name: server.name,
         status: 'degraded',
         detail: error instanceof Error ? error.message : String(error),
       });

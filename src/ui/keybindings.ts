@@ -146,6 +146,8 @@ export function identifyKey(data: string, offset: number): { key: string; consum
         '13;2u': 'shift+enter',
         '13;2~': 'shift+enter',
         '27;2;13~': 'shift+enter',
+        '13;5u': 'shift+enter',  // xterm Shift+Enter
+        '13;6u': 'shift+enter',  // Alt+Enter variant
         '122;6u': 'ctrl+shift+z',
         '3~': 'delete',
       };

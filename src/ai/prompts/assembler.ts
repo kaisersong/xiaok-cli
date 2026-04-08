@@ -47,6 +47,9 @@ export interface AssemblerOptions {
   allowedToolsActive?: string[];
   permissionMode?: 'default' | 'auto' | 'plan';
   toolCount?: number;
+  // Approval detection context
+  lastAssistantMessage?: string;
+  lastUserMessage?: string;
 }
 
 export interface AssembledPrompt {
@@ -133,6 +136,8 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
     memories: opts.memories,
     currentTokenUsage: opts.currentTokenUsage,
     contextLimit: opts.contextLimit,
+    lastAssistantMessage: opts.lastAssistantMessage,
+    lastUserMessage: opts.lastUserMessage,
   });
   if (guidance) dynamicSections.push(guidance);
 

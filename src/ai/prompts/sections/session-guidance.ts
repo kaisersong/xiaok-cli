@@ -11,6 +11,8 @@ export interface SessionGuidanceOptions {
   memories?: MemoryRecord[];
   currentTokenUsage?: number;
   contextLimit?: number;
+  lastAssistantMessage?: string;
+  lastUserMessage?: string;
 }
 
 export function getSessionGuidanceSection(opts: SessionGuidanceOptions): string {
@@ -36,6 +38,19 @@ export function getSessionGuidanceSection(opts: SessionGuidanceOptions): string 
 
   // === 新增：用户授权后的执行指导 ===
   parts.push('CRITICAL: When the user says "允许", "确认", "好的", "行", "yes", "do it", or any other approval, EXECUTE IMMEDIATELY. Do not ask them to type a specific command format. Do not ask for additional confirmation. Their approval means you should call the Bash tool and run the command NOW.');
+
+  // === 新增：批准检测与立即执行 ===
+  if (opts.lastAssistantMessage && opts.lastUserMessage) {
+    const planCompleted = /(spec|plan|设计|方案).*已完成|文档路径[:：]\s*[\w/.-]+/i.test(opts.lastAssistantMessage);
+    const userApproved = /^(好的|行|yes|do it|允许|确认|继续)$/i.test(opts.lastUserMessage.trim());
+
+    if (planCompleted && userApproved) {
+      parts.push('**CRITICAL CONTEXT DETECTED**: You just completed a spec/plan and the user approved.');
+      parts.push('**IMMEDIATE ACTION REQUIRED**: Call Write/Edit/Bash NOW to execute the next step.');
+      parts.push('**FORBIDDEN**: Saying "收到"/"好"/"我会" or describing what you will do.');
+      parts.push('**REQUIRED**: Your first output MUST be a tool call. Just execute.');
+    }
+  }
 
   // === 新增：!/command 快捷用法 ===
   parts.push('If the user types `!/skillname args` or `!/command args`, they want you to execute that skill/command immediately with the given arguments. Treat it as a shortcut for running the skill without confirmation.');

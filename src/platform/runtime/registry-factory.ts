@@ -7,6 +7,7 @@ import { executeNamedSubAgent } from '../../ai/agents/subagent-executor.js';
 import { applySandboxToTools } from '../sandbox/tool-wrappers.js';
 import { createTeamTools } from '../teams/tools.js';
 import type { PlatformRuntimeContext } from './context.js';
+import { mergeToolPools, isMcpTool } from '../../ai/tools/tool-pool.js';
 
 export interface PlatformRegistryFactoryOptions {
   platform: PlatformRuntimeContext;
@@ -71,13 +72,23 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
         getTaskId: options.getCurrentTaskId,
       }),
     ];
-    const allTools = applySandboxToTools(
-      buildToolList(options.skillTool, { cwd }, extraTools),
-      options.platform.sandboxEnforcer,
+
+    // 构建基础 tool list
+    const baseTools = buildToolList(options.skillTool, { cwd }, extraTools);
+
+    // 应用 sandbox
+    const sandboxedTools = applySandboxToTools(baseTools, options.platform.sandboxEnforcer);
+
+    // 合并 built-in 和 MCP tools（保证 ordering）
+    const orderedTools = mergeToolPools(
+      sandboxedTools.filter((t) => !isMcpTool(t)),
+      sandboxedTools.filter(isMcpTool),
     );
+
+    // 过滤 allowedTools
     const filteredTools = allowedTools?.length
-      ? allTools.filter((tool) => allowedTools.includes(tool.definition.name))
-      : allTools;
+      ? orderedTools.filter((tool) => allowedTools.includes(tool.definition.name))
+      : orderedTools;
 
     return new ToolRegistry({
       capabilityRegistry: options.platform.capabilityRegistry,
