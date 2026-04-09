@@ -34,8 +34,8 @@ export function shouldCompact(estimatedTokens: number, contextLimit: number, thr
 
 export function mergeUsage(base: UsageStats, next: UsageStats): UsageStats {
   const merged: UsageStats = {
-    inputTokens: next.inputTokens,
-    outputTokens: next.outputTokens,
+    inputTokens: next.inputTokens > 0 ? next.inputTokens : base.inputTokens,
+    outputTokens: next.outputTokens > 0 ? next.outputTokens : base.outputTokens,
   };
 
   const cacheCreationInputTokens = next.cacheCreationInputTokens ?? base.cacheCreationInputTokens;
