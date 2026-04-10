@@ -1052,7 +1052,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
     // 将光标移到 scroll region 内容区，避免用户输入覆盖 footer
     if (scrollRegion.isActive()) {
-      scrollRegion.beginContentStreaming();
+      scrollRegion.beginUserInputStreaming();
     }
 
     // 显示用户输入（带背景色）
@@ -1115,13 +1115,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
                 if (/\S/.test(chunk.delta)) {
                   if (!responseStarted) {
                     responseStarted = true;
-                    // Clear activity line BEFORE consuming lead-in to prevent
-                    // "Still working" from being scrolled up into content area
+                    // Clear activity line and position for content
                     scrollRegion.beginContentStreaming();
-                    process.stdout.write(turnLayout.consumeAssistantLeadIn());
+                    // Consume lead-in without writing \n (would trigger scroll at
+                    // row 21). The gap row is already created by the input path
+                    // positioning at row 20, leaving row 21 blank.
+                    turnLayout.consumeAssistantLeadIn();
                     beginActivity('Answering');
-                    // beginActivity calls renderFooter which moves cursor to input bar;
-                    // reposition back to scroll region before content writes
+                    // Reposition cursor after beginActivity's renderFooter()
                     scrollRegion.beginContentStreaming();
                     contentStreaming = true;
                     scheduleActivityPause(220);
@@ -1190,12 +1191,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           if (/\S/.test(chunk.delta)) {
             if (!responseStarted) {
               responseStarted = true;
-              // Clear activity line BEFORE consuming lead-in
               scrollRegion.beginContentStreaming();
-              process.stdout.write(turnLayout.consumeAssistantLeadIn());
+              // Consume lead-in without writing (would trigger scroll at row 21)
+              turnLayout.consumeAssistantLeadIn();
               beginActivity('Answering');
-              // beginActivity calls renderFooter which moves cursor to input bar;
-              // reposition back to scroll region before content writes
               scrollRegion.beginContentStreaming();
               contentStreaming = true;
               scheduleActivityPause(220);

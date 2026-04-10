@@ -361,9 +361,8 @@ export class ScrollRegionManager {
 
   /**
    * Prepare for content output.
-   * Clears the activity line at the bottom of the scroll region so content
-   * can be written without stale activity text being scrolled up.
-   * Cursor is positioned to the scroll region bottom where new content begins.
+   * Clears the activity line at the bottom of the scroll region and positions
+   * the cursor there for content to begin.
    * Call this before writing any content to the scroll region.
    */
   beginContentStreaming(): void {
@@ -371,6 +370,24 @@ export class ScrollRegionManager {
 
     const scrollBottom = this.getScrollBottom();
     this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
+    this.stream.write(RESET_ALL);
+  }
+
+  /**
+   * Prepare for user input output.
+   * Clears the activity line and positions the cursor one row above it,
+   * leaving the bottom row as a visual gap. The input's trailing newline
+   * moves the cursor to the bottom row without triggering a scroll,
+   * preserving one extra line of previous content.
+   */
+  beginUserInputStreaming(): void {
+    if (!this.active) return;
+
+    const scrollBottom = this.getScrollBottom();
+    // Clear the activity line
+    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
+    // Position cursor one row above — the bottom row becomes a gap
+    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom - 1))}`);
     this.stream.write(RESET_ALL);
   }
 
