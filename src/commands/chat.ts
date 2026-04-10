@@ -1048,6 +1048,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     // 将光标移到 scroll region 内容区，避免用户输入覆盖 footer
     if (scrollRegion.isActive()) {
       scrollRegion.beginContentStreaming();
+      // Prevent renderLiveActivity timer from writing activity lines that
+      // will be scrolled up into the content area. The activity line at
+      // scrollBottom will be pushed up by streaming content and appear
+      // duplicated in the output.
+      contentStreaming = true;
     }
 
     // 显示用户输入（带背景色）
