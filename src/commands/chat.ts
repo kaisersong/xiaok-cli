@@ -459,6 +459,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       if (responseStarted) {
         return;
       }
+      // Don't write reassurance notes while content is streaming —
+      // they appear in the content area and get scrolled up.
+      if (contentStreaming) {
+        return;
+      }
       const tick = statusBar.getReassuranceTick(Date.now(), lastReassuranceBucket);
       if (!tick) {
         return;
@@ -1115,13 +1120,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
                 if (/\S/.test(chunk.delta)) {
                   if (!responseStarted) {
                     responseStarted = true;
-                    // Position cursor in scroll region BEFORE writing lead-in.
-                    // renderLiveActivity() may have moved cursor to the footer;
-                    // this ensures content writes to the scroll region, not the footer.
-                    scrollRegion.beginContentStreaming();
+                    // Block activity rendering before beginActivity writes anything
+                    contentStreaming = true;
                     process.stdout.write(turnLayout.consumeAssistantLeadIn());
                     beginActivity('Answering');
-                    contentStreaming = true;
+                    // Reposition cursor after beginActivity's renderFooter() call
+                    // which moved cursor to the input bar (wrong location for content)
+                    scrollRegion.beginContentStreaming();
                     scheduleActivityPause(220);
                   } else {
                     if (resumeActivityTimer) {
@@ -1188,11 +1193,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           if (/\S/.test(chunk.delta)) {
             if (!responseStarted) {
               responseStarted = true;
-              // Position cursor in scroll region BEFORE writing lead-in.
-              scrollRegion.beginContentStreaming();
+              // Block activity rendering before beginActivity writes anything
+              contentStreaming = true;
               process.stdout.write(turnLayout.consumeAssistantLeadIn());
               beginActivity('Answering');
-              contentStreaming = true;
+              // Reposition cursor after beginActivity's renderFooter() call
+              scrollRegion.beginContentStreaming();
               scheduleActivityPause(220);
             } else {
               if (resumeActivityTimer) {
