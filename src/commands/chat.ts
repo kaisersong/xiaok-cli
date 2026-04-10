@@ -1115,11 +1115,15 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
                 if (/\S/.test(chunk.delta)) {
                   if (!responseStarted) {
                     responseStarted = true;
+                    // Clear activity line BEFORE consuming lead-in to prevent
+                    // "Still working" from being scrolled up into content area
+                    scrollRegion.beginContentStreaming();
                     process.stdout.write(turnLayout.consumeAssistantLeadIn());
                     beginActivity('Answering');
-                    // Block activity rendering and reposition cursor in scroll region
-                    contentStreaming = true;
+                    // beginActivity calls renderFooter which moves cursor to input bar;
+                    // reposition back to scroll region before content writes
                     scrollRegion.beginContentStreaming();
+                    contentStreaming = true;
                     scheduleActivityPause(220);
                   } else {
                     if (resumeActivityTimer) {
@@ -1186,11 +1190,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           if (/\S/.test(chunk.delta)) {
             if (!responseStarted) {
               responseStarted = true;
+              // Clear activity line BEFORE consuming lead-in
+              scrollRegion.beginContentStreaming();
               process.stdout.write(turnLayout.consumeAssistantLeadIn());
               beginActivity('Answering');
-              // Block activity rendering and reposition cursor in scroll region
-              contentStreaming = true;
+              // beginActivity calls renderFooter which moves cursor to input bar;
+              // reposition back to scroll region before content writes
               scrollRegion.beginContentStreaming();
+              contentStreaming = true;
               scheduleActivityPause(220);
             } else {
               if (resumeActivityTimer) {
