@@ -37,6 +37,8 @@ const CLEAR_LINE = '\x1b[2K';
 const HIDE_CURSOR = '\x1b[?25l';
 const SHOW_CURSOR = '\x1b[?25h';
 const MOVE_TO_ROW = '\x1b[%d;1H';
+const SAVE_CURSOR = '\x1b[s';
+const RESTORE_CURSOR = '\x1b[u';
 
 // Input bar styling
 const INPUT_BG = '\x1b[48;5;244m';   // Gray background
@@ -53,8 +55,6 @@ export class ScrollRegionManager {
   private lastStatusLine = '';
   private lastInputValue = '';
   private lastInputCursor = 0;
-  /** Tracks how many lines of content have been output in the scroll region. */
-  private contentLineCount = 0;
 
   constructor(
     private readonly stream: NodeJS.WriteStream = process.stdout,
@@ -364,26 +364,31 @@ export class ScrollRegionManager {
 
   /**
    * Prepare for content output at the start of a new turn.
-   * Clears the activity line so the turn's output can flow naturally
-   * from where the previous content ended, rather than overwriting it.
-   * The terminal's natural scroll behavior handles pushing content up
-   * when it reaches the scroll region bottom.
+   * Saves the current cursor position, clears the activity line at the bottom
+   * of the scroll region (removing any stale "Still working" text from the
+   * previous turn), then restores the cursor so new content continues exactly
+   * where the previous turn's content ended.
+   *
+   * On the first turn, content starts at row 1 (from begin() clearing screen).
+   * On subsequent turns, content resumes from where the previous turn ended.
    */
   beginContentStreaming(): void {
     if (!this.active) return;
 
-    // Move to the bottom of the scroll region and clear the activity line.
-    // New content writes from here and the terminal auto-scrolls when needed.
-    // Previous turn's content above this row is preserved (not overwritten).
+    // Save cursor, clear the stale activity line at scroll region bottom,
+    // then restore cursor. This removes "Still working" without disrupting
+    // where new content should start.
     const scrollBottom = this.getScrollBottom();
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
+    this.stream.write(`${SAVE_CURSOR}${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}${RESTORE_CURSOR}`);
     this.stream.write(RESET_ALL);
   }
 
   /**
    * Restore footer after content streaming completes.
-   * Clears the activity line area so no stale "Still working" text remains
-   * visible after the turn ends.
+   * Saves the current cursor position (so beginContentStreaming can restore
+   * it on the next turn), clears user input state, and re-renders the footer.
+   * The activity line is NOT cleared here — it is handled by
+   * beginContentStreaming() at the start of the next turn.
    */
   endContentStreaming(options?: {
     inputPrompt?: string;
@@ -391,10 +396,8 @@ export class ScrollRegionManager {
   }): void {
     if (!this.active) return;
 
-    // Clear the scroll region bottom (activity line area) to prevent stale
-    // text from remaining visible after footer is rendered.
-    const scrollBottom = this.getScrollBottom();
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
+    // Save cursor position after all content. Next turn restores here.
+    this.stream.write(SAVE_CURSOR);
 
     this.lastInputValue = '';
     this.lastInputCursor = 0;
