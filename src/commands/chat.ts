@@ -386,6 +386,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   let responseStarted = false;
   let lastReassuranceBucket = -1;
   let contentStreaming = false; // tracks when content is actively being streamed
+  let contentRows = 0; // tracks how many rows of content have been written
 
   const renderLiveActivity = (): void => {
     // While content is actively streaming, stop rendering the activity line.
@@ -1051,8 +1052,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
 
     // 将光标移到 scroll region 内容区，避免用户输入覆盖 footer
+    // Position input after content (not at fixed row) to avoid overwriting
+    // previous turn's output. Input's trailing \n may scroll if region is full.
     if (scrollRegion.isActive()) {
-      scrollRegion.beginUserInputStreaming();
+      scrollRegion.positionAfterContent(contentRows);
     }
 
     // 显示用户输入（带背景色）
@@ -1115,14 +1118,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
                 if (/\S/.test(chunk.delta)) {
                   if (!responseStarted) {
                     responseStarted = true;
-                    // Clear activity line and position for content
-                    scrollRegion.beginContentStreaming();
-                    // Consume lead-in without writing \n (would trigger scroll at
-                    // row 21). The gap row is already created by the input path
-                    // positioning at row 20, leaving row 21 blank.
+                    // Clear activity line without repositioning — cursor stays
+                    // at current position (after user input)
+                    scrollRegion.clearActivityLine();
                     turnLayout.consumeAssistantLeadIn();
                     beginActivity('Answering');
-                    // Reposition cursor after beginActivity's renderFooter()
+                    // beginActivity's renderFooter() moves cursor to input bar;
+                    // reposition back to where content should continue
                     scrollRegion.beginContentStreaming();
                     contentStreaming = true;
                     scheduleActivityPause(220);
@@ -1191,8 +1193,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           if (/\S/.test(chunk.delta)) {
             if (!responseStarted) {
               responseStarted = true;
-              scrollRegion.beginContentStreaming();
-              // Consume lead-in without writing (would trigger scroll at row 21)
+              // Clear activity line without repositioning
+              scrollRegion.clearActivityLine();
               turnLayout.consumeAssistantLeadIn();
               beginActivity('Answering');
               scrollRegion.beginContentStreaming();
@@ -1261,6 +1263,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
     // Restore footer after streaming
     if (scrollRegion.isActive()) {
+      // Track content rows for positioning next turn's input
+      contentRows = mdRenderer.getLineCount();
       scrollRegion.endContentStreaming({
         inputPrompt: 'Type your message...',
         statusLine: statusBar.getStatusLine(),

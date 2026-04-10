@@ -360,6 +360,37 @@ export class ScrollRegionManager {
   }
 
   /**
+   * Clear the activity line at the bottom of the scroll region.
+   * Call this after user input is written, before AI response starts.
+   * Does NOT reposition the cursor — content continues from current position.
+   */
+  clearActivityLine(): void {
+    if (!this.active) return;
+
+    const scrollBottom = this.getScrollBottom();
+    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
+    this.stream.write(RESET_ALL);
+  }
+
+  /**
+   * Position cursor for content output, based on how many rows of content
+   * were written. Calculates the actual end row (accounting for terminal
+   * wrapping) and positions cursor there + 1 for a gap row.
+   */
+  positionAfterContent(contentRows: number): void {
+    if (!this.active) return;
+
+    const scrollBottom = this.getScrollBottom();
+    // Content starts at row 1, ends at row `contentRows`
+    // Leave a gap row: position at contentEnd + 2, but not past scrollBottom
+    const contentEnd = Math.min(contentRows, scrollBottom);
+    const targetRow = Math.min(contentEnd + 2, scrollBottom);
+
+    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(targetRow))}`);
+    this.stream.write(RESET_ALL);
+  }
+
+  /**
    * Prepare for content output.
    * Clears the activity line at the bottom of the scroll region and positions
    * the cursor there for content to begin.
@@ -370,24 +401,6 @@ export class ScrollRegionManager {
 
     const scrollBottom = this.getScrollBottom();
     this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
-    this.stream.write(RESET_ALL);
-  }
-
-  /**
-   * Prepare for user input output.
-   * Clears the activity line and positions the cursor one row above it,
-   * leaving the bottom row as a visual gap. The input's trailing newline
-   * moves the cursor to the bottom row without triggering a scroll,
-   * preserving one extra line of previous content.
-   */
-  beginUserInputStreaming(): void {
-    if (!this.active) return;
-
-    const scrollBottom = this.getScrollBottom();
-    // Clear the activity line
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
-    // Position cursor one row above — the bottom row becomes a gap
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom - 1))}`);
     this.stream.write(RESET_ALL);
   }
 

@@ -1,5 +1,6 @@
 import { bold, dim, cyan, yellow, green, magenta, getTheme } from "./render.js";
 import { highlightLine } from "./highlight.js";
+import { getDisplayWidth, stripAnsi } from "./text-metrics.js";
 
 const BODY_GUTTER = "";
 
@@ -13,6 +14,14 @@ export class MarkdownRenderer {
   private inCodeBlock = false;
   private codeLang = "";
   private pendingLen = 0;
+  private lineCount = 0;
+  private termWidth = 0;
+
+  /** Get the number of content lines written (for cursor positioning). */
+  getLineCount(termWidth?: number): number {
+    if (termWidth) this.termWidth = termWidth;
+    return this.lineCount;
+  }
 
   /** Feed a text chunk (may be partial line). */
   write(text: string): void {
@@ -30,6 +39,12 @@ export class MarkdownRenderer {
 
       this.renderLine(line);
       process.stdout.write("\n");
+
+      // Track line count including terminal wrapping
+      const displayWidth = getDisplayWidth(stripAnsi(line));
+      const cols = this.termWidth || process.stdout.columns || 80;
+      const wrappedLines = Math.max(1, Math.ceil(displayWidth / cols));
+      this.lineCount += wrappedLines;
     }
 
     if (this.buffer.length > this.pendingLen) {
@@ -39,6 +54,17 @@ export class MarkdownRenderer {
       }
       process.stdout.write(newChars);
       this.pendingLen = this.buffer.length;
+
+      // Track pending (non-newline) content as partial line
+      const displayWidth = getDisplayWidth(stripAnsi(this.buffer));
+      const cols = this.termWidth || process.stdout.columns || 80;
+      const pendingRows = Math.ceil(displayWidth / cols);
+      // Only count rows beyond what was already counted via newlines
+      const newlineCount = this.buffer.split('\n').length - 1;
+      const nonNewlineRows = pendingRows - Math.max(0, newlineCount);
+      if (nonNewlineRows > 0) {
+        this.lineCount += nonNewlineRows;
+      }
     }
   }
 
@@ -60,6 +86,7 @@ export class MarkdownRenderer {
     this.inCodeBlock = false;
     this.codeLang = "";
     this.pendingLen = 0;
+    this.lineCount = 0;
   }
 
   private renderLine(line: string): void {
