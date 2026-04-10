@@ -361,16 +361,19 @@ export class ScrollRegionManager {
 
   /**
    * Prepare for content output.
-   * Moves cursor to the bottom of the scroll region and clears the activity
-   * line. New content writes from here; the terminal auto-scrolls when the
-   * scroll region bottom is reached. Previous content above is preserved.
+   * Saves the cursor position, clears the activity line at the bottom of the
+   * scroll region, and restores the cursor. This prevents activity line text
+   * from being scrolled up into the content area, without disrupting the
+   * natural content flow position.
    * Call this before writing any content to the scroll region.
    */
   beginContentStreaming(): void {
     if (!this.active) return;
 
+    // Save cursor, clear the activity line at scroll region bottom,
+    // then restore cursor so content continues from its natural position.
     const scrollBottom = this.getScrollBottom();
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
+    this.stream.write(`\x1b[s${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}\x1b[u`);
     this.stream.write(RESET_ALL);
   }
 

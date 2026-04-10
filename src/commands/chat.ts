@@ -1053,11 +1053,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     // 将光标移到 scroll region 内容区，避免用户输入覆盖 footer
     if (scrollRegion.isActive()) {
       scrollRegion.beginContentStreaming();
-      // Prevent renderLiveActivity timer from writing activity lines that
-      // will be scrolled up into the content area. The activity line at
-      // scrollBottom will be pushed up by streaming content and appear
-      // duplicated in the output.
-      contentStreaming = true;
     }
 
     // 显示用户输入（带背景色）
@@ -1120,12 +1115,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
                 if (/\S/.test(chunk.delta)) {
                   if (!responseStarted) {
                     responseStarted = true;
-                    // Block activity rendering before beginActivity writes anything
-                    contentStreaming = true;
                     process.stdout.write(turnLayout.consumeAssistantLeadIn());
                     beginActivity('Answering');
-                    // Reposition cursor after beginActivity's renderFooter() call
-                    // which moved cursor to the input bar (wrong location for content)
+                    // Block activity rendering and reposition cursor in scroll region
+                    contentStreaming = true;
                     scrollRegion.beginContentStreaming();
                     scheduleActivityPause(220);
                   } else {
@@ -1193,11 +1186,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           if (/\S/.test(chunk.delta)) {
             if (!responseStarted) {
               responseStarted = true;
-              // Block activity rendering before beginActivity writes anything
-              contentStreaming = true;
               process.stdout.write(turnLayout.consumeAssistantLeadIn());
               beginActivity('Answering');
-              // Reposition cursor after beginActivity's renderFooter() call
+              // Block activity rendering and reposition cursor in scroll region
+              contentStreaming = true;
               scrollRegion.beginContentStreaming();
               scheduleActivityPause(220);
             } else {
