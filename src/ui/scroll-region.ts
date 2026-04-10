@@ -53,6 +53,8 @@ export class ScrollRegionManager {
   private lastStatusLine = '';
   private lastInputValue = '';
   private lastInputCursor = 0;
+  /** Tracks how many lines of content have been output in the scroll region. */
+  private contentLineCount = 0;
 
   constructor(
     private readonly stream: NodeJS.WriteStream = process.stdout,
@@ -111,8 +113,8 @@ export class ScrollRegionManager {
 
   /**
    * Activate scroll region mode.
-   * Sets up the scroll region without moving the cursor,
-   * so existing screen content is not overwritten.
+   * Clears the screen and moves cursor to top,
+   * so the welcome screen fills the entire visible area.
    */
   begin(): void {
     if (this.active) return;
@@ -127,8 +129,11 @@ export class ScrollRegionManager {
     // Set scroll region (rows 1 to scrollBottom)
     this.setScrollRegion();
 
-    // Don't move cursor - let content flow from current position.
-    // This ensures existing screen content is scrolled up, not overwritten.
+    // Clear entire screen and move cursor to top-left.
+    // \x1b[2J clears all lines, \x1b[H homes the cursor.
+    // This ensures the welcome screen fills the entire visible area,
+    // pushing the shell command that launched the CLI off screen.
+    this.stream.write(`\x1b[2J\x1b[H`);
 
     // Don't render footer here - it will be rendered by beginActivity()
   }
@@ -358,15 +363,20 @@ export class ScrollRegionManager {
   }
 
   /**
-   * Prepare for content output.
-   * Clears the activity line so content can be output without overlap.
-   * Call this before writing any content to the scroll region.
+   * Prepare for content output at the start of a new turn.
+   * Clears the activity line so the turn's output can flow naturally
+   * from where the previous content ended, rather than overwriting it.
+   * The terminal's natural scroll behavior handles pushing content up
+   * when it reaches the scroll region bottom.
    */
   beginContentStreaming(): void {
     if (!this.active) return;
 
+    // Move to the bottom of the scroll region and clear the activity line.
+    // New content writes from here and the terminal auto-scrolls when needed.
+    // Previous turn's content above this row is preserved (not overwritten).
     const scrollBottom = this.getScrollBottom();
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}\r`);
+    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
     this.stream.write(RESET_ALL);
   }
 
