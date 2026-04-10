@@ -111,8 +111,8 @@ export class ScrollRegionManager {
 
   /**
    * Activate scroll region mode.
-   * Sets up the scroll region without moving the cursor,
-   * so existing screen content is not overwritten.
+   * Clears the screen and moves cursor to top,
+   * so the welcome screen fills the entire visible area.
    */
   begin(): void {
     if (this.active) return;
@@ -127,8 +127,10 @@ export class ScrollRegionManager {
     // Set scroll region (rows 1 to scrollBottom)
     this.setScrollRegion();
 
-    // Don't move cursor - let content flow from current position.
-    // This ensures existing screen content is scrolled up, not overwritten.
+    // Clear entire screen and move cursor to top-left.
+    // \x1b[2J clears all lines, \x1b[H homes the cursor.
+    // This pushes the shell command that launched the CLI off screen.
+    this.stream.write(`\x1b[2J\x1b[H`);
 
     // Don't render footer here - it will be rendered by beginActivity()
   }
