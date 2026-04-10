@@ -37,8 +37,6 @@ const CLEAR_LINE = '\x1b[2K';
 const HIDE_CURSOR = '\x1b[?25l';
 const SHOW_CURSOR = '\x1b[?25h';
 const MOVE_TO_ROW = '\x1b[%d;1H';
-const SAVE_CURSOR = '\x1b[s';
-const RESTORE_CURSOR = '\x1b[u';
 
 // Input bar styling
 const INPUT_BG = '\x1b[48;5;244m';   // Gray background
@@ -113,8 +111,8 @@ export class ScrollRegionManager {
 
   /**
    * Activate scroll region mode.
-   * Clears the screen and moves cursor to top,
-   * so the welcome screen fills the entire visible area.
+   * Sets up the scroll region without moving the cursor,
+   * so existing screen content is not overwritten.
    */
   begin(): void {
     if (this.active) return;
@@ -129,11 +127,8 @@ export class ScrollRegionManager {
     // Set scroll region (rows 1 to scrollBottom)
     this.setScrollRegion();
 
-    // Clear entire screen and move cursor to top-left.
-    // \x1b[2J clears all lines, \x1b[H homes the cursor.
-    // This ensures the welcome screen fills the entire visible area,
-    // pushing the shell command that launched the CLI off screen.
-    this.stream.write(`\x1b[2J\x1b[H`);
+    // Don't move cursor - let content flow from current position.
+    // This ensures existing screen content is scrolled up, not overwritten.
 
     // Don't render footer here - it will be rendered by beginActivity()
   }
@@ -363,41 +358,28 @@ export class ScrollRegionManager {
   }
 
   /**
-   * Prepare for content output at the start of a new turn.
-   * Saves the current cursor position, clears the activity line at the bottom
-   * of the scroll region (removing any stale "Still working" text from the
-   * previous turn), then restores the cursor so new content continues exactly
-   * where the previous turn's content ended.
-   *
-   * On the first turn, content starts at row 1 (from begin() clearing screen).
-   * On subsequent turns, content resumes from where the previous turn ended.
+   * Prepare for content output.
+   * Moves cursor to the bottom of the scroll region and clears the activity
+   * line. New content writes from here; the terminal auto-scrolls when the
+   * scroll region bottom is reached. Previous content above is preserved.
+   * Call this before writing any content to the scroll region.
    */
   beginContentStreaming(): void {
     if (!this.active) return;
 
-    // Save cursor, clear the stale activity line at scroll region bottom,
-    // then restore cursor. This removes "Still working" without disrupting
-    // where new content should start.
     const scrollBottom = this.getScrollBottom();
-    this.stream.write(`${SAVE_CURSOR}${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}${RESTORE_CURSOR}`);
+    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
     this.stream.write(RESET_ALL);
   }
 
   /**
    * Restore footer after content streaming completes.
-   * Saves the current cursor position (so beginContentStreaming can restore
-   * it on the next turn), clears user input state, and re-renders the footer.
-   * The activity line is NOT cleared here — it is handled by
-   * beginContentStreaming() at the start of the next turn.
    */
   endContentStreaming(options?: {
     inputPrompt?: string;
     statusLine?: string;
   }): void {
     if (!this.active) return;
-
-    // Save cursor position after all content. Next turn restores here.
-    this.stream.write(SAVE_CURSOR);
 
     this.lastInputValue = '';
     this.lastInputCursor = 0;
