@@ -382,12 +382,19 @@ export class ScrollRegionManager {
 
   /**
    * Restore footer after content streaming completes.
+   * Clears the activity line area so no stale "Still working" text remains
+   * visible after the turn ends.
    */
   endContentStreaming(options?: {
     inputPrompt?: string;
     statusLine?: string;
   }): void {
     if (!this.active) return;
+
+    // Clear the scroll region bottom (activity line area) to prevent stale
+    // text from remaining visible after footer is rendered.
+    const scrollBottom = this.getScrollBottom();
+    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
 
     this.lastInputValue = '';
     this.lastInputCursor = 0;
