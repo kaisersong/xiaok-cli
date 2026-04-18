@@ -59,6 +59,9 @@ function describeGroupedActivity(toolName: string, input: Record<string, unknown
       : typeof input.path === 'string'
         ? summarizePath(input)
         : '';
+    if (name === 'using-superpowers') {
+      return null;
+    }
     return name ? { group: 'Explored', item: `Load ${name}` } : null;
   }
 

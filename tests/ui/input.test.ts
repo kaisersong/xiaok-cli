@@ -309,13 +309,64 @@ describe('InputReader', () => {
       harness.restore();
     });
 
+    it('emits the mode-cycle notice when shift-tab arrives as a batch ANSI sequence', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+      reader.setModeCycleHandler(() => 'auto');
+
+      const pending = reader.read('> ');
+      harness.send('\x1b[Z');
+
+      expect(harness.output.normalized).toContain('权限模式已切换为 auto');
+
+      harness.send('\x03');
+      await expect(pending).resolves.toBeNull();
+
+      harness.restore();
+    });
+
+    it('emits the mode-cycle notice when shift-tab arrives while a scroll prompt renderer is active', async () => {
+      const harness = createTtyHarness();
+      const scrollPromptRenderer = vi.fn();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+      reader.setModeCycleHandler(() => 'auto');
+      reader.setStatusLineProvider(() => ['  test-model · 0% · project']);
+      reader.setScrollPromptRenderer(scrollPromptRenderer);
+
+      const pending = reader.read('> ');
+      harness.send('\x1b[Z');
+
+      expect(harness.output.normalized).toContain('权限模式已切换为 auto');
+      expect(scrollPromptRenderer).toHaveBeenCalled();
+
+      harness.send('\x03');
+      await expect(pending).resolves.toBeNull();
+
+      harness.restore();
+    });
+
+    it('submits an exact slash command on the first enter even while the menu is open', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+
+      const pending = reader.read('> ');
+      harness.send('/mode');
+      harness.send('\r');
+
+      await expect(pending).resolves.toBe('/mode');
+
+      harness.restore();
+    });
+
     it('does not clear and redraw twice for slash-menu arrow navigation when using the shared renderer', async () => {
       const harness = createTtyHarness();
       const renderInput = vi.fn();
       const clearOverlay = vi.fn();
+      const prepareBlockOutput = vi.fn();
       reader = new InputReader({
         renderInput,
         clearOverlay,
+        prepareBlockOutput,
       } as unknown as ReplRenderer);
       reader.setSkills([
         { name: 'debug', description: '先定位根因，再提出修复方案', content: '', path: '' },
@@ -333,6 +384,60 @@ describe('InputReader', () => {
 
       harness.send('\x03');
       await expect(pending).resolves.toBeNull();
+
+      harness.restore();
+    });
+
+    it('uses the scroll prompt renderer instead of ReplRenderer when one is registered', async () => {
+      const harness = createTtyHarness();
+      const renderInput = vi.fn();
+      const clearOverlay = vi.fn();
+      const prepareBlockOutput = vi.fn();
+      const scrollPromptRenderer = vi.fn();
+      reader = new InputReader({
+        renderInput,
+        clearOverlay,
+        prepareBlockOutput,
+      } as unknown as ReplRenderer);
+      reader.setStatusLineProvider(() => ['  xiaok-cli · claude-sonnet-4 · 1%']);
+      reader.setScrollPromptRenderer(scrollPromptRenderer);
+
+      const pending = reader.read('> ');
+      scrollPromptRenderer.mockClear();
+      renderInput.mockClear();
+
+      harness.send('h');
+
+      expect(scrollPromptRenderer).toHaveBeenCalled();
+      expect(renderInput).not.toHaveBeenCalled();
+
+      harness.send('\x03');
+      await expect(pending).resolves.toBeNull();
+
+      harness.restore();
+    });
+
+    it('attaches the input listener before the first prompt render so early keys are not lost', async () => {
+      const harness = createTtyHarness();
+      let injected = false;
+      const renderInput = vi.fn(() => {
+        if (!injected) {
+          injected = true;
+          harness.send('x');
+          harness.send('\r');
+        }
+      });
+      const clearOverlay = vi.fn();
+      const prepareBlockOutput = vi.fn();
+      reader = new InputReader({
+        renderInput,
+        clearOverlay,
+        prepareBlockOutput,
+      } as unknown as ReplRenderer);
+
+      const pending = reader.read('> ');
+
+      await expect(pending).resolves.toBe('x');
 
       harness.restore();
     });

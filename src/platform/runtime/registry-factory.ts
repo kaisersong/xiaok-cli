@@ -20,6 +20,10 @@ export interface PlatformRegistryFactoryOptions {
   dryRun?: boolean;
   permissionManager?: ConstructorParameters<typeof ToolRegistry>[0]['permissionManager'];
   onPrompt?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
+  onSandboxDenied?: (
+    deniedPath: string,
+    toolName: string,
+  ) => Promise<{ shouldProceed: boolean }> | { shouldProceed: boolean };
   buildSystemPrompt(cwd: string): Promise<string>;
   notifyBackgroundJob?: Parameters<PlatformRuntimeContext['createBackgroundRunner']>[1];
   getCurrentTaskId?: () => string | undefined;
@@ -77,7 +81,9 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
     const baseTools = buildToolList(options.skillTool, { cwd }, extraTools);
 
     // 应用 sandbox
-    const sandboxedTools = applySandboxToTools(baseTools, options.platform.sandboxEnforcer);
+    const sandboxedTools = applySandboxToTools(baseTools, options.platform.sandboxEnforcer, {
+      onSandboxDenied: options.onSandboxDenied,
+    });
 
     // 合并 built-in 和 MCP tools（保证 ordering）
     const orderedTools = mergeToolPools(

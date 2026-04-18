@@ -1,5 +1,6 @@
 export interface SandboxPolicyOptions {
   pathAllowlist?: string[];
+  allowedPaths?: Set<string> | string[];
   pathDenylist?: string[];
   allowedEnv?: string[];
   network?: 'allow' | 'deny';
@@ -15,7 +16,10 @@ function matchesPrefix(prefixes: string[], value: string): boolean {
 }
 
 export function createSandboxPolicy(options: SandboxPolicyOptions) {
-  const allowlist = options.pathAllowlist ?? [];
+  const legacyAllowlist = options.allowedPaths
+    ? Array.from(options.allowedPaths)
+    : [];
+  const allowlist = [...(options.pathAllowlist ?? legacyAllowlist)];
   const denylist = options.pathDenylist ?? [];
   const allowedEnv = new Set(options.allowedEnv ?? []);
 
@@ -38,6 +42,14 @@ export function createSandboxPolicy(options: SandboxPolicyOptions) {
       return options.network === 'deny'
         ? { allowed: false, reason: 'network access disabled by sandbox policy' }
         : { allowed: true };
+    },
+
+    expandAllowedPaths(paths: string[]): void {
+      for (const path of paths) {
+        if (!allowlist.includes(path)) {
+          allowlist.push(path);
+        }
+      }
     },
   };
 }

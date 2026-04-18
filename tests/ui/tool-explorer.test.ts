@@ -52,4 +52,12 @@ describe('ToolExplorer', () => {
 
     expect(nextTurn).toContain('  ╭─ Explored');
   });
+
+  it('suppresses internal using-superpowers skill loads from the transcript activity rail', () => {
+    const explorer = new ToolExplorer();
+
+    const output = strip(explorer.record('skill', { name: 'using-superpowers' }));
+
+    expect(output).toBe('');
+  });
 });

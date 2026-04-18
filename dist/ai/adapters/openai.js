@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { estimateTokens } from '../runtime/usage.js';
 const MAX_RETRIES = 3;
 export class OpenAIAdapter {
     client;
@@ -90,15 +91,32 @@ export class OpenAIAdapter {
             messages: openaiMessages,
             tools: openaiTools.length > 0 ? openaiTools : undefined,
             stream: true,
+            stream_options: { include_usage: true },
         });
         const toolBuffers = new Map();
         let emittedDone = false;
+        let outputChars = 0;
+        let usageReceived = false;
         for await (const chunk of stream) {
+            // Extract usage from chunk (include_usage: true)
+            if (chunk.usage) {
+                usageReceived = true;
+                yield {
+                    type: 'usage',
+                    usage: {
+                        inputTokens: chunk.usage.prompt_tokens ?? 0,
+                        outputTokens: chunk.usage.completion_tokens ?? 0,
+                    },
+                };
+            }
             const choice = chunk.choices[0];
-            const delta = choice?.delta;
+            if (!choice)
+                continue;
+            const delta = choice.delta;
             if (!delta)
                 continue;
             if (delta.content) {
+                outputChars += delta.content.length;
                 yield { type: 'text', delta: delta.content };
             }
             if (delta.tool_calls) {
@@ -125,6 +143,34 @@ export class OpenAIAdapter {
                     yield { type: 'tool_use', id: buf.id, name: buf.name, input };
                 }
                 toolBuffers.clear();
+                // If the API didn't return usage, estimate locally
+                if (!usageReceived) {
+                    const allInputMessages = [
+                        { role: 'user', content: [{ type: 'text', text: systemPrompt }] },
+                        ...messages.map(m => ({
+                            role: m.role,
+                            content: m.content.map(b => {
+                                if (b.type === 'text')
+                                    return { type: 'text', text: b.text };
+                                if (b.type === 'tool_use')
+                                    return { type: 'text', text: JSON.stringify(b.input) };
+                                if (b.type === 'tool_result')
+                                    return { type: 'text', text: b.content };
+                                if (b.type === 'image')
+                                    return { type: 'text', text: '[image]' };
+                                return { type: 'text', text: '' };
+                            }),
+                        })),
+                    ];
+                    const inputTokens = estimateTokens(allInputMessages);
+                    yield {
+                        type: 'usage',
+                        usage: {
+                            inputTokens,
+                            outputTokens: Math.ceil(outputChars / 4),
+                        },
+                    };
+                }
                 emittedDone = true;
                 yield { type: 'done' };
                 return;
@@ -140,6 +186,33 @@ export class OpenAIAdapter {
                     input = { _raw: buf.argsBuffer };
                 }
                 yield { type: 'tool_use', id: buf.id, name: buf.name, input };
+            }
+            if (!usageReceived) {
+                const allInputMessages = [
+                    { role: 'user', content: [{ type: 'text', text: systemPrompt }] },
+                    ...messages.map(m => ({
+                        role: m.role,
+                        content: m.content.map(b => {
+                            if (b.type === 'text')
+                                return { type: 'text', text: b.text };
+                            if (b.type === 'tool_use')
+                                return { type: 'text', text: JSON.stringify(b.input) };
+                            if (b.type === 'tool_result')
+                                return { type: 'text', text: b.content };
+                            if (b.type === 'image')
+                                return { type: 'text', text: '[image]' };
+                            return { type: 'text', text: '' };
+                        }),
+                    })),
+                ];
+                const inputTokens = estimateTokens(allInputMessages);
+                yield {
+                    type: 'usage',
+                    usage: {
+                        inputTokens,
+                        outputTokens: Math.ceil(outputChars / 4),
+                    },
+                };
             }
             yield { type: 'done' };
         }

@@ -21,4 +21,9 @@ export declare class TerminalRenderer {
      * that will move the cursor to a new position.
      */
     reset(): void;
+    /**
+     * Set the expected input area line count so subsequent renders
+     * use cursor movement (\x1b[1B) instead of newlines (\n).
+     */
+    setExpectedLineCount(n: number): void;
 }

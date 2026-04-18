@@ -18,7 +18,7 @@
  * └──────────────────────────────────┘
  */
 
-import { getDisplayWidth } from './text-metrics.js';
+import { getDisplayWidth, stripAnsi } from './text-metrics.js';
 
 export interface ScrollRegionConfig {
   /** Height of fixed footer (input bar + status bar) */
@@ -31,12 +31,26 @@ export interface ScrollRegionConfig {
   columns: number;
 }
 
+export interface ScrollPromptFrame {
+  inputValue: string;
+  cursor: number;
+  placeholder: string;
+  statusLine: string;
+  overlayLines?: string[];
+}
+
 const RESET_SCROLL_REGION = '\x1b[r';
 const SET_SCROLL_REGION = '\x1b[1;%dr';
 const CLEAR_LINE = '\x1b[2K';
 const HIDE_CURSOR = '\x1b[?25l';
 const SHOW_CURSOR = '\x1b[?25h';
 const MOVE_TO_ROW = '\x1b[%d;1H';
+const SAVE_CURSOR = '\x1b[s';
+const RESTORE_CURSOR = '\x1b[u';
+// Cursor movement
+const CURSOR_DOWN_999 = '\x1b[999B';
+const CURSOR_UP = '\x1b[%dA';
+const CURSOR_HOME = '\r';
 
 // Input bar styling
 const INPUT_BG = '\x1b[48;5;244m';   // Gray background
@@ -44,6 +58,15 @@ const PROMPT_FG = '\x1b[1;36m';      // Bold cyan for ❯
 const RESET_FG = '\x1b[22;39m';      // Reset bold + fg, keep bg
 const RESET_ALL = '\x1b[0m';
 const DIM = '\x1b[2m';
+const MAX_INPUT_ROWS = 6;
+
+interface FooterInputState {
+  lines: string[];
+  visibleStart: number;
+  visibleLines: string[];
+  cursorLine: number;
+  cursorColumn: number;
+}
 
 export class ScrollRegionManager {
   private active = false;
@@ -53,6 +76,31 @@ export class ScrollRegionManager {
   private lastStatusLine = '';
   private lastInputValue = '';
   private lastInputCursor = 0;
+  /** Number of terminal rows the welcome screen occupies. */
+  private _welcomeRows = 0;
+  /** Total content rows written since begin() (including welcome). */
+  private _totalRows = 0;
+  /** Whether content is currently being streamed. */
+  private _contentStreaming = false;
+  /** Whether any markdown content has been streamed yet. */
+  private _hasStreamedContent = false;
+  /** Footer is currently visible on screen. */
+  private _footerVisible = false;
+  /** Tracks if we have already pushed past the welcome screen. */
+  private _pastWelcome = false;
+  /** Last row containing content (before footer). Updated at end of streaming. */
+  private _contentEndRow = 0;
+  /** Actual terminal cursor row (1-based), tracked by counting \n writes. */
+  private _cursorRow = 1;
+  /** Actual terminal cursor column (0-based), for wrapping calculation. */
+  private _cursorCol = 0;
+  /** Internal flag: cursor position may be unreliable (just after screen clear). */
+  private _cursorUncertain = false;
+  /** Content row where the current markdown streaming block began. */
+  private _streamStartRow = 1;
+  /** Number of rows currently occupied by the input editor above status. */
+  private lastInputRenderRows = 1;
+
 
   constructor(
     private readonly stream: NodeJS.WriteStream = process.stdout,
@@ -68,25 +116,37 @@ export class ScrollRegionManager {
     };
   }
 
+  private clampCursorRow(row: number): number {
+    return Math.max(1, Math.min(row, this.getScrollBottom()));
+  }
+
+  private maxInputRows(): number {
+    return Math.max(1, Math.min(MAX_INPUT_ROWS, this.config.rows - this.config.gapHeight - 3));
+  }
+
   /**
    * Calculate the bottom row of the scroll region (where activity line renders).
    */
   private getScrollBottom(): number {
-    return this.config.rows - this.config.footerHeight - this.config.gapHeight;
+    return Math.max(1, this.getInputStartRow() - this.config.gapHeight - 1);
   }
 
   /**
-   * Calculate the input bar row (fixed footer first row).
+   * Calculate the input bar row where the last input line sits.
    */
   private getInputBarRow(): number {
-    return this.config.rows - this.config.footerHeight + 1;
+    return this.getStatusBarRow() - 1;
+  }
+
+  private getInputStartRow(rows = this.lastInputRenderRows): number {
+    return Math.max(1, this.getInputBarRow() - rows + 1);
   }
 
   /**
-   * Calculate the status bar row (fixed footer second row).
+   * Calculate the status bar row (fixed footer bottom row).
    */
   private getStatusBarRow(): number {
-    return this.config.rows - this.config.footerHeight + 2;
+    return this.config.rows;
   }
 
   /**
@@ -95,6 +155,38 @@ export class ScrollRegionManager {
    */
   private getCursorBase(): number {
     return 3;
+  }
+
+  private getFooterInputState(inputValue: string, cursor: number): FooterInputState {
+    const lines = inputValue.split('\n');
+    let remaining = Math.max(0, Math.min(cursor, inputValue.length));
+    let cursorLine = 0;
+    let cursorColumn = 0;
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const lineLength = lines[index]?.length ?? 0;
+      if (remaining <= lineLength) {
+        cursorLine = index;
+        cursorColumn = remaining;
+        break;
+      }
+      remaining -= lineLength + 1;
+      cursorLine = Math.min(index + 1, lines.length - 1);
+      cursorColumn = 0;
+    }
+
+    const maxRows = this.maxInputRows();
+    const maxStart = Math.max(0, lines.length - maxRows);
+    const visibleStart = Math.min(Math.max(0, cursorLine - maxRows + 1), maxStart);
+    const visibleLines = lines.slice(visibleStart, visibleStart + maxRows);
+
+    return {
+      lines,
+      visibleStart,
+      visibleLines,
+      cursorLine,
+      cursorColumn,
+    };
   }
 
   /**
@@ -123,6 +215,7 @@ export class ScrollRegionManager {
     this.lastInputValue = '';
     this.lastInputCursor = 0;
     this.lastStatusLine = '';
+    this.lastInputRenderRows = 1;
 
     // Set scroll region (rows 1 to scrollBottom)
     this.setScrollRegion();
@@ -147,15 +240,15 @@ export class ScrollRegionManager {
     // Reset scroll region to full terminal
     this.stream.write(RESET_SCROLL_REGION);
 
-    // Clear footer area (input bar and status bar)
-    const inputBarRow = this.getInputBarRow();
-    const statusBarRow = this.getStatusBarRow();
-    for (const row of [inputBarRow, statusBarRow]) {
-      this.stream.write(`${MOVE_TO_ROW.replace('%d', String(row))}${CLEAR_LINE}`);
+    // Clear footer area: status row plus currently expanded input rows.
+    this.stream.write(CURSOR_DOWN_999);
+    this.stream.write(CLEAR_LINE);
+    for (let row = 0; row < this.lastInputRenderRows; row += 1) {
+      this.stream.write(`${CURSOR_UP.replace('%d', '1')}${CLEAR_LINE}`);
     }
 
-    // Move cursor to after the last content line (bottom of scroll region)
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(this.getScrollBottom()))}`);
+    // Move cursor to after the last content line
+    this.stream.write(CURSOR_UP.replace('%d', '2'));
     this.stream.write('\n');
 
     this.lastActivityLine = '';
@@ -171,6 +264,21 @@ export class ScrollRegionManager {
     return this.active;
   }
 
+  renderPromptFrame(frame: ScrollPromptFrame): void {
+    if (!this.active) return;
+
+    this.lastInputValue = frame.inputValue;
+    this.lastInputCursor = frame.cursor;
+    this.lastInputPrompt = frame.placeholder;
+    this.lastStatusLine = frame.statusLine;
+
+    this.renderFooter({
+      inputPrompt: frame.placeholder,
+      statusLine: frame.statusLine,
+    });
+    this.renderOverlay(frame.overlayLines ?? []);
+  }
+
   /**
    * Render input in the fixed footer area.
    * This should be called when user types during streaming.
@@ -183,72 +291,14 @@ export class ScrollRegionManager {
       const cursorWidth = getDisplayWidth(inputValue.slice(0, cursor));
       const cursorCol = this.getCursorBase() + cursorWidth;
       this.stream.write(`\r${CLEAR_LINE}${INPUT_BG}${PROMPT_FG}❯${RESET_FG} ${inputValue}${RESET_ALL}`);
-      this.stream.write(`\x1b[1;${cursorCol}H${INPUT_BG}`);
+      this.stream.write(`\x1b[1;${cursorCol}H`);
       return;
     }
 
     this.lastInputValue = inputValue;
     this.lastInputCursor = cursor;
 
-    // Render input bar with user's input
-    const inputBarRow = this.getInputBarRow();
-    const cols = this.config.columns;
-
-    // Handle multi-line input: show only the last line in input bar
-    const lines = inputValue.split('\n');
-    const displayLine = lines[lines.length - 1] ?? '';
-    const lineCount = lines.length;
-
-    // Build input line with line indicator if multi-line
-    let inputText = displayLine;
-    if (lineCount > 1) {
-      inputText = `[${lineCount} lines] ${displayLine}`;
-    }
-
-    // Move to input line, clear it, and write content
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(inputBarRow))}\r${CLEAR_LINE}`);
-
-    // Write input line with background
-    const inputLine = `${INPUT_BG}${PROMPT_FG}❯${RESET_FG} ${inputText}`;
-    this.stream.write(inputLine);
-
-    // Pad to end of line with background, then reset
-    const textWidth = this.getCursorBase() - 1 + getDisplayWidth(inputText); // "❯ " + text
-    const padWidth = cols - textWidth;
-    if (padWidth > 0) {
-      this.stream.write(`${INPUT_BG}${' '.repeat(padWidth)}${RESET_ALL}`);
-    }
-
-    // Position cursor using absolute row;col positioning (atomic, IME-safe)
-    const cursorCol = this.calcCursorCol(inputText, cursor, lineCount, lines);
-
-    // Single atomic write: position cursor + set background for subsequent typing
-    this.stream.write(`\x1b[${inputBarRow};${cursorCol}H${INPUT_BG}`);
-  }
-
-  /**
-   * Calculate the cursor column for the input bar.
-   */
-  private calcCursorCol(
-    inputText: string,
-    cursor: number,
-    lineCount: number,
-    lines: string[],
-  ): number {
-    let cursorCol = this.getCursorBase(); // After "❯ "
-    if (lineCount > 1) {
-      const prefix = `[${lineCount} lines] `;
-      cursorCol += getDisplayWidth(prefix);
-    }
-    let charsBeforeLastLine = 0;
-    for (let i = 0; i < lines.length - 1; i++) {
-      charsBeforeLastLine += (lines[i]?.length ?? 0) + 1;
-    }
-    const cursorInLastLine = Math.max(0, cursor - charsBeforeLastLine);
-    // For multi-line, inputText has a prefix, so adjust slice offset
-    const prefixLen = lineCount > 1 ? `[${lineCount} lines] `.length : 0;
-    cursorCol += getDisplayWidth(inputText.slice(prefixLen, prefixLen + cursorInLastLine));
-    return cursorCol;
+    this.renderFooter();
   }
 
   /**
@@ -289,8 +339,8 @@ export class ScrollRegionManager {
   }): void {
     if (!this.active) return;
 
-    const inputBarRow = this.getInputBarRow();
-    const statusBarRow = this.getStatusBarRow();
+    this._footerVisible = true;
+
     const cols = this.config.columns;
 
     // Use inputPrompt as a placeholder text when no user input
@@ -301,24 +351,72 @@ export class ScrollRegionManager {
     if (options?.inputPrompt) this.lastInputPrompt = options.inputPrompt;
     if (options?.statusLine) this.lastStatusLine = options.statusLine;
 
-    // Row 1: 输入栏 (Input prompt with background)
-    const displayText = this.lastInputValue || inputPrompt;
+    const inputState = this.lastInputValue
+      ? this.getFooterInputState(this.lastInputValue, this.lastInputCursor)
+      : undefined;
+    const inputLines = inputState?.visibleLines ?? [inputPrompt];
+    const inputRows = Math.max(1, inputLines.length);
     const isPlaceholder = !this.lastInputValue;
 
-    // Use absolute positioning (row;colH uses global coordinates by default)
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(inputBarRow))}${CLEAR_LINE}`);
-    const textPrefix = isPlaceholder ? DIM : '';
-    const inputLine = `${INPUT_BG}${PROMPT_FG}❯${RESET_FG} ${textPrefix}${displayText}`;
-    this.stream.write(this.padLineWithBg(inputLine, cols));
+    // Use absolute row positioning instead of cursor-down-999 which may be
+    // unreliable in some terminals. Calculate exact footer rows.
+    const statusBarRow = this.getStatusBarRow();
+    const previousInputStartRow = this.getInputStartRow();
+    const inputStartRow = this.getInputStartRow(inputRows);
+    const inputEndRow = this.getInputBarRow();
 
-    // Row 2: 状态栏
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(statusBarRow))}${CLEAR_LINE}`);
-    if (statusLine) {
-      this.stream.write(this.padLine(DIM + statusLine + RESET_ALL, cols, false));
+    // Reset scroll region to allow writing to footer area
+    this.stream.write(RESET_SCROLL_REGION);
+
+    // Clear previous and current editor rows. This prevents stale rows when
+    // the input grows or shrinks between redraws.
+    const clearStartRow = Math.min(previousInputStartRow, inputStartRow);
+    for (let row = clearStartRow; row <= inputEndRow; row += 1) {
+      this.stream.write(`\x1b[${row};1H${CLEAR_LINE}`);
     }
 
-    // Position cursor: if there's user input, use the cursor position; otherwise at start
-    this.positionCursorForInput(displayText, isPlaceholder);
+    // Status bar (bottom row)
+    this.stream.write(`\x1b[${statusBarRow};1H${CLEAR_LINE}`);
+    if (statusLine) {
+      this.stream.write(DIM + statusLine + RESET_ALL);
+    }
+
+    inputLines.forEach((line, index) => {
+      const row = inputStartRow + index;
+      const prefix = index === 0
+        ? `${INPUT_BG}${PROMPT_FG}❯${RESET_FG} `
+        : `${INPUT_BG}  `;
+      const textPrefix = isPlaceholder ? DIM : '';
+      this.stream.write(`\x1b[${row};1H${CLEAR_LINE}`);
+      this.stream.write(this.padLineWithBg(`${prefix}${textPrefix}${line}`, cols));
+    });
+
+    this.lastInputRenderRows = inputRows;
+
+    // Restore scroll region
+    this.setScrollRegion();
+
+    // Position cursor after restoring the scroll region. Some terminals move
+    // the cursor when DECSTBM is applied, so this must be the final cursor op.
+    this.positionCursorForInput();
+  }
+
+  private renderOverlay(lines: string[]): void {
+    if (!this.active || lines.length === 0) return;
+
+    const inputBarRow = this.getInputStartRow();
+    const scrollBottom = this.getScrollBottom();
+    const maxOverlayLines = Math.max(0, inputBarRow - scrollBottom - 1);
+    const visibleLines = lines.slice(-maxOverlayLines);
+    const overlayStart = Math.max(scrollBottom + 1, inputBarRow - visibleLines.length);
+
+    visibleLines.forEach((line, index) => {
+      const row = overlayStart + index;
+      if (row >= inputBarRow) return;
+      this.stream.write(`${MOVE_TO_ROW.replace('%d', String(row))}${CLEAR_LINE}${line}`);
+    });
+
+    this.positionCursorForInput();
   }
 
   /**
@@ -326,22 +424,23 @@ export class ScrollRegionManager {
    * When showing a placeholder (no user input), cursor goes to column 3 (after "❯ ").
    * When showing user input, cursor goes to the actual cursor position.
    */
-  private positionCursorForInput(
-    fallbackDisplayText?: string,
-    isPlaceholder?: boolean,
-  ): void {
-    const inputBarRow = this.getInputBarRow();
-
-    if (this.lastInputValue) {
-      // User has typed - position cursor at the actual location
-      const displayWidth = getDisplayWidth(this.lastInputValue.slice(0, this.lastInputCursor));
-      const cursorCol = this.getCursorBase() + displayWidth;
-      this.stream.write(`\x1b[${inputBarRow};${cursorCol}H${INPUT_BG}`);
-    } else {
-      // Placeholder mode - cursor at the start of the input area (after "❯ ")
-      const cursorCol = this.getCursorBase();
-      this.stream.write(`\x1b[${inputBarRow};${cursorCol}H${INPUT_BG}`);
+  private positionCursorForInput(): void {
+    if (!this.lastInputValue) {
+      this.stream.write(`\x1b[${this.getInputStartRow()};${this.getCursorBase()}H`);
+      return;
     }
+
+    const state = this.getFooterInputState(this.lastInputValue, this.lastInputCursor);
+    const cursorVisibleLine = Math.max(
+      0,
+      Math.min(state.cursorLine - state.visibleStart, state.visibleLines.length - 1),
+    );
+    const cursorRow = this.getInputStartRow(state.visibleLines.length) + cursorVisibleLine;
+    const cursorLineText = state.lines[state.cursorLine] ?? '';
+    const cursorCol = this.getCursorBase()
+      + getDisplayWidth(cursorLineText.slice(0, state.cursorColumn));
+
+    this.stream.write(`\x1b[${cursorRow};${cursorCol}H`);
   }
 
   /**
@@ -353,7 +452,6 @@ export class ScrollRegionManager {
     this.lastInputCursor = 0;
     if (this.active) {
       this.renderFooter({
-        inputPrompt: 'working...',
         statusLine: this.lastStatusLine || undefined,
       });
     }
@@ -377,13 +475,13 @@ export class ScrollRegionManager {
    * were written. Calculates the actual end row (accounting for terminal
    * wrapping) and positions cursor there + 1 for a gap row.
    */
-  positionAfterContent(contentRows: number): void {
+  positionAfterContent(contentRows?: number): void {
     if (!this.active) return;
 
     const scrollBottom = this.getScrollBottom();
     // Content starts at row 1, ends at row `contentRows`
     // Leave a gap row: position at contentEnd + 2, but not past scrollBottom
-    const contentEnd = Math.min(contentRows, scrollBottom);
+    const contentEnd = Math.min(contentRows ?? scrollBottom, scrollBottom);
     const targetRow = Math.min(contentEnd + 2, scrollBottom);
 
     this.stream.write(`${MOVE_TO_ROW.replace('%d', String(targetRow))}`);
@@ -399,8 +497,16 @@ export class ScrollRegionManager {
   beginContentStreaming(): void {
     if (!this.active) return;
 
+    this._contentStreaming = true;
+    this._footerVisible = false;
     const scrollBottom = this.getScrollBottom();
     this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
+    const targetRow = Math.max(1, Math.min(this._cursorRow, scrollBottom));
+    this._streamStartRow = targetRow;
+    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(targetRow))}`);
+    if (this._cursorCol > 0) {
+      this.stream.write(`\x1b[${this._cursorCol + 1}G`);
+    }
     this.stream.write(RESET_ALL);
   }
 
@@ -413,6 +519,7 @@ export class ScrollRegionManager {
   }): void {
     if (!this.active) return;
 
+    this._contentStreaming = false;
     this.lastInputValue = '';
     this.lastInputCursor = 0;
 
@@ -455,7 +562,9 @@ export class ScrollRegionManager {
     // Move to activity line, clear, and write - cursor stays here
     this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
     this.stream.write(this.padLine(activityLine, cols, false));
-    // Cursor now at activity line - input bar is NOT affected
+    if (this._footerVisible && !this._contentStreaming) {
+      this.positionCursorForInput();
+    }
   }
 
   /**
@@ -482,8 +591,10 @@ export class ScrollRegionManager {
     this.lastStatusLine = statusLine;
     if (this.active) {
       const statusBarRow = this.getStatusBarRow();
+      this.stream.write(SAVE_CURSOR);
       this.stream.write(`${MOVE_TO_ROW.replace('%d', String(statusBarRow))}${CLEAR_LINE}`);
       this.stream.write(this.padLine(DIM + statusLine + RESET_ALL, this.config.columns, false));
+      this.stream.write(RESTORE_CURSOR);
     }
   }
 
@@ -499,6 +610,167 @@ export class ScrollRegionManager {
    * Pad a line to fill the terminal width (clears any remaining characters).
    * If hasBackground is true, the padding will have the background color.
    */
+
+  isContentStreaming(): boolean {
+    return this._contentStreaming;
+  }
+
+  setWelcomeRows(rows: number): void {
+    this._welcomeRows = rows;
+    this._pastWelcome = true;
+    this._totalRows = rows;
+    this._cursorRow = this.clampCursorRow(rows + 1);
+    this._cursorCol = 0;
+  }
+
+  clearContentArea(): void {
+    if (!this.active) return;
+
+    const scrollBottom = this.getScrollBottom();
+    this.stream.write(RESET_SCROLL_REGION);
+    for (let row = 1; row <= scrollBottom; row += 1) {
+      this.stream.write(`${MOVE_TO_ROW.replace('%d', String(row))}${CLEAR_LINE}`);
+    }
+    this.setScrollRegion();
+    this._welcomeRows = 0;
+    this._totalRows = 0;
+    this._contentEndRow = 0;
+    this._cursorRow = 1;
+    this._cursorCol = 0;
+    this._cursorUncertain = false;
+    this._pastWelcome = true;
+    this._hasStreamedContent = false;
+  }
+
+  advanceContentCursor(rows: number): void {
+    if (!this.active) return;
+    this._totalRows += rows;
+    this._cursorRow = this.clampCursorRow(this._cursorRow + rows);
+    this._cursorUncertain = false;
+  }
+
+  setContentCursor(row: number): void {
+    if (!this.active) return;
+    this._totalRows = row;
+    this._cursorRow = this.clampCursorRow(row);
+  }
+
+  getContentCursor(): number {
+    return this._totalRows;
+  }
+
+  get maxContentRows(): number {
+    return this.getScrollBottom();
+  }
+
+  writeAtContentCursor(text: string): void {
+    if (!this.active) {
+      this.stream.write(text);
+      return;
+    }
+    this.stream.write(RESET_ALL);
+    const targetRow = this.clampCursorRow(this._cursorRow);
+    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(targetRow))}`);
+
+    const cols = this.config.columns;
+    let col = this._cursorCol;
+    let newlines = 0;
+    let extraRows = 0;
+
+    for (const ch of text) {
+      if (ch === '\n') {
+        newlines++;
+        col = 0;
+      } else if (ch === '\r') {
+        col = 0;
+      } else if (ch === '\t') {
+        const next = col + 4 - (col % 4);
+        extraRows += Math.floor(next / cols);
+        col = next % cols;
+      } else {
+        const w = getDisplayWidth(ch);
+        if (col + w >= cols) {
+          extraRows++;
+          col = 0;
+          if (w === cols) {
+            extraRows++;
+            col = 0;
+          } else {
+            col = w;
+          }
+        } else {
+          col += w;
+        }
+      }
+    }
+
+    const totalRows = newlines + extraRows;
+    this._cursorCol = col;
+    this._totalRows += totalRows;
+    this._cursorRow = this.clampCursorRow(targetRow + totalRows);
+    this._cursorUncertain = false;
+    this.stream.write(text);
+  }
+
+  writeSubmittedInput(text: string): void {
+    if (!this.active) {
+      this.stream.write(text);
+      return;
+    }
+    if (this._cursorCol > 0) {
+      this.stream.write('\n');
+      this._totalRows++;
+      this._cursorRow = this.clampCursorRow(this._cursorRow + 1);
+      this._cursorCol = 0;
+    }
+    this.writeAtContentCursor(text);
+    this._contentEndRow = this._cursorRow;
+    this._cursorCol = 0;
+    this._pastWelcome = true;
+  }
+
+  getNewlineCallback(): (() => void) {
+    const self = this;
+    return function newlineCallback() {
+      self.stream.write('\n');
+      self._totalRows++;
+      self._cursorRow = self.clampCursorRow(self._cursorRow + 1);
+      self._cursorCol = 0;
+      self._cursorUncertain = false;
+    };
+  }
+
+  syncContentCursorFromRenderedLines(lines: string[]): void {
+    if (!this.active || lines.length === 0) return;
+
+    const cols = this.config.columns;
+    let row = this._streamStartRow;
+    let col = 0;
+
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const text = stripAnsi(lines[lineIndex] ?? '');
+      col = 0;
+
+      for (const ch of text) {
+        const w = getDisplayWidth(ch);
+        if (col + w >= cols) {
+          row = this.clampCursorRow(row + 1);
+          col = 0;
+        }
+        col += w;
+      }
+
+      if (lineIndex < lines.length - 1) {
+        row = this.clampCursorRow(row + 1);
+        col = 0;
+      }
+    }
+
+    this._cursorRow = row;
+    this._cursorCol = col;
+    this._totalRows = Math.max(this._totalRows, row);
+    this._cursorUncertain = false;
+  }
   private padLine(line: string, width: number, hasBackground = false): string {
     const visibleLen = getDisplayWidth(line);
     if (visibleLen >= width) return line.slice(0, width + (line.length - visibleLen));
@@ -524,4 +796,5 @@ export class ScrollRegionManager {
     const padding = ' '.repeat(width - visibleLen);
     return line + padding + RESET_ALL;
   }
+
 }

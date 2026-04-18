@@ -12,6 +12,11 @@ export interface PlatformRegistryFactoryOptions {
     dryRun?: boolean;
     permissionManager?: ConstructorParameters<typeof ToolRegistry>[0]['permissionManager'];
     onPrompt?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
+    onSandboxDenied?: (deniedPath: string, toolName: string) => Promise<{
+        shouldProceed: boolean;
+    }> | {
+        shouldProceed: boolean;
+    };
     buildSystemPrompt(cwd: string): Promise<string>;
     notifyBackgroundJob?: Parameters<PlatformRuntimeContext['createBackgroundRunner']>[1];
     getCurrentTaskId?: () => string | undefined;

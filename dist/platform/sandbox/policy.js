@@ -2,7 +2,10 @@ function matchesPrefix(prefixes, value) {
     return prefixes.some((prefix) => value === prefix || value.startsWith(`${prefix}/`));
 }
 export function createSandboxPolicy(options) {
-    const allowlist = options.pathAllowlist ?? [];
+    const legacyAllowlist = options.allowedPaths
+        ? Array.from(options.allowedPaths)
+        : [];
+    const allowlist = [...(options.pathAllowlist ?? legacyAllowlist)];
     const denylist = options.pathDenylist ?? [];
     const allowedEnv = new Set(options.allowedEnv ?? []);
     return {
@@ -22,6 +25,13 @@ export function createSandboxPolicy(options) {
             return options.network === 'deny'
                 ? { allowed: false, reason: 'network access disabled by sandbox policy' }
                 : { allowed: true };
+        },
+        expandAllowedPaths(paths) {
+            for (const path of paths) {
+                if (!allowlist.includes(path)) {
+                    allowlist.push(path);
+                }
+            }
         },
     };
 }

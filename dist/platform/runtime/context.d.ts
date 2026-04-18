@@ -4,6 +4,7 @@ import { createBackgroundRunner, type BackgroundJobRecord } from '../agents/back
 import { createLspManager } from '../lsp/manager.js';
 import { type PlatformPluginRuntimeState } from '../plugins/runtime.js';
 import { createSandboxEnforcer } from '../sandbox/enforcer.js';
+import { createSandboxPolicy } from '../sandbox/policy.js';
 import { type TeamService } from '../teams/service.js';
 import { type WorktreeManager } from '../worktrees/manager.js';
 import { CapabilityRegistry } from './capability-registry.js';
@@ -26,6 +27,7 @@ export interface PlatformRuntimeContext {
     lspManager: ReturnType<typeof createLspManager>;
     lspClient: LspClientLike | undefined;
     teamService: TeamService;
+    sandboxPolicy: ReturnType<typeof createSandboxPolicy>;
     sandboxEnforcer: ReturnType<typeof createSandboxEnforcer>;
     worktreeManager: WorktreeManager;
     mcpTools: Tool[];

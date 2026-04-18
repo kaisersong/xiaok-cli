@@ -18,6 +18,8 @@ function replayTerminal(raw: string, maxRows?: number): string[] {
   let savedRow = 0;
   let savedCol = 0;
   const viewportRows = maxRows && maxRows > 0 ? maxRows : Number.POSITIVE_INFINITY;
+  let scrollTop = 0;
+  let scrollBottom = viewportRows === Number.POSITIVE_INFINITY ? Number.POSITIVE_INFINITY : viewportRows - 1;
 
   const ensureRow = (target: number) => {
     while (lines.length <= target) {
@@ -55,6 +57,23 @@ function replayTerminal(raw: string, maxRows?: number): string[] {
     lines[row] = line.slice(0, col);
   };
 
+  const clearScreen = (mode: string | undefined) => {
+    if (mode === '2') {
+      lines.length = 0;
+      lines.push('');
+      row = 0;
+      col = 0;
+      savedRow = 0;
+      savedCol = 0;
+      return;
+    }
+    if (mode === '0' || mode === undefined || mode === '') {
+      lines.splice(row + 1);
+      ensureRow(row);
+      lines[row] = (lines[row] ?? '').slice(0, col);
+    }
+  };
+
   const scrollIfNeeded = () => {
     if (viewportRows === Number.POSITIVE_INFINITY) {
       return;
@@ -68,13 +87,31 @@ function replayTerminal(raw: string, maxRows?: number): string[] {
     }
   };
 
+  const scrollRegionUp = () => {
+    if (viewportRows === Number.POSITIVE_INFINITY || scrollBottom === Number.POSITIVE_INFINITY) {
+      return;
+    }
+    ensureRow(scrollBottom);
+    lines.splice(scrollTop, 1);
+    lines.splice(scrollBottom, 0, '');
+    if (lines.length > viewportRows) {
+      lines.length = viewportRows;
+    }
+    row = scrollBottom;
+    savedRow = Math.max(scrollTop, Math.min(savedRow, scrollBottom));
+  };
+
   for (let i = 0; i < raw.length; i++) {
     const char = raw[i];
     if (char === '\n') {
-      row += 1;
       col = 0;
-      scrollIfNeeded();
-      ensureRow(row);
+      if (viewportRows !== Number.POSITIVE_INFINITY && row >= scrollTop && row === scrollBottom) {
+        scrollRegionUp();
+      } else {
+        row += 1;
+        scrollIfNeeded();
+        ensureRow(row);
+      }
       continue;
     }
     if (char === '\r') {
@@ -95,20 +132,40 @@ function replayTerminal(raw: string, maxRows?: number): string[] {
         j += 1;
       }
       const cmd = raw[j] ?? '';
-      const value = Number.parseInt(params || '1', 10) || 1;
-      if (cmd === 'A') row = Math.max(0, row - value);
+      const parts = params.split(';');
+      const firstValue = Number.parseInt(parts[0] || '1', 10) || 1;
+      if (cmd === 'A') row = Math.max(0, row - firstValue);
       if (cmd === 'B') {
-        row += value;
+        if (viewportRows !== Number.POSITIVE_INFINITY) {
+          row = Math.min(row + firstValue, viewportRows - 1);
+        } else {
+          row += firstValue;
+        }
+        ensureRow(row);
+      }
+      if (cmd === 'C') col += firstValue;
+      if (cmd === 'D') col = Math.max(0, col - firstValue);
+      if (cmd === 'G') {
+        col = Math.max(0, firstValue - 1);
+      }
+      if (cmd === 'H' || cmd === 'f') {
+        const targetRow = (Number.parseInt(parts[0] || '1', 10) || 1) - 1;
+        const targetCol = (Number.parseInt(parts[1] || '1', 10) || 1) - 1;
+        row = Math.max(0, viewportRows === Number.POSITIVE_INFINITY ? targetRow : Math.min(targetRow, viewportRows - 1));
+        col = Math.max(0, targetCol);
         scrollIfNeeded();
         ensureRow(row);
       }
-      if (cmd === 'C') col += value;
-      if (cmd === 'D') col = Math.max(0, col - value);
-      if (cmd === 'H') {
-        row = 0;
-        col = 0;
-      }
       if (cmd === 'K') clearLine(params);
+      if (cmd === 'J') clearScreen(params);
+      if (cmd === 'r') {
+        if (viewportRows !== Number.POSITIVE_INFINITY) {
+          const top = Math.max(0, (Number.parseInt(parts[0] || '1', 10) || 1) - 1);
+          const bottom = Math.max(top, (Number.parseInt(parts[1] || String(viewportRows), 10) || viewportRows) - 1);
+          scrollTop = Math.min(top, viewportRows - 1);
+          scrollBottom = Math.min(bottom, viewportRows - 1);
+        }
+      }
       if (cmd === 's') {
         savedRow = row;
         savedCol = col;

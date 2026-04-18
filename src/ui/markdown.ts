@@ -16,11 +16,22 @@ export class MarkdownRenderer {
   private pendingLen = 0;
   private lineCount = 0;
   private termWidth = 0;
+  private consecutiveBlankLines = 0;
+  /** Optional callback for newline output (e.g., scroll-region-aware). */
+  private newlineFn: (() => void) | null = null;
 
   /** Get the number of content lines written (for cursor positioning). */
   getLineCount(termWidth?: number): number {
     if (termWidth) this.termWidth = termWidth;
     return this.lineCount;
+  }
+
+  /**
+   * Set a custom newline callback. When set, this function is called
+   * instead of writing '\n' to stdout.
+   */
+  setNewlineCallback(callback: (() => void) | null): void {
+    this.newlineFn = callback;
   }
 
   /** Feed a text chunk (may be partial line). */
@@ -32,13 +43,44 @@ export class MarkdownRenderer {
       const line = this.buffer.slice(0, nlIdx);
       this.buffer = this.buffer.slice(nlIdx + 1);
 
-      if (this.pendingLen > 0) {
+      // If there's pending partial text, incorporate it into this line.
+      // Only clear+re-render if the pending text adds NEW content beyond
+      // what renderLine already wrote (i.e., the line was updated mid-stream).
+      if (this.pendingLen > 0 && this.pendingLen < line.length) {
+        // Streaming update: new chars arrived after initial render.
+        // Clear the old render and re-render with the full line.
         process.stdout.write(`\r\x1b[2K`);
-        this.pendingLen = 0;
+        this.renderLine(line);
+      } else if (this.pendingLen > 0 && this.pendingLen >= line.length) {
+        // Full line was already rendered (or over-rendered) by pending.
+        // Just move cursor to next line without re-rendering.
+      } else {
+        // No pending text — this is a fresh complete line.
+        this.renderLine(line);
       }
+      this.pendingLen = 0;
 
-      this.renderLine(line);
-      process.stdout.write("\n");
+      const isBlank = line.trim() === "";
+      // Skip all blank lines outside code blocks to prevent
+      // extra \n from pushing content into footer area.
+      if (isBlank && !this.inCodeBlock) {
+        this.consecutiveBlankLines++;
+        // Still call newline callback for standalone blank lines between content
+        // to ensure cursor moves to next row.
+        if (this.newlineFn) {
+          this.newlineFn();
+        } else {
+          process.stdout.write("\n");
+        }
+        continue;
+      }
+      this.consecutiveBlankLines = 0;
+
+      if (this.newlineFn) {
+        this.newlineFn();
+      } else {
+        process.stdout.write("\n");
+      }
 
       // Track line count including terminal wrapping
       const displayWidth = getDisplayWidth(stripAnsi(line));
@@ -47,6 +89,8 @@ export class MarkdownRenderer {
       this.lineCount += wrappedLines;
     }
 
+    // Write remaining buffer as partial line (streaming text without newline).
+    // Only write new characters beyond what's already displayed.
     if (this.buffer.length > this.pendingLen) {
       const newChars = this.buffer.slice(this.pendingLen);
       if (this.pendingLen === 0) {
@@ -54,30 +98,30 @@ export class MarkdownRenderer {
       }
       process.stdout.write(newChars);
       this.pendingLen = this.buffer.length;
-
-      // Track pending (non-newline) content as partial line
-      const displayWidth = getDisplayWidth(stripAnsi(this.buffer));
-      const cols = this.termWidth || process.stdout.columns || 80;
-      const pendingRows = Math.ceil(displayWidth / cols);
-      // Only count rows beyond what was already counted via newlines
-      const newlineCount = this.buffer.split('\n').length - 1;
-      const nonNewlineRows = pendingRows - Math.max(0, newlineCount);
-      if (nonNewlineRows > 0) {
-        this.lineCount += nonNewlineRows;
-      }
     }
   }
 
-  /** Flush remaining buffer. */
-  flush(): void {
+  /** Flush remaining buffer and return the number of terminal rows finalized. */
+  flush(): number {
+    let flushedRows = 0;
+
     if (this.buffer) {
       if (this.pendingLen > 0) {
         process.stdout.write(`\r\x1b[2K`);
         this.pendingLen = 0;
       }
-      this.renderLine(this.buffer);
+      const flushed = this.buffer;
+      this.renderLine(flushed);
+      flushedRows = this.countRows(flushed);
+      this.lineCount += flushedRows;
       this.buffer = "";
     }
+    // Reset pendingLen after flush to prevent subsequent write() calls
+    // from clearing the line where the flushed content was written.
+    // This can happen if the footer has been rendered between flush()
+    // and the next write().
+    this.pendingLen = 0;
+    return flushedRows;
   }
 
   /** Reset state between messages. */
@@ -87,6 +131,8 @@ export class MarkdownRenderer {
     this.codeLang = "";
     this.pendingLen = 0;
     this.lineCount = 0;
+    this.consecutiveBlankLines = 0;
+    this.newlineFn = null;
   }
 
   private renderLine(line: string): void {
@@ -154,6 +200,12 @@ export class MarkdownRenderer {
 
     // Regular text
     process.stdout.write(`${BODY_GUTTER}${this.inlineFormat(line)}`);
+  }
+
+  private countRows(text: string): number {
+    const displayWidth = getDisplayWidth(stripAnsi(text));
+    const cols = this.termWidth || process.stdout.columns || 80;
+    return Math.max(1, Math.ceil(displayWidth / cols));
   }
 
   /** Apply inline formatting. */

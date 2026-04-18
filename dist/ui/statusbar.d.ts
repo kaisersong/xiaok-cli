@@ -41,6 +41,7 @@ export declare class StatusBar {
     /** Build the status string (no newline). */
     getStatusLine(): string;
     getLiveStatusLine(now?: number, frameIndex?: number): string;
+    getActivityLine(now?: number, frameIndex?: number): string;
     getReassuranceTick(now?: number, lastBucket?: number): ReassuranceTick | null;
     renderLive(now?: number, frameIndex?: number): void;
     clearLive(): void;

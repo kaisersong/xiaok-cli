@@ -8,13 +8,26 @@ export declare class MarkdownRenderer {
     private inCodeBlock;
     private codeLang;
     private pendingLen;
+    private lineCount;
+    private termWidth;
+    private consecutiveBlankLines;
+    /** Optional callback for newline output (e.g., scroll-region-aware). */
+    private newlineFn;
+    /** Get the number of content lines written (for cursor positioning). */
+    getLineCount(termWidth?: number): number;
+    /**
+     * Set a custom newline callback. When set, this function is called
+     * instead of writing '\n' to stdout.
+     */
+    setNewlineCallback(callback: (() => void) | null): void;
     /** Feed a text chunk (may be partial line). */
     write(text: string): void;
-    /** Flush remaining buffer. */
-    flush(): void;
+    /** Flush remaining buffer and return the number of terminal rows finalized. */
+    flush(): number;
     /** Reset state between messages. */
     reset(): void;
     private renderLine;
+    private countRows;
     /** Apply inline formatting. */
     private inlineFormat;
     private getPendingPrefix;

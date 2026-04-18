@@ -46,7 +46,9 @@ export function createPlatformRegistryFactory(options) {
         // 构建基础 tool list
         const baseTools = buildToolList(options.skillTool, { cwd }, extraTools);
         // 应用 sandbox
-        const sandboxedTools = applySandboxToTools(baseTools, options.platform.sandboxEnforcer);
+        const sandboxedTools = applySandboxToTools(baseTools, options.platform.sandboxEnforcer, {
+            onSandboxDenied: options.onSandboxDenied,
+        });
         // 合并 built-in 和 MCP tools（保证 ordering）
         const orderedTools = mergeToolPools(sandboxedTools.filter((t) => !isMcpTool(t)), sandboxedTools.filter(isMcpTool));
         // 过滤 allowedTools

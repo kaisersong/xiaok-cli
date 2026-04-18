@@ -158,6 +158,7 @@ export class InputReader {
     onModeCycle;
     transcriptLogger;
     statusLineProvider;
+    scrollPromptRenderer;
     constructor(renderer) {
         this.renderer = renderer;
     }
@@ -172,6 +173,9 @@ export class InputReader {
     }
     setStatusLineProvider(provider) {
         this.statusLineProvider = provider;
+    }
+    setScrollPromptRenderer(renderer) {
+        this.scrollPromptRenderer = renderer;
     }
     async read(prompt) {
         if (!stdin.isTTY) {
@@ -197,6 +201,17 @@ export class InputReader {
                         ? buildSlashMenuOverlayLines(this.menuItems, this.menuIdx, stdout.columns ?? 80, MAX_MENU_VISIBLE_ITEMS)
                         : [];
                     const footerLines = this.statusLineProvider?.() ?? [];
+                    if (this.scrollPromptRenderer) {
+                        this.renderedMenuRows = overlayLines.length;
+                        this.scrollPromptRenderer({
+                            inputValue: input,
+                            cursor,
+                            placeholder: prompt,
+                            statusLine: footerLines[0] ?? '',
+                            overlayLines,
+                        });
+                        return;
+                    }
                     this.renderedMenuRows = overlayLines.length;
                     this.renderer.renderInput({ prompt, input, cursor, overlayLines, footerLines });
                     return;
@@ -284,7 +299,7 @@ export class InputReader {
                     return;
                 resolved = true;
                 // Clear prompt line BEFORE closeMenu() to prevent redraw() from re-rendering it
-                if (this.renderer) {
+                if (this.renderer && !this.scrollPromptRenderer) {
                     this.renderer.prepareBlockOutput();
                 }
                 closeMenu();
@@ -306,6 +321,7 @@ export class InputReader {
                 if (key.length > 1) {
                     // Process input with ANSI sequence recognition
                     let i = 0;
+                    let skipSyncMenuAfterBatch = false;
                     while (i < key.length) {
                         // Try to identify ANSI sequences first
                         const identified = identifyKey(key, i);
@@ -351,6 +367,20 @@ export class InputReader {
                                     if (cursor < input.length)
                                         cursor++;
                                 }
+                                else if (action === 'shift-tab') {
+                                    if (this.onModeCycle) {
+                                        const nextMode = this.onModeCycle();
+                                        stdout.write(`\n${dim(`权限模式已切换为 ${nextMode}`)}\n`);
+                                    }
+                                }
+                                else if (action === 'history-prev' && this.menuOpen && this.menuItems.length > 0) {
+                                    this.menuIdx = (this.menuIdx - 1 + this.menuItems.length) % this.menuItems.length;
+                                    skipSyncMenuAfterBatch = true;
+                                }
+                                else if (action === 'history-next' && this.menuOpen && this.menuItems.length > 0) {
+                                    this.menuIdx = (this.menuIdx + 1) % this.menuItems.length;
+                                    skipSyncMenuAfterBatch = true;
+                                }
                                 // Skip other actions in batch mode for simplicity
                             }
                             i += identified.consumed;
@@ -371,7 +401,7 @@ export class InputReader {
                     }
                     // Redraw once after processing all batch input
                     redraw();
-                    if (input.startsWith('/')) {
+                    if (input.startsWith('/') && !skipSyncMenuAfterBatch) {
                         syncMenu(input);
                     }
                     return;
@@ -408,6 +438,11 @@ export class InputReader {
                 const submitInput = () => {
                     if (this.menuOpen && this.menuItems.length > 0) {
                         const selected = this.menuItems[this.menuIdx].cmd;
+                        if (input === selected || input.startsWith(`${selected} `)) {
+                            this.transcriptLogger?.record({ type: 'input_submit', value: input, timestamp: Date.now() });
+                            done(input);
+                            return;
+                        }
                         input = selected;
                         cursor = selected.length;
                         closeMenu();
@@ -690,6 +725,7 @@ export class InputReader {
                     }
                 }
             };
+            stdin.on('data', onData);
             if (this.renderer) {
                 stdin.setRawMode(true);
                 stdin.resume();
@@ -700,7 +736,6 @@ export class InputReader {
                 stdin.setRawMode(true);
                 stdin.resume();
             }
-            stdin.on('data', onData);
         });
     }
 }

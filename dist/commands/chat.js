@@ -25,6 +25,7 @@ import { FileSessionStore } from '../ai/runtime/session-store.js';
 import { formatPrintOutput } from './chat-print-mode.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
+import { ScrollRegionManager } from '../ui/scroll-region.js';
 import { renderWelcomeScreen, renderInputSeparator, dim, formatProgressNote, formatSubmittedInput, formatToolActivity, formatHistoryBlock } from '../ui/render.js';
 import { InputReader } from '../ui/input.js';
 import { ReplRenderer } from '../ui/repl-renderer.js';
@@ -171,6 +172,10 @@ async function runChat(initialInput, opts) {
         inputReader.setSkills(skills);
         runtimeFacade?.resetSkillTracking();
     };
+    // Lazy callbacks for AskUserQuestion — assigned after functions are declared.
+    // This avoids TS2448 (use-before-declare) for const-declared functions.
+    let askUserOnEnter = null;
+    let askUserOnExit = null;
     const workflowTools = [
         createAskUserTool({
             ask: async (question, placeholder) => {
@@ -186,7 +191,10 @@ async function runChat(initialInput, opts) {
             },
         }),
         ...createTaskTools({ board: taskBoard, sessionId }),
-        createAskUserQuestionTool(),
+        createAskUserQuestionTool({
+            onEnterInteractive: () => askUserOnEnter?.(),
+            onExitInteractive: () => askUserOnExit?.(),
+        }),
         createInstallSkillTool({
             cwd,
             capabilityRegistry: platform.capabilityRegistry,
@@ -212,10 +220,6 @@ async function runChat(initialInput, opts) {
         permissionManager.setMode(nextMode);
         statusBar.updateMode(nextMode);
         return nextMode;
-    });
-    inputReader.setStatusLineProvider(() => {
-        const line = statusBar.getStatusLine();
-        return line ? [line] : [];
     });
     // 嵌入式 channel 管理
     const embeddedChannels = [];
@@ -260,6 +264,34 @@ async function runChat(initialInput, opts) {
             }
             return tuiDecide();
         },
+        onSandboxDenied: async (deniedPath, toolName) => {
+            stopLiveActivityTimer();
+            const choice = await showPermissionPrompt(`sandbox-expand:${toolName}`, { file_path: deniedPath, _hint: `文件在工作目录外，是否允许扩展沙箱访问并读取？` }, { transcriptLogger, renderer: replRenderer });
+            if (choice.action === 'deny')
+                return { shouldProceed: false };
+            if (choice.action === 'allow_once') {
+                platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
+                return { shouldProceed: true };
+            }
+            if (choice.action === 'allow_session') {
+                platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
+                permissionManager.addSessionRule(choice.rule);
+                return { shouldProceed: true };
+            }
+            if (choice.action === 'allow_project') {
+                platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
+                await addAllowRule('project', choice.rule, cwd);
+                permissionManager.addSessionRule(choice.rule);
+                return { shouldProceed: true };
+            }
+            if (choice.action === 'allow_global') {
+                platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
+                await addAllowRule('global', choice.rule, cwd);
+                permissionManager.addSessionRule(choice.rule);
+                return { shouldProceed: true };
+            }
+            return { shouldProceed: false };
+        },
         buildSystemPrompt: async (promptCwd) => buildPrompt(skills, promptCwd),
         notifyBackgroundJob: async (job) => {
             process.stdout.write(`\n[background] ${job.jobId} ${job.status}${job.resultSummary ? `: ${job.resultSummary}` : ''}\n`);
@@ -295,8 +327,32 @@ async function runChat(initialInput, opts) {
     // 创建 UI 组件
     const mdRenderer = new MarkdownRenderer();
     const statusBar = new StatusBar();
+    const scrollRegion = new ScrollRegionManager();
+    replRenderer.setScrollRegion(scrollRegion);
+    inputReader.setStatusLineProvider(() => {
+        const line = statusBar.getStatusLine();
+        return line ? [line] : [];
+    });
+    inputReader.setScrollPromptRenderer((frame) => {
+        if (!scrollRegion.isActive())
+            return;
+        scrollRegion.renderPromptFrame({
+            inputValue: frame.inputValue,
+            cursor: frame.cursor,
+            placeholder: 'Type your message...',
+            statusLine: frame.statusLine,
+            overlayLines: frame.overlayLines,
+        });
+    });
+    const flushStreamingMarkdown = () => {
+        const flushedRows = mdRenderer.flush();
+        if (flushedRows > 0 && scrollRegion.isActive() && scrollRegion.isContentStreaming()) {
+            scrollRegion.advanceContentCursor(flushedRows);
+        }
+    };
     // 收集历史消息用于稍后打印（在欢迎页之后）
     const historyMessages = persistedSession?.messages ?? [];
+    let welcomeVisible = historyMessages.length === 0 && !opts.dryRun;
     let liveActivityTimer = null;
     let resumeActivityTimer = null;
     let reassuranceTimer = null;
@@ -304,11 +360,28 @@ async function runChat(initialInput, opts) {
     let liveActivityVisible = false;
     let responseStarted = false;
     let lastReassuranceBucket = -1;
+    let contentRows = 0; // tracks how many rows of content have been written
+    let turnActive = true; // blocks beginActivity() after turn has ended
     const renderLiveActivity = () => {
-        statusBar.renderLive(Date.now(), liveActivityFrame++);
+        // While content is actively streaming, stop rendering the activity line.
+        // The streaming content naturally replaces the thinking indicator, and
+        // re-rendering it causes duplication (activity line gets scrolled up by
+        // terminal auto-scroll, then re-rendered at its original position).
+        // This flag is reset after each turn's content streaming completes,
+        // so tool execution phases can still show activity indicators.
+        if (scrollRegion.isContentStreaming())
+            return;
+        const line = statusBar.getActivityLine(Date.now(), liveActivityFrame++);
+        if (!line)
+            return;
         liveActivityVisible = true;
+        scrollRegion.renderActivity(line);
     };
     const beginActivity = (label, restart = false) => {
+        // Don't start new activity after the turn has ended —
+        // a scheduled resumeActivityTimer may fire after stopActivity().
+        if (!turnActive && liveActivityTimer)
+            return;
         if (resumeActivityTimer) {
             clearTimeout(resumeActivityTimer);
             resumeActivityTimer = null;
@@ -318,6 +391,13 @@ async function runChat(initialInput, opts) {
         }
         else {
             statusBar.updateActivity(label);
+        }
+        // Skip footer render when content is actively streaming —
+        // renderFooter() moves cursor to input bar, which disrupts content position.
+        if (!scrollRegion.isContentStreaming()) {
+            scrollRegion.renderFooter({
+                statusLine: statusBar.getStatusLine(),
+            });
         }
         if (!liveActivityTimer) {
             renderLiveActivity();
@@ -351,7 +431,13 @@ async function runChat(initialInput, opts) {
             return;
         }
         reassuranceTimer = setInterval(() => {
-            if (responseStarted) {
+            // Don't write reassurance when content is actively streaming
+            if (scrollRegion.isContentStreaming()) {
+                return;
+            }
+            // Don't write reassurance during the first turn before any input
+            // (welcome screen is showing, no need for reassurance)
+            if (!responseStarted) {
                 return;
             }
             const tick = statusBar.getReassuranceTick(Date.now(), lastReassuranceBucket);
@@ -384,7 +470,17 @@ async function runChat(initialInput, opts) {
             liveActivityVisible = false;
         }
     };
+    // Wire up lazy callbacks for AskUserQuestion interactive prompt
+    askUserOnEnter = stopLiveActivityTimer;
+    askUserOnExit = () => {
+        if (!liveActivityTimer) {
+            beginActivity(describeLiveActivity('AskUserQuestion', {}), true);
+        }
+    };
     const stopActivity = () => {
+        // Clear activity label FIRST so any pending renderLiveActivity() callback
+        // sees an empty label and returns early.
+        statusBar.endActivity();
         if (reassuranceTimer) {
             clearInterval(reassuranceTimer);
             reassuranceTimer = null;
@@ -404,7 +500,6 @@ async function runChat(initialInput, opts) {
         liveActivityFrame = 0;
         responseStarted = false;
         lastReassuranceBucket = -1;
-        statusBar.endActivity();
     };
     const resetTurnChrome = () => {
         stopActivity();
@@ -521,19 +616,23 @@ async function runChat(initialInput, opts) {
         return originalStderrWrite(chunk, ...args);
     });
     try {
-        // 显示欢迎界面（不清屏，让它可以滚动）
-        renderWelcomeScreen({
+        // 激活 scroll region（必须在欢迎屏幕之前）
+        // 这样欢迎内容自然填充到 scroll region 内，footer 固定在底部
+        scrollRegion.begin();
+        // 显示欢迎界面
+        contentRows = renderWelcomeScreen({
             model: provider,
             cwd: process.cwd(),
             sessionId,
             mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
             version: cliVersion,
         });
+        // Initialize scroll region to match welcome screen position.
+        // setWelcomeRows updates both _totalRows and _cursorRow based on
+        // the row count returned by renderWelcomeScreen (console.log calls).
+        scrollRegion.setWelcomeRows(contentRows);
         // 设置初始 usage
         statusBar.update({ inputTokens: 0, outputTokens: 0 });
-        if (capabilityHealthNotice) {
-            process.stdout.write(`${capabilityHealthNotice}\n\n`);
-        }
         if (opts.dryRun)
             process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
         // 打印历史消息（session resume）- 在欢迎页之后
@@ -570,6 +669,14 @@ async function runChat(initialInput, opts) {
             }
             process.stdout.write('\n');
         }
+        const dismissWelcomeScreen = () => {
+            if (!welcomeVisible || !scrollRegion.isActive())
+                return;
+            // Keep the welcome card in the scroll region as a visual separator from
+            // terminal scrollback. Submitted input will append below and scroll it
+            // away naturally as the conversation grows.
+            welcomeVisible = false;
+        };
         // 创建输入读取器
         inputReader.setSkills(skills);
         runtimeHooks.on('turn_started', () => {
@@ -577,6 +684,7 @@ async function runChat(initialInput, opts) {
             turnLayout.reset();
             responseStarted = false;
             lastReassuranceBucket = -1;
+            turnActive = true;
             beginActivity('Thinking', true);
             ensureReassuranceTimer();
         });
@@ -586,7 +694,13 @@ async function runChat(initialInput, opts) {
             if (activity) {
                 turnLayout.noteToolActivity();
                 pauseActivity();
-                process.stdout.write(activity);
+                // Write tool output at the tracked content position (inside scroll region)
+                if (scrollRegion.isActive()) {
+                    scrollRegion.writeAtContentCursor(activity);
+                }
+                else {
+                    process.stdout.write(activity);
+                }
                 scheduleActivityResume(describeLiveActivity(e.toolName, e.toolInput), 220);
             }
         });
@@ -618,6 +732,9 @@ async function runChat(initialInput, opts) {
             if (resizeTimeout)
                 clearTimeout(resizeTimeout);
             resizeTimeout = setTimeout(() => {
+                const rows = process.stdout.rows ?? 24;
+                const cols = process.stdout.columns ?? 80;
+                scrollRegion.updateSize(rows, cols);
                 // 普通文档流模式下不做底部重绘，后续输出自然适配新尺寸
             }, 100);
         };
@@ -637,9 +754,13 @@ async function runChat(initialInput, opts) {
         // 交互循环
         while (true) {
             await refreshSkills();
-            renderInputSeparator();
+            // 输入前的分隔线 — scroll region 激活后跳过，由 footer 处理
+            if (!scrollRegion.isActive()) {
+                renderInputSeparator();
+            }
             const input = await inputReader.read('> ');
             if (input === null || input.trim() === '/exit') {
+                scrollRegion.end();
                 statusBar.destroy();
                 process.stdout.write(`\n再见！${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
                 break;
@@ -650,16 +771,21 @@ async function runChat(initialInput, opts) {
             await refreshSkills();
             // 处理内置命令
             if (trimmed === '/clear') {
+                scrollRegion.end();
                 process.stdout.write('\x1b[2J\x1b[H');
-                renderWelcomeScreen({
+                contentRows = renderWelcomeScreen({
                     model: provider,
                     cwd: process.cwd(),
                     sessionId,
                     mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
                     version: cliVersion,
                 });
+                scrollRegion.begin();
+                scrollRegion.setWelcomeRows(contentRows);
+                welcomeVisible = true;
                 continue;
             }
+            dismissWelcomeScreen();
             if (trimmed === '/help') {
                 process.stdout.write('\n可用命令：\n');
                 process.stdout.write('  /exit    - 退出\n');
@@ -885,11 +1011,30 @@ async function runChat(initialInput, opts) {
                 }
                 continue;
             }
-            replRenderer.prepareBlockOutput();
-            // 输入后的分隔线
-            renderInputSeparator();
-            // 显示用户输入（带背景色）
-            process.stdout.write(formatSubmittedInput(trimmed));
+            // Clear terminal renderer state — but NOT when scroll region is active,
+            // because the scroll region's endContentStreaming() has already positioned
+            // the footer at the bottom, and TerminalRenderer's initial render (\n)
+            // would scroll it up.
+            if (!scrollRegion.isActive()) {
+                replRenderer.prepareBlockOutput();
+            }
+            // 输入后的分隔线 — scroll region 激活后跳过，footer 已包含分隔效果
+            if (!scrollRegion.isActive()) {
+                renderInputSeparator();
+            }
+            // 将光标移到 scroll region 内容区，避免用户输入覆盖 footer
+            // Uses the scroll region's tracked content cursor (_contentCursor)
+            // which accounts for all written content including tool explorer output.
+            if (scrollRegion.isActive()) {
+                scrollRegion.positionAfterContent();
+            }
+            // 显示用户输入（带背景色）— 写入 scroll region 内容区
+            // Note: In scroll region mode, we DON'T write input here because
+            // clearLastInput() will clear the screen. Instead, input is written
+            // after clearLastInput() via writeSubmittedInput().
+            if (!scrollRegion.isActive()) {
+                process.stdout.write(formatSubmittedInput(trimmed));
+            }
             // 斜杠命令：直接触发对应 skill
             const slash = parseSlashCommand(trimmed);
             if (slash) {
@@ -933,6 +1078,8 @@ async function runChat(initialInput, opts) {
                             const userMsg = slash.rest
                                 ? `执行 skill plan "${plan.primarySkill}"，用户补充说明：${slash.rest}\n\n${JSON.stringify(plan, null, 2)}`
                                 : `执行 skill plan：\n\n${JSON.stringify(plan, null, 2)}`;
+                            scrollRegion.clearLastInput();
+                            beginActivity('Thinking', true);
                             await runtimeFacade.runTurn({
                                 sessionId,
                                 cwd,
@@ -943,8 +1090,11 @@ async function runChat(initialInput, opts) {
                                     if (/\S/.test(chunk.delta)) {
                                         if (!responseStarted) {
                                             responseStarted = true;
-                                            process.stdout.write(turnLayout.consumeAssistantLeadIn());
+                                            scrollRegion.clearActivityLine();
+                                            turnLayout.consumeAssistantLeadIn();
+                                            scrollRegion.beginContentStreaming();
                                             beginActivity('Answering');
+                                            mdRenderer.setNewlineCallback(scrollRegion.getNewlineCallback());
                                             scheduleActivityPause(220);
                                         }
                                         else {
@@ -959,17 +1109,22 @@ async function runChat(initialInput, opts) {
                                 }
                                 if (chunk.type === 'usage') {
                                     statusBar.update(chunk.usage);
+                                    scrollRegion.updateStatusLine(statusBar.getStatusLine());
                                 }
                             });
                             await persistSession();
                         }
-                        mdRenderer.flush();
-                        process.stdout.write('\n');
+                        flushStreamingMarkdown();
+                        if (!scrollRegion.isActive()) {
+                            process.stdout.write('\n');
+                        }
                     }
                     catch (e) {
                         handleTurnFailure(e);
                     }
-                    process.stdout.write('\n');
+                    if (!scrollRegion.isActive()) {
+                        process.stdout.write('\n');
+                    }
                 }
                 else {
                     process.stdout.write(`找不到 skill "${slash.skillName}"。可用 skills：${skills.map(s => '/' + s.name).join(', ') || '（无）'}\n`);
@@ -977,7 +1132,9 @@ async function runChat(initialInput, opts) {
                 continue;
             }
             // 普通输入
-            process.stdout.write('\n');
+            if (!scrollRegion.isActive()) {
+                process.stdout.write('\n');
+            }
             mdRenderer.reset();
             try {
                 // UserPromptSubmit hook — broker 可在此注入额外上下文
@@ -991,6 +1148,13 @@ async function runChat(initialInput, opts) {
                 const inputBlocks = await parseInputBlocks(effectiveInput, resolveModelCapabilities(adapter).supportsImageInput);
                 clearPastedImagePaths();
                 let lastAssistantText = '';
+                // Clear previously typed input so footer shows placeholder during turn
+                scrollRegion.clearLastInput();
+                // Re-display user input in the content area (after screen clear)
+                if (scrollRegion.isActive()) {
+                    scrollRegion.writeSubmittedInput(formatSubmittedInput(trimmed));
+                }
+                beginActivity('Thinking', true);
                 await runtimeFacade.runTurn({
                     sessionId,
                     cwd,
@@ -1002,8 +1166,13 @@ async function runChat(initialInput, opts) {
                         if (/\S/.test(chunk.delta)) {
                             if (!responseStarted) {
                                 responseStarted = true;
-                                process.stdout.write(turnLayout.consumeAssistantLeadIn());
+                                scrollRegion.clearActivityLine();
+                                turnLayout.consumeAssistantLeadIn();
+                                // Don't call beginActivity before beginContentStreaming —
+                                // renderFooter would write at the content cursor position.
+                                scrollRegion.beginContentStreaming();
                                 beginActivity('Answering');
+                                mdRenderer.setNewlineCallback(scrollRegion.getNewlineCallback());
                                 scheduleActivityPause(220);
                             }
                             else {
@@ -1018,11 +1187,14 @@ async function runChat(initialInput, opts) {
                     }
                     if (chunk.type === 'usage') {
                         statusBar.update(chunk.usage);
+                        scrollRegion.updateStatusLine(statusBar.getStatusLine());
                     }
                 });
                 await persistSession();
-                mdRenderer.flush();
-                process.stdout.write('\n');
+                flushStreamingMarkdown();
+                if (!scrollRegion.isActive()) {
+                    process.stdout.write('\n');
+                }
                 // Stop hook — broker 可在此注入新任务（auto-continue）
                 const stopResult = await lifecycleHooks.runHooks('Stop', {
                     stopHookActive: true,
@@ -1036,6 +1208,7 @@ async function runChat(initialInput, opts) {
                     lastAssistantText = '';
                     const continueBlocks = await parseInputBlocks(stopResult.message, resolveModelCapabilities(adapter).supportsImageInput);
                     clearPastedImagePaths();
+                    scrollRegion.clearLastInput();
                     await runtimeFacade.runTurn({
                         sessionId,
                         cwd,
@@ -1044,21 +1217,59 @@ async function runChat(initialInput, opts) {
                     }, (chunk) => {
                         if (chunk.type === 'text') {
                             lastAssistantText += chunk.delta;
+                            if (/\S/.test(chunk.delta)) {
+                                if (!responseStarted) {
+                                    responseStarted = true;
+                                    scrollRegion.clearActivityLine();
+                                    turnLayout.consumeAssistantLeadIn();
+                                    scrollRegion.beginContentStreaming();
+                                    beginActivity('Answering');
+                                    mdRenderer.setNewlineCallback(scrollRegion.getNewlineCallback());
+                                    scheduleActivityPause(220);
+                                }
+                                else {
+                                    if (resumeActivityTimer) {
+                                        clearTimeout(resumeActivityTimer);
+                                        resumeActivityTimer = null;
+                                    }
+                                    pauseActivity();
+                                }
+                            }
                             mdRenderer.write(chunk.delta);
                         }
                         if (chunk.type === 'usage') {
                             statusBar.update(chunk.usage);
+                            scrollRegion.updateStatusLine(statusBar.getStatusLine());
                         }
                     });
                     await persistSession();
-                    mdRenderer.flush();
-                    process.stdout.write('\n');
+                    flushStreamingMarkdown();
+                    if (!scrollRegion.isActive()) {
+                        process.stdout.write('\n');
+                    }
                 }
             }
             catch (e) {
                 handleTurnFailure(e);
             }
-            process.stdout.write('\n');
+            // Restore footer after streaming
+            if (scrollRegion.isActive()) {
+                scrollRegion.endContentStreaming({
+                    inputPrompt: 'Type your message...',
+                    statusLine: statusBar.getStatusLine(),
+                });
+                // Ensure next TerminalRenderer render uses cursor movement (\x1b[1B)
+                // instead of newlines (\n), which would scroll the footer up.
+                replRenderer.prepareForInput();
+            }
+            // Clear activity state BEFORE unblocking renderLiveActivity().
+            // This prevents pending interval callbacks from rendering "Thinking"
+            // in the window between contentStreaming=false and stopActivity().
+            statusBar.endActivity();
+            turnActive = false;
+            stopActivity();
+            // Activity line was already cleared by clearActivityLine() at the start
+            // of content streaming. Skipping nextTick clear to avoid clearing content.
         }
     }
     finally {

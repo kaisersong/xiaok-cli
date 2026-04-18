@@ -4,4 +4,8 @@
  * and get back their selection.
  */
 import type { Tool } from '../../types.js';
-export declare function createAskUserQuestionTool(): Tool;
+export interface AskUserQuestionToolOptions {
+    onEnterInteractive?: () => void;
+    onExitInteractive?: () => void;
+}
+export declare function createAskUserQuestionTool(options?: AskUserQuestionToolOptions): Tool;

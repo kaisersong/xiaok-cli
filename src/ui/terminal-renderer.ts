@@ -131,4 +131,12 @@ export class TerminalRenderer {
   reset(): void {
     this.previousLineCount = 0;
   }
+
+  /**
+   * Set the expected input area line count so subsequent renders
+   * use cursor movement (\x1b[1B) instead of newlines (\n).
+   */
+  setExpectedLineCount(n: number): void {
+    this.previousLineCount = n;
+  }
 }

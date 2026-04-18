@@ -36,6 +36,9 @@ function describeGroupedActivity(toolName, input) {
             : typeof input.path === 'string'
                 ? summarizePath(input)
                 : '';
+        if (name === 'using-superpowers') {
+            return null;
+        }
         return name ? { group: 'Explored', item: `Load ${name}` } : null;
     }
     if (toolName === 'web_fetch') {

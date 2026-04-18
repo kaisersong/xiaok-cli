@@ -37,4 +37,14 @@ describe('MarkdownRenderer', () => {
 
     expect(output).toBe('streaming');
   });
+
+  it('counts a flushed partial line as finalized rows', () => {
+    const renderer = new MarkdownRenderer();
+
+    renderer.write('streaming');
+    const flushedRows = renderer.flush();
+
+    expect(flushedRows).toBe(1);
+    expect(renderer.getLineCount()).toBe(1);
+  });
 });

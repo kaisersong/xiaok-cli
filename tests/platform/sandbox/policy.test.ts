@@ -22,4 +22,16 @@ describe('sandbox policy', () => {
     expect(policy.filterEnv({ PATH: '/bin', SECRET: 'x' })).toEqual({ PATH: '/bin' });
     expect(policy.checkNetworkAccess()).toMatchObject({ allowed: false });
   });
+
+  it('allows runtime expansion of path allowlist entries', () => {
+    const policy = createSandboxPolicy({
+      pathAllowlist: ['/repo'],
+    });
+
+    expect(policy.checkPath('/tmp/outside.txt')).toMatchObject({ allowed: false });
+
+    policy.expandAllowedPaths(['/tmp/outside.txt']);
+
+    expect(policy.checkPath('/tmp/outside.txt')).toMatchObject({ allowed: true });
+  });
 });

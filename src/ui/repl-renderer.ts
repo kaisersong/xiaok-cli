@@ -1,4 +1,5 @@
 import type { ReplInputFrame } from './repl-state.js';
+import type { ScrollRegionManager } from './scroll-region.js';
 import { createTerminalController, type PermissionModalRequest, type TerminalController } from './terminal-controller.js';
 import { TerminalRenderer } from './terminal-renderer.js';
 
@@ -14,6 +15,8 @@ export class ReplRenderer {
 
   private readonly terminalRenderer: TerminalRenderer;
 
+  private scrollRegion: ScrollRegionManager | null = null;
+
   constructor(private readonly stream: NodeJS.WriteStream = process.stdout) {
     this.controller = createTerminalController({ prompt: '' });
     this.terminalRenderer = new TerminalRenderer(stream);
@@ -22,6 +25,10 @@ export class ReplRenderer {
   private syncTerminalSize(): void {
     const { columns, rows } = getTerminalSize(this.stream);
     this.controller.setTerminalSize(columns, rows);
+  }
+
+  setScrollRegion(region: ScrollRegionManager): void {
+    this.scrollRegion = region;
   }
 
   private render(): void {
@@ -78,5 +85,13 @@ export class ReplRenderer {
 
   prepareBlockOutput(): void {
     this.terminalRenderer.clearAll();
+  }
+
+  /**
+   * Restore expected line count after scroll region's endContentStreaming,
+   * so the next TerminalRenderer render uses cursor movement not newlines.
+   */
+  prepareForInput(): void {
+    this.terminalRenderer.setExpectedLineCount(2); // input bar + status bar
   }
 }

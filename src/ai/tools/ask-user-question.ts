@@ -7,7 +7,12 @@
 import type { Tool } from '../../types.js';
 import { askQuestion } from '../../ui/ask-question.js';
 
-export function createAskUserQuestionTool(): Tool {
+export interface AskUserQuestionToolOptions {
+  onEnterInteractive?: () => void;
+  onExitInteractive?: () => void;
+}
+
+export function createAskUserQuestionTool(options: AskUserQuestionToolOptions = {}): Tool {
   return {
     permission: 'safe',
     definition: {
@@ -74,12 +79,18 @@ IMPORTANT: Do NOT use this tool as a first response to friction or minor obstacl
       for (const q of questions.slice(0, 4)) {
         if (!q.question || !Array.isArray(q.options) || q.options.length < 2) continue;
 
-        const result = await askQuestion({
-          header: q.header,
-          question: q.question,
-          options: q.options,
-          multiSelect: q.multiSelect ?? false,
-        });
+        options.onEnterInteractive?.();
+        let result: Awaited<ReturnType<typeof askQuestion>>;
+        try {
+          result = await askQuestion({
+            header: q.header,
+            question: q.question,
+            options: q.options,
+            multiSelect: q.multiSelect ?? false,
+          });
+        } finally {
+          options.onExitInteractive?.();
+        }
 
         const answerText = result.otherText
           ? result.otherText

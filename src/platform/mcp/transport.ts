@@ -37,7 +37,7 @@ export async function createMcpClientConnection(
   const transport = await createTransport(serverName, config);
 
   const client = new Client(
-    { name: 'xiaok-cli', version: '0.5.5' },
+    { name: 'xiaok-cli', version: '0.5.6' },
     { capabilities: {} },
   );
 
@@ -94,7 +94,7 @@ async function createStdioTransport(config: McpStdioServerConfig): Promise<Trans
     command: config.command,
     args: config.args ?? [],
     env,
-    stderr: 'inherit', // 继承 stderr 以便看到错误输出
+    stderr: 'pipe',
   });
 
   // 注意：不要调用 start()，Client.connect() 会自动调用

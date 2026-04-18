@@ -73,6 +73,7 @@ export async function createPlatformRuntimeContext(options) {
         lspManager,
         lspClient,
         teamService,
+        sandboxPolicy,
         sandboxEnforcer,
         worktreeManager,
         mcpTools,

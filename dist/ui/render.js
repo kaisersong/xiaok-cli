@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from 'fs';
 import { basename, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getToolActivityLabel } from './locale.js';
-import { getDisplayWidth } from './display-width.js';
+import { getDisplayWidth, stripAnsi } from './display-width.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOGO_PATH = join(__dirname, '../../data/logo.txt');
 let colorsEnabled = process.stdout.isTTY !== false &&
@@ -90,7 +90,8 @@ export function renderWelcomeScreen(opts) {
         console.log(boldCyan("欢迎使用 xiaok code!"));
         console.log(dim(`${opts.model} · ${opts.mode} · ${opts.cwd}`));
         console.log();
-        return 3;
+        // Count actual terminal rows (with wrapping)
+        return 1 + 1 + Math.ceil(getDisplayWidth(`${opts.model} · ${opts.mode} · ${opts.cwd}`) / cols) + 1;
     }
     const line = (left, right) => {
         const leftPart = left.padEnd(leftWidth, " ");
@@ -120,17 +121,26 @@ export function renderWelcomeScreen(opts) {
         "",
         ""
     ];
-    let lineCount = 0;
+    // Count actual terminal rows (accounting for line wrapping)
+    function countRows(text) {
+        const displayWidth = getDisplayWidth(text);
+        return Math.max(1, Math.ceil(displayWidth / cols));
+    }
+    let rowCount = 0;
+    // Blank line
     console.log();
-    lineCount++;
-    console.log(dim("╭") + dim("─".repeat(leftWidth)) + dim("┬") + dim("─".repeat(rightWidth)) + dim("╮"));
-    lineCount++;
+    rowCount += 1;
+    // Top border (totalWidth chars, may wrap)
+    const topBorder = dim("╭") + dim("─".repeat(leftWidth)) + dim("┬") + dim("─".repeat(rightWidth)) + dim("╮");
+    console.log(topBorder);
+    rowCount += countRows(stripAnsi(topBorder));
     const welcome = "欢迎使用 xiaok code!";
     const welcomeWidth = getDisplayWidth(welcome);
     const welcomePad = Math.floor((leftWidth - welcomeWidth) / 2);
     const welcomeLeft = " ".repeat(welcomePad) + boldCyan(welcome) + " ".repeat(leftWidth - welcomePad - welcomeWidth);
-    console.log(line(welcomeLeft, ""));
-    lineCount++;
+    const welcomeLine = line(welcomeLeft, "");
+    console.log(welcomeLine);
+    rowCount += countRows(stripAnsi(welcomeLine));
     for (let i = 0; i < logo.length; i++) {
         const logoPad = Math.floor((leftWidth - logo[i].length) / 2);
         const logoLine = " ".repeat(logoPad) + cyan(logo[i]) + " ".repeat(leftWidth - logoPad - logo[i].length);
@@ -138,10 +148,11 @@ export function renderWelcomeScreen(opts) {
         const tipWidth = getDisplayWidth(tip);
         const tipLine = " " + tip + " ".repeat(rightWidth - tipWidth - 1);
         console.log(dim("│") + logoLine + dim("│") + tipLine + dim("│"));
-        lineCount++;
+        rowCount += countRows(stripAnsi(dim("│") + logoLine + dim("│") + tipLine + dim("│")));
     }
-    console.log(dim("├") + dim("─".repeat(leftWidth)) + dim("┼") + dim("─".repeat(rightWidth)) + dim("┤"));
-    lineCount++;
+    const midBorder = dim("├") + dim("─".repeat(leftWidth)) + dim("┼") + dim("─".repeat(rightWidth)) + dim("┤");
+    console.log(midBorder);
+    rowCount += countRows(stripAnsi(midBorder));
     const modelInfo = `${opts.model} · ${opts.mode}`;
     const sessionInfo = `Session: ${opts.sessionId}`;
     const sessionWidth = getDisplayWidth(sessionInfo);
@@ -149,18 +160,22 @@ export function renderWelcomeScreen(opts) {
     const versionWidth = getDisplayWidth(versionInfo);
     const modelLine = " " + dim(modelInfo) + " ".repeat(leftWidth - modelInfo.length - 1);
     const sessionLine = " " + dim(sessionInfo) + " ".repeat(rightWidth - sessionWidth - 1);
-    console.log(dim("│") + modelLine + dim("│") + sessionLine + dim("│"));
-    lineCount++;
+    const modelRow = dim("│") + modelLine + dim("│") + sessionLine + dim("│");
+    console.log(modelRow);
+    rowCount += countRows(stripAnsi(modelRow));
     const cwdShort = opts.cwd.length > leftWidth - 2 ? "..." + opts.cwd.slice(-(leftWidth - 5)) : opts.cwd;
     const cwdLine = " " + dim(cwdShort) + " ".repeat(leftWidth - cwdShort.length - 1);
     const versionLine = " " + dim(versionInfo) + " ".repeat(rightWidth - versionWidth - 1);
-    console.log(dim("│") + cwdLine + dim("│") + versionLine + dim("│"));
-    lineCount++;
-    console.log(dim("╰") + dim("─".repeat(leftWidth)) + dim("┴") + dim("─".repeat(rightWidth)) + dim("╯"));
-    lineCount++;
+    const cwdRow = dim("│") + cwdLine + dim("│") + versionLine + dim("│");
+    console.log(cwdRow);
+    rowCount += countRows(stripAnsi(cwdRow));
+    const botBorder = dim("╰") + dim("─".repeat(leftWidth)) + dim("┴") + dim("─".repeat(rightWidth)) + dim("╯");
+    console.log(botBorder);
+    rowCount += countRows(stripAnsi(botBorder));
+    // Blank line
     console.log();
-    lineCount++;
-    return lineCount;
+    rowCount += 1;
+    return rowCount;
 }
 export function renderInputSeparator() {
     const cols = process.stdout.columns ?? 80;

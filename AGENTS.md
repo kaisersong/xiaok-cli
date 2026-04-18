@@ -2,13 +2,14 @@
 
 ## Worktrees
 
-- Feature work should use project-local worktrees under `.worktrees/`.
-- The main workspace at the repo root may contain unrelated local changes; avoid mixing feature implementation into the root workspace.
-- The CLI runtime layer refactor for the current effort lives under `.worktrees/cli-runtime-layer`.
+- The CLI runtime layer refactor has been integrated back into the main workspace.
+- There is no active runtime refactor worktree for the current effort.
+- Local validation of the `xiaok` command must use the main workspace at `/Users/song/projects/xiaok-cli`; do not `npm link` a feature worktree.
+- If a future effort needs a worktree, create it only for isolated implementation and remove it after the change is integrated.
 
 ## Current Scope
 
-- The active refactor scope is the `xiaok chat` CLI runtime only.
+- The completed refactor scope was the `xiaok chat` CLI runtime only.
 - Do not fold `yzj` channel or webhook/websocket work into this runtime refactor.
 
 ## Active Ownership
@@ -67,9 +68,21 @@ Summary:
 
 ## Integration Rule
 
-- Prefer small commits and `cherry-pick` across worktrees.
+- Prefer small commits and main-workspace integration once a worktree effort is complete.
 - Do not let two Codex instances make concurrent uncoordinated edits to the same file.
 - If a shared file must change for both efforts, the single writer integrates both changes after reading the other commit.
+
+## Current Release Notes
+
+- `xiaok` is currently linked from the main workspace only and reports `0.5.7`.
+- Terminal E2E verification uses `tests/e2e/tmux-e2e.py`, which starts a local OpenAI-compatible SSE server and a real tmux TTY.
+- First submitted input keeps the startup welcome card above it until normal terminal scrolling moves it away; do not clear the content region on first submit.
+- Live activity such as `Thinking` and `Working` renders on the activity row above the input footer, with a blank gap row between activity and `❯`; activity lines must not repeat footer status fields such as model, mode, tokens, or project.
+- Verified after the 0.5.7 integration:
+- `npm run build`
+- targeted sandbox Vitest suite for terminal UI, sandbox expansion, and AskUserQuestion lifecycle
+- `python3 tests/e2e/tmux-e2e.py`
+- tmux cursor smoke check: startup cursor is on the bottom input bar, and typing keeps it there.
 
 ## Current Roadmap Docs
 

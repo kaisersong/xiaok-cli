@@ -10,6 +10,7 @@ export class ReplRenderer {
     stream;
     controller;
     terminalRenderer;
+    scrollRegion = null;
     constructor(stream = process.stdout) {
         this.stream = stream;
         this.controller = createTerminalController({ prompt: '' });
@@ -18,6 +19,9 @@ export class ReplRenderer {
     syncTerminalSize() {
         const { columns, rows } = getTerminalSize(this.stream);
         this.controller.setTerminalSize(columns, rows);
+    }
+    setScrollRegion(region) {
+        this.scrollRegion = region;
     }
     render() {
         this.syncTerminalSize();
@@ -64,5 +68,12 @@ export class ReplRenderer {
     }
     prepareBlockOutput() {
         this.terminalRenderer.clearAll();
+    }
+    /**
+     * Restore expected line count after scroll region's endContentStreaming,
+     * so the next TerminalRenderer render uses cursor movement not newlines.
+     */
+    prepareForInput() {
+        this.terminalRenderer.setExpectedLineCount(2); // input bar + status bar
     }
 }

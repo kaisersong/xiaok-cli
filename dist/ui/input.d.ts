@@ -14,6 +14,13 @@ export interface InputHistoryState {
     undoStack: InputSnapshot[];
     redoStack: InputSnapshot[];
 }
+export interface ScrollPromptRenderFrame {
+    inputValue: string;
+    cursor: number;
+    placeholder: string;
+    statusLine: string;
+    overlayLines: string[];
+}
 /** 向左找词边界（Ctrl+W / Alt+Left 用） */
 export declare function wordBoundaryLeft(text: string, cursor: number): number;
 /** 向右找词边界（Alt+Right 用） */
@@ -51,11 +58,13 @@ export declare class InputReader {
     private onModeCycle?;
     private transcriptLogger?;
     private statusLineProvider?;
+    private scrollPromptRenderer?;
     constructor(renderer?: ReplRenderer | undefined);
     setSkills(skills: SkillMeta[]): void;
     setModeCycleHandler(handler: () => PermissionMode): void;
     setTranscriptLogger(logger: TranscriptLogger | undefined): void;
     setStatusLineProvider(provider: (() => string[]) | undefined): void;
+    setScrollPromptRenderer(renderer: ((frame: ScrollPromptRenderFrame) => void) | undefined): void;
     read(prompt: string): Promise<string | null>;
 }
 export {};

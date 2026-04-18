@@ -108,9 +108,11 @@ describe('chat CLI smoke', () => {
   it('runs chat --auto --json end-to-end against a custom OpenAI-compatible provider', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-cli-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
+    const homeDir = join(rootDir, 'home');
     const projectDir = join(rootDir, 'project');
     tempDirs.push(rootDir);
     mkdirSync(projectDir, { recursive: true });
+    mkdirSync(homeDir, { recursive: true });
     ensureTestDistPackageJson();
 
     const server = await withFakeOpenAiServer(async (_req, body, res) => {
@@ -151,6 +153,7 @@ describe('chat CLI smoke', () => {
           cwd: projectDir,
           env: {
             ...process.env,
+            HOME: homeDir,
             XIAOK_CONFIG_DIR: configDir,
           },
         },
@@ -170,9 +173,11 @@ describe('chat CLI smoke', () => {
   it('prints degraded capability health to stderr while still returning the chat result', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-cli-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
+    const homeDir = join(rootDir, 'home');
     const projectDir = join(rootDir, 'project');
     tempDirs.push(rootDir);
     mkdirSync(join(projectDir, '.xiaok'), { recursive: true });
+    mkdirSync(homeDir, { recursive: true });
     ensureTestDistPackageJson();
 
     const server = await withFakeOpenAiServer(async (_req, _body, res) => {
@@ -209,7 +214,9 @@ describe('chat CLI smoke', () => {
         mcpServers: [
           {
             name: 'broken-docs',
-            command: `${JSON.stringify(process.execPath)} ${JSON.stringify('-e')} ${JSON.stringify('process.exit(1)')}`,
+            type: 'stdio',
+            command: process.execPath,
+            args: ['-e', 'process.exit(1)'],
           },
         ],
       });
@@ -221,6 +228,7 @@ describe('chat CLI smoke', () => {
           cwd: projectDir,
           env: {
             ...process.env,
+            HOME: homeDir,
             XIAOK_CONFIG_DIR: configDir,
           },
         },

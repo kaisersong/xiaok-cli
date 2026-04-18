@@ -193,6 +193,17 @@ describe('StatusBar', () => {
       expect(line).toContain('claude-opus-4-6');
     });
 
+    it('exposes the activity line for scroll-region renderers', () => {
+      statusBar.beginActivity('Exploring codebase', 0);
+
+      const line = statusBar.getActivityLine(24_000, 1);
+
+      expect(line).toContain('Digging through repo');
+      expect(line).toContain('24s');
+      expect(line).not.toContain('xiaok-cli');
+      expect(line).not.toContain('claude-opus-4-6');
+    });
+
     it('suppresses live activity for very short operations to avoid flicker', () => {
       statusBar.beginActivity('Thinking', 0);
 

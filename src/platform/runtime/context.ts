@@ -37,6 +37,7 @@ export interface PlatformRuntimeContext {
   lspManager: ReturnType<typeof createLspManager>;
   lspClient: LspClientLike | undefined;
   teamService: TeamService;
+  sandboxPolicy: ReturnType<typeof createSandboxPolicy>;
   sandboxEnforcer: ReturnType<typeof createSandboxEnforcer>;
   worktreeManager: WorktreeManager;
   mcpTools: Tool[];
@@ -136,6 +137,7 @@ export async function createPlatformRuntimeContext(
     lspManager,
     lspClient,
     teamService,
+    sandboxPolicy,
     sandboxEnforcer,
     worktreeManager,
     mcpTools,
