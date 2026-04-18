@@ -1,6 +1,0 @@
-[2026-03-30T01:39:44.438Z] [debug] Error
-[2026-03-30T01:39:44.448Z] [warning] No available adapters.
-[2026-03-30T01:39:44.450Z] [debug] Error
-[2026-03-30T01:39:46.085Z] [warning] [GSI_LOGGER]: google.accounts.id.initialize() is called multiple times. This could cause unexpected behavior and only the last initialized instance will be used.
-[2026-03-30T01:39:46.888Z] [error] Failed to load resource: the server responded with a status of 404 ()
-[2026-03-30T01:39:47.397Z] [error] Failed to load resource: the server responded with a status of 403 ()

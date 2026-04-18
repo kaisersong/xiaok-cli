@@ -2,6 +2,10 @@ node_modules/
 dist/
 *.log
 .DS_Store
+.claude/
+.npm-cache/
+.gstack/
+.serena/
 .env
 .env.local
 coverage/
@@ -18,6 +22,8 @@ test-*.mjs
 test-*.json
 test-*.log
 BUG-*.md
+BUGFIX_*.md
+DEBUG-*.md
 E2E-*.md
 TEST-*.md
 *.log
