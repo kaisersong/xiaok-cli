@@ -27,6 +27,7 @@ export class TerminalRenderer {
     // Cursor is at the line after output content.
     // We render the input frame directly here, without clearing anything above.
     if (isInitialRender) {
+      this.stream.write('\r');
       // Just render the input frame lines at current position
       frame.lines.forEach((line, index) => {
         this.stream.write('\x1b[2K'); // Clear current line

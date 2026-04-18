@@ -9,7 +9,9 @@ export function resolvePluginShellCommand(command, platform = process.platform) 
     if (platform === 'win32') {
         return {
             command: 'cmd.exe',
-            args: ['/d', '/s', '/c', command],
+            // Wrap the full command so cmd.exe preserves quoted executables like
+            // "C:\Program Files\nodejs\node.exe" when we pass arguments verbatim.
+            args: ['/d', '/s', '/c', `"${command}"`],
         };
     }
     return {

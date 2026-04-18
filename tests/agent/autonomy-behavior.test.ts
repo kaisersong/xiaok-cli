@@ -294,7 +294,8 @@ describe('Agent Autonomy Behavior - Mock Model', () => {
   // -------------------------------------------------------------------------
 
   it('PROMPT CHECK: should include CRITICAL execution instruction', async () => {
-    expect(systemPrompt).toContain('CRITICAL: EXECUTE IMMEDIATELY');
+    expect(systemPrompt).toContain('EXECUTE IMMEDIATELY');
+    expect(systemPrompt).toContain('When the user says "允许"');
   });
 
   it('PROMPT CHECK: should include user authorization instruction', async () => {

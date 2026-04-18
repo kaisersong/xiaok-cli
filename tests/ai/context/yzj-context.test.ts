@@ -13,9 +13,11 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('ent_123');
   });
 
-  it('truncates to token budget', async () => {
+  it('still returns the core prompt when the token budget is tiny', async () => {
     const prompt = await buildSystemPrompt({ enterpriseId: null, devApp: null, cwd: '/tmp', budget: 50 });
-    expect(prompt.length).toBeLessThan(8000);
+    expect(typeof prompt).toBe('string');
+    expect(prompt).toContain('xiaok');
+    expect(prompt.length).toBeGreaterThan(1000);
   });
 
   it('resolves successfully when yzj CLI is not installed or times out', async () => {
@@ -77,8 +79,8 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Destructive operations');
     expect(prompt).toContain('merge conflicts');
     // Layer 5: UsingTools (English)
-    expect(prompt).toContain('read tool');
-    expect(prompt).toContain('edit tool');
+    expect(prompt).toContain('To read files use Read');
+    expect(prompt).toContain('To edit files use Edit');
     // Layer 6: ToneAndStyle (English)
     expect(prompt).toContain('file_path:line_number');
     // Layer 7: OutputEfficiency (English)

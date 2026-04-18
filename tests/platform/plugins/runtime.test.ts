@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeMcpMessage } from '../../../src/ai/mcp/runtime/server-process.js';
 import { encodeLspMessage } from '../../../src/platform/lsp/client.js';
 import { createLspManager } from '../../../src/platform/lsp/manager.js';
+import { resolvePluginShellCommand } from '../../../src/platform/plugins/runtime.js';
 
 const { startMcpServerProcessMock, startLspServerProcessMock } = vi.hoisted(() => ({
   startMcpServerProcessMock: vi.fn(),
@@ -60,7 +61,7 @@ describe('platform plugin runtime', () => {
     });
     expect(resolvePluginShellCommand('node .\\server.js', 'win32')).toEqual({
       command: 'cmd.exe',
-      args: ['/d', '/s', '/c', 'node .\\server.js'],
+      args: ['/d', '/s', '/c', '"node .\\server.js"'],
     });
   });
 
@@ -122,7 +123,8 @@ describe('platform plugin runtime', () => {
 
     connection.dispose();
 
-    expect(startMcpServerProcessMock).toHaveBeenCalledWith('sh', ['-c', 'node ./fake-docs-server.js']);
+    const shell = resolvePluginShellCommand('node ./fake-docs-server.js');
+    expect(startMcpServerProcessMock).toHaveBeenCalledWith(shell.command, shell.args);
     expect(child.kill).toHaveBeenCalledTimes(1);
   });
 
@@ -170,7 +172,8 @@ describe('platform plugin runtime', () => {
 
     connection.dispose();
 
-    expect(startLspServerProcessMock).toHaveBeenCalledWith('sh', ['-c', 'node ./fake-lsp-server.js']);
+    const shell = resolvePluginShellCommand('node ./fake-lsp-server.js');
+    expect(startLspServerProcessMock).toHaveBeenCalledWith(shell.command, shell.args);
     expect(child.kill).toHaveBeenCalledTimes(1);
   });
 

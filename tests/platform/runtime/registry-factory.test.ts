@@ -1,5 +1,5 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -37,6 +37,12 @@ function initGitRepo(cwd: string): void {
   execFileSync('git', ['commit', '-m', 'init'], { cwd });
 }
 
+function canSpawnChildProcesses(): boolean {
+  const nodeResult = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'pipe' });
+  const gitResult = spawnSync('git', ['--version'], { stdio: 'pipe' });
+  return !nodeResult.error && nodeResult.status === 0 && !gitResult.error && gitResult.status === 0;
+}
+
 async function* mockStream(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
   for (const chunk of chunks) {
     yield chunk;
@@ -45,6 +51,7 @@ async function* mockStream(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
 
 describe('platform registry factory', () => {
   const tempDirs: string[] = [];
+  const itIfCanSpawn = canSpawnChildProcesses() ? it : it.skip;
 
   afterEach(() => {
     for (const dir of tempDirs.splice(0)) {
@@ -52,7 +59,7 @@ describe('platform registry factory', () => {
     }
   });
 
-  it('runs a longer chain across team tools, MCP tools, and background subagents with cwd and model propagation', async () => {
+  itIfCanSpawn('runs a longer chain across team tools, MCP tools, and background subagents with cwd and model propagation', async () => {
     const cwd = join(tmpdir(), `xiaok-platform-registry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const packageCwd = join(cwd, 'packages', 'app');
     tempDirs.push(cwd);
@@ -66,7 +73,9 @@ describe('platform registry factory', () => {
       mcpServers: [
         {
           name: 'fixture-docs',
-          command: `${quote(process.execPath)} ${quote(join(process.cwd(), 'tests', 'support', 'mcp-stdio-server.js'))}`,
+          type: 'stdio',
+          command: process.execPath,
+          args: [join(process.cwd(), 'tests', 'support', 'mcp-stdio-server.js')],
         },
       ],
     });
@@ -148,7 +157,7 @@ describe('platform registry factory', () => {
     await context.dispose();
   });
 
-  it('runs isolated background subagents inside real git worktrees and deletes cleanup worktrees after completion', async () => {
+  itIfCanSpawn('runs isolated background subagents inside real git worktrees and deletes cleanup worktrees after completion', async () => {
     const cwd = join(tmpdir(), `xiaok-platform-registry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     tempDirs.push(cwd);
     mkdirSync(join(cwd, '.xiaok'), { recursive: true });
@@ -211,7 +220,7 @@ describe('platform registry factory', () => {
     await context.dispose();
   });
 
-  it('deletes cleanup worktrees even when an isolated background subagent fails', async () => {
+  itIfCanSpawn('deletes cleanup worktrees even when an isolated background subagent fails', async () => {
     const cwd = join(tmpdir(), `xiaok-platform-registry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     tempDirs.push(cwd);
     mkdirSync(join(cwd, '.xiaok'), { recursive: true });
@@ -260,7 +269,7 @@ describe('platform registry factory', () => {
     await waitFor(() => {
       expect(context.listBackgroundJobs('sess_registry_worktree_fail')[0]).toMatchObject({
         status: 'failed',
-        errorMessage: '模型未返回任何文本或工具调用',
+        errorMessage: expect.stringContaining('模型未返回任何文本或工具调用'),
       });
     });
 

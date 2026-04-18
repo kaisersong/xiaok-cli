@@ -1,11 +1,6 @@
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-const {
-  buildWorktreePath,
-  planWorktreeAdd,
-  sanitizeBranchName,
-} = await import(pathToFileURL(resolve(process.cwd(), 'scripts/new-worktree.mjs')).href);
+import { buildWorktreePath, planWorktreeAdd, sanitizeBranchName } from '../../scripts/new-worktree.mjs';
 
 describe('sanitizeBranchName', () => {
   it('normalizes whitespace for branch names', () => {
@@ -15,7 +10,7 @@ describe('sanitizeBranchName', () => {
 
 describe('buildWorktreePath', () => {
   it('maps slash branch names into stable worktree paths', () => {
-    expect(buildWorktreePath('/repo', 'feature/runtime-hygiene')).toBe('/repo/.worktrees/feature-runtime-hygiene');
+    expect(buildWorktreePath('/repo', 'feature/runtime-hygiene')).toBe(join('/repo', '.worktrees', 'feature-runtime-hygiene'));
   });
 });
 
@@ -33,7 +28,7 @@ describe('planWorktreeAdd', () => {
       'add',
       '-b',
       'feature/runtime-hygiene',
-      '/repo/.worktrees/feature-runtime-hygiene',
+      join('/repo', '.worktrees', 'feature-runtime-hygiene'),
       'origin/master',
     ]);
   });
@@ -49,7 +44,7 @@ describe('planWorktreeAdd', () => {
       '/repo',
       'worktree',
       'add',
-      '/repo/.worktrees/feature-runtime-hygiene',
+      join('/repo', '.worktrees', 'feature-runtime-hygiene'),
       'feature/runtime-hygiene',
     ]);
   });

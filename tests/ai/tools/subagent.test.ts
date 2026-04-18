@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ModelAdapter, StreamChunk, Tool } from '../../../src/types.js';
 import { createSubAgentTool } from '../../../src/ai/tools/subagent.js';
 import { createWorktreeManager } from '../../../src/platform/worktrees/manager.js';
@@ -11,6 +14,14 @@ async function* mockStream(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
 }
 
 describe('createSubAgentTool', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('runs a named subagent inside an isolated worktree when the agent requires worktree isolation', async () => {
     const execGit = vi.fn(async () => '');
     const worktreeManager = createWorktreeManager({
@@ -50,20 +61,23 @@ describe('createSubAgentTool', () => {
     });
 
     expect(result).toContain('subagent done');
+    const expectedPath = resolve('/repo/.worktrees/reviewer-sess_1');
     expect(execGit).toHaveBeenCalledWith([
       'worktree',
       'add',
-      '/repo/.worktrees/reviewer-sess_1',
+      expectedPath,
       '-b',
       'reviewer-sess_1',
     ]);
-    expect(createRegistry).toHaveBeenCalledWith('/repo/.worktrees/reviewer-sess_1', ['read']);
+    expect(createRegistry).toHaveBeenCalledWith(expectedPath, ['read']);
   });
 
   it('dispatches background agents through the background runner and returns the queued job id', async () => {
+    const rootDir = join(tmpdir(), `xiaok-subagent-background-tests-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(rootDir);
     const notify = vi.fn(async () => undefined);
     const backgroundRunner = createBackgroundRunner({
-      rootDir: '/tmp/xiaok-subagent-background-tests',
+      rootDir,
       execute: async () => ({ ok: true, summary: 'background complete' }),
       notify,
     });
@@ -138,13 +152,14 @@ describe('createSubAgentTool', () => {
     });
 
     expect(result).toContain('done');
+    const expectedPath = resolve('/repo/.worktrees/janitor-sess_cleanup');
     expect(execGit).toHaveBeenNthCalledWith(
       1,
-      ['worktree', 'add', '/repo/.worktrees/janitor-sess_cleanup', '-b', 'janitor-sess_cleanup'],
+      ['worktree', 'add', expectedPath, '-b', 'janitor-sess_cleanup'],
     );
     expect(execGit).toHaveBeenNthCalledWith(
       2,
-      ['worktree', 'remove', '/repo/.worktrees/janitor-sess_cleanup'],
+      ['worktree', 'remove', expectedPath],
     );
   });
 

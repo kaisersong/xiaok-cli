@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
@@ -8,6 +8,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const execFileAsync = promisify(execFile);
 const cliEntryPath = join(process.cwd(), '.test-dist', 'src', 'index.js');
+
+function canSpawnChildProcesses(): boolean {
+  const result = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'pipe' });
+  return !result.error && result.status === 0;
+}
 
 function ensureTestDistPackageJson(): void {
   const packageJsonPath = join(process.cwd(), '.test-dist', 'package.json');
@@ -98,6 +103,7 @@ async function withFakeOpenAiServer(
 
 describe('chat CLI smoke', () => {
   const tempDirs: string[] = [];
+  const itIfCanSpawn = canSpawnChildProcesses() ? it : it.skip;
 
   afterEach(() => {
     for (const dir of tempDirs.splice(0)) {
@@ -105,7 +111,7 @@ describe('chat CLI smoke', () => {
     }
   });
 
-  it('runs chat --auto --json end-to-end against a custom OpenAI-compatible provider', async () => {
+  itIfCanSpawn('runs chat --auto --json end-to-end against a custom OpenAI-compatible provider', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-cli-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
     const homeDir = join(rootDir, 'home');
@@ -170,7 +176,7 @@ describe('chat CLI smoke', () => {
     }
   }, 10_000);
 
-  it('prints degraded capability health to stderr while still returning the chat result', async () => {
+  itIfCanSpawn('prints degraded capability health to stderr while still returning the chat result', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-cli-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
     const homeDir = join(rootDir, 'home');

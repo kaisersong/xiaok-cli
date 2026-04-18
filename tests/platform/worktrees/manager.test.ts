@@ -1,3 +1,4 @@
+import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createWorktreeManager } from '../../../src/platform/worktrees/manager.js';
 
@@ -16,9 +17,10 @@ describe('worktree manager', () => {
       branch: 'bg-task-1',
     });
 
-    expect(allocation.path).toBe('/repo/.worktrees/bg-task-1');
+    const expectedPath = resolve('/repo/.worktrees/bg-task-1');
+    expect(allocation.path).toBe(expectedPath);
     expect(allocation.created).toBe(true);
-    expect(execGit).toHaveBeenCalledWith(['worktree', 'add', '/repo/.worktrees/bg-task-1', '-b', 'bg-task-1']);
+    expect(execGit).toHaveBeenCalledWith(['worktree', 'add', expectedPath, '-b', 'bg-task-1']);
   });
 
   it('reuses an existing branch allocation without creating another worktree', async () => {
@@ -62,7 +64,7 @@ describe('worktree manager', () => {
 
     await manager.release(allocation.path);
 
-    expect(execGit).toHaveBeenLastCalledWith(['worktree', 'remove', '/repo/.worktrees/cleanup-branch']);
+    expect(execGit).toHaveBeenLastCalledWith(['worktree', 'remove', resolve('/repo/.worktrees/cleanup-branch')]);
   });
 
   it('rejects worktree paths outside the configured boundary', async () => {
@@ -73,7 +75,7 @@ describe('worktree manager', () => {
     });
 
     expect(() =>
-      manager.validatePath('/tmp/escape')
+      manager.validatePath(join(resolve('/tmp'), 'escape'))
     ).toThrow('outside configured worktree boundary');
   });
 });

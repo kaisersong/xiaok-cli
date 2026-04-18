@@ -7,7 +7,10 @@ export interface LspServerProcess {
 }
 
 export function startLspServerProcess(command: string, args: string[] = []): LspServerProcess {
-  const child = spawn(command, args, { stdio: 'pipe' });
+  const child = spawn(command, args, {
+    stdio: 'pipe',
+    windowsVerbatimArguments: process.platform === 'win32' && command.toLowerCase() === 'cmd.exe',
+  });
   return {
     child,
     dispose() {

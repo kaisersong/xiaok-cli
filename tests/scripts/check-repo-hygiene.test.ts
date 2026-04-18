@@ -1,10 +1,6 @@
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-const {
-  evaluateRepoHealth,
-  parseStatusPorcelain,
-} = await import(pathToFileURL(resolve(process.cwd(), 'scripts/check-repo-hygiene.mjs')).href);
+import { evaluateRepoHealth, parseStatusPorcelain } from '../../scripts/check-repo-hygiene.mjs';
 
 describe('parseStatusPorcelain', () => {
   it('parses porcelain lines into entries', () => {
@@ -41,7 +37,7 @@ describe('evaluateRepoHealth', () => {
       ahead: 1,
       behind: 0,
       entries: parseStatusPorcelain('?? .xiaok/state/capability-health.json\n?? .DS_Store\n'),
-      globalXiaokTarget: '/repo/.worktrees/feature-runtime',
+      globalXiaokTarget: join('/repo', '.worktrees', 'feature-runtime'),
     });
 
     expect(report.ok).toBe(true);
@@ -55,12 +51,12 @@ describe('evaluateRepoHealth', () => {
       ahead: 0,
       behind: 0,
       entries: [],
-      globalXiaokTarget: '/repo/.worktrees/runtime-first-phase1',
+      globalXiaokTarget: join('/repo', '.worktrees', 'runtime-first-phase1'),
     });
 
     expect(report.ok).toBe(true);
     expect(report.warnings).toContain(
-      'global xiaok points to /repo/.worktrees/runtime-first-phase1 instead of /repo',
+      `global xiaok points to ${join('/repo', '.worktrees', 'runtime-first-phase1')} instead of /repo`,
     );
   });
 });

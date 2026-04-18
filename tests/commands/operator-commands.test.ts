@@ -45,7 +45,7 @@ describe('operator commands', () => {
     const settingsPath = join(testDir, '.xiaok', 'settings.json');
     const settingsText = readFileSync(settingsPath, 'utf8');
 
-    expect(result).toContain('.xiaok/settings.json');
+    expect(result).toContain(settingsPath);
     expect(settingsText).toContain('"permissions"');
     expect(settingsText).toContain('"statusBar"');
   });

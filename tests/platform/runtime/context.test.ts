@@ -1,13 +1,25 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPlatformRuntimeContext } from '../../../src/platform/runtime/context.js';
 import { FileCapabilityHealthStore } from '../../../src/platform/runtime/health-store.js';
+import { resolvePluginShellCommand } from '../../../src/platform/plugins/runtime.js';
 import { waitFor } from '../../support/wait-for.js';
 
 function quote(value: string): string {
   return JSON.stringify(value);
+}
+
+function canSpawnChildProcesses(): boolean {
+  const command = `${quote(process.execPath)} ${quote('-e')} ${quote('process.exit(0)')}`;
+  const shell = resolvePluginShellCommand(command);
+  const result = spawnSync(shell.command, shell.args, {
+    stdio: 'pipe',
+    windowsVerbatimArguments: process.platform === 'win32' && shell.command.toLowerCase() === 'cmd.exe',
+  });
+  return !result.error && result.status === 0;
 }
 
 function writePlugin(
@@ -122,7 +134,9 @@ describe('platform runtime context', () => {
     await context.dispose();
   });
 
-  it('loads declared MCP and LSP plugins end-to-end and persists connected capability health', async () => {
+  const itIfCanSpawn = canSpawnChildProcesses() ? it : it.skip;
+
+  itIfCanSpawn('loads declared MCP and LSP plugins end-to-end and persists connected capability health', async () => {
     const cwd = join(tmpdir(), `xiaok-platform-context-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     tempDirs.push(cwd);
     mkdirSync(join(cwd, '.xiaok'), { recursive: true });
@@ -137,7 +151,9 @@ describe('platform runtime context', () => {
       mcpServers: [
         {
           name: 'fixture-docs',
-          command: `${quote(process.execPath)} ${quote(join(process.cwd(), 'tests', 'support', 'mcp-stdio-server.js'))}`,
+          type: 'stdio',
+          command: process.execPath,
+          args: [join(process.cwd(), 'tests', 'support', 'mcp-stdio-server.js')],
         },
       ],
       lspServers: [
@@ -184,7 +200,9 @@ describe('platform runtime context', () => {
       mcpServers: [
         {
           name: 'broken-docs',
-          command: `${quote(process.execPath)} ${quote('-e')} ${quote('process.exit(1)')}`,
+          type: 'stdio',
+          command: process.execPath,
+          args: ['-e', 'process.exit(1)'],
         },
       ],
       lspServers: [

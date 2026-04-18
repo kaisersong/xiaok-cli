@@ -121,6 +121,10 @@ export function identifyKey(data: string, offset: number): { key: string; consum
   const ch = data[offset];
 
   if (ch === '\x1b') {
+    if (offset + 1 < data.length && data[offset + 1] === '\r') {
+      return { key: 'shift+enter', consumed: 2 };
+    }
+
     if (offset + 1 < data.length && data[offset + 1] === '[') {
       let i = offset + 2;
       let params = '';

@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { PromptBuilder } from '../../dist/ai/prompts/builder.js';
+import { PromptBuilder } from '../../src/ai/prompts/builder.js';
 
 // =============================================================================
 // 测试用例
@@ -23,7 +23,16 @@ describe('Agent Autonomy Prompt 检查', () => {
     const promptBuilder = new PromptBuilder();
     const snapshot = await promptBuilder.build({
       cwd: '/test/workspace',
+      enterpriseId: null,
+      devApp: null,
+      budget: 4000,
       channel: 'chat',
+      skills: [],
+      deferredTools: [],
+      agents: [],
+      pluginCommands: [],
+      lspDiagnostics: '',
+      autoContext: { docs: [], git: null },
     });
     promptText = snapshot.rendered;
   });
@@ -33,7 +42,7 @@ describe('Agent Autonomy Prompt 检查', () => {
   // ---------------------------------------------------------------------------
 
   it('should include "Immediate execution" instruction', () => {
-    expect(promptText).toContain('Immediate execution');
+    expect(promptText).toContain('EXECUTE IMMEDIATELY');
   });
 
   it('should include "just do it" instruction', () => {
@@ -91,7 +100,16 @@ async function runCliTest() {
   const promptBuilder = new PromptBuilder();
   const snapshot = await promptBuilder.build({
     cwd: process.cwd(),
+    enterpriseId: null,
+    devApp: null,
+    budget: 4000,
     channel: 'chat',
+    skills: [],
+    deferredTools: [],
+    agents: [],
+    pluginCommands: [],
+    lspDiagnostics: '',
+    autoContext: { docs: [], git: null },
   });
 
   const promptText = snapshot.rendered;
@@ -100,7 +118,7 @@ async function runCliTest() {
 
   const checks = [
     // Phase 4 新增
-    { name: 'Immediate execution', pattern: 'Immediate execution', phase: 4 },
+    { name: 'Immediate execution', pattern: 'EXECUTE IMMEDIATELY', phase: 4 },
     { name: 'just do it', pattern: 'Do not restate what the user said — just do it', phase: 4 },
     { name: 'Go straight to the point', pattern: 'Go straight to the point', phase: 4 },
     { name: 'Skip filler', pattern: 'Skip filler words, preamble', phase: 4 },

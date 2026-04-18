@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createLspManager } from '../../../src/platform/lsp/manager.js';
@@ -7,8 +8,15 @@ function quote(value: string): string {
   return JSON.stringify(value);
 }
 
+function canSpawnChildProcesses(): boolean {
+  const result = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'pipe' });
+  return !result.error && result.status === 0;
+}
+
 describe('platform plugin runtime real process', () => {
-  it('connects to real MCP and LSP stdio fixtures', async () => {
+  const itIfCanSpawn = canSpawnChildProcesses() ? it : it.skip;
+
+  itIfCanSpawn('connects to real MCP and LSP stdio fixtures', async () => {
     const mcpCommand = `${quote(process.execPath)} ${quote(join(process.cwd(), 'tests', 'support', 'mcp-stdio-server.js'))}`;
     const lspCommand = `${quote(process.execPath)} ${quote(join(process.cwd(), 'tests', 'support', 'lsp-stdio-server.js'))}`;
 
