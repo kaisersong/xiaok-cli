@@ -51,6 +51,33 @@ export const bgDarkGray = (s) => colorsEnabled ? `\x1b[48;5;235m${s}\x1b[0m` : s
 export const bgInputGray = (s) => colorsEnabled ? `\x1b[48;5;238m${s}\x1b[0m` : s;
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const RAIL_INDENT = "  ";
+function padToDisplayWidth(text, width) {
+    const padCount = Math.max(0, width - getDisplayWidth(text));
+    return text + ' '.repeat(padCount);
+}
+function wrapDisplayLine(text, width) {
+    if (width <= 0) {
+        return [''];
+    }
+    const wrapped = [];
+    let current = '';
+    let currentWidth = 0;
+    for (const symbol of Array.from(text)) {
+        const symbolWidth = Math.max(1, getDisplayWidth(symbol));
+        if (current !== '' && currentWidth + symbolWidth > width) {
+            wrapped.push(current);
+            current = symbol;
+            currentWidth = symbolWidth;
+            continue;
+        }
+        current += symbol;
+        currentWidth += symbolWidth;
+    }
+    if (current.length > 0 || wrapped.length === 0) {
+        wrapped.push(current);
+    }
+    return wrapped;
+}
 export function startSpinner(message) {
     if (!colorsEnabled) {
         process.stderr.write(`  ${message}\n`);
@@ -228,16 +255,15 @@ function extractToolActivityTarget(input) {
 }
 export function formatSubmittedInput(text) {
     const termWidth = process.stdout.columns ?? 80;
-    const indentWidth = RAIL_INDENT.length;
-    const lines = text.split(/\r?\n/);
+    const prefix = ' › ';
+    const textWidth = Math.max(1, termWidth - getDisplayWidth(prefix));
+    const lines = text
+        .split(/\r?\n/)
+        .flatMap((line) => wrapDisplayLine(line, textWidth));
     return [
-        ...lines.map((line) => {
-            const content = ` › ${line} `;
-            const contentDisplayWidth = getDisplayWidth(content);
-            const availableWidth = termWidth - indentWidth;
-            const padCount = Math.max(0, availableWidth - contentDisplayWidth);
-            return `${RAIL_INDENT}${bgDarkGray(content + ' '.repeat(padCount))}`;
-        }),
+        bgDarkGray(' '.repeat(termWidth)),
+        ...lines.map((line) => bgDarkGray(padToDisplayWidth(`${prefix}${line}`, termWidth))),
+        bgDarkGray(' '.repeat(termWidth)),
     ].join('\n') + '\n';
 }
 export function formatProgressNote(text) {
@@ -326,11 +352,9 @@ export function formatHistoryBlock(block) {
         return formatSubmittedInput(block.text);
     }
     if (block.type === 'thinking') {
-        // Thinking blocks shown as dim summary, truncated to 200 chars
-        const truncated = block.thinking.length > 200
-            ? block.thinking.slice(0, 200) + '...'
-            : block.thinking;
-        return `${dim('  [Thinking]')} ${dim(truncated)}\n`;
+        // Thinking is hidden during normal interactive use and should stay hidden
+        // when replaying persisted session history during resume.
+        return '';
     }
     if (block.type === 'tool_use') {
         // Tool use shown as activity summary

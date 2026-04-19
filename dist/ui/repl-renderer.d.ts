@@ -9,6 +9,9 @@ export declare class ReplRenderer {
     constructor(stream?: NodeJS.WriteStream);
     private syncTerminalSize;
     setScrollRegion(region: ScrollRegionManager): void;
+    hasActiveScrollRegion(): boolean;
+    private getScrollPromptFrame;
+    private buildPermissionOverlayLines;
     private render;
     getState(): import("./surface-state.js").SurfaceState;
     renderInput(frame: ReplInputFrame): void;

@@ -1,5 +1,35 @@
+function normalizePathForMatch(path) {
+    return path.replace(/\\/g, '/').replace(/\/+$/g, '');
+}
 function matchesPrefix(prefixes, value) {
-    return prefixes.some((prefix) => value === prefix || value.startsWith(`${prefix}/`));
+    const normalizedValue = normalizePathForMatch(value);
+    return prefixes.some((prefix) => {
+        const normalizedPrefix = normalizePathForMatch(prefix);
+        return normalizedValue === normalizedPrefix || normalizedValue.startsWith(`${normalizedPrefix}/`);
+    });
+}
+export function extractSandboxAllowedPaths(rules) {
+    const prefixes = [];
+    const seen = new Set();
+    for (const rule of rules) {
+        const match = rule.match(/^sandbox-expand:[^(]+\((.*)\)$/i);
+        if (!match) {
+            continue;
+        }
+        let pattern = match[1]?.trim() ?? '';
+        if (!pattern || pattern === '*') {
+            continue;
+        }
+        if (pattern.endsWith('/*') || pattern.endsWith('\\*')) {
+            pattern = pattern.slice(0, -2);
+        }
+        if (!pattern || seen.has(pattern)) {
+            continue;
+        }
+        seen.add(pattern);
+        prefixes.push(pattern);
+    }
+    return prefixes;
 }
 export function createSandboxPolicy(options) {
     const legacyAllowlist = options.allowedPaths

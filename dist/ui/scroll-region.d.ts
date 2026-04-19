@@ -90,6 +90,8 @@ export declare class ScrollRegionManager {
      * "❯" is at column 1, space at column 2, text starts at column 3.
      */
     private getCursorBase;
+    private getFooterTextWidth;
+    private wrapFooterLine;
     private getFooterInputState;
     /**
      * Update terminal size.
@@ -205,6 +207,7 @@ export declare class ScrollRegionManager {
      * If hasBackground is true, the padding will have the background color.
      */
     isContentStreaming(): boolean;
+    getPromptFrameState(): ScrollPromptFrame;
     setWelcomeRows(rows: number): void;
     clearContentArea(): void;
     advanceContentCursor(rows: number): void;

@@ -18,7 +18,7 @@
  * └──────────────────────────────────┘
  */
 
-import { getDisplayWidth, stripAnsi } from './text-metrics.js';
+import { getDisplayWidth, splitSymbols, stripAnsi } from './text-metrics.js';
 
 export interface ScrollRegionConfig {
   /** Height of fixed footer (input bar + status bar) */
@@ -53,7 +53,7 @@ const CURSOR_UP = '\x1b[%dA';
 const CURSOR_HOME = '\r';
 
 // Input bar styling
-const INPUT_BG = '\x1b[48;5;244m';   // Gray background
+const INPUT_BG = '\x1b[48;5;238m';   // Darker gray background
 const PROMPT_FG = '\x1b[1;36m';      // Bold cyan for ❯
 const RESET_FG = '\x1b[22;39m';      // Reset bold + fg, keep bg
 const RESET_ALL = '\x1b[0m';
@@ -61,11 +61,15 @@ const DIM = '\x1b[2m';
 const MAX_INPUT_ROWS = 6;
 
 interface FooterInputState {
-  lines: string[];
   visibleStart: number;
   visibleLines: string[];
-  cursorLine: number;
+  cursorVisualLine: number;
   cursorColumn: number;
+}
+
+interface WrappedFooterLine {
+  text: string;
+  cursorColumn?: number;
 }
 
 export class ScrollRegionManager {
@@ -129,7 +133,8 @@ export class ScrollRegionManager {
    * Calculate the bottom row of the scroll region (where activity line renders).
    */
   private getScrollBottom(): number {
-    return Math.max(1, this.getInputStartRow() - this.config.gapHeight - 1);
+    const reservedRowsAboveInput = Math.max(this.config.gapHeight, this.lastOverlayRenderRows);
+    return Math.max(1, this.getInputStartRow() - reservedRowsAboveInput - 1);
   }
 
   /**
@@ -166,34 +171,82 @@ export class ScrollRegionManager {
     return 3;
   }
 
-  private getFooterInputState(inputValue: string, cursor: number): FooterInputState {
-    const lines = inputValue.split('\n');
-    let remaining = Math.max(0, Math.min(cursor, inputValue.length));
-    let cursorLine = 0;
-    let cursorColumn = 0;
+  private getFooterTextWidth(): number {
+    return Math.max(1, this.config.columns - this.getCursorBase() + 1);
+  }
 
-    for (let index = 0; index < lines.length; index += 1) {
-      const lineLength = lines[index]?.length ?? 0;
-      if (remaining <= lineLength) {
-        cursorLine = index;
-        cursorColumn = remaining;
-        break;
+  private wrapFooterLine(line: string, maxWidth: number, cursorSentinel: string): WrappedFooterLine[] {
+    const wrapped: WrappedFooterLine[] = [];
+    const symbols = splitSymbols(line);
+    let current = '';
+    let currentWidth = 0;
+    let currentCursorColumn: number | undefined;
+
+    const pushCurrent = () => {
+      wrapped.push({
+        text: current,
+        cursorColumn: currentCursorColumn,
+      });
+      current = '';
+      currentWidth = 0;
+      currentCursorColumn = undefined;
+    };
+
+    for (const symbol of symbols) {
+      if (symbol === cursorSentinel) {
+        if (currentWidth >= maxWidth) {
+          pushCurrent();
+        }
+        currentCursorColumn = currentWidth;
+        continue;
       }
-      remaining -= lineLength + 1;
-      cursorLine = Math.min(index + 1, lines.length - 1);
-      cursorColumn = 0;
+
+      const symbolWidth = Math.max(1, getDisplayWidth(symbol));
+      if (current !== '' && currentWidth + symbolWidth > maxWidth) {
+        pushCurrent();
+      }
+
+      current += symbol;
+      currentWidth += symbolWidth;
     }
 
+    if (current.length > 0 || currentCursorColumn !== undefined || wrapped.length === 0) {
+      pushCurrent();
+    }
+
+    return wrapped;
+  }
+
+  private getFooterInputState(inputValue: string, cursor: number): FooterInputState {
+    const cursorSentinel = '\uFFF0';
+    const safeCursor = Math.max(0, Math.min(cursor, inputValue.length));
+    const inputWithCursor = `${inputValue.slice(0, safeCursor)}${cursorSentinel}${inputValue.slice(safeCursor)}`;
+    const rawLines = inputWithCursor.split('\n');
+    const wrappedLines: string[] = [];
+    const maxWidth = this.getFooterTextWidth();
+    let cursorVisualLine = 0;
+    let cursorColumn = 0;
+
+    rawLines.forEach((line) => {
+      const wrapped = this.wrapFooterLine(line, maxWidth, cursorSentinel);
+      wrapped.forEach((entry) => {
+        if (entry.cursorColumn !== undefined) {
+          cursorVisualLine = wrappedLines.length;
+          cursorColumn = entry.cursorColumn;
+        }
+        wrappedLines.push(entry.text);
+      });
+    });
+
     const maxRows = this.maxInputRows();
-    const maxStart = Math.max(0, lines.length - maxRows);
-    const visibleStart = Math.min(Math.max(0, cursorLine - maxRows + 1), maxStart);
-    const visibleLines = lines.slice(visibleStart, visibleStart + maxRows);
+    const maxStart = Math.max(0, wrappedLines.length - maxRows);
+    const visibleStart = Math.min(Math.max(0, cursorVisualLine - maxRows + 1), maxStart);
+    const visibleLines = wrappedLines.slice(visibleStart, visibleStart + maxRows);
 
     return {
-      lines,
       visibleStart,
       visibleLines,
-      cursorLine,
+      cursorVisualLine,
       cursorColumn,
     };
   }
@@ -418,6 +471,8 @@ export class ScrollRegionManager {
 
   private renderOverlayPromptFrame(frame: ScrollPromptFrame): void {
     const cols = this.config.columns;
+    const previousInputRows = this.lastInputRenderRows;
+    const previousOverlayRows = this.lastOverlayRenderRows;
     const inputState = this.lastInputValue
       ? this.getFooterInputState(this.lastInputValue, this.lastInputCursor)
       : undefined;
@@ -427,11 +482,13 @@ export class ScrollRegionManager {
     const overlayRows = overlayLines.length;
     const inputStartRow = this.config.rows - inputRows + 1;
     const overlayStartRow = Math.max(1, inputStartRow - overlayRows);
+    const previousOverlayStartRow = Math.max(1, this.getInputStartRow(previousInputRows) - previousOverlayRows);
+    const clearStartRow = Math.min(previousOverlayStartRow, overlayStartRow);
     const scrollBottom = Math.max(1, overlayStartRow - 1);
     const isPlaceholder = !this.lastInputValue;
 
     this.stream.write(RESET_SCROLL_REGION);
-    for (let row = overlayStartRow; row <= this.config.rows; row += 1) {
+    for (let row = clearStartRow; row <= this.config.rows; row += 1) {
       this.stream.write(`\x1b[${row};1H${CLEAR_LINE}`);
     }
 
@@ -469,12 +526,10 @@ export class ScrollRegionManager {
 
     const cursorVisibleLine = Math.max(
       0,
-      Math.min(inputState.cursorLine - inputState.visibleStart, inputState.visibleLines.length - 1),
+      Math.min(inputState.cursorVisualLine - inputState.visibleStart, inputState.visibleLines.length - 1),
     );
     const cursorRow = inputStartRow + cursorVisibleLine;
-    const cursorLineText = inputState.lines[inputState.cursorLine] ?? '';
-    const cursorCol = this.getCursorBase()
-      + getDisplayWidth(cursorLineText.slice(0, inputState.cursorColumn));
+    const cursorCol = this.getCursorBase() + inputState.cursorColumn;
 
     this.stream.write(`\x1b[${cursorRow};${cursorCol}H`);
   }
@@ -493,12 +548,10 @@ export class ScrollRegionManager {
     const state = this.getFooterInputState(this.lastInputValue, this.lastInputCursor);
     const cursorVisibleLine = Math.max(
       0,
-      Math.min(state.cursorLine - state.visibleStart, state.visibleLines.length - 1),
+      Math.min(state.cursorVisualLine - state.visibleStart, state.visibleLines.length - 1),
     );
     const cursorRow = this.getInputStartRow(state.visibleLines.length) + cursorVisibleLine;
-    const cursorLineText = state.lines[state.cursorLine] ?? '';
-    const cursorCol = this.getCursorBase()
-      + getDisplayWidth(cursorLineText.slice(0, state.cursorColumn));
+    const cursorCol = this.getCursorBase() + state.cursorColumn;
 
     this.stream.write(`\x1b[${cursorRow};${cursorCol}H`);
   }
@@ -619,9 +672,11 @@ export class ScrollRegionManager {
     const scrollBottom = this.getScrollBottom();
     const cols = this.config.columns;
 
-    // Move to activity line, clear, and write - cursor stays here
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
-    this.stream.write(this.padLine(activityLine, cols, false));
+    // Write the full activity refresh in one chunk to avoid transient blank
+    // frames when terminal capture lands between clear and redraw.
+    this.stream.write(
+      `${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}${this.padLine(activityLine, cols, false)}`,
+    );
     if (this._footerVisible && !this._contentStreaming) {
       this.positionCursorForInput();
     }
@@ -672,6 +727,16 @@ export class ScrollRegionManager {
 
   isContentStreaming(): boolean {
     return this._contentStreaming;
+  }
+
+  getPromptFrameState(): ScrollPromptFrame {
+    return {
+      inputValue: this.lastInputValue,
+      cursor: this.lastInputCursor,
+      placeholder: this.lastInputPrompt || 'Type your message...',
+      statusLine: this.lastStatusLine,
+      overlayLines: this.lastOverlayRenderRows > 0 ? [] : undefined,
+    };
   }
 
   setWelcomeRows(rows: number): void {

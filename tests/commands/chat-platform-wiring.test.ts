@@ -14,5 +14,9 @@ describe('chat platform wiring', () => {
     expect(source).toContain('buildCapabilityHealthNotice(platform.health)');
     expect(source).toContain('loadSettings(cwd)');
     expect(source).toContain('mergeRules(persistedPermissionSettings)');
+    expect(source).toContain('extractSandboxAllowedPaths');
+    expect(source).toContain('const persistedSandboxAllowedPaths = extractSandboxAllowedPaths(persistedPermissionRules.allowRules);');
+    expect(source).toContain('platform.sandboxPolicy.expandAllowedPaths(persistedSandboxAllowedPaths);');
+    expect(source).toContain('platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));');
   });
 });

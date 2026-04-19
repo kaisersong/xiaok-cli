@@ -28,11 +28,47 @@ from typing import Callable
 ROWS = 24
 COLS = 120
 SPINNER_LABELS = ("Thinking", "Answering", "Working")
+ResponseScript = str | list[dict]
 
 
 def resolve_command(primary: str, fallback: str) -> str:
     resolved = shutil.which(primary) or shutil.which(fallback)
     return resolved or fallback
+
+
+def resolve_tmux_binary() -> str:
+    env_override = os.environ.get("TMUX_BINARY")
+    if env_override:
+        return env_override
+
+    resolved = shutil.which("tmux.exe" if os.name == "nt" else "tmux") or shutil.which("tmux")
+    if resolved:
+        return resolved
+
+    if os.name == "nt":
+        local_appdata = os.environ.get("LOCALAPPDATA", "")
+        candidate_roots = [
+            Path(local_appdata) / "Microsoft" / "WinGet" / "Links",
+            Path(local_appdata) / "Microsoft" / "WinGet" / "Packages",
+            Path(r"C:\Program Files\Git\usr\bin"),
+            Path(r"C:\Program Files\Git\bin"),
+            Path(r"C:\msys64\usr\bin"),
+        ]
+        for root in candidate_roots:
+            if not root.exists():
+                continue
+            direct = root / "tmux.exe"
+            if direct.exists():
+                return str(direct)
+            if root.name == "Packages":
+                matches = list(root.glob("arndawg.tmux-windows*\\tmux.exe"))
+                if matches:
+                    return str(matches[0])
+
+    raise FileNotFoundError(
+        "tmux binary not found. Install tmux and add it to PATH, or set TMUX_BINARY "
+        "to the full tmux executable path before running tests/e2e/tmux-e2e.py."
+    )
 
 
 def shell_quote_posix(value: str) -> str:
@@ -44,18 +80,28 @@ def shell_quote_cmd(value: str) -> str:
     return escaped.replace("<", "^<").replace(">", "^>").replace('"', '""')
 
 
-def build_cli_launch_command(project_dir: Path, config_dir: Path, cli_entry: Path) -> str:
+def build_cli_launch_command(
+    project_dir: Path,
+    config_dir: Path,
+    cli_entry: Path,
+    home_dir: Path,
+    auto_mode: bool = True,
+) -> str:
     node_cmd = resolve_command("node.exe" if os.name == "nt" else "node", "node")
+    auto_flag = " --auto" if auto_mode else ""
     if os.name == "nt":
         project_value = str(project_dir).replace('"', '""')
         config_value = shell_quote_cmd(str(config_dir))
+        home_value = shell_quote_cmd(str(home_dir))
         node_value = str(node_cmd).replace('"', '""')
         cli_value = str(cli_entry).replace('"', '""')
         return (
             'cmd /v:on /c "'
             f'cd /d "{project_value}" && '
             f'set "XIAOK_CONFIG_DIR={config_value}" && '
-            f'"{node_value}" "{cli_value}" --auto 2>nul'
+            f'set "HOME={home_value}" && '
+            f'set "USERPROFILE={home_value}" && '
+            f'"{node_value}" "{cli_value}"{auto_flag} 2>nul'
             '"'
         )
 
@@ -63,16 +109,67 @@ def build_cli_launch_command(project_dir: Path, config_dir: Path, cli_entry: Pat
         [
             f"cd {shell_quote_posix(str(project_dir))} &&",
             f"XIAOK_CONFIG_DIR={shell_quote_posix(str(config_dir))}",
+            f"HOME={shell_quote_posix(str(home_dir))}",
             shell_quote_posix(node_cmd),
             shell_quote_posix(str(cli_entry)),
-            "--auto",
+            *(["--auto"] if auto_mode else []),
             "2>/dev/null",
         ],
     )
 
 
+def text_response_events(body: str) -> list[dict]:
+    return [
+        {"choices": [{"index": 0, "delta": {"content": body}, "finish_reason": None}]},
+        {"choices": [], "usage": {"prompt_tokens": 100, "completion_tokens": 4}},
+        {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+    ]
+
+
+def tool_call_response_events(name: str, arguments: dict, call_id: str) -> list[dict]:
+    return [
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": call_id,
+                                "function": {
+                                    "name": name,
+                                    "arguments": "",
+                                },
+                            },
+                        ],
+                    },
+                    "finish_reason": None,
+                },
+            ],
+        },
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {
+                                    "arguments": json.dumps(arguments),
+                                },
+                            },
+                        ],
+                    },
+                    "finish_reason": None,
+                },
+            ],
+        },
+        {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+    ]
+
+
 class FakeOpenAIServer:
-    def __init__(self, responses: list[str], first_token_delay: float = 0.9) -> None:
+    def __init__(self, responses: list[ResponseScript], first_token_delay: float = 0.9) -> None:
         self.responses = responses
         self.first_token_delay = first_token_delay
         self.requests: list[dict] = []
@@ -92,10 +189,10 @@ class FakeOpenAIServer:
         self._server.server_close()
         self._thread.join(timeout=5)
 
-    def _next_response(self) -> str:
+    def _next_response(self) -> ResponseScript:
         if self.responses:
             return self.responses.pop(0)
-        return "DONE"
+        return text_response_events("DONE")
 
     def _handler_class(self) -> type[BaseHTTPRequestHandler]:
         outer = self
@@ -109,7 +206,7 @@ class FakeOpenAIServer:
                 except json.JSONDecodeError:
                     outer.requests.append({"_raw": raw_body})
 
-                body = outer._next_response()
+                script = outer._next_response()
                 self.send_response(200)
                 self.send_header("content-type", "text/event-stream")
                 self.send_header("cache-control", "no-cache")
@@ -117,9 +214,9 @@ class FakeOpenAIServer:
                 self.end_headers()
 
                 time.sleep(outer.first_token_delay)
-                self._write_chunk({"choices": [{"index": 0, "delta": {"content": body}, "finish_reason": None}]})
-                self._write_chunk({"choices": [], "usage": {"prompt_tokens": 100, "completion_tokens": 4}})
-                self._write_chunk({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+                events = text_response_events(script) if isinstance(script, str) else script
+                for event in events:
+                    self._write_chunk(event)
                 self.wfile.write(b"data: [DONE]\n\n")
                 self.wfile.flush()
 
@@ -134,12 +231,23 @@ class FakeOpenAIServer:
 
 
 class TmuxHarness:
-    def __init__(self, session: str, project_dir: Path, config_dir: Path, cli_entry: Path, tmux_bin: str) -> None:
+    def __init__(
+        self,
+        session: str,
+        project_dir: Path,
+        config_dir: Path,
+        home_dir: Path,
+        cli_entry: Path,
+        tmux_bin: str,
+        auto_mode: bool = True,
+    ) -> None:
         self.session = session
         self.project_dir = project_dir
         self.config_dir = config_dir
+        self.home_dir = home_dir
         self.cli_entry = cli_entry
         self.tmux_bin = tmux_bin
+        self.auto_mode = auto_mode
 
     def tmux(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
@@ -173,7 +281,13 @@ class TmuxHarness:
         self.tmux(
             *args,
         )
-        command = build_cli_launch_command(self.project_dir, self.config_dir, self.cli_entry)
+        command = build_cli_launch_command(
+            self.project_dir,
+            self.config_dir,
+            self.cli_entry,
+            self.home_dir,
+            auto_mode=self.auto_mode,
+        )
         self.tmux("send-keys", "-t", self.session, command, "Enter")
 
     def stop(self) -> None:
@@ -252,6 +366,10 @@ def footer_has_empty_prompt(content: str) -> bool:
     return False
 
 
+def count_occurrences(content: str, needle: str) -> int:
+    return sum(1 for line in visible_lines(content) if needle in line)
+
+
 def assert_activity_above_prompt_with_gap(content: str) -> None:
     lines = visible_lines(content)
     prompt_index = next((i for i, line in enumerate(lines) if line.strip().startswith("❯")), -1)
@@ -277,21 +395,49 @@ def assert_activity_above_prompt_with_gap(content: str) -> None:
 def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
     cli_entry = project_dir / "dist" / "index.js"
     assert_true(cli_entry.exists(), f"CLI entry not found: {cli_entry}")
-    tmux_bin = os.environ.get("TMUX_BINARY") or resolve_command("tmux.exe" if os.name == "nt" else "tmux", "tmux")
+    tmux_bin = resolve_tmux_binary()
 
     work_root = Path(tempfile.mkdtemp(prefix="xiaok-terminal-e2e-"))
     project_fixture = work_root / "project"
+    sandbox_fixture = work_root / "outside-workdir"
     config_dir = work_root / "config"
+    home_dir = work_root / "home"
     project_fixture.mkdir(parents=True)
+    sandbox_fixture.mkdir(parents=True)
+    home_dir.mkdir(parents=True)
+    (sandbox_fixture / "marker.txt").write_text("sandbox fixture\n", encoding="utf-8")
 
     first_response = "E2E_RESPONSE_ONE"
     second_response = "E2E_RESPONSE_TWO"
-    server = FakeOpenAIServer([first_response, second_response], first_token_delay=1.5)
+    permission_response_one = "E2E_PERMISSION_RESPONSE_ONE"
+    permission_response_two = "E2E_PERMISSION_RESPONSE_TWO"
+    permission_command = "cmd /c echo E2E_PERMISSION_OK"
+    sandbox_response_one = "E2E_SANDBOX_RESPONSE_ONE"
+    sandbox_response_two = "E2E_SANDBOX_RESPONSE_TWO"
+    sandbox_command = "cmd /c echo E2E_SANDBOX_OK"
+    server = FakeOpenAIServer([
+        text_response_events(first_response),
+        text_response_events(second_response),
+        tool_call_response_events("bash", {"command": permission_command}, "call_permission_1"),
+        text_response_events(permission_response_one),
+        tool_call_response_events("bash", {"command": permission_command}, "call_permission_2"),
+        text_response_events(permission_response_two),
+        tool_call_response_events("bash", {
+            "command": sandbox_command,
+            "workdir": str(sandbox_fixture),
+        }, "call_sandbox_1"),
+        text_response_events(sandbox_response_one),
+        tool_call_response_events("bash", {
+            "command": sandbox_command,
+            "workdir": str(sandbox_fixture),
+        }, "call_sandbox_2"),
+        text_response_events(sandbox_response_two),
+    ], first_token_delay=1.5)
     server.start()
     write_config(config_dir, server.base_url)
 
     session = f"xiaok-e2e-{os.getpid()}"
-    tmux = TmuxHarness(session, project_fixture, config_dir, cli_entry, tmux_bin)
+    tmux = TmuxHarness(session, project_fixture, config_dir, home_dir, cli_entry, tmux_bin)
 
     try:
         tmux.start()
@@ -330,7 +476,26 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
         assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render after multiline restart")
 
-        print("--- E2E 3: slash input and overlay ---")
+        print("--- E2E 3: long single-line input soft-wraps instead of horizontally scrolling ---")
+        long_input = f"WRAP_START_{'x' * 125}_WRAP_MIDDLE_{'y' * 35}_WRAP_END"
+        tmux.send_text(long_input)
+        time.sleep(0.5)
+        wrapped = tmux.capture()
+        wrapped_lines = visible_lines(wrapped)
+        wrapped_prompt_lines = [line for line in wrapped_lines if "❯" in line]
+        wrapped_status_lines = [line for line in wrapped_lines if "gpt-terminal-e2e" in line]
+        assert_true(len(wrapped_prompt_lines) == 1, f"expected one wrapped prompt row:\n{wrapped}")
+        assert_true("WRAP_START_" in wrapped, f"long single-line input start was not visible:\n{wrapped}")
+        assert_true("_WRAP_MIDDLE_" in wrapped, f"long single-line input did not wrap into additional footer rows:\n{wrapped}")
+        assert_true(len(wrapped_status_lines) == 1, f"expected one wrapped status line:\n{wrapped}")
+        print("PASS: long single-line input wraps inside the footer")
+
+        tmux.stop()
+        tmux.start()
+        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
+        assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render after wrap restart")
+
+        print("--- E2E 4: slash input and overlay ---")
         tmux.send_text("/hel")
         time.sleep(0.5)
         slash = tmux.capture()
@@ -338,7 +503,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_contains(slash, "/help", "slash menu overlay was not visible")
         print("PASS: typed input and slash overlay are visible")
 
-        print("--- E2E 4: built-in slash command renders visible output ---")
+        print("--- E2E 5: built-in slash command renders visible output ---")
         tmux.send_key("Enter")
         help_output = tmux.wait_for(
             lambda text: "/skills-reload" in text and "/help    - 显示帮助" in text and "可用 skills：" in text,
@@ -354,7 +519,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
         assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render after session restart")
 
-        print("--- E2E 5: streamed answer preserves output and footer ---")
+        print("--- E2E 6: streamed answer preserves output and footer ---")
         tmux.send_text("first terminal request")
         time.sleep(0.15)
         tmux.send_key("Enter")
@@ -376,7 +541,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_true("❯" in "\n".join(visible_lines(first)[-4:]), "footer prompt missing after first response")
         print("PASS: first streamed response and footer are stable")
 
-        print("--- E2E 6: second turn does not eat previous output ---")
+        print("--- E2E 7: second turn does not eat previous output ---")
         time.sleep(0.2)
         tmux.send_text("second terminal request")
         time.sleep(0.15)
@@ -395,9 +560,129 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_true(activity_line_count(second) <= 2, f"too many activity lines after second response:\n{second}")
         print("PASS: multi-turn output remains visible without activity duplication")
 
+        tmux.auto_mode = False
+        tmux.stop()
+        tmux.start()
+        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
+        assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render before permission flow")
+
+        print("--- E2E 8: permission menu remains intact and project allow persists ---")
+        tmux.send_text("trigger permission prompt")
+        time.sleep(0.15)
+        tmux.send_key("Enter")
+        permission_prompt = tmux.wait_for(
+            lambda text: "xiaok 想要执行以下操作" in text and "bash" in text and permission_command in text,
+            timeout=12,
+        )
+        assert_contains(permission_prompt, "xiaok 想要执行以下操作", "permission title did not render")
+        assert_contains(permission_prompt, "bash", "permission tool name did not render")
+        assert_contains(permission_prompt, permission_command, "permission command summary did not render")
+        assert_true(count_occurrences(permission_prompt, "xiaok 想要执行以下操作") == 1, f"permission prompt duplicated:\n{permission_prompt}")
+        assert_true("❯ 允许一次" in permission_prompt, f"default permission selection was not visible:\n{permission_prompt}")
+
+        tmux.send_key("Down")
+        tmux.send_key("Down")
+        time.sleep(0.2)
+        project_selected = tmux.capture()
+        assert_true(
+            "❯ 始终允许 bash(cmd *) (保存到项目)" in project_selected,
+            f"permission selection did not move to project allow:\n{project_selected}",
+        )
+        tmux.send_key("Enter")
+
+        first_permission_result = tmux.wait_for(
+            lambda text: permission_response_one in text and "xiaok 想要执行以下操作" not in text,
+            timeout=20,
+        )
+        assert_contains(first_permission_result, permission_response_one, "permission flow response did not render")
+        assert_true("xiaok 想要执行以下操作" not in first_permission_result, f"permission prompt text leaked after approval:\n{first_permission_result}")
+
+        settings_path = project_fixture / ".xiaok" / "settings.json"
+        assert_true(settings_path.exists(), f"project settings file was not written: {settings_path}")
+        settings_raw = settings_path.read_text(encoding="utf-8")
+        assert_true("bash(cmd *)" in settings_raw, f"project permission rule was not persisted:\n{settings_raw}")
+
+        tmux.stop()
+        tmux.start()
+        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
+        assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render before persisted permission replay")
+
+        tmux.send_text("trigger permission prompt again")
+        time.sleep(0.15)
+        tmux.send_key("Enter")
+        time.sleep(1.8)
+        no_reprompt = tmux.capture()
+        assert_true("xiaok 想要执行以下操作" not in no_reprompt, f"persisted project permission still prompted:\n{no_reprompt}")
+
+        second_permission_result = tmux.wait_for(
+            lambda text: permission_response_two in text and len(server.requests) >= 6,
+            timeout=20,
+        )
+        assert_contains(second_permission_result, permission_response_two, "persisted permission response did not render")
+        assert_true("xiaok 想要执行以下操作" not in second_permission_result, f"permission prompt reappeared after persisted allow:\n{second_permission_result}")
+        print("PASS: permission prompt is stable and project allow persists across restart")
+
+        tmux.stop()
+        tmux.start()
+        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
+        assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render before sandbox permission flow")
+
+        print("--- E2E 9: sandbox expansion prompt persists project approval across restart ---")
+        tmux.send_text("trigger sandbox permission prompt")
+        time.sleep(0.15)
+        tmux.send_key("Enter")
+        sandbox_prompt = tmux.wait_for(
+            lambda text: "xiaok 想要执行以下操作" in text and "sandbox-expand:bash" in text and str(sandbox_fixture) in text,
+            timeout=12,
+        )
+        assert_contains(sandbox_prompt, "sandbox-expand:bash", "sandbox prompt tool name did not render")
+        assert_contains(sandbox_prompt, str(sandbox_fixture), "sandbox prompt target path did not render")
+
+        tmux.send_key("Down")
+        tmux.send_key("Down")
+        time.sleep(0.2)
+        sandbox_project_selected = tmux.capture()
+        assert_true(
+            "保存到项目" in sandbox_project_selected and "❯ 始终允许 sandbox-expand:bash(" in sandbox_project_selected,
+            f"sandbox prompt selection did not move to project allow:\n{sandbox_project_selected}",
+        )
+        tmux.send_key("Enter")
+
+        first_sandbox_result = tmux.wait_for(
+            lambda text: sandbox_response_one in text and "xiaok 想要执行以下操作" not in text,
+            timeout=20,
+        )
+        assert_contains(first_sandbox_result, sandbox_response_one, "sandbox approval response did not render")
+
+        sandbox_settings_raw = settings_path.read_text(encoding="utf-8")
+        assert_true(
+            "sandbox-expand:bash(" in sandbox_settings_raw,
+            f"sandbox expansion rule was not persisted to project settings:\n{sandbox_settings_raw}",
+        )
+
+        tmux.stop()
+        tmux.start()
+        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
+        assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render before persisted sandbox replay")
+
+        tmux.send_text("trigger sandbox permission prompt again")
+        time.sleep(0.15)
+        tmux.send_key("Enter")
+        time.sleep(1.8)
+        sandbox_no_reprompt = tmux.capture()
+        assert_true("sandbox-expand:bash" not in sandbox_no_reprompt, f"persisted sandbox approval still prompted:\n{sandbox_no_reprompt}")
+
+        second_sandbox_result = tmux.wait_for(
+            lambda text: sandbox_response_two in text and len(server.requests) >= 10,
+            timeout=20,
+        )
+        assert_contains(second_sandbox_result, sandbox_response_two, "persisted sandbox approval response did not render")
+        assert_true("sandbox-expand:bash" not in second_sandbox_result, f"sandbox prompt reappeared after persisted project allow:\n{second_sandbox_result}")
+        print("PASS: sandbox expansion approval persists across restart")
+
         print("--- E2E Summary ---")
         print(f"Requests observed by fake OpenAI server: {len(server.requests)}")
-        assert_true(len(server.requests) >= 2, "expected at least two model requests")
+        assert_true(len(server.requests) >= 10, "expected at least ten model requests")
         print("PASS: terminal e2e completed")
     finally:
         if keep_session:

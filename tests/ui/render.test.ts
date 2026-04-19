@@ -10,6 +10,7 @@ import {
   formatHistoryBlock,
   type HistoryMessageBlock,
 } from '../../src/ui/render.js';
+import { getDisplayWidth } from '../../src/ui/display-width.js';
 
 describe('renderInputSeparator', () => {
   let originalColumns: number | undefined;
@@ -104,14 +105,29 @@ describe('renderInputPrompt', () => {
 });
 
 describe('formatSubmittedInput', () => {
-  it('renders the submitted input as a distinct user block with full-width background', () => {
-    setColorsEnabled(false);
-    const output = formatSubmittedInput('安装 https://github.com/kaisersong/slide-creator 技能');
+  let originalColumns: number | undefined;
 
-    // No longer has "You" label - just the input with › prefix and full-width background
-    expect(output).toContain('›');
-    expect(output).toContain('安装 https://github.com/kaisersong/slide-creator 技能');
-    expect(output.match(/\n/g)?.length ?? 0).toBe(1);
+  beforeEach(() => {
+    originalColumns = process.stdout.columns;
+  });
+
+  afterEach(() => {
+    if (originalColumns !== undefined) {
+      process.stdout.columns = originalColumns;
+    }
+  });
+
+  it('renders the submitted input as a full-width block without a left gutter gap', () => {
+    setColorsEnabled(false);
+    process.stdout.columns = 24;
+    const output = formatSubmittedInput('你好，开始吧');
+    const lines = output.slice(0, -1).split('\n');
+
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toBe(' '.repeat(24));
+    expect(lines[1]?.startsWith(' › ')).toBe(true);
+    expect(getDisplayWidth(lines[1] ?? '')).toBe(24);
+    expect(lines[2]).toBe(' '.repeat(24));
     setColorsEnabled(true);
   });
 });
@@ -215,7 +231,7 @@ describe('renderWelcomeScreen', () => {
       cwd: 'C:/Users/song',
       sessionId: 'session-crlf',
       mode: 'default',
-      version: '0.6.2',
+      version: '0.6.3',
     });
 
     expect(lines.some((line) => line.includes('\r'))).toBe(false);
@@ -239,22 +255,15 @@ describe('formatHistoryBlock', () => {
     expect(output).toContain('›');
   });
 
-  it('formats thinking blocks as truncated summary', () => {
+  it('omits thinking blocks from history output', () => {
     const shortThinking: HistoryMessageBlock = { type: 'thinking', thinking: 'Short thought' };
-    const shortOutput = formatHistoryBlock(shortThinking);
-
-    expect(shortOutput).toContain('[Thinking]');
-    expect(shortOutput).toContain('Short thought');
-
     const longThinking: HistoryMessageBlock = {
       type: 'thinking',
-      thinking: 'This is a very long thinking block that should be truncated to 200 characters maximum because we do not want to show the entire thinking content in the history output as it would take up too much space and make the resume output cluttered and hard to read.',
+      thinking: 'This is a very long thinking block that should not be shown when replaying session history during resume.',
     };
-    const longOutput = formatHistoryBlock(longThinking);
 
-    expect(longOutput).toContain('[Thinking]');
-    expect(longOutput.length).toBeLessThan(300); // Should be truncated
-    expect(longOutput).toContain('...');
+    expect(formatHistoryBlock(shortThinking)).toBe('');
+    expect(formatHistoryBlock(longThinking)).toBe('');
   });
 
   it('formats tool_use blocks as activity summary', () => {

@@ -30,6 +30,7 @@ import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
 import { ScrollRegionManager } from '../ui/scroll-region.js';
 import { renderWelcomeScreen, renderInputSeparator, dim, formatProgressNote, formatSubmittedInput, formatToolActivity, formatHistoryBlock } from '../ui/render.js';
+import { getDisplayWidth, stripAnsi } from '../ui/display-width.js';
 import { InputReader } from '../ui/input.js';
 import { ReplRenderer } from '../ui/repl-renderer.js';
 import { ToolExplorer } from '../ui/tool-explorer.js';
@@ -40,6 +41,7 @@ import { getCurrentBranch } from '../utils/git.js';
 import { buildChatReminderHelpLines, executeReminderSlashCommand } from './chat-reminder.js';
 import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
+import { extractSandboxAllowedPaths } from '../platform/sandbox/policy.js';
 import { FileTranscriptLogger } from '../ui/transcript.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
 import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
@@ -94,6 +96,20 @@ function describeLiveActivity(toolName: string, input: Record<string, unknown>):
   }
 
   return 'Working';
+}
+
+function countTerminalRowsForLine(line: string, columns: number): number {
+  return Math.max(1, Math.ceil(getDisplayWidth(stripAnsi(line)) / Math.max(1, columns)));
+}
+
+function countTerminalRowsForOutput(output: string, columns: number): number {
+  if (!output) {
+    return 0;
+  }
+
+  const normalized = output.endsWith('\n') ? output.slice(0, -1) : output;
+  const lines = normalized.split('\n');
+  return lines.reduce((sum, line) => sum + countTerminalRowsForLine(line, columns), 0);
 }
 
 async function runChat(initialInput: string | undefined, opts: ChatOptions): Promise<void> {
@@ -255,6 +271,17 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     allowRules: persistedPermissionRules.allowRules,
     denyRules: persistedPermissionRules.denyRules,
   });
+  const expandSandboxTargets = (rule: string | undefined, deniedPath: string): string[] => {
+    if (!rule) {
+      return [deniedPath];
+    }
+    const extracted = extractSandboxAllowedPaths([rule]);
+    return extracted.length > 0 ? extracted : [deniedPath];
+  };
+  const persistedSandboxAllowedPaths = extractSandboxAllowedPaths(persistedPermissionRules.allowRules);
+  if (persistedSandboxAllowedPaths.length > 0) {
+    platform.sandboxPolicy.expandAllowedPaths(persistedSandboxAllowedPaths);
+  }
   inputReader.setModeCycleHandler(() => {
     const nextMode = PermissionManager.nextMode(permissionManager.getMode());
     permissionManager.setMode(nextMode);
@@ -308,18 +335,18 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         return { shouldProceed: true };
       }
       if (choice.action === 'allow_session') {
-        platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
+        platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
         permissionManager.addSessionRule(choice.rule);
         return { shouldProceed: true };
       }
       if (choice.action === 'allow_project') {
-        platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
+        platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
         await addAllowRule('project', choice.rule, cwd);
         permissionManager.addSessionRule(choice.rule);
         return { shouldProceed: true };
       }
       if (choice.action === 'allow_global') {
-        platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
+        platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
         await addAllowRule('global', choice.rule, cwd);
         permissionManager.addSessionRule(choice.rule);
         return { shouldProceed: true };
@@ -511,6 +538,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
 
   const stopLiveActivityTimer = (): void => {
+    if (resumeActivityTimer) {
+      clearTimeout(resumeActivityTimer);
+      resumeActivityTimer = null;
+    }
     if (liveActivityTimer) {
       clearInterval(liveActivityTimer);
       liveActivityTimer = null;
@@ -704,7 +735,15 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
     // 打印历史消息（session resume）- 在欢迎页之后
     if (historyMessages.length > 0) {
-      process.stdout.write('\n');
+      const historyColumns = process.stdout.columns ?? 80;
+      let replayedRows = 0;
+      const writeHistoryChunk = (chunk: string): void => {
+        if (!chunk) return;
+        process.stdout.write(chunk);
+        replayedRows += countTerminalRowsForOutput(chunk, historyColumns);
+      };
+
+      writeHistoryChunk('\n');
       for (const msg of historyMessages) {
         if (msg.role === 'user') {
           for (const block of msg.content) {
@@ -712,26 +751,26 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
               const text = block.text;
               // Skip system-reminder content
               if (text && !text.startsWith('<system-reminder>')) {
-                process.stdout.write(formatHistoryBlock(block));
+                writeHistoryChunk(formatHistoryBlock(block));
               }
             } else {
-              process.stdout.write(formatHistoryBlock(block));
+              writeHistoryChunk(formatHistoryBlock(block));
             }
           }
         } else if (msg.role === 'assistant') {
-          mdRenderer.reset();
           for (const block of msg.content) {
             if (block.type === 'text') {
-              mdRenderer.write(block.text);
-              mdRenderer.flush();
-              process.stdout.write('\n');
+              for (const line of MarkdownRenderer.renderToLines(block.text)) {
+                writeHistoryChunk(`${line}\n`);
+              }
             } else {
-              process.stdout.write(formatHistoryBlock(block));
+              writeHistoryChunk(formatHistoryBlock(block));
             }
           }
         }
       }
-      process.stdout.write('\n');
+      writeHistoryChunk('\n');
+      scrollRegion.advanceContentCursor(replayedRows);
     }
 
     const dismissWelcomeScreen = (): void => {

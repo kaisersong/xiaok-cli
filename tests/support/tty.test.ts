@@ -45,4 +45,13 @@ describe('tty harness replay', () => {
     expect(lines[2]).toContain('line 6');
     expect(lines[4]).toContain('footer');
   });
+
+  it('optionally captures stderr writes into the same terminal replay', () => {
+    harness = createTtyHarness(40, 4, { captureStderr: true });
+
+    process.stdout.write('stdout');
+    process.stderr.write('\r\x1b[2Kstderr');
+
+    expect(harness.screen.lines()[0]).toBe('stderr');
+  });
 });

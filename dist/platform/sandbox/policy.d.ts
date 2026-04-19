@@ -9,6 +9,7 @@ export interface SandboxDecision {
     allowed: boolean;
     reason?: string;
 }
+export declare function extractSandboxAllowedPaths(rules: string[]): string[];
 export declare function createSandboxPolicy(options: SandboxPolicyOptions): {
     checkPath(path: string): SandboxDecision;
     filterEnv(env: Record<string, string>): Record<string, string>;

@@ -9,6 +9,7 @@ import {
 import { createTtyHarness } from '../support/tty.js';
 import type { TranscriptLogger } from '../../src/ui/transcript.js';
 import { ReplRenderer } from '../../src/ui/repl-renderer.js';
+import { ScrollRegionManager } from '../../src/ui/scroll-region.js';
 
 function strip(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, '');
@@ -225,6 +226,50 @@ describe('permission-prompt', () => {
       const screen = harness.screen.text();
       expect(screen).toContain('用户输入内容');
       expect(screen).toContain('xiaok 想要执行以下操作');
+
+      harness.restore();
+    });
+
+    it('keeps the approval menu intact while background activity and status rows try to redraw', async () => {
+      const harness = createTtyHarness(120, 24, { captureStderr: true });
+      const renderer = new ReplRenderer(process.stdout);
+      const scrollRegion = new ScrollRegionManager(process.stdout);
+      renderer.setScrollRegion(scrollRegion);
+
+      scrollRegion.begin();
+      scrollRegion.setWelcomeRows(10);
+      scrollRegion.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'kimi-for-coding · 3% · master · D:\\projects\\xiaok-cli',
+      });
+
+      const pending = showPermissionPrompt(
+        'bash',
+        { command: 'cmd /c where pi' },
+        { renderer },
+      );
+
+      scrollRegion.renderActivity('⠋ Waiting for command output · 1m 34s');
+      scrollRegion.updateStatusLine('kimi-for-coding · 4% · master · D:\\projects\\xiaok-cli');
+      process.stderr.write('\r\x1b[2K');
+
+      const beforeDecision = harness.screen.text();
+      expect(beforeDecision).toContain('xiaok 想要执行以下操作');
+      expect(beforeDecision).toContain('命令: cmd /c where pi');
+      expect(beforeDecision).toContain('❯ 允许一次');
+      const beforeLines = harness.screen.lines();
+      const activityIndex = beforeLines.findIndex((line) => line.includes('Waiting for command output'));
+      const titleIndex = beforeLines.findIndex((line) => line.includes('xiaok 想要执行以下操作'));
+      expect(activityIndex).toBeGreaterThanOrEqual(0);
+      expect(titleIndex).toBeGreaterThan(activityIndex);
+
+      harness.send('\x1b[B');
+      const afterNavigate = harness.screen.text();
+      expect(afterNavigate).toContain('❯ 本次会话始终允许 bash(cmd *)');
+      expect(afterNavigate).not.toContain('❯ 允许一次');
+
+      harness.send('\r');
+      await expect(pending).resolves.toEqual({ action: 'allow_session', rule: 'bash(cmd *)' });
 
       harness.restore();
     });

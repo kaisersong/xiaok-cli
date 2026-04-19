@@ -122,6 +122,7 @@ export async function showPermissionPrompt(
   const useRenderer = Boolean(
     renderer &&
     (
+      renderer.hasActiveScrollRegion() ||
       renderer.getState().prompt !== '' ||
       renderer.getState().input.value !== ''
     ),

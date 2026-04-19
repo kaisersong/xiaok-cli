@@ -382,6 +382,8 @@ npm run dev -- --help  # 从源码运行
 
 ## 版本日志
 
+**v0.6.3** — resume transcript 与终端 UI 打磨：隐藏 session resume 回放中的内部 thinking 内容，修复 resume 后首轮输入会插进历史中间而不是接在末尾的问题，稳定权限弹窗持久化与 overlay 重绘行为，并继续打磨终端表现，让内容区提交块文字垂直居中、输入栏底色更深以提升对比度。
+
 **v0.6.2** — chat slash 收口与 reminder 入口统一：把 reminder 的创建、列表、取消合并成单一 `/reminder <自然语言> | list | cancel <id>` 命令，移除本应保留为顶层 CLI 的陈旧 slash 入口，并补强交互测试，确保 slash 菜单、`/help`、重定向提示和 transcript 渲染始终一致。
 
 **v0.6.1** — 验证体系加固与终端/运行时 bugfix：修复 OpenAI 兼容模型在 `thinking -> tool_use -> replay` 历史回放时丢失 `reasoning_content` 的问题，保证内容区上一条回答和下一条输入之间保留空白分隔行，并补齐 reasoning 字段 contract fixture 与 daemon 多实例隔离测试。

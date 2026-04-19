@@ -83,7 +83,8 @@ export async function showPermissionPrompt(toolName, input, config) {
     const transcriptLogger = config?.transcriptLogger;
     const renderer = config?.renderer;
     const useRenderer = Boolean(renderer &&
-        (renderer.getState().prompt !== '' ||
+        (renderer.hasActiveScrollRegion() ||
+            renderer.getState().prompt !== '' ||
             renderer.getState().input.value !== ''));
     // 构建选项列表
     const promptOptions = [

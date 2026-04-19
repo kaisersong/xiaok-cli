@@ -24,24 +24,29 @@ function resetAdapterState(): void {
 }
 
 function extractLastUserText(messages: Message[]): string {
-  const lastUser = [...messages].reverse().find((message) => message.role === 'user');
-  if (!lastUser) {
+  const lastUserWithText = [...messages].reverse().find((message) => {
+    if (message.role !== 'user') {
+      return false;
+    }
+    return message.content.some((block) => block.type === 'text' && !block.text.startsWith('<system-reminder>'));
+  });
+  if (!lastUserWithText) {
     return '';
   }
 
-  return lastUser.content
+  return lastUserWithText.content
     .filter((block) => block.type === 'text' && !block.text.startsWith('<system-reminder>'))
     .map((block) => block.text)
     .join('\n');
 }
 
 function extractLastToolResult(messages: Message[]): string {
-  const lastUser = [...messages].reverse().find((message) => message.role === 'user');
-  if (!lastUser) {
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage || !lastMessage.content.some((block) => block.type === 'tool_result')) {
     return '';
   }
 
-  return lastUser.content
+  return lastMessage.content
     .filter((block) => block.type === 'tool_result')
     .map((block) => block.content)
     .join('\n');
@@ -174,6 +179,44 @@ function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithMode
       if (lastUserText.includes('延迟回复')) {
         await new Promise((resolve) => setTimeout(resolve, 1_500));
         yield { type: 'text', delta: 'delayed reply' };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('读取外部文件A')) {
+        yield {
+          type: 'tool_use',
+          id: 'tu_external_read_a',
+          name: 'read',
+          input: {
+            file_path: process.env.XIAOK_TEST_EXTERNAL_FILE_A ?? '',
+          },
+        };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('读取外部文件B')) {
+        yield {
+          type: 'tool_use',
+          id: 'tu_external_read_b',
+          name: 'read',
+          input: {
+            file_path: process.env.XIAOK_TEST_EXTERNAL_FILE_B ?? '',
+          },
+        };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastToolResult.includes('outside file A')) {
+        yield { type: 'text', delta: 'external read A ok' };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastToolResult.includes('outside file B')) {
+        yield { type: 'text', delta: 'external read B ok' };
         yield { type: 'done' };
         return;
       }
@@ -477,6 +520,226 @@ describe('chat interactive runtime', () => {
       }, { timeoutMs: 3_000 });
 
       await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('does not display hidden thinking blocks when resuming a saved session', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-resume-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const sessionsDir = join(configDir, 'sessions');
+    const sessionId = 'sess_resume_hidden_thinking';
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    mkdirSync(sessionsDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+    writeFileSync(join(sessionsDir, `${sessionId}.json`), JSON.stringify({
+      schemaVersion: 1,
+      sessionId,
+      cwd: projectDir,
+      createdAt: Date.now() - 10_000,
+      updatedAt: Date.now() - 5_000,
+      lineage: [sessionId],
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: '简单分析一下' }],
+        },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'thinking',
+              thinking: '用户输入了一长串"1"，这看起来像是误触、测试或者没有实际意义的输入。',
+            },
+            {
+              type: 'text',
+              text: '这是正式回答。',
+            },
+          ],
+        },
+      ],
+      usage: {
+        inputTokens: 1,
+        outputTokens: 1,
+      },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 30);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+
+      await waitForInputTurnReady(harness);
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('简单分析一下');
+        expect(harness.output.normalized).toContain('这是正式回答。');
+        expect(harness.output.normalized).not.toContain('[Thinking]');
+        expect(harness.output.normalized).not.toContain('用户输入了一长串"1"');
+      }, { timeoutMs: 3_000 });
+
+      harness.send('resume 后继续');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('echo:resume 后继续');
+        const lines = harness.screen.lines();
+        const resumedQuestionIndex = lines.findIndex((line) => line.includes('› 简单分析一下'));
+        const resumedAnswerIndex = lines.findIndex((line) => line.includes('这是正式回答。'));
+        const newSubmittedIndex = lines.findIndex((line) => line.includes('› resume 后继续'));
+        const newAnswerIndex = lines.findIndex((line) => line.includes('echo:resume 后继续'));
+
+        expect(resumedQuestionIndex).toBeGreaterThanOrEqual(0);
+        expect(resumedAnswerIndex).toBeGreaterThan(resumedQuestionIndex);
+        expect(newSubmittedIndex).toBeGreaterThan(resumedAnswerIndex);
+        expect(newAnswerIndex).toBeGreaterThan(newSubmittedIndex);
+      }, { timeoutMs: 3_000 });
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('appends the first new turn after the replayed history when resuming a longer session', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-resume-layout-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const sessionsDir = join(configDir, 'sessions');
+    const sessionId = 'sess_resume_layout_overlap';
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    mkdirSync(sessionsDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+    writeFileSync(join(sessionsDir, `${sessionId}.json`), JSON.stringify({
+      schemaVersion: 1,
+      sessionId,
+      cwd: projectDir,
+      createdAt: Date.now() - 20_000,
+      updatedAt: Date.now() - 5_000,
+      lineage: [sessionId],
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: '历史问题一' }],
+        },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'line a1\nline a2\nline a3\nline a4\nline a5' }],
+        },
+        {
+          role: 'user',
+          content: [{ type: 'text', text: '历史问题二' }],
+        },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'line b1\nline b2\nline b3\nline b4\nline b5\nline b6' }],
+        },
+      ],
+      usage: {
+        inputTokens: 1,
+        outputTokens: 1,
+      },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+
+      await waitForInputTurnReady(harness);
+      harness.send('resume 继续提问');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('echo:resume 继续提问');
+        const lines = harness.screen.lines();
+        const historyQuestion2Index = lines.findIndex((line) => line.includes('› 历史问题二'));
+        const historyLastAnswerIndex = lines.findIndex((line) => line.includes('line b6'));
+        const newSubmittedIndex = lines.findIndex((line) => line.includes('› resume 继续提问'));
+        const newAnswerIndex = lines.findIndex((line) => line.includes('echo:resume 继续提问'));
+
+        expect(historyQuestion2Index).toBeGreaterThanOrEqual(0);
+        expect(historyLastAnswerIndex).toBeGreaterThan(historyQuestion2Index);
+        expect(newSubmittedIndex).toBeGreaterThan(historyLastAnswerIndex);
+        expect(newAnswerIndex).toBeGreaterThan(newSubmittedIndex);
+      }, { timeoutMs: 3_000 });
+
       harness.send('/exit');
       harness.send('\r');
       await pending;
@@ -1091,7 +1354,7 @@ describe('chat interactive runtime', () => {
         const answerIndex = lines.findIndex((line) => line.trim() === 'echo:hi');
         const submittedIndex = lines.findIndex((line) => line.includes('› next'));
         expect(answerIndex).toBeGreaterThanOrEqual(0);
-        expect(submittedIndex).toBe(answerIndex + 2);
+        expect(submittedIndex).toBe(answerIndex + 3);
         expect(lines[answerIndex + 1]).toBe('');
       }, { timeoutMs: 3_000 });
 

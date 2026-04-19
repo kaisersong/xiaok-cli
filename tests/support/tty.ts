@@ -11,6 +11,10 @@ export interface TtyHarness {
   restore: () => void;
 }
 
+interface TtyHarnessOptions {
+  captureStderr?: boolean;
+}
+
 function replayTerminal(raw: string, maxRows?: number): string[] {
   const lines: string[] = [''];
   let row = 0;
@@ -194,11 +198,12 @@ function replayTerminal(raw: string, maxRows?: number): string[] {
   return lines.map((line) => line.replace(/\s+$/g, ''));
 }
 
-export function createTtyHarness(columns = 80, rows?: number): TtyHarness {
+export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarnessOptions): TtyHarness {
   const emitter = new EventEmitter();
   let raw = '';
 
   const originalStdoutWrite = process.stdout.write;
+  const originalStderrWrite = process.stderr.write;
   const originalStdoutColumns = process.stdout.columns;
   const originalStdoutRows = process.stdout.rows;
   const originalStdinIsTTY = process.stdin.isTTY;
@@ -229,6 +234,12 @@ export function createTtyHarness(columns = 80, rows?: number): TtyHarness {
     raw += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
     return true;
   }) as typeof process.stdout.write;
+  if (options?.captureStderr) {
+    process.stderr.write = ((chunk: WritableChunk) => {
+      raw += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+      return true;
+    }) as typeof process.stderr.write;
+  }
 
   return {
     emitter,
@@ -253,6 +264,7 @@ export function createTtyHarness(columns = 80, rows?: number): TtyHarness {
     },
     restore() {
       process.stdout.write = originalStdoutWrite;
+      process.stderr.write = originalStderrWrite;
       process.stdout.columns = originalStdoutColumns;
       process.stdout.rows = originalStdoutRows;
       process.stdin.isTTY = originalStdinIsTTY;

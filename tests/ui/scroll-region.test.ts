@@ -9,6 +9,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { PassThrough } from 'node:stream';
 import { MarkdownRenderer } from '../../src/ui/markdown.js';
+import { formatSubmittedInput, setColorsEnabled } from '../../src/ui/render.js';
 import { ScrollRegionManager } from '../../src/ui/scroll-region.js';
 import { createTtyHarness } from '../support/tty.js';
 
@@ -227,6 +228,47 @@ describe('scroll-region prompt frame ownership', () => {
       harness.restore();
     }
   });
+
+  it('clears stale overlay rows when the input shrinks while the overlay stays open', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const overlayLines = [
+      '⚡ xiaok 想要执行以下操作',
+      '工具: bash',
+      '命令: cmd /c echo E2E_PERMISSION_OK',
+      '❯ 允许一次',
+      '  本次会话始终允许 bash(cmd *)',
+      '  始终允许 bash(cmd *) (保存到项目)',
+      '  始终允许 bash(cmd *) (保存到全局)',
+      '  拒绝',
+      '↑↓ 选择  Enter 确认  Esc 取消',
+    ];
+
+    try {
+      manager.begin();
+      manager.renderPromptFrame({
+        inputValue: 'x'.repeat(150),
+        cursor: 150,
+        placeholder: 'Type your message...',
+        statusLine: 'gpt-5.4 · 5%',
+        overlayLines,
+      });
+
+      manager.renderPromptFrame({
+        inputValue: '',
+        cursor: 0,
+        placeholder: 'Type your message...',
+        statusLine: 'gpt-5.4 · 5%',
+        overlayLines,
+      });
+
+      const lines = harness.screen.lines();
+      expect(lines.filter((line) => line.includes('xiaok 想要执行以下操作'))).toHaveLength(1);
+      expect(lines.filter((line) => line.includes('工具: bash'))).toHaveLength(1);
+    } finally {
+      harness.restore();
+    }
+  });
 });
 
 describe('ANSI compatibility', () => {
@@ -264,6 +306,16 @@ describe('ANSI compatibility', () => {
     expect(output).not.toMatch(/\x1b\[23;6H\x1b\[48;5;244m$/);
   });
 
+  it('uses a darker footer background for input contrast', () => {
+    const { manager, getOutput } = createMockScrollRegion();
+    manager.begin();
+    manager.renderInput('abc', 3);
+
+    const output = getOutput();
+    expect(output).toContain('\x1b[48;5;238m');
+    expect(output).not.toContain('\x1b[48;5;244m');
+  });
+
   it('expands multiline prompt input while keeping a single status line', () => {
     const harness = createTtyHarness(80, 24);
     const manager = new ScrollRegionManager(process.stdout);
@@ -288,6 +340,33 @@ describe('ANSI compatibility', () => {
       expect(promptLines[0]).toContain('1');
       expect(inputLines).toEqual(['2', '3', '4']);
       expect(statusLines).toHaveLength(1);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('soft-wraps long single-line footer input instead of truncating it horizontally', () => {
+    const harness = createTtyHarness(20, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      const inputValue = '0123456789abcdefghijk';
+
+      manager.begin();
+      manager.renderPromptFrame({
+        inputValue,
+        cursor: inputValue.length,
+        placeholder: 'Type your message...',
+        statusLine: 'gpt-5.4 · 5%',
+      });
+
+      const lines = harness.screen.lines();
+      const statusLines = lines.filter((line) => line.includes('gpt-5.4 · 5%'));
+
+      expect(lines.some((line) => line.includes('❯ 0123456789abcdefgh'))).toBe(true);
+      expect(lines.some((line) => line.trim() === 'ijk')).toBe(true);
+      expect(statusLines).toHaveLength(1);
+      expect(harness.output.raw).toMatch(/\x1b\[23;6H$/);
     } finally {
       harness.restore();
     }
@@ -775,6 +854,14 @@ describe('updateStatusLine respects _contentStreaming guard', () => {
 });
 
 describe('streaming cursor handoff', () => {
+  beforeEach(() => {
+    setColorsEnabled(false);
+  });
+
+  afterEach(() => {
+    setColorsEnabled(true);
+  });
+
   it('keeps streamed output above the fixed footer after a submitted input block', () => {
     const harness = createTtyHarness(120, 24);
     const manager = new ScrollRegionManager(process.stdout);
@@ -789,7 +876,7 @@ describe('streaming cursor handoff', () => {
       });
 
       manager.clearLastInput();
-      manager.writeSubmittedInput('› 分三次显示123\n');
+      manager.writeSubmittedInput(formatSubmittedInput('分三次显示123'));
 
       markdown.setNewlineCallback(manager.getNewlineCallback());
       manager.beginContentStreaming();
@@ -809,7 +896,8 @@ describe('streaming cursor handoff', () => {
       const statusIndex = lines.findIndex((line) => line.includes('claude-test') && line.includes('auto'));
 
       expect(submittedIndex).toBeGreaterThanOrEqual(0);
-      expect(line1Index).toBeGreaterThan(submittedIndex);
+      expect(line1Index).toBeGreaterThan(submittedIndex + 1);
+      expect(lines[line1Index - 1]).toBe('');
       expect(line2Index).toBeGreaterThan(line1Index);
       expect(line3Index).toBeGreaterThan(line2Index);
       expect(promptIndex).toBeGreaterThan(line3Index);

@@ -11,8 +11,46 @@ export interface SandboxDecision {
   reason?: string;
 }
 
+function normalizePathForMatch(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/g, '');
+}
+
 function matchesPrefix(prefixes: string[], value: string): boolean {
-  return prefixes.some((prefix) => value === prefix || value.startsWith(`${prefix}/`));
+  const normalizedValue = normalizePathForMatch(value);
+  return prefixes.some((prefix) => {
+    const normalizedPrefix = normalizePathForMatch(prefix);
+    return normalizedValue === normalizedPrefix || normalizedValue.startsWith(`${normalizedPrefix}/`);
+  });
+}
+
+export function extractSandboxAllowedPaths(rules: string[]): string[] {
+  const prefixes: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rule of rules) {
+    const match = rule.match(/^sandbox-expand:[^(]+\((.*)\)$/i);
+    if (!match) {
+      continue;
+    }
+
+    let pattern = match[1]?.trim() ?? '';
+    if (!pattern || pattern === '*') {
+      continue;
+    }
+
+    if (pattern.endsWith('/*') || pattern.endsWith('\\*')) {
+      pattern = pattern.slice(0, -2);
+    }
+
+    if (!pattern || seen.has(pattern)) {
+      continue;
+    }
+
+    seen.add(pattern);
+    prefixes.push(pattern);
+  }
+
+  return prefixes;
 }
 
 export function createSandboxPolicy(options: SandboxPolicyOptions) {

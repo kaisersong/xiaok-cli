@@ -82,6 +82,39 @@ export const bgInputGray = (s: string) =>
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const RAIL_INDENT = "  ";
 
+function padToDisplayWidth(text: string, width: number): string {
+  const padCount = Math.max(0, width - getDisplayWidth(text));
+  return text + ' '.repeat(padCount);
+}
+
+function wrapDisplayLine(text: string, width: number): string[] {
+  if (width <= 0) {
+    return [''];
+  }
+
+  const wrapped: string[] = [];
+  let current = '';
+  let currentWidth = 0;
+
+  for (const symbol of Array.from(text)) {
+    const symbolWidth = Math.max(1, getDisplayWidth(symbol));
+    if (current !== '' && currentWidth + symbolWidth > width) {
+      wrapped.push(current);
+      current = symbol;
+      currentWidth = symbolWidth;
+      continue;
+    }
+    current += symbol;
+    currentWidth += symbolWidth;
+  }
+
+  if (current.length > 0 || wrapped.length === 0) {
+    wrapped.push(current);
+  }
+
+  return wrapped;
+}
+
 export function startSpinner(message: string): () => void {
   if (!colorsEnabled) {
     process.stderr.write(`  ${message}\n`);
@@ -288,16 +321,16 @@ function extractToolActivityTarget(input: Record<string, unknown>): string {
 
 export function formatSubmittedInput(text: string): string {
   const termWidth = process.stdout.columns ?? 80;
-  const indentWidth = RAIL_INDENT.length;
-  const lines = text.split(/\r?\n/);
+  const prefix = ' › ';
+  const textWidth = Math.max(1, termWidth - getDisplayWidth(prefix));
+  const lines = text
+    .split(/\r?\n/)
+    .flatMap((line) => wrapDisplayLine(line, textWidth));
+
   return [
-    ...lines.map((line) => {
-      const content = ` › ${line} `;
-      const contentDisplayWidth = getDisplayWidth(content);
-      const availableWidth = termWidth - indentWidth;
-      const padCount = Math.max(0, availableWidth - contentDisplayWidth);
-      return `${RAIL_INDENT}${bgDarkGray(content + ' '.repeat(padCount))}`;
-    }),
+    bgDarkGray(' '.repeat(termWidth)),
+    ...lines.map((line) => bgDarkGray(padToDisplayWidth(`${prefix}${line}`, termWidth))),
+    bgDarkGray(' '.repeat(termWidth)),
   ].join('\n') + '\n';
 }
 
@@ -417,11 +450,9 @@ export function formatHistoryBlock(block: HistoryMessageBlock): string {
   }
 
   if (block.type === 'thinking') {
-    // Thinking blocks shown as dim summary, truncated to 200 chars
-    const truncated = block.thinking.length > 200
-      ? block.thinking.slice(0, 200) + '...'
-      : block.thinking;
-    return `${dim('  [Thinking]')} ${dim(truncated)}\n`;
+    // Thinking is hidden during normal interactive use and should stay hidden
+    // when replaying persisted session history during resume.
+    return '';
   }
 
   if (block.type === 'tool_use') {
