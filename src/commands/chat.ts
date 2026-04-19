@@ -37,11 +37,7 @@ import { TurnLayout } from '../ui/turn-layout.js';
 import { parseInputBlocks, clearPastedImagePaths } from '../ui/image-input.js';
 import { selectModel } from '../ui/model-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
-import { runCommitCommand } from './commit.js';
-import { runReviewCommand } from './review.js';
-import { runPrCommand } from './pr.js';
-import { runDoctorCommand } from './doctor.js';
-import { runInitCommand } from './init.js';
+import { buildChatReminderHelpLines, executeReminderSlashCommand } from './chat-reminder.js';
 import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
 import { FileTranscriptLogger } from '../ui/transcript.js';
@@ -336,6 +332,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     },
   });
   const registry = registryFactory.createRegistry(cwd);
+  const reminders = registryFactory.getReminderApi();
 
   // Top-level hooks runner for lifecycle events (SessionStart / UserPromptSubmit / Stop)
   const lifecycleHooks = createHooksRunner({
@@ -890,19 +887,15 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         '可用命令：',
         '  /exit    - 退出',
         '  /clear   - 清屏',
-        '  /commit [message] - 提交已暂存改动',
-        '  /context - 查看当前加载的仓库上下文',
-        '  /doctor  - 检查本地 CLI 环境',
-        '  /init    - 初始化项目配置',
-        '  /review  - 查看当前 git 改动概览',
-        '  /pr      - 创建或预览 PR',
+        '  /compact - 压缩上下文',
+        '  /context - 查看当前仓库上下文',
         '  /models  - 切换模型',
         '  /mode [default|auto|plan] - 查看或切换权限模式',
+        ...buildChatReminderHelpLines(),
         '  /settings - 查看当前生效配置',
-        '  /tasks   - 查看当前会话任务',
-        '  /task <id> - 查看任务详情',
-        '  /compact - 手动压缩上下文',
         '  /skills-reload - 刷新 skill 目录（安装后无需重启即可使用）',
+        '  /task <id> - 查看任务详情',
+        '  /tasks   - 查看当前会话任务',
         '  /yzjchannel - 连接云之家 channel（嵌入式，关闭 chat 即断开）',
         '  /help    - 显示帮助',
       ];
@@ -915,6 +908,18 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       helpLines.push('');
       writeCommandOutput(trimmed, helpLines.join('\n'));
       continue;
+    }
+
+    if (reminders) {
+      const reminderOutput = await executeReminderSlashCommand(trimmed, {
+        reminders,
+        sessionId,
+        creatorUserId: sessionId,
+      });
+      if (reminderOutput !== null) {
+        writeCommandOutput(trimmed, `${reminderOutput}\n\n`);
+        continue;
+      }
     }
 
     if (trimmed === '/skills-reload') {
@@ -1007,6 +1012,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       continue;
     }
 
+    if (trimmed === '/task') {
+      writeCommandOutput(trimmed, '用法：/task <taskId>\n\n');
+      continue;
+    }
+
     if (trimmed.startsWith('/task ')) {
       const taskId = trimmed.slice('/task '.length).trim();
       if (!taskId) {
@@ -1053,52 +1063,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       continue;
     }
 
-    if (trimmed.startsWith('/commit')) {
-      const message = trimmed.slice('/commit'.length).trim() || undefined;
-      try {
-        writeCommandOutput(trimmed, `${await runCommitCommand(cwd, message)}\n\n`);
-      } catch (e) {
-        writeError(String(e));
-      }
-      continue;
-    }
-
-    if (trimmed === '/review') {
-      try {
-        writeCommandOutput(trimmed, `${await runReviewCommand(cwd)}\n\n`);
-      } catch (e) {
-        writeError(String(e));
-      }
-      continue;
-    }
-
-    if (trimmed === '/pr') {
-      try {
-        writeCommandOutput(trimmed, `${await runPrCommand(cwd)}\n\n`);
-      } catch (e) {
-        writeError(String(e));
-      }
-      continue;
-    }
-
-    if (trimmed === '/doctor') {
-      try {
-        writeCommandOutput(trimmed, `${await runDoctorCommand(cwd)}\n\n`);
-      } catch (e) {
-        writeError(String(e));
-      }
-      continue;
-    }
-
-    if (trimmed === '/init') {
-      try {
-        writeCommandOutput(trimmed, `${await runInitCommand(cwd)}\n\n`);
-      } catch (e) {
-        writeError(String(e));
-      }
-      continue;
-    }
-
     if (trimmed === '/settings') {
       try {
         const settings = await loadSettings(cwd);
@@ -1120,6 +1084,31 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       } catch (e) {
         writeError(String(e));
       }
+      continue;
+    }
+
+    if (trimmed === '/doctor') {
+      writeCommandOutput(trimmed, 'chat 中已不再支持 /doctor，请直接运行：xiaok doctor\n\n');
+      continue;
+    }
+
+    if (trimmed === '/init') {
+      writeCommandOutput(trimmed, 'chat 中已不再支持 /init，请直接运行：xiaok init\n\n');
+      continue;
+    }
+
+    if (trimmed === '/review') {
+      writeCommandOutput(trimmed, 'chat 中已不再支持 /review，请直接运行：xiaok review\n\n');
+      continue;
+    }
+
+    if (trimmed === '/pr') {
+      writeCommandOutput(trimmed, 'chat 中已不再支持 /pr，请直接运行：xiaok pr\n\n');
+      continue;
+    }
+
+    if (trimmed === '/commit' || trimmed.startsWith('/commit ')) {
+      writeCommandOutput(trimmed, 'chat 中已不再支持 /commit，请直接运行：xiaok commit\n\n');
       continue;
     }
 

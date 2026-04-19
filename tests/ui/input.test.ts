@@ -25,17 +25,26 @@ describe('getSlashCommands', () => {
 
     expect(commands).toContainEqual({ cmd: '/exit', desc: 'Exit the chat' });
     expect(commands).toContainEqual({ cmd: '/clear', desc: 'Clear the screen' });
-    expect(commands).toContainEqual({ cmd: '/commit', desc: 'Commit staged changes' });
-    expect(commands).toContainEqual({ cmd: '/review', desc: 'Summarize current git changes' });
-    expect(commands).toContainEqual({ cmd: '/pr', desc: 'Create or preview a pull request' });
-    expect(commands).toContainEqual({ cmd: '/doctor', desc: 'Inspect local CLI health' });
-    expect(commands).toContainEqual({ cmd: '/init', desc: 'Initialize project xiaok settings' });
     expect(commands).toContainEqual({ cmd: '/settings', desc: 'Show active CLI settings' });
     expect(commands).toContainEqual({ cmd: '/context', desc: 'Show loaded repo context' });
+    expect(commands).toContainEqual({ cmd: '/compact', desc: 'Compact the current conversation context' });
     expect(commands).toContainEqual({ cmd: '/models', desc: 'Switch model' });
     expect(commands).toContainEqual({ cmd: '/mode', desc: 'Show or change permission mode' });
+    expect(commands).toContainEqual({ cmd: '/reminder', desc: 'Manage reminders: create, list, or cancel' });
+    expect(commands).toContainEqual({ cmd: '/skills-reload', desc: 'Reload the skill catalog' });
+    expect(commands).toContainEqual({ cmd: '/task', desc: 'Show workflow task details by ID' });
     expect(commands).toContainEqual({ cmd: '/tasks', desc: 'List workflow tasks' });
+    expect(commands).toContainEqual({ cmd: '/yzjchannel', desc: 'Connect the embedded YZJ channel' });
     expect(commands).toContainEqual({ cmd: '/help', desc: 'Show help' });
+
+    expect(commands.some((command) => command.cmd === '/commit')).toBe(false);
+    expect(commands.some((command) => command.cmd === '/review')).toBe(false);
+    expect(commands.some((command) => command.cmd === '/pr')).toBe(false);
+    expect(commands.some((command) => command.cmd === '/doctor')).toBe(false);
+    expect(commands.some((command) => command.cmd === '/init')).toBe(false);
+    expect(commands.some((command) => command.cmd === '/remind')).toBe(false);
+    expect(commands.some((command) => command.cmd === '/reminders')).toBe(false);
+    expect(commands.some((command) => command.cmd === '/reminder-cancel')).toBe(false);
     expect(commands.length).toBe(13);
   });
 

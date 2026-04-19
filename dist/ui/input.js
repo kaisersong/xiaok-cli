@@ -3,6 +3,7 @@ import { stdin, stdout } from 'process';
 import { boldCyan, dim } from './render.js';
 import { appendFileSync } from 'fs';
 import { buildSlashMenuOverlayLines, MAX_MENU_DESCRIPTION_WIDTH } from './repl-state.js';
+import { CHAT_REMINDER_SLASH_COMMANDS } from '../commands/chat-reminder.js';
 import { getDisplayWidth } from './display-width.js';
 import { sliceByDisplayColumns } from './text-metrics.js';
 import { identifyKey, loadKeybindingsSync, resolveAction } from './keybindings.js';
@@ -19,16 +20,16 @@ function log(msg) {
 const BASE_SLASH_COMMANDS = [
     { cmd: '/exit', desc: 'Exit the chat' },
     { cmd: '/clear', desc: 'Clear the screen' },
-    { cmd: '/commit', desc: 'Commit staged changes' },
+    { cmd: '/compact', desc: 'Compact the current conversation context' },
     { cmd: '/context', desc: 'Show loaded repo context' },
-    { cmd: '/doctor', desc: 'Inspect local CLI health' },
-    { cmd: '/init', desc: 'Initialize project xiaok settings' },
-    { cmd: '/review', desc: 'Summarize current git changes' },
-    { cmd: '/pr', desc: 'Create or preview a pull request' },
     { cmd: '/models', desc: 'Switch model' },
     { cmd: '/mode', desc: 'Show or change permission mode' },
+    ...CHAT_REMINDER_SLASH_COMMANDS.map(({ cmd, desc }) => ({ cmd, desc })),
     { cmd: '/settings', desc: 'Show active CLI settings' },
+    { cmd: '/skills-reload', desc: 'Reload the skill catalog' },
+    { cmd: '/task', desc: 'Show workflow task details by ID' },
     { cmd: '/tasks', desc: 'List workflow tasks' },
+    { cmd: '/yzjchannel', desc: 'Connect the embedded YZJ channel' },
     { cmd: '/help', desc: 'Show help' },
 ];
 /** 向左找词边界（Ctrl+W / Alt+Left 用） */

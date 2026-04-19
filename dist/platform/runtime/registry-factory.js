@@ -90,5 +90,8 @@ export function createPlatformRegistryFactory(options) {
     }
     return {
         createRegistry: createRegistryForCwd,
+        getReminderApi() {
+            return reminders;
+        },
     };
 }

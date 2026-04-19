@@ -7,6 +7,7 @@ import { executeNamedSubAgent } from '../../ai/agents/subagent-executor.js';
 import { applySandboxToTools } from '../sandbox/tool-wrappers.js';
 import { createTeamTools } from '../teams/tools.js';
 import { createReminderTools } from '../../ai/tools/reminders.js';
+import type { ReminderApi } from '../../runtime/reminder/service.js';
 import type { PlatformRuntimeContext } from './context.js';
 import { mergeToolPools, isMcpTool } from '../../ai/tools/tool-pool.js';
 
@@ -32,6 +33,7 @@ export interface PlatformRegistryFactoryOptions {
 
 export interface PlatformRegistryFactory {
   createRegistry(cwd: string, allowedTools?: string[]): ToolRegistry;
+  getReminderApi(): ReminderApi | undefined;
 }
 
 export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOptions): PlatformRegistryFactory {
@@ -132,5 +134,8 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
 
   return {
     createRegistry: createRegistryForCwd,
+    getReminderApi() {
+      return reminders;
+    },
   };
 }

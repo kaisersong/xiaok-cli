@@ -1,6 +1,6 @@
 {
   "name": "xiaok",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "面向云之家开发者的 AI 编程 CLI",
   "type": "module",
   "bin": {

@@ -382,6 +382,8 @@ npm run dev -- --help  # 从源码运行
 
 ## 版本日志
 
+**v0.6.2** — chat slash 收口与 reminder 入口统一：把 reminder 的创建、列表、取消合并成单一 `/reminder <自然语言> | list | cancel <id>` 命令，移除本应保留为顶层 CLI 的陈旧 slash 入口，并补强交互测试，确保 slash 菜单、`/help`、重定向提示和 transcript 渲染始终一致。
+
 **v0.6.1** — 验证体系加固与终端/运行时 bugfix：修复 OpenAI 兼容模型在 `thinking -> tool_use -> replay` 历史回放时丢失 `reasoning_content` 的问题，保证内容区上一条回答和下一条输入之间保留空白分隔行，并补齐 reasoning 字段 contract fixture 与 daemon 多实例隔离测试。
 
 **v0.6.0** — 本地 daemon、提醒与 provider catalog：新增共享 `xiaok daemon` 宿主和 reminder scheduling service，基于 SQLite 的 durable reminder store 与恢复机制，真实 daemon/client 端到端测试覆盖，Anthropic/OpenAI/Kimi/DeepSeek/GLM/MiniMax/Gemini provider profile registry，`providers + models + defaultModelId` 的 v2 配置结构，CLI/UI 多模型切换，以及面向 Gemini 的 OpenAI Responses 适配层。

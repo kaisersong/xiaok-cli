@@ -15,18 +15,21 @@ describe('chat workflow wiring', () => {
     expect(source).toContain("trimmed === '/tasks'");
   });
 
-  it('intercepts built-in git workflow commands before slash skill dispatch', () => {
+  it('redirects git workflow slash commands to the top-level CLI before slash skill dispatch', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
-    expect(source).toContain("from './commit.js'");
-    expect(source).toContain("from './review.js'");
-    expect(source).toContain("from './pr.js'");
     expect(source).toContain("trimmed === '/review'");
     expect(source).toContain("trimmed === '/pr'");
-    expect(source).toContain("trimmed.startsWith('/commit')");
-    expect(source).toContain('runCommitCommand');
-    expect(source).toContain('runReviewCommand');
-    expect(source).toContain('runPrCommand');
+    expect(source).toContain("trimmed === '/commit' || trimmed.startsWith('/commit ')");
+    expect(source).toContain('chat 中已不再支持 /commit');
+    expect(source).toContain('chat 中已不再支持 /review');
+    expect(source).toContain('chat 中已不再支持 /pr');
+    expect(source).not.toContain("from './commit.js'");
+    expect(source).not.toContain("from './review.js'");
+    expect(source).not.toContain("from './pr.js'");
+    expect(source).not.toContain('runCommitCommand');
+    expect(source).not.toContain('runReviewCommand');
+    expect(source).not.toContain('runPrCommand');
 
     const reviewIndex = source.indexOf("trimmed === '/review'");
     const slashIndex = source.indexOf('const slash = parseSlashCommand(trimmed);');

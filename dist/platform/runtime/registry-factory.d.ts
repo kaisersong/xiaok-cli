@@ -1,5 +1,6 @@
 import type { ModelAdapter, Tool } from '../../types.js';
 import { ToolRegistry } from '../../ai/tools/index.js';
+import type { ReminderApi } from '../../runtime/reminder/service.js';
 import type { PlatformRuntimeContext } from './context.js';
 export interface PlatformRegistryFactoryOptions {
     platform: PlatformRuntimeContext;
@@ -23,5 +24,6 @@ export interface PlatformRegistryFactoryOptions {
 }
 export interface PlatformRegistryFactory {
     createRegistry(cwd: string, allowedTools?: string[]): ToolRegistry;
+    getReminderApi(): ReminderApi | undefined;
 }
 export declare function createPlatformRegistryFactory(options: PlatformRegistryFactoryOptions): PlatformRegistryFactory;

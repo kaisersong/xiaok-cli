@@ -215,7 +215,7 @@ describe('renderWelcomeScreen', () => {
       cwd: 'C:/Users/song',
       sessionId: 'session-crlf',
       mode: 'default',
-      version: '0.6.1',
+      version: '0.6.2',
     });
 
     expect(lines.some((line) => line.includes('\r'))).toBe(false);

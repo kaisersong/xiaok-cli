@@ -529,13 +529,14 @@ describe('chat interactive runtime', () => {
 
       await waitForInputTurnReady(harness);
 
-      harness.send('/');
+      harness.send('/rem');
 
       await waitFor(() => {
         const lines = harness.screen.lines();
-        expect(lines.some((line) => line.includes('/clear'))).toBe(true);
-        expect(lines.some((line) => line.includes('/commit'))).toBe(true);
-        expect(lines.some((line) => line.includes('/context'))).toBe(true);
+        expect(lines.some((line) => line.includes('/reminder'))).toBe(true);
+        expect(lines.some((line) => line.includes('/remind '))).toBe(false);
+        expect(lines.some((line) => line.includes('/reminders'))).toBe(false);
+        expect(lines.some((line) => line.includes('/reminder-cancel'))).toBe(false);
       }, { timeoutMs: 3_000 });
 
       harness.send('\x03');
@@ -596,7 +597,85 @@ describe('chat interactive runtime', () => {
         const lines = harness.screen.lines();
         expect(lines.some((line) => line.includes('可用命令'))).toBe(true);
         expect(lines.some((line) => line.includes('/clear') && line.includes('清屏'))).toBe(true);
+        expect(lines.some((line) => line.includes('/compact') && line.includes('压缩上下文'))).toBe(true);
+        expect(lines.some((line) => line.includes('/context') && line.includes('查看当前仓库上下文'))).toBe(true);
+        expect(lines.some((line) => line.includes('/reminder') && line.includes('list') && line.includes('cancel <id>'))).toBe(true);
+        expect(lines.some((line) => line.includes('/settings') && line.includes('查看当前生效配置'))).toBe(true);
+        expect(lines.some((line) => line.includes('/skills-reload') && line.includes('刷新 skill 目录'))).toBe(true);
+        expect(lines.some((line) => line.includes('/task <id>') && line.includes('查看任务详情'))).toBe(true);
+        expect(lines.some((line) => line.includes('/tasks') && line.includes('查看当前会话任务'))).toBe(true);
+        expect(lines.some((line) => line.includes('/yzjchannel') && line.includes('连接云之家 channel'))).toBe(true);
         expect(lines.some((line) => line.includes('/help') && line.includes('显示帮助'))).toBe(true);
+        expect(lines.some((line) => line.includes('/remind '))).toBe(false);
+        expect(lines.some((line) => line.includes('/reminders'))).toBe(false);
+        expect(lines.some((line) => line.includes('/reminder-cancel'))).toBe(false);
+        expect(lines.some((line) => line.includes('/commit'))).toBe(false);
+        expect(lines.some((line) => line.includes('/review'))).toBe(false);
+        expect(lines.some((line) => line.includes('/pr'))).toBe(false);
+        expect(lines.some((line) => line.includes('/doctor'))).toBe(false);
+        expect(lines.some((line) => line.includes('/init'))).toBe(false);
+      }, { timeoutMs: 3_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('redirects removed slash commands to the top-level CLI instead of treating them as skills', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 30);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('/doctor');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('chat 中已不再支持 /doctor');
+        expect(harness.output.normalized).toContain('xiaok doctor');
+        expect(harness.output.normalized).not.toContain('找不到 skill "doctor"');
       }, { timeoutMs: 3_000 });
 
       await waitForInputTurnReady(harness);
