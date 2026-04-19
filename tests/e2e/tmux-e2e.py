@@ -370,17 +370,34 @@ def count_occurrences(content: str, needle: str) -> int:
     return sum(1 for line in visible_lines(content) if needle in line)
 
 
+def line_before_prompt_with_gap(content: str, min_blank_rows: int = 2) -> str:
+    lines = visible_lines(content)
+    prompt_index = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].strip().startswith("❯")), -1)
+    assert_true(prompt_index >= (min_blank_rows + 1), f"input prompt was not visible near the footer:\n{content}")
+
+    blank_rows = 0
+    cursor = prompt_index - 1
+    while cursor >= 0 and lines[cursor].strip() == "":
+        blank_rows += 1
+        cursor -= 1
+
+    assert_true(
+        blank_rows >= min_blank_rows,
+        f"expected at least {min_blank_rows} blank rows above the input prompt:\n{content}",
+    )
+    assert_true(cursor >= 0, f"no visible content remained above the input prompt:\n{content}")
+    return lines[cursor]
+
+
 def assert_activity_above_prompt_with_gap(content: str) -> None:
     lines = visible_lines(content)
-    prompt_index = next((i for i, line in enumerate(lines) if line.strip().startswith("❯")), -1)
-    assert_true(prompt_index >= 2, f"input prompt was not visible near the footer:\n{content}")
-    activity_line = lines[prompt_index - 2]
-    gap_line = lines[prompt_index - 1]
+    prompt_index = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].strip().startswith("❯")), -1)
+    assert_true(prompt_index >= 3, f"input prompt was not visible near the footer:\n{content}")
+    activity_line = line_before_prompt_with_gap(content, min_blank_rows=2)
     assert_true(
         any(label in activity_line for label in SPINNER_LABELS),
         f"activity was not rendered above the input prompt:\n{content}",
     )
-    assert_true(gap_line.strip() == "", f"expected a blank gap between activity and input prompt:\n{content}")
     assert_true(
         not any(label in lines[prompt_index] for label in SPINNER_LABELS),
         f"activity leaked into the input prompt row:\n{content}",
@@ -390,6 +407,14 @@ def assert_activity_above_prompt_with_gap(content: str) -> None:
             status_fragment not in activity_line,
             f"activity line should not include footer status text:\n{content}",
         )
+
+
+def assert_overlay_above_prompt_with_gap(content: str, expected_anchor: str) -> None:
+    overlay_tail = line_before_prompt_with_gap(content, min_blank_rows=2)
+    assert_true(
+        expected_anchor in overlay_tail,
+        f"overlay did not stay at least two blank rows above the input prompt:\n{content}",
+    )
 
 
 def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
@@ -506,12 +531,12 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         print("--- E2E 5: built-in slash command renders visible output ---")
         tmux.send_key("Enter")
         help_output = tmux.wait_for(
-            lambda text: "/skills-reload" in text and "/help    - 显示帮助" in text and "可用 skills：" in text,
+            lambda text: "/help    - 显示帮助" in text and "可用 skills：" in text and "/plan -" in text,
             timeout=12,
         )
-        assert_contains(help_output, "/skills-reload", "built-in /help output was not visible")
         assert_contains(help_output, "/help    - 显示帮助", "built-in /help output did not list /help")
         assert_contains(help_output, "可用 skills：", "built-in /help output did not include skills section")
+        assert_contains(help_output, "/plan -", "built-in /help output did not include visible skills")
         print("PASS: built-in slash command output is visible")
 
         tmux.stop()
@@ -579,6 +604,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_contains(permission_prompt, permission_command, "permission command summary did not render")
         assert_true(count_occurrences(permission_prompt, "xiaok 想要执行以下操作") == 1, f"permission prompt duplicated:\n{permission_prompt}")
         assert_true("❯ 允许一次" in permission_prompt, f"default permission selection was not visible:\n{permission_prompt}")
+        assert_overlay_above_prompt_with_gap(permission_prompt, "↑↓ 选择")
 
         tmux.send_key("Down")
         tmux.send_key("Down")
@@ -588,6 +614,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
             "❯ 始终允许 bash(cmd *) (保存到项目)" in project_selected,
             f"permission selection did not move to project allow:\n{project_selected}",
         )
+        assert_overlay_above_prompt_with_gap(project_selected, "↑↓ 选择")
         tmux.send_key("Enter")
 
         first_permission_result = tmux.wait_for(
@@ -637,6 +664,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         )
         assert_contains(sandbox_prompt, "sandbox-expand:bash", "sandbox prompt tool name did not render")
         assert_contains(sandbox_prompt, str(sandbox_fixture), "sandbox prompt target path did not render")
+        assert_overlay_above_prompt_with_gap(sandbox_prompt, "↑↓ 选择")
 
         tmux.send_key("Down")
         tmux.send_key("Down")
@@ -646,6 +674,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
             "保存到项目" in sandbox_project_selected and "❯ 始终允许 sandbox-expand:bash(" in sandbox_project_selected,
             f"sandbox prompt selection did not move to project allow:\n{sandbox_project_selected}",
         )
+        assert_overlay_above_prompt_with_gap(sandbox_project_selected, "↑↓ 选择")
         tmux.send_key("Enter")
 
         first_sandbox_result = tmux.wait_for(

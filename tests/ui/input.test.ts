@@ -380,6 +380,27 @@ describe('InputReader', () => {
       harness.restore();
     });
 
+    it('clears overlay lines through the scroll prompt renderer before resolving a slash submission', async () => {
+      const harness = createTtyHarness();
+      const scrollPromptRenderer = vi.fn();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+      reader.setStatusLineProvider(() => ['  xiaok-cli · claude-sonnet-4 · 1%']);
+      reader.setScrollPromptRenderer(scrollPromptRenderer);
+
+      const pending = reader.read('> ');
+      harness.send('/hel');
+      scrollPromptRenderer.mockClear();
+
+      harness.send('\r');
+
+      await expect(pending).resolves.toBe('/help');
+      expect(scrollPromptRenderer).toHaveBeenCalled();
+      const finalFrame = scrollPromptRenderer.mock.calls.at(-1)?.[0];
+      expect(finalFrame?.overlayLines).toEqual([]);
+
+      harness.restore();
+    });
+
     it('does not clear and redraw twice for slash-menu arrow navigation when using the shared renderer', async () => {
       const harness = createTtyHarness();
       const renderInput = vi.fn();

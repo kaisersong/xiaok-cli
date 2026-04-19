@@ -124,10 +124,10 @@ describe('formatSubmittedInput', () => {
     const lines = output.slice(0, -1).split('\n');
 
     expect(lines).toHaveLength(3);
-    expect(lines[0]).toBe(' '.repeat(24));
+    expect(lines[0]).toBe(' '.repeat(23));
     expect(lines[1]?.startsWith(' › ')).toBe(true);
-    expect(getDisplayWidth(lines[1] ?? '')).toBe(24);
-    expect(lines[2]).toBe(' '.repeat(24));
+    expect(getDisplayWidth(lines[1] ?? '')).toBe(23);
+    expect(lines[2]).toBe(' '.repeat(23));
     setColorsEnabled(true);
   });
 });
@@ -177,16 +177,30 @@ describe('formatToolActivity', () => {
 describe('renderWelcomeScreen', () => {
   let originalColumns: number | undefined;
   let originalConsoleLog: typeof console.log;
+  let originalTmux: string | undefined;
+  let originalTermProgram: string | undefined;
 
   beforeEach(() => {
     originalColumns = process.stdout.columns;
     originalConsoleLog = console.log;
+    originalTmux = process.env.TMUX;
+    originalTermProgram = process.env.TERM_PROGRAM;
     setColorsEnabled(false);
   });
 
   afterEach(() => {
     if (originalColumns !== undefined) {
       process.stdout.columns = originalColumns;
+    }
+    if (originalTmux === undefined) {
+      delete process.env.TMUX;
+    } else {
+      process.env.TMUX = originalTmux;
+    }
+    if (originalTermProgram === undefined) {
+      delete process.env.TERM_PROGRAM;
+    } else {
+      process.env.TERM_PROGRAM = originalTermProgram;
     }
     console.log = originalConsoleLog;
   });
@@ -235,6 +249,51 @@ describe('renderWelcomeScreen', () => {
     });
 
     expect(lines.some((line) => line.includes('\r'))).toBe(false);
+  });
+
+  it('keeps every welcome-screen line inside the terminal width without touching the last column', () => {
+    process.stdout.columns = 80;
+
+    const lines: string[] = [];
+    console.log = ((...args: unknown[]) => {
+      lines.push(args.join(' '));
+    }) as typeof console.log;
+
+    renderWelcomeScreen({
+      model: 'gpt-terminal-e2e',
+      cwd: 'C:/Users/song/AppData/Local/Temp/xiaok-terminal-e2e/project',
+      sessionId: 'session-safe-width',
+      mode: 'auto',
+      version: '0.6.3',
+    });
+
+    const visibleLines = lines.filter((line) => line.length > 0);
+    expect(visibleLines.length).toBeGreaterThan(0);
+    expect(visibleLines.every((line) => getDisplayWidth(line) <= 79)).toBe(true);
+  });
+
+  it('uses an ASCII welcome frame inside tmux to avoid wide box-drawing wraps', () => {
+    process.stdout.columns = 120;
+    process.env.TMUX = 'tmux-test,1,0';
+    process.env.TERM_PROGRAM = 'tmux';
+
+    const lines: string[] = [];
+    console.log = ((...args: unknown[]) => {
+      lines.push(args.join(' '));
+    }) as typeof console.log;
+
+    renderWelcomeScreen({
+      model: 'gpt-terminal-e2e',
+      cwd: 'C:/Users/song/AppData/Local/Temp/xiaok-terminal-e2e/project',
+      sessionId: 'session-safe-width',
+      mode: 'auto',
+      version: '0.6.3',
+    });
+
+    const visibleLines = lines.filter((line) => line.length > 0);
+    expect(visibleLines.some((line) => line.startsWith('+'))).toBe(true);
+    expect(visibleLines.some((line) => line.startsWith('|'))).toBe(true);
+    expect(visibleLines.every((line) => getDisplayWidth(line) <= 102)).toBe(true);
   });
 });
 

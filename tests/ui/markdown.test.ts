@@ -42,9 +42,10 @@ describe('MarkdownRenderer', () => {
     const renderer = new MarkdownRenderer();
 
     renderer.write('streaming');
-    const flushedRows = renderer.flush();
+    const flushResult = renderer.flush();
 
-    expect(flushedRows).toBe(1);
+    expect(flushResult.rows).toBe(1);
+    expect(flushResult.renderedLine).toBe('streaming');
     expect(renderer.getLineCount()).toBe(1);
   });
 });

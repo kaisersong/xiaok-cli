@@ -1,6 +1,6 @@
 import { dim, boldCyan, dimCyan } from "./render.js";
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 
 export type StatusBarField = "model" | "mode" | "tokens" | "session";
@@ -183,7 +183,8 @@ export class StatusBar {
 
   private getStatusText(): string {
     const parts: string[] = [];
-    const projectName = this.cwd.split('/').filter(Boolean).pop() || 'xiaok';
+    const normalizedCwd = this.cwd.replace(/[\\/]+$/, '');
+    const projectName = basename(normalizedCwd) || 'xiaok';
 
     for (const field of this.fields) {
       if (field === "session" && projectName) {

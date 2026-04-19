@@ -108,9 +108,13 @@ export function renderError(message) {
 }
 export function renderWelcomeScreen(opts) {
     const cols = process.stdout.columns ?? 80;
-    const totalWidth = Math.min(cols - 2, 100);
+    const totalWidth = Math.min(cols - 3, 100);
     const leftWidth = 32;
     const rightWidth = totalWidth - leftWidth - 1;
+    const useAsciiFrame = Boolean(process.env.TMUX || process.env.TERM_PROGRAM === 'tmux');
+    const frame = useAsciiFrame
+        ? { tl: '+', tr: '+', bl: '+', br: '+', vl: '|', vr: '|', tm: '+', mm: '+', bm: '+', ml: '+', mr: '+', hz: '-' }
+        : { tl: '╭', tr: '╮', bl: '╰', br: '╯', vl: '│', vr: '│', tm: '┬', mm: '┼', bm: '┴', ml: '├', mr: '┤', hz: '─' };
     // 如果终端太小（小于 50 列），跳过欢迎界面，避免 String.repeat 负数错误
     if (cols < 50 || rightWidth < 0) {
         console.log();
@@ -120,10 +124,24 @@ export function renderWelcomeScreen(opts) {
         // Count actual terminal rows (with wrapping)
         return 1 + 1 + Math.ceil(getDisplayWidth(`${opts.model} · ${opts.mode} · ${opts.cwd}`) / cols) + 1;
     }
+    const padVisible = (text, width) => {
+        const visibleWidth = getDisplayWidth(stripAnsi(text));
+        if (visibleWidth >= width)
+            return text;
+        return text + " ".repeat(width - visibleWidth);
+    };
+    const centerVisible = (text, width) => {
+        const visibleWidth = getDisplayWidth(stripAnsi(text));
+        if (visibleWidth >= width)
+            return text;
+        const leftPad = Math.floor((width - visibleWidth) / 2);
+        const rightPad = width - visibleWidth - leftPad;
+        return " ".repeat(leftPad) + text + " ".repeat(rightPad);
+    };
     const line = (left, right) => {
-        const leftPart = left.padEnd(leftWidth, " ");
-        const rightPart = right.padEnd(rightWidth, " ");
-        return dim("│") + leftPart + dim("│") + rightPart + dim("│");
+        const leftPart = padVisible(left, leftWidth);
+        const rightPart = padVisible(right, rightWidth);
+        return dim(frame.vl) + leftPart + dim(frame.vl) + rightPart + dim(frame.vr);
     };
     let logo = [];
     if (existsSync(LOGO_PATH)) {
@@ -158,45 +176,40 @@ export function renderWelcomeScreen(opts) {
     console.log();
     rowCount += 1;
     // Top border (totalWidth chars, may wrap)
-    const topBorder = dim("╭") + dim("─".repeat(leftWidth)) + dim("┬") + dim("─".repeat(rightWidth)) + dim("╮");
+    const topBorder = dim(frame.tl) + dim(frame.hz.repeat(leftWidth)) + dim(frame.tm) + dim(frame.hz.repeat(rightWidth)) + dim(frame.tr);
     console.log(topBorder);
     rowCount += countRows(stripAnsi(topBorder));
     const welcome = "欢迎使用 xiaok code!";
-    const welcomeWidth = getDisplayWidth(welcome);
-    const welcomePad = Math.floor((leftWidth - welcomeWidth) / 2);
-    const welcomeLeft = " ".repeat(welcomePad) + boldCyan(welcome) + " ".repeat(leftWidth - welcomePad - welcomeWidth);
+    const welcomeLeft = centerVisible(boldCyan(welcome), leftWidth);
     const welcomeLine = line(welcomeLeft, "");
     console.log(welcomeLine);
     rowCount += countRows(stripAnsi(welcomeLine));
     for (let i = 0; i < logo.length; i++) {
-        const logoPad = Math.floor((leftWidth - logo[i].length) / 2);
-        const logoLine = " ".repeat(logoPad) + cyan(logo[i]) + " ".repeat(leftWidth - logoPad - logo[i].length);
+        const logoLine = centerVisible(cyan(logo[i]), leftWidth);
         const tip = tips[i] || "";
-        const tipWidth = getDisplayWidth(tip);
-        const tipLine = " " + tip + " ".repeat(rightWidth - tipWidth - 1);
-        console.log(dim("│") + logoLine + dim("│") + tipLine + dim("│"));
-        rowCount += countRows(stripAnsi(dim("│") + logoLine + dim("│") + tipLine + dim("│")));
+        const tipLine = padVisible(" " + tip, rightWidth);
+        const logoRow = dim(frame.vl) + logoLine + dim(frame.vl) + tipLine + dim(frame.vr);
+        console.log(logoRow);
+        rowCount += countRows(stripAnsi(logoRow));
     }
-    const midBorder = dim("├") + dim("─".repeat(leftWidth)) + dim("┼") + dim("─".repeat(rightWidth)) + dim("┤");
+    const midBorder = dim(frame.ml) + dim(frame.hz.repeat(leftWidth)) + dim(frame.mm) + dim(frame.hz.repeat(rightWidth)) + dim(frame.mr);
     console.log(midBorder);
     rowCount += countRows(stripAnsi(midBorder));
     const modelInfo = `${opts.model} · ${opts.mode}`;
     const sessionInfo = `Session: ${opts.sessionId}`;
-    const sessionWidth = getDisplayWidth(sessionInfo);
     const versionInfo = `Version: ${opts.version}`;
-    const versionWidth = getDisplayWidth(versionInfo);
-    const modelLine = " " + dim(modelInfo) + " ".repeat(leftWidth - modelInfo.length - 1);
-    const sessionLine = " " + dim(sessionInfo) + " ".repeat(rightWidth - sessionWidth - 1);
-    const modelRow = dim("│") + modelLine + dim("│") + sessionLine + dim("│");
+    const modelLine = padVisible(" " + dim(modelInfo), leftWidth);
+    const sessionLine = padVisible(" " + dim(sessionInfo), rightWidth);
+    const modelRow = dim(frame.vl) + modelLine + dim(frame.vl) + sessionLine + dim(frame.vr);
     console.log(modelRow);
     rowCount += countRows(stripAnsi(modelRow));
     const cwdShort = opts.cwd.length > leftWidth - 2 ? "..." + opts.cwd.slice(-(leftWidth - 5)) : opts.cwd;
-    const cwdLine = " " + dim(cwdShort) + " ".repeat(leftWidth - cwdShort.length - 1);
-    const versionLine = " " + dim(versionInfo) + " ".repeat(rightWidth - versionWidth - 1);
-    const cwdRow = dim("│") + cwdLine + dim("│") + versionLine + dim("│");
+    const cwdLine = padVisible(" " + dim(cwdShort), leftWidth);
+    const versionLine = padVisible(" " + dim(versionInfo), rightWidth);
+    const cwdRow = dim(frame.vl) + cwdLine + dim(frame.vl) + versionLine + dim(frame.vr);
     console.log(cwdRow);
     rowCount += countRows(stripAnsi(cwdRow));
-    const botBorder = dim("╰") + dim("─".repeat(leftWidth)) + dim("┴") + dim("─".repeat(rightWidth)) + dim("╯");
+    const botBorder = dim(frame.bl) + dim(frame.hz.repeat(leftWidth)) + dim(frame.bm) + dim(frame.hz.repeat(rightWidth)) + dim(frame.br);
     console.log(botBorder);
     rowCount += countRows(stripAnsi(botBorder));
     // Blank line
@@ -255,15 +268,16 @@ function extractToolActivityTarget(input) {
 }
 export function formatSubmittedInput(text) {
     const termWidth = process.stdout.columns ?? 80;
+    const safeWidth = Math.max(1, termWidth - 1);
     const prefix = ' › ';
-    const textWidth = Math.max(1, termWidth - getDisplayWidth(prefix));
+    const textWidth = Math.max(1, safeWidth - getDisplayWidth(prefix));
     const lines = text
         .split(/\r?\n/)
         .flatMap((line) => wrapDisplayLine(line, textWidth));
     return [
-        bgDarkGray(' '.repeat(termWidth)),
-        ...lines.map((line) => bgDarkGray(padToDisplayWidth(`${prefix}${line}`, termWidth))),
-        bgDarkGray(' '.repeat(termWidth)),
+        bgDarkGray(' '.repeat(safeWidth)),
+        ...lines.map((line) => bgDarkGray(padToDisplayWidth(`${prefix}${line}`, safeWidth))),
+        bgDarkGray(' '.repeat(safeWidth)),
     ].join('\n') + '\n';
 }
 export function formatProgressNote(text) {

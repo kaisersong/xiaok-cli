@@ -22,11 +22,15 @@ export declare class MarkdownRenderer {
     setNewlineCallback(callback: (() => void) | null): void;
     /** Feed a text chunk (may be partial line). */
     write(text: string): void;
-    /** Flush remaining buffer and return the number of terminal rows finalized. */
-    flush(): number;
+    /** Flush remaining buffer and return the finalized row count plus rendered tail text. */
+    flush(): {
+        rows: number;
+        renderedLine: string;
+    };
     /** Reset state between messages. */
     reset(): void;
     private renderLine;
+    private formatLine;
     private countRows;
     /** Apply inline formatting. */
     private inlineFormat;

@@ -101,9 +101,10 @@ export class MarkdownRenderer {
     }
   }
 
-  /** Flush remaining buffer and return the number of terminal rows finalized. */
-  flush(): number {
+  /** Flush remaining buffer and return the finalized row count plus rendered tail text. */
+  flush(): { rows: number; renderedLine: string } {
     let flushedRows = 0;
+    let renderedLine = '';
 
     if (this.buffer) {
       if (this.pendingLen > 0) {
@@ -111,7 +112,8 @@ export class MarkdownRenderer {
         this.pendingLen = 0;
       }
       const flushed = this.buffer;
-      this.renderLine(flushed);
+      renderedLine = this.formatLine(flushed);
+      process.stdout.write(renderedLine);
       flushedRows = this.countRows(flushed);
       this.lineCount += flushedRows;
       this.buffer = "";
@@ -121,7 +123,7 @@ export class MarkdownRenderer {
     // This can happen if the footer has been rendered between flush()
     // and the next write().
     this.pendingLen = 0;
-    return flushedRows;
+    return { rows: flushedRows, renderedLine };
   }
 
   /** Reset state between messages. */
@@ -136,6 +138,10 @@ export class MarkdownRenderer {
   }
 
   private renderLine(line: string): void {
+    process.stdout.write(this.formatLine(line));
+  }
+
+  private formatLine(line: string): string {
     const theme = getTheme();
 
     // Code block fences
@@ -143,63 +149,53 @@ export class MarkdownRenderer {
       if (this.inCodeBlock) {
         this.inCodeBlock = false;
         this.codeLang = "";
-        if (theme === "default") process.stdout.write(`${BODY_GUTTER}${dim("╰─")}`);
-        else process.stdout.write(BODY_GUTTER);
-      } else {
-        this.inCodeBlock = true;
-        const lang = line.trimStart().slice(3).trim();
-        this.codeLang = lang.toLowerCase();
-        if (theme === "default") process.stdout.write(`${BODY_GUTTER}${dim(`╭─ ${lang ? magenta(lang) : ""}`)}`);
-        else process.stdout.write(BODY_GUTTER);
+        return theme === "default" ? `${BODY_GUTTER}${dim("╰─")}` : BODY_GUTTER;
       }
-      return;
+      this.inCodeBlock = true;
+      const lang = line.trimStart().slice(3).trim();
+      this.codeLang = lang.toLowerCase();
+      return theme === "default"
+        ? `${BODY_GUTTER}${dim(`╭─ ${lang ? magenta(lang) : ""}`)}`
+        : BODY_GUTTER;
     }
 
     // Inside code block
     if (this.inCodeBlock) {
       const highlighted = this.codeLang ? highlightLine(line, this.codeLang) : green(line);
-      if (theme === "default") {
-        process.stdout.write(`${BODY_GUTTER}${dim("│")} ${highlighted}`);
-      } else {
-        process.stdout.write(`${BODY_GUTTER}${highlighted}`);
-      }
-      return;
+      return theme === "default"
+        ? `${BODY_GUTTER}${dim("│")} ${highlighted}`
+        : `${BODY_GUTTER}${highlighted}`;
     }
 
     // Headings
     const headerMatch = line.match(/^(#{1,6})\s+(.*)/);
     if (headerMatch) {
-      process.stdout.write(`${BODY_GUTTER}${bold(headerMatch[2])}`);
-      return;
+      return `${BODY_GUTTER}${bold(headerMatch[2])}`;
     }
 
     // Blockquotes
     if (line.startsWith("> ")) {
-      process.stdout.write(`${BODY_GUTTER}${dim("│")} ${dim(this.inlineFormat(line.slice(2)))}`);
-      return;
+      return `${BODY_GUTTER}${dim("│")} ${dim(this.inlineFormat(line.slice(2)))}`;
     }
 
     // Horizontal rule
     if (/^[-*_]{3,}\s*$/.test(line)) {
-      process.stdout.write(`${BODY_GUTTER}${dim("─".repeat(40))}`);
-      return;
+      return `${BODY_GUTTER}${dim("─".repeat(40))}`;
     }
 
     // List items
     const ulMatch = line.match(/^(\s*)[-*+]\s+(.*)/);
     if (ulMatch) {
-      process.stdout.write(`${BODY_GUTTER}${ulMatch[1]}${dim("•")} ${this.inlineFormat(ulMatch[2])}`);
-      return;
+      return `${BODY_GUTTER}${ulMatch[1]}${dim("•")} ${this.inlineFormat(ulMatch[2])}`;
     }
 
     const olMatch = line.match(/^(\s*)(\d+)\.\s+(.*)/);
     if (olMatch) {
-      process.stdout.write(`${BODY_GUTTER}${olMatch[1]}${dim(olMatch[2] + ".")} ${this.inlineFormat(olMatch[3])}`);
-      return;
+      return `${BODY_GUTTER}${olMatch[1]}${dim(olMatch[2] + ".")} ${this.inlineFormat(olMatch[3])}`;
     }
 
     // Regular text
-    process.stdout.write(`${BODY_GUTTER}${this.inlineFormat(line)}`);
+    return `${BODY_GUTTER}${this.inlineFormat(line)}`;
   }
 
   private countRows(text: string): number {

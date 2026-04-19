@@ -367,9 +367,14 @@ async function runChat(initialInput, opts) {
         });
     });
     const flushStreamingMarkdown = () => {
-        const flushedRows = mdRenderer.flush();
-        if (flushedRows > 0 && scrollRegion.isActive() && scrollRegion.isContentStreaming()) {
-            scrollRegion.advanceContentCursor(flushedRows);
+        const flushResult = mdRenderer.flush();
+        if (flushResult.rows > 0 && scrollRegion.isActive() && scrollRegion.isContentStreaming()) {
+            if (flushResult.renderedLine) {
+                scrollRegion.advanceContentCursorByRenderedText(flushResult.renderedLine);
+            }
+            else {
+                scrollRegion.advanceContentCursor(flushResult.rows);
+            }
         }
     };
     // 收集历史消息用于稍后打印（在欢迎页之后）
@@ -413,13 +418,6 @@ async function runChat(initialInput, opts) {
         }
         else {
             statusBar.updateActivity(label);
-        }
-        // Skip footer render when content is actively streaming —
-        // renderFooter() moves cursor to input bar, which disrupts content position.
-        if (!scrollRegion.isContentStreaming()) {
-            scrollRegion.renderFooter({
-                statusLine: statusBar.getStatusLine(),
-            });
         }
         if (!liveActivityTimer) {
             renderLiveActivity();
@@ -723,10 +721,6 @@ async function runChat(initialInput, opts) {
             scrollRegion.clearLastInput();
             scrollRegion.writeSubmittedInput(formatSubmittedInput(commandText));
             scrollRegion.writeAtContentCursor(output);
-            scrollRegion.renderFooter({
-                inputPrompt: 'Type your message...',
-                statusLine: statusBar.getStatusLine(),
-            });
             replRenderer.prepareForInput();
         };
         // 创建输入读取器
@@ -1120,7 +1114,6 @@ async function runChat(initialInput, opts) {
                                 ? `执行 skill plan "${plan.primarySkill}"，用户补充说明：${slash.rest}\n\n${JSON.stringify(plan, null, 2)}`
                                 : `执行 skill plan：\n\n${JSON.stringify(plan, null, 2)}`;
                             scrollRegion.clearLastInput();
-                            beginActivity('Thinking', true);
                             await runtimeFacade.runTurn({
                                 sessionId,
                                 cwd,
@@ -1195,7 +1188,6 @@ async function runChat(initialInput, opts) {
                 if (scrollRegion.isActive()) {
                     scrollRegion.writeSubmittedInput(formatSubmittedInput(trimmed));
                 }
-                beginActivity('Thinking', true);
                 await runtimeFacade.runTurn({
                     sessionId,
                     cwd,

@@ -258,10 +258,14 @@ describe('permission-prompt', () => {
       expect(beforeDecision).toContain('命令: cmd /c where pi');
       expect(beforeDecision).toContain('❯ 允许一次');
       const beforeLines = harness.screen.lines();
-      const activityIndex = beforeLines.findIndex((line) => line.includes('Waiting for command output'));
       const titleIndex = beforeLines.findIndex((line) => line.includes('xiaok 想要执行以下操作'));
-      expect(activityIndex).toBeGreaterThanOrEqual(0);
-      expect(titleIndex).toBeGreaterThan(activityIndex);
+      const hintIndex = beforeLines.findIndex((line) => line.includes('↑↓ 选择  Enter 确认  Esc 取消'));
+      const footerIndex = beforeLines.findIndex((line) => line.includes('Type your message...'));
+      expect(titleIndex).toBeGreaterThanOrEqual(0);
+      expect(hintIndex).toBeGreaterThan(titleIndex);
+      expect(footerIndex).toBeGreaterThan(hintIndex + 1);
+      expect(beforeDecision).not.toContain('Waiting for command output');
+      expect(beforeDecision).toContain('kimi-for-coding · 4% · master · D:\\projects\\xiaok-cli');
 
       harness.send('\x1b[B');
       const afterNavigate = harness.screen.text();
@@ -270,6 +274,47 @@ describe('permission-prompt', () => {
 
       harness.send('\r');
       await expect(pending).resolves.toEqual({ action: 'allow_session', rule: 'bash(cmd *)' });
+
+      harness.restore();
+    });
+
+    it('clears the approval menu before the next transcript output renders', async () => {
+      const harness = createTtyHarness(120, 24, { captureStderr: true });
+      const renderer = new ReplRenderer(process.stdout);
+      const scrollRegion = new ScrollRegionManager(process.stdout);
+      renderer.setScrollRegion(scrollRegion);
+
+      scrollRegion.begin();
+      scrollRegion.setWelcomeRows(10);
+      scrollRegion.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · auto · 0% · project',
+      });
+
+      const pending = showPermissionPrompt(
+        'bash',
+        { command: 'cmd /c echo E2E_PERMISSION_OK' },
+        { renderer },
+      );
+
+      harness.send('\x1b[B');
+      harness.send('\x1b[B');
+      harness.send('\r');
+      await expect(pending).resolves.toEqual({ action: 'allow_project', rule: 'bash(cmd *)' });
+
+      scrollRegion.setContentCursor(scrollRegion.maxContentRows);
+      scrollRegion.writeAtContentCursor('\npermission-line-1\npermission-line-2\nE2E_PERMISSION_RESPONSE_ONE');
+      scrollRegion.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · auto · 0% · project',
+      });
+
+      const afterDecision = harness.screen.text();
+      expect(afterDecision).toContain('E2E_PERMISSION_RESPONSE_ONE');
+      expect(afterDecision).toContain('permission-line-1');
+      expect(afterDecision).not.toContain('xiaok 想要执行以下操作');
+      expect(afterDecision).not.toContain('工具: bash');
+      expect(afterDecision).not.toContain('命令: cmd /c echo E2E_PERMISSION_OK');
 
       harness.restore();
     });

@@ -12,6 +12,7 @@
  * │                                  │
  * │ ⠴ Thinking(4m 12s • esc to int)  │  ← Live activity (bottom of scroll)
  * │                                  │  ← Gap row (empty)
+ * │                                  │  ← Gap row (empty)
  * ├──────────────────────────────────┤
  * │ ❯ working...                     │  ← Input bar (fixed footer row 1)
  * │ gpt-5.4 · 0% · master · xiaok-cli│  ← Status bar (fixed footer row 2)
@@ -20,7 +21,7 @@
 export interface ScrollRegionConfig {
     /** Height of fixed footer (input bar + status bar) */
     footerHeight: number;
-    /** Empty gap row between activity line and input bar */
+    /** Empty gap rows between transcript/activity/overlay and the input bar */
     gapHeight: number;
     /** Terminal rows */
     rows: number;
@@ -85,6 +86,7 @@ export declare class ScrollRegionManager {
      */
     private getStatusBarRow;
     private getOverlayVisibleLines;
+    private clearScreenRow;
     /**
      * Calculate cursor column after the "❯ " prefix.
      * "❯" is at column 1, space at column 2, text starts at column 3.
@@ -148,7 +150,9 @@ export declare class ScrollRegionManager {
      * Clear the last input value.
      * Call this after user submits input so the footer shows placeholder during turn.
      */
-    clearLastInput(): void;
+    clearLastInput(options?: {
+        renderFooter?: boolean;
+    }): void;
     /**
      * Clear the activity line at the bottom of the scroll region.
      * Call this after user input is written, before AI response starts.
@@ -158,7 +162,8 @@ export declare class ScrollRegionManager {
     /**
      * Position cursor for content output, based on how many rows of content
      * were written. Calculates the actual end row (accounting for terminal
-     * wrapping) and positions cursor there + 1 for a gap row.
+     * wrapping) and positions cursor there + gapHeight + 1 to preserve the
+     * required blank safety rows before the fixed footer.
      */
     positionAfterContent(contentRows?: number): void;
     /**
@@ -211,6 +216,7 @@ export declare class ScrollRegionManager {
     setWelcomeRows(rows: number): void;
     clearContentArea(): void;
     advanceContentCursor(rows: number): void;
+    advanceContentCursorByRenderedText(text: string): void;
     setContentCursor(row: number): void;
     getContentCursor(): number;
     get maxContentRows(): number;

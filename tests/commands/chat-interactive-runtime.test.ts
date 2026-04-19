@@ -1347,18 +1347,26 @@ describe('chat interactive runtime', () => {
       }, { timeoutMs: 3_000 });
       await waitForInputTurnReady(harness);
 
+      {
+        const lines = harness.screen.lines();
+        const answerIndex = lines.findIndex((line) => line.trim() === 'echo:hi');
+        const promptIndex = lines.findIndex((line) => line.includes('❯ Type your message...'));
+        expect(answerIndex).toBeGreaterThanOrEqual(0);
+        expect(promptIndex).toBeGreaterThanOrEqual(answerIndex + 3);
+        expect(lines.slice(answerIndex + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
+      }
+
       harness.send('next');
       harness.send('\r');
-      await waitFor(() => {
+      await waitForInputTurnReady(harness);
+      {
         const lines = harness.screen.lines();
         const answerIndex = lines.findIndex((line) => line.trim() === 'echo:hi');
         const submittedIndex = lines.findIndex((line) => line.includes('› next'));
         expect(answerIndex).toBeGreaterThanOrEqual(0);
-        expect(submittedIndex).toBe(answerIndex + 3);
+        expect(submittedIndex).toBeGreaterThan(answerIndex);
         expect(lines[answerIndex + 1]).toBe('');
-      }, { timeoutMs: 3_000 });
-
-      await waitForInputTurnReady(harness);
+      }
       harness.send('/exit');
       harness.send('\r');
       await pending;

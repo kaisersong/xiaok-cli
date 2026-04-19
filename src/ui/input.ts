@@ -368,7 +368,6 @@ export class InputReader {
 
       const done = (result: string | null) => {
         if (resolved) return;
-        resolved = true;
 
         // Clear prompt line BEFORE closeMenu() to prevent redraw() from re-rendering it
         if (this.renderer && !this.scrollPromptRenderer) {
@@ -376,6 +375,7 @@ export class InputReader {
         }
 
         closeMenu();
+        resolved = true;
         stdin.removeListener('data', onData);
         stdin.setRawMode(false);
         stdin.pause();

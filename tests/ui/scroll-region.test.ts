@@ -223,7 +223,68 @@ describe('scroll-region prompt frame ownership', () => {
       expect(lines.some((line) => line.includes('/context'))).toBe(true);
       expect(lines.some((line) => line.includes('/doctor'))).toBe(true);
       expect(lines.some((line) => line.includes('gpt-5.4 · 5%'))).toBe(false);
-      expect(lines[23]).toContain('❯ /');
+      expect(lines[22]).toContain('❯ /');
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('keeps two blank rows between overlay content and the input footer', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderPromptFrame({
+        inputValue: '/',
+        cursor: 1,
+        placeholder: 'Type your message...',
+        statusLine: 'gpt-5.4 · 5%',
+        overlayLines: [
+          '⚡ xiaok 想要执行以下操作',
+          '工具: bash',
+          '命令: cmd /c where pi',
+          '❯ 允许一次',
+          '↑↓ 选择  Enter 确认  Esc 取消',
+        ],
+      });
+
+      const lines = harness.screen.lines();
+      const overlayBottomIndex = lines.findIndex((line) => line.includes('↑↓ 选择  Enter 确认  Esc 取消'));
+      const promptIndex = lines.findIndex((line) => line.includes('❯ /'));
+
+      expect(overlayBottomIndex).toBeGreaterThanOrEqual(0);
+      expect(promptIndex).toBe(overlayBottomIndex + 3);
+      expect(lines[overlayBottomIndex + 1]).toBe('');
+      expect(lines[overlayBottomIndex + 2]).toBe('');
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('truncates tall overlays so the footer gap remains intact', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const overlayLines = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`);
+
+    try {
+      manager.begin();
+      manager.renderPromptFrame({
+        inputValue: '',
+        cursor: 0,
+        placeholder: 'Type your message...',
+        statusLine: 'gpt-5.4 · 5%',
+        overlayLines,
+      });
+
+      const lines = harness.screen.lines();
+      const promptIndex = lines.findIndex((line) => line.includes('❯ Type your message...'));
+      const overlayBottomIndex = lines.findIndex((line) => line.includes('line 30'));
+
+      expect(overlayBottomIndex).toBeGreaterThanOrEqual(0);
+      expect(promptIndex).toBe(overlayBottomIndex + 3);
+      expect(lines[overlayBottomIndex + 1]).toBe('');
+      expect(lines[overlayBottomIndex + 2]).toBe('');
     } finally {
       harness.restore();
     }
@@ -269,6 +330,84 @@ describe('scroll-region prompt frame ownership', () => {
       harness.restore();
     }
   });
+
+  it('clears stale prompt rows from the footer gap before redrawing the placeholder', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · auto · 0% · project',
+      });
+
+      process.stdout.write('\x1b[21;1H❯ stale prompt row');
+      process.stdout.write('\x1b[22;1Hstale status row');
+
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · auto · 0% · project',
+      });
+
+      const lines = harness.screen.lines();
+      expect(lines[20]).toBe('');
+      expect(lines[21]).toBe('');
+      expect(lines[22]).toContain('❯ Type your message...');
+      expect(lines[21]).not.toContain('stale prompt row');
+      expect(lines[22]).not.toContain('stale prompt row');
+      expect(lines[21]).not.toContain('stale status row');
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('clears permission overlay rows before transcript output resumes', () => {
+    const harness = createTtyHarness(120, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.setWelcomeRows(8);
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · auto · 0% · project',
+      });
+
+      manager.renderPromptFrame({
+        inputValue: '',
+        cursor: 0,
+        placeholder: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · auto · 0% · project',
+        overlayLines: [
+          '⚡ xiaok 想要执行以下操作',
+          '工具: bash',
+          '命令: cmd /c echo E2E_PERMISSION_OK',
+          '❯ 允许一次',
+          '  本次会话始终允许 bash(cmd *)',
+          '  始终允许 bash(cmd *) (保存到项目)',
+          '  始终允许 bash(cmd *) (保存到全局)',
+          '  拒绝',
+          '↑↓ 选择  Enter 确认  Esc 取消',
+        ],
+      });
+
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · auto · 0% · project',
+      });
+      manager.setContentCursor(9);
+      manager.writeAtContentCursor('E2E_PERMISSION_RESPONSE_ONE');
+
+      const lines = harness.screen.lines();
+      expect(lines.some((line) => line.includes('E2E_PERMISSION_RESPONSE_ONE'))).toBe(true);
+      expect(lines.some((line) => line.includes('xiaok 想要执行以下操作'))).toBe(false);
+      expect(lines.some((line) => line.includes('工具: bash'))).toBe(false);
+      expect(lines.some((line) => line.includes('↑↓ 选择  Enter 确认  Esc 取消'))).toBe(false);
+    } finally {
+      harness.restore();
+    }
+  });
 });
 
 describe('ANSI compatibility', () => {
@@ -293,7 +432,7 @@ describe('ANSI compatibility', () => {
     manager.renderFooter({ inputPrompt: 'Type...', statusLine: 'gpt-5.4' });
 
     const output = getOutput();
-    expect(output).toMatch(/\x1b\[1;21r\x1b\[23;3H$/);
+    expect(output).toMatch(/\x1b\[1;20r\x1b\[23;3H$/);
   });
 
   it('does not leave the input background SGR active after footer rendering', () => {
@@ -302,7 +441,7 @@ describe('ANSI compatibility', () => {
     manager.renderInput('abc', 3);
 
     const output = getOutput();
-    expect(output).toMatch(/\x1b\[0m\x1b\[1;21r\x1b\[23;6H$/);
+    expect(output).toMatch(/\x1b\[0m\x1b\[24;1H\x1b\[2K(?:\x1b\[2m.*?\x1b\[0m)?\x1b\[1;20r\x1b\[23;6H$/);
     expect(output).not.toMatch(/\x1b\[23;6H\x1b\[48;5;244m$/);
   });
 
@@ -361,10 +500,11 @@ describe('ANSI compatibility', () => {
       });
 
       const lines = harness.screen.lines();
+      const renderedFooter = lines.join('\n');
       const statusLines = lines.filter((line) => line.includes('gpt-5.4 · 5%'));
 
-      expect(lines.some((line) => line.includes('❯ 0123456789abcdefgh'))).toBe(true);
-      expect(lines.some((line) => line.trim() === 'ijk')).toBe(true);
+      expect(renderedFooter).toContain('❯ 0123456789');
+      expect(renderedFooter).toContain('ijk');
       expect(statusLines).toHaveLength(1);
       expect(harness.output.raw).toMatch(/\x1b\[23;6H$/);
     } finally {
@@ -379,7 +519,7 @@ describe('ANSI compatibility', () => {
     manager.renderActivity('⠙ Content');
 
     const output = getOutput();
-    expect(output).toContain('\x1b[21;1H');
+    expect(output).toContain('\x1b[20;1H');
     expect(output).toContain('⠋ Thinking');
     expect(output).toContain('⠙ Content');
   });
@@ -391,10 +531,10 @@ describe('ANSI compatibility', () => {
     manager.renderActivity('⠋ Thinking');
     const output = getOutput();
     expect(output).toContain('⠋ Thinking');
-    expect(output).toContain('\x1b[21;1H');
+    expect(output).toContain('\x1b[20;1H');
   });
 
-  it('renders activity above the input footer with a blank gap row', () => {
+  it('renders activity above the input footer with two blank gap rows', () => {
     const harness = createTtyHarness(80, 24);
     const manager = new ScrollRegionManager(process.stdout);
 
@@ -404,7 +544,8 @@ describe('ANSI compatibility', () => {
       manager.renderActivity('⠋ Thinking');
 
       const lines = harness.screen.lines();
-      expect(lines[20]).toContain('Thinking');
+      expect(lines[19]).toContain('Thinking');
+      expect(lines[20]).toBe('');
       expect(lines[21]).toBe('');
       expect(lines[22]).toContain('❯ Type your message...');
       expect(lines[22]).not.toContain('Thinking');
@@ -788,12 +929,12 @@ describe('Bug 11: Terminal resize handling', () => {
 
   it('updateSize changes maxContentRows', () => {
     const { manager } = createMock(24, 80);
-    // Before: footerHeight=2, gapHeight=1, so maxContentRows = 24-2-1 = 21
-    expect((manager as any).maxContentRows).toBe(21);
+    // Before: footerHeight=2, gapHeight=2, so maxContentRows = 24-2-2 = 20
+    expect((manager as any).maxContentRows).toBe(20);
 
     manager.updateSize(30, 100);
-    // After: maxContentRows = 30-2-1 = 27
-    expect((manager as any).maxContentRows).toBe(27);
+    // After: maxContentRows = 30-2-2 = 26
+    expect((manager as any).maxContentRows).toBe(26);
   });
 
   it('updateSize changes columns for wrap calculation', () => {
@@ -905,5 +1046,59 @@ describe('streaming cursor handoff', () => {
     } finally {
       harness.restore();
     }
+  });
+
+  it('keeps a flushed single-line assistant reply visible when the next submitted input is written', () => {
+    const harness = createTtyHarness(120, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const markdown = new MarkdownRenderer();
+
+    try {
+      manager.begin();
+      manager.setWelcomeRows(12);
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'claude-test · auto · 0% · xiaok-cli',
+      });
+
+      manager.clearLastInput();
+      manager.writeSubmittedInput(formatSubmittedInput('first question'));
+
+      markdown.setNewlineCallback(manager.getNewlineCallback());
+      manager.beginContentStreaming();
+      markdown.write('FIRST_REPLY');
+      const flushResult = markdown.flush();
+      manager.advanceContentCursorByRenderedText(flushResult.renderedLine);
+      manager.endContentStreaming({
+        inputPrompt: 'Type your message...',
+        statusLine: 'claude-test · auto · 0% · xiaok-cli',
+      });
+
+      manager.clearLastInput();
+      manager.writeSubmittedInput(formatSubmittedInput('second question'));
+
+      const lines = harness.screen.lines();
+      const firstReplyIndex = lines.findIndex((line) => line.includes('FIRST_REPLY'));
+      const secondQuestionIndex = lines.findIndex((line) => line.includes('› second question'));
+
+      expect(firstReplyIndex).toBeGreaterThanOrEqual(0);
+      expect(secondQuestionIndex).toBeGreaterThan(firstReplyIndex);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('uses visible rows instead of ANSI bytes when advancing past a submitted input block', () => {
+    const { manager, getOutput } = createMockScrollRegion();
+    manager.begin();
+    manager.setWelcomeRows(14);
+
+    manager.writeSubmittedInput(formatSubmittedInput('first terminal request'));
+    manager.beginContentStreaming();
+
+    const output = getOutput();
+    expect(output).toContain('\x1b[15;1H');
+    expect(output).toContain('\x1b[18;1H');
+    expect(output).not.toContain('\x1b[20;1H\x1b[0m');
   });
 });

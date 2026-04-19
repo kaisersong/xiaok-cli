@@ -70,6 +70,15 @@ describe('StatusBar', () => {
       expect(line).toContain('test'); // project name
       expect(line).toContain('0%');
     });
+
+    it('extracts the project name from a Windows cwd instead of showing the full path', () => {
+      statusBar.init('kimi-for-coding', 'test123', 'C:\\Users\\song\\AppData\\Local\\Temp\\xiaok-terminal-e2e-vn9vdd5o\\project');
+      statusBar.update({ inputTokens: 100, outputTokens: 100, budget: 200000 });
+
+      const line = statusBar.getStatusLine();
+      expect(line).toContain('project');
+      expect(line).not.toContain('C:\\Users\\song\\AppData\\Local\\Temp');
+    });
   });
 
   describe('render', () => {

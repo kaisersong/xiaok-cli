@@ -412,9 +412,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     });
   });
   const flushStreamingMarkdown = (): void => {
-    const flushedRows = mdRenderer.flush();
-    if (flushedRows > 0 && scrollRegion.isActive() && scrollRegion.isContentStreaming()) {
-      scrollRegion.advanceContentCursor(flushedRows);
+    const flushResult = mdRenderer.flush();
+    if (flushResult.rows > 0 && scrollRegion.isActive() && scrollRegion.isContentStreaming()) {
+      if (flushResult.renderedLine) {
+        scrollRegion.advanceContentCursorByRenderedText(flushResult.renderedLine);
+      } else {
+        scrollRegion.advanceContentCursor(flushResult.rows);
+      }
     }
   };
 
@@ -460,14 +464,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       statusBar.beginActivity(label, Date.now());
     } else {
       statusBar.updateActivity(label);
-    }
-
-    // Skip footer render when content is actively streaming —
-    // renderFooter() moves cursor to input bar, which disrupts content position.
-    if (!scrollRegion.isContentStreaming()) {
-      scrollRegion.renderFooter({
-        statusLine: statusBar.getStatusLine(),
-      });
     }
 
     if (!liveActivityTimer) {
@@ -790,10 +786,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       scrollRegion.clearLastInput();
       scrollRegion.writeSubmittedInput(formatSubmittedInput(commandText));
       scrollRegion.writeAtContentCursor(output);
-      scrollRegion.renderFooter({
-        inputPrompt: 'Type your message...',
-        statusLine: statusBar.getStatusLine(),
-      });
       replRenderer.prepareForInput();
     };
 
@@ -1225,7 +1217,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
               : `执行 skill plan：\n\n${JSON.stringify(plan, null, 2)}`;
 
             scrollRegion.clearLastInput();
-            beginActivity('Thinking', true);
 
             await runtimeFacade.runTurn({
               sessionId,
@@ -1302,7 +1293,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       clearPastedImagePaths();
 
       let lastAssistantText = '';
-
       // Clear previously typed input so footer shows placeholder during turn
       scrollRegion.clearLastInput();
 
@@ -1310,7 +1300,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       if (scrollRegion.isActive()) {
         scrollRegion.writeSubmittedInput(formatSubmittedInput(trimmed));
       }
-      beginActivity('Thinking', true);
 
       await runtimeFacade.runTurn({
         sessionId,
