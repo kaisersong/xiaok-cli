@@ -358,6 +358,19 @@ describe('InputReader', () => {
       harness.restore();
     });
 
+    it('submits the selected slash command on the first enter when only a prefix was typed', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+
+      const pending = reader.read('> ');
+      harness.send('/hel');
+      harness.send('\r');
+
+      await expect(pending).resolves.toBe('/help');
+
+      harness.restore();
+    });
+
     it('does not clear and redraw twice for slash-menu arrow navigation when using the shared renderer', async () => {
       const harness = createTtyHarness();
       const renderInput = vi.fn();

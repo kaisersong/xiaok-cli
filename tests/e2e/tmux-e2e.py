@@ -338,12 +338,23 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_contains(slash, "/help", "slash menu overlay was not visible")
         print("PASS: typed input and slash overlay are visible")
 
+        print("--- E2E 4: built-in slash command renders visible output ---")
+        tmux.send_key("Enter")
+        help_output = tmux.wait_for(
+            lambda text: "/skills-reload" in text and "/help    - 显示帮助" in text and "可用 skills：" in text,
+            timeout=12,
+        )
+        assert_contains(help_output, "/skills-reload", "built-in /help output was not visible")
+        assert_contains(help_output, "/help    - 显示帮助", "built-in /help output did not list /help")
+        assert_contains(help_output, "可用 skills：", "built-in /help output did not include skills section")
+        print("PASS: built-in slash command output is visible")
+
         tmux.stop()
         tmux.start()
         welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
         assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render after session restart")
 
-        print("--- E2E 4: streamed answer preserves output and footer ---")
+        print("--- E2E 5: streamed answer preserves output and footer ---")
         tmux.send_text("first terminal request")
         time.sleep(0.15)
         tmux.send_key("Enter")
@@ -365,7 +376,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_true("❯" in "\n".join(visible_lines(first)[-4:]), "footer prompt missing after first response")
         print("PASS: first streamed response and footer are stable")
 
-        print("--- E2E 5: second turn does not eat previous output ---")
+        print("--- E2E 6: second turn does not eat previous output ---")
         time.sleep(0.2)
         tmux.send_text("second terminal request")
         time.sleep(0.15)

@@ -14,6 +14,10 @@ export type StreamChunk = {
     type: 'text';
     delta: string;
 } | {
+    type: 'thinking';
+    delta: string;
+    signature?: string;
+} | {
     type: 'tool_use';
     id: string;
     name: string;

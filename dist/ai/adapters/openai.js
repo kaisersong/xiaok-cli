@@ -13,6 +13,38 @@ function isKimiCodingEndpoint(baseUrl) {
         return false;
     }
 }
+function collectReasoningText(blocks) {
+    const reasoning = blocks
+        .filter((block) => block.type === 'thinking')
+        .map((block) => block.thinking.trim())
+        .filter(Boolean)
+        .join('\n\n');
+    return reasoning || undefined;
+}
+function extractReasoningDeltas(delta) {
+    const chunks = [];
+    const reasoningDetails = delta.reasoning_details;
+    let usedReasoningDetails = false;
+    if (Array.isArray(reasoningDetails)) {
+        for (const item of reasoningDetails) {
+            const detail = item;
+            if (detail.type === 'reasoning.text' && typeof detail.text === 'string' && detail.text.length > 0) {
+                chunks.push({ signature: 'reasoning_details', text: detail.text });
+                usedReasoningDetails = true;
+            }
+        }
+    }
+    if (!usedReasoningDetails) {
+        for (const field of ['reasoning_content', 'reasoning', 'reasoning_text']) {
+            const value = delta[field];
+            if (typeof value === 'string' && value.length > 0) {
+                chunks.push({ signature: field, text: value });
+                break;
+            }
+        }
+    }
+    return chunks;
+}
 export class OpenAIAdapter {
     client;
     apiKey;
@@ -50,6 +82,7 @@ export class OpenAIAdapter {
             if (m.role === 'assistant') {
                 const textBlocks = m.content.filter((block) => block.type === 'text');
                 const toolUseBlocks = m.content.filter((block) => block.type === 'tool_use');
+                const reasoningContent = collectReasoningText(m.content);
                 const msg = {
                     role: 'assistant',
                     content: textBlocks.length > 0 ? textBlocks.map((block) => block.text).join('') : null,
@@ -63,6 +96,9 @@ export class OpenAIAdapter {
                             arguments: JSON.stringify(block.input),
                         },
                     }));
+                }
+                if (reasoningContent) {
+                    msg.reasoning_content = reasoningContent;
                 }
                 openaiMessages.push(msg);
                 continue;
@@ -139,6 +175,9 @@ export class OpenAIAdapter {
             const delta = choice.delta;
             if (!delta)
                 continue;
+            for (const reasoning of extractReasoningDeltas(delta)) {
+                yield { type: 'thinking', delta: reasoning.text, signature: reasoning.signature };
+            }
             if (delta.content) {
                 outputChars += delta.content.length;
                 yield { type: 'text', delta: delta.content };

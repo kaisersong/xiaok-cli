@@ -745,6 +745,22 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       welcomeVisible = false;
     };
 
+    const writeCommandOutput = (commandText: string, output: string): void => {
+      if (!scrollRegion.isActive()) {
+        process.stdout.write(output);
+        return;
+      }
+
+      scrollRegion.clearLastInput();
+      scrollRegion.writeSubmittedInput(formatSubmittedInput(commandText));
+      scrollRegion.writeAtContentCursor(output);
+      scrollRegion.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: statusBar.getStatusLine(),
+      });
+      replRenderer.prepareForInput();
+    };
+
     // 创建输入读取器
     inputReader.setSkills(skills);
 
@@ -869,31 +885,35 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     dismissWelcomeScreen();
 
     if (trimmed === '/help') {
-      process.stdout.write('\n可用命令：\n');
-      process.stdout.write('  /exit    - 退出\n');
-      process.stdout.write('  /clear   - 清屏\n');
-      process.stdout.write('  /commit [message] - 提交已暂存改动\n');
-      process.stdout.write('  /context - 查看当前加载的仓库上下文\n');
-      process.stdout.write('  /doctor  - 检查本地 CLI 环境\n');
-      process.stdout.write('  /init    - 初始化项目配置\n');
-      process.stdout.write('  /review  - 查看当前 git 改动概览\n');
-      process.stdout.write('  /pr      - 创建或预览 PR\n');
-      process.stdout.write('  /models  - 切换模型\n');
-      process.stdout.write('  /mode [default|auto|plan] - 查看或切换权限模式\n');
-      process.stdout.write('  /settings - 查看当前生效配置\n');
-      process.stdout.write('  /tasks   - 查看当前会话任务\n');
-      process.stdout.write('  /task <id> - 查看任务详情\n');
-      process.stdout.write('  /compact - 手动压缩上下文\n');
-      process.stdout.write('  /skills-reload - 刷新 skill 目录（安装后无需重启即可使用）\n');
-      process.stdout.write('  /yzjchannel - 连接云之家 channel（嵌入式，关闭 chat 即断开）\n');
-      process.stdout.write('  /help    - 显示帮助\n');
+      const helpLines = [
+        '',
+        '可用命令：',
+        '  /exit    - 退出',
+        '  /clear   - 清屏',
+        '  /commit [message] - 提交已暂存改动',
+        '  /context - 查看当前加载的仓库上下文',
+        '  /doctor  - 检查本地 CLI 环境',
+        '  /init    - 初始化项目配置',
+        '  /review  - 查看当前 git 改动概览',
+        '  /pr      - 创建或预览 PR',
+        '  /models  - 切换模型',
+        '  /mode [default|auto|plan] - 查看或切换权限模式',
+        '  /settings - 查看当前生效配置',
+        '  /tasks   - 查看当前会话任务',
+        '  /task <id> - 查看任务详情',
+        '  /compact - 手动压缩上下文',
+        '  /skills-reload - 刷新 skill 目录（安装后无需重启即可使用）',
+        '  /yzjchannel - 连接云之家 channel（嵌入式，关闭 chat 即断开）',
+        '  /help    - 显示帮助',
+      ];
       if (skills.length > 0) {
-        process.stdout.write('\n可用 skills：\n');
+        helpLines.push('', '可用 skills：');
         for (const skill of skills) {
-          process.stdout.write(`  /${skill.name} - ${skill.description}\n`);
+          helpLines.push(`  /${skill.name} - ${skill.description}`);
         }
       }
-      process.stdout.write('\n');
+      helpLines.push('');
+      writeCommandOutput(trimmed, helpLines.join('\n'));
       continue;
     }
 
@@ -904,25 +924,25 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       inputReader.setSkills(skills);
       const diff = newCount - prevCount;
       if (diff > 0) {
-        process.stdout.write(`已刷新 skill 目录，新增 ${diff} 个 skill，当前共 ${newCount} 个。\n\n`);
+        writeCommandOutput(trimmed, `已刷新 skill 目录，新增 ${diff} 个 skill，当前共 ${newCount} 个。\n\n`);
       } else if (diff < 0) {
-        process.stdout.write(`已刷新 skill 目录，移除 ${-diff} 个 skill，当前共 ${newCount} 个。\n\n`);
+        writeCommandOutput(trimmed, `已刷新 skill 目录，移除 ${-diff} 个 skill，当前共 ${newCount} 个。\n\n`);
       } else {
-        process.stdout.write(`已刷新 skill 目录，当前共 ${newCount} 个 skill。\n\n`);
+        writeCommandOutput(trimmed, `已刷新 skill 目录，当前共 ${newCount} 个 skill。\n\n`);
       }
       continue;
     }
 
     if (trimmed === '/yzjchannel') {
       if (embeddedChannels.length > 0) {
-        process.stdout.write('已有活跃的云之家 channel，请先关闭当前 chat 进程再重新连接。\n\n');
+        writeCommandOutput(trimmed, '已有活跃的云之家 channel，请先关闭当前 chat 进程再重新连接。\n\n');
         continue;
       }
       const yzjConfig = (() => {
         try {
           return resolveYZJConfig(config);
         } catch {
-          process.stdout.write('YZJ 未配置，请先运行 xiaok yzjchannel config set-webhook-url <url>\n\n');
+          writeCommandOutput(trimmed, 'YZJ 未配置，请先运行 xiaok yzjchannel config set-webhook-url <url>\n\n');
           return null;
         }
       })();
@@ -931,7 +951,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       const namedChannels = config.channels?.yzj?.namedChannels ?? [];
       const selectedChannel = await selectYZJChannel(namedChannels);
       if (!selectedChannel) {
-        process.stdout.write('已取消。\n\n');
+        writeCommandOutput(trimmed, '已取消。\n\n');
         continue;
       }
 
@@ -956,56 +976,57 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (trimmed.startsWith('/mode')) {
       const [, requestedMode] = trimmed.split(/\s+/, 2);
       if (!requestedMode) {
-        process.stdout.write(`当前权限模式：${permissionManager.getMode()}\n\n`);
+        writeCommandOutput(trimmed, `当前权限模式：${permissionManager.getMode()}\n\n`);
         continue;
       }
 
       if (!['default', 'auto', 'plan'].includes(requestedMode)) {
-        process.stdout.write('用法：/mode [default|auto|plan]\n\n');
+        writeCommandOutput(trimmed, '用法：/mode [default|auto|plan]\n\n');
         continue;
       }
 
       permissionManager.setMode(requestedMode as 'default' | 'auto' | 'plan');
       statusBar.updateMode(requestedMode);
-      process.stdout.write(`权限模式已切换为 ${requestedMode}\n\n`);
+      writeCommandOutput(trimmed, `权限模式已切换为 ${requestedMode}\n\n`);
       continue;
     }
 
     if (trimmed === '/tasks') {
       const tasks = taskBoard.list(sessionId);
       if (tasks.length === 0) {
-        process.stdout.write('当前会话还没有任务。\n\n');
+        writeCommandOutput(trimmed, '当前会话还没有任务。\n\n');
         continue;
       }
 
-      process.stdout.write('\n当前会话任务：\n');
+      const taskLines = ['','当前会话任务：'];
       for (const task of tasks) {
-        process.stdout.write(`  ${task.taskId} [${task.status}] ${task.title}\n`);
+        taskLines.push(`  ${task.taskId} [${task.status}] ${task.title}`);
       }
-      process.stdout.write('\n');
+      taskLines.push('');
+      writeCommandOutput(trimmed, taskLines.join('\n'));
       continue;
     }
 
     if (trimmed.startsWith('/task ')) {
       const taskId = trimmed.slice('/task '.length).trim();
       if (!taskId) {
-        process.stdout.write('用法：/task <taskId>\n\n');
+        writeCommandOutput(trimmed, '用法：/task <taskId>\n\n');
         continue;
       }
 
       const task = taskBoard.get(sessionId, taskId);
       if (!task) {
-        process.stdout.write(`未找到任务 ${taskId}\n\n`);
+        writeCommandOutput(trimmed, `未找到任务 ${taskId}\n\n`);
         continue;
       }
 
-      process.stdout.write(`${JSON.stringify(task, null, 2)}\n\n`);
+      writeCommandOutput(trimmed, `${JSON.stringify(task, null, 2)}\n\n`);
       continue;
     }
 
     if (trimmed === '/compact') {
       agent.forceCompact();
-      process.stdout.write(`${dim('上下文已压缩。')}\n\n`);
+      writeCommandOutput(trimmed, `${dim('上下文已压缩。')}\n\n`);
       continue;
     }
 
@@ -1022,12 +1043,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           config = newConfig;
           agent.setAdapter(adapter);
           statusBar.updateModel(selected.model);
-          process.stdout.write(`已切换到：[${selected.provider}] ${selected.label} (${selected.model})\n\n`);
+          writeCommandOutput(trimmed, `已切换到：[${selected.provider}] ${selected.label} (${selected.model})\n\n`);
         } catch (e) {
-          process.stdout.write(`切换失败：${String(e)}\n\n`);
+          writeCommandOutput(trimmed, `切换失败：${String(e)}\n\n`);
         }
       } else {
-        process.stdout.write('已取消\n\n');
+        writeCommandOutput(trimmed, '已取消\n\n');
       }
       continue;
     }
@@ -1035,7 +1056,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (trimmed.startsWith('/commit')) {
       const message = trimmed.slice('/commit'.length).trim() || undefined;
       try {
-        process.stdout.write(`${await runCommitCommand(cwd, message)}\n\n`);
+        writeCommandOutput(trimmed, `${await runCommitCommand(cwd, message)}\n\n`);
       } catch (e) {
         writeError(String(e));
       }
@@ -1044,7 +1065,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
     if (trimmed === '/review') {
       try {
-        process.stdout.write(`${await runReviewCommand(cwd)}\n\n`);
+        writeCommandOutput(trimmed, `${await runReviewCommand(cwd)}\n\n`);
       } catch (e) {
         writeError(String(e));
       }
@@ -1053,7 +1074,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
     if (trimmed === '/pr') {
       try {
-        process.stdout.write(`${await runPrCommand(cwd)}\n\n`);
+        writeCommandOutput(trimmed, `${await runPrCommand(cwd)}\n\n`);
       } catch (e) {
         writeError(String(e));
       }
@@ -1062,7 +1083,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
     if (trimmed === '/doctor') {
       try {
-        process.stdout.write(`${await runDoctorCommand(cwd)}\n\n`);
+        writeCommandOutput(trimmed, `${await runDoctorCommand(cwd)}\n\n`);
       } catch (e) {
         writeError(String(e));
       }
@@ -1071,7 +1092,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
     if (trimmed === '/init') {
       try {
-        process.stdout.write(`${await runInitCommand(cwd)}\n\n`);
+        writeCommandOutput(trimmed, `${await runInitCommand(cwd)}\n\n`);
       } catch (e) {
         writeError(String(e));
       }
@@ -1082,7 +1103,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       try {
         const settings = await loadSettings(cwd);
         const rules = mergeRules(settings);
-        process.stdout.write(`${JSON.stringify({
+        writeCommandOutput(trimmed, `${JSON.stringify({
           config,
           permissions: rules,
         }, null, 2)}\n\n`);
@@ -1095,7 +1116,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (trimmed === '/context') {
       try {
         const context = await loadAutoContext({ cwd });
-        process.stdout.write(`${formatLoadedContext(context) || '当前没有可展示的仓库上下文。'}\n\n`);
+        writeCommandOutput(trimmed, `${formatLoadedContext(context) || '当前没有可展示的仓库上下文。'}\n\n`);
       } catch (e) {
         writeError(String(e));
       }
@@ -1223,7 +1244,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           process.stdout.write('\n');
         }
       } else {
-        process.stdout.write(`找不到 skill "${slash.skillName}"。可用 skills：${skills.map(s => '/' + s.name).join(', ') || '（无）'}\n`);
+        writeCommandOutput(
+          trimmed,
+          `找不到 skill "${slash.skillName}"。可用 skills：${skills.map(s => '/' + s.name).join(', ') || '（无）'}\n`,
+        );
       }
       continue;
     }

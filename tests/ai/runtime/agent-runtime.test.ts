@@ -129,6 +129,48 @@ describe('AgentRuntime', () => {
     expect(secondText.text).toBe('After tool');
   });
 
+  it('stores thinking chunks in session before tool-use turns', async () => {
+    const session = new AgentSessionState();
+    let streamCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () => {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          return mockStream([
+            { type: 'thinking', delta: 'reasoned step', signature: 'reasoning_content' } as unknown as StreamChunk,
+            { type: 'tool_use', id: 'tu_1', name: 'read', input: { file: 'a.ts' } },
+            { type: 'done' },
+          ]);
+        }
+        return mockStream([
+          { type: 'text', delta: 'done' },
+          { type: 'done' },
+        ]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    await runtime.run('hi', () => {});
+
+    const assistantMsg = session.getMessages().find((message) => message.role === 'assistant');
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg?.content[0]).toMatchObject({
+      type: 'thinking',
+      thinking: 'reasoned step',
+    });
+    expect(assistantMsg?.content[1]).toMatchObject({
+      type: 'tool_use',
+      id: 'tu_1',
+    });
+  });
+
   it('executes tool calls and continues the loop', async () => {
     let streamCalls = 0;
     const adapter: ModelAdapter = {

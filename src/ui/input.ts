@@ -510,9 +510,8 @@ export class InputReader {
               done(input);
               return;
             }
-            input = selected;
-            cursor = selected.length;
-            closeMenu();
+            this.transcriptLogger?.record({ type: 'input_submit', value: selected, timestamp: Date.now() });
+            done(selected);
             return;
           }
 

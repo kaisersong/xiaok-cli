@@ -180,6 +180,170 @@ describe('OpenAIAdapter', () => {
     expect((toolMessages[1] as { tool_call_id: string }).tool_call_id).toBe('tu_2');
   });
 
+  it('preserves assistant thinking as reasoning_content on tool-call replay', async () => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    let capturedMessages: unknown[] = [];
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    };
+
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (params: unknown) => {
+      capturedMessages = (params as { messages: unknown[] }).messages;
+      return mockStream as never;
+    });
+
+    const adapter = new OpenAIAdapter('test-key', 'kimi-k2-thinking');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: [
+          { type: 'thinking' as const, thinking: 'first reasoned step' },
+          { type: 'tool_use' as const, id: 'tu_1', name: 'search', input: { q: 'slash commands' } },
+        ],
+      },
+      {
+        role: 'user' as const,
+        content: [
+          { type: 'tool_result' as const, tool_use_id: 'tu_1', content: 'search result' },
+        ],
+      },
+    ];
+
+    for await (const _ of adapter.stream(messages, [], 'system')) { /* consume */ }
+
+    const assistantMessage = capturedMessages.find((m: unknown) => (m as { role: string }).role === 'assistant') as
+      | { reasoning_content?: string; tool_calls?: unknown[] }
+      | undefined;
+    expect(assistantMessage).toBeDefined();
+    expect(assistantMessage?.reasoning_content).toBe('first reasoned step');
+    expect(assistantMessage?.tool_calls).toHaveLength(1);
+  });
+
+  it('emits thinking chunks from reasoning_content streaming deltas', async () => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { reasoning_content: 'step 1' }, finish_reason: null }] };
+        yield { choices: [{ delta: { reasoning_content: ' + step 2' }, finish_reason: null }] };
+        yield { choices: [{ delta: { content: 'answer' }, finish_reason: null }] };
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    };
+
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue(mockStream as never);
+
+    const adapter = new OpenAIAdapter('test-key', 'kimi-k2-thinking');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const chunks = [];
+    for await (const chunk of adapter.stream([], [], 'system')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.filter((chunk) => chunk.type === 'thinking')).toEqual([
+      { type: 'thinking', delta: 'step 1', signature: 'reasoning_content' },
+      { type: 'thinking', delta: ' + step 2', signature: 'reasoning_content' },
+    ]);
+    expect(chunks).toContainEqual({ type: 'text', delta: 'answer' });
+  });
+
+  it('emits thinking chunks from reasoning_details streaming deltas', async () => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield {
+          choices: [{
+            delta: {
+              reasoning_details: [
+                { type: 'reasoning.text', text: 'step A' },
+                { type: 'reasoning.text', text: ' + step B' },
+              ],
+            },
+            finish_reason: null,
+          }],
+        };
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    };
+
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue(mockStream as never);
+
+    const adapter = new OpenAIAdapter('test-key', 'kimi-k2-thinking');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const chunks = [];
+    for await (const chunk of adapter.stream([], [], 'system')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.filter((chunk) => chunk.type === 'thinking')).toEqual([
+      { type: 'thinking', delta: 'step A', signature: 'reasoning_details' },
+      { type: 'thinking', delta: ' + step B', signature: 'reasoning_details' },
+    ]);
+  });
+
+  it('joins multiple assistant thinking blocks into one reasoning_content replay payload', async () => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    let capturedMessages: unknown[] = [];
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    };
+
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (params: unknown) => {
+      capturedMessages = (params as { messages: unknown[] }).messages;
+      return mockStream as never;
+    });
+
+    const adapter = new OpenAIAdapter('test-key', 'kimi-k2-thinking');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: [
+          { type: 'thinking' as const, thinking: 'first reasoned step' },
+          { type: 'text' as const, text: 'working...' },
+          { type: 'thinking' as const, thinking: 'second reasoned step' },
+          { type: 'tool_use' as const, id: 'tu_1', name: 'search', input: { q: 'daemon isolation' } },
+        ],
+      },
+      {
+        role: 'user' as const,
+        content: [
+          { type: 'tool_result' as const, tool_use_id: 'tu_1', content: 'search result' },
+        ],
+      },
+    ];
+
+    for await (const _ of adapter.stream(messages, [], 'system')) { /* consume */ }
+
+    const assistantMessage = capturedMessages.find((m: unknown) => (m as { role: string }).role === 'assistant') as
+      | { content?: string | null; reasoning_content?: string; tool_calls?: unknown[] }
+      | undefined;
+    expect(assistantMessage).toBeDefined();
+    expect(assistantMessage?.content).toBe('working...');
+    expect(assistantMessage?.reasoning_content).toBe('first reasoned step\n\nsecond reasoned step');
+    expect(assistantMessage?.tool_calls).toHaveLength(1);
+  });
+
   it('ignores prompt cache metadata for OpenAI-compatible payloads', async () => {
     const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
 

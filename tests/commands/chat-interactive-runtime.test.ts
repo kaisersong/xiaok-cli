@@ -555,6 +555,69 @@ describe('chat interactive runtime', () => {
     }
   }, 10_000);
 
+  it('renders built-in slash command output in the visible transcript area', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 30);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('/help');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expect(lines.some((line) => line.includes('可用命令'))).toBe(true);
+        expect(lines.some((line) => line.includes('/clear') && line.includes('清屏'))).toBe(true);
+        expect(lines.some((line) => line.includes('/help') && line.includes('显示帮助'))).toBe(true);
+      }, { timeoutMs: 3_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
   it('supports shift-tab mode cycling plus ask-user and task inspection flows in interactive chat', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
@@ -883,6 +946,77 @@ describe('chat interactive runtime', () => {
       expect(lines.some((line) => line.includes('› 分五次显示12345'))).toBe(true);
       expect(lines.some((line) => line.trim() === '5')).toBe(true);
 
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 15_000);
+
+  it('keeps a blank separator row between the previous answer and the next submitted input', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 30);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('hi');
+      harness.send('\r');
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('echo:hi');
+      }, { timeoutMs: 3_000 });
+      await waitForInputTurnReady(harness);
+
+      harness.send('next');
+      harness.send('\r');
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        const answerIndex = lines.findIndex((line) => line.trim() === 'echo:hi');
+        const submittedIndex = lines.findIndex((line) => line.includes('› next'));
+        expect(answerIndex).toBeGreaterThanOrEqual(0);
+        expect(submittedIndex).toBe(answerIndex + 2);
+        expect(lines[answerIndex + 1]).toBe('');
+      }, { timeoutMs: 3_000 });
+
+      await waitForInputTurnReady(harness);
       harness.send('/exit');
       harness.send('\r');
       await pending;

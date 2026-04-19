@@ -648,7 +648,14 @@ export class ScrollRegionManager {
             this.stream.write(text);
             return;
         }
+        const hasPriorTranscript = this._totalRows > this._welcomeRows;
         if (this._cursorCol > 0) {
+            this.stream.write('\n');
+            this._totalRows++;
+            this._cursorRow = this.clampCursorRow(this._cursorRow + 1);
+            this._cursorCol = 0;
+        }
+        if (hasPriorTranscript) {
             this.stream.write('\n');
             this._totalRows++;
             this._cursorRow = this.clampCursorRow(this._cursorRow + 1);

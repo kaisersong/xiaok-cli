@@ -17,6 +17,44 @@ function isKimiCodingEndpoint(baseUrl?: string): boolean {
   }
 }
 
+function collectReasoningText(blocks: Message['content']): string | undefined {
+  const reasoning = blocks
+    .filter((block): block is Extract<Message['content'][number], { type: 'thinking' }> => block.type === 'thinking')
+    .map((block) => block.thinking.trim())
+    .filter(Boolean)
+    .join('\n\n');
+
+  return reasoning || undefined;
+}
+
+function extractReasoningDeltas(delta: Record<string, unknown>): Array<{ signature: string; text: string }> {
+  const chunks: Array<{ signature: string; text: string }> = [];
+  const reasoningDetails = delta.reasoning_details;
+  let usedReasoningDetails = false;
+
+  if (Array.isArray(reasoningDetails)) {
+    for (const item of reasoningDetails) {
+      const detail = item as { type?: unknown; text?: unknown };
+      if (detail.type === 'reasoning.text' && typeof detail.text === 'string' && detail.text.length > 0) {
+        chunks.push({ signature: 'reasoning_details', text: detail.text });
+        usedReasoningDetails = true;
+      }
+    }
+  }
+
+  if (!usedReasoningDetails) {
+    for (const field of ['reasoning_content', 'reasoning', 'reasoning_text'] as const) {
+      const value = delta[field];
+      if (typeof value === 'string' && value.length > 0) {
+        chunks.push({ signature: field, text: value });
+        break;
+      }
+    }
+  }
+
+  return chunks;
+}
+
 export class OpenAIAdapter implements ModelAdapter {
   client: OpenAI;
   private readonly apiKey: string;
@@ -64,8 +102,9 @@ export class OpenAIAdapter implements ModelAdapter {
       if (m.role === 'assistant') {
         const textBlocks = m.content.filter((block) => block.type === 'text');
         const toolUseBlocks = m.content.filter((block) => block.type === 'tool_use');
+        const reasoningContent = collectReasoningText(m.content);
 
-        const msg: OpenAI.ChatCompletionAssistantMessageParam = {
+        const msg: OpenAI.ChatCompletionAssistantMessageParam & { reasoning_content?: string } = {
           role: 'assistant',
           content: textBlocks.length > 0 ? textBlocks.map((block) => block.text).join('') : null,
         };
@@ -79,6 +118,10 @@ export class OpenAIAdapter implements ModelAdapter {
               arguments: JSON.stringify(block.input),
             },
           }));
+        }
+
+        if (reasoningContent) {
+          msg.reasoning_content = reasoningContent;
         }
 
         openaiMessages.push(msg);
@@ -161,6 +204,10 @@ export class OpenAIAdapter implements ModelAdapter {
       if (!choice) continue;
       const delta = choice.delta;
       if (!delta) continue;
+
+      for (const reasoning of extractReasoningDeltas(delta as Record<string, unknown>)) {
+        yield { type: 'thinking', delta: reasoning.text, signature: reasoning.signature };
+      }
 
       if (delta.content) {
         outputChars += delta.content.length;

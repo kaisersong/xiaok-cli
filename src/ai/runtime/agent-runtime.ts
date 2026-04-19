@@ -153,6 +153,16 @@ export class AgentRuntime {
             continue;
           }
 
+          if (chunk.type === 'thinking') {
+            const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+            if (lastBlock?.type === 'thinking') {
+              lastBlock.thinking += chunk.delta;
+            } else {
+              assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
+            }
+            continue;
+          }
+
           if (chunk.type === 'tool_use') {
             assistantBlocks.push(chunk);
             continue;

@@ -357,7 +357,7 @@ src/
 
 ```bash
 npm run build       # 构建
-npm test            # 运行测试（756 个测试，153 个文件）
+npm test            # 运行测试（765 个测试，153 个文件）
 npm run test:watch  # 监听模式
 npm run dev -- --help  # 从源码运行
 ```
@@ -381,6 +381,8 @@ npm run dev -- --help  # 从源码运行
 ---
 
 ## 版本日志
+
+**v0.6.1** — 验证体系加固与终端/运行时 bugfix：修复 OpenAI 兼容模型在 `thinking -> tool_use -> replay` 历史回放时丢失 `reasoning_content` 的问题，保证内容区上一条回答和下一条输入之间保留空白分隔行，并补齐 reasoning 字段 contract fixture 与 daemon 多实例隔离测试。
 
 **v0.6.0** — 本地 daemon、提醒与 provider catalog：新增共享 `xiaok daemon` 宿主和 reminder scheduling service，基于 SQLite 的 durable reminder store 与恢复机制，真实 daemon/client 端到端测试覆盖，Anthropic/OpenAI/Kimi/DeepSeek/GLM/MiniMax/Gemini provider profile registry，`providers + models + defaultModelId` 的 v2 配置结构，CLI/UI 多模型切换，以及面向 Gemini 的 OpenAI Responses 适配层。
 
