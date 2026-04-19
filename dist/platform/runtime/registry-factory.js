@@ -5,6 +5,7 @@ import { createHooksRunner } from '../../runtime/hooks-runner.js';
 import { executeNamedSubAgent } from '../../ai/agents/subagent-executor.js';
 import { applySandboxToTools } from '../sandbox/tool-wrappers.js';
 import { createTeamTools } from '../teams/tools.js';
+import { createReminderTools } from '../../ai/tools/reminders.js';
 import { mergeToolPools, isMcpTool } from '../../ai/tools/tool-pool.js';
 export function createPlatformRegistryFactory(options) {
     const runNamedSubAgent = async (agentName, prompt, cwd) => {
@@ -24,9 +25,26 @@ export function createPlatformRegistryFactory(options) {
         });
     };
     const backgroundRunner = options.platform.createBackgroundRunner(async ({ agent, prompt, cwd }) => runNamedSubAgent(agent, prompt, cwd), options.notifyBackgroundJob);
+    const reminders = options.source === 'chat'
+        ? options.platform.createReminderApi(options.sessionId, options.sessionId)
+        : undefined;
+    if (reminders) {
+        void reminders.start();
+        reminders.registerInChatSink(options.sessionId, (message) => {
+            process.stdout.write(`\n[reminder] ${message}\n`);
+        });
+    }
     function createRegistryForCwd(cwd, allowedTools) {
         const extraTools = [
             ...(options.workflowTools ?? []),
+            ...(reminders
+                ? createReminderTools({
+                    reminders,
+                    sessionId: options.sessionId,
+                    creatorUserId: options.sessionId,
+                    timezone: options.platform.reminderDefaultTimeZone,
+                })
+                : []),
             ...createTeamTools(options.platform.teamService),
             ...options.platform.mcpTools,
             createLspTool({ getLspClient: () => options.platform.lspClient, cwd }),

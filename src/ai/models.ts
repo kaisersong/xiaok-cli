@@ -1,7 +1,10 @@
 import type { ModelAdapter } from '../types.js';
-import type { Config } from '../types.js';
+import type { Config, LegacyConfig } from '../types.js';
 import { ClaudeAdapter } from './adapters/claude.js';
 import { OpenAIAdapter } from './adapters/openai.js';
+import { OpenAIResponsesAdapter } from './adapters/openai-responses.js';
+import { normalizeConfig } from './providers/normalize.js';
+import { getProviderProfile } from './providers/registry.js';
 
 function isClaudeCompatibleCustomEndpoint(baseUrl: string, model?: string): boolean {
   const normalizedBaseUrl = baseUrl.toLowerCase();
@@ -18,45 +21,72 @@ function isClaudeCompatibleCustomEndpoint(baseUrl: string, model?: string): bool
   return /claude|sonnet|opus|haiku/.test(normalizedModel);
 }
 
-export function createAdapter(config: Config): ModelAdapter {
-  const provider = config.defaultModel;
-  // 按提供商读取 API Key：环境变量优先于配置文件
-  // 注意：不支持无前缀的 XIAOK_API_KEY
-  const envKey = process.env[`XIAOK_${provider.toUpperCase()}_API_KEY`];
-  const configKey = provider === 'claude' ? config.models.claude?.apiKey
-    : provider === 'openai' ? config.models.openai?.apiKey
-    : config.models.custom?.apiKey;
-  const providerKey = envKey ?? configKey;
+function resolveProviderApiKey(config: Config, providerId: string): string {
+  const providerConfig = config.providers[providerId];
+  const profile = getProviderProfile(providerId);
+  const envPrefixes = profile?.envPrefixes ?? [providerId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')];
+  for (const prefix of envPrefixes) {
+    const key = process.env[`XIAOK_${prefix}_API_KEY`];
+    if (key) {
+      return key;
+    }
+  }
 
-  if (!providerKey && provider !== 'custom') {
+  return providerConfig?.apiKey ?? '';
+}
+
+export function createAdapter(rawConfig: Config | LegacyConfig): ModelAdapter {
+  const config = normalizeConfig(rawConfig);
+  const modelEntry = config.models[config.defaultModelId];
+  if (!modelEntry) {
+    throw new Error(`未找到默认模型: ${config.defaultModelId}`);
+  }
+
+  const providerId = modelEntry.provider;
+  const providerConfig = config.providers[providerId];
+  if (!providerConfig) {
+    throw new Error(`未找到模型对应的 provider: ${providerId}`);
+  }
+
+  const providerProfile = getProviderProfile(providerId);
+  const providerKey = resolveProviderApiKey(config, providerId);
+
+  if (!providerKey && providerConfig.type !== 'custom') {
+    const envHint = (providerProfile?.envPrefixes[0] ?? providerId.toUpperCase()).toUpperCase();
     throw new Error(
-      `未配置 API Key。请运行: xiaok config set api-key <key> --provider ${provider}\n` +
-      `或设置环境变量 XIAOK_${provider.toUpperCase()}_API_KEY`
+      `未配置 API Key。请运行: xiaok config set api-key <key> --provider ${providerId}\n` +
+      `或设置环境变量 XIAOK_${envHint}_API_KEY`
     );
   }
 
-  if (provider === 'claude') {
-    const m = config.models.claude;
-    // 支持 custom baseURL（用于第三方 Anthropic 兼容 API）
-    const baseUrl = process.env.ANTHROPIC_BASE_URL ?? m?.baseUrl;
-    return new ClaudeAdapter(providerKey!, m?.model ?? 'claude-opus-4-6', baseUrl);
+  const baseUrl = providerConfig.baseUrl ?? providerProfile?.baseUrl;
+
+  if (providerConfig.type === 'custom' && !baseUrl) {
+    throw new Error('custom 模型需要配置 baseUrl。请运行: xiaok config set model custom --base-url <url>');
   }
 
-  if (provider === 'openai') {
-    const m = config.models.openai;
-    return new OpenAIAdapter(providerKey!, m?.model ?? 'gpt-4o');
+  if (providerConfig.protocol === 'anthropic') {
+    const anthropicBaseUrl = process.env.ANTHROPIC_BASE_URL ?? baseUrl;
+    return new ClaudeAdapter(providerKey, modelEntry.model ?? 'claude-opus-4-6', anthropicBaseUrl);
   }
 
-  if (provider === 'custom') {
-    const m = config.models.custom;
-    if (!m?.baseUrl) throw new Error('custom 模型需要配置 baseUrl。请运行: xiaok config set model custom --base-url <url>');
-    const apiKey = process.env.XIAOK_CUSTOM_API_KEY ?? m.apiKey ?? '';
-    if (isClaudeCompatibleCustomEndpoint(m.baseUrl, m.model)) {
-      return new ClaudeAdapter(apiKey, m.model ?? 'claude-opus-4-6', m.baseUrl);
-    }
-    // 自定义端点的 model 名称从配置中读取，未配置时使用 'default'（部分 provider 忽略此字段）
-    return new OpenAIAdapter(apiKey, m.model ?? 'default', m.baseUrl);
+  if (providerConfig.protocol === 'openai_legacy') {
+    return new OpenAIAdapter(
+      providerKey,
+      modelEntry.model ?? 'default',
+      baseUrl,
+      providerConfig.headers ?? providerProfile?.defaultHeaders,
+    );
   }
 
-  throw new Error(`未知的模型提供商: ${provider}`);
+  if (providerConfig.protocol === 'openai_responses') {
+    return new OpenAIResponsesAdapter(
+      providerKey,
+      modelEntry.model ?? 'default',
+      baseUrl,
+      providerConfig.headers ?? providerProfile?.defaultHeaders,
+    );
+  }
+
+  throw new Error(`未知的模型协议: ${providerConfig.protocol}`);
 }

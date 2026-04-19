@@ -7,6 +7,7 @@ import { createSandboxEnforcer } from '../sandbox/enforcer.js';
 import { createSandboxPolicy } from '../sandbox/policy.js';
 import { type TeamService } from '../teams/service.js';
 import { type WorktreeManager } from '../worktrees/manager.js';
+import { type ReminderApi } from '../../runtime/reminder/service.js';
 import { CapabilityRegistry } from './capability-registry.js';
 export interface LspClientLike {
     didOpenDocument(document: {
@@ -32,6 +33,8 @@ export interface PlatformRuntimeContext {
     worktreeManager: WorktreeManager;
     mcpTools: Tool[];
     capabilityRegistry: CapabilityRegistry;
+    reminderDefaultTimeZone: string;
+    createReminderApi(sessionId: string, creatorUserId: string): ReminderApi;
     health: PlatformRuntimeHealth;
     dispose(): Promise<void>;
     listBackgroundJobs(sessionId: string): BackgroundJobRecord[];
@@ -60,5 +63,7 @@ export interface PlatformRuntimeHealth {
 export interface CreatePlatformRuntimeContextOptions {
     cwd: string;
     builtinCommands: string[];
+    reminderMode?: 'daemon' | 'local';
+    reminderSocketPath?: string;
 }
 export declare function createPlatformRuntimeContext(options: CreatePlatformRuntimeContextOptions): Promise<PlatformRuntimeContext>;

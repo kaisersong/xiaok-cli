@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { DEFAULT_CONFIG, isValidProvider } from '../types.js';
+import { DEFAULT_CONFIG, isValidLegacyProvider } from '../types.js';
+import { normalizeConfig } from '../ai/providers/normalize.js';
 export function getConfigDir() {
     return process.env.XIAOK_CONFIG_DIR ?? join(homedir(), '.xiaok');
 }
@@ -39,59 +40,15 @@ export async function loadConfig() {
         return cloneDefaultConfig();
     }
     const obj = parsed;
-    if (obj.schemaVersion !== 1) {
+    if (obj.schemaVersion !== 1 && obj.schemaVersion !== 2) {
         backupAndRemove(path);
         return cloneDefaultConfig();
     }
-    // 校验 defaultModel，防止脏数据
-    if (obj.defaultModel !== undefined && !isValidProvider(obj.defaultModel)) {
+    if (obj.schemaVersion === 1 && obj.defaultModel !== undefined && !isValidLegacyProvider(obj.defaultModel)) {
         backupAndRemove(path);
         return cloneDefaultConfig();
     }
-    const defaults = cloneDefaultConfig();
-    const parsedConfig = obj;
-    const mergedModels = {};
-    if (defaults.models.claude || parsedConfig.models?.claude) {
-        mergedModels.claude = {
-            ...(defaults.models.claude ?? { model: 'claude-opus-4-6' }),
-            ...(parsedConfig.models?.claude ?? {}),
-        };
-    }
-    if (defaults.models.openai || parsedConfig.models?.openai) {
-        const openaiModel = {
-            ...(defaults.models.openai ?? {}),
-            ...(parsedConfig.models?.openai ?? {}),
-        };
-        if (openaiModel.model) {
-            mergedModels.openai = openaiModel;
-        }
-    }
-    if (defaults.models.custom || parsedConfig.models?.custom) {
-        const customModel = {
-            ...(defaults.models.custom ?? {}),
-            ...(parsedConfig.models?.custom ?? {}),
-        };
-        if (customModel.baseUrl) {
-            mergedModels.custom = customModel;
-        }
-    }
-    const mergedChannels = {
-        ...(defaults.channels ?? {}),
-        ...(parsedConfig.channels ?? {}),
-    };
-    if (defaults.channels?.yzj || parsedConfig.channels?.yzj) {
-        mergedChannels.yzj = {
-            ...(defaults.channels?.yzj ?? {}),
-            ...(parsedConfig.channels?.yzj ?? {}),
-        };
-    }
-    return {
-        ...defaults,
-        ...parsedConfig,
-        models: mergedModels,
-        channels: mergedChannels,
-        schemaVersion: 1,
-    };
+    return normalizeConfig(obj);
 }
 export async function saveConfig(config) {
     const dir = getConfigDir();

@@ -95,6 +95,7 @@ describe('platform registry factory', () => {
     const context = await createPlatformRuntimeContext({
       cwd,
       builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
     });
 
     const buildSystemPrompt = vi.fn(async (promptCwd: string) => `system:${promptCwd}`);
@@ -179,6 +180,7 @@ describe('platform registry factory', () => {
     const context = await createPlatformRuntimeContext({
       cwd,
       builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
     });
 
     const buildSystemPrompt = vi.fn(async (promptCwd: string) => `system:${promptCwd}`);
@@ -242,6 +244,7 @@ describe('platform registry factory', () => {
     const context = await createPlatformRuntimeContext({
       cwd,
       builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
     });
 
     const adapter: ModelAdapter = {

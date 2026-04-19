@@ -1,23 +1,25 @@
 // tests/types.test.ts
 import { describe, it, expect, expectTypeOf } from 'vitest';
 import type { Message, MessageBlock, UsageStats } from '../src/types.js';
-import { isValidProvider, DEFAULT_CONFIG } from '../src/types.js';
+import { isValidLegacyProvider, DEFAULT_CONFIG } from '../src/types.js';
 
 describe('types', () => {
-  it('isValidProvider accepts valid providers', () => {
-    expect(isValidProvider('claude')).toBe(true);
-    expect(isValidProvider('openai')).toBe(true);
-    expect(isValidProvider('custom')).toBe(true);
+  it('isValidLegacyProvider accepts valid legacy providers', () => {
+    expect(isValidLegacyProvider('claude')).toBe(true);
+    expect(isValidLegacyProvider('openai')).toBe(true);
+    expect(isValidLegacyProvider('custom')).toBe(true);
   });
 
-  it('isValidProvider rejects unknown providers', () => {
-    expect(isValidProvider('unknown')).toBe(false);
-    expect(isValidProvider('')).toBe(false);
-    expect(isValidProvider(null)).toBe(false);
+  it('isValidLegacyProvider rejects unknown providers', () => {
+    expect(isValidLegacyProvider('unknown')).toBe(false);
+    expect(isValidLegacyProvider('')).toBe(false);
+    expect(isValidLegacyProvider(null)).toBe(false);
   });
 
-  it('DEFAULT_CONFIG has schemaVersion 1', () => {
-    expect(DEFAULT_CONFIG.schemaVersion).toBe(1);
+  it('DEFAULT_CONFIG uses schemaVersion 2 provider catalogs', () => {
+    expect(DEFAULT_CONFIG.schemaVersion).toBe(2);
+    expect(DEFAULT_CONFIG.defaultProvider).toBe('anthropic');
+    expect(DEFAULT_CONFIG.defaultModelId).toBe('anthropic-default');
   });
 
   it('Message uses block-based content', () => {

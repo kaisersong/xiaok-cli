@@ -149,7 +149,7 @@ export function renderWelcomeScreen(opts: {
   let logo: string[] = [];
   if (existsSync(LOGO_PATH)) {
     const logoContent = readFileSync(LOGO_PATH, 'utf-8');
-    logo = logoContent.split('\n').filter(line => line.length > 0);
+    logo = logoContent.split(/\r?\n/).filter(line => line.length > 0);
   } else {
     logo = [
       "  .-------.",

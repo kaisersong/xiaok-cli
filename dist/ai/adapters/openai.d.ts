@@ -5,8 +5,9 @@ export declare class OpenAIAdapter implements ModelAdapter {
     client: OpenAI;
     private readonly apiKey;
     private readonly baseUrl?;
+    private readonly defaultHeaders?;
     private model;
-    constructor(apiKey: string, model?: string, baseUrl?: string);
+    constructor(apiKey: string, model?: string, baseUrl?: string, defaultHeaders?: Record<string, string>);
     getModelName(): string;
     cloneWithModel(model: string): OpenAIAdapter;
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, _options?: ModelInvocationOptions): AsyncIterable<StreamChunk>;

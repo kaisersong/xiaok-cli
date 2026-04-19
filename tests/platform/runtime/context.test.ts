@@ -45,6 +45,7 @@ describe('platform runtime context', () => {
     const context = await createPlatformRuntimeContext({
       cwd: process.cwd(),
       builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
     });
 
     expect(context.health.hasDegradedCapabilities()).toBe(false);
@@ -61,6 +62,7 @@ describe('platform runtime context', () => {
     const context = await createPlatformRuntimeContext({
       cwd,
       builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
     });
 
     const team = context.teamService.createTeam({
@@ -108,6 +110,7 @@ describe('platform runtime context', () => {
     const context = await createPlatformRuntimeContext({
       cwd,
       builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
     });
 
     const runner = context.createBackgroundRunner(async () => {
@@ -167,6 +170,7 @@ describe('platform runtime context', () => {
     const context = await createPlatformRuntimeContext({
       cwd,
       builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
     });
 
     expect(context.health.hasDegradedCapabilities()).toBe(false);
@@ -216,6 +220,7 @@ describe('platform runtime context', () => {
     const context = await createPlatformRuntimeContext({
       cwd,
       builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
     });
 
     expect(context.health.hasDegradedCapabilities()).toBe(true);

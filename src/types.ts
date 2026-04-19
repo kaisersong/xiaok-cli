@@ -6,6 +6,7 @@ import type { RuntimeEvent } from './runtime/events.js';
 import type { AgentSessionSnapshot } from './ai/runtime/session.js';
 import type { PromptCacheSegments } from './ai/runtime/model-capabilities.js';
 import type { PromptSnapshot } from './ai/prompts/types.js';
+import type { ModelConfigEntry, ProviderConfig, ProviderId } from './ai/providers/types.js';
 
 export type { MessageBlock, UsageStats };
 
@@ -87,8 +88,8 @@ export interface YZJChannelConfig {
   namedChannels?: YZJNamedChannel[];
 }
 
-// config.json schema
-export interface Config {
+// legacy config.json schema (schemaVersion 1)
+export interface LegacyConfig {
   schemaVersion: 1;
   defaultModel: 'claude' | 'openai' | 'custom';
   models: {
@@ -103,21 +104,48 @@ export interface Config {
   };
 }
 
-const VALID_PROVIDERS = ['claude', 'openai', 'custom'] as const;
+// normalized config.json schema (schemaVersion 2)
+export interface Config {
+  schemaVersion: 2;
+  defaultProvider: ProviderId;
+  defaultModelId: string;
+  providers: Record<string, ProviderConfig>;
+  models: Record<string, ModelConfigEntry>;
+  devApp?: { appKey: string; appSecret: string };
+  defaultMode: 'interactive';
+  channels?: {
+    yzj?: YZJChannelConfig;
+  };
+}
+
+const VALID_LEGACY_PROVIDERS = ['claude', 'openai', 'custom'] as const;
 
 export const DEFAULT_CONFIG: Config = {
-  schemaVersion: 1,
-  defaultModel: 'claude',
+  schemaVersion: 2,
+  defaultProvider: 'anthropic',
+  defaultModelId: 'anthropic-default',
+  providers: {
+    anthropic: {
+      type: 'first_party',
+      protocol: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+    },
+  },
   models: {
-    claude: { model: 'claude-opus-4-6' },
+    'anthropic-default': {
+      provider: 'anthropic',
+      model: 'claude-opus-4-6',
+      label: 'Anthropic Default',
+      capabilities: ['tools'],
+    },
   },
   defaultMode: 'interactive',
   channels: {},
 };
 
-/** 校验 defaultModel 是否合法，防止脏数据写入 */
-export function isValidProvider(v: unknown): v is Config['defaultModel'] {
-  return VALID_PROVIDERS.includes(v as Config['defaultModel']);
+/** 校验 legacy defaultModel 是否合法，防止脏数据写入 */
+export function isValidLegacyProvider(v: unknown): v is LegacyConfig['defaultModel'] {
+  return VALID_LEGACY_PROVIDERS.includes(v as LegacyConfig['defaultModel']);
 }
 
 // Permission settings schema

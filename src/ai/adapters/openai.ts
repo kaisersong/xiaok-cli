@@ -4,17 +4,41 @@ import type { ModelInvocationOptions } from '../runtime/model-capabilities.js';
 import { estimateTokens } from '../runtime/usage.js';
 
 const MAX_RETRIES = 3;
+const KIMI_CODING_COMPAT_USER_AGENT = 'claude-code/1.0';
+
+function isKimiCodingEndpoint(baseUrl?: string): boolean {
+  if (!baseUrl) return false;
+
+  try {
+    const url = new URL(baseUrl);
+    return url.hostname === 'api.kimi.com' && url.pathname.startsWith('/coding');
+  } catch {
+    return false;
+  }
+}
 
 export class OpenAIAdapter implements ModelAdapter {
   client: OpenAI;
   private readonly apiKey: string;
   private readonly baseUrl?: string;
+  private readonly defaultHeaders?: Record<string, string>;
   private model: string;
 
-  constructor(apiKey: string, model = 'gpt-4o', baseUrl?: string) {
+  constructor(apiKey: string, model = 'gpt-4o', baseUrl?: string, defaultHeaders?: Record<string, string>) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
-    this.client = new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: MAX_RETRIES });
+    this.defaultHeaders = defaultHeaders;
+    this.client = new OpenAI({
+      apiKey,
+      baseURL: baseUrl,
+      maxRetries: MAX_RETRIES,
+      defaultHeaders: {
+        ...(defaultHeaders ?? {}),
+        ...(isKimiCodingEndpoint(baseUrl)
+          ? { 'User-Agent': KIMI_CODING_COMPAT_USER_AGENT }
+          : {}),
+      },
+    });
     this.model = model;
   }
 
@@ -23,7 +47,7 @@ export class OpenAIAdapter implements ModelAdapter {
   }
 
   cloneWithModel(model: string): OpenAIAdapter {
-    return new OpenAIAdapter(this.apiKey, model, this.baseUrl);
+    return new OpenAIAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders);
   }
 
   async *stream(

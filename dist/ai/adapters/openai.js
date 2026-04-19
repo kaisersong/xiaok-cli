@@ -1,22 +1,46 @@
 import OpenAI from 'openai';
 import { estimateTokens } from '../runtime/usage.js';
 const MAX_RETRIES = 3;
+const KIMI_CODING_COMPAT_USER_AGENT = 'claude-code/1.0';
+function isKimiCodingEndpoint(baseUrl) {
+    if (!baseUrl)
+        return false;
+    try {
+        const url = new URL(baseUrl);
+        return url.hostname === 'api.kimi.com' && url.pathname.startsWith('/coding');
+    }
+    catch {
+        return false;
+    }
+}
 export class OpenAIAdapter {
     client;
     apiKey;
     baseUrl;
+    defaultHeaders;
     model;
-    constructor(apiKey, model = 'gpt-4o', baseUrl) {
+    constructor(apiKey, model = 'gpt-4o', baseUrl, defaultHeaders) {
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
-        this.client = new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: MAX_RETRIES });
+        this.defaultHeaders = defaultHeaders;
+        this.client = new OpenAI({
+            apiKey,
+            baseURL: baseUrl,
+            maxRetries: MAX_RETRIES,
+            defaultHeaders: {
+                ...(defaultHeaders ?? {}),
+                ...(isKimiCodingEndpoint(baseUrl)
+                    ? { 'User-Agent': KIMI_CODING_COMPAT_USER_AGENT }
+                    : {}),
+            },
+        });
         this.model = model;
     }
     getModelName() {
         return this.model;
     }
     cloneWithModel(model) {
-        return new OpenAIAdapter(this.apiKey, model, this.baseUrl);
+        return new OpenAIAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders);
     }
     async *stream(messages, tools, systemPrompt, _options) {
         const openaiMessages = [

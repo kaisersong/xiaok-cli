@@ -37,7 +37,8 @@ describe('operator commands', () => {
     expect(result).toContain('Config');
     expect(result).toContain('Credentials');
     expect(result).toContain('Git');
-    expect(result).toContain('claude');
+    expect(result).toContain('defaultProvider=anthropic');
+    expect(result).toContain('defaultModelId=anthropic-default');
   });
 
   it('runInitCommand creates project settings scaffold', async () => {

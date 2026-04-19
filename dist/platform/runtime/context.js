@@ -11,6 +11,9 @@ import { createSandboxPolicy } from '../sandbox/policy.js';
 import { FileTeamStore } from '../teams/store.js';
 import { createTeamService } from '../teams/service.js';
 import { createWorktreeManager } from '../worktrees/manager.js';
+import { ReminderClientService } from '../../runtime/reminder/client.js';
+import { resolveXiaokDaemonSocketPath } from '../../runtime/reminder/ipc.js';
+import { createReminderService } from '../../runtime/reminder/service.js';
 import { CapabilityRegistry } from './capability-registry.js';
 import { FileCapabilityHealthStore } from './health-store.js';
 import { loadSettingsMcpServers, loadPluginMcpServers, mergeMcpServerConfigs, } from '../mcp/config.js';
@@ -25,6 +28,24 @@ export async function createPlatformRuntimeContext(options) {
     const stateRootDir = join(options.cwd, '.xiaok', 'state');
     const healthStore = new FileCapabilityHealthStore(join(stateRootDir, 'capability-health.json'));
     const teamService = createTeamService({ store: new FileTeamStore(join(stateRootDir, 'teams.json')) });
+    const reminderDefaultTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC';
+    const reminderApis = [];
+    const createReminderApi = (sessionId, creatorUserId) => {
+        const api = options.reminderMode === 'local'
+            ? createReminderService({
+                dbPath: join(stateRootDir, 'reminders.sqlite'),
+                defaultTimeZone: reminderDefaultTimeZone,
+            })
+            : new ReminderClientService({
+                workspaceRoot: options.cwd,
+                sessionId,
+                creatorUserId,
+                defaultTimeZone: reminderDefaultTimeZone,
+                socketPath: options.reminderSocketPath ?? resolveXiaokDaemonSocketPath(),
+            });
+        reminderApis.push(api);
+        return api;
+    };
     const sandboxPolicy = createSandboxPolicy({
         pathAllowlist: [options.cwd, join(options.cwd, '.xiaok'), join(options.cwd, '.worktrees')],
         network: 'allow',
@@ -78,8 +99,13 @@ export async function createPlatformRuntimeContext(options) {
         worktreeManager,
         mcpTools,
         capabilityRegistry,
+        reminderDefaultTimeZone,
+        createReminderApi,
         health,
         async dispose() {
+            for (const reminderApi of reminderApis.splice(0)) {
+                await reminderApi.dispose();
+            }
             for (const disposable of disposables.splice(0).reverse()) {
                 try {
                     disposable.dispose();

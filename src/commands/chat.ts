@@ -54,6 +54,7 @@ import { selectYZJChannel } from '../ui/channel-selector.js';
 import { resolveYZJConfig } from '../channels/yzj.js';
 import { YZJTransport } from '../channels/yzj-transport.js';
 import { InMemoryApprovalStore } from '../channels/approval-store.js';
+import { getProviderProfile } from '../ai/providers/registry.js';
 
 const { version: cliVersion } = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
@@ -112,7 +113,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   }
 
   // 加载配置和凭据
-  const config = await loadConfig();
+  let config = await loadConfig();
 
   let adapter: ModelAdapter;
   try {
@@ -661,7 +662,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   }
 
   // 交互模式 - 显示欢迎界面
-  const provider = config.defaultModel ?? 'claude';
+  const getActiveProviderLabel = (): string => {
+    const providerId = config.defaultProvider;
+    const profile = getProviderProfile(providerId);
+    return (profile?.label ?? providerId).toLowerCase();
+  };
   inputReader.setTranscriptLogger(transcriptLogger);
   const originalStdoutWrite = process.stdout.write.bind(process.stdout);
   const originalStderrWrite = process.stderr.write.bind(process.stderr);
@@ -683,7 +688,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
     // 显示欢迎界面
     contentRows = renderWelcomeScreen({
-      model: provider,
+      model: getActiveProviderLabel(),
       cwd: process.cwd(),
       sessionId,
       mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
@@ -849,7 +854,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       scrollRegion.end();
       process.stdout.write('\x1b[2J\x1b[H');
       contentRows = renderWelcomeScreen({
-        model: provider,
+        model: getActiveProviderLabel(),
         cwd: process.cwd(),
         sessionId,
         mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
@@ -1007,17 +1012,17 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (trimmed === '/models') {
       const selected = await selectModel(config);
       if (selected) {
-        const newConfig = { ...config, defaultModel: selected.provider };
-        if (selected.provider === 'claude') {
-          newConfig.models.claude = { ...newConfig.models.claude!, model: selected.model };
-        } else if (selected.provider === 'openai') {
-          newConfig.models.openai = { ...newConfig.models.openai!, model: selected.model };
-        }
+        const newConfig = {
+          ...config,
+          defaultProvider: selected.provider,
+          defaultModelId: selected.modelId,
+        };
         try {
           adapter = createAdapter(newConfig);
+          config = newConfig;
           agent.setAdapter(adapter);
           statusBar.updateModel(selected.model);
-          process.stdout.write(`已切换到：[${selected.provider}] ${selected.model}\n\n`);
+          process.stdout.write(`已切换到：[${selected.provider}] ${selected.label} (${selected.model})\n\n`);
         } catch (e) {
           process.stdout.write(`切换失败：${String(e)}\n\n`);
         }

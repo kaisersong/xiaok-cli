@@ -1,5 +1,83 @@
 import type { Command } from 'commander';
 import { loadConfig, saveConfig } from '../utils/config.js';
+import { getProviderProfile } from '../ai/providers/registry.js';
+
+function normalizeProviderId(value: string): string | null {
+  if (value === 'claude') return 'anthropic';
+  if (value === 'anthropic') return 'anthropic';
+  if (value === 'openai') return 'openai';
+  if (value === 'custom') return 'custom-default';
+  if (value === 'kimi' || value === 'deepseek' || value === 'glm' || value === 'minimax' || value === 'gemini') {
+    return value;
+  }
+  return null;
+}
+
+function sanitizeModelIdPart(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function ensureProviderConfig(
+  cfg: Awaited<ReturnType<typeof loadConfig>>,
+  providerId: string,
+): void {
+  if (cfg.providers[providerId]) {
+    return;
+  }
+
+  if (providerId === 'custom-default') {
+    cfg.providers[providerId] = {
+      type: 'custom',
+      protocol: 'openai_legacy',
+    };
+    return;
+  }
+
+  const profile = getProviderProfile(providerId);
+  if (!profile) {
+    throw new Error(`未知 provider: ${providerId}`);
+  }
+
+  cfg.providers[providerId] = {
+    type: 'first_party',
+    protocol: profile.protocol,
+    baseUrl: profile.baseUrl,
+    headers: profile.defaultHeaders,
+  };
+}
+
+function ensureDefaultModelForProvider(
+  cfg: Awaited<ReturnType<typeof loadConfig>>,
+  providerId: string,
+): string {
+  const existing = Object.entries(cfg.models).find(([, model]) => model.provider === providerId);
+  if (existing) {
+    return existing[0];
+  }
+
+  if (providerId === 'custom-default') {
+    const modelId = 'custom-default-model';
+    cfg.models[modelId] = {
+      provider: providerId,
+      model: 'default',
+      label: 'Custom Default',
+    };
+    return modelId;
+  }
+
+  const profile = getProviderProfile(providerId);
+  if (!profile) {
+    throw new Error(`未知 provider: ${providerId}`);
+  }
+
+  cfg.models[profile.defaultModel.modelId] = {
+    provider: providerId,
+    model: profile.defaultModel.model,
+    label: profile.defaultModel.label,
+    capabilities: profile.defaultModel.capabilities,
+  };
+  return profile.defaultModel.modelId;
+}
 
 export function registerConfigCommands(program: Command): void {
   const config = program.command('config').description('管理 xiaok 配置');
@@ -8,36 +86,66 @@ export function registerConfigCommands(program: Command): void {
 
   configSet
     .command('model <value>')
-    .description('设置默认 AI 模型（claude / openai / custom）')
+    .description('设置默认 AI 模型（provider、modelId 或 provider/model）')
     .option('--base-url <url>', '自定义模型 base URL（model=custom 时使用）')
     .option('--api-key <key>', '同时设置该模型的 API Key')
     .action(async (value: string, opts: { baseUrl?: string; apiKey?: string }) => {
       const cfg = await loadConfig();
-      if (value === 'claude' || value === 'openai' || value === 'custom') {
-        cfg.defaultModel = value;
-        if (opts.baseUrl && value === 'custom') {
-          cfg.models.custom = { ...cfg.models.custom, baseUrl: opts.baseUrl };
-        }
-        if (opts.apiKey) {
-          cfg.models[value] = { ...cfg.models[value], apiKey: opts.apiKey } as never;
-        }
+
+      if (cfg.models[value]) {
+        const model = cfg.models[value];
+        cfg.defaultModelId = value;
+        cfg.defaultProvider = model.provider;
         await saveConfig(cfg);
         console.log(`已设置默认模型为: ${value}`);
-      } else {
-        // 尝试解析为 provider/model 格式，如 openai/gpt-4o
-        const [provider, model] = value.split('/');
-        if (provider && model && ['claude', 'openai'].includes(provider)) {
-          cfg.defaultModel = provider as 'claude' | 'openai';
-          cfg.models[provider as 'claude' | 'openai'] = {
-            ...cfg.models[provider as 'claude' | 'openai'],
-            model,
-          };
-          await saveConfig(cfg);
-          console.log(`已设置默认模型为: ${provider}/${model}`);
-        } else {
-          console.error(`未知模型: ${value}。支持: claude, openai, custom, openai/gpt-4o 等`);
-        }
+        return;
       }
+
+      const normalizedProvider = normalizeProviderId(value);
+      if (normalizedProvider) {
+        ensureProviderConfig(cfg, normalizedProvider);
+        if (opts.baseUrl) {
+          cfg.providers[normalizedProvider].baseUrl = opts.baseUrl;
+        }
+        if (opts.apiKey) {
+          cfg.providers[normalizedProvider].apiKey = opts.apiKey;
+        }
+        const modelId = ensureDefaultModelForProvider(cfg, normalizedProvider);
+        cfg.defaultProvider = normalizedProvider;
+        cfg.defaultModelId = modelId;
+        await saveConfig(cfg);
+        console.log(`已设置默认模型为: ${modelId}`);
+        return;
+      }
+
+      const [providerValue, modelName] = value.split('/');
+      const providerId = normalizeProviderId(providerValue);
+      if (providerId && modelName) {
+        ensureProviderConfig(cfg, providerId);
+        if (providerId === 'custom-default' && !opts.baseUrl && !cfg.providers[providerId].baseUrl) {
+          console.error('请先设置 baseUrl：xiaok config set model custom --base-url <url>');
+          return;
+        }
+        if (opts.baseUrl) {
+          cfg.providers[providerId].baseUrl = opts.baseUrl;
+        }
+        if (opts.apiKey) {
+          cfg.providers[providerId].apiKey = opts.apiKey;
+        }
+        const modelId = `${providerId}-${sanitizeModelIdPart(modelName)}`;
+        cfg.models[modelId] = {
+          provider: providerId,
+          model: modelName,
+          label: modelName,
+        };
+        cfg.defaultProvider = providerId;
+        cfg.defaultModelId = modelId;
+        await saveConfig(cfg);
+        console.log(`已设置默认模型为: ${modelId}`);
+        return;
+      }
+
+      console.error(`未知模型: ${value}。支持: modelId、provider、provider/model`);
     });
 
   configSet
@@ -46,15 +154,31 @@ export function registerConfigCommands(program: Command): void {
     .option('--provider <provider>', '指定提供商（默认当前默认模型）')
     .action(async (key: string, opts: { provider?: string }) => {
       const cfg = await loadConfig();
-      const provider = (opts.provider ?? cfg.defaultModel) as 'claude' | 'openai' | 'custom';
-      // custom 模型必须先有 baseUrl 才能设置 apiKey
-      if (provider === 'custom' && !cfg.models.custom?.baseUrl) {
+      const provider = normalizeProviderId(opts.provider ?? cfg.defaultProvider) ?? cfg.defaultProvider;
+      ensureProviderConfig(cfg, provider);
+      if (provider === 'custom-default' && !cfg.providers[provider].baseUrl) {
         console.error('请先设置 baseUrl：xiaok config set model custom --base-url <url>');
         return;
       }
-      cfg.models[provider] = { ...cfg.models[provider], apiKey: key } as never;
+      cfg.providers[provider].apiKey = key;
       await saveConfig(cfg);
       console.log(`已为 ${provider} 设置 API Key`);
+    });
+
+  configSet
+    .command('default-model <modelId>')
+    .description('设置默认模型 ID')
+    .action(async (modelId: string) => {
+      const cfg = await loadConfig();
+      const model = cfg.models[modelId];
+      if (!model) {
+        console.error(`未知模型: ${modelId}`);
+        return;
+      }
+      cfg.defaultModelId = modelId;
+      cfg.defaultProvider = model.provider;
+      await saveConfig(cfg);
+      console.log(`已设置默认模型为: ${modelId}`);
     });
 
   configSet
@@ -142,8 +266,12 @@ export function registerConfigCommands(program: Command): void {
     .action(async (key: string) => {
       const cfg = await loadConfig();
       if (key === 'model') {
-        const m = cfg.models[cfg.defaultModel];
-        console.log(`${cfg.defaultModel}${'model' in (m ?? {}) ? '/' + (m as { model: string }).model : ''}`);
+        const m = cfg.models[cfg.defaultModelId];
+        console.log(`${cfg.defaultModelId}${m ? ` (${m.provider}/${m.model})` : ''}`);
+      } else if (key === 'models') {
+        console.log(JSON.stringify(cfg.models, null, 2));
+      } else if (key === 'providers') {
+        console.log(JSON.stringify(cfg.providers, null, 2));
       } else if (key === 'yzj') {
         console.log(JSON.stringify(cfg.channels?.yzj ?? null, null, 2));
       } else if (key === 'yzj.webhook-url') {

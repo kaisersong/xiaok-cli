@@ -46,6 +46,7 @@ export class ScrollRegionManager {
     lastStatusLine = '';
     lastInputValue = '';
     lastInputCursor = 0;
+    lastOverlayRenderRows = 0;
     /** Number of terminal rows the welcome screen occupies. */
     _welcomeRows = 0;
     /** Total content rows written since begin() (including welcome). */
@@ -107,6 +108,13 @@ export class ScrollRegionManager {
      */
     getStatusBarRow() {
         return this.config.rows;
+    }
+    getOverlayVisibleLines(lines, inputRows) {
+        const maxOverlayRows = Math.max(0, this.config.rows - inputRows - 1);
+        if (maxOverlayRows <= 0) {
+            return [];
+        }
+        return lines.slice(-maxOverlayRows);
     }
     /**
      * Calculate cursor column after the "❯ " prefix.
@@ -214,11 +222,15 @@ export class ScrollRegionManager {
         this.lastInputCursor = frame.cursor;
         this.lastInputPrompt = frame.placeholder;
         this.lastStatusLine = frame.statusLine;
+        if ((frame.overlayLines?.length ?? 0) > 0) {
+            this.renderOverlayPromptFrame(frame);
+            return;
+        }
         this.renderFooter({
             inputPrompt: frame.placeholder,
             statusLine: frame.statusLine,
         });
-        this.renderOverlay(frame.overlayLines ?? []);
+        this.lastOverlayRenderRows = 0;
     }
     /**
      * Render input in the fixed footer area.
@@ -296,7 +308,7 @@ export class ScrollRegionManager {
         this.stream.write(RESET_SCROLL_REGION);
         // Clear previous and current editor rows. This prevents stale rows when
         // the input grows or shrinks between redraws.
-        const clearStartRow = Math.min(previousInputStartRow, inputStartRow);
+        const clearStartRow = Math.max(1, Math.min(previousInputStartRow - this.lastOverlayRenderRows, inputStartRow));
         for (let row = clearStartRow; row <= inputEndRow; row += 1) {
             this.stream.write(`\x1b[${row};1H${CLEAR_LINE}`);
         }
@@ -315,27 +327,60 @@ export class ScrollRegionManager {
             this.stream.write(this.padLineWithBg(`${prefix}${textPrefix}${line}`, cols));
         });
         this.lastInputRenderRows = inputRows;
+        this.lastOverlayRenderRows = 0;
         // Restore scroll region
         this.setScrollRegion();
         // Position cursor after restoring the scroll region. Some terminals move
         // the cursor when DECSTBM is applied, so this must be the final cursor op.
         this.positionCursorForInput();
     }
-    renderOverlay(lines) {
-        if (!this.active || lines.length === 0)
-            return;
-        const inputBarRow = this.getInputStartRow();
-        const scrollBottom = this.getScrollBottom();
-        const maxOverlayLines = Math.max(0, inputBarRow - scrollBottom - 1);
-        const visibleLines = lines.slice(-maxOverlayLines);
-        const overlayStart = Math.max(scrollBottom + 1, inputBarRow - visibleLines.length);
-        visibleLines.forEach((line, index) => {
-            const row = overlayStart + index;
-            if (row >= inputBarRow)
-                return;
-            this.stream.write(`${MOVE_TO_ROW.replace('%d', String(row))}${CLEAR_LINE}${line}`);
+    renderOverlayPromptFrame(frame) {
+        const cols = this.config.columns;
+        const inputState = this.lastInputValue
+            ? this.getFooterInputState(this.lastInputValue, this.lastInputCursor)
+            : undefined;
+        const inputLines = inputState?.visibleLines ?? [frame.placeholder];
+        const inputRows = Math.max(1, inputLines.length);
+        const overlayLines = this.getOverlayVisibleLines(frame.overlayLines ?? [], inputRows);
+        const overlayRows = overlayLines.length;
+        const inputStartRow = this.config.rows - inputRows + 1;
+        const overlayStartRow = Math.max(1, inputStartRow - overlayRows);
+        const scrollBottom = Math.max(1, overlayStartRow - 1);
+        const isPlaceholder = !this.lastInputValue;
+        this.stream.write(RESET_SCROLL_REGION);
+        for (let row = overlayStartRow; row <= this.config.rows; row += 1) {
+            this.stream.write(`\x1b[${row};1H${CLEAR_LINE}`);
+        }
+        overlayLines.forEach((line, index) => {
+            const row = overlayStartRow + index;
+            this.stream.write(`\x1b[${row};1H${CLEAR_LINE}${this.padLine(line, cols, false)}`);
         });
-        this.positionCursorForInput();
+        inputLines.forEach((line, index) => {
+            const row = inputStartRow + index;
+            const prefix = index === 0
+                ? `${INPUT_BG}${PROMPT_FG}❯${RESET_FG} `
+                : `${INPUT_BG}  `;
+            const textPrefix = isPlaceholder ? DIM : '';
+            this.stream.write(`\x1b[${row};1H${CLEAR_LINE}`);
+            this.stream.write(this.padLineWithBg(`${prefix}${textPrefix}${line}`, cols));
+        });
+        this.lastInputRenderRows = inputRows;
+        this.lastOverlayRenderRows = overlayRows;
+        this.setScrollRegion(scrollBottom);
+        this.positionCursorForOverlayInput(inputState, inputLines.length);
+    }
+    positionCursorForOverlayInput(inputState, inputRows) {
+        const inputStartRow = this.config.rows - inputRows + 1;
+        if (!this.lastInputValue || !inputState) {
+            this.stream.write(`\x1b[${inputStartRow};${this.getCursorBase()}H`);
+            return;
+        }
+        const cursorVisibleLine = Math.max(0, Math.min(inputState.cursorLine - inputState.visibleStart, inputState.visibleLines.length - 1));
+        const cursorRow = inputStartRow + cursorVisibleLine;
+        const cursorLineText = inputState.lines[inputState.cursorLine] ?? '';
+        const cursorCol = this.getCursorBase()
+            + getDisplayWidth(cursorLineText.slice(0, inputState.cursorColumn));
+        this.stream.write(`\x1b[${cursorRow};${cursorCol}H`);
     }
     /**
      * Position the cursor in the input bar for typing.
@@ -494,8 +539,7 @@ export class ScrollRegionManager {
     /**
      * Set the scroll region ANSI sequence.
      */
-    setScrollRegion() {
-        const scrollEnd = this.getScrollBottom();
+    setScrollRegion(scrollEnd = this.getScrollBottom()) {
         this.stream.write(SET_SCROLL_REGION.replace('%d', String(scrollEnd)));
     }
     /**

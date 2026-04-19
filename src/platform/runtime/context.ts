@@ -12,6 +12,9 @@ import { createSandboxPolicy } from '../sandbox/policy.js';
 import { FileTeamStore } from '../teams/store.js';
 import { createTeamService, type TeamService } from '../teams/service.js';
 import { createWorktreeManager, type WorktreeManager } from '../worktrees/manager.js';
+import { ReminderClientService } from '../../runtime/reminder/client.js';
+import { resolveXiaokDaemonSocketPath } from '../../runtime/reminder/ipc.js';
+import { createReminderService, type ReminderApi } from '../../runtime/reminder/service.js';
 import { CapabilityRegistry } from './capability-registry.js';
 import { FileCapabilityHealthStore } from './health-store.js';
 import {
@@ -42,6 +45,8 @@ export interface PlatformRuntimeContext {
   worktreeManager: WorktreeManager;
   mcpTools: Tool[];
   capabilityRegistry: CapabilityRegistry;
+  reminderDefaultTimeZone: string;
+  createReminderApi(sessionId: string, creatorUserId: string): ReminderApi;
   health: PlatformRuntimeHealth;
   dispose(): Promise<void>;
   listBackgroundJobs(sessionId: string): BackgroundJobRecord[];
@@ -72,6 +77,8 @@ export interface PlatformRuntimeHealth {
 export interface CreatePlatformRuntimeContextOptions {
   cwd: string;
   builtinCommands: string[];
+  reminderMode?: 'daemon' | 'local';
+  reminderSocketPath?: string;
 }
 
 export async function createPlatformRuntimeContext(
@@ -86,6 +93,24 @@ export async function createPlatformRuntimeContext(
   const stateRootDir = join(options.cwd, '.xiaok', 'state');
   const healthStore = new FileCapabilityHealthStore(join(stateRootDir, 'capability-health.json'));
   const teamService = createTeamService({ store: new FileTeamStore(join(stateRootDir, 'teams.json')) });
+  const reminderDefaultTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC';
+  const reminderApis: ReminderApi[] = [];
+  const createReminderApi = (sessionId: string, creatorUserId: string): ReminderApi => {
+    const api = options.reminderMode === 'local'
+      ? createReminderService({
+        dbPath: join(stateRootDir, 'reminders.sqlite'),
+        defaultTimeZone: reminderDefaultTimeZone,
+      })
+      : new ReminderClientService({
+        workspaceRoot: options.cwd,
+        sessionId,
+        creatorUserId,
+        defaultTimeZone: reminderDefaultTimeZone,
+        socketPath: options.reminderSocketPath ?? resolveXiaokDaemonSocketPath(),
+      });
+    reminderApis.push(api);
+    return api;
+  };
   const sandboxPolicy = createSandboxPolicy({
     pathAllowlist: [options.cwd, join(options.cwd, '.xiaok'), join(options.cwd, '.worktrees')],
     network: 'allow',
@@ -142,8 +167,13 @@ export async function createPlatformRuntimeContext(
     worktreeManager,
     mcpTools,
     capabilityRegistry,
+    reminderDefaultTimeZone,
+    createReminderApi,
     health,
     async dispose() {
+      for (const reminderApi of reminderApis.splice(0)) {
+        await reminderApi.dispose();
+      }
       for (const disposable of disposables.splice(0).reverse()) {
         try {
           disposable.dispose();

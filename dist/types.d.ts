@@ -4,6 +4,7 @@ import type { RuntimeEvent } from './runtime/events.js';
 import type { AgentSessionSnapshot } from './ai/runtime/session.js';
 import type { PromptCacheSegments } from './ai/runtime/model-capabilities.js';
 import type { PromptSnapshot } from './ai/prompts/types.js';
+import type { ModelConfigEntry, ProviderConfig, ProviderId } from './ai/providers/types.js';
 export type { MessageBlock, UsageStats };
 export interface ModelAdapter {
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string): AsyncIterable<StreamChunk>;
@@ -77,7 +78,7 @@ export interface YZJChannelConfig {
     secret?: string;
     namedChannels?: YZJNamedChannel[];
 }
-export interface Config {
+export interface LegacyConfig {
     schemaVersion: 1;
     defaultModel: 'claude' | 'openai' | 'custom';
     models: {
@@ -105,9 +106,24 @@ export interface Config {
         yzj?: YZJChannelConfig;
     };
 }
+export interface Config {
+    schemaVersion: 2;
+    defaultProvider: ProviderId;
+    defaultModelId: string;
+    providers: Record<string, ProviderConfig>;
+    models: Record<string, ModelConfigEntry>;
+    devApp?: {
+        appKey: string;
+        appSecret: string;
+    };
+    defaultMode: 'interactive';
+    channels?: {
+        yzj?: YZJChannelConfig;
+    };
+}
 export declare const DEFAULT_CONFIG: Config;
-/** 校验 defaultModel 是否合法，防止脏数据写入 */
-export declare function isValidProvider(v: unknown): v is Config['defaultModel'];
+/** 校验 legacy defaultModel 是否合法，防止脏数据写入 */
+export declare function isValidLegacyProvider(v: unknown): v is LegacyConfig['defaultModel'];
 export interface PermissionSettings {
     permissions?: {
         allow?: string[];

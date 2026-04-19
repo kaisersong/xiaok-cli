@@ -1,9 +1,15 @@
 // tests/ai/adapters/openai.test.ts
 import { describe, it, expect, vi } from 'vitest';
 
+const openAIConstructorCalls: unknown[] = [];
+
 vi.mock('openai', () => {
   return {
     default: class OpenAI {
+      constructor(opts?: unknown) {
+        openAIConstructorCalls.push(opts);
+      }
+
       chat = {
         completions: {
           create: vi.fn(),
@@ -14,6 +20,40 @@ vi.mock('openai', () => {
 });
 
 describe('OpenAIAdapter', () => {
+  it('spoofs a supported coding-agent user agent for kimi coding endpoints', async () => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    openAIConstructorCalls.length = 0;
+    new OpenAIAdapter('test-key', 'kimi-for-coding', 'https://api.kimi.com/coding/v1');
+
+    expect(openAIConstructorCalls).toHaveLength(1);
+    expect(openAIConstructorCalls[0]).toMatchObject({
+      apiKey: 'test-key',
+      baseURL: 'https://api.kimi.com/coding/v1',
+      defaultHeaders: {
+        'User-Agent': 'claude-code/1.0',
+      },
+    });
+  });
+
+  it('keeps the default openai sdk user agent for non-kimi endpoints', async () => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    openAIConstructorCalls.length = 0;
+    new OpenAIAdapter('test-key', 'gpt-4o', 'https://api.openai.com/v1');
+
+    expect(openAIConstructorCalls).toHaveLength(1);
+    expect(openAIConstructorCalls[0]).toMatchObject({
+      apiKey: 'test-key',
+      baseURL: 'https://api.openai.com/v1',
+    });
+    expect(openAIConstructorCalls[0]).not.toMatchObject({
+      defaultHeaders: {
+        'User-Agent': 'claude-code/1.0',
+      },
+    });
+  });
+
   it('emits text chunks from streaming response', async () => {
     const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
 

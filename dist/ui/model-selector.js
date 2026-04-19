@@ -1,34 +1,31 @@
 import { stdin, stdout } from 'process';
 import { boldCyan, dim } from './render.js';
+import { getProviderProfile } from '../ai/providers/registry.js';
+export function buildModelOptions(config) {
+    return Object.entries(config.models).map(([id, modelEntry]) => {
+        const providerConfig = config.providers[modelEntry.provider];
+        const providerProfile = getProviderProfile(modelEntry.provider);
+        const providerLabel = providerProfile?.label ?? modelEntry.provider;
+        const providerDesc = providerConfig?.type === 'custom'
+            ? `Custom (${providerConfig.baseUrl ?? 'no baseUrl'})`
+            : providerLabel;
+        return {
+            id,
+            provider: modelEntry.provider,
+            model: modelEntry.model,
+            label: modelEntry.label,
+            desc: providerDesc,
+        };
+    });
+}
 export async function selectModel(config) {
-    const models = [];
-    if (config.models.claude?.model) {
-        models.push({
-            provider: 'claude',
-            model: config.models.claude.model,
-            desc: 'Claude'
-        });
-    }
-    if (config.models.openai?.model) {
-        models.push({
-            provider: 'openai',
-            model: config.models.openai.model,
-            desc: 'OpenAI'
-        });
-    }
-    if (config.models.custom?.model && config.models.custom?.baseUrl) {
-        models.push({
-            provider: 'custom',
-            model: config.models.custom.model,
-            desc: `Custom (${config.models.custom.baseUrl})`
-        });
-    }
+    const models = buildModelOptions(config);
     if (models.length === 0) {
         stdout.write('未配置任何模型。请先运行 xiaok config set 配置模型。\n');
         return null;
     }
-    const currentProvider = config.defaultModel ?? 'claude';
-    let selectedIdx = models.findIndex(m => m.provider === currentProvider);
+    const currentModelId = config.defaultModelId;
+    let selectedIdx = models.findIndex(m => m.id === currentModelId);
     if (selectedIdx === -1)
         selectedIdx = 0;
     return new Promise((resolve) => {
@@ -38,7 +35,7 @@ export async function selectModel(config) {
                 const m = models[i];
                 const isSelected = i === selectedIdx;
                 const prefix = isSelected ? boldCyan('❯') : ' ';
-                const modelStr = isSelected ? boldCyan(`[${m.provider}] ${m.model}`) : dim(`[${m.provider}] ${m.model}`);
+                const modelStr = isSelected ? boldCyan(`[${m.provider}] ${m.label}`) : dim(`[${m.provider}] ${m.label}`);
                 const descStr = dim(m.desc);
                 stdout.write(`\n  ${prefix} ${modelStr} - ${descStr}`);
             }
@@ -70,7 +67,7 @@ export async function selectModel(config) {
             }
             if (key === '\r' || key === '\n') {
                 const selected = models[selectedIdx];
-                done({ provider: selected.provider, model: selected.model });
+                done({ modelId: selected.id, provider: selected.provider, model: selected.model, label: selected.label });
                 return;
             }
             if (key === '\x1b[A') {

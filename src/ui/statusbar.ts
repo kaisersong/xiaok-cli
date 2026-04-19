@@ -146,10 +146,6 @@ export class StatusBar {
     if (!this.enabled || !this.activity) return "";
 
     const elapsedMs = Math.max(0, now - this.activity.startedAt);
-    if (elapsedMs < LIVE_RENDER_DELAY_MS) {
-      return "";
-    }
-
     const frame = LIVE_FRAMES[frameIndex % LIVE_FRAMES.length] ?? LIVE_FRAMES[0];
     const elapsed = formatElapsed(elapsedMs);
     const label = resolveActivityLabel(this.activity.label, elapsedMs);

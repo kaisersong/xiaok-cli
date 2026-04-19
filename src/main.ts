@@ -7,6 +7,7 @@ import { registerCommitCommands } from './commands/commit.js';
 import { registerDoctorCommands } from './commands/doctor.js';
 import { registerInitCommands } from './commands/init.js';
 import { registerPrCommands } from './commands/pr.js';
+import { registerDaemonCommands } from './commands/reminder.js';
 import { registerReviewCommands } from './commands/review.js';
 import { registerTranscriptCommands } from './commands/transcript.js';
 import { registerYZJCommands } from './commands/yzj.js';
@@ -25,6 +26,7 @@ program
 registerAuthCommands(program);
 registerConfigCommands(program);
 registerCommitCommands(program);
+registerDaemonCommands(program);
 registerDoctorCommands(program);
 registerInitCommands(program);
 registerPrCommands(program);

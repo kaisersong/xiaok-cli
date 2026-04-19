@@ -194,8 +194,38 @@ describe('scroll-region prompt frame ownership', () => {
 
     const output = getOutput();
     expect(output).toContain('/mo');
-    expect(output).toContain('gpt-5.4 · 5%');
     expect(output).toContain('/mode  Show or change permission mode');
+  });
+
+  it('renders multiple slash menu rows above the input when overlay is open', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderPromptFrame({
+        inputValue: '/',
+        cursor: 1,
+        placeholder: 'Type your message...',
+        statusLine: 'gpt-5.4 · 5%',
+        overlayLines: [
+          '  ❯ /clear  Clear the screen',
+          '    /commit  Commit staged changes',
+          '    /context  Show loaded repo context',
+          '    /doctor  Inspect local CLI health',
+        ],
+      });
+
+      const lines = harness.screen.lines();
+      expect(lines.some((line) => line.includes('/clear'))).toBe(true);
+      expect(lines.some((line) => line.includes('/commit'))).toBe(true);
+      expect(lines.some((line) => line.includes('/context'))).toBe(true);
+      expect(lines.some((line) => line.includes('/doctor'))).toBe(true);
+      expect(lines.some((line) => line.includes('gpt-5.4 · 5%'))).toBe(false);
+      expect(lines[23]).toContain('❯ /');
+    } finally {
+      harness.restore();
+    }
   });
 });
 

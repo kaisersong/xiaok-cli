@@ -201,6 +201,25 @@ describe('renderWelcomeScreen', () => {
     // Logo is loaded from data/logo.txt which may not be available in test-dist
     // Skip logo assertion in test environment
   });
+
+  it('does not emit carriage returns when loading the logo from a Windows CRLF file', () => {
+    process.stdout.columns = 100;
+
+    const lines: string[] = [];
+    console.log = ((...args: unknown[]) => {
+      lines.push(args.join(' '));
+    }) as typeof console.log;
+
+    renderWelcomeScreen({
+      model: 'gpt-5.4',
+      cwd: 'C:/Users/song',
+      sessionId: 'session-crlf',
+      mode: 'default',
+      version: '0.5.8',
+    });
+
+    expect(lines.some((line) => line.includes('\r'))).toBe(false);
+  });
 });
 
 describe('formatHistoryBlock', () => {

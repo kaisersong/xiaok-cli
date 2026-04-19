@@ -23,8 +23,9 @@ describe('config', () => {
 
   it('returns DEFAULT_CONFIG when no config file exists', async () => {
     const config = await loadConfig();
-    expect(config.schemaVersion).toBe(1);
-    expect(config.defaultModel).toBe('claude');
+    expect(config.schemaVersion).toBe(2);
+    expect(config.defaultProvider).toBe('anthropic');
+    expect(config.defaultModelId).toBe('anthropic-default');
   });
 
   it('reads and parses valid config file', async () => {
@@ -54,8 +55,8 @@ describe('config', () => {
 
     const config = await loadConfig();
 
-    expect(config.models.claude?.apiKey).toBe('test-key');
-    expect(config.models.claude?.model).toBe(DEFAULT_CONFIG.models.claude?.model);
+    expect(config.providers.anthropic?.apiKey).toBe('test-key');
+    expect(config.models['anthropic-default']?.model).toBe(DEFAULT_CONFIG.models['anthropic-default']?.model);
   });
 
   it('merges yzj channel config with defaults', async () => {
@@ -117,6 +118,6 @@ describe('config', () => {
     const cfg = { ...DEFAULT_CONFIG, contextBudget: 2000 };
     await saveConfig(cfg);
     const loaded = await loadConfig();
-    expect(loaded.contextBudget).toBe(2000);
+    expect((loaded as typeof loaded & { contextBudget?: number }).contextBudget).toBe(2000);
   });
 });

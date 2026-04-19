@@ -43,6 +43,7 @@ export declare class ScrollRegionManager {
     private lastStatusLine;
     private lastInputValue;
     private lastInputCursor;
+    private lastOverlayRenderRows;
     /** Number of terminal rows the welcome screen occupies. */
     private _welcomeRows;
     /** Total content rows written since begin() (including welcome). */
@@ -83,6 +84,7 @@ export declare class ScrollRegionManager {
      * Calculate the status bar row (fixed footer bottom row).
      */
     private getStatusBarRow;
+    private getOverlayVisibleLines;
     /**
      * Calculate cursor column after the "❯ " prefix.
      * "❯" is at column 1, space at column 2, text starts at column 3.
@@ -132,7 +134,8 @@ export declare class ScrollRegionManager {
         inputPrompt?: string;
         statusLine?: string;
     }): void;
-    private renderOverlay;
+    private renderOverlayPromptFrame;
+    private positionCursorForOverlayInput;
     /**
      * Position the cursor in the input bar for typing.
      * When showing a placeholder (no user input), cursor goes to column 3 (after "❯ ").
