@@ -30,6 +30,47 @@ COLS = 120
 SPINNER_LABELS = ("Thinking", "Answering", "Working")
 
 
+def resolve_command(primary: str, fallback: str) -> str:
+    resolved = shutil.which(primary) or shutil.which(fallback)
+    return resolved or fallback
+
+
+def shell_quote_posix(value: str) -> str:
+    return shlex.quote(value)
+
+
+def shell_quote_cmd(value: str) -> str:
+    escaped = value.replace("^", "^^").replace("&", "^&").replace("|", "^|")
+    return escaped.replace("<", "^<").replace(">", "^>").replace('"', '""')
+
+
+def build_cli_launch_command(project_dir: Path, config_dir: Path, cli_entry: Path) -> str:
+    node_cmd = resolve_command("node.exe" if os.name == "nt" else "node", "node")
+    if os.name == "nt":
+        project_value = str(project_dir).replace('"', '""')
+        config_value = shell_quote_cmd(str(config_dir))
+        node_value = str(node_cmd).replace('"', '""')
+        cli_value = str(cli_entry).replace('"', '""')
+        return (
+            'cmd /v:on /c "'
+            f'cd /d "{project_value}" && '
+            f'set "XIAOK_CONFIG_DIR={config_value}" && '
+            f'"{node_value}" "{cli_value}" --auto 2>nul'
+            '"'
+        )
+
+    return " ".join(
+        [
+            f"cd {shell_quote_posix(str(project_dir))} &&",
+            f"XIAOK_CONFIG_DIR={shell_quote_posix(str(config_dir))}",
+            shell_quote_posix(node_cmd),
+            shell_quote_posix(str(cli_entry)),
+            "--auto",
+            "2>/dev/null",
+        ],
+    )
+
+
 class FakeOpenAIServer:
     def __init__(self, responses: list[str], first_token_delay: float = 0.9) -> None:
         self.responses = responses
@@ -93,17 +134,20 @@ class FakeOpenAIServer:
 
 
 class TmuxHarness:
-    def __init__(self, session: str, project_dir: Path, config_dir: Path, cli_entry: Path) -> None:
+    def __init__(self, session: str, project_dir: Path, config_dir: Path, cli_entry: Path, tmux_bin: str) -> None:
         self.session = session
         self.project_dir = project_dir
         self.config_dir = config_dir
         self.cli_entry = cli_entry
+        self.tmux_bin = tmux_bin
 
     def tmux(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
-            ["tmux", *args],
+            [self.tmux_bin, *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
         if check and result.returncode != 0:
@@ -112,7 +156,7 @@ class TmuxHarness:
 
     def start(self) -> None:
         self.tmux("kill-session", "-t", self.session, check=False)
-        self.tmux(
+        args = [
             "new-session",
             "-d",
             "-s",
@@ -121,18 +165,15 @@ class TmuxHarness:
             str(COLS),
             "-y",
             str(ROWS),
-            "-c",
-            str(self.project_dir),
+        ]
+        if os.name == "nt":
+            args.append(os.environ.get("COMSPEC") or "cmd.exe")
+        else:
+            args.extend(["-c", str(self.project_dir)])
+        self.tmux(
+            *args,
         )
-        command = " ".join(
-            [
-                f"XIAOK_CONFIG_DIR={shlex.quote(str(self.config_dir))}",
-                shlex.quote(shutil.which("node") or "node"),
-                shlex.quote(str(self.cli_entry)),
-                "--auto",
-                "2>/dev/null",
-            ],
-        )
+        command = build_cli_launch_command(self.project_dir, self.config_dir, self.cli_entry)
         self.tmux("send-keys", "-t", self.session, command, "Enter")
 
     def stop(self) -> None:
@@ -236,6 +277,7 @@ def assert_activity_above_prompt_with_gap(content: str) -> None:
 def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
     cli_entry = project_dir / "dist" / "index.js"
     assert_true(cli_entry.exists(), f"CLI entry not found: {cli_entry}")
+    tmux_bin = os.environ.get("TMUX_BINARY") or resolve_command("tmux.exe" if os.name == "nt" else "tmux", "tmux")
 
     work_root = Path(tempfile.mkdtemp(prefix="xiaok-terminal-e2e-"))
     project_fixture = work_root / "project"
@@ -249,7 +291,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
     write_config(config_dir, server.base_url)
 
     session = f"xiaok-e2e-{os.getpid()}"
-    tmux = TmuxHarness(session, project_fixture, config_dir, cli_entry)
+    tmux = TmuxHarness(session, project_fixture, config_dir, cli_entry, tmux_bin)
 
     try:
         tmux.start()
@@ -372,7 +414,15 @@ def main() -> int:
     print(f"Project: {project_dir}")
     print("=" * 72)
 
-    result = subprocess.run(["npm", "run", "build"], cwd=project_dir, text=True, timeout=60)
+    npm_cmd = resolve_command("npm.cmd" if os.name == "nt" else "npm", "npm")
+    result = subprocess.run(
+        [npm_cmd, "run", "build"],
+        cwd=project_dir,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
     if result.returncode != 0:
         return result.returncode
 

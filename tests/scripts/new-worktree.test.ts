@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildWorktreePath, planWorktreeAdd, sanitizeBranchName } from '../../scripts/new-worktree.mjs';
+import { buildWorktreePath, planWorktreeAdd, sanitizeBranchName } from '../../scripts/new-worktree.js';
 
 describe('sanitizeBranchName', () => {
   it('normalizes whitespace for branch names', () => {

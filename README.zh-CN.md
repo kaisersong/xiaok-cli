@@ -4,7 +4,7 @@
 
 面向金蝶苍穹与云之家开发者的 AI 编程 CLI。
 
-English | [简体中文](README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 ---
 
@@ -24,8 +24,9 @@ English | [简体中文](README.zh-CN.md)
 1. 本地终端交互式对话：`xiaok`
 2. 恢复上次会话：`xiaok -c`
 3. 单次任务执行：`xiaok "review the changes"`
-4. 云之家 IM 接入：`xiaok yzj serve`
-5. 嵌入式 Channel：会话内 `/yzjchannel` 直连移动端
+4. 启动本地 daemon：`xiaok daemon start`
+5. 云之家 IM 接入：`xiaok yzj serve`
+6. 嵌入式 Channel：会话内 `/yzjchannel` 直连移动端
 
 ---
 
@@ -105,12 +106,35 @@ npm run build
 
 ```json
 {
-  "schemaVersion": 1,
-  "defaultModel": "claude",
+  "schemaVersion": 2,
+  "defaultProvider": "anthropic",
+  "defaultModelId": "anthropic-default",
+  "providers": {
+    "anthropic": {
+      "type": "first_party",
+      "protocol": "anthropic",
+      "apiKey": "your-api-key",
+      "baseUrl": "https://api.anthropic.com"
+    },
+    "kimi": {
+      "type": "first_party",
+      "protocol": "openai_legacy",
+      "apiKey": "your-kimi-key",
+      "baseUrl": "https://api.kimi.com/coding/v1"
+    }
+  },
   "models": {
-    "claude": {
+    "anthropic-default": {
+      "provider": "anthropic",
       "model": "claude-opus-4-6",
-      "apiKey": "your-api-key"
+      "label": "Anthropic Default",
+      "capabilities": ["tools"]
+    },
+    "kimi-k2-thinking": {
+      "provider": "kimi",
+      "model": "kimi-k2-thinking",
+      "label": "Kimi K2 Thinking",
+      "capabilities": ["tools", "thinking"]
     }
   },
   "channels": {
@@ -120,6 +144,16 @@ npm run build
     }
   }
 }
+```
+
+旧的 schema v1 配置会在加载时自动迁移。也可以直接用 CLI 维护 provider 和 model catalog：
+
+```bash
+xiaok config set model anthropic
+xiaok config set model kimi/kimi-k2-thinking
+xiaok config set api-key <key> --provider kimi
+xiaok config get providers
+xiaok config get models
 ```
 
 **项目配置：** `<repo>/.xiaok/settings.json`
@@ -145,6 +179,11 @@ xiaok --resume <session-id>
 # 单次任务
 xiaok "review the current workspace changes"
 
+# 管理本地 daemon
+xiaok daemon start
+xiaok daemon status
+xiaok daemon stop
+
 # 启动云之家 IM 网关
 xiaok yzj serve
 ```
@@ -153,6 +192,7 @@ xiaok yzj serve
 
 ```text
 /mode [default|auto|plan]     切换权限模式
+/models                       切换模型
 /tasks                        列出活跃任务
 /task <id>                    查看任务详情
 /yzjchannel                   连接云之家 channel
@@ -211,10 +251,11 @@ xiaok yzj serve
 ### 核心功能
 
 - **7 层 Prompt 架构** — CC 风格 section 函数，静态/动态分界，每 turn 动态注入
-- **多模型支持** — Claude/OpenAI 适配器，自动重试与指数退避
+- **Provider catalog + 多模型** — 内置 Anthropic/OpenAI/Kimi/DeepSeek/GLM/MiniMax/Gemini 一等 provider，并支持自定义 endpoint
 - **Bash 安全** — block/warn/safe 三级分类，拦截危险命令
 - **工具输入校验** — JSON Schema 验证器，每次调用前校验
 - **类型化记忆** — user/feedback/project/reference 分类存储
+- **本地 daemon + 提醒** — 基于 SQLite 的 durable reminder scheduler，daemon/client 隔离
 
 ### 技能系统
 
@@ -247,6 +288,13 @@ xiaok yzj serve
 - **自动保存** — 每次对话自动保存
 - **恢复会话** — `xiaok -c` 恢复上次，`xiaok --resume <id>` 恢复指定
 - **Session ID** — 退出时显示，方便追溯
+
+### 本地 Daemon 与提醒
+
+- **`xiaok daemon` 宿主** — `start/status/stop/restart/update/serve`
+- **按 OS 用户单例运行** — 多个 chat 实例共享一个本地 daemon
+- **Durable reminder** — SQLite 持久化、恢复、重试、按 session 绑定投递
+- **实例互不拖垮** — daemon 异常不阻塞 chat 启动，chat 退出不影响 daemon
 
 ### 云之家 IM 集成
 
@@ -287,16 +335,19 @@ xiaok yzj serve
 src/
   ai/
     prompts/sections/    7 个独立 section 函数
-    adapters/            Claude/OpenAI 适配器
+    adapters/            Anthropic/OpenAI/OpenAI Responses 适配器
     agents/              自定义 agent + 内置 explore/plan/verification
     memory/              类型化文件记忆
+    providers/           Provider profile、协议映射、配置归一化
     runtime/             agent runtime、compact runner
     skills/              技能加载器、规划器
-    tools/               read/write/edit/bash/grep/glob/web/lsp
+    tools/               read/write/edit/bash/grep/glob/web/lsp/reminders
     permissions/         三层权限策略引擎
   channels/              渠道网关、任务/审批/会话
   commands/              CLI 命令
   platform/              MCP/LSP 插件、worktree 隔离
+  runtime/daemon/        通用本地 daemon 宿主与控制面
+  runtime/reminder/      提醒调度、SQLite store、daemon/client 桥接
   ui/                    终端 UI：流式 Markdown、状态栏
 ```
 
@@ -306,7 +357,7 @@ src/
 
 ```bash
 npm run build       # 构建
-npm test            # 运行测试（600 个测试，133 个文件）
+npm test            # 运行测试（756 个测试，153 个文件）
 npm run test:watch  # 监听模式
 npm run dev -- --help  # 从源码运行
 ```
@@ -321,14 +372,17 @@ npm run dev -- --help  # 从源码运行
 | Linux | 完全支持 |
 | Windows | 部分支持（Hook 有限制） |
 
-| 模型 | 支持 |
-|------|------|
-| Claude | 流式、prompt 缓存、图片输入 |
-| OpenAI | 流式、兼容 endpoint |
+| Provider / 协议 | 支持 |
+|-----------------|------|
+| Anthropic | 流式、prompt 缓存、图片输入 |
+| OpenAI 兼容 | 流式、兼容 endpoint、自定义 base URL |
+| Gemini (`openai_responses`) | Responses API 适配、tools、thinking |
 
 ---
 
 ## 版本日志
+
+**v0.6.0** — 本地 daemon、提醒与 provider catalog：新增共享 `xiaok daemon` 宿主和 reminder scheduling service，基于 SQLite 的 durable reminder store 与恢复机制，真实 daemon/client 端到端测试覆盖，Anthropic/OpenAI/Kimi/DeepSeek/GLM/MiniMax/Gemini provider profile registry，`providers + models + defaultModelId` 的 v2 配置结构，CLI/UI 多模型切换，以及面向 Gemini 的 OpenAI Responses 适配层。
 
 **v0.5.7** — 终端 UI 稳定化与主干本地集成：修复底部输入栏光标初始位置、输入栏背景重置、满行填充、多行输入渲染、首次提交时欢迎卡与终端旧 scrollback 的分隔，以及 `Thinking`/`Working` 等实时活动显示在输入栏上方并保留空白间隔且不重复底部状态栏信息；新增基于 tmux 的端到端终端测试，使用本地 OpenAI 兼容 SSE 服务；确认本地 `xiaok` 只链接主干并输出 `0.5.7`。
 

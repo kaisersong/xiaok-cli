@@ -4,7 +4,7 @@
 
 An AI coding CLI for Kingdee Cosmic and Yunzhijia developers.
 
-English | [简体中文](README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 ---
 
@@ -24,8 +24,9 @@ English | [简体中文](README.zh-CN.md)
 1. Local terminal interactive chat: `xiaok`
 2. Resume last session: `xiaok -c`
 3. Single-shot task: `xiaok "review the changes"`
-4. Yunzhijia IM integration: `xiaok yzj serve`
-5. Embedded Channel: `/yzjchannel` inside session for mobile access
+4. Start local daemon: `xiaok daemon start`
+5. Yunzhijia IM integration: `xiaok yzj serve`
+6. Embedded Channel: `/yzjchannel` inside session for mobile access
 
 ---
 
@@ -105,12 +106,35 @@ npm run build
 
 ```json
 {
-  "schemaVersion": 1,
-  "defaultModel": "claude",
+  "schemaVersion": 2,
+  "defaultProvider": "anthropic",
+  "defaultModelId": "anthropic-default",
+  "providers": {
+    "anthropic": {
+      "type": "first_party",
+      "protocol": "anthropic",
+      "apiKey": "your-api-key",
+      "baseUrl": "https://api.anthropic.com"
+    },
+    "kimi": {
+      "type": "first_party",
+      "protocol": "openai_legacy",
+      "apiKey": "your-kimi-key",
+      "baseUrl": "https://api.kimi.com/coding/v1"
+    }
+  },
   "models": {
-    "claude": {
+    "anthropic-default": {
+      "provider": "anthropic",
       "model": "claude-opus-4-6",
-      "apiKey": "your-api-key"
+      "label": "Anthropic Default",
+      "capabilities": ["tools"]
+    },
+    "kimi-k2-thinking": {
+      "provider": "kimi",
+      "model": "kimi-k2-thinking",
+      "label": "Kimi K2 Thinking",
+      "capabilities": ["tools", "thinking"]
     }
   },
   "channels": {
@@ -120,6 +144,16 @@ npm run build
     }
   }
 }
+```
+
+Version 1 configs are auto-migrated on load. You can also manage the catalog from CLI:
+
+```bash
+xiaok config set model anthropic
+xiaok config set model kimi/kimi-k2-thinking
+xiaok config set api-key <key> --provider kimi
+xiaok config get providers
+xiaok config get models
 ```
 
 **Project Settings:** `<repo>/.xiaok/settings.json`
@@ -145,6 +179,11 @@ xiaok --resume <session-id>
 # Single task
 xiaok "review the current workspace changes"
 
+# Manage local daemon
+xiaok daemon start
+xiaok daemon status
+xiaok daemon stop
+
 # Start Yunzhijia IM gateway
 xiaok yzj serve
 ```
@@ -153,6 +192,7 @@ xiaok yzj serve
 
 ```text
 /mode [default|auto|plan]     Switch permission mode
+/models                       Switch model
 /tasks                        List active tasks
 /task <id>                    Show task details
 /yzjchannel                   Connect Yunzhijia channel
@@ -211,10 +251,11 @@ xiaok yzj serve
 ### Core
 
 - **7-layer prompt architecture** — CC-style section functions, static/dynamic boundary, per-turn injection
-- **Multi-model** — Claude/OpenAI adapters with auto-retry and exponential backoff
+- **Provider catalogs + multi-model** — first-party profiles for Anthropic/OpenAI/Kimi/DeepSeek/GLM/MiniMax/Gemini plus custom endpoints
 - **Bash safety** — block/warn/safe 3-level classification
 - **Tool input validation** — JSON Schema validator before each call
 - **Typed memory** — user/feedback/project/reference classification
+- **Local daemon + reminders** — durable reminder scheduler on SQLite with daemon/client isolation
 
 ### Skill System
 
@@ -247,6 +288,13 @@ Built-in `lsp` tool:
 - **Auto-save** — Every session auto-saved
 - **Resume** — `xiaok -c` for last, `xiaok --resume <id>` for specific
 - **Session ID** — Shown on exit for traceability
+
+### Local Daemon & Reminders
+
+- **`xiaok daemon` host** — `start/status/stop/restart/update/serve`
+- **Per-user daemon** — multiple chat instances share one local daemon
+- **Durable reminders** — SQLite-backed store, recovery, retry, bound-session delivery
+- **Instance isolation** — daemon failure does not block chat startup, client failure does not crash daemon
 
 ### Yunzhijia IM Integration
 
@@ -287,16 +335,19 @@ Built-in `lsp` tool:
 src/
   ai/
     prompts/sections/    7 independent section functions
-    adapters/            Claude/OpenAI adapters
+    adapters/            Anthropic/OpenAI/OpenAI Responses adapters
     agents/              Custom agent + built-in explore/plan/verification
     memory/              Typed file-based memory
+    providers/           Provider profiles, protocol mapping, config normalization
     runtime/             Agent runtime, compact runner
     skills/              Skill loader, planner
-    tools/               read/write/edit/bash/grep/glob/web/lsp
+    tools/               read/write/edit/bash/grep/glob/web/lsp/reminders
     permissions/         3-layer permission engine
   channels/              Channel gateways, task/approval/session
   commands/              CLI commands
   platform/              MCP/LSP plugins, worktree isolation
+  runtime/daemon/        Shared local daemon host and control plane
+  runtime/reminder/      Reminder scheduler, SQLite store, daemon/client bridge
   ui/                    Terminal UI: streaming markdown, status bar
 ```
 
@@ -306,7 +357,7 @@ src/
 
 ```bash
 npm run build       # Build
-npm test            # Run tests (600 tests, 133 files)
+npm test            # Run tests (756 tests, 153 files)
 npm run test:watch  # Watch mode
 npm run dev -- --help  # Run from source
 ```
@@ -321,14 +372,17 @@ npm run dev -- --help  # Run from source
 | Linux | Full |
 | Windows | Partial (Hook limitations) |
 
-| Model | Support |
-|-------|---------|
-| Claude | Streaming, prompt caching, image input |
-| OpenAI | Streaming, compatible endpoints |
+| Provider / Protocol | Support |
+|---------------------|---------|
+| Anthropic | Streaming, prompt caching, image input |
+| OpenAI-compatible | Streaming, compatible endpoints, custom base URLs |
+| Gemini (`openai_responses`) | Responses API adapter, tools, thinking |
 
 ---
 
 ## Version History
+
+**v0.6.0** — Local daemon, reminders, and provider catalogs: added the shared `xiaok daemon` host with reminder scheduling service, SQLite-backed durable reminder store and recovery, real daemon/client end-to-end coverage, provider profile registry for Anthropic/OpenAI/Kimi/DeepSeek/GLM/MiniMax/Gemini, config schema v2 with `providers + models + defaultModelId`, multi-model switching in CLI/UI, and OpenAI Responses adapter support for Gemini.
 
 **v0.5.7** — Terminal UI stabilization and local-main integration: fixed bottom input cursor placement, input bar background reset, full-width footer fill, multiline input rendering, first-submit welcome-card separation from terminal scrollback, and live activity placement above the input footer with a blank gap row and no duplicated footer status text; added tmux-based terminal E2E with a local OpenAI-compatible SSE server; verified main-workspace `xiaok` link reports `0.5.7`.
 

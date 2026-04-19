@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { grepTool } from '../../../src/ai/tools/grep.js';
+import { grepTool, runFallbackGrepSearch } from '../../../src/ai/tools/grep.js';
 
 describe('grepTool', () => {
   let dir: string;
@@ -23,5 +23,11 @@ describe('grepTool', () => {
   it('returns empty message when no matches', async () => {
     const result = await grepTool.execute({ pattern: 'zzznomatch', path: dir });
     expect(result).toContain('无匹配');
+  });
+
+  it('supports the pure node fallback when external grep commands are unavailable', async () => {
+    const result = await runFallbackGrepSearch({ pattern: 'hello', path: dir });
+    expect(result.some((line) => line.includes('hello world'))).toBe(true);
+    expect(result.some((line) => line.includes('hello again'))).toBe(true);
   });
 });

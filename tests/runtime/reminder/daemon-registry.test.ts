@@ -11,7 +11,7 @@ function createRegistration(overrides: Partial<ReminderDaemonSessionRegistration
     sessionId: 'sess_1',
     creatorUserId: 'user_1',
     workspaceRoot: 'D:/projects/xiaok-cli',
-    clientVersion: '0.5.7',
+    clientVersion: '0.6.0',
     protocolVersion: 1,
     heartbeatAt: 1_000,
     ...overrides,

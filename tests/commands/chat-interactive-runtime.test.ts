@@ -30,7 +30,7 @@ function extractLastUserText(messages: Message[]): string {
   }
 
   return lastUser.content
-    .filter((block) => block.type === 'text')
+    .filter((block) => block.type === 'text' && !block.text.startsWith('<system-reminder>'))
     .map((block) => block.text)
     .join('\n');
 }

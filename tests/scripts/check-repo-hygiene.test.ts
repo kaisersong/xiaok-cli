@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { evaluateRepoHealth, parseStatusPorcelain } from '../../scripts/check-repo-hygiene.mjs';
+import { evaluateRepoHealth, parseStatusPorcelain } from '../../scripts/check-repo-hygiene.js';
 
 describe('parseStatusPorcelain', () => {
   it('parses porcelain lines into entries', () => {
