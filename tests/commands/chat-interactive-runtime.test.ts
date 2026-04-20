@@ -176,6 +176,37 @@ function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithMode
         return;
       }
 
+      if (lastUserText.includes('多行结尾测试')) {
+        yield {
+          type: 'text',
+          delta: [
+            '适合中午的：',
+            '',
+            '- 快餐：鸡腿饭',
+            '- 面食：拉面',
+            '- 轻食：三明治',
+            '',
+            '想吃点重口还是清淡的？',
+          ].join('\n'),
+        };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('辣的续问')) {
+        yield {
+          type: 'text',
+          delta: [
+            '辣的午餐：',
+            '',
+            '- 川菜：麻婆豆腐饭',
+            '- 小吃：麻辣烫',
+          ].join('\n'),
+        };
+        yield { type: 'done' };
+        return;
+      }
+
       if (lastUserText.includes('延迟回复')) {
         await new Promise((resolve) => setTimeout(resolve, 1_500));
         yield { type: 'text', delta: 'delayed reply' };
@@ -1308,7 +1339,7 @@ describe('chat interactive runtime', () => {
     }
   }, 15_000);
 
-  it('keeps a blank separator row between the previous answer and the next submitted input', async () => {
+  it('keeps the previous assistant tail visible after the next turn finishes', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
     const projectDir = join(rootDir, 'project');
@@ -1360,14 +1391,19 @@ describe('chat interactive runtime', () => {
 
       harness.send('next');
       harness.send('\r');
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('echo:next');
+      }, { timeoutMs: 3_000 });
       await waitForInputTurnReady(harness);
       {
         const lines = harness.screen.lines();
-        const answerIndex = lines.findIndex((line) => line.trim() === 'echo:hi');
+        const firstAnswerIndex = lines.findIndex((line) => line.trim() === 'echo:hi');
         const submittedIndex = lines.findIndex((line) => line.includes('› next'));
-        expect(answerIndex).toBeGreaterThanOrEqual(0);
-        expect(submittedIndex).toBeGreaterThan(answerIndex);
-        expect(lines[answerIndex + 1]).toBe('');
+        const secondAnswerIndex = lines.findIndex((line) => line.trim() === 'echo:next');
+        expect(firstAnswerIndex).toBeGreaterThanOrEqual(0);
+        expect(submittedIndex).toBeGreaterThan(firstAnswerIndex);
+        expect(secondAnswerIndex).toBeGreaterThan(submittedIndex);
+        expect(lines[firstAnswerIndex + 1]).toBe('');
       }
       harness.send('/exit');
       harness.send('\r');
@@ -1440,6 +1476,84 @@ describe('chat interactive runtime', () => {
         expect(harness.screen.text()).toContain('delayed reply');
       }, { timeoutMs: 3_000 });
       await waitForInputTurnReady(harness);
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 15_000);
+
+  it('keeps the last line of a multiline assistant reply visible after the next submitted input', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 30);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('多行结尾测试');
+      harness.send('\r');
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('想吃点重口还是清淡的？');
+      }, { timeoutMs: 3_000 });
+      await waitForInputTurnReady(harness);
+
+      harness.send('辣的续问');
+      harness.send('\r');
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('辣的午餐：');
+      }, { timeoutMs: 3_000 });
+      await waitForInputTurnReady(harness);
+
+      {
+        const lines = harness.screen.lines();
+        const tailIndex = lines.findIndex((line) => line.trim() === '想吃点重口还是清淡的？');
+        const submittedIndex = lines.findIndex((line) => line.includes('› 辣的续问'));
+        const secondAnswerIndex = lines.findIndex((line) => line.trim() === '辣的午餐：');
+
+        expect(tailIndex).toBeGreaterThanOrEqual(0);
+        expect(submittedIndex).toBeGreaterThan(tailIndex);
+        expect(secondAnswerIndex).toBeGreaterThan(submittedIndex);
+        expect(lines[tailIndex + 1]).toBe('');
+      }
 
       harness.send('/exit');
       harness.send('\r');

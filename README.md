@@ -382,6 +382,8 @@ npm run dev -- --help  # Run from source
 
 ## Version History
 
+**v0.6.4** — Terminal transcript preservation and input layout refinement: preserved the last assistant line across turns in the real tmux flow by returning separator writes to the tracked content cursor before appending the next submitted input, tightened real-terminal regression coverage for multiline reply tails, and shipped the content/input spacing polish with a thinner submitted-input block and a fuller input footer background.
+
 **v0.6.3** — Resume transcript and terminal UI polish: hid internal thinking blocks during session replay, fixed resumed sessions so the first new turn appends after replayed history instead of overwriting it, stabilized permission prompt persistence and overlay redraw behavior, and refined the terminal presentation with vertically centered submitted-input blocks plus a darker input footer for better contrast.
 
 **v0.6.2** — Chat slash consolidation for reminders and operator flow cleanup: merged reminder creation, listing, and cancellation into a single `/reminder <natural language> | list | cancel <id>` command, removed stale slash entries that should stay top-level CLI actions, and tightened interactive coverage so the slash menu, `/help`, redirect messaging, and transcript rendering stay aligned.

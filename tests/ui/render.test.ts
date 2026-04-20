@@ -123,11 +123,10 @@ describe('formatSubmittedInput', () => {
     const output = formatSubmittedInput('你好，开始吧');
     const lines = output.slice(0, -1).split('\n');
 
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toBe(' '.repeat(23));
-    expect(lines[1]?.startsWith(' › ')).toBe(true);
-    expect(getDisplayWidth(lines[1] ?? '')).toBe(23);
-    expect(lines[2]).toBe(' '.repeat(23));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]?.startsWith(' › ')).toBe(true);
+    expect(getDisplayWidth(lines[0] ?? '')).toBe(23);
+    expect(lines[1]).toBe(' '.repeat(23));
     setColorsEnabled(true);
   });
 });

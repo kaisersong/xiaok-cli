@@ -13,9 +13,10 @@
  * │ ⠴ Thinking(4m 12s • esc to int)  │  ← Live activity (bottom of scroll)
  * │                                  │  ← Gap row (empty)
  * │                                  │  ← Gap row (empty)
+ * │                                  │  ← Input background padding row
  * ├──────────────────────────────────┤
- * │ ❯ working...                     │  ← Input bar (fixed footer row 1)
- * │ gpt-5.4 · 0% · master · xiaok-cli│  ← Status bar (fixed footer row 2)
+ * │ ❯ working...                     │  ← Input bar text row
+ * │ gpt-5.4 · 0% · master · xiaok-cli│  ← Status bar (fixed footer bottom row)
  * └──────────────────────────────────┘
  */
 export interface ScrollRegionConfig {
@@ -83,7 +84,9 @@ export declare class ScrollRegionManager {
      * Calculate the input bar row where the last input line sits.
      */
     private getInputBarRow;
+    private getInputFrameRows;
     private getInputStartRow;
+    private getInputTextStartRow;
     /**
      * Calculate the status bar row (fixed footer bottom row).
      */
@@ -234,4 +237,5 @@ export declare class ScrollRegionManager {
      * The line should already have background set. Adds spaces and resets.
      */
     private padLineWithBg;
+    private padBackgroundRow;
 }

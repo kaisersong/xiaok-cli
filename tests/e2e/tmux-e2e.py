@@ -432,8 +432,23 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
     home_dir.mkdir(parents=True)
     (sandbox_fixture / "marker.txt").write_text("sandbox fixture\n", encoding="utf-8")
 
-    first_response = "E2E_RESPONSE_ONE"
-    second_response = "E2E_RESPONSE_TWO"
+    first_response = "\n".join([
+        "适合中午的：",
+        "",
+        "- 快餐：鸡腿饭",
+        "- 面食：拉面",
+        "- 轻食：三明治",
+        "",
+        "想吃点重口还是清淡的？",
+    ])
+    first_response_tail = "想吃点重口还是清淡的？"
+    second_response = "\n".join([
+        "辣的午餐：",
+        "",
+        "- 川菜：麻婆豆腐饭",
+        "- 小吃：麻辣烫",
+    ])
+    second_response_head = "辣的午餐："
     permission_response_one = "E2E_PERMISSION_RESPONSE_ONE"
     permission_response_two = "E2E_PERMISSION_RESPONSE_TWO"
     permission_command = "cmd /c echo E2E_PERMISSION_OK"
@@ -557,11 +572,11 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_true(submitted_index > welcome_index, f"first submitted input did not render below the welcome card:\n{first_pending}")
         assert_activity_above_prompt_with_gap(first_pending)
         first = tmux.wait_for(
-            lambda text: first_response in text and len(server.requests) >= 1 and footer_has_empty_prompt(text),
+            lambda text: first_response_tail in text and len(server.requests) >= 1 and footer_has_empty_prompt(text),
             timeout=20,
         )
         assert_contains(first, "first terminal request", "submitted user input disappeared")
-        assert_contains(first, first_response, "assistant response did not render")
+        assert_contains(first, first_response_tail, "assistant response tail did not render")
         assert_true(activity_line_count(first) <= 2, f"too many activity lines after first response:\n{first}")
         assert_true("❯" in "\n".join(visible_lines(first)[-4:]), "footer prompt missing after first response")
         print("PASS: first streamed response and footer are stable")
@@ -573,15 +588,15 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         tmux.send_key("Enter")
         second = tmux.wait_for(
             lambda text: (
-                first_response in text
-                and second_response in text
+                first_response_tail in text
+                and second_response_head in text
                 and len(server.requests) >= 2
                 and footer_has_empty_prompt(text)
             ),
             timeout=20,
         )
-        assert_contains(second, first_response, "first response was overwritten by second turn")
-        assert_contains(second, second_response, "second assistant response did not render")
+        assert_contains(second, first_response_tail, "first response tail was overwritten by second turn")
+        assert_contains(second, second_response_head, "second assistant response did not render")
         assert_true(activity_line_count(second) <= 2, f"too many activity lines after second response:\n{second}")
         print("PASS: multi-turn output remains visible without activity duplication")
 

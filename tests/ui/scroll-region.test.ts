@@ -264,9 +264,10 @@ describe('scroll-region prompt frame ownership', () => {
       const promptIndex = lines.findIndex((line) => line.includes('❯ /'));
 
       expect(overlayBottomIndex).toBeGreaterThanOrEqual(0);
-      expect(promptIndex).toBe(overlayBottomIndex + 3);
+      expect(promptIndex).toBe(overlayBottomIndex + 4);
       expect(lines[overlayBottomIndex + 1]).toBe('');
       expect(lines[overlayBottomIndex + 2]).toBe('');
+      expect(lines[overlayBottomIndex + 3]).toBe('');
     } finally {
       harness.restore();
     }
@@ -292,9 +293,10 @@ describe('scroll-region prompt frame ownership', () => {
       const overlayBottomIndex = lines.findIndex((line) => line.includes('line 30'));
 
       expect(overlayBottomIndex).toBeGreaterThanOrEqual(0);
-      expect(promptIndex).toBe(overlayBottomIndex + 3);
+      expect(promptIndex).toBe(overlayBottomIndex + 4);
       expect(lines[overlayBottomIndex + 1]).toBe('');
       expect(lines[overlayBottomIndex + 2]).toBe('');
+      expect(lines[overlayBottomIndex + 3]).toBe('');
     } finally {
       harness.restore();
     }
@@ -430,6 +432,7 @@ describe('ANSI compatibility', () => {
     const output = getOutput();
     // Footer uses absolute cursor positioning (\x1b[row;colH) to ensure
     // it renders at exact terminal bottom rows regardless of cursor state.
+    expect(output).toMatch(/\x1b\[22;1H\x1b\[2K\x1b\[48;5;238m +\x1b\[0m/);  // padded background row above the prompt
     expect(output).toMatch(/\x1b\[23;1H/);  // input bar at row 23
     expect(output).toMatch(/\x1b\[24;1H/);  // status bar at row 24
     expect(output).toContain('Type...');
@@ -442,7 +445,7 @@ describe('ANSI compatibility', () => {
     manager.renderFooter({ inputPrompt: 'Type...', statusLine: 'gpt-5.4' });
 
     const output = getOutput();
-    expect(output).toMatch(/\x1b\[1;20r\x1b\[23;3H$/);
+    expect(output).toMatch(/\x1b\[1;19r\x1b\[23;3H$/);
   });
 
   it('does not leave the input background SGR active after footer rendering', () => {
@@ -451,7 +454,7 @@ describe('ANSI compatibility', () => {
     manager.renderInput('abc', 3);
 
     const output = getOutput();
-    expect(output).toMatch(/\x1b\[0m\x1b\[24;1H\x1b\[2K(?:\x1b\[2m.*?\x1b\[0m)?\x1b\[1;20r\x1b\[23;6H$/);
+    expect(output).toMatch(/\x1b\[0m\x1b\[24;1H\x1b\[2K(?:\x1b\[2m.*?\x1b\[0m)?\x1b\[1;19r\x1b\[23;6H$/);
     expect(output).not.toMatch(/\x1b\[23;6H\x1b\[48;5;244m$/);
   });
 
@@ -529,7 +532,7 @@ describe('ANSI compatibility', () => {
     manager.renderActivity('⠙ Content');
 
     const output = getOutput();
-    expect(output).toContain('\x1b[20;1H');
+    expect(output).toContain('\x1b[19;1H');
     expect(output).toContain('⠋ Thinking');
     expect(output).toContain('⠙ Content');
   });
@@ -541,7 +544,7 @@ describe('ANSI compatibility', () => {
     manager.renderActivity('⠋ Thinking');
     const output = getOutput();
     expect(output).toContain('⠋ Thinking');
-    expect(output).toContain('\x1b[20;1H');
+    expect(output).toContain('\x1b[19;1H');
   });
 
   it('renders activity above the input footer with two blank gap rows', () => {
@@ -554,12 +557,13 @@ describe('ANSI compatibility', () => {
       manager.renderActivity('⠋ Thinking');
 
       const lines = harness.screen.lines();
-      expect(lines[19]).toContain('Thinking');
+      expect(lines[18]).toContain('Thinking');
+      expect(lines[19]).toBe('');
       expect(lines[20]).toBe('');
       expect(lines[21]).toBe('');
-      expect(lines[22]).toContain('❯ Type your message...');
       expect(lines[22]).not.toContain('Thinking');
       expect(lines[22]).not.toContain('working');
+      expect(lines[22]).toContain('❯ Type your message...');
       expect(lines[23]).toContain('gpt-5.4 · 5%');
     } finally {
       harness.restore();
@@ -939,12 +943,12 @@ describe('Bug 11: Terminal resize handling', () => {
 
   it('updateSize changes maxContentRows', () => {
     const { manager } = createMock(24, 80);
-    // Before: footerHeight=2, gapHeight=2, so maxContentRows = 24-2-2 = 20
-    expect((manager as any).maxContentRows).toBe(20);
+    // Before: 2 gap rows + padded input footer keep the scroll region bottom at row 19
+    expect((manager as any).maxContentRows).toBe(19);
 
     manager.updateSize(30, 100);
-    // After: maxContentRows = 30-2-2 = 26
-    expect((manager as any).maxContentRows).toBe(26);
+    // After resize the same chrome leaves the scroll region bottom at row 25
+    expect((manager as any).maxContentRows).toBe(25);
   });
 
   it('updateSize changes columns for wrap calculation', () => {
@@ -1123,6 +1127,47 @@ describe('streaming cursor handoff', () => {
     }
   });
 
+  it('moves the real terminal cursor back to the content tail before inserting separator newlines', () => {
+    const { manager, getOutput } = createMockScrollRegion();
+    const markdown = new MarkdownRenderer();
+
+    manager.begin();
+    manager.setWelcomeRows(12);
+    manager.renderFooter({
+      inputPrompt: 'Type your message...',
+      statusLine: 'claude-test · auto · 0% · xiaok-cli',
+    });
+
+    manager.clearLastInput();
+    manager.writeSubmittedInput(formatSubmittedInput('first question'));
+
+    markdown.setNewlineCallback(manager.getNewlineCallback());
+    manager.beginContentStreaming();
+    markdown.write('line 1\nline 2\nTAIL_LINE');
+    const flushResult = markdown.flush();
+    manager.advanceContentCursorByRenderedText(flushResult.renderedLine);
+    manager.endContentStreaming({
+      inputPrompt: 'Type your message...',
+      statusLine: 'claude-test · auto · 0% · xiaok-cli',
+    });
+
+    const contentRow = (manager as any)._cursorRow as number;
+    const contentCol = (manager as any)._cursorCol as number;
+    const before = getOutput().length;
+
+    manager.clearLastInput();
+    manager.writeSubmittedInput(formatSubmittedInput('second question'));
+
+    const delta = getOutput().slice(before);
+    const moveToContentCursor = `\x1b[${contentRow};1H`;
+    const moveToContentColumn = `\x1b[${contentCol + 1}G`;
+
+    expect(contentCol).toBeGreaterThan(0);
+    expect(delta.indexOf(moveToContentCursor)).toBeGreaterThanOrEqual(0);
+    expect(delta.indexOf(moveToContentColumn)).toBeGreaterThan(delta.indexOf(moveToContentCursor));
+    expect(delta.indexOf('\n')).toBeGreaterThan(delta.indexOf(moveToContentColumn));
+  });
+
   it('uses visible rows instead of ANSI bytes when advancing past a submitted input block', () => {
     const { manager, getOutput } = createMockScrollRegion();
     manager.begin();
@@ -1133,7 +1178,7 @@ describe('streaming cursor handoff', () => {
 
     const output = getOutput();
     expect(output).toContain('\x1b[15;1H');
-    expect(output).toContain('\x1b[18;1H');
-    expect(output).not.toContain('\x1b[20;1H\x1b[0m');
+    expect(output).toContain('\x1b[17;1H');
+    expect(output).not.toContain('\x1b[19;1H\x1b[0m');
   });
 });

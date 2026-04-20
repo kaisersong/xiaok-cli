@@ -274,11 +274,10 @@ export function formatSubmittedInput(text) {
     const lines = text
         .split(/\r?\n/)
         .flatMap((line) => wrapDisplayLine(line, textWidth));
-    return [
-        bgDarkGray(' '.repeat(safeWidth)),
-        ...lines.map((line) => bgDarkGray(padToDisplayWidth(`${prefix}${line}`, safeWidth))),
-        bgDarkGray(' '.repeat(safeWidth)),
-    ].join('\n') + '\n';
+    return lines
+        .map((line) => bgDarkGray(padToDisplayWidth(`${prefix}${line}`, safeWidth)))
+        .concat(bgDarkGray(' '.repeat(safeWidth)))
+        .join('\n') + '\n';
 }
 export function formatProgressNote(text) {
     return `  ${dim('·')} ${dim(text)}\n`;
