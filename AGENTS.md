@@ -74,15 +74,14 @@ Summary:
 
 ## Current Release Notes
 
-- `xiaok` is currently linked from the main workspace only and reports `0.6.5`.
+- `xiaok` is currently linked from the main workspace only and reports `0.6.6`.
 - Terminal E2E verification uses `tests/e2e/tmux-e2e.py`, which starts a local OpenAI-compatible SSE server and a real tmux TTY.
 - First submitted input keeps the startup welcome card above it until normal terminal scrolling moves it away; do not clear the content region on first submit.
 - Live activity such as `Thinking` and `Working` renders on the activity row above the input footer, with a blank gap row between activity and `❯`; activity lines must not repeat footer status fields such as model, mode, tokens, or project.
-- Verified after the 0.6.5 integration:
+- Verified after the 0.6.6 integration:
 - `npm run build`
-- `npm run test:sandbox`
-- `python3 tests/e2e/tmux-e2e.py`
-- tmux cursor smoke check: startup cursor is on the bottom input bar, and typing keeps it there.
+- `npm run test:sandbox:build`
+- `npm run test:sandbox:run -- .test-dist/tests/update/source-detection.test.js`
 
 ## Current Roadmap Docs
 

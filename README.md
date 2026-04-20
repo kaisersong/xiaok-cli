@@ -398,6 +398,8 @@ npm run dev -- --help  # Run from source
 
 ## Version History
 
+**v0.6.6** — Update command groundwork: added the first self-update foundation with install-source detection for git-backed checkouts, `npm link`, and npm-global `xiaokcode` installs, and locked the behavior down with a focused regression suite so later `xiaok update` work starts from a single normalized source-classification layer.
+
 **v0.6.5** — Permission prompt cleanup, runtime control-plane groundwork, and local crash capture: fixed the non-renderer permission menu clear path so closing approvals no longer leaves title rows behind or erases adjacent transcript output, introduced a resolved provider/model/auth control plane before adapter construction, added session-store interface extraction plus a SQLite + FTS5 local session store foundation, and now writes crash reports for top-level chat/runtime failures.
 
 **v0.6.4** — Terminal transcript preservation and input layout refinement: preserved the last assistant line across turns in the real tmux flow by returning separator writes to the tracked content cursor before appending the next submitted input, tightened real-terminal regression coverage for multiline reply tails, and shipped the content/input spacing polish with a thinner submitted-input block and a fuller input footer background.
