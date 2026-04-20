@@ -48,7 +48,9 @@ export class MarkdownRenderer {
             }
             else if (this.pendingLen > 0 && this.pendingLen >= line.length) {
                 // Full line was already rendered (or over-rendered) by pending.
-                // Just move cursor to next line without re-rendering.
+                // The pending text was written raw (unformatted); re-render with formatting.
+                process.stdout.write(`\r\x1b[2K`);
+                this.renderLine(line);
             }
             else {
                 // No pending text — this is a fresh complete line.
