@@ -398,6 +398,8 @@ npm run dev -- --help  # Run from source
 
 ## Version History
 
+**v0.6.7** — Permission approval transcript preservation and concrete command summaries: preserved renderer transcript rows around permission confirmations so recent tool lines stay visible, normalized permission-option styling so the menu text keeps a consistent weight, and changed generic bash `Ran` blocks to retain the concrete command instead of collapsing to a placeholder summary.
+
 **v0.6.6** — Update command groundwork: added the first self-update foundation with install-source detection for git-backed checkouts, `npm link`, and npm-global `xiaokcode` installs, and locked the behavior down with a focused regression suite so later `xiaok update` work starts from a single normalized source-classification layer.
 
 **v0.6.5** — Permission prompt cleanup, runtime control-plane groundwork, and local crash capture: fixed the non-renderer permission menu clear path so closing approvals no longer leaves title rows behind or erases adjacent transcript output, introduced a resolved provider/model/auth control plane before adapter construction, added session-store interface extraction plus a SQLite + FTS5 local session store foundation, and now writes crash reports for top-level chat/runtime failures.

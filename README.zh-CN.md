@@ -398,6 +398,8 @@ npm run dev -- --help  # 从源码运行
 
 ## 版本日志
 
+**v0.6.7** — 权限确认 transcript 保留与命令摘要修正：修复 renderer 权限确认前后最近工具输出行容易被覆盖的问题，统一权限菜单选项文字样式避免粗细不一致，并让 generic bash 的 `Ran` 卡片保留具体命令，而不是退化成“执行本地命令”。
+
 **v0.6.3** — resume transcript 与终端 UI 打磨：隐藏 session resume 回放中的内部 thinking 内容，修复 resume 后首轮输入会插进历史中间而不是接在末尾的问题，稳定权限弹窗持久化与 overlay 重绘行为，并继续打磨终端表现，让内容区提交块文字垂直居中、输入栏底色更深以提升对比度。
 
 **v0.6.2** — chat slash 收口与 reminder 入口统一：把 reminder 的创建、列表、取消合并成单一 `/reminder <自然语言> | list | cancel <id>` 命令，移除本应保留为顶层 CLI 的陈旧 slash 入口，并补强交互测试，确保 slash 菜单、`/help`、重定向提示和 transcript 渲染始终一致。

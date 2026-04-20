@@ -59,7 +59,11 @@ function describeDirectActivity(toolName, input) {
     if (toolName === 'bash') {
         const description = describeToolActivity(toolName, input, 'zh-CN');
         const item = stripKnownLabel(description, ['执行命令', 'Run command']);
-        return item ? { group: 'Ran', item } : null;
+        if (item && item !== '执行本地命令' && item !== 'Run local command') {
+            return { group: 'Ran', item };
+        }
+        const command = typeof input.command === 'string' ? singleLine(input.command) : '';
+        return command ? { group: 'Ran', item: command } : (item ? { group: 'Ran', item } : null);
     }
     if (toolName === 'write') {
         const file = summarizePath(input);

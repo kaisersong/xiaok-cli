@@ -427,10 +427,28 @@ export class ScrollRegionManager {
         // the cursor when DECSTBM is applied, so this must be the final cursor op.
         this.positionCursorForInput();
     }
+    reserveTranscriptRowsForOverlay(nextScrollBottom, previousScrollBottom) {
+        const clampedCurrentBottom = Math.max(1, previousScrollBottom);
+        const visibleContentRow = Math.max(1, Math.min(this._cursorRow, clampedCurrentBottom));
+        const rowsToScroll = Math.max(0, visibleContentRow - nextScrollBottom);
+        if (rowsToScroll === 0) {
+            return;
+        }
+        this.stream.write(SET_SCROLL_REGION.replace('%d', String(clampedCurrentBottom)));
+        this.stream.write(`${MOVE_TO_ROW.replace('%d', String(clampedCurrentBottom))}`);
+        for (let index = 0; index < rowsToScroll; index += 1) {
+            this.stream.write('\n');
+        }
+        this._cursorRow = Math.max(1, this._cursorRow - rowsToScroll);
+        this._contentEndRow = Math.max(0, this._contentEndRow - rowsToScroll);
+        this._streamStartRow = Math.max(1, this._streamStartRow - rowsToScroll);
+        this._cursorUncertain = false;
+    }
     renderOverlayPromptFrame(frame) {
         const cols = this.config.columns;
         const previousInputRows = this.lastInputRenderRows;
         const previousOverlayRows = this.lastOverlayRenderRows;
+        const previousScrollBottom = this.getScrollBottom();
         const inputState = this.lastInputValue
             ? this.getFooterInputState(this.lastInputValue, this.lastInputCursor)
             : undefined;
@@ -448,6 +466,7 @@ export class ScrollRegionManager {
         const scrollBottom = Math.max(1, overlayStartRow - 1);
         const isPlaceholder = !this.lastInputValue;
         this.stream.write(RESET_SCROLL_REGION);
+        this.reserveTranscriptRowsForOverlay(scrollBottom, previousScrollBottom);
         for (let row = clearStartRow; row <= statusBarRow; row += 1) {
             this.clearScreenRow(row);
         }

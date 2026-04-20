@@ -145,6 +145,7 @@ export declare class ScrollRegionManager {
         inputPrompt?: string;
         statusLine?: string;
     }): void;
+    private reserveTranscriptRowsForOverlay;
     private renderOverlayPromptFrame;
     private positionCursorForOverlayInput;
     /**

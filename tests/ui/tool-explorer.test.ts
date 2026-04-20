@@ -27,6 +27,18 @@ describe('ToolExplorer', () => {
     expect(output).toBe('  ╭─ Ran\n  │ 导出 PPT\n');
   });
 
+  it('keeps the concrete bash command in the Ran block when the generic summary would hide it', () => {
+    const explorer = new ToolExplorer();
+
+    const output = strip(explorer.record('bash', {
+      command: 'sqlite3 ~/.mempalace/knowledge_graph.sqlite3 ".tables" 2>/dev/null && echo ---',
+    }));
+
+    expect(output).toContain('  ╭─ Ran');
+    expect(output).toContain('sqlite3 ~/.mempalace/knowledge_graph.sqlite3 ".tables" 2>/dev/null && echo ---');
+    expect(output).not.toContain('执行本地命令');
+  });
+
   it('groups consecutive file changes under a Changed block', () => {
     const explorer = new ToolExplorer();
 

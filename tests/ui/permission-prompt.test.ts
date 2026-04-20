@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  buildPermissionPromptOptions,
   buildPermissionRequest,
   deriveRule,
   formatPermissionDecisionSummary,
@@ -131,6 +132,21 @@ describe('permission-prompt', () => {
         toolName: 'bash',
         summary: expect.stringContaining('git status'),
       });
+    });
+  });
+
+  describe('buildPermissionPromptOptions', () => {
+    it('builds plain-text option labels so selection styling is applied only once', () => {
+      const options = buildPermissionPromptOptions('bash(ls *)');
+
+      expect(options.map((option) => strip(option.label))).toEqual([
+        '允许一次',
+        '本次会话始终允许 bash(ls *)',
+        '始终允许 bash(ls *) (保存到项目)',
+        '始终允许 bash(ls *) (保存到全局)',
+        '拒绝',
+      ]);
+      expect(options.some((option) => /\x1b\[[0-9;]*m/.test(option.label))).toBe(false);
     });
   });
 
@@ -316,6 +332,85 @@ describe('permission-prompt', () => {
       expect(afterDecision).not.toContain('xiaok 想要执行以下操作');
       expect(afterDecision).not.toContain('工具: bash');
       expect(afterDecision).not.toContain('命令: cmd /c echo E2E_PERMISSION_OK');
+
+      harness.restore();
+    });
+
+    it('keeps the latest tool transcript rows visible above the renderer permission menu', async () => {
+      const harness = createTtyHarness(120, 24, { captureStderr: true });
+      const renderer = new ReplRenderer(process.stdout);
+      const scrollRegion = new ScrollRegionManager(process.stdout);
+      renderer.setScrollRegion(scrollRegion);
+
+      scrollRegion.begin();
+      scrollRegion.setWelcomeRows(10);
+      scrollRegion.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'kimi-for-coding · 3% · master · xiaok-cli',
+      });
+
+      scrollRegion.setContentCursor(scrollRegion.maxContentRows - 1);
+      scrollRegion.writeAtContentCursor('tool-row-1\ntool-row-2');
+      scrollRegion.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'kimi-for-coding · 3% · master · xiaok-cli',
+      });
+
+      const pending = showPermissionPrompt(
+        'bash',
+        { command: 'git status --short' },
+        { renderer },
+      );
+
+      const openScreen = harness.screen.text();
+      expect(openScreen).toContain('tool-row-1');
+      expect(openScreen).toContain('tool-row-2');
+      expect(openScreen).toContain('xiaok 想要执行以下操作');
+      expect(openScreen).toContain('命令: git status --short');
+
+      harness.send('\r');
+      await expect(pending).resolves.toEqual({ action: 'allow_once' });
+
+      harness.restore();
+    });
+
+    it('keeps renderer transcript rows above the permission menu after the decision closes it', async () => {
+      const harness = createTtyHarness(120, 24, { captureStderr: true });
+      const renderer = new ReplRenderer(process.stdout);
+      const scrollRegion = new ScrollRegionManager(process.stdout);
+      renderer.setScrollRegion(scrollRegion);
+
+      scrollRegion.begin();
+      scrollRegion.setWelcomeRows(10);
+      scrollRegion.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'kimi-for-coding · 3% · master · xiaok-cli',
+      });
+
+      scrollRegion.setContentCursor(scrollRegion.maxContentRows - 1);
+      scrollRegion.writeAtContentCursor('  ╭─ Ran\n  │ sqlite3 ~/.mempalace/knowledge_graph.sqlite3 ".tables"\n');
+      scrollRegion.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'kimi-for-coding · 3% · master · xiaok-cli',
+      });
+
+      const pending = showPermissionPrompt(
+        'bash',
+        { command: 'sqlite3 ~/.mempalace/knowledge_graph.sqlite3 ".tables"' },
+        { renderer },
+      );
+
+      harness.send('\r');
+      await expect(pending).resolves.toEqual({ action: 'allow_once' });
+      scrollRegion.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'kimi-for-coding · 3% · master · xiaok-cli',
+      });
+
+      const closedScreen = harness.screen.text();
+      expect(closedScreen).toContain('╭─ Ran');
+      expect(closedScreen).toContain('sqlite3 ~/.mempalace/knowledge_graph.sqlite3 ".tables"');
+      expect(closedScreen).not.toContain('xiaok 想要执行以下操作');
 
       harness.restore();
     });

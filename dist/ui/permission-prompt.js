@@ -1,6 +1,6 @@
 import { stdin, stdout } from 'process';
 import { dirname } from 'path';
-import { boldCyan, dim, yellow, bold } from './render.js';
+import { boldCyan, dim, yellow } from './render.js';
 import { getUiCopy } from './locale.js';
 function singleLine(text) {
     return text.replace(/\s+/g, ' ').trim();
@@ -69,6 +69,16 @@ function compactRuleForOption(rule, maxLength = 72) {
     const tailLength = Math.floor(availableInner / 2);
     return `${prefix}${inner.slice(0, headLength)}...${inner.slice(-tailLength)}${suffix}`;
 }
+export function buildPermissionPromptOptions(rule) {
+    const displayRule = compactRuleForOption(rule);
+    return [
+        { label: '允许一次', choice: { action: 'allow_once' } },
+        { label: `本次会话始终允许 ${displayRule}`, choice: { action: 'allow_session', rule } },
+        { label: `始终允许 ${displayRule} (保存到项目)`, choice: { action: 'allow_project', rule } },
+        { label: `始终允许 ${displayRule} (保存到全局)`, choice: { action: 'allow_global', rule } },
+        { label: '拒绝', choice: { action: 'deny' } },
+    ];
+}
 export function formatPermissionPromptLines(toolName, input, options, locale = 'zh-CN') {
     const copy = getUiCopy(locale);
     const target = extractTarget(input, locale);
@@ -93,21 +103,13 @@ export function formatPermissionPromptLines(toolName, input, options, locale = '
  */
 export async function showPermissionPrompt(toolName, input, config) {
     const rule = deriveRule(toolName, input);
-    const displayRule = compactRuleForOption(rule);
     const transcriptLogger = config?.transcriptLogger;
     const renderer = config?.renderer;
     const useRenderer = Boolean(renderer &&
         (renderer.hasActiveScrollRegion() ||
             renderer.getState().prompt !== '' ||
             renderer.getState().input.value !== ''));
-    // 构建选项列表
-    const promptOptions = [
-        { label: '允许一次', choice: { action: 'allow_once' } },
-        { label: `本次会话始终允许 ${bold(displayRule)}`, choice: { action: 'allow_session', rule } },
-        { label: `始终允许 ${bold(displayRule)} (保存到项目)`, choice: { action: 'allow_project', rule } },
-        { label: `始终允许 ${bold(displayRule)} (保存到全局)`, choice: { action: 'allow_global', rule } },
-        { label: '拒绝', choice: { action: 'deny' } },
-    ];
+    const promptOptions = buildPermissionPromptOptions(rule);
     // 非 TTY 环境下默认拒绝
     if (!stdin.isTTY) {
         return { action: 'deny' };

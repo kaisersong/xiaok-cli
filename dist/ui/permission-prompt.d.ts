@@ -2,6 +2,10 @@ import type { PermissionChoice } from '../types.js';
 import { type UiLocale } from './locale.js';
 import type { TranscriptLogger } from './transcript.js';
 import type { ReplRenderer } from './repl-renderer.js';
+interface PromptOption {
+    label: string;
+    choice: PermissionChoice;
+}
 interface PromptRenderOption {
     label: string;
     selected: boolean;
@@ -16,6 +20,7 @@ export interface PermissionRequestPayload {
 export declare function deriveRule(toolName: string, input: Record<string, unknown>): string;
 export declare function buildPermissionRequest(toolName: string, input: Record<string, unknown>): PermissionRequestPayload;
 export declare function formatPermissionDecisionSummary(_choice: PermissionChoice): string;
+export declare function buildPermissionPromptOptions(rule: string): PromptOption[];
 export declare function formatPermissionPromptLines(toolName: string, input: Record<string, unknown>, options: PromptRenderOption[], locale?: UiLocale): string[];
 /**
  * 交互式权限确认选择器。
