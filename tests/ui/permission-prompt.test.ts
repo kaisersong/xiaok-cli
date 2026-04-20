@@ -225,7 +225,8 @@ describe('permission-prompt', () => {
 
       const screen = harness.screen.text();
       expect(screen).toContain('用户输入内容');
-      expect(screen).toContain('xiaok 想要执行以下操作');
+      expect(screen).not.toContain('xiaok 想要执行以下操作');
+      expect(screen).not.toContain('工具: bash');
 
       harness.restore();
     });
@@ -315,6 +316,40 @@ describe('permission-prompt', () => {
       expect(afterDecision).not.toContain('xiaok 想要执行以下操作');
       expect(afterDecision).not.toContain('工具: bash');
       expect(afterDecision).not.toContain('命令: cmd /c echo E2E_PERMISSION_OK');
+
+      harness.restore();
+    });
+
+    it('does not damage surrounding transcript lines when the non-renderer menu closes', async () => {
+      const harness = createTtyHarness();
+      process.stdout.write('REAL_OUTPUT_ABOVE_MENU\n');
+
+      const pending = showPermissionPrompt('bash', { command: 'ls' });
+      const totalLines = formatPermissionPromptLines(
+        'bash',
+        { command: 'ls' },
+        [
+          { label: '允许一次', selected: true },
+          { label: '本次会话始终允许 bash(ls *)', selected: false },
+          { label: '始终允许 bash(ls *) (保存到项目)', selected: false },
+          { label: '始终允许 bash(ls *) (保存到全局)', selected: false },
+          { label: '拒绝', selected: false },
+        ],
+      ).length;
+
+      process.stdout.write('\x1b7');
+      process.stdout.write(`\x1b[${totalLines}B\r`);
+      process.stdout.write('REAL_OUTPUT_BELOW_MENU');
+      process.stdout.write('\x1b8');
+
+      harness.send('\r');
+      await expect(pending).resolves.toEqual({ action: 'allow_once' });
+
+      const screen = harness.screen.text();
+      expect(screen).toContain('REAL_OUTPUT_ABOVE_MENU');
+      expect(screen).toContain('REAL_OUTPUT_BELOW_MENU');
+      expect(screen).not.toContain('xiaok 想要执行以下操作');
+      expect(screen).not.toContain('工具: bash');
 
       harness.restore();
     });

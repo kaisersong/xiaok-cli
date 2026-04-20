@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { Message, UsageStats } from '../../../src/types.js';
 import { FileSessionStore } from '../../../src/ai/runtime/session-store.js';
+import { createFileSessionStore } from '../../../src/ai/runtime/session-store/file-store.js';
+import type { SessionStore } from '../../../src/ai/runtime/session-store/store.js';
 
 describe('FileSessionStore', () => {
   let rootDir: string;
@@ -135,6 +137,37 @@ describe('FileSessionStore', () => {
     expect(forked.memoryRefs).toEqual(['mem_1']);
     expect(forked.approvalRefs).toEqual(['apr_1']);
     expect(forked.backgroundJobRefs).toEqual(['bg_1']);
+  });
+
+  it('keeps save/load/loadLast/list/fork working through the shared SessionStore contract', async () => {
+    const store: SessionStore = createFileSessionStore(rootDir);
+
+    await store.save({
+      sessionId: 'sess_contract',
+      cwd: '/contract',
+      createdAt: 100,
+      updatedAt: 200,
+      lineage: ['sess_contract'],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'contract preview' }] }],
+      usage: { inputTokens: 1, outputTokens: 2 },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
+    });
+
+    const loaded = await store.load('sess_contract');
+    const last = await store.loadLast();
+    const listed = await store.list();
+    const forked = await store.fork('sess_contract');
+
+    expect(loaded?.sessionId).toBe('sess_contract');
+    expect(last?.sessionId).toBe('sess_contract');
+    expect(listed[0]).toMatchObject({
+      sessionId: 'sess_contract',
+      preview: 'contract preview',
+    });
+    expect(forked.forkedFromSessionId).toBe('sess_contract');
   });
 
   describe('loadLast', () => {

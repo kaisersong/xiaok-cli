@@ -202,7 +202,10 @@ export async function showPermissionPrompt(
       ).length;
       stdout.write('\x1b7'); // save cursor
       for (let i = 0; i < totalLines; i++) {
-        stdout.write('\n\x1b[2K');
+        stdout.write('\x1b[2K');
+        if (i < totalLines - 1) {
+          stdout.write('\x1b[B\r');
+        }
       }
       stdout.write('\x1b8'); // restore cursor
     };

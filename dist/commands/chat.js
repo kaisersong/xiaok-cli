@@ -41,6 +41,7 @@ import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
 import { extractSandboxAllowedPaths } from '../platform/sandbox/policy.js';
 import { FileTranscriptLogger } from '../ui/transcript.js';
+import { setCrashContext } from '../utils/crash-reporter.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
 import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
 import { executeNamedSubAgent } from '../ai/agents/subagent-executor.js';
@@ -1310,6 +1311,15 @@ export function registerChatCommands(program) {
         .option('--fork-session <id>', '从已有会话分叉一个新会话')
         .argument('[input]', '单次任务描述（省略则进入交互模式）')
         .action(async (input, opts) => {
-        await runChat(input, opts);
+        setCrashContext({ command: 'chat', args: process.argv.slice(2), cwd: process.cwd() });
+        try {
+            await runChat(input, opts);
+        }
+        catch (error) {
+            const { reportCrash } = await import('../utils/crash-reporter.js');
+            const path = await reportCrash(error);
+            writeError(`运行中断，崩溃报告已保存: ${path}`);
+            process.exit(1);
+        }
     });
 }

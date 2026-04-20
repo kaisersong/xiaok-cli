@@ -11,6 +11,8 @@ import { registerDaemonCommands } from './commands/reminder.js';
 import { registerReviewCommands } from './commands/review.js';
 import { registerTranscriptCommands } from './commands/transcript.js';
 import { registerYZJCommands } from './commands/yzj.js';
+import { installGlobalCrashHandlers } from './utils/crash-reporter.js';
+installGlobalCrashHandlers();
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const program = new Command();
 program

@@ -1,35 +1,4 @@
-import type { Message, UsageStats } from '../../types.js';
-import type { CompactionRecord } from './session.js';
-export interface PersistedSessionSnapshot {
-    sessionId: string;
-    cwd: string;
-    model?: string;
-    createdAt: number;
-    updatedAt: number;
-    forkedFromSessionId?: string;
-    lineage: string[];
-    messages: Message[];
-    usage: UsageStats;
-    compactions: CompactionRecord[];
-    promptSnapshotId?: string;
-    memoryRefs: string[];
-    approvalRefs: string[];
-    backgroundJobRefs: string[];
-}
-export interface SessionListEntry {
-    sessionId: string;
-    cwd: string;
-    updatedAt: number;
-    preview: string;
-}
-export declare class FileSessionStore {
-    private readonly rootDir;
-    constructor(rootDir?: string);
-    createSessionId(): string;
-    save(snapshot: PersistedSessionSnapshot): Promise<void>;
-    loadLast(): Promise<PersistedSessionSnapshot | null>;
-    load(sessionId: string): Promise<PersistedSessionSnapshot | null>;
-    list(): Promise<SessionListEntry[]>;
-    fork(sessionId: string): Promise<PersistedSessionSnapshot>;
-    private getFilePath;
-}
+export type { PersistedSessionSnapshot, SessionListEntry, SessionStore } from './session-store/store.js';
+export { FileSessionStore, createFileSessionStore } from './session-store/file-store.js';
+export type { SessionMessageSearchHit } from './session-store/sqlite-store.js';
+export { SQLiteSessionStore } from './session-store/sqlite-store.js';
