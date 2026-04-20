@@ -13,7 +13,7 @@
     "test": "npm run test:sandbox",
     "test:full": "vitest run",
     "test:watch": "vitest",
-    "test:sandbox:build": "tsc -p tsconfig.tests.json",
+    "test:sandbox:build": "tsc -p tsconfig.tests.json && node -e \"const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); fs.mkdirSync('.test-dist',{recursive:true}); fs.writeFileSync('.test-dist/package.json', JSON.stringify({version:pkg.version,type:'module'}, null, 2));\"",
     "test:sandbox:run": "node -r ./tests/support/vite-net-use-patch.cjs ./node_modules/vitest/vitest.mjs run --config vitest.sandbox.config.mjs --configLoader runner",
     "test:sandbox": "npm run test:sandbox:build && npm run test:sandbox:run",
     "test:autonomy": "vitest run tests/agent/autonomy-test-cases.test.ts",

@@ -9,12 +9,12 @@
  */
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
+import { getConfigDir } from '../../utils/config.js';
 /**
  * 从 ~/.xiaok/settings.json 加载 MCP servers
  */
 export function loadSettingsMcpServers() {
-    const settingsPath = join(homedir(), '.xiaok', 'settings.json');
+    const settingsPath = join(getConfigDir(), 'settings.json');
     if (!existsSync(settingsPath)) {
         return {};
     }

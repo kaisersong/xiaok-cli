@@ -10,8 +10,8 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 import type { PlatformPluginRuntimeState } from '../plugins/runtime.js';
+import { getConfigDir } from '../../utils/config.js';
 import type {
   SettingsMcpServers,
   McpServerConfig,
@@ -22,7 +22,7 @@ import type {
  * 从 ~/.xiaok/settings.json 加载 MCP servers
  */
 export function loadSettingsMcpServers(): SettingsMcpServers {
-  const settingsPath = join(homedir(), '.xiaok', 'settings.json');
+  const settingsPath = join(getConfigDir(), 'settings.json');
 
   if (!existsSync(settingsPath)) {
     return {};

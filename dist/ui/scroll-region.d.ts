@@ -69,6 +69,9 @@ export declare class ScrollRegionManager {
     private _streamStartRow;
     /** Number of rows currently occupied by the input editor above status. */
     private lastInputRenderRows;
+    /** Last screen rows occupied by footer/overlay chrome, used to clear stale rows after terminal resize. */
+    private lastFooterClearStartRow;
+    private lastFooterClearEndRow;
     constructor(stream?: NodeJS.WriteStream, config?: ScrollRegionConfig);
     private clampCursorRow;
     private maxInputRows;
@@ -87,6 +90,7 @@ export declare class ScrollRegionManager {
     private getStatusBarRow;
     private getOverlayVisibleLines;
     private clearScreenRow;
+    private clearRenderedFooterRows;
     /**
      * Calculate cursor column after the "❯ " prefix.
      * "❯" is at column 1, space at column 2, text starts at column 3.

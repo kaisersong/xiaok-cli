@@ -72,6 +72,9 @@ export class ScrollRegionManager {
     _streamStartRow = 1;
     /** Number of rows currently occupied by the input editor above status. */
     lastInputRenderRows = 1;
+    /** Last screen rows occupied by footer/overlay chrome, used to clear stale rows after terminal resize. */
+    lastFooterClearStartRow = 0;
+    lastFooterClearEndRow = 0;
     constructor(stream = process.stdout, config) {
         this.stream = stream;
         const rows = stream.rows ?? 24;
@@ -122,6 +125,15 @@ export class ScrollRegionManager {
     }
     clearScreenRow(row) {
         this.stream.write(`\x1b[${row};1H${CLEAR_LINE}`);
+    }
+    clearRenderedFooterRows() {
+        const fallbackStart = this.getInputStartRow();
+        const fallbackEnd = this.getStatusBarRow();
+        const start = this.lastFooterClearStartRow || fallbackStart;
+        const end = this.lastFooterClearEndRow || fallbackEnd;
+        for (let row = Math.max(1, start); row <= Math.max(start, end); row += 1) {
+            this.clearScreenRow(row);
+        }
     }
     /**
      * Calculate cursor column after the "❯ " prefix.
@@ -202,6 +214,10 @@ export class ScrollRegionManager {
      * Update terminal size.
      */
     updateSize(rows, columns) {
+        if (this.active) {
+            this.stream.write(RESET_SCROLL_REGION);
+            this.clearRenderedFooterRows();
+        }
         this.config = { ...this.config, rows, columns };
         if (this.active) {
             // Re-apply scroll region with new size
@@ -224,6 +240,8 @@ export class ScrollRegionManager {
         this.lastInputCursor = 0;
         this.lastStatusLine = '';
         this.lastInputRenderRows = 1;
+        this.lastFooterClearStartRow = 0;
+        this.lastFooterClearEndRow = 0;
         // Set scroll region (rows 1 to scrollBottom)
         this.setScrollRegion();
         // Clear entire screen and move cursor to top-left.
@@ -255,6 +273,8 @@ export class ScrollRegionManager {
         this.lastInputPrompt = '';
         this.lastInputValue = '';
         this.lastStatusLine = '';
+        this.lastFooterClearStartRow = 0;
+        this.lastFooterClearEndRow = 0;
     }
     /**
      * Check if scroll region is active.
@@ -369,7 +389,7 @@ export class ScrollRegionManager {
                 : `${INPUT_BG}  `;
             this.stream.write(`\x1b[${row};1H${CLEAR_LINE}`);
             if (isPlaceholder) {
-                this.stream.write(`${prefix}${DIM}${line}${RESET_ALL}`);
+                this.stream.write(this.padLineWithBg(`${prefix}${DIM}${line}`, cols));
             }
             else {
                 this.stream.write(this.padLineWithBg(`${prefix}${line}`, cols));
@@ -383,6 +403,8 @@ export class ScrollRegionManager {
         }
         this.lastInputRenderRows = inputRows;
         this.lastOverlayRenderRows = 0;
+        this.lastFooterClearStartRow = clearStartRow;
+        this.lastFooterClearEndRow = statusBarRow;
         // Restore scroll region
         this.setScrollRegion();
         // Position cursor after restoring the scroll region. Some terminals move
@@ -423,7 +445,7 @@ export class ScrollRegionManager {
                 : `${INPUT_BG}  `;
             this.clearScreenRow(row);
             if (isPlaceholder) {
-                this.stream.write(`${prefix}${DIM}${line}${RESET_ALL}`);
+                this.stream.write(this.padLineWithBg(`${prefix}${DIM}${line}`, cols));
             }
             else {
                 this.stream.write(this.padLineWithBg(`${prefix}${line}`, cols));
@@ -431,6 +453,8 @@ export class ScrollRegionManager {
         });
         this.lastInputRenderRows = inputRows;
         this.lastOverlayRenderRows = overlayRows;
+        this.lastFooterClearStartRow = clearStartRow;
+        this.lastFooterClearEndRow = statusBarRow;
         this.setScrollRegion(scrollBottom);
         this.positionCursorForOverlayInput(inputState, inputLines.length);
     }

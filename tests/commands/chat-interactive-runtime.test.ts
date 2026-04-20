@@ -634,6 +634,7 @@ describe('chat interactive runtime', () => {
         expect(newAnswerIndex).toBeGreaterThan(newSubmittedIndex);
       }, { timeoutMs: 3_000 });
 
+      await waitForInputTurnReady(harness);
       harness.send('/exit');
       harness.send('\r');
       await pending;
@@ -740,6 +741,7 @@ describe('chat interactive runtime', () => {
         expect(newAnswerIndex).toBeGreaterThan(newSubmittedIndex);
       }, { timeoutMs: 3_000 });
 
+      await waitForInputTurnReady(harness);
       harness.send('/exit');
       harness.send('\r');
       await pending;

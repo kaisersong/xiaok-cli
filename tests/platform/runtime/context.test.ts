@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createPlatformRuntimeContext } from '../../../src/platform/runtime/context.js';
 import { FileCapabilityHealthStore } from '../../../src/platform/runtime/health-store.js';
 import { resolvePluginShellCommand } from '../../../src/platform/plugins/runtime.js';
@@ -34,8 +34,23 @@ function writePlugin(
 
 describe('platform runtime context', () => {
   const tempDirs: string[] = [];
+  let originalConfigDir: string | undefined;
+
+  beforeEach(() => {
+    originalConfigDir = process.env.XIAOK_CONFIG_DIR;
+    const configDir = join(tmpdir(), `xiaok-platform-config-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(configDir);
+    mkdirSync(configDir, { recursive: true });
+    process.env.XIAOK_CONFIG_DIR = configDir;
+  });
 
   afterEach(() => {
+    if (originalConfigDir === undefined) {
+      delete process.env.XIAOK_CONFIG_DIR;
+    } else {
+      process.env.XIAOK_CONFIG_DIR = originalConfigDir;
+    }
+
     for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }

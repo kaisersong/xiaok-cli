@@ -77,6 +77,16 @@ describe('ScrollRegionManager activity rendering', () => {
       expect(output).toContain('Type your message...');
       expect(output).toContain('gpt-5.4 · 5%');
     });
+
+    it('pads placeholder input with footer background across the row', () => {
+      const { manager, getOutput } = createMockScrollRegion();
+      manager.begin();
+
+      manager.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'gpt-5.4' });
+
+      const output = getOutput();
+      expect(output).toMatch(/❯\x1b\[22;39m \x1b\[2mType your message\.\.\. +\x1b\[0m/);
+    });
   });
 });
 
@@ -953,6 +963,31 @@ describe('Bug 11: Terminal resize handling', () => {
 
     // On wider terminal, fewer wraps should occur
     expect(rowAfter100).toBeLessThanOrEqual(rowAfter80);
+  });
+
+  it('clears the old footer rows when a Mac terminal resize moves the footer down', () => {
+    const harness = createTtyHarness(80, 30);
+    const manager = new ScrollRegionManager(process.stdout, {
+      footerHeight: 2,
+      gapHeight: 2,
+      rows: 24,
+      columns: 80,
+    });
+
+    try {
+      manager.begin();
+      manager.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'gpt-5.4 · 6% · master' });
+
+      manager.updateSize(30, 80);
+
+      const lines = harness.screen.lines();
+      expect(lines[22]).not.toContain('Type your message...');
+      expect(lines[23]).not.toContain('gpt-5.4');
+      expect(lines[28]).toContain('❯ Type your message...');
+      expect(lines[29]).toContain('gpt-5.4 · 6% · master');
+    } finally {
+      harness.restore();
+    }
   });
 });
 

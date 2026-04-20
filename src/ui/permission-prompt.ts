@@ -57,12 +57,6 @@ export function deriveRule(toolName: string, input: Record<string, unknown>): st
   return toolName;
 }
 
-/** 截断过长文本 */
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return text.slice(0, max - 3) + '...';
-}
-
 export function buildPermissionRequest(toolName: string, input: Record<string, unknown>): PermissionRequestPayload {
   const target = extractTarget(input);
   return {
@@ -75,6 +69,28 @@ export function buildPermissionRequest(toolName: string, input: Record<string, u
 
 export function formatPermissionDecisionSummary(_choice: PermissionChoice): string {
   return '';
+}
+
+function compactRuleForOption(rule: string, maxLength = 72): string {
+  if (rule.length <= maxLength) return rule;
+
+  const openParen = rule.indexOf('(');
+  const closeParen = rule.lastIndexOf(')');
+  if (openParen < 0 || closeParen <= openParen) {
+    return `${rule.slice(0, maxLength - 3)}...`;
+  }
+
+  const prefix = rule.slice(0, openParen + 1);
+  const suffix = rule.slice(closeParen);
+  const inner = rule.slice(openParen + 1, closeParen);
+  const availableInner = maxLength - prefix.length - suffix.length - 3;
+  if (availableInner <= 8) {
+    return `${rule.slice(0, maxLength - 3)}...`;
+  }
+
+  const headLength = Math.ceil(availableInner / 2);
+  const tailLength = Math.floor(availableInner / 2);
+  return `${prefix}${inner.slice(0, headLength)}...${inner.slice(-tailLength)}${suffix}`;
 }
 
 export function formatPermissionPromptLines(
@@ -91,7 +107,7 @@ export function formatPermissionPromptLines(
   ];
 
   if (target) {
-    lines.push(`${target.key}: ${dim(truncate(target.value, 80))}`);
+    lines.push(`${target.key}: ${dim(target.value)}`);
   }
 
   for (const option of options) {
@@ -117,6 +133,7 @@ export async function showPermissionPrompt(
   },
 ): Promise<PermissionChoice> {
   const rule = deriveRule(toolName, input);
+  const displayRule = compactRuleForOption(rule);
   const transcriptLogger = config?.transcriptLogger;
   const renderer = config?.renderer;
   const useRenderer = Boolean(
@@ -131,9 +148,9 @@ export async function showPermissionPrompt(
   // 构建选项列表
   const promptOptions: PromptOption[] = [
     { label: '允许一次', choice: { action: 'allow_once' } },
-    { label: `本次会话始终允许 ${bold(rule)}`, choice: { action: 'allow_session', rule } },
-    { label: `始终允许 ${bold(rule)} (保存到项目)`, choice: { action: 'allow_project', rule } },
-    { label: `始终允许 ${bold(rule)} (保存到全局)`, choice: { action: 'allow_global', rule } },
+    { label: `本次会话始终允许 ${bold(displayRule)}`, choice: { action: 'allow_session', rule } },
+    { label: `始终允许 ${bold(displayRule)} (保存到项目)`, choice: { action: 'allow_project', rule } },
+    { label: `始终允许 ${bold(displayRule)} (保存到全局)`, choice: { action: 'allow_global', rule } },
     { label: '拒绝', choice: { action: 'deny' } },
   ];
 

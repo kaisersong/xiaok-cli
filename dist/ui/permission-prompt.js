@@ -38,12 +38,6 @@ export function deriveRule(toolName, input) {
     }
     return toolName;
 }
-/** 截断过长文本 */
-function truncate(text, max) {
-    if (text.length <= max)
-        return text;
-    return text.slice(0, max - 3) + '...';
-}
 export function buildPermissionRequest(toolName, input) {
     const target = extractTarget(input);
     return {
@@ -56,6 +50,25 @@ export function buildPermissionRequest(toolName, input) {
 export function formatPermissionDecisionSummary(_choice) {
     return '';
 }
+function compactRuleForOption(rule, maxLength = 72) {
+    if (rule.length <= maxLength)
+        return rule;
+    const openParen = rule.indexOf('(');
+    const closeParen = rule.lastIndexOf(')');
+    if (openParen < 0 || closeParen <= openParen) {
+        return `${rule.slice(0, maxLength - 3)}...`;
+    }
+    const prefix = rule.slice(0, openParen + 1);
+    const suffix = rule.slice(closeParen);
+    const inner = rule.slice(openParen + 1, closeParen);
+    const availableInner = maxLength - prefix.length - suffix.length - 3;
+    if (availableInner <= 8) {
+        return `${rule.slice(0, maxLength - 3)}...`;
+    }
+    const headLength = Math.ceil(availableInner / 2);
+    const tailLength = Math.floor(availableInner / 2);
+    return `${prefix}${inner.slice(0, headLength)}...${inner.slice(-tailLength)}${suffix}`;
+}
 export function formatPermissionPromptLines(toolName, input, options, locale = 'zh-CN') {
     const copy = getUiCopy(locale);
     const target = extractTarget(input, locale);
@@ -64,7 +77,7 @@ export function formatPermissionPromptLines(toolName, input, options, locale = '
         `${copy.toolLabel}: ${boldCyan(toolName)}`,
     ];
     if (target) {
-        lines.push(`${target.key}: ${dim(truncate(target.value, 80))}`);
+        lines.push(`${target.key}: ${dim(target.value)}`);
     }
     for (const option of options) {
         const prefix = option.selected ? boldCyan('❯') : dim(' ');
@@ -80,6 +93,7 @@ export function formatPermissionPromptLines(toolName, input, options, locale = '
  */
 export async function showPermissionPrompt(toolName, input, config) {
     const rule = deriveRule(toolName, input);
+    const displayRule = compactRuleForOption(rule);
     const transcriptLogger = config?.transcriptLogger;
     const renderer = config?.renderer;
     const useRenderer = Boolean(renderer &&
@@ -89,9 +103,9 @@ export async function showPermissionPrompt(toolName, input, config) {
     // 构建选项列表
     const promptOptions = [
         { label: '允许一次', choice: { action: 'allow_once' } },
-        { label: `本次会话始终允许 ${bold(rule)}`, choice: { action: 'allow_session', rule } },
-        { label: `始终允许 ${bold(rule)} (保存到项目)`, choice: { action: 'allow_project', rule } },
-        { label: `始终允许 ${bold(rule)} (保存到全局)`, choice: { action: 'allow_global', rule } },
+        { label: `本次会话始终允许 ${bold(displayRule)}`, choice: { action: 'allow_session', rule } },
+        { label: `始终允许 ${bold(displayRule)} (保存到项目)`, choice: { action: 'allow_project', rule } },
+        { label: `始终允许 ${bold(displayRule)} (保存到全局)`, choice: { action: 'allow_global', rule } },
         { label: '拒绝', choice: { action: 'deny' } },
     ];
     // 非 TTY 环境下默认拒绝
