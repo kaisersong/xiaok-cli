@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
 import type { DevAppIdentity } from '../../auth/identity.js';
 import type { ToolDefinition } from '../../types.js';
+import type { PromptSegment } from './types.js';
 import type { CustomAgentDef } from '../agents/loader.js';
 import type { SkillMeta } from '../skills/loader.js';
 import type { LoadedContext } from '../runtime/context-loader.js';
@@ -56,6 +57,7 @@ export interface AssembledPrompt {
   staticText: string;
   dynamicText: string;
   rendered: string;
+  segments: PromptSegment[];
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +103,13 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
     getOutputEfficiencySection(),
   ];
   const staticText = staticSections.join('\n\n');
+  const segments: PromptSegment[] = [{
+    key: 'static_identity',
+    title: 'Static Identity',
+    text: staticText,
+    cacheable: true,
+    kind: 'system_rule',
+  }];
 
   // -----------------------------------------------------------------------
   // SYSTEM_PROMPT_DYNAMIC_BOUNDARY
@@ -133,7 +142,6 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
     allowedToolsActive: opts.allowedToolsActive,
     toolCount: opts.toolCount,
     mcpInstructions: opts.mcpInstructions,
-    memories: opts.memories,
     currentTokenUsage: opts.currentTokenUsage,
     contextLimit: opts.contextLimit,
     lastAssistantMessage: opts.lastAssistantMessage,
@@ -175,9 +183,6 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
     maxChars: Math.max(1_200, opts.budget * 2),
   });
   const autoContextSection = formatLoadedContext(autoContext);
-  if (autoContextSection) {
-    dynamicSections.push(autoContextSection);
-  }
 
   // 10. Yunzhijia API overview (budget-managed)
   const base = [staticText, ...dynamicSections].join('\n\n');
@@ -203,7 +208,49 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
   }
 
   const dynamicText = dynamicSections.filter(Boolean).join('\n\n');
-  const rendered = [staticText, dynamicText].filter(Boolean).join('\n\n');
+  if (dynamicText) {
+    segments.push({
+      key: 'dynamic_context',
+      title: 'Dynamic Context',
+      text: dynamicText,
+      cacheable: false,
+      kind: 'background_context',
+    });
+  }
 
-  return { staticText, dynamicText, rendered };
+  if (autoContextSection) {
+    segments.push({
+      key: 'workspace_context',
+      title: 'Workspace Context',
+      text: `Workspace context:\n${autoContextSection}`,
+      cacheable: false,
+      kind: 'background_context',
+    });
+  }
+
+  if (opts.memories && opts.memories.length > 0) {
+    const memoryText = opts.memories
+      .slice(0, 10)
+      .map((memory) => `- ${memory.title}: ${memory.summary}`)
+      .join('\n');
+    segments.push({
+      key: 'memory_summary',
+      title: 'Background Memory',
+      text: `Background memory:\n${memoryText}`,
+      cacheable: false,
+      kind: 'background_context',
+    });
+  }
+
+  const rendered = segments
+    .map((segment) => segment.text)
+    .filter(Boolean)
+    .join('\n\n');
+  const dynamicRenderedText = segments
+    .filter((segment) => segment.key !== 'static_identity')
+    .map((segment) => segment.text)
+    .filter(Boolean)
+    .join('\n\n');
+
+  return { staticText, dynamicText: dynamicRenderedText, rendered, segments };
 }

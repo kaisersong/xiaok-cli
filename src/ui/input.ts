@@ -7,7 +7,7 @@ import type { PermissionMode } from '../ai/permissions/manager.js';
 import type { TranscriptLogger } from './transcript.js';
 import type { ReplRenderer } from './repl-renderer.js';
 import { buildSlashMenuOverlayLines, MAX_MENU_DESCRIPTION_WIDTH } from './repl-state.js';
-import { CHAT_REMINDER_SLASH_COMMANDS } from '../commands/chat-reminder.js';
+import { getChatSlashCommands } from '../commands/registry.js';
 import { getDisplayWidth } from './display-width.js';
 import { sliceByDisplayColumns } from './text-metrics.js';
 import { identifyKey, loadKeybindingsSync, resolveAction, type Action } from './keybindings.js';
@@ -23,22 +23,6 @@ function log(msg: string) {
     appendFileSync(DEBUG_LOG, `${new Date().toISOString()} ${msg}\n`);
   } catch {}
 }
-
-const BASE_SLASH_COMMANDS: MenuItem[] = [
-  { cmd: '/exit', desc: 'Exit the chat' },
-  { cmd: '/clear', desc: 'Clear the screen' },
-  { cmd: '/compact', desc: 'Compact the current conversation context' },
-  { cmd: '/context', desc: 'Show loaded repo context' },
-  { cmd: '/models', desc: 'Switch model' },
-  { cmd: '/mode', desc: 'Show or change permission mode' },
-  ...CHAT_REMINDER_SLASH_COMMANDS.map(({ cmd, desc }) => ({ cmd, desc })),
-  { cmd: '/settings', desc: 'Show active CLI settings' },
-  { cmd: '/skills-reload', desc: 'Reload the skill catalog' },
-  { cmd: '/task', desc: 'Show workflow task details by ID' },
-  { cmd: '/tasks', desc: 'List workflow tasks' },
-  { cmd: '/yzjchannel', desc: 'Connect the embedded YZJ channel' },
-  { cmd: '/help', desc: 'Show help' },
-];
 
 export interface InputSnapshot {
   input: string;
@@ -79,7 +63,7 @@ export function wordBoundaryRight(text: string, cursor: number): number {
 }
 
 export function getSlashCommands(skills: SkillMeta[]): MenuItem[] {
-  const commands = [...BASE_SLASH_COMMANDS];
+  const commands = [...getChatSlashCommands()];
   for (const skill of skills) {
     const cmd = `/${skill.name}`;
     if (!commands.some((c) => c.cmd === cmd)) {

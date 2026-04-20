@@ -17,40 +17,13 @@ export class PromptBuilder {
             memories: memories.length > 0 ? memories.slice(0, 10) : undefined,
         };
         const assembled = await assembleSystemPrompt(assemblerOpts);
-        const memoryText = memories.length > 0
-            ? memories.map((record) => `- ${record.title}: ${record.summary}`).join('\n')
-            : '';
-        const segments = [
-            {
-                key: 'static_identity',
-                title: 'Static Identity',
-                text: assembled.staticText,
-                cacheable: true,
-            },
-        ];
-        if (assembled.dynamicText) {
-            segments.push({
-                key: 'dynamic_context',
-                title: 'Dynamic Context',
-                text: assembled.dynamicText,
-                cacheable: false,
-            });
-        }
-        if (memoryText) {
-            segments.push({
-                key: 'memory_summary',
-                title: 'Memory Summary',
-                text: memoryText,
-                cacheable: false,
-            });
-        }
         return {
             id: `prompt_${Date.now().toString(36)}`,
             createdAt: Date.now(),
             cwd: input.cwd,
             channel: input.channel,
             rendered: assembled.rendered,
-            segments,
+            segments: assembled.segments,
             memoryRefs: memories.map((record) => record.id),
         };
     }

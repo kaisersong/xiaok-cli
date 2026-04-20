@@ -1258,7 +1258,7 @@ describe('chat interactive runtime', () => {
     }
   }, 15_000);
 
-  it('preserves prior turn tail lines instead of overwriting them when 3 turns fit in a 24-row terminal', async () => {
+  it('preserves the most recent turn tail lines instead of overwriting them when older content scrolls in a 24-row terminal', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
     const projectDir = join(rootDir, 'project');
@@ -1314,12 +1314,13 @@ describe('chat interactive runtime', () => {
       await waitForInputTurnReady(harness);
 
       const lines = harness.screen.lines();
-      expect(lines.some((line) => line.includes('› 分三次显示123'))).toBe(true);
-      expect(lines.some((line) => line.trim() === '3')).toBe(true);
+      expectNoTransientChrome(lines);
+      expectSingleFooter(lines);
       expect(lines.some((line) => line.includes('› 分四次显示1234'))).toBe(true);
       expect(lines.some((line) => line.trim() === '4')).toBe(true);
       expect(lines.some((line) => line.includes('› 分五次显示12345'))).toBe(true);
       expect(lines.some((line) => line.trim() === '5')).toBe(true);
+      expect(lines.some((line) => line.includes('› 分三次显示123'))).toBe(false);
 
       harness.send('/exit');
       harness.send('\r');

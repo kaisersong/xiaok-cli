@@ -1,5 +1,6 @@
 import type { DevAppIdentity } from '../../auth/identity.js';
 import type { ToolDefinition } from '../../types.js';
+import type { PromptSegment } from './types.js';
 import type { CustomAgentDef } from '../agents/loader.js';
 import type { SkillMeta } from '../skills/loader.js';
 import type { LoadedContext } from '../runtime/context-loader.js';
@@ -29,6 +30,7 @@ export interface AssembledPrompt {
     staticText: string;
     dynamicText: string;
     rendered: string;
+    segments: PromptSegment[];
 }
 /**
  * Assemble the system prompt from static sections (cacheable) and dynamic

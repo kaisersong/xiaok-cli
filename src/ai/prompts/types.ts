@@ -1,7 +1,14 @@
+export type PromptSegmentKind =
+  | 'system_rule'
+  | 'background_context'
+  | 'derived_summary'
+  | 'user_input';
+
 export interface PromptSegment {
   key:
     | 'static_identity'
     | 'dynamic_context'
+    | 'workspace_context'
     | 'core_identity'
     | 'session_context'
     | 'skills'
@@ -13,6 +20,7 @@ export interface PromptSegment {
   title: string;
   text: string;
   cacheable: boolean;
+  kind: PromptSegmentKind;
 }
 
 export interface PromptSnapshot {

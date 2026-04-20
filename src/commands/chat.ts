@@ -38,7 +38,8 @@ import { TurnLayout } from '../ui/turn-layout.js';
 import { parseInputBlocks, clearPastedImagePaths } from '../ui/image-input.js';
 import { selectModel } from '../ui/model-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
-import { buildChatReminderHelpLines, executeReminderSlashCommand } from './chat-reminder.js';
+import { executeReminderSlashCommand } from './chat-reminder.js';
+import { buildChatHelpText } from './registry.js';
 import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
 import { extractSandboxAllowedPaths } from '../platform/sandbox/policy.js';
@@ -913,31 +914,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     dismissWelcomeScreen();
 
     if (trimmed === '/help') {
-      const helpLines = [
-        '',
-        '可用命令：',
-        '  /exit    - 退出',
-        '  /clear   - 清屏',
-        '  /compact - 压缩上下文',
-        '  /context - 查看当前仓库上下文',
-        '  /models  - 切换模型',
-        '  /mode [default|auto|plan] - 查看或切换权限模式',
-        ...buildChatReminderHelpLines(),
-        '  /settings - 查看当前生效配置',
-        '  /skills-reload - 刷新 skill 目录（安装后无需重启即可使用）',
-        '  /task <id> - 查看任务详情',
-        '  /tasks   - 查看当前会话任务',
-        '  /yzjchannel - 连接云之家 channel（嵌入式，关闭 chat 即断开）',
-        '  /help    - 显示帮助',
-      ];
-      if (skills.length > 0) {
-        helpLines.push('', '可用 skills：');
-        for (const skill of skills) {
-          helpLines.push(`  /${skill.name} - ${skill.description}`);
-        }
-      }
-      helpLines.push('');
-      writeCommandOutput(trimmed, helpLines.join('\n'));
+      writeCommandOutput(trimmed, buildChatHelpText(skills));
       continue;
     }
 

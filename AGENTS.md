@@ -74,13 +74,13 @@ Summary:
 
 ## Current Release Notes
 
-- `xiaok` is currently linked from the main workspace only and reports `0.6.3`.
+- `xiaok` is currently linked from the main workspace only and reports `0.6.4`.
 - Terminal E2E verification uses `tests/e2e/tmux-e2e.py`, which starts a local OpenAI-compatible SSE server and a real tmux TTY.
 - First submitted input keeps the startup welcome card above it until normal terminal scrolling moves it away; do not clear the content region on first submit.
 - Live activity such as `Thinking` and `Working` renders on the activity row above the input footer, with a blank gap row between activity and `❯`; activity lines must not repeat footer status fields such as model, mode, tokens, or project.
-- Verified after the 0.5.7 integration:
+- Verified after the 0.6.4 integration:
 - `npm run build`
-- targeted sandbox Vitest suite for terminal UI, sandbox expansion, and AskUserQuestion lifecycle
+- `npm run test:sandbox`
 - `python3 tests/e2e/tmux-e2e.py`
 - tmux cursor smoke check: startup cursor is on the bottom input bar, and typing keeps it there.
 
@@ -95,6 +95,7 @@ Summary:
 
 ## Local Verification Note
 
-- In this Windows sandbox, raw `vitest` against TypeScript sources can fail with `spawn EPERM` because Vite/esbuild try to start child processes.
+- In this Codex sandbox, raw `vitest` against TypeScript sources can fail with `spawn EPERM` because Vite/esbuild try to start child processes.
 - Use `npm test` or `npm run test:sandbox`, which first compiles `src/` and `tests/` into `.test-dist/` and then runs Vitest against emitted JavaScript with `vitest.sandbox.config.mjs`.
+- The reminder/daemon suites open real Unix sockets. In the restricted sandbox they can fail with `listen EPERM`; rerun `npm run test:sandbox` with unrestricted permissions when you need the full pass signal.
 - The sandbox suite excludes subprocess-dependent tests such as `bash` and `grep`; run `npm run test:full` on an unrestricted machine for the complete suite.

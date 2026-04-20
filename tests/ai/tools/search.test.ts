@@ -17,6 +17,19 @@ describe('tool_search', () => {
     expect(result).toContain('uninstall_skill');
   });
 
+  it('normalizes legacy aliases in select queries to the canonical built-in tool identity', async () => {
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'default' }),
+      dryRun: false,
+      onPrompt: async () => true,
+    });
+
+    const toolSearchTool = createToolSearchTool(registry);
+    const result = await toolSearchTool.execute({ query: 'select:Read' });
+
+    expect(result).toContain('"name": "read"');
+  });
+
   it('returns deferred tool schemas by name', async () => {
     const registry = new ToolRegistry({
       permissionManager: new PermissionManager({ mode: 'default' }),

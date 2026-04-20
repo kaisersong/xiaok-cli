@@ -15,6 +15,14 @@ import { webFetchTool } from './web-fetch.js';
 import { webSearchTool } from './web-search.js';
 import { installSkillTool } from './install-skill.js';
 import { uninstallSkillTool } from './uninstall-skill.js';
+import {
+  buildCapabilityToolDefinition,
+  buildToolSearchEntry,
+  dedupeToolSearchEntries,
+  getCanonicalToolId,
+  selectToolEntries,
+  type ToolSearchEntry,
+} from './tool-identity.js';
 
 export function buildToolList(
   skillTool?: Tool,
@@ -50,12 +58,13 @@ export interface RegistryOptions {
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
   private deferredTools = new Map<string, ToolDefinition>();
+  private canonicalToolNames = new Map<string, string>();
   private permissionManager: PermissionManager;
   private options: Required<Pick<RegistryOptions, 'dryRun' | 'onPrompt'>> & RegistryOptions;
   private allowedToolsFilter: Set<string> | null = null;
 
   setAllowedTools(names: string[] | null): void {
-    this.allowedToolsFilter = names ? new Set(names) : null;
+    this.allowedToolsFilter = names ? new Set(names.map((name) => getCanonicalToolId(name))) : null;
   }
 
   constructor(options: RegistryOptions, tools?: Tool[]) {
@@ -84,6 +93,7 @@ export class ToolRegistry {
 
   registerTool(tool: Tool): void {
     this.tools.set(tool.definition.name, tool);
+    this.canonicalToolNames.set(getCanonicalToolId(tool.definition.name), tool.definition.name);
     this.options.capabilityRegistry?.register({
       kind: 'tool',
       name: tool.definition.name,
@@ -110,6 +120,8 @@ export class ToolRegistry {
   }
 
   searchDeferredTools(query: string): ToolDefinition[] {
+    const deferredEntries = [...this.deferredTools.values()].map((tool) => buildToolSearchEntry(tool));
+
     if (query.startsWith('select:')) {
       const names = query
         .slice('select:'.length)
@@ -117,26 +129,29 @@ export class ToolRegistry {
         .map((value) => value.trim())
         .filter(Boolean);
 
-      return names
-        .map((name) => this.deferredTools.get(name))
-        .filter((tool): tool is ToolDefinition => Boolean(tool));
+      return selectToolEntries(deferredEntries, names);
     }
 
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) {
-      return [...this.deferredTools.values()];
+      return dedupeToolSearchEntries(deferredEntries);
     }
 
-    return [...this.deferredTools.values()].filter((tool) => {
+    return dedupeToolSearchEntries(deferredEntries.filter((entry) => {
+      const tool = entry.definition;
       return (
         tool.name.toLowerCase().includes(normalizedQuery) ||
         tool.description.toLowerCase().includes(normalizedQuery)
       );
-    });
+    }));
   }
 
   searchTools(query: string): ToolDefinition[] {
     const activeTools = this.getToolDefinitions();
+    const activeEntries = activeTools.map((tool) => buildToolSearchEntry(tool));
+    const deferredEntries = [...this.deferredTools.values()].map((tool) => buildToolSearchEntry(tool));
+    const capabilityEntries = (this.options.capabilityRegistry?.search(query.startsWith('select:') ? '' : query) ?? [])
+      .map((capability) => buildToolSearchEntry(buildCapabilityToolDefinition(capability)));
 
     if (query.startsWith('select:')) {
       const names = query
@@ -144,41 +159,31 @@ export class ToolRegistry {
         .split(',')
         .map((value) => value.trim())
         .filter(Boolean);
-      const activeMap = new Map(activeTools.map((tool) => [tool.name, tool]));
-      const deferredMap = new Map(this.searchDeferredTools(query).map((tool) => [tool.name, tool]));
-
-      return names
-        .map((name) => activeMap.get(name) ?? deferredMap.get(name))
-        .filter((tool): tool is ToolDefinition => Boolean(tool));
+      return selectToolEntries([...activeEntries, ...deferredEntries, ...capabilityEntries], names);
     }
 
     const normalizedQuery = query.trim().toLowerCase();
     const matches = normalizedQuery
-      ? activeTools.filter((tool) => {
+      ? activeEntries.filter((entry) => {
+        const tool = entry.definition;
         return (
           tool.name.toLowerCase().includes(normalizedQuery) ||
           tool.description.toLowerCase().includes(normalizedQuery)
         );
       })
-      : activeTools;
+      : activeEntries;
 
-    const merged = new Map(matches.map((tool) => [tool.name, tool]));
-    for (const tool of this.searchDeferredTools(query)) {
-      if (!merged.has(tool.name)) {
-        merged.set(tool.name, tool);
-      }
-    }
-    for (const capability of this.options.capabilityRegistry?.search(query) ?? []) {
-      if (!merged.has(capability.name)) {
-        merged.set(capability.name, {
-          name: capability.name,
-          description: capability.description,
-          inputSchema: capability.inputSchema ?? { type: 'object', properties: {} },
-        });
-      }
-    }
+    const deferredMatches = normalizedQuery
+      ? deferredEntries.filter((entry) => {
+        const tool = entry.definition;
+        return (
+          tool.name.toLowerCase().includes(normalizedQuery) ||
+          tool.description.toLowerCase().includes(normalizedQuery)
+        );
+      })
+      : deferredEntries;
 
-    return [...merged.values()];
+    return dedupeToolSearchEntries([...matches, ...deferredMatches, ...capabilityEntries]);
   }
 
   async executeTool(
@@ -187,11 +192,13 @@ export class ToolRegistry {
     context?: ToolExecutionContext,
   ): Promise<string> {
     let input = rawInput;
-    if (this.allowedToolsFilter !== null && !this.allowedToolsFilter.has(name)) {
+    const canonicalToolId = getCanonicalToolId(name);
+    if (this.allowedToolsFilter !== null && !this.allowedToolsFilter.has(canonicalToolId)) {
       return `Error: tool "${name}" is not allowed in current skill context`;
     }
 
-    const tool = this.tools.get(name);
+    const registeredName = this.canonicalToolNames.get(canonicalToolId) ?? name;
+    const tool = this.tools.get(registeredName);
     if (!tool) return `Error: 未知工具: ${name}`;
 
     const validation = validateToolInput(tool.definition.inputSchema, input);
@@ -203,17 +210,43 @@ export class ToolRegistry {
       return `[dry-run] ${name}(${JSON.stringify(input)})`;
     }
 
-    const decision = await this.permissionManager.check(name, input);
+    const decision = await this.permissionManager.check(tool.definition.name, input);
     if (decision === 'deny') {
+      await this.options.hooksRunner?.runHooks('PermissionDenied', {
+        tool_name: tool.definition.name,
+        input,
+        reason: 'policy_denied',
+      });
       return `Error: 权限不足: ${name}`;
     }
 
     if (decision === 'prompt' && tool.permission !== 'safe') {
-      const approved = await this.options.onPrompt(name, input);
-      if (!approved) return `（已取消: ${name}）`;
+      const permissionRequest = await this.options.hooksRunner?.runHooks('PermissionRequest', {
+        tool_name: tool.definition.name,
+        input,
+      });
+      if (permissionRequest?.decision === 'deny' || permissionRequest?.ok === false) {
+        await this.options.hooksRunner?.runHooks('PermissionDenied', {
+          tool_name: tool.definition.name,
+          input,
+          reason: permissionRequest?.message ?? 'denied_by_permission_hook',
+        });
+        return `Error: ${permissionRequest?.message ?? `权限不足: ${name}`}`;
+      }
+      const approved = permissionRequest?.decision === 'allow'
+        ? true
+        : await this.options.onPrompt(tool.definition.name, input);
+      if (!approved) {
+        await this.options.hooksRunner?.runHooks('PermissionDenied', {
+          tool_name: tool.definition.name,
+          input,
+          reason: 'prompt_declined',
+        });
+        return `（已取消: ${name}）`;
+      }
     }
 
-    const preHookResult = await this.options.hooksRunner?.runPreHooks(name, input);
+    const preHookResult = await this.options.hooksRunner?.runPreHooks(tool.definition.name, input);
     if (preHookResult && !preHookResult.ok) {
       return `Error: ${preHookResult.message ?? `${name} blocked by pre hook`}`;
     }
@@ -234,7 +267,7 @@ export class ToolRegistry {
         result = `${result}\n[agent loop should stop after this tool]`;
       }
 
-      const warnings = await this.options.hooksRunner?.runPostHooks(name, input) ?? [];
+      const warnings = await this.options.hooksRunner?.runPostHooks(tool.definition.name, input) ?? [];
       if (warnings.length === 0) {
         return result;
       }

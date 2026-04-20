@@ -101,6 +101,13 @@ describe('getSlashCommands', () => {
 
     expect(commands.length).toBe(16); // 13 base + 3 skills
   });
+
+  it('builds base slash commands from shared chat command metadata rather than a local constant table', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'ui', 'input.ts'), 'utf8');
+
+    expect(source).not.toContain('const BASE_SLASH_COMMANDS');
+    expect(source).toContain("from '../commands/registry.js'");
+  });
 });
 
 describe('InputReader', () => {

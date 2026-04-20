@@ -1,5 +1,5 @@
 // tests/ai/tools/index.test.ts
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PermissionManager } from '../../../src/ai/permissions/manager.js';
 import { ToolRegistry } from '../../../src/ai/tools/index.js';
 import type { Tool } from '../../../src/types.js';
@@ -237,5 +237,116 @@ describe('ToolRegistry', () => {
     expect(registry.searchTools('cognitive')).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'cognitive-coach' }),
     ]));
+  });
+
+  it('accepts legacy allowedTools aliases for the same logical built-in tool', async () => {
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+    });
+
+    registry.setAllowedTools(['Read']);
+
+    const result = await registry.executeTool('read', { file_path: 'src/ai/tools/read.ts', limit: 1 });
+
+    expect(result).toContain('import { readFileSync, existsSync } from \'fs\';');
+    expect(result).not.toContain('is not allowed');
+  });
+
+  it('runs PermissionRequest hooks before prompt fallback and skips the UI prompt when the hook allows', async () => {
+    const onPrompt = vi.fn(async () => false);
+    const runHooks = vi.fn(async (eventName: string) => {
+      if (eventName === 'PermissionRequest') {
+        return { ok: true, decision: 'allow' as const };
+      }
+      return { ok: true };
+    });
+
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'default' }),
+      onPrompt,
+      hooksRunner: {
+        runHooks,
+        runPreHooks: async () => ({ ok: true }),
+        runPostHooks: async () => [],
+      },
+    }, [{
+      permission: 'write',
+      definition: {
+        name: 'write',
+        description: 'mock write',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      execute: async () => 'written by hook-approved path',
+    }]);
+
+    const result = await registry.executeTool('write', { file_path: '/tmp/x', content: 'x' });
+
+    expect(runHooks).toHaveBeenCalledWith('PermissionRequest', expect.objectContaining({
+      tool_name: 'write',
+    }));
+    expect(onPrompt).not.toHaveBeenCalled();
+    expect(result).toContain('written by hook-approved path');
+  });
+
+  it('emits PermissionDenied hooks when policy blocks a tool before any prompt', async () => {
+    const runHooks = vi.fn(async () => ({ ok: true }));
+
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'plan' }),
+      hooksRunner: {
+        runHooks,
+        runPreHooks: async () => ({ ok: true }),
+        runPostHooks: async () => [],
+      },
+    }, [{
+      permission: 'write',
+      definition: {
+        name: 'write',
+        description: 'mock write',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      execute: async () => 'should not run',
+    }]);
+
+    const result = await registry.executeTool('write', { file_path: '/tmp/x', content: 'x' });
+
+    expect(result).toContain('权限');
+    expect(runHooks).toHaveBeenCalledWith('PermissionDenied', expect.objectContaining({
+      tool_name: 'write',
+    }));
+  });
+
+  it('emits PermissionDenied hooks when the fallback prompt declines the tool call', async () => {
+    const runHooks = vi.fn(async () => ({ ok: true }));
+    const onPrompt = vi.fn(async () => false);
+
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'default' }),
+      onPrompt,
+      hooksRunner: {
+        runHooks,
+        runPreHooks: async () => ({ ok: true }),
+        runPostHooks: async () => [],
+      },
+    }, [{
+      permission: 'write',
+      definition: {
+        name: 'write',
+        description: 'mock write',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      execute: async () => 'should not run',
+    }]);
+
+    const result = await registry.executeTool('write', { file_path: '/tmp/x', content: 'x' });
+
+    expect(onPrompt).toHaveBeenCalled();
+    expect(result).toContain('已取消');
+    expect(runHooks).toHaveBeenCalledWith('PermissionRequest', expect.objectContaining({
+      tool_name: 'write',
+    }));
+    expect(runHooks).toHaveBeenCalledWith('PermissionDenied', expect.objectContaining({
+      tool_name: 'write',
+    }));
   });
 });

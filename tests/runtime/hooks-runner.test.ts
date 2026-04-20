@@ -194,4 +194,44 @@ describe('hooks runner', () => {
     expect(result.async).toBe(true);
     expect(child.unref).toHaveBeenCalled();
   });
+
+  it('parses structured allow decisions from PermissionRequest hook output', async () => {
+    const mockExec = vi.mocked(exec) as any;
+    mockExec.mockImplementation(() =>
+      createMockChild({
+        exitCode: 0,
+        stdout: JSON.stringify({ decision: 'allow', message: 'allowed by hook policy' }),
+      }),
+    );
+
+    const runner = createHooksRunner({
+      hooks: [{ type: 'command', command: 'permission-hook', events: ['PermissionRequest'], matcher: 'write' }],
+    });
+
+    const result = await runner.runHooks('PermissionRequest', { tool_name: 'write', input: { file_path: '/tmp/x' } });
+
+    expect(result.ok).toBe(true);
+    expect(result.decision).toBe('allow');
+    expect(result.message).toBe('allowed by hook policy');
+  });
+
+  it('treats malformed PermissionRequest hook output as no decision instead of crashing the flow', async () => {
+    const mockExec = vi.mocked(exec) as any;
+    mockExec.mockImplementation(() =>
+      createMockChild({
+        exitCode: 0,
+        stdout: 'definitely not json',
+      }),
+    );
+
+    const runner = createHooksRunner({
+      hooks: [{ type: 'command', command: 'permission-hook', events: ['PermissionRequest'], matcher: 'write' }],
+    });
+
+    const result = await runner.runHooks('PermissionRequest', { tool_name: 'write', input: { file_path: '/tmp/x' } });
+
+    expect(result.ok).toBe(true);
+    expect(result.decision).toBeUndefined();
+    expect(result.message).toBeUndefined();
+  });
 });

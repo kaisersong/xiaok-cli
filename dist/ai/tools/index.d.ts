@@ -15,6 +15,7 @@ export interface RegistryOptions {
 export declare class ToolRegistry {
     private tools;
     private deferredTools;
+    private canonicalToolNames;
     private permissionManager;
     private options;
     private allowedToolsFilter;
