@@ -91,7 +91,21 @@ Via Intent Broker lifecycle hooks:
 
 ## Install
 
-### Quick Install
+### Install from npm
+
+```bash
+npm install -g xiaokcode
+```
+
+After installation, run:
+
+```bash
+xiaok
+```
+
+The npm package name is `xiaokcode`, while the CLI command stays `xiaok`.
+
+### From Source (Development)
 
 ```bash
 git clone https://github.com/kaisersong/xiaok-cli ~/.xiaok-cli
@@ -99,6 +113,8 @@ cd ~/.xiaok-cli
 npm install
 npm run build
 ```
+
+Use the source install path only if you are developing on `xiaok-cli` itself or need a local git-backed checkout.
 
 ### Configuration
 

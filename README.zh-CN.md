@@ -91,7 +91,21 @@ System Prompt 采用 CC 风格的 7 层设计，显式静态/动态分界：
 
 ## 安装
 
-### 快速安装
+### npm 安装
+
+```bash
+npm install -g xiaokcode
+```
+
+安装后直接运行：
+
+```bash
+xiaok
+```
+
+npm 包名是 `xiaokcode`，但 CLI 命令仍然保持 `xiaok`。
+
+### 源码安装（开发用）
 
 ```bash
 git clone https://github.com/kaisersong/xiaok-cli ~/.xiaok-cli
@@ -99,6 +113,8 @@ cd ~/.xiaok-cli
 npm install
 npm run build
 ```
+
+源码安装路径只用于参与 `xiaok-cli` 开发，或需要保留本地 git 仓库的场景。
 
 ### 配置
 

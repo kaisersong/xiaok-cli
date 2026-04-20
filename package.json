@@ -1,7 +1,25 @@
 {
-  "name": "xiaok",
+  "name": "xiaokcode",
   "version": "0.6.5",
   "description": "面向云之家开发者的 AI 编程 CLI",
+  "license": "MIT",
+  "homepage": "https://github.com/kaisersong/xiaok-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kaisersong/xiaok-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kaisersong/xiaok-cli/issues"
+  },
+  "keywords": [
+    "ai",
+    "cli",
+    "agent",
+    "coding",
+    "terminal",
+    "yunzhijia",
+    "kingdee"
+  ],
   "type": "module",
   "bin": {
     "xiaok": "./dist/index.js"
