@@ -27,11 +27,9 @@ name: hello
 description: 打招呼
 task-goals:
   - greet the user
-input-kinds: greeting, short prompt
-output-kinds:
-  - warm reply
-examples:
-  - say hello
+input-kinds: [greeting, short prompt]
+output-kinds: [warm reply]
+examples: [say hello]
 allowed-tools:
   - read
   - grep

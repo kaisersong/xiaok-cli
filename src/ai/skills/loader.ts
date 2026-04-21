@@ -64,8 +64,16 @@ function stripWrappingQuotes(value: string): string {
   return value;
 }
 
+function stripListBrackets(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    return trimmed.slice(1, -1);
+  }
+  return value;
+}
+
 function splitCommaList(value: string): string[] {
-  return value
+  return stripListBrackets(value)
     .split(',')
     .map((entry) => stripWrappingQuotes(entry.trim()))
     .filter(Boolean);

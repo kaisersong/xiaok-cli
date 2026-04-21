@@ -30,4 +30,33 @@ describe('matchSkillsForTask', () => {
     expect(matches[0]?.skill.name).toBe('proposal-composer');
     expect(matches[0]?.reasons).toContain('task-goals');
   });
+
+  it('returns no skills when nothing matches', () => {
+    const matches = matchSkillsForTask('connect to a database', [
+      skill('proposal-composer', 'Compose product proposals', {
+        taskGoals: ['compose proposals'],
+        inputKinds: ['project brief'],
+        outputKinds: ['proposal draft'],
+        examples: ['write a proposal'],
+      }),
+    ]);
+
+    expect(matches).toEqual([]);
+  });
+
+  it('matches Chinese task phrasing against Chinese hints', () => {
+    const matches = matchSkillsForTask('帮我把这几份材料整理成一版方案', [
+      skill('proposal-composer', '整理材料并生成方案', {
+        taskGoals: ['整理材料并生成方案'],
+        inputKinds: ['材料', '需求说明'],
+        outputKinds: ['方案', '提案'],
+        examples: ['把材料整理成方案'],
+      }),
+    ]);
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0]?.skill.name).toBe('proposal-composer');
+    expect(matches[0]?.score).toBeGreaterThan(0);
+    expect(matches[0]?.reasons).toContain('task-goals');
+  });
 });

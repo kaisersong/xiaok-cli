@@ -14,9 +14,51 @@ const FIELD_WEIGHTS = {
   examples: 2,
 } as const;
 
+const STOP_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'as',
+  'at',
+  'be',
+  'by',
+  'for',
+  'from',
+  'in',
+  'is',
+  'it',
+  'of',
+  'on',
+  'or',
+  'the',
+  'to',
+  'with',
+]);
+
 function tokenize(value: string): Set<string> {
-  const tokens = value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  return new Set(tokens);
+  const tokens = new Set<string>();
+  const normalized = value.toLowerCase();
+
+  for (const word of normalized.match(/[a-z0-9]+/g) ?? []) {
+    if (word.length < 2 || STOP_WORDS.has(word)) {
+      continue;
+    }
+    tokens.add(word);
+  }
+
+  for (const hanChunk of normalized.match(/\p{Script=Han}+/gu) ?? []) {
+    if (hanChunk.length === 1) {
+      tokens.add(hanChunk);
+      continue;
+    }
+
+    for (let index = 0; index < hanChunk.length - 1; index += 1) {
+      tokens.add(hanChunk.slice(index, index + 2));
+    }
+  }
+
+  return tokens;
 }
 
 function scoreField(
@@ -91,6 +133,7 @@ export function matchSkillsForTask(
   });
 
   return matches
+    .filter((match) => match.score > 0)
     .sort((left, right) => {
       if (right.score !== left.score) return right.score - left.score;
       return left.skill.name.localeCompare(right.skill.name);
