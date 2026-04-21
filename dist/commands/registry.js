@@ -126,6 +126,5 @@ export function buildChatHelpText(skills) {
             lines.push(`  /${skill.name} - ${skill.description}`);
         }
     }
-    lines.push('');
     return lines.join('\n');
 }

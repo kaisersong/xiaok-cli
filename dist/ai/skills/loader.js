@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 import { getBuiltinSkillRoots } from './defaults.js';
+import { getConfigDir } from '../../utils/config.js';
 function stripWrappingQuotes(value) {
     if ((value.startsWith('"') && value.endsWith('"')) ||
         (value.startsWith('\'') && value.endsWith('\''))) {
@@ -158,7 +158,7 @@ function loadSkillsFromDir(dir, source, tier) {
     }
     return results;
 }
-export async function loadSkills(xiaokConfigDir = join(homedir(), '.xiaok'), cwd = process.cwd(), options) {
+export async function loadSkills(xiaokConfigDir = getConfigDir(), cwd = process.cwd(), options) {
     const builtinRoots = [
         ...(options?.builtinRoots ?? getBuiltinSkillRoots()),
         ...(options?.extraRoots ?? []),
@@ -204,7 +204,7 @@ function resolveSkillsByName(names, skills) {
     }
     return ordered;
 }
-export function createSkillCatalog(xiaokConfigDir = join(homedir(), '.xiaok'), cwd = process.cwd(), options) {
+export function createSkillCatalog(xiaokConfigDir = getConfigDir(), cwd = process.cwd(), options) {
     let skills = [];
     return {
         async reload() {

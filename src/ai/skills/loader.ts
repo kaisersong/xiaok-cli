@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 import { getBuiltinSkillRoots } from './defaults.js';
+import { getConfigDir } from '../../utils/config.js';
 
 export type SkillExecutionContext = 'inline' | 'fork';
 
@@ -231,7 +231,7 @@ function loadSkillsFromDir(
 }
 
 export async function loadSkills(
-  xiaokConfigDir = join(homedir(), '.xiaok'),
+  xiaokConfigDir = getConfigDir(),
   cwd = process.cwd(),
   options?: SkillLoadOptions,
 ): Promise<SkillMeta[]> {
@@ -286,7 +286,7 @@ function resolveSkillsByName(names: string[], skills: SkillMeta[]): SkillMeta[] 
 }
 
 export function createSkillCatalog(
-  xiaokConfigDir = join(homedir(), '.xiaok'),
+  xiaokConfigDir = getConfigDir(),
   cwd = process.cwd(),
   options?: SkillLoadOptions,
 ): SkillCatalog {

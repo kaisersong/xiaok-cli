@@ -141,6 +141,5 @@ export function buildChatHelpText(skills: SkillMeta[]): string {
       lines.push(`  /${skill.name} - ${skill.description}`);
     }
   }
-  lines.push('');
   return lines.join('\n');
 }

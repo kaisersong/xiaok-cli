@@ -20,6 +20,7 @@ export declare class ReplRenderer {
     handleKey(key: string): void;
     clearOverlay(): void;
     closeModal(): void;
+    clearVisibleContent(): void;
     clearPromptLine(): void;
     prepareBlockOutput(): void;
     /**

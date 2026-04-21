@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
+import { platform } from 'node:process';
 
 const execFileAsync = promisify(execFile);
 const cliEntryPath = join(process.cwd(), '.test-dist', 'src', 'index.js');
@@ -101,13 +102,39 @@ async function withFakeOpenAiServer(
   };
 }
 
+function cleanupDir(dir: string): void {
+  const attempts = platform === 'win32' ? 8 : 1;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      const isRetryable = typeof error === 'object'
+        && error !== null
+        && 'code' in error
+        && (error as { code?: string }).code === 'EBUSY';
+      if (!isRetryable || attempt === attempts - 1) {
+        throw error;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * (attempt + 1));
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+}
+
 describe('chat CLI smoke', () => {
   const tempDirs: string[] = [];
   const itIfCanSpawn = canSpawnChildProcesses() ? it : it.skip;
 
   afterEach(() => {
     for (const dir of tempDirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true });
+      cleanupDir(dir);
     }
   });
 

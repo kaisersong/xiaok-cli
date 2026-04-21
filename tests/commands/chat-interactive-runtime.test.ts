@@ -891,6 +891,12 @@ describe('chat interactive runtime', () => {
 
       await waitFor(() => {
         const lines = harness.screen.lines();
+        const commandSectionStart = lines.findIndex((line) => line.includes('可用命令'));
+        const skillsSectionStart = lines.findIndex((line) => line.includes('可用 skills'));
+        const commandLines = lines.slice(
+          commandSectionStart >= 0 ? commandSectionStart : 0,
+          skillsSectionStart >= 0 ? skillsSectionStart : lines.length,
+        );
         expect(lines.some((line) => line.includes('可用命令'))).toBe(true);
         expect(lines.some((line) => line.includes('/clear') && line.includes('清屏'))).toBe(true);
         expect(lines.some((line) => line.includes('/compact') && line.includes('压缩上下文'))).toBe(true);
@@ -906,7 +912,7 @@ describe('chat interactive runtime', () => {
         expect(lines.some((line) => line.includes('/reminders'))).toBe(false);
         expect(lines.some((line) => line.includes('/reminder-cancel'))).toBe(false);
         expect(lines.some((line) => line.includes('/commit'))).toBe(false);
-        expect(lines.some((line) => line.includes('/review'))).toBe(false);
+        expect(commandLines.some((line) => line.includes('/review'))).toBe(false);
         expect(lines.some((line) => line.includes('/pr'))).toBe(false);
         expect(lines.some((line) => line.includes('/doctor'))).toBe(false);
         expect(lines.some((line) => line.includes('/init'))).toBe(false);

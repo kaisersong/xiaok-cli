@@ -361,7 +361,7 @@ def activity_line_count(content: str) -> int:
 
 def footer_has_empty_prompt(content: str) -> bool:
     for line in visible_lines(content)[-4:]:
-        if line.strip() == "❯":
+        if line.strip() in {"❯", ">"}:
             return True
     return False
 
@@ -370,9 +370,14 @@ def count_occurrences(content: str, needle: str) -> int:
     return sum(1 for line in visible_lines(content) if needle in line)
 
 
+def is_input_prompt_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("❯") or stripped.startswith(">")
+
+
 def line_before_prompt_with_gap(content: str, min_blank_rows: int = 2) -> str:
     lines = visible_lines(content)
-    prompt_index = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].strip().startswith("❯")), -1)
+    prompt_index = next((i for i in range(len(lines) - 1, -1, -1) if is_input_prompt_line(lines[i])), -1)
     assert_true(prompt_index >= (min_blank_rows + 1), f"input prompt was not visible near the footer:\n{content}")
 
     blank_rows = 0
@@ -391,7 +396,7 @@ def line_before_prompt_with_gap(content: str, min_blank_rows: int = 2) -> str:
 
 def assert_activity_above_prompt_with_gap(content: str) -> None:
     lines = visible_lines(content)
-    prompt_index = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].strip().startswith("❯")), -1)
+    prompt_index = next((i for i in range(len(lines) - 1, -1, -1) if is_input_prompt_line(lines[i])), -1)
     assert_true(prompt_index >= 3, f"input prompt was not visible near the footer:\n{content}")
     activity_line = line_before_prompt_with_gap(content, min_blank_rows=2)
     assert_true(
@@ -415,6 +420,28 @@ def assert_overlay_above_prompt_with_gap(content: str, expected_anchor: str) -> 
         expected_anchor in overlay_tail,
         f"overlay did not stay at least two blank rows above the input prompt:\n{content}",
     )
+
+
+def assert_single_footer_status(content: str, expected_status: str) -> None:
+    lines = visible_lines(content)
+    matches = [line for line in lines if expected_status in line]
+    assert_true(
+        len(matches) == 1,
+        f"expected exactly one footer status line containing {expected_status!r}:\n{content}",
+    )
+
+
+def assert_no_truncated_footer_status(content: str) -> None:
+    lines = visible_lines(content)
+    truncated = [line for line in lines if line.strip().startswith("pt-terminal-e2e")]
+    assert_true(
+        len(truncated) == 0,
+        f"footer status line was truncated into the prompt row:\n{content}",
+    )
+
+
+def has_input_prompt(content: str) -> bool:
+    return any(is_input_prompt_line(line) for line in visible_lines(content))
 
 
 def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
@@ -483,11 +510,11 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         tmux.start()
 
         print("--- E2E 1: welcome and fixed footer ---")
-        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
+        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and has_input_prompt(text), timeout=12)
         assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render")
-        assert_contains(welcome, "❯", "input footer prompt did not render")
+        assert_true(has_input_prompt(welcome), f"input footer prompt did not render:\n{welcome}")
         bottom = "\n".join(visible_lines(welcome)[-4:])
-        assert_true("❯" in bottom, f"input prompt is not near bottom footer:\n{bottom}")
+        assert_true(any(is_input_prompt_line(line) for line in bottom.splitlines()), f"input prompt is not near bottom footer:\n{bottom}")
         assert_true("gpt-terminal-e2e" in welcome, "status line did not include configured model")
         print("PASS: welcome screen and footer are visible")
 
@@ -502,7 +529,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         time.sleep(0.5)
         multiline = tmux.capture()
         lines = visible_lines(multiline)
-        prompt_lines = [line for line in lines if "❯" in line]
+        prompt_lines = [line for line in lines if is_input_prompt_line(line)]
         body_input_lines = [line.strip() for line in lines if line.strip() in {"2", "3", "4"}]
         status_lines = [line for line in visible_lines(multiline) if "gpt-terminal-e2e" in line]
         assert_true(len(prompt_lines) == 1, f"expected one prompt line, got {len(prompt_lines)}:\n{multiline}")
@@ -513,7 +540,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
 
         tmux.stop()
         tmux.start()
-        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
+        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and has_input_prompt(text), timeout=12)
         assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render after multiline restart")
 
         print("--- E2E 3: long single-line input soft-wraps instead of horizontally scrolling ---")
@@ -522,7 +549,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         time.sleep(0.5)
         wrapped = tmux.capture()
         wrapped_lines = visible_lines(wrapped)
-        wrapped_prompt_lines = [line for line in wrapped_lines if "❯" in line]
+        wrapped_prompt_lines = [line for line in wrapped_lines if is_input_prompt_line(line)]
         wrapped_status_lines = [line for line in wrapped_lines if "gpt-terminal-e2e" in line]
         assert_true(len(wrapped_prompt_lines) == 1, f"expected one wrapped prompt row:\n{wrapped}")
         assert_true("WRAP_START_" in wrapped, f"long single-line input start was not visible:\n{wrapped}")
@@ -532,7 +559,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
 
         tmux.stop()
         tmux.start()
-        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
+        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and has_input_prompt(text), timeout=12)
         assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render after wrap restart")
 
         print("--- E2E 4: slash input and overlay ---")
@@ -556,7 +583,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
 
         tmux.stop()
         tmux.start()
-        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
+        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and has_input_prompt(text), timeout=12)
         assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render after session restart")
 
         print("--- E2E 6: streamed answer preserves output and footer ---")
@@ -578,7 +605,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_contains(first, "first terminal request", "submitted user input disappeared")
         assert_contains(first, first_response_tail, "assistant response tail did not render")
         assert_true(activity_line_count(first) <= 2, f"too many activity lines after first response:\n{first}")
-        assert_true("❯" in "\n".join(visible_lines(first)[-4:]), "footer prompt missing after first response")
+        assert_true(any(is_input_prompt_line(line) for line in visible_lines(first)[-4:]), f"footer prompt missing after first response:\n{first}")
         print("PASS: first streamed response and footer are stable")
 
         print("--- E2E 7: second turn does not eat previous output ---")
@@ -603,13 +630,20 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         tmux.auto_mode = False
         tmux.stop()
         tmux.start()
-        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
+        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and has_input_prompt(text), timeout=12)
         assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render before permission flow")
 
         print("--- E2E 8: permission menu remains intact and project allow persists ---")
         tmux.send_text("trigger permission prompt")
         time.sleep(0.15)
         tmux.send_key("Enter")
+        time.sleep(0.4)
+        pending_permission = tmux.capture()
+        assert_contains(pending_permission, "trigger permission prompt", "submitted permission-trigger input disappeared before the prompt opened")
+        assert_true("xiaok 想要执行以下操作" not in pending_permission, f"permission prompt opened before pending footer state was captured:\n{pending_permission}")
+        assert_true(activity_line_count(pending_permission) <= 1, f"pending permission state duplicated activity lines:\n{pending_permission}")
+        assert_single_footer_status(pending_permission, "gpt-terminal-e2e · 0% · project")
+        assert_no_truncated_footer_status(pending_permission)
         permission_prompt = tmux.wait_for(
             lambda text: "xiaok 想要执行以下操作" in text and "bash" in text and permission_command in text,
             timeout=12,
@@ -620,6 +654,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_true(count_occurrences(permission_prompt, "xiaok 想要执行以下操作") == 1, f"permission prompt duplicated:\n{permission_prompt}")
         assert_true("❯ 允许一次" in permission_prompt, f"default permission selection was not visible:\n{permission_prompt}")
         assert_overlay_above_prompt_with_gap(permission_prompt, "↑↓ 选择")
+        assert_no_truncated_footer_status(permission_prompt)
 
         tmux.send_key("Down")
         tmux.send_key("Down")
@@ -629,7 +664,12 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
             "❯ 始终允许 bash(cmd *) (保存到项目)" in project_selected,
             f"permission selection did not move to project allow:\n{project_selected}",
         )
+        assert_true(
+            count_occurrences(project_selected, "xiaok 想要执行以下操作") == 1,
+            f"permission prompt duplicated during navigation:\n{project_selected}",
+        )
         assert_overlay_above_prompt_with_gap(project_selected, "↑↓ 选择")
+        assert_no_truncated_footer_status(project_selected)
         tmux.send_key("Enter")
 
         first_permission_result = tmux.wait_for(
@@ -638,6 +678,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         )
         assert_contains(first_permission_result, permission_response_one, "permission flow response did not render")
         assert_true("xiaok 想要执行以下操作" not in first_permission_result, f"permission prompt text leaked after approval:\n{first_permission_result}")
+        assert_single_footer_status(first_permission_result, "gpt-terminal-e2e · 0% · project")
 
         settings_path = project_fixture / ".xiaok" / "settings.json"
         assert_true(settings_path.exists(), f"project settings file was not written: {settings_path}")
@@ -646,7 +687,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
 
         tmux.stop()
         tmux.start()
-        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
+        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and has_input_prompt(text), timeout=12)
         assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render before persisted permission replay")
 
         tmux.send_text("trigger permission prompt again")
@@ -666,7 +707,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
 
         tmux.stop()
         tmux.start()
-        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
+        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and has_input_prompt(text), timeout=12)
         assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render before sandbox permission flow")
 
         print("--- E2E 9: sandbox expansion prompt persists project approval across restart ---")
@@ -706,7 +747,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
 
         tmux.stop()
         tmux.start()
-        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and "❯" in text, timeout=12)
+        welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and has_input_prompt(text), timeout=12)
         assert_contains(welcome, "欢迎使用 xiaok code", "welcome screen did not render before persisted sandbox replay")
 
         tmux.send_text("trigger sandbox permission prompt again")

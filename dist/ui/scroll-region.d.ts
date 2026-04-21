@@ -35,6 +35,8 @@ export interface ScrollPromptFrame {
     placeholder: string;
     statusLine: string;
     overlayLines?: string[];
+    overlayKind?: 'generic' | 'permission';
+    owner?: 'input' | 'renderer';
 }
 export declare class ScrollRegionManager {
     private readonly stream;
@@ -54,6 +56,8 @@ export declare class ScrollRegionManager {
     private _contentStreaming;
     /** Whether any markdown content has been streamed yet. */
     private _hasStreamedContent;
+    /** Whether a renderer-owned permission overlay currently owns the prompt/footer area. */
+    private _overlayPromptVisible;
     /** Footer is currently visible on screen. */
     private _footerVisible;
     /** Tracks if we have already pushed past the welcome screen. */
@@ -147,6 +151,7 @@ export declare class ScrollRegionManager {
     }): void;
     private reserveTranscriptRowsForOverlay;
     private renderOverlayPromptFrame;
+    private positionCursorForPermissionOverlay;
     private positionCursorForOverlayInput;
     /**
      * Position the cursor in the input bar for typing.
@@ -223,6 +228,7 @@ export declare class ScrollRegionManager {
     getPromptFrameState(): ScrollPromptFrame;
     setWelcomeRows(rows: number): void;
     clearContentArea(): void;
+    clearVisibleViewport(): void;
     advanceContentCursor(rows: number): void;
     advanceContentCursorByRenderedText(text: string): void;
     setContentCursor(row: number): void;

@@ -90,9 +90,7 @@ export function formatPermissionPromptLines(toolName, input, options, locale = '
         lines.push(`${target.key}: ${dim(target.value)}`);
     }
     for (const option of options) {
-        const prefix = option.selected ? boldCyan('❯') : dim(' ');
-        const label = option.selected ? boldCyan(option.label) : dim(option.label);
-        lines.push(`${prefix} ${label}`);
+        lines.push(option.selected ? boldCyan(`❯ ${option.label}`) : dim(`  ${option.label}`));
     }
     lines.push(dim(copy.hint));
     return lines;
@@ -121,6 +119,16 @@ export async function showPermissionPrompt(toolName, input, config) {
         const renderAll = () => {
             const lines = formatPermissionPromptLines(toolName, input, promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx })));
             if (useRenderer && renderer) {
+                if (renderer.hasActiveScrollRegion()) {
+                    const currentState = renderer.getState();
+                    renderer.renderInput({
+                        prompt: currentState.prompt || 'Type your message...',
+                        input: '',
+                        cursor: 0,
+                        footerLines: currentState.footerLines,
+                        overlayLines: [],
+                    });
+                }
                 renderer.openPermissionModal({
                     toolName,
                     targetLines: lines.slice(2, lines.length - (promptOptions.length + 1)),
@@ -138,7 +146,23 @@ export async function showPermissionPrompt(toolName, input, config) {
         };
         const clearAll = () => {
             if (useRenderer && renderer) {
-                renderer.closeModal();
+                const currentState = renderer.getState();
+                if (renderer.hasActiveScrollRegion()) {
+                    const preserveFooter = !(process.platform === 'win32' && process.env.TMUX);
+                    if (process.platform === 'win32' && process.env.TMUX) {
+                        renderer.clearVisibleContent();
+                    }
+                    renderer.renderInput({
+                        prompt: currentState.prompt || 'Type your message...',
+                        input: '',
+                        cursor: 0,
+                        footerLines: preserveFooter ? currentState.footerLines : [],
+                        overlayLines: [],
+                    });
+                }
+                else {
+                    renderer.closeModal();
+                }
                 return;
             }
             const totalLines = formatPermissionPromptLines(toolName, input, promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx }))).length;

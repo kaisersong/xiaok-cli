@@ -58,9 +58,7 @@ describe('ScrollRegionManager activity rendering', () => {
       manager.beginContentStreaming();
       const output = getOutput();
       expect(manager.isContentStreaming()).toBe(true);
-      // First turn: clears content area and resets cursor position
-      // Uses absolute positioning to clear stale activity lines
-      expect(output).toContain('\x1b[2K');  // clear line
+      expect(output).toContain('\x1b[1;1H');
     });
 
     it('endContentStreaming renders footer', () => {
@@ -1007,7 +1005,7 @@ describe('updateStatusLine respects _contentStreaming guard', () => {
     return { manager, getOutput: () => chunks.join('') };
   }
 
-  it('updateStatusLine preserves the cursor while updating the footer during streaming', () => {
+  it('updateStatusLine caches the footer status without writing during streaming', () => {
     const { manager, getOutput } = createMock();
     manager.begin();
     manager.beginContentStreaming();
@@ -1016,9 +1014,10 @@ describe('updateStatusLine respects _contentStreaming guard', () => {
     manager.updateStatusLine('new status');
 
     const output = getOutput();
-    expect(output).toContain('new status');
-    expect(output).toContain('\x1b[s');
-    expect(output).toContain('\x1b[u');
+    expect((manager as any).lastStatusLine).toBe('new status');
+    expect(output).not.toContain('new status');
+    expect(output).not.toContain('\x1b[s');
+    expect(output).not.toContain('\x1b[u');
   });
 
   it('updateStatusLine works when not streaming', () => {
@@ -1122,6 +1121,70 @@ describe('streaming cursor handoff', () => {
 
       expect(firstReplyIndex).toBeGreaterThanOrEqual(0);
       expect(secondQuestionIndex).toBeGreaterThan(firstReplyIndex);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('preserves the first response tail across a second turn in a 24-row tmux-style layout', () => {
+    const harness = createTtyHarness(120, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const markdown = new MarkdownRenderer();
+    const firstResponse = [
+      '适合中午的：',
+      '',
+      '- 快餐：鸡腿饭',
+      '- 面食：拉面',
+      '- 轻食：三明治',
+      '',
+      '想吃点重口还是清淡的？',
+    ].join('\n');
+    const secondResponse = [
+      '辣的午餐：',
+      '',
+      '- 川菜：麻婆豆腐饭',
+      '- 小吃：麻辣烫',
+    ].join('\n');
+
+    try {
+      manager.begin();
+      manager.setWelcomeRows(14);
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · auto · 0% · project',
+      });
+
+      manager.clearLastInput();
+      manager.writeSubmittedInput(formatSubmittedInput('first terminal request'));
+      markdown.setNewlineCallback(manager.getNewlineCallback());
+      manager.beginContentStreaming();
+      markdown.write(firstResponse);
+      const firstFlush = markdown.flush();
+      manager.advanceContentCursorByRenderedText(firstFlush.renderedLine);
+      manager.endContentStreaming({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · auto · 0% · project',
+      });
+
+      markdown.reset();
+      manager.clearLastInput();
+      manager.writeSubmittedInput(formatSubmittedInput('second terminal request'));
+      markdown.setNewlineCallback(manager.getNewlineCallback());
+      manager.beginContentStreaming();
+      markdown.write(secondResponse);
+      const secondFlush = markdown.flush();
+      manager.advanceContentCursorByRenderedText(secondFlush.renderedLine);
+      manager.endContentStreaming({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · auto · 0% · project',
+      });
+
+      const lines = harness.screen.lines();
+      const firstTailIndex = lines.findIndex((line) => line.includes('想吃点重口还是清淡的？'));
+      const secondHeadIndex = lines.findIndex((line) => line.includes('辣的午餐：'));
+
+      expect(firstTailIndex).toBeGreaterThanOrEqual(0);
+      expect(secondHeadIndex).toBeGreaterThan(firstTailIndex);
     } finally {
       harness.restore();
     }

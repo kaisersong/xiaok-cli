@@ -158,6 +158,9 @@ export function renderWelcomeScreen(opts) {
             "  '-------'"
         ];
     }
+    if (useAsciiFrame && logo.length > 4) {
+        logo = logo.slice(0, 4);
+    }
     const tips = [
         boldYellow("快速开始指南"),
         dim("• 输入问题开始对话"),
@@ -212,9 +215,6 @@ export function renderWelcomeScreen(opts) {
     const botBorder = dim(frame.bl) + dim(frame.hz.repeat(leftWidth)) + dim(frame.bm) + dim(frame.hz.repeat(rightWidth)) + dim(frame.br);
     console.log(botBorder);
     rowCount += countRows(stripAnsi(botBorder));
-    // Blank line
-    console.log();
-    rowCount += 1;
     return rowCount;
 }
 export function renderInputSeparator() {

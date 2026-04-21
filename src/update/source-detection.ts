@@ -1,17 +1,30 @@
-import { dirname, resolve } from 'node:path';
 import type { DetectInstallSourceDeps, InstallSource } from './types.js';
+
+function normalizePath(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+/g, '/');
+}
+
+function stripDistEntry(path: string): string | null {
+  const normalized = normalizePath(path);
+  if (!normalized.endsWith('/dist/index.js')) {
+    return null;
+  }
+  return normalized.slice(0, -'/dist/index.js'.length);
+}
 
 export async function detectInstallSource(
   deps: DetectInstallSourceDeps,
 ): Promise<InstallSource> {
   const resolvedBin = await deps.realpath(deps.argv0);
-  const repoRoot = resolve(dirname(resolvedBin), '..');
+  const normalizedArgv0 = normalizePath(deps.argv0);
+  const normalizedBin = normalizePath(resolvedBin);
+  const repoRoot = stripDistEntry(resolvedBin);
 
   if (
-    resolvedBin.endsWith('/dist/index.js')
-    && await deps.pathExists(resolve(repoRoot, '.git'))
+    repoRoot
+    && await deps.pathExists(`${repoRoot}/.git`)
   ) {
-    if (resolve(deps.argv0) !== resolvedBin) {
+    if (normalizedArgv0 !== normalizedBin) {
       return {
         kind: 'npm_link',
         repoRoot,
@@ -27,10 +40,11 @@ export async function detectInstallSource(
   }
 
   const npmRoot = await deps.npmRootGlobal();
-  if (resolvedBin.startsWith(resolve(npmRoot, 'xiaokcode'))) {
+  const packageRoot = `${normalizePath(npmRoot)}/xiaokcode`;
+  if (normalizedBin === packageRoot || normalizedBin.startsWith(`${packageRoot}/`)) {
     return {
       kind: 'npm_global',
-      packageRoot: resolve(npmRoot, 'xiaokcode'),
+      packageRoot,
       binPath: resolvedBin,
     };
   }

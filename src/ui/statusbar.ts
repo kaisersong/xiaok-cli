@@ -178,7 +178,9 @@ export class StatusBar {
   }
 
   clearLive(): void {
-    process.stderr.write('\r\x1b[2K');
+    // Scroll-region mode owns live activity rendering and clears it via
+    // absolute cursor positioning. Relative stderr clears here can corrupt
+    // streamed transcript rows in real tmux sessions.
   }
 
   private getStatusText(): string {

@@ -37,7 +37,10 @@ export class ReplRenderer {
     return this.scrollRegion?.isActive() ?? false;
   }
 
-  private getScrollPromptFrame(overlayLines: string[] = []): ScrollPromptFrame {
+  private getScrollPromptFrame(
+    overlayLines: string[] = [],
+    overlayKind: ScrollPromptFrame['overlayKind'] = 'generic',
+  ): ScrollPromptFrame {
     const state = this.controller.getState();
     const scrollFrame = this.scrollRegion?.getPromptFrameState();
     const inputValue = state.input.value || scrollFrame?.inputValue || '';
@@ -51,6 +54,8 @@ export class ReplRenderer {
       placeholder,
       statusLine,
       overlayLines,
+      overlayKind,
+      owner: 'renderer',
     };
   }
 
@@ -61,9 +66,7 @@ export class ReplRenderer {
       ...modal.targetLines,
       ...modal.options.map((option, index) => {
         const selected = index === modal.selectedIndex;
-        const prefix = selected ? boldCyan('❯') : dim(' ');
-        const label = selected ? boldCyan(option) : dim(option);
-        return `${prefix} ${label}`;
+        return selected ? boldCyan(`❯ ${option}`) : dim(`  ${option}`);
       }),
       dim('↑↓ 选择  Enter 确认  Esc 取消'),
     ];
@@ -73,12 +76,15 @@ export class ReplRenderer {
     this.syncTerminalSize();
     const state = this.controller.getState();
     if (this.scrollRegion?.isActive()) {
-      const overlayLines = state.modal?.type === 'permission'
-        ? this.buildPermissionOverlayLines(state.modal)
+      const permissionModal = state.modal?.type === 'permission' ? state.modal : null;
+      const overlayLines = permissionModal
+        ? this.buildPermissionOverlayLines(permissionModal)
         : state.overlay?.type === 'lines'
           ? state.overlay.lines
           : [];
-      this.scrollRegion.renderPromptFrame(this.getScrollPromptFrame(overlayLines));
+      this.scrollRegion.renderPromptFrame(
+        this.getScrollPromptFrame(overlayLines, permissionModal ? 'permission' : 'generic'),
+      );
       return;
     }
     this.terminalRenderer.render(this.controller.getState());
@@ -120,6 +126,10 @@ export class ReplRenderer {
   closeModal(): void {
     this.controller.closeModal();
     this.render();
+  }
+
+  clearVisibleContent(): void {
+    this.scrollRegion?.clearVisibleViewport();
   }
 
   clearPromptLine(): void {

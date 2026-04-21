@@ -43,13 +43,13 @@ export class MarkdownRenderer {
             if (this.pendingLen > 0 && this.pendingLen < line.length) {
                 // Streaming update: new chars arrived after initial render.
                 // Clear the old render and re-render with the full line.
-                process.stdout.write(`\r\x1b[2K`);
+                process.stdout.write(`\x1b[1G\x1b[2K`);
                 this.renderLine(line);
             }
             else if (this.pendingLen > 0 && this.pendingLen >= line.length) {
                 // Full line was already rendered (or over-rendered) by pending.
                 // The pending text was written raw (unformatted); re-render with formatting.
-                process.stdout.write(`\r\x1b[2K`);
+                process.stdout.write(`\x1b[1G\x1b[2K`);
                 this.renderLine(line);
             }
             else {
@@ -102,7 +102,7 @@ export class MarkdownRenderer {
         let renderedLine = '';
         if (this.buffer) {
             if (this.pendingLen > 0) {
-                process.stdout.write(`\r\x1b[2K`);
+                process.stdout.write(`\x1b[1G\x1b[2K`);
                 this.pendingLen = 0;
             }
             const flushed = this.buffer;

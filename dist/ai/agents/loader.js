@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { homedir } from 'os';
+import { getConfigDir } from '../../utils/config.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BUILTIN_AGENTS_DIR = join(__dirname, '../../../data/agents');
 export function parseAgentFile(name, raw) {
@@ -56,7 +56,7 @@ function loadAgentsFromDir(dir, source) {
     }
     return agents;
 }
-export async function loadCustomAgents(xiaokConfigDir = join(homedir(), '.xiaok'), cwd = process.cwd(), extraDirs = []) {
+export async function loadCustomAgents(xiaokConfigDir = getConfigDir(), cwd = process.cwd(), extraDirs = []) {
     const builtinAgents = loadAgentsFromDir(BUILTIN_AGENTS_DIR, 'builtin');
     const globalAgents = loadAgentsFromDir(join(xiaokConfigDir, 'agents'), 'global');
     const projectAgents = loadAgentsFromDir(join(cwd, '.xiaok', 'agents'), 'project');
