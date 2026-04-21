@@ -94,7 +94,7 @@ export function createTaskTools(options: TaskToolOptions): Tool[] {
               items: { type: 'string' },
               description: '新的验收标准（可选）',
             },
-            blocked_reason: { type: 'string', description: '阻塞原因（可选）' },
+            blocked_reason: { type: 'string', description: '阻塞原因；传空字符串可清除（可选）' },
             increment_attempt: { type: 'boolean', description: '是否增加尝试次数（可选）' },
             last_tool_name: { type: 'string', description: '最近执行的 tool 名称（可选）' },
           },

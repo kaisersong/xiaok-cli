@@ -49,6 +49,15 @@ export interface ListWorkflowTasksInput {
   limit?: number;
 }
 
+const NON_BLOCKED_STATUSES = new Set<TaskStatus>([
+  'queued',
+  'running',
+  'waiting_approval',
+  'completed',
+  'failed',
+  'cancelled',
+]);
+
 export class SessionTaskBoard {
   private readonly store: InMemoryTaskStore<WorkflowTaskRecord, CreateWorkflowTaskInput>;
 
@@ -111,20 +120,25 @@ export class SessionTaskBoard {
       return undefined;
     }
 
+    const nextStatus = patch.status ?? current.status;
     const notes = patch.note ? [...current.notes, patch.note] : current.notes;
     const latestEvent = patch.latestEvent ?? patch.note ?? current.latestEvent;
+    const blockedReason = typeof patch.blockedReason === 'string'
+      ? (patch.blockedReason.trim() ? patch.blockedReason : undefined)
+      : (patch.status && NON_BLOCKED_STATUSES.has(nextStatus) ? undefined : current.blockedReason);
+
     return this.store.update(taskId, {
       title: patch.title ?? current.title,
       details: patch.details ?? current.details,
       owner: patch.owner ?? current.owner,
-      status: patch.status ?? current.status,
+      status: nextStatus,
       notes,
       latestEvent,
       objective: patch.objective ?? current.objective,
       deliverable: patch.deliverable ?? current.deliverable,
-      selectedSkills: patch.selectedSkills ?? current.selectedSkills,
-      acceptanceCriteria: patch.acceptanceCriteria ?? current.acceptanceCriteria,
-      blockedReason: patch.blockedReason ?? current.blockedReason,
+      selectedSkills: patch.selectedSkills ? [...patch.selectedSkills] : current.selectedSkills,
+      acceptanceCriteria: patch.acceptanceCriteria ? [...patch.acceptanceCriteria] : current.acceptanceCriteria,
+      blockedReason,
       lastToolName: patch.lastToolName ?? current.lastToolName,
       attemptCount: patch.incrementAttempt ? current.attemptCount + 1 : current.attemptCount,
       startedAt: patch.status === 'running' && !current.startedAt ? Date.now() : current.startedAt,

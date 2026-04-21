@@ -32,6 +32,32 @@ describe('task tools', () => {
     expect(updated.lastToolName).toBe('read');
   });
 
+  it('clears blocked reason through task_update when unblocking a task', async () => {
+    const board = new SessionTaskBoard('cli');
+    const tools = createTaskTools({ board, sessionId: 'sess_1' });
+    const createTool = tools.find((tool) => tool.definition.name === 'task_create')!;
+    const updateTool = tools.find((tool) => tool.definition.name === 'task_update')!;
+
+    const created = JSON.parse(await createTool.execute({
+      title: '整理客户材料',
+    })) as { taskId: string };
+
+    const blocked = JSON.parse(await updateTool.execute({
+      task_id: created.taskId,
+      blocked_reason: '缺少技术架构文档',
+    })) as { blockedReason: string };
+    expect(blocked.blockedReason).toBe('缺少技术架构文档');
+
+    const resumed = JSON.parse(await updateTool.execute({
+      task_id: created.taskId,
+      status: 'running',
+      blocked_reason: '',
+    })) as { blockedReason?: string; status: string };
+
+    expect(resumed.status).toBe('running');
+    expect(resumed.blockedReason).toBeUndefined();
+  });
+
   it('creates, lists, gets, and updates workflow tasks for the current session', async () => {
     const board = new SessionTaskBoard('cli');
     const tools = new Map(
