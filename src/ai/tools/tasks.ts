@@ -31,6 +31,18 @@ export function createTaskTools(options: TaskToolOptions): Tool[] {
             title: { type: 'string', description: '任务标题' },
             details: { type: 'string', description: '任务详情（可选）' },
             owner: { type: 'string', description: '负责人（可选）' },
+            objective: { type: 'string', description: '任务目标（可选）' },
+            deliverable: { type: 'string', description: '预期交付物（可选）' },
+            selected_skills: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '当前选中的 skill 列表（可选）',
+            },
+            acceptance_criteria: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '任务验收标准（可选）',
+            },
           },
           required: ['title'],
         },
@@ -45,6 +57,14 @@ export function createTaskTools(options: TaskToolOptions): Tool[] {
           title,
           details: typeof input.details === 'string' ? input.details : undefined,
           owner: typeof input.owner === 'string' ? input.owner : undefined,
+          objective: typeof input.objective === 'string' ? input.objective : undefined,
+          deliverable: typeof input.deliverable === 'string' ? input.deliverable : undefined,
+          selectedSkills: Array.isArray(input.selected_skills)
+            ? input.selected_skills.filter((value): value is string => typeof value === 'string')
+            : undefined,
+          acceptanceCriteria: Array.isArray(input.acceptance_criteria)
+            ? input.acceptance_criteria.filter((value): value is string => typeof value === 'string')
+            : undefined,
         });
         return JSON.stringify(task, null, 2);
       },
@@ -62,6 +82,21 @@ export function createTaskTools(options: TaskToolOptions): Tool[] {
             details: { type: 'string', description: '新的任务详情（可选）' },
             owner: { type: 'string', description: '新的负责人（可选）' },
             note: { type: 'string', description: '新的进展记录（可选）' },
+            objective: { type: 'string', description: '新的任务目标（可选）' },
+            deliverable: { type: 'string', description: '新的预期交付物（可选）' },
+            selected_skills: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '新的 skill 列表（可选）',
+            },
+            acceptance_criteria: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '新的验收标准（可选）',
+            },
+            blocked_reason: { type: 'string', description: '阻塞原因（可选）' },
+            increment_attempt: { type: 'boolean', description: '是否增加尝试次数（可选）' },
+            last_tool_name: { type: 'string', description: '最近执行的 tool 名称（可选）' },
           },
           required: ['task_id'],
         },
@@ -82,6 +117,17 @@ export function createTaskTools(options: TaskToolOptions): Tool[] {
           details: typeof input.details === 'string' ? input.details : undefined,
           owner: typeof input.owner === 'string' ? input.owner : undefined,
           note: typeof input.note === 'string' ? input.note : undefined,
+          objective: typeof input.objective === 'string' ? input.objective : undefined,
+          deliverable: typeof input.deliverable === 'string' ? input.deliverable : undefined,
+          selectedSkills: Array.isArray(input.selected_skills)
+            ? input.selected_skills.filter((value): value is string => typeof value === 'string')
+            : undefined,
+          acceptanceCriteria: Array.isArray(input.acceptance_criteria)
+            ? input.acceptance_criteria.filter((value): value is string => typeof value === 'string')
+            : undefined,
+          blockedReason: typeof input.blocked_reason === 'string' ? input.blocked_reason : undefined,
+          incrementAttempt: input.increment_attempt === true,
+          lastToolName: typeof input.last_tool_name === 'string' ? input.last_tool_name : undefined,
         });
         if (!updated) {
           return `Error: 未找到任务 ${taskId}`;

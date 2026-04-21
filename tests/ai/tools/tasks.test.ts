@@ -3,6 +3,35 @@ import { createTaskTools } from '../../../src/ai/tools/tasks.js';
 import { SessionTaskBoard } from '../../../src/runtime/tasking/board.js';
 
 describe('task tools', () => {
+  it('creates and updates delivery-oriented task fields', async () => {
+    const board = new SessionTaskBoard('cli');
+    const tools = createTaskTools({ board, sessionId: 'sess_1' });
+    const createTool = tools.find((tool) => tool.definition.name === 'task_create')!;
+    const updateTool = tools.find((tool) => tool.definition.name === 'task_update')!;
+
+    const created = JSON.parse(await createTool.execute({
+      title: '整理客户材料',
+      objective: '整理客户发来的材料并生成方案',
+      deliverable: '一版方案初稿',
+      selected_skills: ['solution-compose'],
+      acceptance_criteria: ['返回具体方案内容'],
+    })) as { taskId: string; deliverable: string; selectedSkills: string[] };
+
+    expect(created.deliverable).toBe('一版方案初稿');
+    expect(created.selectedSkills).toEqual(['solution-compose']);
+
+    const updated = JSON.parse(await updateTool.execute({
+      task_id: created.taskId,
+      blocked_reason: '缺少技术架构文档',
+      increment_attempt: true,
+      last_tool_name: 'read',
+    })) as { blockedReason: string; attemptCount: number; lastToolName: string };
+
+    expect(updated.blockedReason).toBe('缺少技术架构文档');
+    expect(updated.attemptCount).toBe(2);
+    expect(updated.lastToolName).toBe('read');
+  });
+
   it('creates, lists, gets, and updates workflow tasks for the current session', async () => {
     const board = new SessionTaskBoard('cli');
     const tools = new Map(

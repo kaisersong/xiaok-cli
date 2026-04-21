@@ -7,6 +7,13 @@ export interface WorkflowTaskRecord extends BaseTaskRecord {
   owner?: string;
   source: string;
   notes: string[];
+  objective: string;
+  deliverable?: string;
+  selectedSkills: string[];
+  acceptanceCriteria: string[];
+  blockedReason?: string;
+  attemptCount: number;
+  lastToolName?: string;
 }
 
 export interface CreateWorkflowTaskInput {
@@ -15,6 +22,10 @@ export interface CreateWorkflowTaskInput {
   details?: string;
   owner?: string;
   source: string;
+  objective?: string;
+  deliverable?: string;
+  selectedSkills?: string[];
+  acceptanceCriteria?: string[];
 }
 
 export interface UpdateWorkflowTaskInput {
@@ -24,6 +35,13 @@ export interface UpdateWorkflowTaskInput {
   status?: TaskStatus;
   note?: string;
   latestEvent?: string;
+  objective?: string;
+  deliverable?: string;
+  selectedSkills?: string[];
+  acceptanceCriteria?: string[];
+  blockedReason?: string;
+  lastToolName?: string;
+  incrementAttempt?: boolean;
 }
 
 export interface ListWorkflowTasksInput {
@@ -46,6 +64,13 @@ export class SessionTaskBoard {
       owner: input.owner,
       source: input.source,
       notes: [],
+      objective: input.objective ?? input.title,
+      deliverable: input.deliverable,
+      selectedSkills: [...(input.selectedSkills ?? [])],
+      acceptanceCriteria: [...(input.acceptanceCriteria ?? [])],
+      blockedReason: undefined,
+      attemptCount: 1,
+      lastToolName: undefined,
     }));
   }
 
@@ -56,6 +81,10 @@ export class SessionTaskBoard {
       details: input.details,
       owner: input.owner,
       source: input.source ?? this.defaultSource,
+      objective: input.objective,
+      deliverable: input.deliverable,
+      selectedSkills: input.selectedSkills,
+      acceptanceCriteria: input.acceptanceCriteria,
     });
   }
 
@@ -91,6 +120,13 @@ export class SessionTaskBoard {
       status: patch.status ?? current.status,
       notes,
       latestEvent,
+      objective: patch.objective ?? current.objective,
+      deliverable: patch.deliverable ?? current.deliverable,
+      selectedSkills: patch.selectedSkills ?? current.selectedSkills,
+      acceptanceCriteria: patch.acceptanceCriteria ?? current.acceptanceCriteria,
+      blockedReason: patch.blockedReason ?? current.blockedReason,
+      lastToolName: patch.lastToolName ?? current.lastToolName,
+      attemptCount: patch.incrementAttempt ? current.attemptCount + 1 : current.attemptCount,
       startedAt: patch.status === 'running' && !current.startedAt ? Date.now() : current.startedAt,
       finishedAt: patch.status && ['completed', 'failed', 'cancelled'].includes(patch.status)
         ? Date.now()
