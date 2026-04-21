@@ -20,6 +20,7 @@ export interface RuntimeFacadeOptions {
   getPromptInput(cwd: string): Promise<Omit<PromptBuilderInput, 'cwd' | 'channel'>>;
   agent: Pick<Agent, 'getSessionState' | 'setPromptSnapshot' | 'setSystemPrompt' | 'runTurn'>;
   getSkillEntries?(): SkillEntry[];
+  getTaskReminderBlock?(): MessageBlock | undefined;
 }
 
 export class RuntimeFacade {
@@ -57,25 +58,36 @@ export class RuntimeFacade {
   }
 
   private buildInput(input: string | MessageBlock[]): string | MessageBlock[] {
+    const reminderBlock = this.options.getTaskReminderBlock?.();
+
     // Compute new skills not yet seen by the agent (CC dedup: only send new ones).
     const allEntries = this.options.getSkillEntries?.() ?? [];
     const newEntries = allEntries.filter((e) => !this.sentSkillNames.has(e.name));
 
-    if (newEntries.length === 0) return input;
+    const prefixBlocks: MessageBlock[] = [];
+    if (reminderBlock) {
+      prefixBlocks.push(reminderBlock);
+    }
 
-    // Mark as sent before running (mirrors CC's O.add loop).
-    for (const e of newEntries) this.sentSkillNames.add(e.name);
+    if (newEntries.length > 0) {
+      // Mark as sent before running (mirrors CC's O.add loop).
+      for (const e of newEntries) this.sentSkillNames.add(e.name);
 
-    const listing = newEntries.map((e) => e.listing).join('\n');
-    const listingBlock: MessageBlock = {
-      type: 'text',
-      text: `<system-reminder>\nThe following skills are available for use with the Skill tool:\n\n${listing}\n</system-reminder>`,
-    };
+      const listing = newEntries.map((e) => e.listing).join('\n');
+      prefixBlocks.push({
+        type: 'text',
+        text: `<system-reminder>\nThe following skills are available for use with the Skill tool:\n\n${listing}\n</system-reminder>`,
+      });
+    }
+
+    if (prefixBlocks.length === 0) {
+      return input;
+    }
 
     const inputBlocks: MessageBlock[] = typeof input === 'string'
       ? [{ type: 'text', text: input }]
       : input;
 
-    return [listingBlock, ...inputBlocks];
+    return [...prefixBlocks, ...inputBlocks];
   }
 }
