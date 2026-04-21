@@ -59,9 +59,19 @@ const UNBLOCKED_STATUSES = new Set<TaskStatus>([
 function cloneTaskRecord(task: WorkflowTaskRecord): WorkflowTaskRecord {
   return {
     ...task,
+    notes: [...task.notes],
     selectedSkills: [...task.selectedSkills],
     acceptanceCriteria: [...task.acceptanceCriteria],
   };
+}
+
+function normalizeObjective(value: string | undefined, fallback: string): string {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : fallback;
 }
 
 export class SessionTaskBoard {
@@ -79,7 +89,7 @@ export class SessionTaskBoard {
       owner: input.owner,
       source: input.source,
       notes: [],
-      objective: input.objective ?? input.title,
+      objective: normalizeObjective(input.objective, input.title),
       deliverable: input.deliverable,
       selectedSkills: [...(input.selectedSkills ?? [])],
       acceptanceCriteria: [...(input.acceptanceCriteria ?? [])],
@@ -141,7 +151,7 @@ export class SessionTaskBoard {
       status: nextStatus,
       notes,
       latestEvent,
-      objective: patch.objective ?? current.objective,
+      objective: normalizeObjective(patch.objective, current.objective),
       deliverable: patch.deliverable ?? current.deliverable,
       selectedSkills: patch.selectedSkills ? [...patch.selectedSkills] : current.selectedSkills,
       acceptanceCriteria: patch.acceptanceCriteria ? [...patch.acceptanceCriteria] : current.acceptanceCriteria,
