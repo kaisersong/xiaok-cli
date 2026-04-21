@@ -63,7 +63,7 @@ function decodeQuotedScalar(value: string): string {
     if (value.startsWith('\'')) {
       return inner.replace(/''/g, '\'');
     }
-    return inner;
+    return inner.replace(/\\(["\\])/g, '$1');
   }
   return value;
 }
@@ -100,8 +100,13 @@ function parseInlineList(value: string): string[] {
       }
 
       if (char === '\\' && quote === '"' && index + 1 < input.length) {
-        current += input[index + 1];
-        index += 1;
+        const next = input[index + 1];
+        if (next === '"' || next === '\\') {
+          current += next;
+          index += 1;
+          continue;
+        }
+        current += char;
         continue;
       }
 

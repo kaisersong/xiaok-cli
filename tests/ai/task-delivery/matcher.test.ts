@@ -61,17 +61,30 @@ describe('matchSkillsForTask', () => {
   });
 
   it('matches normal English word-form variants', () => {
-    const matches = matchSkillsForTask('please summarize', [
+    const matches = matchSkillsForTask('workflow planning', [
       skill('summary-helper', 'Summary helper', {
-        taskGoals: ['summary'],
-        inputKinds: ['report'],
-        outputKinds: ['summary'],
-        examples: ['summary'],
+        taskGoals: ['workflow'],
+        inputKinds: ['plan'],
+        outputKinds: ['planning'],
+        examples: ['workflow'],
       }),
     ]);
 
     expect(matches).toHaveLength(1);
     expect(matches[0]?.skill.name).toBe('summary-helper');
     expect(matches[0]?.score).toBeGreaterThan(0);
+  });
+
+  it('does not match unrelated short-prefix words', () => {
+    const matches = matchSkillsForTask('workshop planning', [
+      skill('workflow-helper', 'Workflow helper', {
+        taskGoals: ['workflow'],
+        inputKinds: ['workflows'],
+        outputKinds: ['workflow plan'],
+        examples: ['workflow'],
+      }),
+    ]);
+
+    expect(matches).toEqual([]);
   });
 });

@@ -109,6 +109,21 @@ Brief content.`);
     expect(brief?.taskHints.examples).toEqual(["writer's brief"]);
   });
 
+  it('decodes double-quoted block list escapes', async () => {
+    writeFileSync(join(globalDir, 'skills', 'quote.md'), `---
+name: quote
+description: quote helper
+examples:
+  - "say \\"hello\\""
+---
+Quote content.`);
+
+    const skills = await loadSkills(globalDir, projectDir, { builtinRoots: [] });
+    const quote = skills.find((skill) => skill.name === 'quote');
+
+    expect(quote?.taskHints.examples).toEqual(['say "hello"']);
+  });
+
   it('loads skills from project-local directory', async () => {
     writeFileSync(join(projectDir, '.xiaok', 'skills', 'local.md'), `---
 name: local

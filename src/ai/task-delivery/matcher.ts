@@ -83,10 +83,10 @@ function wordsMatch(left: string, right: string): boolean {
   if (!isAsciiWord(left) || !isAsciiWord(right)) return false;
 
   const prefixLength = commonPrefixLength(left, right);
-  if (prefixLength < 3) return false;
+  if (prefixLength < 4) return false;
   if (Math.min(left.length, right.length) < 5) return false;
 
-  const maxDistance = prefixLength >= 4 && Math.min(left.length, right.length) >= 6 ? 3 : 2;
+  const maxDistance = prefixLength >= 5 && Math.min(left.length, right.length) >= 6 ? 2 : 1;
   return levenshteinWithin(left, right, maxDistance);
 }
 
