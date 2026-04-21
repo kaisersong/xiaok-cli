@@ -40,22 +40,30 @@ function tokenize(value: string): Set<string> {
   const tokens = new Set<string>();
   const normalized = value.toLowerCase();
 
-  for (const word of normalized.match(/[a-z0-9]+/g) ?? []) {
-    if (word.length < 2 || STOP_WORDS.has(word)) {
+  for (const chunk of normalized.match(/[\p{L}\p{N}]+/gu) ?? []) {
+    if (/^\p{Script=Han}+$/u.test(chunk)) {
+      tokens.add(chunk);
+
+      if (chunk.length === 1) {
+        continue;
+      }
+
+      for (let index = 0; index < chunk.length - 1; index += 1) {
+        tokens.add(chunk.slice(index, index + 2));
+      }
       continue;
     }
-    tokens.add(word);
-  }
 
-  for (const hanChunk of normalized.match(/\p{Script=Han}+/gu) ?? []) {
-    if (hanChunk.length === 1) {
-      tokens.add(hanChunk);
+    if (/^[a-z0-9]+$/u.test(chunk)) {
+      if (chunk.length < 2 || STOP_WORDS.has(chunk)) {
+        continue;
+      }
+
+      tokens.add(chunk);
       continue;
     }
 
-    for (let index = 0; index < hanChunk.length - 1; index += 1) {
-      tokens.add(hanChunk.slice(index, index + 2));
-    }
+    tokens.add(chunk);
   }
 
   return tokens;

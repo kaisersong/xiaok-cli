@@ -72,11 +72,56 @@ function stripListBrackets(value: string): string {
   return value;
 }
 
-function splitCommaList(value: string): string[] {
-  return stripListBrackets(value)
-    .split(',')
-    .map((entry) => stripWrappingQuotes(entry.trim()))
-    .filter(Boolean);
+function parseInlineList(value: string): string[] {
+  const input = stripListBrackets(value).trim();
+  if (!input) return [];
+
+  const items: string[] = [];
+  let current = '';
+  let quote: '"' | '\'' | null = null;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index];
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+        continue;
+      }
+
+      if (char === '\\' && quote === '"' && index + 1 < input.length) {
+        current += input[index + 1];
+        index += 1;
+        continue;
+      }
+
+      current += char;
+      continue;
+    }
+
+    if (char === '"' || char === '\'') {
+      quote = char;
+      continue;
+    }
+
+    if (char === ',') {
+      const item = current.trim();
+      if (item) {
+        items.push(stripWrappingQuotes(item));
+      }
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  const lastItem = current.trim();
+  if (lastItem) {
+    items.push(stripWrappingQuotes(lastItem));
+  }
+
+  return items.filter(Boolean);
 }
 
 function parseBoolean(value: string | undefined): boolean | undefined {
@@ -87,7 +132,7 @@ function parseBoolean(value: string | undefined): boolean | undefined {
 }
 
 function readListField(fields: Map<string, string>, listFields: Map<string, string[]>, key: string): string[] {
-  return listFields.get(key) ?? splitCommaList(fields.get(key) ?? '');
+  return listFields.get(key) ?? parseInlineList(fields.get(key) ?? '');
 }
 
 function parseFrontmatter(raw: string): ParsedFrontmatter | null {
@@ -171,9 +216,9 @@ function parseFrontmatter(raw: string): ParsedFrontmatter | null {
   }
 
   const allowedTools = listFields.get('allowed-tools')
-    ?? splitCommaList(fields.get('allowed-tools') ?? '');
+    ?? parseInlineList(fields.get('allowed-tools') ?? '');
   const dependsOn = listFields.get('depends-on')
-    ?? splitCommaList(fields.get('depends-on') ?? fields.get('skills') ?? '');
+    ?? parseInlineList(fields.get('depends-on') ?? fields.get('skills') ?? '');
   const taskGoals = readListField(fields, listFields, 'task-goals');
   const inputKinds = readListField(fields, listFields, 'input-kinds');
   const outputKinds = readListField(fields, listFields, 'output-kinds');

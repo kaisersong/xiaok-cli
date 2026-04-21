@@ -66,6 +66,20 @@ description: 通用技能
     });
   });
 
+  it('parses inline lists with quoted commas as single entries', async () => {
+    writeFileSync(join(globalDir, 'skills', 'summary.md'), `---
+name: summary
+description: 总结技能
+examples: ["write proposal, then summarize"]
+---
+Summary content.`);
+
+    const skills = await loadSkills(globalDir, projectDir, { builtinRoots: [] });
+    const summary = skills.find((skill) => skill.name === 'summary');
+
+    expect(summary?.taskHints.examples).toEqual(['write proposal, then summarize']);
+  });
+
   it('loads skills from project-local directory', async () => {
     writeFileSync(join(projectDir, '.xiaok', 'skills', 'local.md'), `---
 name: local
