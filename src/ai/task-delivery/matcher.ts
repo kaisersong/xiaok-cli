@@ -36,6 +36,60 @@ const STOP_WORDS = new Set([
   'with',
 ]);
 
+function isAsciiWord(value: string): boolean {
+  return /^[a-z0-9]+$/u.test(value);
+}
+
+function commonPrefixLength(left: string, right: string): number {
+  const limit = Math.min(left.length, right.length);
+  let index = 0;
+  while (index < limit && left[index] === right[index]) {
+    index += 1;
+  }
+  return index;
+}
+
+function levenshteinWithin(left: string, right: string, maxDistance: number): boolean {
+  const leftLength = left.length;
+  const rightLength = right.length;
+  if (Math.abs(leftLength - rightLength) > maxDistance) return false;
+  if (left === right) return true;
+
+  let previous = Array.from({ length: rightLength + 1 }, (_, index) => index);
+
+  for (let i = 1; i <= leftLength; i += 1) {
+    const current = [i];
+    let rowMin = current[0]!;
+
+    for (let j = 1; j <= rightLength; j += 1) {
+      const substitutionCost = left[i - 1] === right[j - 1] ? 0 : 1;
+      const insertion = current[j - 1]! + 1;
+      const deletion = previous[j]! + 1;
+      const substitution = previous[j - 1]! + substitutionCost;
+      const value = Math.min(insertion, deletion, substitution);
+      current[j] = value;
+      if (value < rowMin) rowMin = value;
+    }
+
+    if (rowMin > maxDistance) return false;
+    previous = current;
+  }
+
+  return previous[rightLength]! <= maxDistance;
+}
+
+function wordsMatch(left: string, right: string): boolean {
+  if (left === right) return true;
+  if (!isAsciiWord(left) || !isAsciiWord(right)) return false;
+
+  const prefixLength = commonPrefixLength(left, right);
+  if (prefixLength < 3) return false;
+  if (Math.min(left.length, right.length) < 5) return false;
+
+  const maxDistance = prefixLength >= 4 && Math.min(left.length, right.length) >= 6 ? 3 : 2;
+  return levenshteinWithin(left, right, maxDistance);
+}
+
 function tokenize(value: string): Set<string> {
   const tokens = new Set<string>();
   const normalized = value.toLowerCase();
@@ -80,9 +134,13 @@ function scoreField(
   for (const value of values) {
     const valueTokens = tokenize(value);
     for (const token of valueTokens) {
-      if (queryTokens.has(token)) {
+      for (const queryToken of queryTokens) {
+        if (!wordsMatch(queryToken, token)) {
+          continue;
+        }
         score += weight;
         matched = true;
+        break;
       }
     }
   }

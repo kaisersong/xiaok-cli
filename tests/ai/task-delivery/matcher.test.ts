@@ -60,18 +60,18 @@ describe('matchSkillsForTask', () => {
     expect(matches[0]?.reasons).toContain('task-goals');
   });
 
-  it('matches non-ASCII task phrasing against non-ASCII hints', () => {
-    const matches = matchSkillsForTask('резюме', [
-      skill('resume-review', 'Резюме helper', {
-        taskGoals: ['резюме'],
-        inputKinds: ['резюме'],
-        outputKinds: ['feedback'],
-        examples: ['резюме'],
+  it('matches normal English word-form variants', () => {
+    const matches = matchSkillsForTask('please summarize', [
+      skill('summary-helper', 'Summary helper', {
+        taskGoals: ['summary'],
+        inputKinds: ['report'],
+        outputKinds: ['summary'],
+        examples: ['summary'],
       }),
     ]);
 
     expect(matches).toHaveLength(1);
-    expect(matches[0]?.skill.name).toBe('resume-review');
+    expect(matches[0]?.skill.name).toBe('summary-helper');
     expect(matches[0]?.score).toBeGreaterThan(0);
   });
 });

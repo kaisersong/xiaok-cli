@@ -84,6 +84,12 @@ function parseInlineList(value: string): string[] {
     const char = input[index];
 
     if (quote) {
+      if (quote === '\'' && char === '\'' && index + 1 < input.length && input[index + 1] === '\'') {
+        current += '\'';
+        index += 1;
+        continue;
+      }
+
       if (char === quote) {
         quote = null;
         continue;

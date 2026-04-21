@@ -80,6 +80,20 @@ Summary content.`);
     expect(summary?.taskHints.examples).toEqual(['write proposal, then summarize']);
   });
 
+  it('preserves apostrophes in single-quoted inline list entries', async () => {
+    writeFileSync(join(globalDir, 'skills', 'brief.md'), `---
+name: brief
+description: brief helper
+examples: ['writer''s brief']
+---
+Brief content.`);
+
+    const skills = await loadSkills(globalDir, projectDir, { builtinRoots: [] });
+    const brief = skills.find((skill) => skill.name === 'brief');
+
+    expect(brief?.taskHints.examples).toEqual(["writer's brief"]);
+  });
+
   it('loads skills from project-local directory', async () => {
     writeFileSync(join(projectDir, '.xiaok', 'skills', 'local.md'), `---
 name: local
