@@ -6,7 +6,7 @@ describe('task delivery board', () => {
     vi.restoreAllMocks();
   });
 
-  it('stores task delivery fields and increments attempts on retry', () => {
+  it('stores task delivery fields and updates progress metadata', () => {
     const board = new SessionTaskBoard('cli');
     const created = board.create('sess_1', {
       title: '整理客户材料',
@@ -23,13 +23,12 @@ describe('task delivery board', () => {
     expect(created.acceptanceCriteria).toHaveLength(2);
 
     const updated = board.update('sess_1', created.taskId, {
-      incrementAttempt: true,
       blockedReason: '缺少报价表',
       lastToolName: 'read',
       note: '等待用户补充报价表',
     });
 
-    expect(updated?.attemptCount).toBe(2);
+    expect(updated?.attemptCount).toBe(1);
     expect(updated?.blockedReason).toBe('缺少报价表');
     expect(updated?.lastToolName).toBe('read');
   });
@@ -77,6 +76,21 @@ describe('task delivery board', () => {
     const completed = board.update('sess_1', created.taskId, {
       status: 'completed',
     });
+    expect(completed?.blockedReason).toBeUndefined();
+  });
+
+  it('does not keep an explicit blocker on a completed task', () => {
+    const board = new SessionTaskBoard('cli');
+    const created = board.create('sess_1', {
+      title: '整理客户材料',
+    });
+
+    const completed = board.update('sess_1', created.taskId, {
+      status: 'completed',
+      blockedReason: '仍缺少报价表',
+    });
+
+    expect(completed?.status).toBe('completed');
     expect(completed?.blockedReason).toBeUndefined();
   });
 
@@ -141,6 +155,44 @@ describe('task delivery board', () => {
     expect(retried?.status).toBe('running');
     expect(retried?.startedAt).toBe(5000);
     expect(retried?.finishedAt).toBeUndefined();
+  });
+
+  it('treats terminal-to-active reopen as a coherent new attempt', () => {
+    const board = new SessionTaskBoard('cli');
+    const task = board.create('sess_1', {
+      title: '整理客户材料',
+    });
+
+    const nowSpy = vi.spyOn(Date, 'now');
+    nowSpy
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(2000)
+      .mockReturnValueOnce(3000)
+      .mockReturnValueOnce(4000)
+      .mockReturnValueOnce(5000)
+      .mockReturnValueOnce(6000);
+
+    const running = board.update('sess_1', task.taskId, {
+      status: 'running',
+    });
+    const completed = board.update('sess_1', task.taskId, {
+      status: 'completed',
+    });
+    const reopened = board.update('sess_1', task.taskId, {
+      status: 'running',
+    });
+    const detachedIncrement = board.update('sess_1', task.taskId, {
+      incrementAttempt: true,
+      note: '记录进展',
+    });
+
+    expect(running?.attemptCount).toBe(1);
+    expect(completed?.finishedAt).toBe(3000);
+    expect(reopened?.status).toBe('running');
+    expect(reopened?.attemptCount).toBe(2);
+    expect(reopened?.startedAt).toBe(5000);
+    expect(reopened?.finishedAt).toBeUndefined();
+    expect(detachedIncrement?.attemptCount).toBe(2);
   });
 
   it('copies updated delivery arrays before storing them', () => {

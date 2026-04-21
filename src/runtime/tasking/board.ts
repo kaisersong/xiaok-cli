@@ -62,6 +62,11 @@ const TERMINAL_STATUSES = new Set<TaskStatus>([
   'cancelled',
 ]);
 
+const ACTIVE_ATTEMPT_STATUSES = new Set<TaskStatus>([
+  'running',
+  'waiting_approval',
+]);
+
 function cloneTaskRecord(task: WorkflowTaskRecord): WorkflowTaskRecord {
   return {
     ...task,
@@ -146,16 +151,17 @@ export class SessionTaskBoard {
     const nextStatus = patch.status ?? current.status;
     const notes = patch.note ? [...current.notes, patch.note] : current.notes;
     const latestEvent = patch.latestEvent ?? patch.note ?? current.latestEvent;
-    const retryingTerminalTask = patch.incrementAttempt === true
-      && nextStatus === 'running'
+    const startingNewAttempt = ACTIVE_ATTEMPT_STATUSES.has(nextStatus)
       && TERMINAL_STATUSES.has(current.status);
-    const blockedReason = typeof patch.blockedReason === 'string'
+    const blockedReason = nextStatus === 'completed'
+      ? undefined
+      : typeof patch.blockedReason === 'string'
       ? (patch.blockedReason.trim() ? patch.blockedReason : undefined)
       : (patch.status && UNBLOCKED_STATUSES.has(nextStatus) ? undefined : current.blockedReason);
-    const startedAt = retryingTerminalTask
+    const startedAt = startingNewAttempt
       ? Date.now()
       : (patch.status === 'running' && !current.startedAt ? Date.now() : current.startedAt);
-    const finishedAt = retryingTerminalTask
+    const finishedAt = startingNewAttempt
       ? undefined
       : (patch.status && TERMINAL_STATUSES.has(patch.status) ? Date.now() : current.finishedAt);
 
@@ -172,7 +178,7 @@ export class SessionTaskBoard {
       acceptanceCriteria: patch.acceptanceCriteria ? [...patch.acceptanceCriteria] : current.acceptanceCriteria,
       blockedReason,
       lastToolName: patch.lastToolName ?? current.lastToolName,
-      attemptCount: patch.incrementAttempt ? current.attemptCount + 1 : current.attemptCount,
+      attemptCount: startingNewAttempt ? current.attemptCount + 1 : current.attemptCount,
       startedAt,
       finishedAt,
     });

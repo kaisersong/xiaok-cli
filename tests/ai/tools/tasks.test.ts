@@ -20,14 +20,24 @@ describe('task tools', () => {
     expect(created.deliverable).toBe('一版方案初稿');
     expect(created.selectedSkills).toEqual(['solution-compose']);
 
+    const failed = JSON.parse(await updateTool.execute({
+      task_id: created.taskId,
+      status: 'failed',
+      blocked_reason: '缺少技术架构文档',
+      last_tool_name: 'read',
+    })) as { blockedReason: string; lastToolName: string };
+
+    expect(failed.blockedReason).toBe('缺少技术架构文档');
+    expect(failed.lastToolName).toBe('read');
+
     const updated = JSON.parse(await updateTool.execute({
       task_id: created.taskId,
-      blocked_reason: '缺少技术架构文档',
+      status: 'running',
       increment_attempt: true,
       last_tool_name: 'read',
     })) as { blockedReason: string; attemptCount: number; lastToolName: string };
 
-    expect(updated.blockedReason).toBe('缺少技术架构文档');
+    expect(updated.blockedReason).toBeUndefined();
     expect(updated.attemptCount).toBe(2);
     expect(updated.lastToolName).toBe('read');
   });
