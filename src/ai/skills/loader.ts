@@ -54,12 +54,16 @@ interface ParsedFrontmatter {
   examples: string[];
 }
 
-function stripWrappingQuotes(value: string): string {
+function decodeQuotedScalar(value: string): string {
   if (
     (value.startsWith('"') && value.endsWith('"')) ||
     (value.startsWith('\'') && value.endsWith('\''))
   ) {
-    return value.slice(1, -1);
+    const inner = value.slice(1, -1);
+    if (value.startsWith('\'')) {
+      return inner.replace(/''/g, '\'');
+    }
+    return inner;
   }
   return value;
 }
@@ -113,7 +117,7 @@ function parseInlineList(value: string): string[] {
     if (char === ',') {
       const item = current.trim();
       if (item) {
-        items.push(stripWrappingQuotes(item));
+        items.push(decodeQuotedScalar(item));
       }
       current = '';
       continue;
@@ -124,7 +128,7 @@ function parseInlineList(value: string): string[] {
 
   const lastItem = current.trim();
   if (lastItem) {
-    items.push(stripWrappingQuotes(lastItem));
+    items.push(decodeQuotedScalar(lastItem));
   }
 
   return items.filter(Boolean);
@@ -184,7 +188,7 @@ function parseFrontmatter(raw: string): ParsedFrontmatter | null {
     const listItemMatch = line.match(/^\s*-\s+(.+)$/);
     if (listItemMatch && currentListKey) {
       const items = listFields.get(currentListKey) ?? [];
-      items.push(stripWrappingQuotes(listItemMatch[1].trim()));
+      items.push(decodeQuotedScalar(listItemMatch[1].trim()));
       listFields.set(currentListKey, items);
       continue;
     }
@@ -210,7 +214,7 @@ function parseFrontmatter(raw: string): ParsedFrontmatter | null {
       continue;
     }
 
-    fields.set(key, stripWrappingQuotes(value));
+    fields.set(key, decodeQuotedScalar(value));
   }
 
   flushBlockScalar();
