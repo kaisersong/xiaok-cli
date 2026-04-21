@@ -49,13 +49,11 @@ export interface ListWorkflowTasksInput {
   limit?: number;
 }
 
-const NON_BLOCKED_STATUSES = new Set<TaskStatus>([
+const UNBLOCKED_STATUSES = new Set<TaskStatus>([
   'queued',
   'running',
   'waiting_approval',
   'completed',
-  'failed',
-  'cancelled',
 ]);
 
 function cloneTaskRecord(task: WorkflowTaskRecord): WorkflowTaskRecord {
@@ -134,7 +132,7 @@ export class SessionTaskBoard {
     const latestEvent = patch.latestEvent ?? patch.note ?? current.latestEvent;
     const blockedReason = typeof patch.blockedReason === 'string'
       ? (patch.blockedReason.trim() ? patch.blockedReason : undefined)
-      : (patch.status && NON_BLOCKED_STATUSES.has(nextStatus) ? undefined : current.blockedReason);
+      : (patch.status && UNBLOCKED_STATUSES.has(nextStatus) ? undefined : current.blockedReason);
 
     const task = this.store.update(taskId, {
       title: patch.title ?? current.title,

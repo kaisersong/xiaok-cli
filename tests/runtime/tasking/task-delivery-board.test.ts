@@ -59,6 +59,35 @@ describe('task delivery board', () => {
     expect(completed?.blockedReason).toBeUndefined();
   });
 
+  it('preserves blocked reason for terminal blocked tasks', () => {
+    const board = new SessionTaskBoard('cli');
+    const failedTask = board.create('sess_1', {
+      title: '整理客户材料',
+    });
+
+    board.update('sess_1', failedTask.taskId, {
+      blockedReason: '缺少报价表',
+    });
+
+    const failed = board.update('sess_1', failedTask.taskId, {
+      status: 'failed',
+    });
+    expect(failed?.blockedReason).toBe('缺少报价表');
+
+    const cancelledTask = board.create('sess_1', {
+      title: '整理客户材料',
+    });
+
+    board.update('sess_1', cancelledTask.taskId, {
+      blockedReason: '缺少最终确认',
+    });
+
+    const cancelled = board.update('sess_1', cancelledTask.taskId, {
+      status: 'cancelled',
+    });
+    expect(cancelled?.blockedReason).toBe('缺少最终确认');
+  });
+
   it('copies updated delivery arrays before storing them', () => {
     const board = new SessionTaskBoard('cli');
     const created = board.create('sess_1', {
