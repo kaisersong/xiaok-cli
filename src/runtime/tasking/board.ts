@@ -172,8 +172,11 @@ export class SessionTaskBoard {
     const nextStatus = patch.status ?? current.status;
     const notes = patch.note ? [...current.notes, patch.note] : current.notes;
     const latestEvent = patch.latestEvent ?? patch.note ?? current.latestEvent;
-    const startingNewAttempt = ACTIVE_ATTEMPT_STATUSES.has(nextStatus)
-      && TERMINAL_STATUSES.has(current.status);
+    const activeNextStatus = ACTIVE_ATTEMPT_STATUSES.has(nextStatus);
+    const startingNewAttempt = activeNextStatus && (
+      TERMINAL_STATUSES.has(current.status)
+      || (patch.incrementAttempt === true && ACTIVE_ATTEMPT_STATUSES.has(current.status))
+    );
     const blockedReason = nextStatus === 'completed'
       ? undefined
       : typeof patch.blockedReason === 'string'
@@ -181,7 +184,7 @@ export class SessionTaskBoard {
       : (patch.status && UNBLOCKED_STATUSES.has(nextStatus) ? undefined : current.blockedReason);
     const startedAt = startingNewAttempt
       ? Date.now()
-      : (patch.status && ACTIVE_ATTEMPT_STATUSES.has(nextStatus) && !current.startedAt ? Date.now() : current.startedAt);
+      : (patch.status && activeNextStatus && !current.startedAt ? Date.now() : current.startedAt);
     const finishedAt = resolveFinishedAt(current, patch.status, nextStatus, startingNewAttempt);
 
     const task = this.store.update(taskId, {

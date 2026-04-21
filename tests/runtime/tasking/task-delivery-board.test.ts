@@ -222,7 +222,7 @@ describe('task delivery board', () => {
     expect(reopened?.attemptCount).toBe(2);
     expect(reopened?.startedAt).toBe(5000);
     expect(reopened?.finishedAt).toBeUndefined();
-    expect(detachedIncrement?.attemptCount).toBe(2);
+    expect(detachedIncrement?.attemptCount).toBe(3);
   });
 
   it('uses incrementAttempt only for a real new attempt transition', () => {
@@ -259,7 +259,7 @@ describe('task delivery board', () => {
     expect(completed?.attemptCount).toBe(1);
     expect(noFlagReopen?.attemptCount).toBe(2);
     expect(noFlagReopen?.finishedAt).toBeUndefined();
-    expect(waitingApproval?.attemptCount).toBe(2);
+    expect(waitingApproval?.attemptCount).toBe(3);
   });
 
   it('initializes attempt timing when entering waiting approval directly', () => {
@@ -283,11 +283,18 @@ describe('task delivery board', () => {
     expect(waitingApproval?.finishedAt).toBeUndefined();
   });
 
-  it('ignores incrementAttempt outside a real retry transition', () => {
+  it('starts a new attempt when incrementAttempt is requested on an active task', () => {
     const board = new SessionTaskBoard('cli');
     const task = board.create('sess_1', {
       title: '整理客户材料',
     });
+
+    const nowSpy = vi.spyOn(Date, 'now');
+    nowSpy
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(2000)
+      .mockReturnValueOnce(3000)
+      .mockReturnValueOnce(4000);
 
     const running = board.update('sess_1', task.taskId, {
       status: 'running',
@@ -299,7 +306,10 @@ describe('task delivery board', () => {
     });
 
     expect(running?.attemptCount).toBe(1);
-    expect(stillRunning?.attemptCount).toBe(1);
+    expect(running?.startedAt).toBe(1000);
+    expect(stillRunning?.attemptCount).toBe(2);
+    expect(stillRunning?.startedAt).toBe(3000);
+    expect(stillRunning?.finishedAt).toBeUndefined();
     expect(stillRunning?.notes).toEqual(['补充进展']);
   });
 

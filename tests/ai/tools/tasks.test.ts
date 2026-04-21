@@ -76,7 +76,7 @@ describe('task tools', () => {
       increment_attempt: true,
       note: '补充进展',
     })) as { attemptCount: number; notes: string[] };
-    expect(stillRunning.attemptCount).toBe(2);
+    expect(stillRunning.attemptCount).toBe(3);
     expect(stillRunning.notes).toEqual(['补充进展']);
   });
 
