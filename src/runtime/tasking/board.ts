@@ -85,6 +85,27 @@ function normalizeObjective(value: string | undefined, fallback: string): string
   return trimmed ? trimmed : fallback;
 }
 
+function resolveFinishedAt(
+  current: WorkflowTaskRecord,
+  patchStatus: TaskStatus | undefined,
+  nextStatus: TaskStatus,
+  startingNewAttempt: boolean,
+): number | undefined {
+  if (startingNewAttempt) {
+    return undefined;
+  }
+
+  if (!patchStatus || !TERMINAL_STATUSES.has(nextStatus)) {
+    return current.finishedAt;
+  }
+
+  if (TERMINAL_STATUSES.has(current.status) && typeof current.finishedAt === 'number') {
+    return current.finishedAt;
+  }
+
+  return Date.now();
+}
+
 export class SessionTaskBoard {
   private readonly store: InMemoryTaskStore<WorkflowTaskRecord, CreateWorkflowTaskInput>;
 
@@ -161,9 +182,7 @@ export class SessionTaskBoard {
     const startedAt = startingNewAttempt
       ? Date.now()
       : (patch.status === 'running' && !current.startedAt ? Date.now() : current.startedAt);
-    const finishedAt = startingNewAttempt
-      ? undefined
-      : (patch.status && TERMINAL_STATUSES.has(patch.status) ? Date.now() : current.finishedAt);
+    const finishedAt = resolveFinishedAt(current, patch.status, nextStatus, startingNewAttempt);
 
     const task = this.store.update(taskId, {
       title: patch.title ?? current.title,

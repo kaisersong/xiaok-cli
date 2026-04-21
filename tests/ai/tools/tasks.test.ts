@@ -42,6 +42,44 @@ describe('task tools', () => {
     expect(updated.lastToolName).toBe('read');
   });
 
+  it('only increments attempts when task_update starts a real new attempt', async () => {
+    const board = new SessionTaskBoard('cli');
+    const tools = createTaskTools({ board, sessionId: 'sess_1' });
+    const createTool = tools.find((tool) => tool.definition.name === 'task_create')!;
+    const updateTool = tools.find((tool) => tool.definition.name === 'task_update')!;
+
+    const created = JSON.parse(await createTool.execute({
+      title: '整理客户材料',
+    })) as { taskId: string };
+
+    const running = JSON.parse(await updateTool.execute({
+      task_id: created.taskId,
+      status: 'running',
+      increment_attempt: true,
+    })) as { attemptCount: number };
+    expect(running.attemptCount).toBe(1);
+
+    await updateTool.execute({
+      task_id: created.taskId,
+      status: 'completed',
+    });
+
+    const reopened = JSON.parse(await updateTool.execute({
+      task_id: created.taskId,
+      status: 'running',
+    })) as { attemptCount: number };
+    expect(reopened.attemptCount).toBe(2);
+
+    const stillRunning = JSON.parse(await updateTool.execute({
+      task_id: created.taskId,
+      status: 'running',
+      increment_attempt: true,
+      note: '补充进展',
+    })) as { attemptCount: number; notes: string[] };
+    expect(stillRunning.attemptCount).toBe(2);
+    expect(stillRunning.notes).toEqual(['补充进展']);
+  });
+
   it('clears blocked reason through task_update when unblocking a task', async () => {
     const board = new SessionTaskBoard('cli');
     const tools = createTaskTools({ board, sessionId: 'sess_1' });

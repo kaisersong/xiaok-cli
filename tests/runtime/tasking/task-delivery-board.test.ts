@@ -123,6 +123,36 @@ describe('task delivery board', () => {
     expect(cancelled?.blockedReason).toBe('缺少最终确认');
   });
 
+  it('preserves the first terminal timestamp across repeated terminal updates', () => {
+    const board = new SessionTaskBoard('cli');
+    const task = board.create('sess_1', {
+      title: '整理客户材料',
+    });
+
+    const nowSpy = vi.spyOn(Date, 'now');
+    nowSpy
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(2000)
+      .mockReturnValueOnce(3000)
+      .mockReturnValueOnce(4000)
+      .mockReturnValueOnce(5000);
+
+    board.update('sess_1', task.taskId, {
+      status: 'running',
+    });
+    const completed = board.update('sess_1', task.taskId, {
+      status: 'completed',
+    });
+    const completedAgain = board.update('sess_1', task.taskId, {
+      status: 'completed',
+      note: '补充完成说明',
+    });
+
+    expect(completed?.finishedAt).toBe(3000);
+    expect(completedAgain?.finishedAt).toBe(3000);
+    expect(completedAgain?.notes).toEqual(['补充完成说明']);
+  });
+
   it('refreshes timing metadata when retrying a terminal task', () => {
     const board = new SessionTaskBoard('cli');
     const task = board.create('sess_1', {
@@ -193,6 +223,63 @@ describe('task delivery board', () => {
     expect(reopened?.startedAt).toBe(5000);
     expect(reopened?.finishedAt).toBeUndefined();
     expect(detachedIncrement?.attemptCount).toBe(2);
+  });
+
+  it('uses incrementAttempt only for a real new attempt transition', () => {
+    const board = new SessionTaskBoard('cli');
+    const task = board.create('sess_1', {
+      title: '整理客户材料',
+    });
+
+    const nowSpy = vi.spyOn(Date, 'now');
+    nowSpy
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(2000)
+      .mockReturnValueOnce(3000)
+      .mockReturnValueOnce(4000)
+      .mockReturnValueOnce(5000)
+      .mockReturnValueOnce(6000);
+
+    const running = board.update('sess_1', task.taskId, {
+      status: 'running',
+      incrementAttempt: true,
+    });
+    const completed = board.update('sess_1', task.taskId, {
+      status: 'completed',
+    });
+    const noFlagReopen = board.update('sess_1', task.taskId, {
+      status: 'running',
+    });
+    const waitingApproval = board.update('sess_1', task.taskId, {
+      status: 'waiting_approval',
+      incrementAttempt: true,
+    });
+
+    expect(running?.attemptCount).toBe(1);
+    expect(completed?.attemptCount).toBe(1);
+    expect(noFlagReopen?.attemptCount).toBe(2);
+    expect(noFlagReopen?.finishedAt).toBeUndefined();
+    expect(waitingApproval?.attemptCount).toBe(2);
+  });
+
+  it('ignores incrementAttempt outside a real retry transition', () => {
+    const board = new SessionTaskBoard('cli');
+    const task = board.create('sess_1', {
+      title: '整理客户材料',
+    });
+
+    const running = board.update('sess_1', task.taskId, {
+      status: 'running',
+    });
+    const stillRunning = board.update('sess_1', task.taskId, {
+      status: 'running',
+      incrementAttempt: true,
+      note: '补充进展',
+    });
+
+    expect(running?.attemptCount).toBe(1);
+    expect(stillRunning?.attemptCount).toBe(1);
+    expect(stillRunning?.notes).toEqual(['补充进展']);
   });
 
   it('copies updated delivery arrays before storing them', () => {
