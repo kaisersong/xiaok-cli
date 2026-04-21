@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createSkillTool, formatSkillPayload } from '../../../src/ai/skills/tool.js';
+import { createSkillTool } from '../../../src/ai/skills/tool.js';
 import { createSkillCatalog, loadSkills } from '../../../src/ai/skills/loader.js';
 
 describe('skillTool', () => {
@@ -38,7 +38,18 @@ examples:
       requested: string[];
       strategy: string;
       primarySkill: string;
-      resolved: Array<{ name: string; description: string; executionContext: string; content: string }>;
+      resolved: Array<{
+        name: string;
+        description: string;
+        executionContext: string;
+        taskHints: {
+          taskGoals: string[];
+          inputKinds: string[];
+          outputKinds: string[];
+          examples: string[];
+        };
+        content: string;
+      }>;
     };
 
     expect(payload.type).toBe('skill_plan');
@@ -47,6 +58,12 @@ examples:
     expect(payload.strategy).toBe('inline');
     expect(payload.resolved[0]?.name).toBe('greet');
     expect(payload.resolved[0]?.description).toContain('打招呼');
+    expect(payload.resolved[0]?.taskHints).toEqual({
+      taskGoals: ['greet the user warmly'],
+      inputKinds: ['greeting'],
+      outputKinds: ['friendly reply'],
+      examples: ['hello there'],
+    });
     expect(payload.resolved[0]?.content).toContain('中文');
   });
 
@@ -85,27 +102,5 @@ description: 发布技能
     const payload = JSON.parse(result) as { primarySkill: string; resolved: Array<{ content: string }> };
     expect(payload.primarySkill).toBe('deploy');
     expect(payload.resolved[0]?.content).toContain('检查 CI');
-  });
-
-  it('includes task hints in the skill payload', async () => {
-    const skills = await loadSkills(dir, dir, { builtinRoots: [] });
-    const skill = skills.find((entry) => entry.name === 'greet');
-    expect(skill).toBeTruthy();
-
-    const payload = JSON.parse(formatSkillPayload(skill!)) as {
-      taskHints: {
-        taskGoals: string[];
-        inputKinds: string[];
-        outputKinds: string[];
-        examples: string[];
-      };
-    };
-
-    expect(payload.taskHints).toEqual({
-      taskGoals: ['greet the user warmly'],
-      inputKinds: ['greeting'],
-      outputKinds: ['friendly reply'],
-      examples: ['hello there'],
-    });
   });
 });

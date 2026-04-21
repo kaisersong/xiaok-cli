@@ -12,6 +12,7 @@ export interface SkillPlanStep {
   model?: string;
   effort?: string;
   dependsOn: string[];
+  taskHints: SkillMeta['taskHints'];
   content: string;
 }
 
@@ -36,6 +37,7 @@ function toPlanStep(skill: SkillMeta): SkillPlanStep {
     model: skill.model,
     effort: skill.effort,
     dependsOn: [...skill.dependsOn],
+    taskHints: skill.taskHints,
     content: skill.content,
   };
 }
