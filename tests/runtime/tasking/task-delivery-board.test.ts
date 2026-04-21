@@ -82,4 +82,39 @@ describe('task delivery board', () => {
     expect(persisted?.selectedSkills).toEqual(['solution-compose']);
     expect(persisted?.acceptanceCriteria).toEqual(['返回具体方案内容']);
   });
+
+  it('returns defensive copies of delivery arrays from create, get, list, and update', () => {
+    const board = new SessionTaskBoard('cli');
+    const created = board.create('sess_1', {
+      title: '整理客户材料',
+      selectedSkills: ['solution-compose'],
+      acceptanceCriteria: ['返回具体方案内容'],
+    });
+
+    created.selectedSkills.push('mutated-after-create');
+    created.acceptanceCriteria.push('mutated-after-create');
+    expect(board.get('sess_1', created.taskId)?.selectedSkills).toEqual(['solution-compose']);
+    expect(board.get('sess_1', created.taskId)?.acceptanceCriteria).toEqual(['返回具体方案内容']);
+
+    const fetched = board.get('sess_1', created.taskId)!;
+    fetched.selectedSkills.push('mutated-after-get');
+    fetched.acceptanceCriteria.push('mutated-after-get');
+    expect(board.get('sess_1', created.taskId)?.selectedSkills).toEqual(['solution-compose']);
+    expect(board.get('sess_1', created.taskId)?.acceptanceCriteria).toEqual(['返回具体方案内容']);
+
+    const listed = board.list('sess_1')[0]!;
+    listed.selectedSkills.push('mutated-after-list');
+    listed.acceptanceCriteria.push('mutated-after-list');
+    expect(board.get('sess_1', created.taskId)?.selectedSkills).toEqual(['solution-compose']);
+    expect(board.get('sess_1', created.taskId)?.acceptanceCriteria).toEqual(['返回具体方案内容']);
+
+    const updated = board.update('sess_1', created.taskId, {
+      selectedSkills: ['doc-extract'],
+      acceptanceCriteria: ['生成方案初稿'],
+    })!;
+    updated.selectedSkills.push('mutated-after-update');
+    updated.acceptanceCriteria.push('mutated-after-update');
+    expect(board.get('sess_1', created.taskId)?.selectedSkills).toEqual(['doc-extract']);
+    expect(board.get('sess_1', created.taskId)?.acceptanceCriteria).toEqual(['生成方案初稿']);
+  });
 });

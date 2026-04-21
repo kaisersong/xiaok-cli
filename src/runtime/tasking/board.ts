@@ -58,6 +58,14 @@ const NON_BLOCKED_STATUSES = new Set<TaskStatus>([
   'cancelled',
 ]);
 
+function cloneTaskRecord(task: WorkflowTaskRecord): WorkflowTaskRecord {
+  return {
+    ...task,
+    selectedSkills: [...task.selectedSkills],
+    acceptanceCriteria: [...task.acceptanceCriteria],
+  };
+}
+
 export class SessionTaskBoard {
   private readonly store: InMemoryTaskStore<WorkflowTaskRecord, CreateWorkflowTaskInput>;
 
@@ -84,7 +92,7 @@ export class SessionTaskBoard {
   }
 
   create(sessionId: string, input: Omit<CreateWorkflowTaskInput, 'sessionId' | 'source'> & { source?: string }): WorkflowTaskRecord {
-    return this.store.create({
+    const task = this.store.create({
       sessionId,
       title: input.title,
       details: input.details,
@@ -95,6 +103,7 @@ export class SessionTaskBoard {
       selectedSkills: input.selectedSkills,
       acceptanceCriteria: input.acceptanceCriteria,
     });
+    return cloneTaskRecord(task);
   }
 
   get(sessionId: string, taskId: string): WorkflowTaskRecord | undefined {
@@ -102,16 +111,16 @@ export class SessionTaskBoard {
     if (!task || task.sessionId !== sessionId) {
       return undefined;
     }
-    return task;
+    return cloneTaskRecord(task);
   }
 
   list(sessionId: string, options: ListWorkflowTasksInput = {}): WorkflowTaskRecord[] {
     const tasks = this.store.listBySession(sessionId)
       .filter((task) => !options.status || task.status === options.status);
     if (typeof options.limit === 'number' && options.limit >= 0) {
-      return tasks.slice(0, options.limit);
+      return tasks.slice(0, options.limit).map(cloneTaskRecord);
     }
-    return tasks;
+    return tasks.map(cloneTaskRecord);
   }
 
   update(sessionId: string, taskId: string, patch: UpdateWorkflowTaskInput): WorkflowTaskRecord | undefined {
@@ -127,7 +136,7 @@ export class SessionTaskBoard {
       ? (patch.blockedReason.trim() ? patch.blockedReason : undefined)
       : (patch.status && NON_BLOCKED_STATUSES.has(nextStatus) ? undefined : current.blockedReason);
 
-    return this.store.update(taskId, {
+    const task = this.store.update(taskId, {
       title: patch.title ?? current.title,
       details: patch.details ?? current.details,
       owner: patch.owner ?? current.owner,
@@ -146,5 +155,6 @@ export class SessionTaskBoard {
         ? Date.now()
         : current.finishedAt,
     });
+    return task ? cloneTaskRecord(task) : undefined;
   }
 }
