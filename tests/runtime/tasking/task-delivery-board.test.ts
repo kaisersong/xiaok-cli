@@ -262,6 +262,27 @@ describe('task delivery board', () => {
     expect(waitingApproval?.attemptCount).toBe(2);
   });
 
+  it('initializes attempt timing when entering waiting approval directly', () => {
+    const board = new SessionTaskBoard('cli');
+    const task = board.create('sess_1', {
+      title: '整理客户材料',
+    });
+
+    const nowSpy = vi.spyOn(Date, 'now');
+    nowSpy
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(2000);
+
+    const waitingApproval = board.update('sess_1', task.taskId, {
+      status: 'waiting_approval',
+    });
+
+    expect(waitingApproval?.status).toBe('waiting_approval');
+    expect(waitingApproval?.attemptCount).toBe(1);
+    expect(waitingApproval?.startedAt).toBe(1000);
+    expect(waitingApproval?.finishedAt).toBeUndefined();
+  });
+
   it('ignores incrementAttempt outside a real retry transition', () => {
     const board = new SessionTaskBoard('cli');
     const task = board.create('sess_1', {

@@ -181,7 +181,7 @@ export class SessionTaskBoard {
       : (patch.status && UNBLOCKED_STATUSES.has(nextStatus) ? undefined : current.blockedReason);
     const startedAt = startingNewAttempt
       ? Date.now()
-      : (patch.status === 'running' && !current.startedAt ? Date.now() : current.startedAt);
+      : (patch.status && ACTIVE_ATTEMPT_STATUSES.has(nextStatus) && !current.startedAt ? Date.now() : current.startedAt);
     const finishedAt = resolveFinishedAt(current, patch.status, nextStatus, startingNewAttempt);
 
     const task = this.store.update(taskId, {
