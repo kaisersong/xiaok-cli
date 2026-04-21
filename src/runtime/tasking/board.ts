@@ -56,6 +56,12 @@ const UNBLOCKED_STATUSES = new Set<TaskStatus>([
   'completed',
 ]);
 
+const TERMINAL_STATUSES = new Set<TaskStatus>([
+  'completed',
+  'failed',
+  'cancelled',
+]);
+
 function cloneTaskRecord(task: WorkflowTaskRecord): WorkflowTaskRecord {
   return {
     ...task,
@@ -140,9 +146,18 @@ export class SessionTaskBoard {
     const nextStatus = patch.status ?? current.status;
     const notes = patch.note ? [...current.notes, patch.note] : current.notes;
     const latestEvent = patch.latestEvent ?? patch.note ?? current.latestEvent;
+    const retryingTerminalTask = patch.incrementAttempt === true
+      && nextStatus === 'running'
+      && TERMINAL_STATUSES.has(current.status);
     const blockedReason = typeof patch.blockedReason === 'string'
       ? (patch.blockedReason.trim() ? patch.blockedReason : undefined)
       : (patch.status && UNBLOCKED_STATUSES.has(nextStatus) ? undefined : current.blockedReason);
+    const startedAt = retryingTerminalTask
+      ? Date.now()
+      : (patch.status === 'running' && !current.startedAt ? Date.now() : current.startedAt);
+    const finishedAt = retryingTerminalTask
+      ? undefined
+      : (patch.status && TERMINAL_STATUSES.has(patch.status) ? Date.now() : current.finishedAt);
 
     const task = this.store.update(taskId, {
       title: patch.title ?? current.title,
@@ -158,10 +173,8 @@ export class SessionTaskBoard {
       blockedReason,
       lastToolName: patch.lastToolName ?? current.lastToolName,
       attemptCount: patch.incrementAttempt ? current.attemptCount + 1 : current.attemptCount,
-      startedAt: patch.status === 'running' && !current.startedAt ? Date.now() : current.startedAt,
-      finishedAt: patch.status && ['completed', 'failed', 'cancelled'].includes(patch.status)
-        ? Date.now()
-        : current.finishedAt,
+      startedAt,
+      finishedAt,
     });
     return task ? cloneTaskRecord(task) : undefined;
   }

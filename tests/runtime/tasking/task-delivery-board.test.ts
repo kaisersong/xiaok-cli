@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionTaskBoard } from '../../../src/runtime/tasking/board.js';
 
 describe('task delivery board', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('stores task delivery fields and increments attempts on retry', () => {
     const board = new SessionTaskBoard('cli');
     const created = board.create('sess_1', {
@@ -103,6 +107,40 @@ describe('task delivery board', () => {
       status: 'cancelled',
     });
     expect(cancelled?.blockedReason).toBe('缺少最终确认');
+  });
+
+  it('refreshes timing metadata when retrying a terminal task', () => {
+    const board = new SessionTaskBoard('cli');
+    const task = board.create('sess_1', {
+      title: '整理客户材料',
+    });
+
+    const nowSpy = vi.spyOn(Date, 'now');
+    nowSpy
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(2000)
+      .mockReturnValueOnce(3000)
+      .mockReturnValueOnce(4000)
+      .mockReturnValueOnce(5000)
+      .mockReturnValueOnce(6000);
+
+    const running = board.update('sess_1', task.taskId, {
+      status: 'running',
+    });
+    const failed = board.update('sess_1', task.taskId, {
+      status: 'failed',
+    });
+    const retried = board.update('sess_1', task.taskId, {
+      status: 'running',
+      incrementAttempt: true,
+    });
+
+    expect(running?.startedAt).toBe(1000);
+    expect(failed?.finishedAt).toBe(3000);
+    expect(retried?.attemptCount).toBe(2);
+    expect(retried?.status).toBe('running');
+    expect(retried?.startedAt).toBe(5000);
+    expect(retried?.finishedAt).toBeUndefined();
   });
 
   it('copies updated delivery arrays before storing them', () => {
