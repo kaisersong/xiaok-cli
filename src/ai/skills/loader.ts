@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { getBuiltinSkillRoots } from './defaults.js';
 import { getConfigDir } from '../../utils/config.js';
+import type { TaskSkillHints } from '../task-delivery/types.js';
 
 export type SkillExecutionContext = 'inline' | 'fork';
 
@@ -20,6 +21,7 @@ export interface SkillMeta {
   dependsOn: string[];
   userInvocable: boolean;
   whenToUse?: string;
+  taskHints: TaskSkillHints;
 }
 
 export interface SkillLoadOptions {
@@ -46,6 +48,10 @@ interface ParsedFrontmatter {
   dependsOn: string[];
   userInvocable?: boolean;
   whenToUse?: string;
+  taskGoals: string[];
+  inputKinds: string[];
+  outputKinds: string[];
+  examples: string[];
 }
 
 function stripWrappingQuotes(value: string): string {
@@ -70,6 +76,10 @@ function parseBoolean(value: string | undefined): boolean | undefined {
   if (/^(true|yes|1)$/i.test(value)) return true;
   if (/^(false|no|0)$/i.test(value)) return false;
   return undefined;
+}
+
+function readListField(fields: Map<string, string>, listFields: Map<string, string[]>, key: string): string[] {
+  return listFields.get(key) ?? splitCommaList(fields.get(key) ?? '');
 }
 
 function parseFrontmatter(raw: string): ParsedFrontmatter | null {
@@ -156,6 +166,10 @@ function parseFrontmatter(raw: string): ParsedFrontmatter | null {
     ?? splitCommaList(fields.get('allowed-tools') ?? '');
   const dependsOn = listFields.get('depends-on')
     ?? splitCommaList(fields.get('depends-on') ?? fields.get('skills') ?? '');
+  const taskGoals = readListField(fields, listFields, 'task-goals');
+  const inputKinds = readListField(fields, listFields, 'input-kinds');
+  const outputKinds = readListField(fields, listFields, 'output-kinds');
+  const examples = readListField(fields, listFields, 'examples');
   const executionContext = fields.get('context') === 'fork' ? 'fork' : 'inline';
 
   return {
@@ -170,6 +184,10 @@ function parseFrontmatter(raw: string): ParsedFrontmatter | null {
     dependsOn,
     userInvocable: parseBoolean(fields.get('user-invocable')),
     whenToUse: fields.get('when_to_use') ?? fields.get('when-to-use') ?? undefined,
+    taskGoals,
+    inputKinds,
+    outputKinds,
+    examples,
   };
 }
 
@@ -194,6 +212,12 @@ function normalizeSkill(
     dependsOn: parsed.dependsOn,
     userInvocable: parsed.userInvocable ?? true,
     whenToUse: parsed.whenToUse,
+    taskHints: {
+      taskGoals: parsed.taskGoals,
+      inputKinds: parsed.inputKinds,
+      outputKinds: parsed.outputKinds,
+      examples: parsed.examples,
+    },
   };
 }
 

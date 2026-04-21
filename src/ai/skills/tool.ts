@@ -19,6 +19,7 @@ export function formatSkillPayload(skill: SkillMeta): string {
     dependsOn: skill.dependsOn,
     userInvocable: skill.userInvocable,
     whenToUse: skill.whenToUse,
+    taskHints: skill.taskHints,
     content: skill.content,
   }, null, 2);
 }

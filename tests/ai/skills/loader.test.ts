@@ -25,6 +25,13 @@ describe('loadSkills', () => {
     writeFileSync(join(globalDir, 'skills', 'hello.md'), `---
 name: hello
 description: 打招呼
+task-goals:
+  - greet the user
+input-kinds: greeting, short prompt
+output-kinds:
+  - warm reply
+examples:
+  - say hello
 allowed-tools:
   - read
   - grep
@@ -53,6 +60,12 @@ description: 通用技能
     expect(hello?.executionContext).toBe('fork');
     expect(hello?.agent).toBe('researcher');
     expect(hello?.dependsOn).toEqual(['common']);
+    expect(hello?.taskHints).toEqual({
+      taskGoals: ['greet the user'],
+      inputKinds: ['greeting', 'short prompt'],
+      outputKinds: ['warm reply'],
+      examples: ['say hello'],
+    });
   });
 
   it('loads skills from project-local directory', async () => {

@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createSkillTool } from '../../../src/ai/skills/tool.js';
+import { createSkillTool, formatSkillPayload } from '../../../src/ai/skills/tool.js';
 import { createSkillCatalog, loadSkills } from '../../../src/ai/skills/loader.js';
 
 describe('skillTool', () => {
@@ -15,6 +15,14 @@ describe('skillTool', () => {
     writeFileSync(join(dir, 'skills', 'greet.md'), `---
 name: greet
 description: 打招呼技能
+task-goals:
+  - greet the user warmly
+input-kinds:
+  - greeting
+output-kinds:
+  - friendly reply
+examples:
+  - hello there
 ---
 请用中文打招呼，保持友好。`);
   });
@@ -77,5 +85,27 @@ description: 发布技能
     const payload = JSON.parse(result) as { primarySkill: string; resolved: Array<{ content: string }> };
     expect(payload.primarySkill).toBe('deploy');
     expect(payload.resolved[0]?.content).toContain('检查 CI');
+  });
+
+  it('includes task hints in the skill payload', async () => {
+    const skills = await loadSkills(dir, dir, { builtinRoots: [] });
+    const skill = skills.find((entry) => entry.name === 'greet');
+    expect(skill).toBeTruthy();
+
+    const payload = JSON.parse(formatSkillPayload(skill!)) as {
+      taskHints: {
+        taskGoals: string[];
+        inputKinds: string[];
+        outputKinds: string[];
+        examples: string[];
+      };
+    };
+
+    expect(payload.taskHints).toEqual({
+      taskGoals: ['greet the user warmly'],
+      inputKinds: ['greeting'],
+      outputKinds: ['friendly reply'],
+      examples: ['hello there'],
+    });
   });
 });
