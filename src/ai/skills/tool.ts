@@ -2,6 +2,32 @@ import type { Tool } from '../../types.js';
 import type { CapabilityRegistry } from '../../platform/runtime/capability-registry.js';
 import type { SkillCatalog, SkillMeta } from './loader.js';
 import { buildSkillExecutionPlan } from './planner.js';
+import type { SkillExecutionPlan, SkillPlanStep } from './planner.js';
+
+type SkillPlanStepWithTaskHints = SkillPlanStep & {
+  taskHints: SkillMeta['taskHints'];
+};
+
+type SkillExecutionPlanWithTaskHints = Omit<SkillExecutionPlan, 'resolved'> & {
+  resolved: SkillPlanStepWithTaskHints[];
+};
+
+function enrichSkillPlan(plan: SkillExecutionPlan, skills: SkillMeta[]): SkillExecutionPlanWithTaskHints {
+  const byName = new Map(skills.map((skill) => [skill.name, skill]));
+
+  return {
+    ...plan,
+    resolved: plan.resolved.map((step) => ({
+      ...step,
+      taskHints: byName.get(step.name)?.taskHints ?? {
+        taskGoals: [],
+        inputKinds: [],
+        outputKinds: [],
+        examples: [],
+      },
+    })),
+  };
+}
 
 export function formatSkillPayload(skill: SkillMeta): string {
   return JSON.stringify({
@@ -107,7 +133,7 @@ Important:
 
       try {
         const plan = buildSkillExecutionPlan(requested, skills);
-        return JSON.stringify(plan, null, 2);
+        return JSON.stringify(enrichSkillPlan(plan, listSkillRecords()), null, 2);
       } catch {
         const available = listSkillNames().join(', ') || '（无）';
         return `Error: 找不到 skill "${requested.join(', ')}"。可用 skills：${available}`;
