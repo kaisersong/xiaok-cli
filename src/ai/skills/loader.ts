@@ -1,13 +1,14 @@
-import { readdirSync, readFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { readdirSync, readFileSync, existsSync, Dirent } from 'fs';
+import { basename, join } from 'path';
 import { getBuiltinSkillRoots } from './defaults.js';
 import { getConfigDir } from '../../utils/config.js';
-import type { TaskSkillHints } from '../task-delivery/types.js';
+import type { TaskSkillHints } from '../intent-delegation/types.js';
 
 export type SkillExecutionContext = 'inline' | 'fork';
 
 export interface SkillMeta {
   name: string;
+  aliases?: string[];
   description: string;
   content: string;
   path: string;
@@ -264,9 +265,14 @@ function normalizeSkill(
   filePath: string,
   source: SkillMeta['source'],
   tier: SkillMeta['tier'],
+  aliases: string[] = [],
 ): SkillMeta {
+  const normalizedAliases = Array.from(
+    new Set(aliases.map((alias) => alias.trim()).filter((alias) => alias && alias !== parsed.name)),
+  );
   return {
     name: parsed.name,
+    aliases: normalizedAliases,
     description: parsed.description,
     content: parsed.content,
     path: filePath,
@@ -297,25 +303,40 @@ function loadSkillsFromDir(
   if (!existsSync(dir)) return [];
 
   const results: SkillMeta[] = [];
-  let entries: string[];
+  let entries: Dirent[];
   try {
-    entries = readdirSync(dir).filter((file) => file.endsWith('.md'));
+    entries = readdirSync(dir, { withFileTypes: true });
   } catch {
     return [];
   }
 
-  for (const file of entries) {
-    const filePath = join(dir, file);
+  const loadSkillFile = (filePath: string, displayName: string, aliases: string[] = []) => {
     try {
       const raw = readFileSync(filePath, 'utf-8');
       const parsed = parseFrontmatter(raw);
       if (!parsed) {
-        console.warn(`[xiaok] Skills: 跳过格式错误的文件: ${file}`);
-        continue;
+        console.warn(`[xiaok] Skills: 跳过格式错误的文件: ${displayName}`);
+        return;
       }
-      results.push(normalizeSkill(parsed, filePath, source, tier));
+      results.push(normalizeSkill(parsed, filePath, source, tier, aliases));
     } catch {
-      console.warn(`[xiaok] Skills: 读取文件失败: ${file}`);
+      console.warn(`[xiaok] Skills: 读取文件失败: ${displayName}`);
+    }
+  };
+
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.endsWith('.md')) {
+      loadSkillFile(join(dir, entry.name), entry.name, [basename(entry.name, '.md')]);
+      continue;
+    }
+
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) {
+      continue;
+    }
+
+    const skillFilePath = join(dir, entry.name, 'SKILL.md');
+    if (existsSync(skillFilePath)) {
+      loadSkillFile(skillFilePath, `${entry.name}/SKILL.md`, [entry.name]);
     }
   }
 
@@ -350,7 +371,17 @@ function resolveSkillsByName(names: string[], skills: SkillMeta[]): SkillMeta[] 
   const ordered: SkillMeta[] = [];
   const seen = new Set<string>();
   const stack = new Set<string>();
-  const byName = new Map(skills.map((skill) => [skill.name, skill]));
+  const byName = new Map<string, SkillMeta>();
+  for (const skill of skills) {
+    byName.set(skill.name, skill);
+  }
+  for (const skill of skills) {
+    for (const alias of skill.aliases ?? []) {
+      if (!byName.has(alias)) {
+        byName.set(alias, skill);
+      }
+    }
+  }
 
   const visit = (name: string) => {
     if (seen.has(name)) return;
@@ -393,7 +424,7 @@ export function createSkillCatalog(
       return [...skills];
     },
     get(name: string) {
-      return skills.find((skill) => skill.name === name);
+      return findSkillByCommandName(skills, name);
     },
     resolve(names: string[]) {
       return resolveSkillsByName(names, skills);
@@ -413,7 +444,11 @@ function formatSkillDescription(skill: SkillMeta): string {
 }
 
 export function formatSkillEntry(skill: SkillMeta): string {
-  return `- ${skill.name}: ${formatSkillDescription(skill)}`;
+  const aliases = skill.aliases ?? [];
+  const aliasSuffix = aliases.length > 0
+    ? ` (${aliases.map((alias) => `/${alias}`).join(', ')})`
+    : '';
+  return `- ${skill.name}${aliasSuffix}: ${formatSkillDescription(skill)}`;
 }
 
 export function formatSkillsContext(skills: SkillMeta[]): string {
@@ -423,6 +458,14 @@ export function formatSkillsContext(skills: SkillMeta[]): string {
 
 export function toSkillEntries(skills: SkillMeta[]): Array<{ name: string; listing: string }> {
   return skills.map((skill) => ({ name: skill.name, listing: formatSkillEntry(skill) }));
+}
+
+export function getSkillCommandNames(skill: SkillMeta): string[] {
+  return [skill.name, ...(skill.aliases ?? [])];
+}
+
+export function findSkillByCommandName(skills: SkillMeta[], name: string): SkillMeta | undefined {
+  return skills.find((skill) => skill.name === name || (skill.aliases ?? []).includes(name));
 }
 
 export function parseSlashCommand(input: string): { skillName: string; rest: string } | null {

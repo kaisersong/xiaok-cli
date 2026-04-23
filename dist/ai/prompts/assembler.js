@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
 import { formatLoadedContext, loadAutoContext } from '../runtime/context-loader.js';
 import { formatSkillsContext } from '../skills/loader.js';
-import { getIntroSection, getSystemSection, getDoingTasksSection, getActionsSection, getUsingToolsSection, getToneAndStyleSection, getOutputEfficiencySection, getSessionGuidanceSection, } from './sections/index.js';
+import { getIntroSection, getSystemSection, getDoingTasksSection, getIntentDelegationSection, getActionsSection, getUsingToolsSection, getToneAndStyleSection, getOutputEfficiencySection, getSessionGuidanceSection, } from './sections/index.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const API_OVERVIEW_PATH = join(__dirname, '../../../data/yzj-api-overview.md');
 // ---------------------------------------------------------------------------
@@ -41,6 +41,7 @@ export async function assembleSystemPrompt(opts) {
         getIntroSection(),
         getSystemSection(),
         getDoingTasksSection(),
+        getIntentDelegationSection(),
         getActionsSection(),
         getUsingToolsSection(),
         getToneAndStyleSection(),

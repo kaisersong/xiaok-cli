@@ -33,6 +33,7 @@ export interface ScrollPromptFrame {
     inputValue: string;
     cursor: number;
     placeholder: string;
+    summaryLine?: string;
     statusLine: string;
     overlayLines?: string[];
     overlayKind?: 'generic' | 'permission';
@@ -43,7 +44,9 @@ export declare class ScrollRegionManager {
     private active;
     private config;
     private lastActivityLine;
+    private lastActivityRow;
     private lastInputPrompt;
+    private lastSummaryLine;
     private lastStatusLine;
     private lastInputValue;
     private lastInputCursor;
@@ -80,6 +83,8 @@ export declare class ScrollRegionManager {
     constructor(stream?: NodeJS.WriteStream, config?: ScrollRegionConfig);
     private clampCursorRow;
     private maxInputRows;
+    private getSummaryReserveRows;
+    private getSummaryRow;
     /**
      * Calculate the bottom row of the scroll region (where activity line renders).
      */
@@ -139,7 +144,7 @@ export declare class ScrollRegionManager {
      * This only updates the status line, not the input bar.
      * After rendering, cursor is positioned at input line for typing.
      */
-    updateFooter(inputPrompt: string, statusLine?: string): void;
+    updateFooter(inputPrompt: string, summaryLine?: string, statusLine?: string): void;
     /**
      * Render the footer area (input prompt + status bar).
      * Status bar shows static info like model, percentage, branch, project.
@@ -147,6 +152,7 @@ export declare class ScrollRegionManager {
      */
     renderFooter(options?: {
         inputPrompt?: string;
+        summaryLine?: string;
         statusLine?: string;
     }): void;
     private reserveTranscriptRowsForOverlay;
@@ -191,6 +197,7 @@ export declare class ScrollRegionManager {
      */
     endContentStreaming(options?: {
         inputPrompt?: string;
+        summaryLine?: string;
         statusLine?: string;
     }): void;
     /**

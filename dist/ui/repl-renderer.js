@@ -33,11 +33,17 @@ export class ReplRenderer {
         const inputValue = state.input.value || scrollFrame?.inputValue || '';
         const cursor = state.input.value ? state.input.cursorOffset : (scrollFrame?.cursor ?? 0);
         const placeholder = state.prompt || scrollFrame?.placeholder || 'Type your message...';
-        const statusLine = state.footerLines?.[0] ?? scrollFrame?.statusLine ?? '';
+        const summaryLine = state.footerLines && state.footerLines.length > 1
+            ? state.footerLines[0] ?? ''
+            : scrollFrame?.summaryLine ?? '';
+        const statusLine = state.footerLines && state.footerLines.length > 1
+            ? state.footerLines[1] ?? ''
+            : state.footerLines?.[0] ?? scrollFrame?.statusLine ?? '';
         return {
             inputValue,
             cursor,
             placeholder,
+            summaryLine,
             statusLine,
             overlayLines,
             overlayKind,

@@ -189,6 +189,39 @@ describe('contentStreaming flag logic (simulated)', () => {
 });
 
 describe('scroll-region prompt frame ownership', () => {
+  it('renders the sticky summary line above the input and separate from activity and status rows', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderActivity('⠋ Thinking · 1s');
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        summaryLine: 'Intent: Customer proposal · Collect · Drafting Plan',
+        statusLine: 'gpt-5.4 · 5% · master · xiaok-cli',
+      });
+
+      const lines = harness.screen.lines();
+      const activityIndex = lines.findIndex((line) => line.includes('Thinking · 1s'));
+      const summaryIndex = lines.findIndex((line) => line.includes('Intent: Customer proposal'));
+      const promptIndex = lines.findIndex((line) => line.includes('❯ Type your message...'));
+      const statusIndex = lines.findIndex((line) => line.includes('gpt-5.4 · 5% · master · xiaok-cli'));
+
+      expect(activityIndex).toBeGreaterThanOrEqual(0);
+      expect(summaryIndex).toBeGreaterThan(activityIndex);
+      expect(promptIndex).toBeGreaterThan(summaryIndex);
+      expect(statusIndex).toBeGreaterThan(promptIndex);
+      expect(lines[summaryIndex]).not.toContain('gpt-5.4');
+      expect(lines[summaryIndex]).not.toContain('Thinking');
+      expect(summaryIndex).toBe(promptIndex - 3);
+      expect(lines[summaryIndex + 1]).toBe('');
+      expect(lines[activityIndex]).not.toContain('Intent: Customer proposal');
+    } finally {
+      harness.restore();
+    }
+  });
+
   it('renders prompt, status, and overlay from a single scroll-region frame', () => {
     const { manager, getOutput } = createMockScrollRegion();
     manager.begin();
@@ -414,6 +447,62 @@ describe('scroll-region prompt frame ownership', () => {
       expect(lines.some((line) => line.includes('xiaok 想要执行以下操作'))).toBe(false);
       expect(lines.some((line) => line.includes('工具: bash'))).toBe(false);
       expect(lines.some((line) => line.includes('↑↓ 选择  Enter 确认  Esc 取消'))).toBe(false);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('re-anchors the footer after out-of-band transcript writes', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        summaryLine: 'Intent: Customer proposal · Collect · Drafting Plan',
+        statusLine: 'gpt-5.4 · 5% · master · xiaok-cli',
+      });
+
+      manager.writeAtContentCursor('\n[background] job_1 completed: background worker finished\n');
+
+      const lines = harness.screen.lines();
+      const backgroundIndex = lines.findIndex((line) => line.includes('[background] job_1 completed'));
+      const summaryRows = lines.filter((line) => line.includes('Intent: Customer proposal'));
+      const promptRows = lines.filter((line) => line.includes('❯ Type your message...'));
+      const statusRows = lines.filter((line) => line.includes('gpt-5.4 · 5% · master · xiaok-cli'));
+
+      expect(backgroundIndex).toBeGreaterThanOrEqual(0);
+      expect(summaryRows).toHaveLength(1);
+      expect(promptRows).toHaveLength(1);
+      expect(statusRows).toHaveLength(1);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('keeps agent questions visible above the restored footer', () => {
+    const harness = createTtyHarness(100, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        summaryLine: 'Intent: Customer proposal · Collect · Drafting Plan',
+        statusLine: 'test-model · auto · 0% · project',
+      });
+
+      manager.writeAtContentCursor('\nAgent question: 确认目标？\n');
+
+      const lines = harness.screen.lines();
+      const questionIndex = lines.findIndex((line) => line.includes('Agent question: 确认目标？'));
+      const promptIndex = lines.findIndex((line) => line.includes('❯ Type your message...'));
+      const statusIndex = lines.findIndex((line) => line.includes('test-model · auto · 0% · project'));
+
+      expect(questionIndex).toBeGreaterThanOrEqual(0);
+      expect(promptIndex).toBeGreaterThan(questionIndex);
+      expect(statusIndex).toBeGreaterThan(promptIndex);
     } finally {
       harness.restore();
     }

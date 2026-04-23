@@ -1,4 +1,4 @@
-import type { SkillCatalog, SkillMeta } from './loader.js';
+import { findSkillByCommandName, type SkillCatalog, type SkillMeta } from './loader.js';
 
 export interface SkillPlanStep {
   name: string;
@@ -67,7 +67,6 @@ function resolveFromArray(names: string[], skills: SkillMeta[]): SkillMeta[] {
   const ordered: SkillMeta[] = [];
   const seen = new Set<string>();
   const stack = new Set<string>();
-  const byName = new Map(skills.map((skill) => [skill.name, skill]));
 
   const visit = (name: string) => {
     if (seen.has(name)) return;
@@ -75,7 +74,7 @@ function resolveFromArray(names: string[], skills: SkillMeta[]): SkillMeta[] {
       throw new Error(`skill dependency cycle detected: ${name}`);
     }
 
-    const skill = byName.get(name);
+    const skill = findSkillByCommandName(skills, name);
     if (!skill) return;
 
     stack.add(name);

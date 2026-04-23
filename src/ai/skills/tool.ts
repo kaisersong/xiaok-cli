@@ -89,14 +89,13 @@ export function createSkillTool(skills: SkillMeta[] | SkillCatalog, capabilityRe
 
 When users ask you to perform tasks, check if any of the available skills match. Skills provide specialized capabilities and domain knowledge.
 
-When users reference a "slash command" or "/<something>" (e.g., "/kai-report-creator", "/kai-slide-creator"), they are referring to a skill. Use this tool to invoke it.
+When users reference a "slash command" or "/<something>", they are referring to a skill. Use this tool to invoke it.
 
 How to invoke:
 - Use this tool with the skill name and optional arguments
 - Examples:
-  - name: "kai-report-creator" - invoke the report creator skill
-  - name: "kai-slide-creator" - invoke the slide creator skill
-  - name: "kai-html-export" - invoke the export skill
+  - name: "matched-skill-name" - invoke the skill that best matches the current user intent
+  - name: "explicit-slash-command-name" - invoke the skill the user explicitly named
 
 Important:
 - Available skills are listed in system-reminder messages in the conversation

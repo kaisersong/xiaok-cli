@@ -1,4 +1,19 @@
 import { buildSkillExecutionPlan } from './planner.js';
+function enrichSkillPlan(plan, skills) {
+    const byName = new Map(skills.map((skill) => [skill.name, skill]));
+    return {
+        ...plan,
+        resolved: plan.resolved.map((step) => ({
+            ...step,
+            taskHints: byName.get(step.name)?.taskHints ?? {
+                taskGoals: [],
+                inputKinds: [],
+                outputKinds: [],
+                examples: [],
+            },
+        })),
+    };
+}
 export function formatSkillPayload(skill) {
     return JSON.stringify({
         type: 'skill',
@@ -15,6 +30,7 @@ export function formatSkillPayload(skill) {
         dependsOn: skill.dependsOn,
         userInvocable: skill.userInvocable,
         whenToUse: skill.whenToUse,
+        taskHints: skill.taskHints,
         content: skill.content,
     }, null, 2);
 }
@@ -52,14 +68,13 @@ export function createSkillTool(skills, capabilityRegistry) {
 
 When users ask you to perform tasks, check if any of the available skills match. Skills provide specialized capabilities and domain knowledge.
 
-When users reference a "slash command" or "/<something>" (e.g., "/kai-report-creator", "/kai-slide-creator"), they are referring to a skill. Use this tool to invoke it.
+When users reference a "slash command" or "/<something>", they are referring to a skill. Use this tool to invoke it.
 
 How to invoke:
 - Use this tool with the skill name and optional arguments
 - Examples:
-  - name: "kai-report-creator" - invoke the report creator skill
-  - name: "kai-slide-creator" - invoke the slide creator skill
-  - name: "kai-html-export" - invoke the export skill
+  - name: "matched-skill-name" - invoke the skill that best matches the current user intent
+  - name: "explicit-slash-command-name" - invoke the skill the user explicitly named
 
 Important:
 - Available skills are listed in system-reminder messages in the conversation
@@ -94,7 +109,7 @@ Important:
             }
             try {
                 const plan = buildSkillExecutionPlan(requested, skills);
-                return JSON.stringify(plan, null, 2);
+                return JSON.stringify(enrichSkillPlan(plan, listSkillRecords()), null, 2);
             }
             catch {
                 const available = listSkillNames().join(', ') || '（无）';

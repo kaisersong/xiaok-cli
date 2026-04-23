@@ -1,6 +1,7 @@
 import * as readline from 'readline';
 import { stdin, stdout } from 'process';
 import { boldCyan, dim } from './render.js';
+import { getSkillCommandNames } from '../ai/skills/loader.js';
 import { appendFileSync } from 'fs';
 import { buildSlashMenuOverlayLines, MAX_MENU_DESCRIPTION_WIDTH } from './repl-state.js';
 import { getChatSlashCommands } from '../commands/registry.js';
@@ -42,9 +43,11 @@ export function wordBoundaryRight(text, cursor) {
 export function getSlashCommands(skills) {
     const commands = [...getChatSlashCommands()];
     for (const skill of skills) {
-        const cmd = `/${skill.name}`;
-        if (!commands.some((c) => c.cmd === cmd)) {
-            commands.push({ cmd, desc: skill.description });
+        for (const commandName of getSkillCommandNames(skill)) {
+            const cmd = `/${commandName}`;
+            if (!commands.some((c) => c.cmd === cmd)) {
+                commands.push({ cmd, desc: skill.description });
+            }
         }
     }
     return commands.sort((a, b) => a.cmd.localeCompare(b.cmd));
@@ -179,28 +182,73 @@ export class InputReader {
             let cursor = 0;
             let resolved = false;
             let historyState = pushInputHistory(createInputHistoryState(), '', 0);
+            let richUiEnabled = Boolean(this.renderer);
+            let uiErrorNotified = false;
+            const degradeUi = (context, error) => {
+                richUiEnabled = false;
+                this.menuOpen = false;
+                this.menuItems = [];
+                this.menuIdx = 0;
+                this.renderedMenuRows = 0;
+                log(`ui degraded at ${context}: ${String(error)}`);
+                if (uiErrorNotified) {
+                    return;
+                }
+                uiErrorNotified = true;
+                try {
+                    stdout.write(`\n${dim(`[xiaok] UI 已降级：${context}`)}\n`);
+                }
+                catch { }
+            };
             const redraw = () => {
                 if (resolved)
                     return; // don't redraw after done()
-                if (this.renderer) {
-                    const overlayLines = this.menuOpen
-                        ? buildSlashMenuOverlayLines(this.menuItems, this.menuIdx, stdout.columns ?? 80, MAX_MENU_VISIBLE_ITEMS)
-                        : [];
-                    const footerLines = this.statusLineProvider?.() ?? [];
-                    if (this.scrollPromptRenderer) {
-                        this.renderedMenuRows = overlayLines.length;
-                        this.scrollPromptRenderer({
-                            inputValue: input,
-                            cursor,
-                            placeholder: prompt,
-                            statusLine: footerLines[0] ?? '',
-                            overlayLines,
-                        });
-                        return;
+                if (this.renderer && richUiEnabled) {
+                    try {
+                        const overlayLines = this.menuOpen
+                            ? buildSlashMenuOverlayLines(this.menuItems, this.menuIdx, stdout.columns ?? 80, MAX_MENU_VISIBLE_ITEMS)
+                            : [];
+                        const footerLines = (() => {
+                            try {
+                                return this.statusLineProvider?.() ?? [];
+                            }
+                            catch (error) {
+                                degradeUi('status_line_provider', error);
+                                return [];
+                            }
+                        })();
+                        if (richUiEnabled && this.scrollPromptRenderer) {
+                            try {
+                                const summaryLine = footerLines.length > 1 ? footerLines[0] ?? '' : '';
+                                const statusLine = footerLines.length > 1
+                                    ? footerLines[1] ?? ''
+                                    : footerLines[0] ?? '';
+                                this.renderedMenuRows = overlayLines.length;
+                                const didRender = this.scrollPromptRenderer({
+                                    inputValue: input,
+                                    cursor,
+                                    placeholder: prompt,
+                                    summaryLine,
+                                    statusLine,
+                                    overlayLines,
+                                });
+                                if (didRender !== false) {
+                                    return;
+                                }
+                            }
+                            catch (error) {
+                                degradeUi('scroll_prompt_renderer', error);
+                            }
+                        }
+                        if (richUiEnabled) {
+                            this.renderedMenuRows = overlayLines.length;
+                            this.renderer.renderInput({ prompt, input, cursor, overlayLines, footerLines });
+                            return;
+                        }
                     }
-                    this.renderedMenuRows = overlayLines.length;
-                    this.renderer.renderInput({ prompt, input, cursor, overlayLines, footerLines });
-                    return;
+                    catch (error) {
+                        degradeUi('repl_renderer', error);
+                    }
                 }
                 stdout.write(`\r\x1b[K${prompt}${input}`);
                 const back = getDisplayWidth(input.slice(cursor));
@@ -233,10 +281,15 @@ export class InputReader {
                 stdout.write(RESTORE_CURSOR);
             };
             const clearMenu = () => {
-                if (this.renderer) {
-                    this.renderer.clearOverlay();
-                    this.renderedMenuRows = 0;
-                    return;
+                if (this.renderer && richUiEnabled) {
+                    try {
+                        this.renderer.clearOverlay();
+                        this.renderedMenuRows = 0;
+                        return;
+                    }
+                    catch (error) {
+                        degradeUi('clear_overlay', error);
+                    }
                 }
                 if (this.renderedMenuRows <= 0)
                     return;
@@ -284,8 +337,13 @@ export class InputReader {
                 if (resolved)
                     return;
                 // Clear prompt line BEFORE closeMenu() to prevent redraw() from re-rendering it
-                if (this.renderer && !this.scrollPromptRenderer) {
-                    this.renderer.prepareBlockOutput();
+                if (this.renderer && richUiEnabled && !this.scrollPromptRenderer) {
+                    try {
+                        this.renderer.prepareBlockOutput();
+                    }
+                    catch (error) {
+                        degradeUi('prepare_block_output', error);
+                    }
                 }
                 closeMenu();
                 resolved = true;

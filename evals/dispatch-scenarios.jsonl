@@ -1,0 +1,3 @@
+{"id":"dispatch-01","check":"single_active_step","prompt":"帮我根据这些访谈笔记写一版产品方案"}
+{"id":"dispatch-02","check":"out_of_order_rejection","prompt":"帮我根据这些访谈笔记写一版产品方案"}
+{"id":"dispatch-03","check":"high_risk_confirmation","prompt":"帮我根据这些访谈笔记写一版产品方案","riskTierOverride":"high"}

@@ -8,6 +8,10 @@ export interface UsageStats {
 export interface StatusBarOptions {
     contextLimit?: number;
 }
+export interface ActivitySnapshot {
+    label: string;
+    startedAt: number;
+}
 interface ReassuranceTick {
     bucket: number;
     line: string;
@@ -38,6 +42,7 @@ export declare class StatusBar {
     updateActivity(label: string): void;
     endActivity(): void;
     getActivityLabel(): string;
+    getActivitySnapshot(): ActivitySnapshot | null;
     /** Build the status string (no newline). */
     getStatusLine(): string;
     getLiveStatusLine(now?: number, frameIndex?: number): string;

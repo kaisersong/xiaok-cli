@@ -115,29 +115,42 @@ export async function showPermissionPrompt(toolName, input, config) {
     let selectedIdx = 0;
     return new Promise((resolve) => {
         let resolved = false;
+        let renderWithRenderer = useRenderer;
         transcriptLogger?.record({ type: 'permission_prompt_open', toolName, timestamp: Date.now() });
+        const degradeRenderer = (context, _error) => {
+            renderWithRenderer = false;
+            try {
+                stdout.write(`\n${dim(`[xiaok] UI 已降级：${context}`)}\n`);
+            }
+            catch { }
+        };
         const renderAll = () => {
             const lines = formatPermissionPromptLines(toolName, input, promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx })));
-            if (useRenderer && renderer) {
-                if (renderer.hasActiveScrollRegion()) {
-                    const currentState = renderer.getState();
-                    renderer.renderInput({
-                        prompt: currentState.prompt || 'Type your message...',
-                        input: '',
-                        cursor: 0,
-                        footerLines: currentState.footerLines,
-                        overlayLines: [],
+            if (renderWithRenderer && renderer) {
+                try {
+                    if (renderer.hasActiveScrollRegion()) {
+                        const currentState = renderer.getState();
+                        renderer.renderInput({
+                            prompt: currentState.prompt || 'Type your message...',
+                            input: '',
+                            cursor: 0,
+                            footerLines: currentState.footerLines,
+                            overlayLines: [],
+                        });
+                    }
+                    renderer.openPermissionModal({
+                        toolName,
+                        targetLines: lines.slice(2, lines.length - (promptOptions.length + 1)),
+                        options: promptOptions.map((option) => option.label),
                     });
+                    for (let index = 0; index < selectedIdx; index += 1) {
+                        renderer.handleKey('\x1b[B');
+                    }
+                    return;
                 }
-                renderer.openPermissionModal({
-                    toolName,
-                    targetLines: lines.slice(2, lines.length - (promptOptions.length + 1)),
-                    options: promptOptions.map((option) => option.label),
-                });
-                for (let index = 0; index < selectedIdx; index += 1) {
-                    renderer.handleKey('\x1b[B');
+                catch (error) {
+                    degradeRenderer('permission_prompt_renderer', error);
                 }
-                return;
             }
             for (const line of lines) {
                 stdout.write(line + '\n');
@@ -145,25 +158,30 @@ export async function showPermissionPrompt(toolName, input, config) {
             stdout.write(`\x1b[${lines.length}A\r`);
         };
         const clearAll = () => {
-            if (useRenderer && renderer) {
-                const currentState = renderer.getState();
-                if (renderer.hasActiveScrollRegion()) {
-                    const preserveFooter = !(process.platform === 'win32' && process.env.TMUX);
-                    if (process.platform === 'win32' && process.env.TMUX) {
-                        renderer.clearVisibleContent();
+            if (renderWithRenderer && renderer) {
+                try {
+                    const currentState = renderer.getState();
+                    if (renderer.hasActiveScrollRegion()) {
+                        const preserveFooter = !(process.platform === 'win32' && process.env.TMUX);
+                        if (process.platform === 'win32' && process.env.TMUX) {
+                            renderer.clearVisibleContent();
+                        }
+                        renderer.renderInput({
+                            prompt: currentState.prompt || 'Type your message...',
+                            input: '',
+                            cursor: 0,
+                            footerLines: preserveFooter ? currentState.footerLines : [],
+                            overlayLines: [],
+                        });
                     }
-                    renderer.renderInput({
-                        prompt: currentState.prompt || 'Type your message...',
-                        input: '',
-                        cursor: 0,
-                        footerLines: preserveFooter ? currentState.footerLines : [],
-                        overlayLines: [],
-                    });
+                    else {
+                        renderer.closeModal();
+                    }
+                    return;
                 }
-                else {
-                    renderer.closeModal();
+                catch (error) {
+                    degradeRenderer('permission_prompt_clear', error);
                 }
-                return;
             }
             const totalLines = formatPermissionPromptLines(toolName, input, promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx }))).length;
             stdout.write('\x1b7'); // save cursor
@@ -210,8 +228,15 @@ export async function showPermissionPrompt(toolName, input, config) {
             if (key === '\x1b[A') {
                 transcriptLogger?.record({ type: 'permission_prompt_navigate', direction: 'up', timestamp: Date.now() });
                 selectedIdx = (selectedIdx - 1 + promptOptions.length) % promptOptions.length;
-                if (useRenderer && renderer) {
-                    renderer.handleKey('\x1b[A');
+                if (renderWithRenderer && renderer) {
+                    try {
+                        renderer.handleKey('\x1b[A');
+                    }
+                    catch (error) {
+                        degradeRenderer('permission_prompt_nav_up', error);
+                        clearAll();
+                        renderAll();
+                    }
                 }
                 else {
                     clearAll();
@@ -223,8 +248,15 @@ export async function showPermissionPrompt(toolName, input, config) {
             if (key === '\x1b[B') {
                 transcriptLogger?.record({ type: 'permission_prompt_navigate', direction: 'down', timestamp: Date.now() });
                 selectedIdx = (selectedIdx + 1) % promptOptions.length;
-                if (useRenderer && renderer) {
-                    renderer.handleKey('\x1b[B');
+                if (renderWithRenderer && renderer) {
+                    try {
+                        renderer.handleKey('\x1b[B');
+                    }
+                    catch (error) {
+                        degradeRenderer('permission_prompt_nav_down', error);
+                        clearAll();
+                        renderAll();
+                    }
                 }
                 else {
                     clearAll();

@@ -20,7 +20,7 @@ export interface RuntimeFacadeOptions {
   getPromptInput(cwd: string): Promise<Omit<PromptBuilderInput, 'cwd' | 'channel'>>;
   agent: Pick<Agent, 'getSessionState' | 'setPromptSnapshot' | 'setSystemPrompt' | 'runTurn'>;
   getSkillEntries?(): SkillEntry[];
-  getTaskReminderBlock?(): MessageBlock | undefined;
+  getIntentReminderBlock?(): MessageBlock | undefined;
 }
 
 export class RuntimeFacade {
@@ -58,7 +58,7 @@ export class RuntimeFacade {
   }
 
   private buildInput(input: string | MessageBlock[]): string | MessageBlock[] {
-    const reminderBlock = this.options.getTaskReminderBlock?.();
+    const reminderBlock = this.options.getIntentReminderBlock?.();
 
     // Compute new skills not yet seen by the agent (CC dedup: only send new ones).
     const allEntries = this.options.getSkillEntries?.() ?? [];

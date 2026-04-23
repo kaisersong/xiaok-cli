@@ -19,6 +19,8 @@ interface SessionRow {
   memory_refs_json: string;
   approval_refs_json: string;
   background_job_refs_json: string;
+  intent_delegation_json: string | null;
+  skill_eval_json: string | null;
 }
 
 interface SessionMessageRow {
@@ -58,8 +60,9 @@ export class SQLiteSessionStore implements SessionStore {
         INSERT INTO sessions (
           session_id, cwd, model, created_at, updated_at, forked_from_session_id,
           lineage_json, usage_json, compactions_json, prompt_snapshot_id,
-          memory_refs_json, approval_refs_json, background_job_refs_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          memory_refs_json, approval_refs_json, background_job_refs_json,
+          intent_delegation_json, skill_eval_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(session_id) DO UPDATE SET
           cwd = excluded.cwd,
           model = excluded.model,
@@ -72,7 +75,9 @@ export class SQLiteSessionStore implements SessionStore {
           prompt_snapshot_id = excluded.prompt_snapshot_id,
           memory_refs_json = excluded.memory_refs_json,
           approval_refs_json = excluded.approval_refs_json,
-          background_job_refs_json = excluded.background_job_refs_json
+          background_job_refs_json = excluded.background_job_refs_json,
+          intent_delegation_json = excluded.intent_delegation_json,
+          skill_eval_json = excluded.skill_eval_json
       `).run(
         nextSnapshot.sessionId,
         nextSnapshot.cwd,
@@ -87,6 +92,8 @@ export class SQLiteSessionStore implements SessionStore {
         JSON.stringify(nextSnapshot.memoryRefs),
         JSON.stringify(nextSnapshot.approvalRefs),
         JSON.stringify(nextSnapshot.backgroundJobRefs),
+        JSON.stringify(nextSnapshot.intentDelegation ?? null),
+        JSON.stringify(nextSnapshot.skillEval ?? null),
       );
 
       this.db.prepare('DELETE FROM session_messages WHERE session_id = ?').run(nextSnapshot.sessionId);
@@ -173,6 +180,8 @@ export class SQLiteSessionStore implements SessionStore {
       memoryRefs: JSON.parse(row.memory_refs_json) as string[],
       approvalRefs: JSON.parse(row.approval_refs_json) as string[],
       backgroundJobRefs: JSON.parse(row.background_job_refs_json) as string[],
+      intentDelegation: row.intent_delegation_json ? (JSON.parse(row.intent_delegation_json) ?? undefined) : undefined,
+      skillEval: row.skill_eval_json ? (JSON.parse(row.skill_eval_json) ?? undefined) : undefined,
     };
   }
 

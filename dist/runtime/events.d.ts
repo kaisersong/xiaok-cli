@@ -16,6 +16,61 @@ export type RuntimeEvent = {
     sessionId: string;
     turnId: string;
 } | {
+    type: 'intent_created';
+    sessionId: string;
+    turnId: string;
+    intentId: string;
+    templateId: string;
+    deliverable: string;
+    riskTier: 'low' | 'medium' | 'high';
+} | {
+    type: 'stage_activated';
+    sessionId: string;
+    turnId: string;
+    intentId: string;
+    stageId: string;
+    label: string;
+    order: number;
+    totalStages: number;
+} | {
+    type: 'step_activated';
+    sessionId: string;
+    turnId: string;
+    intentId: string;
+    stepId: string;
+} | {
+    type: 'artifact_recorded';
+    sessionId: string;
+    turnId: string;
+    intentId: string;
+    stageId: string;
+    artifactId: string;
+    label: string;
+    kind: string;
+    path?: string;
+} | {
+    type: 'breadcrumb_emitted';
+    sessionId: string;
+    turnId: string;
+    intentId: string;
+    stepId: string;
+    status: 'running' | 'blocked' | 'completed' | 'failed';
+    message: string;
+} | {
+    type: 'receipt_emitted';
+    sessionId: string;
+    turnId: string;
+    intentId: string;
+    stepId: string;
+    note: string;
+} | {
+    type: 'salvage_emitted';
+    sessionId: string;
+    turnId: string;
+    intentId: string;
+    summary: string[];
+    reason?: string;
+} | {
     type: 'approval_required';
     sessionId: string;
     turnId: string;
@@ -132,22 +187,6 @@ export type RuntimeEvent = {
     type: 'setup';
     sessionId: string;
     trigger: 'init' | 'maintenance';
-} | {
-    type: 'task_created';
-    sessionId: string;
-    taskId: string;
-    taskSubject: string;
-    taskDescription?: string;
-    teammateName?: string;
-    teamName?: string;
-} | {
-    type: 'task_completed';
-    sessionId: string;
-    taskId: string;
-    taskSubject: string;
-    taskDescription?: string;
-    teammateName?: string;
-    teamName?: string;
 } | {
     type: 'worktree_create';
     sessionId: string;

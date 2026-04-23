@@ -1,0 +1,9 @@
+id,has_active_intent,active_deliverable,active_intent_type,active_template_id,expected_result_kind,expected_continuation_mode,expected_intent_type,prompt
+intent-01,false,-,-,-,plan,new_intent,generate,"帮我把这几份材料整理成一版通用方案"
+intent-02,true,产品方案,generate,generate_v1,plan,continue_active,-,"继续"
+intent-03,true,产品方案,generate,generate_v1,plan,continue_active,revise,"再改一版，更偏金融行业"
+intent-04,true,产品方案,generate,generate_v1,plan,clarify,analyze,"基于刚才那个，顺便做一个报价测算"
+intent-05,true,产品方案,generate,generate_v1,non_intent,non_intent,-,"/plan"
+intent-06,false,-,-,-,non_intent,non_intent,-,"5*6"
+intent-07,true,产品方案,generate,generate_v1,plan,continue_active,generate,"这里还有一份竞品资料，也一起参考"
+intent-08,true,产品方案,generate,generate_v1,non_intent,non_intent,-,"好的。"

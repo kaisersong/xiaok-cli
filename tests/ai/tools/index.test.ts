@@ -220,6 +220,36 @@ describe('ToolRegistry', () => {
     expect(result).toContain('Warning: post hook warning');
   });
 
+  it('skips native tool execution when a pre hook requests preventContinuation', async () => {
+    const execute = vi.fn(async () => 'native ask menu should not run');
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      hooksRunner: {
+        runPreHooks: async () => ({
+          ok: true,
+          preventContinuation: true,
+          additionalContext: 'AskUserQuestion has been mirrored to HexDeck.'
+        }),
+        runPostHooks: async () => [],
+      },
+    }, [{
+      permission: 'safe',
+      definition: {
+        name: 'AskUserQuestion',
+        description: 'mock ask',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      execute,
+    }]);
+
+    const result = await registry.executeTool('AskUserQuestion', {
+      questions: [{ question: '继续还是停止？', options: [{ label: '继续' }, { label: '停止' }] }]
+    });
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(result).toContain('AskUserQuestion has been mirrored to HexDeck.');
+  });
+
   it('merges capability registry matches into tool search results', () => {
     const capabilityRegistry = new CapabilityRegistry();
     capabilityRegistry.register({

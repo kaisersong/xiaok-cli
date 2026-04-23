@@ -1,9 +1,10 @@
 // tests/ai/skills/loader.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { writeFileSync, mkdirSync, rmSync } from 'fs';
+import { writeFileSync, mkdirSync, rmSync, symlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createSkillCatalog, loadSkills } from '../../../src/ai/skills/loader.js';
+import type { TaskSkillHints } from '../../../src/ai/intent-delegation/types.js';
 
 describe('loadSkills', () => {
   let globalDir: string;
@@ -58,12 +59,58 @@ description: 通用技能
     expect(hello?.executionContext).toBe('fork');
     expect(hello?.agent).toBe('researcher');
     expect(hello?.dependsOn).toEqual(['common']);
-    expect(hello?.taskHints).toEqual({
+    const expectedTaskHints: TaskSkillHints = {
       taskGoals: ['greet the user'],
       inputKinds: ['greeting', 'short prompt'],
       outputKinds: ['warm reply'],
       examples: ['say hello'],
+    };
+
+    expect(hello?.taskHints).toEqual(expectedTaskHints);
+  });
+
+  it('loads directory-style skills from SKILL.md', async () => {
+    mkdirSync(join(globalDir, 'skills', 'slide-creator'), { recursive: true });
+    writeFileSync(join(globalDir, 'skills', 'slide-creator', 'SKILL.md'), `---
+name: kai-slide-creator
+description: 生成 HTML 演示文稿
+---
+Create slides.`);
+
+    const skills = await loadSkills(globalDir, projectDir, { builtinRoots: [] });
+    const slideCreator = skills.find((skill) => skill.name === 'kai-slide-creator');
+
+    expect(slideCreator).toMatchObject({
+      name: 'kai-slide-creator',
+      aliases: ['slide-creator'],
+      description: '生成 HTML 演示文稿',
+      source: 'global',
+      tier: 'user',
+      path: join(globalDir, 'skills', 'slide-creator', 'SKILL.md'),
     });
+  });
+
+  it('loads symlinked directory-style skills from SKILL.md', async () => {
+    const externalSkillDir = join(globalDir, 'external-slide-creator');
+    mkdirSync(externalSkillDir, { recursive: true });
+    writeFileSync(join(externalSkillDir, 'SKILL.md'), `---
+name: kai-slide-creator
+description: symlinked slide skill
+---
+Create slides from symlink.`);
+    symlinkSync(externalSkillDir, join(globalDir, 'skills', 'slide-creator'));
+
+    const skills = await loadSkills(globalDir, projectDir, { builtinRoots: [] });
+    const slideCreator = skills.find((skill) => skill.name === 'kai-slide-creator');
+
+    expect(slideCreator).toMatchObject({
+      name: 'kai-slide-creator',
+      aliases: ['slide-creator'],
+      description: 'symlinked slide skill',
+      source: 'global',
+      tier: 'user',
+    });
+    expect(slideCreator?.path).toBe(join(globalDir, 'skills', 'slide-creator', 'SKILL.md'));
   });
 
   it('parses inline lists with quoted commas as single entries', async () => {
@@ -268,5 +315,23 @@ Report.`);
     await catalog.reload();
 
     expect(catalog.resolve(['report']).map((skill) => skill.name)).toEqual(['base', 'report']);
+  });
+
+  it('resolves aliases through the catalog for slash-command style lookups', async () => {
+    mkdirSync(join(projectDir, '.xiaok', 'skills', 'slide-creator'), { recursive: true });
+    writeFileSync(join(projectDir, '.xiaok', 'skills', 'slide-creator', 'SKILL.md'), `---
+name: kai-slide-creator
+description: slide creator
+---
+Create slides.`);
+
+    const catalog = createSkillCatalog(globalDir, projectDir, { builtinRoots: [] });
+    await catalog.reload();
+
+    expect(catalog.get('slide-creator')).toMatchObject({
+      name: 'kai-slide-creator',
+      aliases: ['slide-creator'],
+    });
+    expect(catalog.resolve(['slide-creator']).map((skill) => skill.name)).toEqual(['kai-slide-creator']);
   });
 });

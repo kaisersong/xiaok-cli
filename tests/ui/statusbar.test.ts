@@ -344,5 +344,17 @@ describe('StatusBar', () => {
 
       expect(statusBar.getLiveStatusLine(10_000, 0)).toBe('');
     });
+
+    it('captures an activity snapshot so paused UI flows can resume the same status', () => {
+      statusBar.beginActivity('Thinking', 1_234);
+
+      expect(statusBar.getActivitySnapshot()).toEqual({
+        label: 'Thinking',
+        startedAt: 1_234,
+      });
+
+      statusBar.endActivity();
+      expect(statusBar.getActivitySnapshot()).toBeNull();
+    });
   });
 });

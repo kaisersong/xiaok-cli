@@ -32,8 +32,6 @@ describe('getSlashCommands', () => {
     expect(commands).toContainEqual({ cmd: '/mode', desc: 'Show or change permission mode' });
     expect(commands).toContainEqual({ cmd: '/reminder', desc: 'Manage reminders: create, list, or cancel' });
     expect(commands).toContainEqual({ cmd: '/skills-reload', desc: 'Reload the skill catalog' });
-    expect(commands).toContainEqual({ cmd: '/task', desc: 'Show workflow task details by ID' });
-    expect(commands).toContainEqual({ cmd: '/tasks', desc: 'List workflow tasks' });
     expect(commands).toContainEqual({ cmd: '/yzjchannel', desc: 'Connect the embedded YZJ channel' });
     expect(commands).toContainEqual({ cmd: '/help', desc: 'Show help' });
 
@@ -45,7 +43,7 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.cmd === '/remind')).toBe(false);
     expect(commands.some((command) => command.cmd === '/reminders')).toBe(false);
     expect(commands.some((command) => command.cmd === '/reminder-cancel')).toBe(false);
-    expect(commands.length).toBe(13);
+    expect(commands.length).toBe(11);
   });
 
   it('should include skills in command list', () => {
@@ -61,7 +59,7 @@ describe('getSlashCommands', () => {
     const commands = getSlashCommands(skills);
 
     expect(commands).toContainEqual({ cmd: '/test-skill', desc: 'A test skill' });
-    expect(commands.length).toBe(14); // 13 base + 1 skill
+    expect(commands.length).toBe(12); // 11 base + 1 skill
   });
 
   it('should sort commands alphabetically', () => {
@@ -99,7 +97,7 @@ describe('getSlashCommands', () => {
 
     const commands = getSlashCommands(skills);
 
-    expect(commands.length).toBe(16); // 13 base + 3 skills
+    expect(commands.length).toBe(14); // 11 base + 3 skills
   });
 
   it('builds base slash commands from shared chat command metadata rather than a local constant table', () => {
@@ -230,6 +228,24 @@ describe('InputReader', () => {
 
       harness.send('\x03');
       await expect(pending).resolves.toBeNull();
+
+      harness.restore();
+    });
+
+    it('degrades to plain input mode when the scroll prompt renderer throws', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+      reader.setScrollPromptRenderer(() => {
+        throw new Error('scroll prompt boom');
+      });
+
+      const pending = reader.read('> ');
+      harness.send('h');
+      harness.send('i');
+      harness.send('\r');
+
+      await expect(pending).resolves.toBe('hi');
+      expect(harness.output.normalized).toContain('[xiaok] UI 已降级：scroll_prompt_renderer');
 
       harness.restore();
     });
@@ -467,6 +483,23 @@ describe('InputReader', () => {
       harness.restore();
     });
 
+    it('falls back to the shared renderer when the scroll prompt renderer declines to draw', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+      reader.setStatusLineProvider(() => ['  xiaok-cli · kimi-for-coding · 4%']);
+      reader.setScrollPromptRenderer(() => false);
+
+      const pending = reader.read('> ');
+
+      expect(harness.screen.lines()[0]).toMatch(/❯/);
+      expect(harness.screen.text()).toContain('xiaok-cli · kimi-for-coding · 4%');
+
+      harness.send('\x03');
+      await expect(pending).resolves.toBeNull();
+
+      harness.restore();
+    });
+
     it('attaches the input listener before the first prompt render so early keys are not lost', async () => {
       const harness = createTtyHarness();
       let injected = false;
@@ -514,12 +547,13 @@ describe('InputReader', () => {
   describe('slash command menu', () => {
     it('should include slash menu candidates for "/" input', () => {
       const skills: SkillMeta[] = [
-        { name: 'browse', description: 'Browser skill', content: '', path: '' },
+        { name: 'browse', aliases: ['browser'], description: 'Browser skill', content: '', path: '' },
       ];
 
       const commands = getSlashCommands(skills);
 
       expect(commands.some((item) => item.cmd === '/browse')).toBe(true);
+      expect(commands.some((item) => item.cmd === '/browser')).toBe(true);
       expect(commands.some((item) => item.cmd === '/exit')).toBe(true);
     });
 
@@ -577,8 +611,8 @@ describe('InputReader', () => {
 
       const commands = getSlashCommands(skills);
 
-      // 13 base commands + 20 skills = 33 total
-      expect(commands.length).toBe(33);
+      // 11 base commands + 20 skills = 31 total
+      expect(commands.length).toBe(31);
     });
 
     it('should preserve command descriptions', () => {

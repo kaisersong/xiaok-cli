@@ -76,6 +76,15 @@ export class StatusBar {
     getActivityLabel() {
         return this.activity?.label ?? '';
     }
+    getActivitySnapshot() {
+        if (!this.activity) {
+            return null;
+        }
+        return {
+            label: this.activity.label,
+            startedAt: this.activity.startedAt,
+        };
+    }
     /** Build the status string (no newline). */
     getStatusLine() {
         if (!this.enabled)

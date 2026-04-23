@@ -1,4 +1,4 @@
-import type { SkillCatalog, SkillMeta } from './loader.js';
+import { type SkillCatalog, type SkillMeta } from './loader.js';
 export interface SkillPlanStep {
     name: string;
     description: string;

@@ -13,6 +13,7 @@ export default {
       '.test-dist/tests/scripts/check-repo-hygiene.test.js',
       '.test-dist/tests/scripts/new-worktree.test.js',
     ],
+    fileParallelism: false,
     pool: 'threads',
   },
 };

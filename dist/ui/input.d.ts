@@ -1,4 +1,4 @@
-import type { SkillMeta } from '../ai/skills/loader.js';
+import { type SkillMeta } from '../ai/skills/loader.js';
 import type { PermissionMode } from '../ai/permissions/manager.js';
 import type { TranscriptLogger } from './transcript.js';
 import type { ReplRenderer } from './repl-renderer.js';
@@ -18,6 +18,7 @@ export interface ScrollPromptRenderFrame {
     inputValue: string;
     cursor: number;
     placeholder: string;
+    summaryLine: string;
     statusLine: string;
     overlayLines: string[];
 }
@@ -64,7 +65,7 @@ export declare class InputReader {
     setModeCycleHandler(handler: () => PermissionMode): void;
     setTranscriptLogger(logger: TranscriptLogger | undefined): void;
     setStatusLineProvider(provider: (() => string[]) | undefined): void;
-    setScrollPromptRenderer(renderer: ((frame: ScrollPromptRenderFrame) => void) | undefined): void;
+    setScrollPromptRenderer(renderer: ((frame: ScrollPromptRenderFrame) => boolean | void) | undefined): void;
     read(prompt: string): Promise<string | null>;
 }
 export {};

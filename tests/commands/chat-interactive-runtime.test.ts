@@ -135,20 +135,6 @@ function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithMode
         return;
       }
 
-      if (lastUserText.includes('创建任务并汇报')) {
-        yield {
-          type: 'tool_use',
-          id: 'tu_task_create_1',
-          name: 'task_create',
-          input: {
-            title: '跟进交互验证',
-            details: '检查 ask_user/task 流',
-          },
-        };
-        yield { type: 'done' };
-        return;
-      }
-
       if (lastUserText.includes('分三次显示123')) {
         yield { type: 'text', delta: '1\n2\n3' };
         yield { type: 'done' };
@@ -282,6 +268,9 @@ function expectSingleFooter(lines: string[]): void {
     .map((line, index) => ({ line, index }))
     .filter(({ line }) => line.includes('project') && line.includes('%'));
 
+  if (promptRows.length !== 1 || statusRows.length !== 1) {
+    console.log('DEBUG_FOOTER_LINES', JSON.stringify(lines));
+  }
   expect(promptRows).toHaveLength(1);
   expect(statusRows).toHaveLength(1);
   expect(statusRows[0]?.index).toBeGreaterThan(promptRows[0]?.index ?? -1);
@@ -904,8 +893,6 @@ describe('chat interactive runtime', () => {
         expect(lines.some((line) => line.includes('/reminder') && line.includes('list') && line.includes('cancel <id>'))).toBe(true);
         expect(lines.some((line) => line.includes('/settings') && line.includes('查看当前生效配置'))).toBe(true);
         expect(lines.some((line) => line.includes('/skills-reload') && line.includes('刷新 skill 目录'))).toBe(true);
-        expect(lines.some((line) => line.includes('/task <id>') && line.includes('查看任务详情'))).toBe(true);
-        expect(lines.some((line) => line.includes('/tasks') && line.includes('查看当前会话任务'))).toBe(true);
         expect(lines.some((line) => line.includes('/yzjchannel') && line.includes('连接云之家 channel'))).toBe(true);
         expect(lines.some((line) => line.includes('/help') && line.includes('显示帮助'))).toBe(true);
         expect(lines.some((line) => line.includes('/remind '))).toBe(false);
@@ -999,7 +986,7 @@ describe('chat interactive runtime', () => {
     }
   }, 10_000);
 
-  it('supports shift-tab mode cycling plus ask-user and task inspection flows in interactive chat', async () => {
+  it('supports shift-tab mode cycling plus ask-user flow in interactive chat', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
     const projectDir = join(rootDir, 'project');
@@ -1056,27 +1043,6 @@ describe('chat interactive runtime', () => {
       harness.send('\r');
       await waitFor(() => {
         expect(harness.output.normalized).toContain('收到回答: 已确认');
-      }, { timeoutMs: 3_000 });
-
-      await waitForInputTurnReady(harness);
-      harness.send('创建任务并汇报');
-      harness.send('\r');
-      await waitFor(() => {
-        expect(harness.output.normalized).toContain('task created');
-      }, { timeoutMs: 3_000 });
-
-      await waitForInputTurnReady(harness);
-      harness.send('/tasks');
-      harness.send('\r');
-      await waitFor(() => {
-        expect(harness.output.normalized).toContain('task_1 [queued] 跟进交互验证');
-      }, { timeoutMs: 3_000 });
-
-      await waitForInputTurnReady(harness);
-      harness.send('/task task_1');
-      harness.send('\r');
-      await waitFor(() => {
-        expect(harness.output.normalized).toContain('"taskId": "task_1"');
       }, { timeoutMs: 3_000 });
 
       await waitForInputTurnReady(harness);

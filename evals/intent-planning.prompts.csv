@@ -1,0 +1,5 @@
+id,has_active_intent,active_deliverable,active_intent_type,active_template_id,prompt,expected_template_id,expected_step_roles
+plan-01,false,-,-,-,"帮我根据这些访谈笔记写一版产品方案，控制在一页内",generate_v1,collect|normalize|compose|validate
+plan-02,true,产品方案,generate,generate_v1,"再改一版，更偏金融行业",revise_v1,inspect_current|identify_delta|rewrite|validate
+plan-03,false,-,-,-,"把这份会议纪要总结成三条关键结论",summarize_v1,collect|extract|structure|finalize
+plan-04,false,-,-,-,"分析一下方案A和方案B哪个更适合当前阶段",analyze_v1,collect|compare|conclude|validate

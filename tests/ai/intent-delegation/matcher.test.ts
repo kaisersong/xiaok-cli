@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { matchSkillsForTask } from '../../../src/ai/task-delivery/matcher.js';
-import type { TaskSkillHints } from '../../../src/ai/task-delivery/types.js';
+import { describe, expect, it } from 'vitest';
+import { matchSkillsForTask } from '../../../src/ai/intent-delegation/matcher.js';
+import type { TaskSkillHints } from '../../../src/ai/intent-delegation/types.js';
 
 function skill(
   name: string,

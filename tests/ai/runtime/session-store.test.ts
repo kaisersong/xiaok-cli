@@ -3,9 +3,11 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { Message, UsageStats } from '../../../src/types.js';
-import { FileSessionStore } from '../../../src/ai/runtime/session-store.js';
+import { FileSessionStore, SQLiteSessionStore } from '../../../src/ai/runtime/session-store.js';
 import { createFileSessionStore } from '../../../src/ai/runtime/session-store/file-store.js';
 import type { SessionStore } from '../../../src/ai/runtime/session-store/store.js';
+import { createEmptySessionIntentLedger } from '../../../src/runtime/intent-delegation/store.js';
+import { createEmptySessionSkillEvalState } from '../../../src/runtime/intent-delegation/skill-eval.js';
 
 describe('FileSessionStore', () => {
   let rootDir: string;
@@ -139,6 +141,105 @@ describe('FileSessionStore', () => {
     expect(forked.backgroundJobRefs).toEqual(['bg_1']);
   });
 
+  it('rekeys nested intent delegation session identities when forking', async () => {
+    const store = new FileSessionStore(rootDir);
+
+    await store.save({
+      sessionId: 'sess_nested',
+      cwd: '/nested',
+      createdAt: 100,
+      updatedAt: 200,
+      lineage: ['sess_nested'],
+      messages: [],
+      usage: { inputTokens: 0, outputTokens: 0 },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
+      intentDelegation: {
+        instanceId: 'inst_nested',
+        sessionId: 'sess_nested',
+        activeIntentId: 'intent_nested',
+        latestPlan: {
+          intentId: 'intent_nested',
+          instanceId: 'inst_nested',
+          sessionId: 'sess_nested',
+          rawIntent: 'Write summary',
+          normalizedIntent: 'write summary',
+          intentType: 'generate',
+          deliverable: 'summary',
+          explicitConstraints: [],
+          delegationBoundary: [],
+          riskTier: 'medium',
+          templateId: 'tpl_generate',
+          steps: [
+            {
+              stepId: 'intent_nested:step:collect',
+              key: 'collect',
+              order: 0,
+              role: 'collect',
+              skillName: null,
+              dependsOn: [],
+              status: 'planned',
+              riskTier: 'medium',
+            },
+          ],
+          activeStepId: 'intent_nested:step:collect',
+          overallStatus: 'drafting_plan',
+          attemptCount: 1,
+          createdAt: 100,
+          updatedAt: 200,
+        },
+        intents: [{
+          intentId: 'intent_nested',
+          instanceId: 'inst_nested',
+          sessionId: 'sess_nested',
+          rawIntent: 'Write summary',
+          normalizedIntent: 'write summary',
+          intentType: 'generate',
+          deliverable: 'summary',
+          explicitConstraints: [],
+          delegationBoundary: [],
+          riskTier: 'medium',
+          templateId: 'tpl_generate',
+          steps: [
+            {
+              stepId: 'intent_nested:step:collect',
+              key: 'collect',
+              order: 0,
+              role: 'collect',
+              skillName: null,
+              dependsOn: [],
+              status: 'planned',
+              riskTier: 'medium',
+            },
+          ],
+          activeStepId: 'intent_nested:step:collect',
+          overallStatus: 'drafting_plan',
+          attemptCount: 1,
+          createdAt: 100,
+          updatedAt: 200,
+        }],
+        breadcrumbs: [],
+        receipt: null,
+        salvage: null,
+        ownership: {
+          state: 'released',
+          previousOwnerInstanceId: 'inst_nested',
+          updatedAt: 200,
+        },
+        updatedAt: 200,
+      },
+    });
+
+    const forked = await store.fork('sess_nested');
+
+    expect(forked.sessionId).not.toBe('sess_nested');
+    expect(forked.intentDelegation?.sessionId).toBe(forked.sessionId);
+    expect(forked.intentDelegation?.latestPlan?.sessionId).toBe(forked.sessionId);
+    expect(forked.intentDelegation?.intents.map((intent) => intent.sessionId)).toEqual([forked.sessionId]);
+  });
+
   it('keeps save/load/loadLast/list/fork working through the shared SessionStore contract', async () => {
     const store: SessionStore = createFileSessionStore(rootDir);
 
@@ -168,6 +269,79 @@ describe('FileSessionStore', () => {
       preview: 'contract preview',
     });
     expect(forked.forkedFromSessionId).toBe('sess_contract');
+  });
+
+  it('persists intent delegation and skill eval state through SQLiteSessionStore', async () => {
+    let store: SQLiteSessionStore;
+    try {
+      store = new SQLiteSessionStore(join(rootDir, 'sessions.db'));
+    } catch (error) {
+      if (isSqliteAbiMismatch(error)) {
+        return;
+      }
+      throw error;
+    }
+    const intentDelegation = createEmptySessionIntentLedger('sess_sqlite', 200);
+    intentDelegation.instanceId = 'inst_sqlite';
+    intentDelegation.ownership = {
+      state: 'owned',
+      ownerInstanceId: 'inst_sqlite',
+      updatedAt: 200,
+    };
+
+    const skillEval = createEmptySessionSkillEvalState(200);
+    skillEval.observations.push({
+      observationId: 'obs_sqlite',
+      sessionId: 'sess_sqlite',
+      intentId: 'intent_sqlite',
+      stageId: 'intent_sqlite:stage:1',
+      stepId: 'intent_sqlite:stage:1:step:compose',
+      intentType: 'generate',
+      stageRole: 'compose',
+      deliverable: '报告',
+      deliverableFamily: 'document',
+      selectedSkillName: 'report-skill',
+      actualSkillName: 'report-skill',
+      status: 'completed',
+      artifactRecorded: true,
+      structuralValidation: 'passed',
+      semanticValidation: 'passed',
+      createdAt: 200,
+      updatedAt: 200,
+    });
+
+    await store.save({
+      sessionId: 'sess_sqlite',
+      cwd: '/sqlite',
+      createdAt: 100,
+      updatedAt: 200,
+      lineage: ['sess_sqlite'],
+      messages: [],
+      usage: { inputTokens: 0, outputTokens: 0 },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
+      intentDelegation,
+      skillEval,
+    });
+
+    const loaded = await store.load('sess_sqlite');
+    expect(loaded?.intentDelegation).toMatchObject({
+      sessionId: 'sess_sqlite',
+      instanceId: 'inst_sqlite',
+      ownership: {
+        state: 'owned',
+        ownerInstanceId: 'inst_sqlite',
+      },
+    });
+    expect(loaded?.skillEval?.observations).toEqual([
+      expect.objectContaining({
+        observationId: 'obs_sqlite',
+        actualSkillName: 'report-skill',
+        status: 'completed',
+      }),
+    ]);
   });
 
   describe('loadLast', () => {
@@ -233,3 +407,8 @@ describe('FileSessionStore', () => {
     });
   });
 });
+
+function isSqliteAbiMismatch(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /NODE_MODULE_VERSION|better-sqlite3/i.test(message);
+}

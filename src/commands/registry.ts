@@ -84,22 +84,6 @@ const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
     showInHelp: true,
   },
   {
-    id: 'task',
-    cmd: '/task',
-    slashDesc: 'Show workflow task details by ID',
-    helpLine: '  /task <id> - 查看任务详情',
-    showInSlash: true,
-    showInHelp: true,
-  },
-  {
-    id: 'tasks',
-    cmd: '/tasks',
-    slashDesc: 'List workflow tasks',
-    helpLine: '  /tasks   - 查看当前会话任务',
-    showInSlash: true,
-    showInHelp: true,
-  },
-  {
     id: 'yzjchannel',
     cmd: '/yzjchannel',
     slashDesc: 'Connect the embedded YZJ channel',

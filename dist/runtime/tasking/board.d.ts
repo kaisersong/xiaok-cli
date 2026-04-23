@@ -5,6 +5,13 @@ export interface WorkflowTaskRecord extends BaseTaskRecord {
     owner?: string;
     source: string;
     notes: string[];
+    objective: string;
+    deliverable?: string;
+    selectedSkills: string[];
+    acceptanceCriteria: string[];
+    blockedReason?: string;
+    attemptCount: number;
+    lastToolName?: string;
 }
 export interface CreateWorkflowTaskInput {
     sessionId: string;
@@ -12,6 +19,10 @@ export interface CreateWorkflowTaskInput {
     details?: string;
     owner?: string;
     source: string;
+    objective?: string;
+    deliverable?: string;
+    selectedSkills?: string[];
+    acceptanceCriteria?: string[];
 }
 export interface UpdateWorkflowTaskInput {
     title?: string;
@@ -20,6 +31,13 @@ export interface UpdateWorkflowTaskInput {
     status?: TaskStatus;
     note?: string;
     latestEvent?: string;
+    objective?: string;
+    deliverable?: string;
+    selectedSkills?: string[];
+    acceptanceCriteria?: string[];
+    blockedReason?: string;
+    lastToolName?: string;
+    incrementAttempt?: boolean;
 }
 export interface ListWorkflowTasksInput {
     status?: TaskStatus;

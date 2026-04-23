@@ -1,3 +1,4 @@
+import { findSkillByCommandName } from './loader.js';
 function toPlanStep(skill) {
     return {
         name: skill.name,
@@ -35,14 +36,13 @@ function resolveFromArray(names, skills) {
     const ordered = [];
     const seen = new Set();
     const stack = new Set();
-    const byName = new Map(skills.map((skill) => [skill.name, skill]));
     const visit = (name) => {
         if (seen.has(name))
             return;
         if (stack.has(name)) {
             throw new Error(`skill dependency cycle detected: ${name}`);
         }
-        const skill = byName.get(name);
+        const skill = findSkillByCommandName(skills, name);
         if (!skill)
             return;
         stack.add(name);

@@ -6,17 +6,17 @@ import { createAdapter } from '../ai/models.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
 import { createAskUserQuestionTool } from '../ai/tools/ask-user-question.js';
-import { createTaskTools } from '../ai/tools/tasks.js';
+import { createIntentDelegationTools } from '../ai/tools/intent-delegation.js';
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
 import { createHooksRunner } from '../runtime/hooks-runner.js';
-import { SessionTaskBoard } from '../runtime/tasking/board.js';
+import { createIntentPlan } from '../ai/intent-delegation/planner.js';
 import { writeError, isTTY } from '../utils/ui.js';
 import { showPermissionPrompt } from '../ui/permission-prompt.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
 import { loadSettings, mergeRules } from '../ai/permissions/settings.js';
-import { createSkillCatalog, parseSlashCommand, toSkillEntries } from '../ai/skills/loader.js';
+import { createSkillCatalog, parseSlashCommand, toSkillEntries, findSkillByCommandName } from '../ai/skills/loader.js';
 import { createSkillTool } from '../ai/skills/tool.js';
 import { buildSkillExecutionPlan } from '../ai/skills/planner.js';
 import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
@@ -41,17 +41,27 @@ import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
 import { extractSandboxAllowedPaths } from '../platform/sandbox/policy.js';
 import { FileTranscriptLogger } from '../ui/transcript.js';
-import { setCrashContext } from '../utils/crash-reporter.js';
+import { setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
 import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
 import { executeNamedSubAgent } from '../ai/agents/subagent-executor.js';
 import { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
+import { SessionIntentDelegationStore, createEmptySessionIntentLedger } from '../runtime/intent-delegation/store.js';
+import { SessionSkillEvalStore } from '../runtime/intent-delegation/skill-eval-store.js';
+import { FileSkillScoreStore } from '../runtime/intent-delegation/skill-score-store.js';
+import { bootstrapTurnIntentPlan } from '../runtime/intent-delegation/chat-bootstrap.js';
+import { wireSkillEvalToRuntimeSync } from '../runtime/intent-delegation/skill-eval-sync.js';
+import { cloneSessionSkillEvalState, createEmptySessionSkillEvalState, inferDeliverableFamily, } from '../runtime/intent-delegation/skill-eval.js';
+import { consumeFreshContextHandoff, hasPendingFreshContextHandoff, resolveOwnedActiveIntent, } from '../runtime/intent-delegation/handoff.js';
+import { wireIntentDelegationToRuntimeSync } from '../runtime/intent-delegation/runtime-sync.js';
+import { markSessionOwned, releaseSessionOwnership, resumeSessionOwnership, takeoverSessionOwnership, } from '../runtime/intent-delegation/ownership.js';
 import { EmbeddedYZJChannel } from '../channels/embedded-yzj.js';
 import { selectYZJChannel } from '../ui/channel-selector.js';
 import { resolveYZJConfig } from '../channels/yzj.js';
 import { YZJTransport } from '../channels/yzj-transport.js';
 import { InMemoryApprovalStore } from '../channels/approval-store.js';
 import { getProviderProfile } from '../ai/providers/registry.js';
+import { buildIntentReminderBlock, formatCurrentIntentSummaryLine, formatIntentCreatedTranscriptBlock, formatProgressTranscriptBlock, formatReceiptTranscriptBlock, formatSalvageTranscriptBlock, formatStageActivatedTranscriptBlock, } from '../ui/orchestration.js';
 const { version: cliVersion } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 function describeLiveActivity(toolName, input) {
     if (['tool_search', 'grep', 'glob', 'read', 'skill', 'web_fetch', 'web_search'].includes(toolName)) {
@@ -94,6 +104,15 @@ async function runChat(initialInput, opts) {
         writeError('print/json 模式需要提供单次输入');
         process.exit(1);
     }
+    const sessionModeFlags = [opts.continue, opts.resume, opts.takeover, opts.forkSession].filter(Boolean);
+    if (sessionModeFlags.length > 1) {
+        writeError('--continue / --resume / --takeover / --fork-session 只能同时使用一个');
+        process.exit(1);
+    }
+    if (opts.confirmHighRiskTakeover && !opts.takeover) {
+        writeError('--confirm-high-risk-takeover 只能与 --takeover 一起使用');
+        process.exit(1);
+    }
     // 检测 CI 环境
     const autoMode = opts.auto || !isTTY();
     if (!isTTY() && !opts.auto) {
@@ -117,6 +136,9 @@ async function runChat(initialInput, opts) {
     const pluginRuntime = platform.pluginRuntime;
     const customAgents = platform.customAgents;
     const sessionStore = new FileSessionStore();
+    const intentLedgerStore = new SessionIntentDelegationStore(sessionStore);
+    const skillEvalStore = new SessionSkillEvalStore(sessionStore);
+    const skillScoreStore = new FileSkillScoreStore();
     let persistedSession = null;
     if (opts.continue) {
         persistedSession = await sessionStore.loadLast();
@@ -132,6 +154,13 @@ async function runChat(initialInput, opts) {
             process.exit(1);
         }
     }
+    else if (opts.takeover) {
+        persistedSession = await sessionStore.load(opts.takeover);
+        if (!persistedSession) {
+            writeError(`找不到会话: ${opts.takeover}`);
+            process.exit(1);
+        }
+    }
     else if (opts.forkSession) {
         persistedSession = await sessionStore.fork(opts.forkSession);
     }
@@ -139,7 +168,18 @@ async function runChat(initialInput, opts) {
     const sessionCreatedAt = persistedSession?.createdAt ?? Date.now();
     const forkedFromSessionId = persistedSession?.forkedFromSessionId;
     const sessionLineage = persistedSession?.lineage ?? [sessionId];
+    const persistedIntentLedger = persistedSession?.intentDelegation ?? null;
+    const instanceId = resolveChatInstanceId();
+    const ownershipMode = opts.forkSession
+        ? 'fork'
+        : (opts.takeover ? 'takeover' : (opts.continue || opts.resume ? 'resume' : 'new'));
     const transcriptLogger = new FileTranscriptLogger(sessionId);
+    let terminalUiSuspended = false;
+    let terminalUiFailureNoted = false;
+    let terminalUiFallbackStream = null;
+    let suspendInteractiveUi = (_context, _error, _fallbackStream) => {
+        terminalUiSuspended = true;
+    };
     // 设置环境变量，让 plugin hook 可以 fallback 读取
     process.env['XIAOK_CODE_SESSION_ID'] = sessionId;
     // 加载 skills
@@ -150,10 +190,24 @@ async function runChat(initialInput, opts) {
     const toolExplorer = new ToolExplorer(formatToolActivity);
     const turnLayout = new TurnLayout();
     const skillTool = createSkillTool(skillCatalog, platform.capabilityRegistry);
-    const taskBoard = new SessionTaskBoard('cli');
     const promptBuilder = new PromptBuilder();
     let agent;
     let runtimeFacade;
+    let activeIntentReminderBlock;
+    let currentTurnIntentPlan;
+    let currentIntentLedger;
+    let currentSkillEvalState = persistedSession?.skillEval
+        ? cloneSessionSkillEvalState(persistedSession.skillEval)
+        : createEmptySessionSkillEvalState(Date.now());
+    try {
+        currentIntentLedger = initializeChatIntentLedger(persistedIntentLedger, sessionId, instanceId, ownershipMode, {
+            confirmHighRiskTakeover: opts.confirmHighRiskTakeover,
+        });
+    }
+    catch (error) {
+        writeError(String(error instanceof Error ? error.message : error));
+        process.exit(1);
+    }
     // Resolve model capabilities early (needed for getPromptInput)
     const modelCapabilities = resolveModelCapabilities(adapter);
     const getPromptInput = async (promptCwd = cwd, nextSkills = skills) => ({
@@ -194,7 +248,13 @@ async function runChat(initialInput, opts) {
                 if (!isTTY()) {
                     throw new Error('当前运行模式不支持 ask_user 交互');
                 }
-                process.stdout.write(`\n${dim('Agent question:')} ${question}\n`);
+                const promptText = `\n${dim('Agent question:')} ${question}\n`;
+                if (replRenderer.hasActiveScrollRegion()) {
+                    scrollRegion.writeAtContentCursor(promptText);
+                }
+                else {
+                    process.stdout.write(promptText);
+                }
                 const answer = await inputReader.read(placeholder ? `${placeholder}: ` : 'Answer: ');
                 if (answer === null) {
                     throw new Error('用户取消了问题输入');
@@ -202,7 +262,12 @@ async function runChat(initialInput, opts) {
                 return answer;
             },
         }),
-        ...createTaskTools({ board: taskBoard, sessionId }),
+        ...createIntentDelegationTools({
+            ledgerStore: intentLedgerStore,
+            sessionId,
+            instanceId,
+            getTurnIntentPlan: () => currentTurnIntentPlan,
+        }),
         createAskUserQuestionTool({
             onEnterInteractive: () => askUserOnEnter?.(),
             onExitInteractive: () => askUserOnExit?.(),
@@ -259,8 +324,6 @@ async function runChat(initialInput, opts) {
         permissionManager,
         onPrompt: async (name, input) => {
             const tuiDecide = async () => {
-                // 停止 live activity 定时器，避免权限确认时滚动输出
-                stopLiveActivityTimer();
                 const choice = await showPermissionPrompt(name, input, { transcriptLogger, renderer: replRenderer });
                 if (choice.action === 'deny')
                     return false;
@@ -282,42 +345,51 @@ async function runChat(initialInput, opts) {
                 }
                 return false;
             };
-            if (embeddedChannels.length > 0) {
-                return embeddedChannels[0].makeOnPrompt(tuiDecide)(name, input);
-            }
-            return tuiDecide();
+            return withPausedLiveActivity(async () => {
+                if (embeddedChannels.length > 0) {
+                    return embeddedChannels[0].makeOnPrompt(tuiDecide)(name, input);
+                }
+                return tuiDecide();
+            });
         },
         onSandboxDenied: async (deniedPath, toolName) => {
-            stopLiveActivityTimer();
-            const choice = await showPermissionPrompt(`sandbox-expand:${toolName}`, { file_path: deniedPath, _hint: `文件在工作目录外，是否允许扩展沙箱访问并读取？` }, { transcriptLogger, renderer: replRenderer });
-            if (choice.action === 'deny')
+            return withPausedLiveActivity(async () => {
+                const choice = await showPermissionPrompt(`sandbox-expand:${toolName}`, { file_path: deniedPath, _hint: `文件在工作目录外，是否允许扩展沙箱访问并读取？` }, { transcriptLogger, renderer: replRenderer });
+                if (choice.action === 'deny')
+                    return { shouldProceed: false };
+                if (choice.action === 'allow_once') {
+                    platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
+                    return { shouldProceed: true };
+                }
+                if (choice.action === 'allow_session') {
+                    platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
+                    permissionManager.addSessionRule(choice.rule);
+                    return { shouldProceed: true };
+                }
+                if (choice.action === 'allow_project') {
+                    platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
+                    await addAllowRule('project', choice.rule, cwd);
+                    permissionManager.addSessionRule(choice.rule);
+                    return { shouldProceed: true };
+                }
+                if (choice.action === 'allow_global') {
+                    platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
+                    await addAllowRule('global', choice.rule, cwd);
+                    permissionManager.addSessionRule(choice.rule);
+                    return { shouldProceed: true };
+                }
                 return { shouldProceed: false };
-            if (choice.action === 'allow_once') {
-                platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
-                return { shouldProceed: true };
-            }
-            if (choice.action === 'allow_session') {
-                platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
-                permissionManager.addSessionRule(choice.rule);
-                return { shouldProceed: true };
-            }
-            if (choice.action === 'allow_project') {
-                platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
-                await addAllowRule('project', choice.rule, cwd);
-                permissionManager.addSessionRule(choice.rule);
-                return { shouldProceed: true };
-            }
-            if (choice.action === 'allow_global') {
-                platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
-                await addAllowRule('global', choice.rule, cwd);
-                permissionManager.addSessionRule(choice.rule);
-                return { shouldProceed: true };
-            }
-            return { shouldProceed: false };
+            });
         },
         buildSystemPrompt: async (promptCwd) => buildPrompt(skills, promptCwd),
         notifyBackgroundJob: async (job) => {
-            process.stdout.write(`\n[background] ${job.jobId} ${job.status}${job.resultSummary ? `: ${job.resultSummary}` : ''}\n`);
+            const line = `\n[background] ${job.jobId} ${job.status}${job.resultSummary ? `: ${job.resultSummary}` : ''}\n`;
+            if (replRenderer.hasActiveScrollRegion()) {
+                scrollRegion.writeAtContentCursor(line);
+            }
+            else {
+                process.stdout.write(line);
+            }
         },
     });
     const registry = registryFactory.createRegistry(cwd);
@@ -331,7 +403,14 @@ async function runChat(initialInput, opts) {
             transcript_path: transcriptLogger.path,
         },
     });
-    const runtimeHooks = createRuntimeHooks();
+    const rawRuntimeHooks = createRuntimeHooks();
+    const runtimeHooks = {
+        on: rawRuntimeHooks.on,
+        onAny: rawRuntimeHooks.onAny,
+        emit(event) {
+            rawRuntimeHooks.emit({ ...event, sessionId });
+        },
+    };
     agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks: runtimeHooks });
     agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
     agent.setPromptSnapshot(initialPromptSnapshot);
@@ -340,13 +419,26 @@ async function runChat(initialInput, opts) {
         getPromptInput: async (promptCwd) => getPromptInput(promptCwd, skills),
         agent,
         getSkillEntries: () => toSkillEntries(skills),
+        getIntentReminderBlock: () => activeIntentReminderBlock,
     });
     if (persistedSession) {
         agent.restoreSession(persistedSession);
     }
+    await sessionStore.save({
+        ...agent.exportSession(),
+        sessionId,
+        cwd: process.cwd(),
+        model: adapter.getModelName(),
+        createdAt: sessionCreatedAt,
+        updatedAt: Date.now(),
+        forkedFromSessionId,
+        lineage: sessionLineage,
+        intentDelegation: currentIntentLedger,
+        skillEval: currentSkillEvalState,
+    });
     // 触发 SessionStart hook
     void lifecycleHooks.runHooks('SessionStart', {
-        source: opts.continue ? 'resume' : opts.resume ? 'resume' : 'startup',
+        source: opts.continue || opts.resume || opts.takeover ? 'resume' : 'startup',
     });
     // 创建 UI 组件
     const mdRenderer = new MarkdownRenderer();
@@ -354,19 +446,41 @@ async function runChat(initialInput, opts) {
     const scrollRegion = new ScrollRegionManager();
     replRenderer.setScrollRegion(scrollRegion);
     inputReader.setStatusLineProvider(() => {
-        const line = statusBar.getStatusLine();
-        return line ? [line] : [];
+        const summaryLine = getCurrentIntentSummaryLine();
+        const statusLine = statusBar.getStatusLine();
+        const lines = [];
+        if (summaryLine) {
+            lines.push(summaryLine);
+        }
+        if (statusLine) {
+            lines.push(statusLine);
+        }
+        return lines;
     });
     inputReader.setScrollPromptRenderer((frame) => {
         if (!scrollRegion.isActive())
-            return;
+            return false;
         scrollRegion.renderPromptFrame({
             inputValue: frame.inputValue,
             cursor: frame.cursor,
             placeholder: 'Type your message...',
+            summaryLine: frame.summaryLine,
             statusLine: frame.statusLine,
             overlayLines: frame.overlayLines,
         });
+        return true;
+    });
+    const stopIntentRuntimeSync = wireIntentDelegationToRuntimeSync({
+        hooks: runtimeHooks,
+        ledgerStore: intentLedgerStore,
+        sessionId,
+    });
+    const stopSkillEvalRuntimeSync = wireSkillEvalToRuntimeSync({
+        hooks: runtimeHooks,
+        ledgerStore: intentLedgerStore,
+        skillEvalStore,
+        scoreStore: skillScoreStore,
+        sessionId,
     });
     const flushStreamingMarkdown = () => {
         const flushResult = mdRenderer.flush();
@@ -404,9 +518,14 @@ async function runChat(initialInput, opts) {
         if (!line)
             return;
         liveActivityVisible = true;
-        scrollRegion.renderActivity(line);
+        try {
+            scrollRegion.renderActivity(line);
+        }
+        catch (error) {
+            suspendInteractiveUi('render_live_activity', error);
+        }
     };
-    const beginActivity = (label, restart = false) => {
+    const beginActivity = (label, restart = false, startedAt = Date.now()) => {
         // Don't start new activity after the turn has ended —
         // a scheduled resumeActivityTimer may fire after stopActivity().
         if (!turnActive && liveActivityTimer)
@@ -416,7 +535,7 @@ async function runChat(initialInput, opts) {
             resumeActivityTimer = null;
         }
         if (restart || !liveActivityTimer) {
-            statusBar.beginActivity(label, Date.now());
+            statusBar.beginActivity(label, startedAt);
         }
         else {
             statusBar.updateActivity(label);
@@ -496,6 +615,18 @@ async function runChat(initialInput, opts) {
             liveActivityVisible = false;
         }
     };
+    const withPausedLiveActivity = async (action) => {
+        const snapshot = statusBar.getActivitySnapshot();
+        stopLiveActivityTimer();
+        try {
+            return await action();
+        }
+        finally {
+            if (snapshot && !terminalUiSuspended && turnActive && !scrollRegion.isContentStreaming()) {
+                beginActivity(snapshot.label, true, snapshot.startedAt);
+            }
+        }
+    };
     // Wire up lazy callbacks for AskUserQuestion interactive prompt
     askUserOnEnter = stopLiveActivityTimer;
     askUserOnExit = () => {
@@ -527,6 +658,47 @@ async function runChat(initialInput, opts) {
         responseStarted = false;
         lastReassuranceBucket = -1;
     };
+    suspendInteractiveUi = (context, error, fallbackStream = null) => {
+        if (terminalUiSuspended) {
+            return;
+        }
+        terminalUiSuspended = true;
+        terminalUiFallbackStream = fallbackStream;
+        turnActive = false;
+        if (!terminalUiFailureNoted) {
+            terminalUiFailureNoted = true;
+            const rawMessage = `\n[xiaok] UI 输出已停用：${context} (${String(error)})\n`;
+            const isBrokenPipe = /\bEPIPE\b/i.test(String(error));
+            const displayMessage = isBrokenPipe
+                ? '\n[xiaok] 终端富交互输出已切换为兼容模式，当前任务会继续运行。\n'
+                : rawMessage;
+            try {
+                transcriptLogger.recordOutput('stderr', rawMessage);
+            }
+            catch { }
+            try {
+                if (fallbackStream === 'stdout') {
+                    originalStdoutWrite(displayMessage);
+                }
+                else {
+                    originalStderrWrite(displayMessage);
+                }
+            }
+            catch { }
+        }
+        try {
+            stopActivity();
+        }
+        catch { }
+        try {
+            statusBar.destroy();
+        }
+        catch { }
+        try {
+            scrollRegion.end();
+        }
+        catch { }
+    };
     const resetTurnChrome = () => {
         stopActivity();
         toolExplorer.reset();
@@ -537,7 +709,115 @@ async function runChat(initialInput, opts) {
         resetTurnChrome();
         writeError(String(error));
     };
+    const getCurrentIntentSummaryLine = () => formatCurrentIntentSummaryLine(currentIntentLedger, instanceId);
+    const refreshIntentLedger = async () => {
+        currentIntentLedger = await intentLedgerStore.load(sessionId) ?? currentIntentLedger;
+    };
+    const refreshSkillEvalState = async () => {
+        currentSkillEvalState = await skillEvalStore.load(sessionId) ?? currentSkillEvalState;
+    };
+    const renderIntentSummaryLine = () => {
+        if (!scrollRegion.isActive() || scrollRegion.isContentStreaming()) {
+            return;
+        }
+        try {
+            scrollRegion.renderFooter({
+                inputPrompt: 'Type your message...',
+                summaryLine: getCurrentIntentSummaryLine(),
+                statusLine: statusBar.getStatusLine(),
+            });
+        }
+        catch (error) {
+            suspendInteractiveUi('render_intent_summary', error);
+        }
+    };
+    const prepareIntentReminderForInput = (input) => {
+        const activeIntent = currentIntentLedger.activeIntentId
+            ? currentIntentLedger.intents.find((intent) => intent.intentId === currentIntentLedger.activeIntentId)
+            : undefined;
+        const planResult = createIntentPlan({
+            instanceId,
+            sessionId,
+            input,
+            skills,
+            skillScoreLookup: ({ skillName, intentType, stageRole, deliverable }) => skillScoreStore.getBoost({
+                skillName,
+                intentType,
+                stageRole,
+                deliverableFamily: inferDeliverableFamily(deliverable),
+            }),
+            activeIntent: activeIntent
+                ? {
+                    intentId: activeIntent.intentId,
+                    deliverable: activeIntent.deliverable,
+                    intentType: activeIntent.intentType,
+                    templateId: activeIntent.templateId,
+                }
+                : undefined,
+        });
+        currentTurnIntentPlan = planResult.kind === 'plan' ? planResult.plan : undefined;
+        if (currentTurnIntentPlan?.continuationMode === 'continue_active') {
+            activeIntentReminderBlock = buildIntentReminderBlock(currentIntentLedger, instanceId);
+            return;
+        }
+        activeIntentReminderBlock = undefined;
+    };
+    const clearTurnIntentContext = () => {
+        currentTurnIntentPlan = undefined;
+        activeIntentReminderBlock = undefined;
+    };
+    const primeTurnIntentPlan = async (renderTranscriptBlock = false) => {
+        if (!currentTurnIntentPlan) {
+            return;
+        }
+        const turnIntentPlan = currentTurnIntentPlan;
+        const beforeIntentCount = currentIntentLedger.intents.length;
+        currentIntentLedger = await bootstrapTurnIntentPlan(intentLedgerStore, sessionId, currentIntentLedger, turnIntentPlan);
+        if (turnIntentPlan.continuationMode === 'new_intent') {
+            activeIntentReminderBlock = buildIntentReminderBlock(currentIntentLedger, instanceId);
+            const createdIntent = currentIntentLedger.intents.find((intent) => intent.intentId === turnIntentPlan.intentId);
+            if (createdIntent) {
+                currentSkillEvalState = await skillEvalStore.ensureObservationsForIntent(sessionId, createdIntent);
+            }
+            if (renderTranscriptBlock && currentIntentLedger.intents.length > beforeIntentCount) {
+                writeOrchestrationBlock(formatIntentCreatedTranscriptBlock(currentIntentLedger, turnIntentPlan.intentId));
+                renderIntentSummaryLine();
+            }
+        }
+    };
+    const maybePrepareFreshContextHandoff = async () => {
+        await refreshIntentLedger();
+        if (!hasPendingFreshContextHandoff(currentIntentLedger, instanceId) || !agent) {
+            return;
+        }
+        const activeIntent = resolveOwnedActiveIntent(currentIntentLedger, instanceId);
+        if (!activeIntent) {
+            return;
+        }
+        currentIntentLedger = await intentLedgerStore.saveDispatchedIntent(sessionId, consumeFreshContextHandoff(activeIntent, Date.now()));
+        agent.clearHistory();
+        runtimeFacade?.resetSkillTracking();
+        activeIntentReminderBlock = buildIntentReminderBlock(currentIntentLedger, instanceId);
+        await persistSession();
+    };
+    const writeOrchestrationBlock = (block) => {
+        if (!block) {
+            return;
+        }
+        if (scrollRegion.isActive()) {
+            try {
+                scrollRegion.writeAtContentCursor(block);
+            }
+            catch (error) {
+                suspendInteractiveUi('write_orchestration_block', error);
+            }
+            return;
+        }
+        process.stdout.write(block);
+    };
     const persistSession = async () => {
+        await refreshIntentLedger();
+        await refreshSkillEvalState();
         const snapshot = agent.exportSession();
         await sessionStore.save({
             ...snapshot,
@@ -548,7 +828,92 @@ async function runChat(initialInput, opts) {
             updatedAt: Date.now(),
             forkedFromSessionId,
             lineage: sessionLineage,
+            intentDelegation: currentIntentLedger,
+            skillEval: currentSkillEvalState,
         });
+    };
+    const releaseSessionOwnershipForExit = async () => {
+        await refreshIntentLedger();
+        const ownerInstanceId = currentIntentLedger.ownership.ownerInstanceId;
+        if (ownerInstanceId !== instanceId) {
+            return;
+        }
+        currentIntentLedger = releaseSessionOwnership(currentIntentLedger, instanceId, Date.now());
+        await persistSession();
+    };
+    const promptFeedbackChoice = async (message, prompt) => withPausedLiveActivity(async () => {
+        const note = `\n[xiaok] ${message}\n`;
+        if (scrollRegion.isActive()) {
+            scrollRegion.writeAtContentCursor(note);
+        }
+        else {
+            process.stdout.write(note);
+        }
+        while (true) {
+            const answer = (await inputReader.read(prompt))?.trim().toLowerCase();
+            if (answer === null || answer === '' || answer === 's' || answer === 'skip') {
+                return 'skip';
+            }
+            if (answer === 'y' || answer === 'yes') {
+                return 'positive';
+            }
+            if (answer === 'n' || answer === 'no') {
+                return 'negative';
+            }
+        }
+    });
+    const buildFeedbackRecord = (intentId, kind, sentiment, observationIds, note) => ({
+        feedbackId: `feedback_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        sessionId,
+        intentId,
+        kind,
+        sentiment,
+        observationIds,
+        note,
+        createdAt: Date.now(),
+    });
+    const maybeCollectCompletedIntentFeedback = async () => {
+        if (!isTTY() || opts.auto) {
+            return;
+        }
+        await refreshIntentLedger();
+        await refreshSkillEvalState();
+        const activeIntent = resolveOwnedActiveIntent(currentIntentLedger, instanceId);
+        if (!activeIntent || activeIntent.overallStatus !== 'completed') {
+            return;
+        }
+        if (currentSkillEvalState.promptedIntentIds.includes(activeIntent.intentId)) {
+            return;
+        }
+        const relevantObservations = currentSkillEvalState.observations.filter((observation) => (observation.intentId === activeIntent.intentId && Boolean(observation.actualSkillName)));
+        currentSkillEvalState = await skillEvalStore.markPromptedIntent(sessionId, activeIntent.intentId);
+        if (relevantObservations.length === 0) {
+            return;
+        }
+        const observationIds = relevantObservations.map((observation) => observation.observationId);
+        const pendingFeedback = [];
+        const outcome = await promptFeedbackChoice('这次生成物是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过', 'Outcome [y/n/s]: ');
+        if (outcome !== 'skip') {
+            pendingFeedback.push(buildFeedbackRecord(activeIntent.intentId, 'outcome', outcome, observationIds));
+        }
+        const routing = await promptFeedbackChoice('这次 skill 路由是否合适？ [y] 合适 / [n] 不合适 / [s] 跳过', 'Routing [y/n/s]: ');
+        if (routing !== 'skip') {
+            pendingFeedback.push(buildFeedbackRecord(activeIntent.intentId, 'routing', routing, observationIds));
+        }
+        if (outcome === 'negative') {
+            const understanding = await promptFeedbackChoice('主要问题更接近需求理解错了吗？ [y] 是 / [n] 否 / [s] 跳过', 'Intent [y/n/s]: ');
+            if (understanding !== 'skip') {
+                pendingFeedback.push(buildFeedbackRecord(activeIntent.intentId, 'intent_understanding', understanding, observationIds));
+            }
+        }
+        if (pendingFeedback.length === 0) {
+            return;
+        }
+        for (const feedback of pendingFeedback) {
+            currentSkillEvalState = await skillEvalStore.recordFeedback(sessionId, feedback);
+            skillScoreStore.recordFeedback(feedback, relevantObservations);
+        }
+        await persistSession();
     };
     // 初始化状态栏（在单次任务模式之前）
     const fullModelName = adapter.getModelName();
@@ -575,6 +940,10 @@ async function runChat(initialInput, opts) {
                 process.stderr.write(`${capabilityHealthNotice}\n`);
             }
             await refreshSkills();
+            await refreshIntentLedger();
+            prepareIntentReminderForInput(initialInput);
+            await primeTurnIntentPlan();
+            await maybePrepareFreshContextHandoff();
             await runtimeFacade.runTurn({
                 sessionId,
                 cwd,
@@ -619,6 +988,8 @@ async function runChat(initialInput, opts) {
             process.exit(1);
         }
         finally {
+            clearTurnIntentContext();
+            await releaseSessionOwnershipForExit();
             await platform.dispose();
         }
         if (!opts.print && !opts.json) {
@@ -635,15 +1006,60 @@ async function runChat(initialInput, opts) {
     inputReader.setTranscriptLogger(transcriptLogger);
     const originalStdoutWrite = process.stdout.write.bind(process.stdout);
     const originalStderrWrite = process.stderr.write.bind(process.stderr);
+    const getFallbackWriter = () => {
+        if (terminalUiFallbackStream === 'stderr') {
+            return originalStderrWrite;
+        }
+        if (terminalUiFallbackStream === 'stdout') {
+            return originalStdoutWrite;
+        }
+        return null;
+    };
     process.stdout.write = ((chunk, ...args) => {
         const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
         transcriptLogger.recordOutput('stdout', text);
-        return originalStdoutWrite(chunk, ...args);
+        if (terminalUiSuspended) {
+            const fallbackWriter = getFallbackWriter();
+            if (fallbackWriter) {
+                try {
+                    return fallbackWriter(chunk, ...args);
+                }
+                catch {
+                    return true;
+                }
+            }
+            return true;
+        }
+        try {
+            return originalStdoutWrite(chunk, ...args);
+        }
+        catch (error) {
+            suspendInteractiveUi('stdout_write', error);
+            return true;
+        }
     });
     process.stderr.write = ((chunk, ...args) => {
         const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
         transcriptLogger.recordOutput('stderr', text);
-        return originalStderrWrite(chunk, ...args);
+        if (terminalUiSuspended) {
+            const fallbackWriter = getFallbackWriter();
+            if (fallbackWriter) {
+                try {
+                    return fallbackWriter(chunk, ...args);
+                }
+                catch {
+                    return true;
+                }
+            }
+            return true;
+        }
+        try {
+            return originalStderrWrite(chunk, ...args);
+        }
+        catch (error) {
+            suspendInteractiveUi('stderr_write', error);
+            return true;
+        }
     });
     try {
         // 激活 scroll region（必须在欢迎屏幕之前）
@@ -720,11 +1136,23 @@ async function runChat(initialInput, opts) {
                 process.stdout.write(output);
                 return;
             }
-            scrollRegion.clearLastInput();
-            scrollRegion.writeSubmittedInput(formatSubmittedInput(commandText));
-            scrollRegion.writeAtContentCursor(output);
-            replRenderer.prepareForInput();
+            try {
+                scrollRegion.clearLastInput();
+                scrollRegion.writeSubmittedInput(formatSubmittedInput(commandText));
+                scrollRegion.writeAtContentCursor(output);
+                replRenderer.prepareForInput();
+            }
+            catch (error) {
+                suspendInteractiveUi('write_command_output', error);
+            }
         };
+        setStreamErrorHandler((error, stream) => {
+            if (stream !== process.stdout && stream !== process.stderr) {
+                return false;
+            }
+            suspendInteractiveUi(stream === process.stdout ? 'stdout_stream_error' : 'stderr_stream_error', error, stream === process.stdout ? 'stderr' : 'stdout');
+            return true;
+        });
         // 创建输入读取器
         inputReader.setSkills(skills);
         runtimeHooks.on('turn_started', () => {
@@ -757,15 +1185,60 @@ async function runChat(initialInput, opts) {
                 scheduleActivityResume('Thinking', 160);
             }
         });
+        runtimeHooks.on('intent_created', async (event) => {
+            await refreshIntentLedger();
+            writeOrchestrationBlock(formatIntentCreatedTranscriptBlock(currentIntentLedger, event.intentId));
+            renderIntentSummaryLine();
+        });
+        runtimeHooks.on('stage_activated', async (event) => {
+            await refreshIntentLedger();
+            writeOrchestrationBlock(formatStageActivatedTranscriptBlock({
+                order: event.order,
+                totalStages: event.totalStages,
+                label: event.label,
+            }));
+            renderIntentSummaryLine();
+        });
+        runtimeHooks.on('step_activated', async (event) => {
+            await refreshIntentLedger();
+            writeOrchestrationBlock(formatProgressTranscriptBlock({
+                stepId: event.stepId,
+                status: 'running',
+                message: `Active step moved to ${event.stepId.split(':step:')[1] ?? event.stepId}`,
+            }));
+            renderIntentSummaryLine();
+        });
+        runtimeHooks.on('breadcrumb_emitted', async (event) => {
+            await refreshIntentLedger();
+            writeOrchestrationBlock(formatProgressTranscriptBlock({
+                stepId: event.stepId,
+                status: event.status,
+                message: event.message,
+            }));
+            renderIntentSummaryLine();
+        });
+        runtimeHooks.on('receipt_emitted', async (event) => {
+            await refreshIntentLedger();
+            writeOrchestrationBlock(formatReceiptTranscriptBlock(event.note));
+            renderIntentSummaryLine();
+        });
+        runtimeHooks.on('salvage_emitted', async (event) => {
+            await refreshIntentLedger();
+            writeOrchestrationBlock(formatSalvageTranscriptBlock(event.summary, event.reason));
+            renderIntentSummaryLine();
+        });
         runtimeHooks.on('turn_completed', () => {
             toolExplorer.reset();
             stopActivity();
+            void refreshIntentLedger().then(renderIntentSummaryLine);
         });
         runtimeHooks.on('turn_failed', () => {
             resetTurnChrome();
+            void refreshIntentLedger().then(renderIntentSummaryLine);
         });
         runtimeHooks.on('turn_aborted', () => {
             resetTurnChrome();
+            void refreshIntentLedger().then(renderIntentSummaryLine);
         });
         // Context 压缩通知
         runtimeHooks.on('compact_triggered', () => {
@@ -782,22 +1255,31 @@ async function runChat(initialInput, opts) {
             resizeTimeout = setTimeout(() => {
                 const rows = process.stdout.rows ?? 24;
                 const cols = process.stdout.columns ?? 80;
-                scrollRegion.updateSize(rows, cols);
+                try {
+                    scrollRegion.updateSize(rows, cols);
+                }
+                catch (error) {
+                    suspendInteractiveUi('resize_render', error);
+                }
                 // 普通文档流模式下不做底部重绘，后续输出自然适配新尺寸
             }, 100);
         };
         process.stdout.on('resize', handleResize);
         // SIGINT 处理
         process.on('SIGINT', () => {
-            stopActivity();
-            void platform.dispose();
-            for (const ch of embeddedChannels) {
-                void ch.cleanup();
-            }
-            process.stdout.off('resize', handleResize);
-            statusBar.destroy();
-            process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
-            process.exit(0);
+            void (async () => {
+                stopActivity();
+                process.stdout.off('resize', handleResize);
+                clearTurnIntentContext();
+                await releaseSessionOwnershipForExit();
+                await platform.dispose();
+                for (const ch of embeddedChannels) {
+                    await ch.cleanup();
+                }
+                statusBar.destroy();
+                process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
+                process.exit(0);
+            })();
         });
         // 交互循环
         while (true) {
@@ -808,6 +1290,8 @@ async function runChat(initialInput, opts) {
             }
             const input = await inputReader.read('> ');
             if (input === null || input.trim() === '/exit') {
+                clearTurnIntentContext();
+                await releaseSessionOwnershipForExit();
                 scrollRegion.end();
                 statusBar.destroy();
                 process.stdout.write(`\n再见！${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
@@ -919,38 +1403,6 @@ async function runChat(initialInput, opts) {
                 writeCommandOutput(trimmed, `权限模式已切换为 ${requestedMode}\n\n`);
                 continue;
             }
-            if (trimmed === '/tasks') {
-                const tasks = taskBoard.list(sessionId);
-                if (tasks.length === 0) {
-                    writeCommandOutput(trimmed, '当前会话还没有任务。\n\n');
-                    continue;
-                }
-                const taskLines = ['', '当前会话任务：'];
-                for (const task of tasks) {
-                    taskLines.push(`  ${task.taskId} [${task.status}] ${task.title}`);
-                }
-                taskLines.push('');
-                writeCommandOutput(trimmed, taskLines.join('\n'));
-                continue;
-            }
-            if (trimmed === '/task') {
-                writeCommandOutput(trimmed, '用法：/task <taskId>\n\n');
-                continue;
-            }
-            if (trimmed.startsWith('/task ')) {
-                const taskId = trimmed.slice('/task '.length).trim();
-                if (!taskId) {
-                    writeCommandOutput(trimmed, '用法：/task <taskId>\n\n');
-                    continue;
-                }
-                const task = taskBoard.get(sessionId, taskId);
-                if (!task) {
-                    writeCommandOutput(trimmed, `未找到任务 ${taskId}\n\n`);
-                    continue;
-                }
-                writeCommandOutput(trimmed, `${JSON.stringify(task, null, 2)}\n\n`);
-                continue;
-            }
             if (trimmed === '/compact') {
                 agent.forceCompact();
                 writeCommandOutput(trimmed, `${dim('上下文已压缩。')}\n\n`);
@@ -1051,15 +1503,16 @@ async function runChat(initialInput, opts) {
             // 斜杠命令：直接触发对应 skill
             const slash = parseSlashCommand(trimmed);
             if (slash) {
-                let skill = skills.find(s => s.name === slash.skillName);
+                let skill = findSkillByCommandName(skills, slash.skillName);
                 if (!skill) {
                     await refreshSkills();
-                    skill = skills.find(s => s.name === slash.skillName);
+                    skill = findSkillByCommandName(skills, slash.skillName);
                 }
                 if (skill) {
                     try {
                         const plan = buildSkillExecutionPlan([skill.name], skills);
                         const primaryStep = plan.resolved[plan.resolved.length - 1];
+                        activeIntentReminderBlock = undefined;
                         process.stdout.write('\n');
                         mdRenderer.reset();
                         if (plan.strategy === 'fork' && primaryStep?.agent) {
@@ -1091,7 +1544,9 @@ async function runChat(initialInput, opts) {
                             const userMsg = slash.rest
                                 ? `执行 skill plan "${plan.primarySkill}"，用户补充说明：${slash.rest}\n\n${JSON.stringify(plan, null, 2)}`
                                 : `执行 skill plan：\n\n${JSON.stringify(plan, null, 2)}`;
+                            clearTurnIntentContext();
                             scrollRegion.clearLastInput();
+                            await maybePrepareFreshContextHandoff();
                             await runtimeFacade.runTurn({
                                 sessionId,
                                 cwd,
@@ -1125,6 +1580,8 @@ async function runChat(initialInput, opts) {
                                 }
                             });
                             await persistSession();
+                            await maybeCollectCompletedIntentFeedback();
+                            clearTurnIntentContext();
                         }
                         flushStreamingMarkdown();
                         if (!scrollRegion.isActive()) {
@@ -1159,6 +1616,8 @@ async function runChat(initialInput, opts) {
                 }
                 const inputBlocks = await parseInputBlocks(effectiveInput, resolveModelCapabilities(adapter).supportsImageInput);
                 clearPastedImagePaths();
+                await refreshIntentLedger();
+                prepareIntentReminderForInput(trimmed);
                 let lastAssistantText = '';
                 // Clear previously typed input so footer shows placeholder during turn
                 scrollRegion.clearLastInput();
@@ -1166,6 +1625,8 @@ async function runChat(initialInput, opts) {
                 if (scrollRegion.isActive()) {
                     scrollRegion.writeSubmittedInput(formatSubmittedInput(trimmed));
                 }
+                await primeTurnIntentPlan(true);
+                await maybePrepareFreshContextHandoff();
                 await runtimeFacade.runTurn({
                     sessionId,
                     cwd,
@@ -1202,6 +1663,8 @@ async function runChat(initialInput, opts) {
                     }
                 });
                 await persistSession();
+                await maybeCollectCompletedIntentFeedback();
+                clearTurnIntentContext();
                 flushStreamingMarkdown();
                 if (!scrollRegion.isActive()) {
                     process.stdout.write('\n');
@@ -1219,7 +1682,11 @@ async function runChat(initialInput, opts) {
                     lastAssistantText = '';
                     const continueBlocks = await parseInputBlocks(stopResult.message, resolveModelCapabilities(adapter).supportsImageInput);
                     clearPastedImagePaths();
+                    await refreshIntentLedger();
+                    prepareIntentReminderForInput(stopResult.message);
+                    await primeTurnIntentPlan(true);
                     scrollRegion.clearLastInput();
+                    await maybePrepareFreshContextHandoff();
                     await runtimeFacade.runTurn({
                         sessionId,
                         cwd,
@@ -1254,6 +1721,8 @@ async function runChat(initialInput, opts) {
                         }
                     });
                     await persistSession();
+                    await maybeCollectCompletedIntentFeedback();
+                    clearTurnIntentContext();
                     flushStreamingMarkdown();
                     if (!scrollRegion.isActive()) {
                         process.stdout.write('\n');
@@ -1261,17 +1730,24 @@ async function runChat(initialInput, opts) {
                 }
             }
             catch (e) {
+                clearTurnIntentContext();
                 handleTurnFailure(e);
             }
             // Restore footer after streaming
             if (scrollRegion.isActive()) {
-                scrollRegion.endContentStreaming({
-                    inputPrompt: 'Type your message...',
-                    statusLine: statusBar.getStatusLine(),
-                });
-                // Ensure next TerminalRenderer render uses cursor movement (\x1b[1B)
-                // instead of newlines (\n), which would scroll the footer up.
-                replRenderer.prepareForInput();
+                try {
+                    scrollRegion.endContentStreaming({
+                        inputPrompt: 'Type your message...',
+                        summaryLine: getCurrentIntentSummaryLine(),
+                        statusLine: statusBar.getStatusLine(),
+                    });
+                    // Ensure next TerminalRenderer render uses cursor movement (\x1b[1B)
+                    // instead of newlines (\n), which would scroll the footer up.
+                    replRenderer.prepareForInput();
+                }
+                catch (error) {
+                    suspendInteractiveUi('end_content_streaming', error);
+                }
             }
             // Clear activity state BEFORE unblocking renderLiveActivity().
             // This prevents pending interval callbacks from rendering "Thinking"
@@ -1284,13 +1760,64 @@ async function runChat(initialInput, opts) {
         }
     }
     finally {
+        setStreamErrorHandler(null);
         process.stdout.write = originalStdoutWrite;
         process.stderr.write = originalStderrWrite;
+        stopIntentRuntimeSync();
+        stopSkillEvalRuntimeSync();
         await platform.dispose();
         for (const ch of embeddedChannels) {
             await ch.cleanup();
         }
     }
+}
+function resolveChatInstanceId() {
+    return `inst_${process.pid}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+export function initializeChatIntentLedger(intentLedger, sessionId, instanceId, ownershipMode, options = {}) {
+    if (!intentLedger) {
+        return markSessionOwned(createEmptySessionIntentLedger(sessionId, Date.now()), instanceId);
+    }
+    const now = Date.now();
+    if (ownershipMode === 'fork') {
+        return markSessionOwned({
+            ...intentLedger,
+            instanceId: undefined,
+            ownership: {
+                state: 'released',
+                updatedAt: now,
+            },
+            updatedAt: now,
+        }, instanceId, now);
+    }
+    if (ownershipMode === 'takeover') {
+        if (intentLedger.ownership.state === 'released') {
+            throw new Error(`会话 ${sessionId} 已处于 released 状态，请使用 xiaok --resume ${sessionId} 恢复，而不是 takeover。`);
+        }
+        try {
+            return takeoverSessionOwnership(intentLedger, instanceId, {
+                now,
+                confirmHighRisk: options.confirmHighRiskTakeover === true,
+            });
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (/high-risk takeover requires explicit confirmation/i.test(message)) {
+                throw new Error(`会话 ${sessionId} 当前处于高风险步骤，请确认后重试：xiaok --takeover ${sessionId} --confirm-high-risk-takeover`);
+            }
+            throw error;
+        }
+    }
+    if (intentLedger.ownership.state === 'released') {
+        return ownershipMode === 'resume'
+            ? resumeSessionOwnership(intentLedger, instanceId, now)
+            : markSessionOwned(intentLedger, instanceId, now);
+    }
+    const currentOwner = intentLedger.ownership.ownerInstanceId;
+    if (!currentOwner) {
+        return markSessionOwned(intentLedger, instanceId, now);
+    }
+    throw new Error(`会话 ${sessionId} 当前仍由实例 ${currentOwner} 持有，当前进程不会自动 takeover。请先正常退出原实例后再使用 xiaok --resume ${sessionId}，或显式执行 xiaok --takeover ${sessionId}`);
 }
 function buildCapabilityHealthNotice(health) {
     if (!health.hasDegradedCapabilities()) {
@@ -1307,6 +1834,8 @@ export function registerChatCommands(program) {
         .option('-p, --print', '以纯文本模式输出单次结果')
         .option('--json', '以 JSON 模式输出单次结果')
         .option('--resume <id>', '恢复已保存会话')
+        .option('--takeover <id>', '显式接管仍被其他实例持有的会话')
+        .option('--confirm-high-risk-takeover', '确认接管处于高风险步骤的会话')
         .option('-c, --continue', '恢复上一次会话')
         .option('--fork-session <id>', '从已有会话分叉一个新会话')
         .argument('[input]', '单次任务描述（省略则进入交互模式）')

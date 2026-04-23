@@ -64,9 +64,9 @@ export class PermissionManager {
     buildRuleRegex(pattern) {
         if (pattern.endsWith(' *')) {
             const prefix = pattern.slice(0, -2);
-            return new RegExp(`^${prefix.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}(?: .*)?$`);
+            return new RegExp(`^${prefix.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[\\s\\S]*')}(?: [\\s\\S]*)?$`);
         }
-        return new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
+        return new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[\\s\\S]*')}$`);
     }
     getRuleTarget(input) {
         if (typeof input.command === 'string') {

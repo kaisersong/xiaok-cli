@@ -169,6 +169,41 @@ describe('permission-prompt', () => {
       harness.restore();
     });
 
+    it('falls back to plain-text approval rendering when the shared renderer throws', async () => {
+      const harness = createTtyHarness();
+      const failingRenderer = {
+        hasActiveScrollRegion: () => true,
+        getState: () => ({
+          prompt: '> ',
+          input: { value: '', cursorOffset: 0 },
+          footerLines: [],
+        }),
+        renderInput: () => {
+          throw new Error('permission renderer boom');
+        },
+        openPermissionModal: () => {
+          throw new Error('permission modal boom');
+        },
+        handleKey: () => {},
+        clearVisibleContent: () => {},
+        closeModal: () => {},
+      } as unknown as ReplRenderer;
+
+      const pending = showPermissionPrompt(
+        'bash',
+        { command: 'ls' },
+        { renderer: failingRenderer },
+      );
+
+      harness.send('\r');
+
+      await expect(pending).resolves.toEqual({ action: 'allow_once' });
+      expect(harness.output.normalized).toContain('[xiaok] UI 已降级：permission_prompt_renderer');
+      expect(harness.output.normalized).toContain('xiaok 想要执行以下操作');
+
+      harness.restore();
+    });
+
     it('records prompt navigation and final decision to the transcript logger', async () => {
       const harness = createTtyHarness();
       const events: Array<Record<string, unknown>> = [];

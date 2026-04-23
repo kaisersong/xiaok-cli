@@ -1,6 +1,8 @@
+import type { TaskSkillHints } from '../intent-delegation/types.js';
 export type SkillExecutionContext = 'inline' | 'fork';
 export interface SkillMeta {
     name: string;
+    aliases?: string[];
     description: string;
     content: string;
     path: string;
@@ -14,6 +16,7 @@ export interface SkillMeta {
     dependsOn: string[];
     userInvocable: boolean;
     whenToUse?: string;
+    taskHints: TaskSkillHints;
 }
 export interface SkillLoadOptions {
     builtinRoots?: string[];
@@ -33,6 +36,8 @@ export declare function toSkillEntries(skills: SkillMeta[]): Array<{
     name: string;
     listing: string;
 }>;
+export declare function getSkillCommandNames(skill: SkillMeta): string[];
+export declare function findSkillByCommandName(skills: SkillMeta[], name: string): SkillMeta | undefined;
 export declare function parseSlashCommand(input: string): {
     skillName: string;
     rest: string;

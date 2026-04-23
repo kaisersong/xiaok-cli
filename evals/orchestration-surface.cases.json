@@ -1,0 +1,93 @@
+{
+  "cases": [
+    {
+      "id": "surface-01",
+      "renderer": "intent_created",
+      "instanceId": "inst-owner",
+      "ownerInstanceId": "inst-owner",
+      "intent": {
+        "deliverable": "Customer proposal",
+        "intentType": "generate",
+        "riskTier": "medium",
+        "templateId": "generate_v1",
+        "delegationBoundary": ["Do not send externally"],
+        "activeStepKey": "collect",
+        "overallStatus": "drafting_plan",
+        "latestBreadcrumb": "Collected the customer constraints"
+      },
+      "expectedSubstrings": ["🤝 已理解，会帮你产出Customer proposal。", "边界：Do not send externally"]
+    },
+    {
+      "id": "surface-02",
+      "renderer": "progress",
+      "stepId": "intent_customer_proposal:step:collect",
+      "stepStatus": "running",
+      "message": "Collected the customer constraints",
+      "expectedSubstrings": ["╭─ Progress", "Collect · Running", "Collected the customer constraints"]
+    },
+    {
+      "id": "surface-03",
+      "renderer": "receipt",
+      "note": "Delivered a first draft",
+      "expectedSubstrings": ["╭─ Receipt", "Delivered a first draft"]
+    },
+    {
+      "id": "surface-04",
+      "renderer": "salvage",
+      "summary": ["Outline is reusable", "Constraints are captured"],
+      "reason": "waiting on approval",
+      "expectedSubstrings": ["╭─ Salvage", "- Outline is reusable", "Reason: waiting on approval"]
+    },
+    {
+      "id": "surface-05",
+      "renderer": "summary_line",
+      "instanceId": "inst-owner",
+      "ownerInstanceId": "inst-owner",
+      "intent": {
+        "deliverable": "Customer proposal",
+        "intentType": "generate",
+        "riskTier": "medium",
+        "templateId": "generate_v1",
+        "delegationBoundary": ["Do not send externally"],
+        "activeStepKey": "collect",
+        "overallStatus": "drafting_plan",
+        "latestBreadcrumb": "Collected the customer constraints"
+      },
+      "expectedSubstrings": ["Intent: Customer proposal", "Stage 1/1", "生成Customer proposal", "Drafting Plan"]
+    },
+    {
+      "id": "surface-06",
+      "renderer": "summary_line",
+      "instanceId": "inst-other",
+      "ownerInstanceId": "inst-owner",
+      "intent": {
+        "deliverable": "Customer proposal",
+        "intentType": "generate",
+        "riskTier": "medium",
+        "templateId": "generate_v1",
+        "delegationBoundary": ["Do not send externally"],
+        "activeStepKey": "collect",
+        "overallStatus": "drafting_plan",
+        "latestBreadcrumb": "Collected the customer constraints"
+      },
+      "expectedExact": ""
+    },
+    {
+      "id": "surface-07",
+      "renderer": "reminder_block",
+      "instanceId": "inst-owner",
+      "ownerInstanceId": "inst-owner",
+      "intent": {
+        "deliverable": "Customer proposal",
+        "intentType": "generate",
+        "riskTier": "medium",
+        "templateId": "generate_v1",
+        "delegationBoundary": ["Do not send externally"],
+        "activeStepKey": "collect",
+        "overallStatus": "drafting_plan",
+        "latestBreadcrumb": "Collected the customer constraints"
+      },
+      "expectedSubstrings": ["Intent run contract:", "Goal chain: Customer proposal", "Final deliverable: Customer proposal", "Active stage: 1/1 生成Customer proposal", "Latest progress: Collected the customer constraints"]
+    }
+  ]
+}

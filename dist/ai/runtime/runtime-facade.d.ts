@@ -16,6 +16,7 @@ export interface RuntimeFacadeOptions {
     getPromptInput(cwd: string): Promise<Omit<PromptBuilderInput, 'cwd' | 'channel'>>;
     agent: Pick<Agent, 'getSessionState' | 'setPromptSnapshot' | 'setSystemPrompt' | 'runTurn'>;
     getSkillEntries?(): SkillEntry[];
+    getIntentReminderBlock?(): MessageBlock | undefined;
 }
 export declare class RuntimeFacade {
     private readonly options;

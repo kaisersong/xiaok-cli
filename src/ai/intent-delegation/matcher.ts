@@ -3,6 +3,7 @@ import type { TaskSkillHints, TaskSkillMatch } from './types.js';
 type TaskSkill = {
   name: string;
   description: string;
+  whenToUse?: string;
   taskHints: TaskSkillHints;
 };
 
@@ -167,7 +168,11 @@ export function matchSkillsForTask(
     let score = 0;
     const reasons: string[] = [];
 
-    const descriptionResult = scoreField(queryTokens, [skill.description], FIELD_WEIGHTS.description);
+    const descriptionResult = scoreField(
+      queryTokens,
+      [skill.description, skill.whenToUse ?? ''],
+      FIELD_WEIGHTS.description,
+    );
     if (descriptionResult.matched) reasons.push('description');
     score += descriptionResult.score;
 
@@ -191,6 +196,7 @@ export function matchSkillsForTask(
       skill: {
         name: skill.name,
         description: skill.description,
+        whenToUse: skill.whenToUse,
         taskHints: normalizeHints(skill.taskHints),
       },
       score,

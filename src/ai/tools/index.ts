@@ -256,15 +256,19 @@ export class ToolRegistry {
       input = { ...input, ...preHookResult.updatedInput };
     }
 
+    if (preHookResult?.preventContinuation) {
+      const message = preHookResult.additionalContext
+        ?? preHookResult.message
+        ?? `[${name} handled by pre hook]`;
+      return `${message}\n[agent loop should stop after this tool]`;
+    }
+
     try {
       let result = await tool.execute(input, context);
 
       // Append hook-provided additional context
       if (preHookResult?.additionalContext) {
         result = `${result}\n${preHookResult.additionalContext}`;
-      }
-      if (preHookResult?.preventContinuation) {
-        result = `${result}\n[agent loop should stop after this tool]`;
       }
 
       const warnings = await this.options.hooksRunner?.runPostHooks(tool.definition.name, input) ?? [];

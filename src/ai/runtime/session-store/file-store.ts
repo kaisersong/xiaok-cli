@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import type { Message } from '../../../types.js';
 import { getConfigDir } from '../../../utils/config.js';
 import type { SessionListEntry, SessionStore, PersistedSessionSnapshot } from './store.js';
+import { cloneSessionIntentLedger, rekeySessionIntentLedger } from '../../../runtime/intent-delegation/types.js';
+import { cloneSessionSkillEvalState } from '../../../runtime/intent-delegation/skill-eval.js';
 
 const SESSION_SCHEMA_VERSION = 1;
 
@@ -58,6 +60,8 @@ export class FileSessionStore implements SessionStore {
       memoryRefs: snapshot.memoryRefs ?? [],
       approvalRefs: snapshot.approvalRefs ?? [],
       backgroundJobRefs: snapshot.backgroundJobRefs ?? [],
+      intentDelegation: snapshot.intentDelegation ? cloneSessionIntentLedger(snapshot.intentDelegation) : undefined,
+      skillEval: snapshot.skillEval ? cloneSessionSkillEvalState(snapshot.skillEval) : undefined,
     } as PersistedSessionSnapshot;
   }
 
@@ -93,9 +97,10 @@ export class FileSessionStore implements SessionStore {
     const lineage = sourceLineage.at(-1) === source.sessionId
       ? [...sourceLineage]
       : [...sourceLineage, source.sessionId];
+    const nextSessionId = this.createSessionId();
     const forked: PersistedSessionSnapshot = {
       ...source,
-      sessionId: this.createSessionId(),
+      sessionId: nextSessionId,
       createdAt: now,
       updatedAt: now,
       forkedFromSessionId: source.sessionId,
@@ -106,6 +111,8 @@ export class FileSessionStore implements SessionStore {
       memoryRefs: [...(source.memoryRefs ?? [])],
       approvalRefs: [...(source.approvalRefs ?? [])],
       backgroundJobRefs: [...(source.backgroundJobRefs ?? [])],
+      intentDelegation: source.intentDelegation ? rekeySessionIntentLedger(source.intentDelegation, nextSessionId) : undefined,
+      skillEval: source.skillEval ? cloneSessionSkillEvalState(source.skillEval) : undefined,
     };
     await this.save(forked);
     return forked;

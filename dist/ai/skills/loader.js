@@ -1,19 +1,76 @@
 import { readdirSync, readFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { getBuiltinSkillRoots } from './defaults.js';
 import { getConfigDir } from '../../utils/config.js';
-function stripWrappingQuotes(value) {
+function decodeQuotedScalar(value) {
     if ((value.startsWith('"') && value.endsWith('"')) ||
         (value.startsWith('\'') && value.endsWith('\''))) {
-        return value.slice(1, -1);
+        const inner = value.slice(1, -1);
+        if (value.startsWith('\'')) {
+            return inner.replace(/''/g, '\'');
+        }
+        return inner.replace(/\\(["\\])/g, '$1');
     }
     return value;
 }
-function splitCommaList(value) {
-    return value
-        .split(',')
-        .map((entry) => stripWrappingQuotes(entry.trim()))
-        .filter(Boolean);
+function stripListBrackets(value) {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        return trimmed.slice(1, -1);
+    }
+    return value;
+}
+function parseInlineList(value) {
+    const input = stripListBrackets(value).trim();
+    if (!input)
+        return [];
+    const items = [];
+    let current = '';
+    let quote = null;
+    for (let index = 0; index < input.length; index += 1) {
+        const char = input[index];
+        if (quote) {
+            if (quote === '\'' && char === '\'' && index + 1 < input.length && input[index + 1] === '\'') {
+                current += '\'';
+                index += 1;
+                continue;
+            }
+            if (char === quote) {
+                quote = null;
+                continue;
+            }
+            if (char === '\\' && quote === '"' && index + 1 < input.length) {
+                const next = input[index + 1];
+                if (next === '"' || next === '\\') {
+                    current += next;
+                    index += 1;
+                    continue;
+                }
+                current += char;
+                continue;
+            }
+            current += char;
+            continue;
+        }
+        if (char === '"' || char === '\'') {
+            quote = char;
+            continue;
+        }
+        if (char === ',') {
+            const item = current.trim();
+            if (item) {
+                items.push(decodeQuotedScalar(item));
+            }
+            current = '';
+            continue;
+        }
+        current += char;
+    }
+    const lastItem = current.trim();
+    if (lastItem) {
+        items.push(decodeQuotedScalar(lastItem));
+    }
+    return items.filter(Boolean);
 }
 function parseBoolean(value) {
     if (!value)
@@ -23,6 +80,9 @@ function parseBoolean(value) {
     if (/^(false|no|0)$/i.test(value))
         return false;
     return undefined;
+}
+function readListField(fields, listFields, key) {
+    return listFields.get(key) ?? parseInlineList(fields.get(key) ?? '');
 }
 function parseFrontmatter(raw) {
     const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
@@ -62,7 +122,7 @@ function parseFrontmatter(raw) {
         const listItemMatch = line.match(/^\s*-\s+(.+)$/);
         if (listItemMatch && currentListKey) {
             const items = listFields.get(currentListKey) ?? [];
-            items.push(stripWrappingQuotes(listItemMatch[1].trim()));
+            items.push(decodeQuotedScalar(listItemMatch[1].trim()));
             listFields.set(currentListKey, items);
             continue;
         }
@@ -85,7 +145,7 @@ function parseFrontmatter(raw) {
             listFields.set(key, listFields.get(key) ?? []);
             continue;
         }
-        fields.set(key, stripWrappingQuotes(value));
+        fields.set(key, decodeQuotedScalar(value));
     }
     flushBlockScalar();
     const name = fields.get('name');
@@ -94,9 +154,13 @@ function parseFrontmatter(raw) {
         return null;
     }
     const allowedTools = listFields.get('allowed-tools')
-        ?? splitCommaList(fields.get('allowed-tools') ?? '');
+        ?? parseInlineList(fields.get('allowed-tools') ?? '');
     const dependsOn = listFields.get('depends-on')
-        ?? splitCommaList(fields.get('depends-on') ?? fields.get('skills') ?? '');
+        ?? parseInlineList(fields.get('depends-on') ?? fields.get('skills') ?? '');
+    const taskGoals = readListField(fields, listFields, 'task-goals');
+    const inputKinds = readListField(fields, listFields, 'input-kinds');
+    const outputKinds = readListField(fields, listFields, 'output-kinds');
+    const examples = readListField(fields, listFields, 'examples');
     const executionContext = fields.get('context') === 'fork' ? 'fork' : 'inline';
     return {
         name,
@@ -110,11 +174,17 @@ function parseFrontmatter(raw) {
         dependsOn,
         userInvocable: parseBoolean(fields.get('user-invocable')),
         whenToUse: fields.get('when_to_use') ?? fields.get('when-to-use') ?? undefined,
+        taskGoals,
+        inputKinds,
+        outputKinds,
+        examples,
     };
 }
-function normalizeSkill(parsed, filePath, source, tier) {
+function normalizeSkill(parsed, filePath, source, tier, aliases = []) {
+    const normalizedAliases = Array.from(new Set(aliases.map((alias) => alias.trim()).filter((alias) => alias && alias !== parsed.name)));
     return {
         name: parsed.name,
+        aliases: normalizedAliases,
         description: parsed.description,
         content: parsed.content,
         path: filePath,
@@ -128,6 +198,12 @@ function normalizeSkill(parsed, filePath, source, tier) {
         dependsOn: parsed.dependsOn,
         userInvocable: parsed.userInvocable ?? true,
         whenToUse: parsed.whenToUse,
+        taskHints: {
+            taskGoals: parsed.taskGoals,
+            inputKinds: parsed.inputKinds,
+            outputKinds: parsed.outputKinds,
+            examples: parsed.examples,
+        },
     };
 }
 function loadSkillsFromDir(dir, source, tier) {
@@ -136,24 +212,36 @@ function loadSkillsFromDir(dir, source, tier) {
     const results = [];
     let entries;
     try {
-        entries = readdirSync(dir).filter((file) => file.endsWith('.md'));
+        entries = readdirSync(dir, { withFileTypes: true });
     }
     catch {
         return [];
     }
-    for (const file of entries) {
-        const filePath = join(dir, file);
+    const loadSkillFile = (filePath, displayName, aliases = []) => {
         try {
             const raw = readFileSync(filePath, 'utf-8');
             const parsed = parseFrontmatter(raw);
             if (!parsed) {
-                console.warn(`[xiaok] Skills: 跳过格式错误的文件: ${file}`);
-                continue;
+                console.warn(`[xiaok] Skills: 跳过格式错误的文件: ${displayName}`);
+                return;
             }
-            results.push(normalizeSkill(parsed, filePath, source, tier));
+            results.push(normalizeSkill(parsed, filePath, source, tier, aliases));
         }
         catch {
-            console.warn(`[xiaok] Skills: 读取文件失败: ${file}`);
+            console.warn(`[xiaok] Skills: 读取文件失败: ${displayName}`);
+        }
+    };
+    for (const entry of entries) {
+        if (entry.isFile() && entry.name.endsWith('.md')) {
+            loadSkillFile(join(dir, entry.name), entry.name, [basename(entry.name, '.md')]);
+            continue;
+        }
+        if (!entry.isDirectory() && !entry.isSymbolicLink()) {
+            continue;
+        }
+        const skillFilePath = join(dir, entry.name, 'SKILL.md');
+        if (existsSync(skillFilePath)) {
+            loadSkillFile(skillFilePath, `${entry.name}/SKILL.md`, [entry.name]);
         }
     }
     return results;
@@ -181,7 +269,17 @@ function resolveSkillsByName(names, skills) {
     const ordered = [];
     const seen = new Set();
     const stack = new Set();
-    const byName = new Map(skills.map((skill) => [skill.name, skill]));
+    const byName = new Map();
+    for (const skill of skills) {
+        byName.set(skill.name, skill);
+    }
+    for (const skill of skills) {
+        for (const alias of skill.aliases ?? []) {
+            if (!byName.has(alias)) {
+                byName.set(alias, skill);
+            }
+        }
+    }
     const visit = (name) => {
         if (seen.has(name))
             return;
@@ -215,7 +313,7 @@ export function createSkillCatalog(xiaokConfigDir = getConfigDir(), cwd = proces
             return [...skills];
         },
         get(name) {
-            return skills.find((skill) => skill.name === name);
+            return findSkillByCommandName(skills, name);
         },
         resolve(names) {
             return resolveSkillsByName(names, skills);
@@ -232,7 +330,11 @@ function formatSkillDescription(skill) {
         : text;
 }
 export function formatSkillEntry(skill) {
-    return `- ${skill.name}: ${formatSkillDescription(skill)}`;
+    const aliases = skill.aliases ?? [];
+    const aliasSuffix = aliases.length > 0
+        ? ` (${aliases.map((alias) => `/${alias}`).join(', ')})`
+        : '';
+    return `- ${skill.name}${aliasSuffix}: ${formatSkillDescription(skill)}`;
 }
 export function formatSkillsContext(skills) {
     if (skills.length === 0)
@@ -241,6 +343,12 @@ export function formatSkillsContext(skills) {
 }
 export function toSkillEntries(skills) {
     return skills.map((skill) => ({ name: skill.name, listing: formatSkillEntry(skill) }));
+}
+export function getSkillCommandNames(skill) {
+    return [skill.name, ...(skill.aliases ?? [])];
+}
+export function findSkillByCommandName(skills, name) {
+    return skills.find((skill) => skill.name === name || (skill.aliases ?? []).includes(name));
 }
 export function parseSlashCommand(input) {
     const trimmed = input.trim();

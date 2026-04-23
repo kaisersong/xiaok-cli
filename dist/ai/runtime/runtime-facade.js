@@ -29,22 +29,30 @@ export class RuntimeFacade {
         this.sentSkillNames.clear();
     }
     buildInput(input) {
+        const reminderBlock = this.options.getIntentReminderBlock?.();
         // Compute new skills not yet seen by the agent (CC dedup: only send new ones).
         const allEntries = this.options.getSkillEntries?.() ?? [];
         const newEntries = allEntries.filter((e) => !this.sentSkillNames.has(e.name));
-        if (newEntries.length === 0)
+        const prefixBlocks = [];
+        if (reminderBlock) {
+            prefixBlocks.push(reminderBlock);
+        }
+        if (newEntries.length > 0) {
+            // Mark as sent before running (mirrors CC's O.add loop).
+            for (const e of newEntries)
+                this.sentSkillNames.add(e.name);
+            const listing = newEntries.map((e) => e.listing).join('\n');
+            prefixBlocks.push({
+                type: 'text',
+                text: `<system-reminder>\nThe following skills are available for use with the Skill tool:\n\n${listing}\n</system-reminder>`,
+            });
+        }
+        if (prefixBlocks.length === 0) {
             return input;
-        // Mark as sent before running (mirrors CC's O.add loop).
-        for (const e of newEntries)
-            this.sentSkillNames.add(e.name);
-        const listing = newEntries.map((e) => e.listing).join('\n');
-        const listingBlock = {
-            type: 'text',
-            text: `<system-reminder>\nThe following skills are available for use with the Skill tool:\n\n${listing}\n</system-reminder>`,
-        };
+        }
         const inputBlocks = typeof input === 'string'
             ? [{ type: 'text', text: input }]
             : input;
-        return [listingBlock, ...inputBlocks];
+        return [...prefixBlocks, ...inputBlocks];
     }
 }

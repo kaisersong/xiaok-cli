@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-export const SESSION_STORE_SCHEMA_VERSION = 1;
+export const SESSION_STORE_SCHEMA_VERSION = 2;
 
 export function applySessionStoreSchema(db: Database.Database): void {
   db.exec(`
@@ -44,9 +44,25 @@ export function applySessionStoreSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_session_messages_session ON session_messages(session_id, message_index);
   `);
 
+  ensureColumn(db, 'sessions', 'intent_delegation_json', 'TEXT');
+  ensureColumn(db, 'sessions', 'skill_eval_json', 'TEXT');
+
   db.prepare(`
     INSERT INTO session_meta (key, value)
     VALUES ('schema_version', ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `).run(String(SESSION_STORE_SCHEMA_VERSION));
+}
+
+function ensureColumn(
+  db: Database.Database,
+  tableName: string,
+  columnName: string,
+  definition: string,
+): void {
+  const existingColumns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  if (existingColumns.some((column) => column.name === columnName)) {
+    return;
+  }
+  db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
 }

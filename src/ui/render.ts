@@ -314,10 +314,6 @@ const LOW_SIGNAL_TOOL_NAMES = new Set([
   'grep',
   'read',
   'skill',
-  'task_create',
-  'task_get',
-  'task_list',
-  'task_update',
   'tool_search',
 ]);
 

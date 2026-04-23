@@ -37,6 +37,21 @@ describe('PermissionManager', () => {
     await expect(pm.check('bash', { command: 'pwd -L' })).resolves.toBe('allow');
   });
 
+  it('matches remembered python rules for multi-line bash commands', async () => {
+    const pm = new PermissionManager({
+      mode: 'default',
+      allowRules: ['bash(python3 *)'],
+    });
+
+    await expect(pm.check('bash', {
+      command: 'python3 -c "\\nimport subprocess\\nprint(1)\\n"',
+    })).resolves.toBe('allow');
+
+    await expect(pm.check('bash', {
+      command: "python3 - <<'PY'\nprint(1)\nPY",
+    })).resolves.toBe('allow');
+  });
+
   it('supports session deny rules with higher priority than allow rules', async () => {
     const pm = new PermissionManager({
       mode: 'default',

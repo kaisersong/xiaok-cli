@@ -28,6 +28,11 @@ interface ActivityState {
   startedAt: number;
 }
 
+export interface ActivitySnapshot {
+  label: string;
+  startedAt: number;
+}
+
 interface ReassuranceTick {
   bucket: number;
   line: string;
@@ -112,6 +117,17 @@ export class StatusBar {
 
   getActivityLabel(): string {
     return this.activity?.label ?? '';
+  }
+
+  getActivitySnapshot(): ActivitySnapshot | null {
+    if (!this.activity) {
+      return null;
+    }
+
+    return {
+      label: this.activity.label,
+      startedAt: this.activity.startedAt,
+    };
   }
 
   /** Build the status string (no newline). */
