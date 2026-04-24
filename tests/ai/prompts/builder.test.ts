@@ -1,4 +1,4 @@
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -76,6 +76,34 @@ describe('PromptBuilder static/dynamic split', () => {
     expect(dynamicSeg.text).toContain('/repo');
     expect(dynamicSeg.text).toContain('ent_123');
     expect(staticSeg.text).not.toContain('/repo');
+  });
+
+  it('does not inject yzj domain docs into generic chat prompts by default', async () => {
+    const builder = new PromptBuilder();
+    const snapshot = await builder.build({
+      cwd: '/repo',
+      enterpriseId: null,
+      devApp: null,
+      budget: 4000,
+      channel: 'chat',
+      skills: [],
+      deferredTools: [],
+      agents: [],
+      pluginCommands: [],
+      lspDiagnostics: '',
+      autoContext: { docs: [], git: null },
+    });
+
+    expect(snapshot.rendered).not.toContain('云之家开放平台 API 概览');
+    expect(snapshot.rendered).not.toContain('## yzj CLI usage');
+  });
+
+  it('gates yzj domain injection on channel or explicit relevance instead of forcing it globally', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'ai', 'prompts', 'assembler.ts'), 'utf8');
+
+    expect(source).toContain('function shouldInjectYzjContext');
+    expect(source).toContain("opts.channel === 'yzj'");
+    expect(source).toContain('includeYzjContext');
   });
 
   it('marks memory summaries as fenced background memory in both segment metadata and rendered prompt', async () => {

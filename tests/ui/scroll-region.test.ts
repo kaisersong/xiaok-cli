@@ -9,7 +9,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { PassThrough } from 'node:stream';
 import { MarkdownRenderer } from '../../src/ui/markdown.js';
-import { formatSubmittedInput, setColorsEnabled } from '../../src/ui/render.js';
+import { formatProgressNote, formatSubmittedInput, setColorsEnabled } from '../../src/ui/render.js';
+import { formatCurrentTurnIntentSummaryLine } from '../../src/ui/orchestration.js';
 import { ScrollRegionManager } from '../../src/ui/scroll-region.js';
 import { createTtyHarness } from '../support/tty.js';
 
@@ -23,7 +24,15 @@ function createMockScrollRegion() {
   (stream as any).columns = 80;
 
   const manager = new ScrollRegionManager(stream);
-  return { manager, stream: mock, getOutput: () => chunks.join('') };
+  return {
+    manager,
+    stream: mock,
+    getOutput: () => chunks.join(''),
+    getChunks: () => [...chunks],
+    resetOutput: () => {
+      chunks.length = 0;
+    },
+  };
 }
 
 describe('ScrollRegionManager activity rendering', () => {
@@ -48,6 +57,42 @@ describe('ScrollRegionManager activity rendering', () => {
       manager.renderActivity('⠋ Thinking');
       const output = getOutput();
       expect(output).toContain('⠋ Thinking');
+    });
+
+    it('does not clear the last visible content row when no activity line is active', () => {
+      const harness = createTtyHarness(80, 24);
+      const manager = new ScrollRegionManager(process.stdout);
+
+      try {
+        manager.begin();
+        manager.writeAtContentCursor('tail line');
+        manager.clearActivity();
+
+        const lines = harness.screen.lines();
+        expect(lines.some((line) => line.includes('tail line'))).toBe(true);
+      } finally {
+        harness.restore();
+      }
+    });
+
+    it('batches footer redraw while restoring an existing activity line', () => {
+      const { manager, getChunks, resetOutput } = createMockScrollRegion();
+      manager.begin();
+      manager.renderActivity('⠋ Thinking · 1s');
+      resetOutput();
+
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · auto · 4% · project',
+      });
+
+      const chunks = getChunks();
+      const promptChunks = chunks.filter((chunk) => chunk.includes('Type your message...'));
+      const statusChunks = chunks.filter((chunk) => chunk.includes('gpt-terminal-e2e · auto · 4% · project'));
+
+      expect(promptChunks).toHaveLength(1);
+      expect(statusChunks).toHaveLength(1);
+      expect(promptChunks[0]).toContain('⠋ Thinking · 1s');
     });
   });
 
@@ -84,6 +129,24 @@ describe('ScrollRegionManager activity rendering', () => {
 
       const output = getOutput();
       expect(output).toMatch(/❯\x1b\[22;39m \x1b\[2mType your message\.\.\. +\x1b\[0m/);
+    });
+
+    it('keeps the footer rows visible while content is streaming', () => {
+      const harness = createTtyHarness(80, 24);
+      const manager = new ScrollRegionManager(process.stdout);
+
+      try {
+        manager.begin();
+        manager.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'gpt-5.4 · 5% · project' });
+        manager.beginContentStreaming();
+        manager.writeAtContentCursor('streaming line');
+
+        const lines = harness.screen.lines();
+        expect(lines.some((line) => line.includes('❯ Type your message...'))).toBe(true);
+        expect(lines.some((line) => line.includes('gpt-5.4 · 5% · project'))).toBe(true);
+      } finally {
+        harness.restore();
+      }
     });
   });
 });
@@ -192,13 +255,20 @@ describe('scroll-region prompt frame ownership', () => {
   it('renders the sticky summary line above the input and separate from activity and status rows', () => {
     const harness = createTtyHarness(80, 24);
     const manager = new ScrollRegionManager(process.stdout);
+    const summaryLine = formatCurrentTurnIntentSummaryLine({
+      deliverable: 'Customer proposal',
+      stageOrder: 0,
+      totalStages: 1,
+      stageLabel: 'Collect',
+      status: 'Drafting Plan',
+    });
 
     try {
       manager.begin();
       manager.renderActivity('⠋ Thinking · 1s');
       manager.renderFooter({
         inputPrompt: 'Type your message...',
-        summaryLine: 'Intent: Customer proposal · Collect · Drafting Plan',
+        summaryLine,
         statusLine: 'gpt-5.4 · 5% · master · xiaok-cli',
       });
 
@@ -214,9 +284,284 @@ describe('scroll-region prompt frame ownership', () => {
       expect(statusIndex).toBeGreaterThan(promptIndex);
       expect(lines[summaryIndex]).not.toContain('gpt-5.4');
       expect(lines[summaryIndex]).not.toContain('Thinking');
+      expect(lines[summaryIndex]).toContain('● Intent: Customer proposal · Stage 1/1 Collect · Drafting Plan');
       expect(summaryIndex).toBe(promptIndex - 3);
       expect(lines[summaryIndex + 1]).toBe('');
       expect(lines[activityIndex]).not.toContain('Intent: Customer proposal');
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('preserves ANSI intent-hint styling in the rendered footer summary line', () => {
+    const { manager, getOutput } = createMockScrollRegion();
+    setColorsEnabled(true);
+    try {
+      const summaryLine = formatCurrentTurnIntentSummaryLine({
+        deliverable: 'md -> 报告',
+        stageOrder: 0,
+        totalStages: 2,
+        stageLabel: '提取 Markdown',
+        status: 'Drafting Plan',
+      });
+
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        summaryLine,
+        statusLine: 'gpt-5.4 · 5% · master · xiaok-cli',
+      });
+
+      const output = getOutput();
+      expect(output).toContain('\x1b[38;2;122;168;255m●\x1b[0m');
+      expect(output).toContain('\x1b[38;2;142;142;142mIntent: md -> 报告 · Stage 1/2 提取 Markdown · Drafting Plan\x1b[0m');
+    } finally {
+      setColorsEnabled(
+        process.stdout.isTTY !== false &&
+        !process.env.NO_COLOR &&
+        !process.argv.includes('--no-color'),
+      );
+    }
+  });
+
+  it('keeps the prompt and status visible when a wrapped summary line shares the footer with changed and ran tool blocks', () => {
+    const harness = createTtyHarness(60, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const summaryLine = formatCurrentTurnIntentSummaryLine({
+      deliverable: 'md -> 报告',
+      stageOrder: 0,
+      totalStages: 2,
+      stageLabel: '提取 Markdown 并生成结构化报告草稿',
+      status: 'Executing tools',
+    });
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        summaryLine,
+        statusLine: 'gpt-terminal-e2e · auto · 0% · project',
+      });
+
+      for (let index = 0; index < 10; index += 1) {
+        manager.writeAtContentCursor(`context line ${index + 1}\n`);
+      }
+
+      manager.writeAtContentCursor('\n\n  ╭─ Changed\n  │ Wrote report-analysis.report.md\n');
+      manager.writeAtContentCursor(
+        '\n\n  ╭─ Ran\n'
+        + '  │ printf "const fs = require(\'fs\'); const report = fs.readFileSync(\'report-analysis.report.md\', \'utf8\'); // 解析并生成总结"\n',
+      );
+      manager.renderActivity('⠋ Executing command · 8s');
+
+      const lines = harness.screen.lines();
+      const promptRows = lines.filter((line) => line.includes('❯'));
+      const statusRows = lines.filter((line) => line.includes('project') && line.includes('%'));
+
+      expect(promptRows).toHaveLength(1);
+      expect(statusRows).toHaveLength(1);
+      expect(lines[22]).toContain('❯ Type your message...');
+      expect(lines[23]).toContain('gpt-terminal-e2e · auto · 0% · project');
+      expect(lines.some((line) => line.includes('Intent: md -> 报告'))).toBe(true);
+      expect(lines.some((line) => line.includes('Wrote report-analysis.report.md'))).toBe(true);
+      expect(lines.some((line) => line.includes('printf "const fs = require'))).toBe(true);
+      expect(lines.some((line) => line.includes('Executing command · 8s'))).toBe(true);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('keeps the prompt row visible while consecutive ran blocks refresh the activity rail', () => {
+    const harness = createTtyHarness(60, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const summaryLine = formatCurrentTurnIntentSummaryLine({
+      deliverable: 'md -> 报告',
+      stageOrder: 0,
+      totalStages: 2,
+      stageLabel: '提取 Markdown',
+      status: 'Working',
+    });
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        summaryLine,
+        statusLine: 'gpt-terminal-e2e · 4% · project',
+      });
+
+      manager.writeAtContentCursor('\n\n  ╭─ Changed\n  │ Wrote combined-source.report.md\n');
+      manager.writeAtContentCursor('\n\n  ╭─ Ran\n  │ printf "E2E_FEEDBACK_CONFIRM_MERGED_MD"\n');
+      manager.renderActivity('⠋ Executing command · 7s');
+      manager.writeAtContentCursor('  │ printf "E2E_FEEDBACK_CONFIRM_WRAP_BLOCK verifying footer stability after feedback confirmation"\n');
+      manager.renderActivity('⠸ Executing command · 8s');
+      manager.writeAtContentCursor('  │ printf "E2E_FEEDBACK_CONFIRM_STAGE2_OK"\n');
+      manager.renderActivity('⠼ Executing command · 9s');
+
+      const lines = harness.screen.lines();
+      const promptRows = lines.filter((line) => line.includes('❯'));
+      const statusRows = lines.filter((line) => line.includes('gpt-terminal-e2e · 4% · project'));
+      const promptIndex = lines.findIndex((line) => line.includes('❯ Type your message...'));
+      const activityIndex = lines.findIndex((line) => line.includes('Executing command · 9s'));
+
+      expect(promptRows).toHaveLength(1);
+      expect(statusRows).toHaveLength(1);
+      expect(promptIndex).toBeGreaterThan(activityIndex);
+      expect(lines.slice(activityIndex + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
+      expect(lines.some((line) => line.includes('Wrote combined-source.report.md'))).toBe(true);
+      expect(lines.filter((line) => line.includes('printf "E2E_FEEDBACK_CONFIRM')).length).toBeGreaterThanOrEqual(2);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('keeps the prompt row visible while activity ticks refresh above an existing footer', () => {
+    const harness = createTtyHarness(60, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const summaryLine = formatCurrentTurnIntentSummaryLine({
+      deliverable: 'md -> 报告',
+      stageOrder: 0,
+      totalStages: 2,
+      stageLabel: '提取 Markdown',
+      status: 'Working',
+    });
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Finishing response...',
+        summaryLine,
+        statusLine: 'gpt-terminal-e2e · auto · 4% · project',
+      });
+
+      manager.writeAtContentCursor('\n\n  ╭─ Explored\n  │ Read 01-market-overview.md\n');
+      manager.writeAtContentCursor('\n\n  ╭─ Changed\n  │ Wrote report-analysis.report.md\n');
+
+      manager.renderActivity('⠋ Updating files · 1s');
+      manager.renderActivity('⠙ Updating files · 2s');
+      manager.renderActivity('⠹ Updating files · 3s');
+      manager.renderActivity('⠸ Updating files · 4s');
+
+      const lines = harness.screen.lines();
+      const promptRows = lines.filter((line) => line.includes('❯'));
+      const statusRows = lines.filter((line) => line.includes('gpt-terminal-e2e · auto · 4% · project'));
+      const promptIndex = lines.findIndex((line) => line.includes('❯ Finishing response...'));
+      const activityIndex = lines.findIndex((line) => line.includes('Updating files · 4s'));
+
+      expect(promptRows).toHaveLength(1);
+      expect(statusRows).toHaveLength(1);
+      expect(promptIndex).toBe(22);
+      expect(activityIndex).toBeLessThan(promptIndex);
+      expect(lines.some((line) => line.includes('Wrote report-analysis.report.md'))).toBe(true);
+      expect(lines.some((line) => line.includes('Intent: md -> 报告'))).toBe(true);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('re-anchors the footer when activity ticks continue after the footer rows were cleared', () => {
+    const harness = createTtyHarness(60, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const summaryLine = formatCurrentTurnIntentSummaryLine({
+      deliverable: 'md -> 报告',
+      stageOrder: 0,
+      totalStages: 2,
+      stageLabel: '提取 Markdown',
+      status: 'Working',
+    });
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Finishing response...',
+        summaryLine,
+        statusLine: 'gpt-terminal-e2e · auto · 4% · project',
+      });
+
+      process.stdout.write('\x1b[20;1H\x1b[2K');
+      process.stdout.write('\x1b[21;1H\x1b[2K');
+      process.stdout.write('\x1b[22;1H\x1b[2K');
+      process.stdout.write('\x1b[23;1H\x1b[2K');
+      process.stdout.write('\x1b[24;1H\x1b[2K');
+
+      manager.renderActivity('⠋ Finalizing response · 1m 47s');
+
+      const lines = harness.screen.lines();
+      const promptRows = lines.filter((line) => line.includes('❯'));
+      const statusRows = lines.filter((line) => line.includes('gpt-terminal-e2e · auto · 4% · project'));
+
+      expect(promptRows).toHaveLength(1);
+      expect(statusRows).toHaveLength(1);
+      expect(lines[22]).toContain('❯ Finishing response...');
+      expect(lines[23]).toContain('gpt-terminal-e2e · auto · 4% · project');
+      expect(lines.some((line) => line.includes('Finalizing response · 1m 47s'))).toBe(true);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('re-anchors the footer when a status-only update lands after the prompt row was cleared', () => {
+    const harness = createTtyHarness(60, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const summaryLine = formatCurrentTurnIntentSummaryLine({
+      deliverable: 'md -> 报告',
+      stageOrder: 0,
+      totalStages: 2,
+      stageLabel: '提取 Markdown',
+      status: 'Working',
+    });
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Finishing response...',
+        summaryLine,
+        statusLine: 'gpt-terminal-e2e · auto · 4% · project',
+      });
+
+      process.stdout.write('\x1b[23;1H\x1b[2K');
+      process.stdout.write('\x1b[24;1H\x1b[2Kgpt-terminal-e2e · auto · 5% · project');
+
+      manager.updateStatusLine('gpt-terminal-e2e · auto · 6% · project');
+
+      const lines = harness.screen.lines();
+      const promptRows = lines.filter((line) => line.includes('❯'));
+      const statusRows = lines.filter((line) => line.includes('gpt-terminal-e2e · auto · 6% · project'));
+
+      expect(promptRows).toHaveLength(1);
+      expect(statusRows).toHaveLength(1);
+      expect(lines[22]).toContain('❯ Finishing response...');
+      expect(lines[23]).toContain('gpt-terminal-e2e · auto · 6% · project');
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('suppresses activity redraws while the feedback overlay owns the footer', () => {
+    const harness = createTtyHarness(60, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderPromptFrame({
+        inputValue: '',
+        cursor: 0,
+        placeholder: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · 4% · project',
+        overlayLines: ['[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过'],
+        overlayKind: 'feedback',
+      });
+
+      manager.renderActivity('⠋ Thinking · 1s');
+
+      const lines = harness.screen.lines();
+      const promptIndex = lines.findIndex((line) => line.includes('❯ Type your message...'));
+      const overlayIndex = lines.findIndex((line) => line.includes('[xiaok] 这次结果是否满足预期？'));
+
+      expect(lines.some((line) => line.includes('Thinking · 1s'))).toBe(false);
+      expect(overlayIndex).toBeGreaterThanOrEqual(0);
+      expect(promptIndex).toBeGreaterThan(overlayIndex);
+      expect(lines.slice(overlayIndex + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
     } finally {
       harness.restore();
     }
@@ -455,12 +800,19 @@ describe('scroll-region prompt frame ownership', () => {
   it('re-anchors the footer after out-of-band transcript writes', () => {
     const harness = createTtyHarness(80, 24);
     const manager = new ScrollRegionManager(process.stdout);
+    const summaryLine = formatCurrentTurnIntentSummaryLine({
+      deliverable: 'Customer proposal',
+      stageOrder: 0,
+      totalStages: 1,
+      stageLabel: 'Collect',
+      status: 'Drafting Plan',
+    });
 
     try {
       manager.begin();
       manager.renderFooter({
         inputPrompt: 'Type your message...',
-        summaryLine: 'Intent: Customer proposal · Collect · Drafting Plan',
+        summaryLine,
         statusLine: 'gpt-5.4 · 5% · master · xiaok-cli',
       });
 
@@ -481,15 +833,66 @@ describe('scroll-region prompt frame ownership', () => {
     }
   });
 
-  it('keeps agent questions visible above the restored footer', () => {
-    const harness = createTtyHarness(100, 24);
+  it('pushes the transcript tail up when a new summary row shrinks the footer gap', () => {
+    const harness = createTtyHarness(80, 24);
     const manager = new ScrollRegionManager(process.stdout);
+    const summaryLine = formatCurrentTurnIntentSummaryLine({
+      deliverable: 'Customer proposal',
+      stageOrder: 0,
+      totalStages: 1,
+      stageLabel: 'Collect',
+      status: 'Drafting Plan',
+    });
 
     try {
       manager.begin();
       manager.renderFooter({
         inputPrompt: 'Type your message...',
-        summaryLine: 'Intent: Customer proposal · Collect · Drafting Plan',
+        statusLine: 'gpt-5.4 · 5% · master · xiaok-cli',
+      });
+
+      manager.setContentCursor(manager.maxContentRows);
+      manager.writeAtContentCursor('TAIL_LINE');
+
+      manager.renderFooter({
+        inputPrompt: ' ',
+        summaryLine,
+        statusLine: 'gpt-5.4 · 5% · master · xiaok-cli',
+      });
+
+      const lines = harness.screen.lines();
+      const tailIndex = lines.findIndex((line) => line.includes('TAIL_LINE'));
+      const summaryIndex = lines.findIndex((line) => line.includes('Intent: Customer proposal'));
+      const promptIndex = lines.findIndex((line) => line.includes('❯'));
+      const statusIndex = lines.findIndex((line) => line.includes('gpt-5.4 · 5% · master · xiaok-cli'));
+
+      expect(tailIndex).toBeGreaterThanOrEqual(0);
+      expect(summaryIndex).toBe(promptIndex - 3);
+      expect(tailIndex).toBe(summaryIndex - 2);
+      expect(lines[summaryIndex - 1]).toBe('');
+      expect(lines[summaryIndex + 1]).toBe('');
+      expect(statusIndex).toBe(promptIndex + 1);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('keeps agent questions visible above the restored footer', () => {
+    const harness = createTtyHarness(100, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const summaryLine = formatCurrentTurnIntentSummaryLine({
+      deliverable: 'Customer proposal',
+      stageOrder: 0,
+      totalStages: 1,
+      stageLabel: 'Collect',
+      status: 'Drafting Plan',
+    });
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        summaryLine,
         statusLine: 'test-model · auto · 0% · project',
       });
 
@@ -634,6 +1037,20 @@ describe('ANSI compatibility', () => {
     expect(output).toContain('\x1b[19;1H');
   });
 
+  it('repositions the real terminal cursor back to the footer after rendering activity', () => {
+    const { manager, getOutput } = createMockScrollRegion();
+    manager.begin();
+    manager.renderFooter({ inputPrompt: 'Type...', statusLine: 'gpt-5.4' });
+
+    const before = getOutput().length;
+    manager.renderActivity('⠋ Thinking');
+    const delta = getOutput().slice(before);
+
+    expect(delta).toContain('\x1b[19;1H');
+    expect(delta).toContain('\x1b[23;3H');
+    expect(delta.lastIndexOf('\x1b[23;3H')).toBeGreaterThan(delta.indexOf('\x1b[19;1H'));
+  });
+
   it('renders activity above the input footer with two blank gap rows', () => {
     const harness = createTtyHarness(80, 24);
     const manager = new ScrollRegionManager(process.stdout);
@@ -652,6 +1069,60 @@ describe('ANSI compatibility', () => {
       expect(lines[22]).not.toContain('working');
       expect(lines[22]).toContain('❯ Type your message...');
       expect(lines[23]).toContain('gpt-5.4 · 5%');
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('re-renders the cached footer when activity updates after footer visibility state was lost', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: ' ',
+        statusLine: 'gpt-5.4 · 5% · project',
+      });
+
+      (manager as unknown as { _footerVisible: boolean })._footerVisible = false;
+      manager.renderActivity('⠋ Working · 11s');
+
+      const lines = harness.screen.lines();
+      expect(lines[18]).toContain('Working · 11s');
+      expect(lines[22]).toContain('❯');
+      expect(lines[23]).toContain('gpt-5.4 · 5% · project');
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('keeps the prompt and status pinned to the final two rows while activity keeps refreshing', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: ' ',
+        summaryLine: '● Intent: md -> 报告 · Stage 1/2 提取 Markdown · Working',
+        statusLine: 'gpt-5.4 · 5% · project',
+      });
+
+      manager.renderActivity('⠋ Exploring codebase · 2s');
+      manager.renderActivity('⠙ Running command · 4s');
+      manager.renderActivity('⠹ Working · 11s');
+
+      const lines = harness.screen.lines();
+      const promptIndex = lines.findIndex((line) => line.includes('❯'));
+      const statusIndex = lines.findIndex((line) => line.includes('gpt-5.4 · 5% · project'));
+      const summaryIndex = lines.findIndex((line) => line.includes('Intent: md -> 报告'));
+      const activityIndex = lines.findIndex((line) => line.includes('Working · 11s'));
+
+      expect(promptIndex).toBe(22);
+      expect(statusIndex).toBe(23);
+      expect(summaryIndex).toBe(promptIndex - 3);
+      expect(activityIndex).toBe(summaryIndex - 2);
     } finally {
       harness.restore();
     }
@@ -998,6 +1469,40 @@ describe('Bug 10: Content exceeding maxContentRows', () => {
     expect(output).toContain('STATUS_LINE');
   });
 
+  it('raw stdout progress notes do not dislodge the fixed footer after activity is cleared at the transcript boundary', () => {
+    const harness = createTtyHarness(60, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-5.4 · 5% · project',
+      });
+
+      for (let index = 0; index < 12; index += 1) {
+        manager.writeAtContentCursor(`Ran printf "/Users/song/.xiaok/skills/kai-report-creator/path-${index}"\n`);
+      }
+
+      manager.renderActivity('⠋ Waiting for command output · 46s');
+      manager.clearActivity();
+      process.stdout.write(formatProgressNote('Still working: waiting for command output (46s)'));
+
+      const lines = harness.screen.lines();
+      const promptRows = lines.filter((line) => line.includes('❯'));
+      const statusRows = lines.filter((line) => line.includes('project') && line.includes('%'));
+      const activityRows = lines.filter((line) => line.includes('Waiting for command output'));
+
+      expect(promptRows).toHaveLength(1);
+      expect(statusRows).toHaveLength(1);
+      expect(activityRows).toHaveLength(0);
+      expect(lines[22]).toContain('❯');
+      expect(lines[23]).toContain('project');
+    } finally {
+      harness.restore();
+    }
+  });
+
   it('clearContentArea resets the scroll region content without touching the footer rows', () => {
     const { manager, getOutput } = createMock(24, 80);
     manager.begin();
@@ -1157,7 +1662,10 @@ describe('streaming cursor handoff', () => {
 
       const lines = harness.screen.lines();
       const submittedIndex = lines.findIndex((line) => line.includes('› 分三次显示123'));
-      const line1Index = lines.findIndex((line) => line.trim() === '1');
+      const line1Index = lines.findIndex((line) => {
+        const trimmed = line.trim();
+        return trimmed === '1' || trimmed === '● 1';
+      });
       const line2Index = lines.findIndex((line) => line.trim() === '2');
       const line3Index = lines.findIndex((line) => line.trim() === '3');
       const promptIndex = lines.findIndex((line) => line.includes('❯ Type your message...'));
@@ -1318,6 +1826,42 @@ describe('streaming cursor handoff', () => {
     expect(delta.indexOf(moveToContentCursor)).toBeGreaterThanOrEqual(0);
     expect(delta.indexOf(moveToContentColumn)).toBeGreaterThan(delta.indexOf(moveToContentCursor));
     expect(delta.indexOf('\n')).toBeGreaterThan(delta.indexOf(moveToContentColumn));
+  });
+
+  it('re-anchors the footer after writing a long submitted input block against a visible footer', () => {
+    const { manager, getOutput } = createMockScrollRegion({ rows: 24, columns: 60 });
+    const statusLine = 'gpt-terminal-e2e · auto · 0% · project';
+    const longFollowup = '基于刚才这份报告，请补充制造业与 SaaS 的差异、风险、建议和下一步行动';
+
+    manager.begin();
+    manager.setWelcomeRows(14);
+    manager.renderFooter({
+      inputPrompt: 'Type your message...',
+      statusLine,
+    });
+
+    manager.writeAtContentCursor([
+      'line 1',
+      'line 2',
+      'line 3',
+      'line 4',
+      'line 5',
+      'line 6',
+      'line 7',
+      'line 8',
+    ].join('\n'));
+
+    manager.clearLastInput();
+    const before = getOutput().length;
+
+    manager.writeSubmittedInput(formatSubmittedInput(longFollowup));
+
+    const delta = getOutput().slice(before);
+    const lastTranscriptWrite = delta.lastIndexOf('› 基于刚才这份报告');
+    const lastStatusWrite = delta.lastIndexOf(statusLine);
+
+    expect(lastTranscriptWrite).toBeGreaterThanOrEqual(0);
+    expect(lastStatusWrite).toBeGreaterThan(lastTranscriptWrite);
   });
 
   it('uses visible rows instead of ANSI bytes when advancing past a submitted input block', () => {

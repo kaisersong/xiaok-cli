@@ -6,6 +6,7 @@ import type { LoadedContext } from '../runtime/context-loader.js';
 import { assembleSystemPrompt } from '../prompts/assembler.js';
 
 export interface ContextOptions {
+  channel?: 'chat' | 'yzj';
   enterpriseId: string | null;
   devApp: DevAppIdentity | null;
   cwd: string;

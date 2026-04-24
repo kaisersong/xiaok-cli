@@ -11,6 +11,7 @@ export declare class MarkdownRenderer {
     private lineCount;
     private termWidth;
     private consecutiveBlankLines;
+    private hasRenderedLeadParagraph;
     /** Optional callback for newline output (e.g., scroll-region-aware). */
     private newlineFn;
     /** Get the number of content lines written (for cursor positioning). */
@@ -29,9 +30,20 @@ export declare class MarkdownRenderer {
     };
     /** Reset state between messages. */
     reset(): void;
+    /**
+     * Start a fresh assistant segment inside the same turn.
+     * Used after transcript interruptions such as tool activity blocks so the
+     * next natural-language continuation gets a new lead bullet + hanging indent.
+     */
+    beginNewSegment(): void;
     private renderLine;
     private formatLine;
     private countRows;
+    private countRenderedRows;
+    private formatLeadParagraphLine;
+    private formatWrappedListItem;
+    private getWrapWidth;
+    private wrapStyledText;
     /** Apply inline formatting. */
     private inlineFormat;
     private getPendingPrefix;

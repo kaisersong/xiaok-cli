@@ -22,6 +22,8 @@ export declare const dimCyan: (s: string) => string;
 export declare const bgGray: (s: string) => string;
 export declare const bgDarkGray: (s: string) => string;
 export declare const bgInputGray: (s: string) => string;
+export declare const intentHint: (s: string) => string;
+export declare const intentHintDot: (s: string) => string;
 export declare function startSpinner(message: string): () => void;
 export declare function formatRailHeader(label: string, detail?: string): string;
 export declare function formatRailLine(content: string): string;

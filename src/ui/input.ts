@@ -24,6 +24,13 @@ function log(msg: string) {
   } catch {}
 }
 
+function normalizeBatchedInput(raw: string): string {
+  return raw
+    .replace(/\r[ \t]*(?:›|❯)\s*/gu, '')
+    .replace(/\r\n/gu, '\n')
+    .replace(/\r(?!$)/gu, '\n');
+}
+
 export interface InputSnapshot {
   input: string;
   cursor: number;
@@ -41,6 +48,12 @@ export interface ScrollPromptRenderFrame {
   summaryLine: string;
   statusLine: string;
   overlayLines: string[];
+  overlayKind?: 'generic' | 'permission' | 'feedback';
+}
+
+export interface InputReadOptions {
+  overlayLines?: string[];
+  overlayKind?: ScrollPromptRenderFrame['overlayKind'];
 }
 
 /** 向左找词边界（Ctrl+W / Alt+Left 用） */
@@ -195,6 +208,7 @@ export class InputReader {
   private transcriptLogger?: TranscriptLogger;
   private statusLineProvider?: () => string[];
   private scrollPromptRenderer?: (frame: ScrollPromptRenderFrame) => boolean | void;
+  private forcePlainMode = false;
   constructor(private readonly renderer?: ReplRenderer) {}
 
   setSkills(skills: SkillMeta[]): void {
@@ -219,7 +233,11 @@ export class InputReader {
     this.scrollPromptRenderer = renderer;
   }
 
-  async read(prompt: string): Promise<string | null> {
+  setForcePlainMode(enabled: boolean): void {
+    this.forcePlainMode = enabled;
+  }
+
+  async read(prompt: string, options?: InputReadOptions): Promise<string | null> {
     if (!stdin.isTTY) {
       const rl = readline.createInterface({ input: stdin, output: stdout });
       return new Promise((resolve) => {
@@ -236,8 +254,9 @@ export class InputReader {
       let input = '';
       let cursor = 0;
       let resolved = false;
+      const staticOverlayLines = options?.overlayLines ?? [];
       let historyState = pushInputHistory(createInputHistoryState(), '', 0);
-      let richUiEnabled = Boolean(this.renderer);
+      let richUiEnabled = Boolean(this.renderer) && !this.forcePlainMode;
       let uiErrorNotified = false;
 
       const degradeUi = (context: string, error: unknown) => {
@@ -260,14 +279,17 @@ export class InputReader {
         if (resolved) return; // don't redraw after done()
         if (this.renderer && richUiEnabled) {
           try {
-            const overlayLines = this.menuOpen
-              ? buildSlashMenuOverlayLines(
-                this.menuItems,
-                this.menuIdx,
-                stdout.columns ?? 80,
-                MAX_MENU_VISIBLE_ITEMS,
-              )
-              : [];
+            const overlayLines = [
+              ...staticOverlayLines,
+              ...(this.menuOpen
+                ? buildSlashMenuOverlayLines(
+                  this.menuItems,
+                  this.menuIdx,
+                  stdout.columns ?? 80,
+                  MAX_MENU_VISIBLE_ITEMS,
+                )
+                : []),
+            ];
             const footerLines = (() => {
               try {
                 return this.statusLineProvider?.() ?? [];
@@ -290,6 +312,7 @@ export class InputReader {
                   summaryLine,
                   statusLine,
                   overlayLines,
+                  overlayKind: options?.overlayKind,
                 });
                 if (didRender !== false) {
                   return;
@@ -432,12 +455,13 @@ export class InputReader {
         // Handle batch input (multiple characters/keys in one data event)
         // This happens in automated testing (expect/pexpect) and pasted text
         if (key.length > 1) {
+          const normalizedBatch = normalizeBatchedInput(key);
           // Process input with ANSI sequence recognition
           let i = 0;
           let skipSyncMenuAfterBatch = false;
-          while (i < key.length) {
+          while (i < normalizedBatch.length) {
             // Try to identify ANSI sequences first
-            const identified = identifyKey(key, i);
+            const identified = identifyKey(normalizedBatch, i);
             if (identified && identified.consumed > 0) {
               // Found an ANSI sequence or control character
               const action = resolveAction(identified.key);
@@ -488,7 +512,7 @@ export class InputReader {
               i += identified.consumed;
             } else {
               // Regular character
-              const ch = key[i];
+              const ch = normalizedBatch[i];
               if (ch >= ' ' && !/[\x1b\x7f]/.test(ch)) {
                 // Printable character
                 const shouldSyncMenu = input.startsWith('/') || ch === '/';

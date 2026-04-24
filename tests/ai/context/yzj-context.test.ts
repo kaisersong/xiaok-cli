@@ -3,9 +3,10 @@ import { describe, it, expect } from 'vitest';
 import { buildSystemPrompt } from '../../../src/ai/context/yzj-context.js';
 
 describe('buildSystemPrompt', () => {
-  it('includes yzj API overview', async () => {
+  it('does not force yzj API context into generic chat prompts', async () => {
     const prompt = await buildSystemPrompt({ enterpriseId: null, devApp: null, cwd: '/tmp', budget: 4000 });
     expect(prompt).toContain('xiaok');
+    expect(prompt).not.toContain('云之家开放平台 API 概览');
   });
 
   it('includes enterprise context when logged in', async () => {
@@ -68,7 +69,8 @@ describe('buildSystemPrompt', () => {
 
     // Layer 1: Intro (Chinese)
     expect(prompt).toContain('xiaok');
-    expect(prompt).toContain('金蝶苍穹');
+    expect(prompt).toContain('AI skill 工作台');
+    expect(prompt).toContain('云之家（Yunzhijia）及相关 API / channel 集成');
     // Layer 2: System (English)
     expect(prompt).toContain('permission mode');
     expect(prompt).toContain('prompt injection');

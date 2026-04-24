@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,6 +6,8 @@ import { Command } from 'commander';
 import type { Message, ModelAdapter, StreamChunk, ToolDefinition } from '../../src/types.js';
 import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
+import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
+import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
 
 interface FakeAdapterCall {
   model: string;
@@ -17,10 +19,40 @@ interface FakeAdapterCall {
 
 const adapterCalls: FakeAdapterCall[] = [];
 const clonedModels: string[] = [];
+let multiToolPhase = 0;
+let denseCommandPhase = 0;
+let reportIntentToolPhase = 0;
+
+const reportIntentFixtureNames = [
+  '01-market-overview.md',
+  '02-customer-signals.txt',
+  '03-execution-risks.txt',
+] as const;
+
+function loadReportIntentFixture(name: (typeof reportIntentFixtureNames)[number]): string {
+  return readFileSync(join(process.cwd(), 'tests', 'fixtures', 'report-intent-source', name), 'utf8');
+}
+
+const denseCommandSequence = [
+  'printf "cat /Users/song/.xiaok/skills/kai-report-creator/SKILL.md"',
+  'printf "ls -la /Users/song/.xiaok/skills/kai-report-creator"',
+  'printf "cd /Users/song/.xiaok/skills/kai-report-creator"',
+  'printf "find /Users/song/.xiaok/skills/kai-report-creator -maxdepth 2"',
+  'printf "cd /Users/song/.xiaok/skills/kai-report-creator/templates"',
+  'printf "cd /Users/song/.xiaok/skills/kai-report-creator/examples"',
+  'printf "cd /Users/song/.xiaok/skills/kai-report-creator/scripts"',
+  'printf "cd /Users/song/.xiaok/skills/kai-report-creator/assets"',
+  'printf "cd /Users/song/.xiaok/skills/kai-report-creator/references"',
+  'printf "cd /Users/song/.xiaok/skills/kai-report-creator/tests"',
+  'printf "" && sleep 6',
+];
 
 function resetAdapterState(): void {
   adapterCalls.length = 0;
   clonedModels.length = 0;
+  multiToolPhase = 0;
+  denseCommandPhase = 0;
+  reportIntentToolPhase = 0;
 }
 
 function extractLastUserText(messages: Message[]): string {
@@ -68,6 +100,11 @@ function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithMode
     ): AsyncIterable<StreamChunk> {
       const lastUserText = extractLastUserText(messages);
       const lastToolResult = extractLastToolResult(messages);
+      const isReportMergeIntent = (
+        lastUserText.includes('生成 md')
+        && lastUserText.includes('生成报告')
+        && (lastUserText.includes('根据这个文档') || lastUserText.includes('根据这些文档'))
+      );
       adapterCalls.push({
         model,
         systemPrompt,
@@ -153,10 +190,73 @@ function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithMode
         return;
       }
 
+      if (lastUserText.includes('报告后慢速长续问')) {
+        await new Promise((resolve) => setTimeout(resolve, 450));
+        yield { type: 'text', delta: `echo:${lastUserText}` };
+        yield { type: 'done' };
+        return;
+      }
+
       if (lastUserText.includes('输出30行')) {
         yield {
           type: 'text',
           delta: Array.from({ length: 30 }, (_, index) => `line ${index + 1}`).join('\n'),
+        };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('很多命令后慢命令')) {
+        if (denseCommandPhase === 0) {
+          denseCommandPhase = 1;
+          yield { type: 'text', delta: '我先顺着引用把命令跑一遍。' };
+          yield {
+            type: 'tool_use',
+            id: 'tu_dense_command_1',
+            name: 'bash',
+            input: {
+              command: denseCommandSequence[0],
+            },
+          };
+          yield { type: 'done' };
+          return;
+        }
+
+        if (denseCommandPhase < denseCommandSequence.length) {
+          const nextCommand = denseCommandSequence[denseCommandPhase];
+          denseCommandPhase += 1;
+          yield {
+            type: 'tool_use',
+            id: `tu_dense_command_${denseCommandPhase}`,
+            name: 'bash',
+            input: {
+              command: nextCommand,
+            },
+          };
+          yield { type: 'done' };
+          return;
+        }
+
+        yield { type: 'text', delta: '很多命令完成' };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('先说明再执行慢命令')) {
+        if (lastToolResult.includes('（命令执行成功，无输出）')) {
+          yield { type: 'text', delta: '慢命令结束' };
+          yield { type: 'done' };
+          return;
+        }
+
+        yield { type: 'text', delta: '我先跑一个慢命令。' };
+        yield {
+          type: 'tool_use',
+          id: 'tu_slow_bash_command',
+          name: 'bash',
+          input: {
+            command: 'sleep 3',
+          },
         };
         yield { type: 'done' };
         return;
@@ -200,10 +300,92 @@ function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithMode
         return;
       }
 
+      if (lastToolResult.includes('outside file A')) {
+        if (lastUserText.includes('连续工具块') && multiToolPhase === 1) {
+          multiToolPhase = 2;
+          yield {
+            type: 'tool_use',
+            id: 'tu_multi_tool_bash',
+            name: 'bash',
+            input: {
+              command: 'printf "grep result"',
+            },
+          };
+          yield { type: 'done' };
+          return;
+        }
+        if (lastUserText.includes('先读取再回答')) {
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          yield { type: 'text', delta: '读取完成' };
+          yield { type: 'done' };
+          return;
+        }
+        yield { type: 'text', delta: 'external read A ok' };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastToolResult.includes('outside file B')) {
+        yield { type: 'text', delta: 'external read B ok' };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('连续工具块') && multiToolPhase === 2) {
+        multiToolPhase = 3;
+        yield {
+          type: 'tool_use',
+          id: 'tu_multi_tool_glob',
+          name: 'glob',
+          input: {
+            pattern: '**/*.txt',
+          },
+        };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('连续工具块') && multiToolPhase === 3) {
+        multiToolPhase = 4;
+        yield { type: 'text', delta: '连续工具块完成' };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (
+        lastToolResult.includes('project file fixture line')
+        && !isReportMergeIntent
+      ) {
+        yield {
+          type: 'text',
+          delta: [
+            '继续总结如下：',
+            '',
+            '- 第一项',
+            '- 第二项',
+          ].join('\n'),
+        };
+        yield { type: 'done' };
+        return;
+      }
+
       if (lastUserText.includes('读取外部文件A')) {
         yield {
           type: 'tool_use',
           id: 'tu_external_read_a',
+          name: 'read',
+          input: {
+            file_path: process.env.XIAOK_TEST_EXTERNAL_FILE_A ?? '',
+          },
+        };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('先读取再回答')) {
+        yield {
+          type: 'tool_use',
+          id: 'tu_external_read_then_answer',
           name: 'read',
           input: {
             file_path: process.env.XIAOK_TEST_EXTERNAL_FILE_A ?? '',
@@ -226,14 +408,125 @@ function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithMode
         return;
       }
 
-      if (lastToolResult.includes('outside file A')) {
-        yield { type: 'text', delta: 'external read A ok' };
+      if (lastUserText.includes('先读项目文件再继续')) {
+        yield { type: 'text', delta: '我先读取项目文件。' };
+        yield {
+          type: 'tool_use',
+          id: 'tu_project_read_then_answer',
+          name: 'read',
+          input: {
+            file_path: process.env.XIAOK_TEST_PROJECT_FILE ?? '',
+          },
+        };
         yield { type: 'done' };
         return;
       }
 
-      if (lastToolResult.includes('outside file B')) {
-        yield { type: 'text', delta: 'external read B ok' };
+      if (isReportMergeIntent) {
+        if (reportIntentToolPhase === 0) {
+          reportIntentToolPhase = 1;
+          yield { type: 'text', delta: '我会先读取三份材料并合并成 Markdown。' };
+          yield {
+            type: 'tool_use',
+            id: 'tu_report_intent_read_a',
+            name: 'read',
+            input: {
+              file_path: process.env.XIAOK_TEST_PROJECT_FILE_A ?? '',
+            },
+          };
+          yield { type: 'done' };
+          return;
+        }
+
+        if (reportIntentToolPhase === 1) {
+          reportIntentToolPhase = 2;
+          yield {
+            type: 'tool_use',
+            id: 'tu_report_intent_read_b',
+            name: 'read',
+            input: {
+              file_path: process.env.XIAOK_TEST_PROJECT_FILE_B ?? '',
+            },
+          };
+          yield { type: 'done' };
+          return;
+        }
+
+        if (reportIntentToolPhase === 2) {
+          reportIntentToolPhase = 3;
+          yield {
+            type: 'tool_use',
+            id: 'tu_report_intent_read_c',
+            name: 'read',
+            input: {
+              file_path: process.env.XIAOK_TEST_PROJECT_FILE_C ?? '',
+            },
+          };
+          yield { type: 'done' };
+          return;
+        }
+
+        if (reportIntentToolPhase === 3) {
+          reportIntentToolPhase = 4;
+          yield {
+            type: 'tool_use',
+            id: 'tu_report_intent_write_md',
+            name: 'write',
+            input: {
+              file_path: join(process.cwd(), 'report-analysis.report.md'),
+              content: '# merged report draft\n',
+            },
+          };
+          yield { type: 'done' };
+          return;
+        }
+
+        if (reportIntentToolPhase === 4) {
+          reportIntentToolPhase = 5;
+          yield {
+            type: 'tool_use',
+            id: 'tu_report_intent_bash_merge',
+            name: 'bash',
+            input: {
+              command: 'printf "E2E_RUNTIME_MERGED_MD"',
+            },
+          };
+          yield { type: 'done' };
+          return;
+        }
+
+        if (reportIntentToolPhase === 5) {
+          reportIntentToolPhase = 6;
+          yield {
+            type: 'tool_use',
+            id: 'tu_report_intent_bash_report',
+            name: 'bash',
+            input: {
+              command: 'printf "const fs = require(\'fs\'); const report = fs.readFileSync(\'report-analysis.report.md\', \'utf8\'); // 解析并生成总结" && sleep 1',
+            },
+          };
+          yield { type: 'done' };
+          return;
+        }
+
+        if (reportIntentToolPhase === 6) {
+          reportIntentToolPhase = 7;
+          yield { type: 'text', delta: '三份文档已先合并为 Markdown，再生成报告。' };
+          yield { type: 'done' };
+          return;
+        }
+      }
+
+      if (lastUserText.includes('连续工具块')) {
+        multiToolPhase = 1;
+        yield {
+          type: 'tool_use',
+          id: 'tu_multi_tool_read',
+          name: 'read',
+          input: {
+            file_path: process.env.XIAOK_TEST_EXTERNAL_FILE_A ?? '',
+          },
+        };
         yield { type: 'done' };
         return;
       }
@@ -252,6 +545,12 @@ async function waitForInputTurnReady(harness: ReturnType<typeof createTtyHarness
   await waitFor(() => {
     expectPromptVisible(harness);
     expect(harness.emitter.listenerCount('data')).toBeGreaterThan(0);
+    const lines = harness.screen.lines();
+    const hasLiveActivity = lines.some((line) => {
+      const trimmed = line.trim();
+      return /^(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])\s+(?:Thinking|Exploring codebase|Tracing references|Running command|Answering|Compacting context)\b/u.test(trimmed);
+    });
+    expect(hasLiveActivity).toBe(false);
   }, { timeoutMs: 3_000 });
   await new Promise((resolve) => setTimeout(resolve, 25));
 }
@@ -260,13 +559,22 @@ function findLineIndex(lines: string[], pattern: string | RegExp): number {
   return lines.findIndex((line) => typeof pattern === 'string' ? line.includes(pattern) : pattern.test(line));
 }
 
+function countOccurrences(text: string, needle: string): number {
+  return text.split(needle).length - 1;
+}
+
+function normalizeAssistantLine(line: string): string {
+  const trimmed = line.trim();
+  return trimmed.startsWith('● ') ? trimmed.slice(2) : trimmed;
+}
+
 function expectSingleFooter(lines: string[]): void {
-  const promptRows = lines
-    .map((line, index) => ({ line, index }))
-    .filter(({ line }) => line.includes('❯'));
   const statusRows = lines
     .map((line, index) => ({ line, index }))
     .filter(({ line }) => line.includes('project') && line.includes('%'));
+  const promptRows = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line, index }) => line.includes('❯') && statusRows.some((row) => row.index === index + 1));
 
   if (promptRows.length !== 1 || statusRows.length !== 1) {
     console.log('DEBUG_FOOTER_LINES', JSON.stringify(lines));
@@ -274,6 +582,13 @@ function expectSingleFooter(lines: string[]): void {
   expect(promptRows).toHaveLength(1);
   expect(statusRows).toHaveLength(1);
   expect(statusRows[0]?.index).toBeGreaterThan(promptRows[0]?.index ?? -1);
+}
+
+function expectActiveTurnFooter(lines: string[]): void {
+  expectSingleFooter(lines);
+  expect(
+    lines.some((line) => /Thinking|Answering|Running command|Executing command|Working/u.test(line)),
+  ).toBe(true);
 }
 
 function expectNoTransientChrome(lines: string[]): void {
@@ -297,11 +612,154 @@ function expectTurnBlock(
 
   let lastIndex = submittedIndex;
   for (const outputLine of expectedOutputLines) {
-    const nextIndex = lines.findIndex((line, index) => index > lastIndex && line.trim() === outputLine);
+    const nextIndex = lines.findIndex(
+      (line, index) => index > lastIndex && normalizeAssistantLine(line) === outputLine,
+    );
     expect(nextIndex).toBeGreaterThan(lastIndex);
     expect(nextIndex).toBeLessThan(promptIndex);
     lastIndex = nextIndex;
   }
+}
+
+function writeCompletedFeedbackResumeSessionFixture(
+  rootDir: string,
+  sessionId: string,
+): { configDir: string; projectDir: string; sessionPath: string; intentId: string } {
+  const configDir = join(rootDir, 'config');
+  const projectDir = join(rootDir, 'project');
+  const sessionsDir = join(configDir, 'sessions');
+  const intentId = 'intent_feedback_footer_gap';
+  const stageId = `${intentId}:stage:1`;
+  const stepId = `${stageId}:step:compose`;
+  const now = Date.now() - 20_000;
+
+  mkdirSync(configDir, { recursive: true });
+  mkdirSync(projectDir, { recursive: true });
+  mkdirSync(sessionsDir, { recursive: true });
+  writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+    schemaVersion: 1,
+    defaultModel: 'claude',
+    models: {
+      claude: { model: 'claude-test' },
+    },
+    defaultMode: 'interactive',
+    contextBudget: 4000,
+    channels: {},
+  }, null, 2));
+
+  const intentDelegation = createEmptySessionIntentLedger(sessionId, now);
+  intentDelegation.activeIntentId = intentId;
+  intentDelegation.instanceId = `inst_${sessionId}`;
+  intentDelegation.intents.push({
+    intentId,
+    instanceId: `inst_${sessionId}`,
+    sessionId,
+    rawIntent: '根据文档生成报告',
+    normalizedIntent: '根据文档生成报告',
+    providedSourcePaths: [],
+    intentType: 'generate',
+    deliverable: '报告',
+    finalDeliverable: '报告',
+    explicitConstraints: [],
+    delegationBoundary: [],
+    riskTier: 'medium',
+    intentMode: 'single_stage',
+    segmentationConfidence: 'high',
+    templateId: 'test-template',
+    stages: [
+      {
+        stageId,
+        order: 0,
+        label: '生成报告',
+        intentType: 'generate',
+        deliverable: '报告',
+        templateId: 'test-template',
+        riskTier: 'medium',
+        dependsOnStageIds: [],
+        steps: [
+          {
+            stepId,
+            key: 'compose',
+            order: 0,
+            role: 'compose',
+            skillName: 'report-skill',
+            dependsOn: [],
+            status: 'completed',
+            riskTier: 'medium',
+          },
+        ],
+        status: 'completed',
+        activeStepId: stepId,
+        structuralValidation: 'passed',
+        semanticValidation: 'passed',
+        needsFreshContextHandoff: false,
+      },
+    ],
+    activeStageId: stageId,
+    artifacts: [],
+    steps: [
+      {
+        stepId,
+        key: 'compose',
+        order: 0,
+        role: 'compose',
+        skillName: 'report-skill',
+        dependsOn: [],
+        status: 'completed',
+        riskTier: 'medium',
+      },
+    ],
+    activeStepId: stepId,
+    overallStatus: 'completed',
+    attemptCount: 1,
+    latestReceipt: 'Completed 报告',
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const skillEval = createEmptySessionSkillEvalState(sessionId, now);
+  skillEval.observations.push({
+    observationId: `${stepId}:skill_eval`,
+    sessionId,
+    intentId,
+    stageId,
+    stepId,
+    intentType: 'generate',
+    stageRole: 'compose',
+    deliverable: '报告',
+    deliverableFamily: 'document',
+    selectedSkillName: 'report-skill',
+    actualSkillName: 'report-skill',
+    status: 'completed',
+    artifactRecorded: true,
+    structuralValidation: 'passed',
+    semanticValidation: 'passed',
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const sessionPath = join(sessionsDir, `${sessionId}.json`);
+  writeFileSync(sessionPath, JSON.stringify({
+    schemaVersion: 1,
+    sessionId,
+    cwd: projectDir,
+    createdAt: now - 5_000,
+    updatedAt: now,
+    lineage: [sessionId],
+    messages: [],
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+    },
+    compactions: [],
+    memoryRefs: [],
+    approvalRefs: [],
+    backgroundJobRefs: [],
+    intentDelegation,
+    skillEval,
+  }, null, 2));
+
+  return { configDir, projectDir, sessionPath, intentId };
 }
 
 vi.mock('../../src/ai/models.js', () => ({
@@ -452,12 +910,13 @@ describe('chat interactive runtime', () => {
     const harness = createTtyHarness(120, 30);
     const sigintListeners = process.listeners('SIGINT');
     const stdoutResizeListeners = process.stdout.listeners('resize');
+    let pending: Promise<void> | undefined;
 
     try {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      pending = program.parseAsync(['node', 'xiaok', 'chat']);
 
       await waitForInputTurnReady(harness);
       expect(harness.output.normalized).not.toContain('[platform] degraded capabilities detected');
@@ -497,6 +956,94 @@ describe('chat interactive runtime', () => {
     }
   }, 10_000);
 
+  it('keeps footer/status visible during a tool interruption and restarts assistant lead formatting after the tool block', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(projectDir, { recursive: true });
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    const projectFile = join(projectDir, 'notes.txt');
+    writeFileSync(projectFile, 'project file fixture line\n', 'utf8');
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    process.env.XIAOK_TEST_PROJECT_FILE = projectFile;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 30);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+    let pending: Promise<void> | undefined;
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('先读项目文件再继续');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const text = harness.screen.text();
+        expect(text).toContain('Read notes.txt');
+      }, { timeoutMs: 3_000 });
+
+      const duringToolLines = harness.screen.lines();
+      const promptIndex = duringToolLines.findIndex((line) => line.includes('❯'));
+
+      expect(promptIndex).toBeGreaterThanOrEqual(0);
+      expect(duringToolLines.slice(Math.max(0, promptIndex - 3), promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
+
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('继续总结如下：');
+      }, { timeoutMs: 3_000 });
+      await waitForInputTurnReady(harness);
+
+      const finalLines = harness.screen.lines();
+      const firstSegmentIndex = finalLines.findIndex((line) => line.trim() === '● 我先读取项目文件。');
+      const secondSegmentIndex = finalLines.findIndex((line) => line.trim() === '● 继续总结如下：');
+      const finalPromptIndex = finalLines.findIndex((line) => line.includes('❯ Type your message...'));
+
+      expect(firstSegmentIndex).toBeGreaterThanOrEqual(0);
+      expect(secondSegmentIndex).toBeGreaterThan(firstSegmentIndex);
+      expect(finalPromptIndex).toBeGreaterThanOrEqual(secondSegmentIndex + 3);
+      expect(finalLines.slice(secondSegmentIndex + 1, finalPromptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      delete process.env.XIAOK_TEST_PROJECT_FILE;
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
   it('shows a Thinking activity immediately even for fast replies', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
@@ -504,6 +1051,244 @@ describe('chat interactive runtime', () => {
     tempDirs.push(rootDir);
 
     mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(60, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('hi');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('Thinking');
+        expect(harness.output.normalized).toContain('echo:hi');
+      }, { timeoutMs: 3_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('keeps a visible live activity while tool blocks are rendering', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-tool-activity-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const externalFileA = join(projectDir, 'external-a.txt');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(externalFileA, 'outside file A');
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    process.env.XIAOK_TEST_EXTERNAL_FILE_A = externalFileA;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(60, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('先读取再回答');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expect(lines.some((line) => line.includes('Read external-a.txt'))).toBe(true);
+        expect(lines.some((line) => line.includes('Exploring codebase'))).toBe(true);
+        expect(lines.some((line) => line.includes('❯'))).toBe(true);
+        expect(lines.some((line) => line.includes('project') && line.includes('%'))).toBe(true);
+        expect(lines.some((line) => line.includes('读取完成'))).toBe(false);
+      }, { timeoutMs: 3_000 });
+
+      await waitFor(() => {
+        expect(harness.screen.text()).toMatch(/读取完成|external read A ok/);
+      }, { timeoutMs: 5_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      delete process.env.XIAOK_TEST_EXTERNAL_FILE_A;
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('keeps prompt, status, and live activity visible across consecutive tool blocks', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-multi-tool-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const externalFileA = join(projectDir, 'external-a.txt');
+    const projectSettingsDir = join(projectDir, '.xiaok');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    mkdirSync(projectSettingsDir, { recursive: true });
+    writeFileSync(externalFileA, 'outside file A');
+    writeFileSync(join(projectSettingsDir, 'settings.json'), JSON.stringify({
+      permissions: {
+        allow: ['bash(printf *)'],
+      },
+    }, null, 2));
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    process.env.XIAOK_TEST_EXTERNAL_FILE_A = externalFileA;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('连续工具块');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        const hasRead = lines.some((line) => line.includes('Read external-a.txt'));
+        const hasBash = lines.some((line) => line.includes('printf "grep result"'));
+        const promptIndex = lines.map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes('❯'))
+          .at(-1)?.index ?? -1;
+        const statusIndex = lines.map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes('project') && line.includes('%'))
+          .at(-1)?.index ?? -1;
+        const activityIndex = lines.findIndex((line) => /Thinking|Exploring codebase|Tracing references|Running command|Working/u.test(line));
+        expect(hasRead).toBe(true);
+        expect(hasBash).toBe(true);
+
+        expect(promptIndex).toBe(22);
+        expect(statusIndex).toBe(23);
+        expect(activityIndex).toBeGreaterThanOrEqual(17);
+        expect(activityIndex).toBeLessThan(promptIndex);
+      }, { timeoutMs: 5_000 });
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('连续工具块完成');
+      }, { timeoutMs: 5_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('工具块完成后还能继续吗');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('echo:工具块完成后还能继续吗');
+      }, { timeoutMs: 5_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      delete process.env.XIAOK_TEST_EXTERNAL_FILE_A;
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('clears staged-intent summary after completion and keeps the next ordinary question out of intent mode', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-intent-followup-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const demoFile = join(projectDir, 'demo.pdf');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(demoFile, 'demo pdf');
     writeFileSync(join(configDir, 'config.json'), JSON.stringify({
       schemaVersion: 1,
       defaultModel: 'claude',
@@ -531,15 +1316,32 @@ describe('chat interactive runtime', () => {
 
       await waitForInputTurnReady(harness);
 
-      harness.send('hi');
+      harness.send(`把这篇文档生成 md，然后生成报告 ${demoFile}`);
       harness.send('\r');
 
       await waitFor(() => {
-        expect(harness.output.normalized).toContain('Thinking');
-        expect(harness.output.normalized).toContain('echo:hi');
+        expect(harness.output.normalized).toContain('🤝 已理解，会先提取 Markdown，再生成报告。');
+        expect(harness.output.normalized).toContain(`echo:把这篇文档生成 md，然后生成报告 ${demoFile}`);
       }, { timeoutMs: 3_000 });
 
       await waitForInputTurnReady(harness);
+
+      expect(harness.screen.lines().some((line) => line.includes('Intent:'))).toBe(false);
+      expect(countOccurrences(harness.output.normalized, '🤝 已理解')).toBe(1);
+
+      harness.send('今天先不聊这个');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('echo:今天先不聊这个');
+      }, { timeoutMs: 3_000 });
+
+      await waitForInputTurnReady(harness);
+
+      const lines = harness.screen.lines();
+      expect(lines.some((line) => line.includes('Intent:'))).toBe(false);
+      expect(countOccurrences(harness.output.normalized, '🤝 已理解')).toBe(1);
+
       harness.send('/exit');
       harness.send('\r');
       await pending;
@@ -646,7 +1448,7 @@ describe('chat interactive runtime', () => {
         const resumedQuestionIndex = lines.findIndex((line) => line.includes('› 简单分析一下'));
         const resumedAnswerIndex = lines.findIndex((line) => line.includes('这是正式回答。'));
         const newSubmittedIndex = lines.findIndex((line) => line.includes('› resume 后继续'));
-        const newAnswerIndex = lines.findIndex((line) => line.includes('echo:resume 后继续'));
+        const newAnswerIndex = lines.findIndex((line) => normalizeAssistantLine(line) === 'echo:resume 后继续');
 
         expect(resumedQuestionIndex).toBeGreaterThanOrEqual(0);
         expect(resumedAnswerIndex).toBeGreaterThan(resumedQuestionIndex);
@@ -1230,6 +2032,1321 @@ describe('chat interactive runtime', () => {
     }
   }, 15_000);
 
+  it('keeps the footer and thinking rail visible when a second turn starts after output has already reached the footer boundary', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('输出30行');
+      harness.send('\r');
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('line 30');
+      }, { timeoutMs: 3_000 });
+      await waitForInputTurnReady(harness);
+
+      harness.send('延迟回复');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        const line30Index = lines.findIndex((line) => normalizeAssistantLine(line) === 'line 30');
+        const submittedIndex = lines.findIndex((line) => line.includes('› 延迟回复'));
+        const activityIndex = lines.findIndex((line) => /Thinking|Exploring codebase|Tracing references|Running command|Working/u.test(line));
+        const promptRows = lines
+          .map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes('❯'));
+        const statusRows = lines
+          .map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes('project') && line.includes('%'));
+        const promptIndex = promptRows.at(-1)?.index ?? -1;
+        const statusIndex = statusRows.at(-1)?.index ?? -1;
+
+        expect(line30Index).toBeGreaterThanOrEqual(0);
+        expect(submittedIndex).toBeGreaterThan(line30Index);
+        expect(activityIndex).toBeGreaterThan(submittedIndex);
+        expect(promptRows).toHaveLength(1);
+        expect(statusRows).toHaveLength(1);
+        expect(promptIndex).toBe(22);
+        expect(statusIndex).toBe(23);
+        expect(promptIndex).toBeGreaterThan(activityIndex);
+        expect(lines.slice(activityIndex + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
+        expect(lines.some((line) => line.includes('delayed reply'))).toBe(false);
+      }, { timeoutMs: 1_200 });
+
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('delayed reply');
+      }, { timeoutMs: 3_000 });
+      await waitForInputTurnReady(harness);
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 15_000);
+
+  it('keeps footer chrome visible during a dense multi-command tool run after transcript output has already reached the footer boundary', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-dense-command-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const projectSettingsDir = join(projectDir, '.xiaok');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    mkdirSync(projectSettingsDir, { recursive: true });
+    writeFileSync(join(projectSettingsDir, 'settings.json'), JSON.stringify({
+      permissions: {
+        allow: ['bash(printf *)'],
+      },
+    }, null, 2));
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('输出30行');
+      harness.send('\r');
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('line 30');
+      }, { timeoutMs: 3_000 });
+      await waitForInputTurnReady(harness);
+
+      harness.send('很多命令后慢命令');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expect(lines.some((line) => line.includes('› 很多命令后慢命令'))).toBe(true);
+        expect(harness.output.normalized).toContain('我先顺着引用把命令跑一遍。');
+        expect(harness.output.normalized).toContain('cd /Users/song/.xiaok/skills/kai-report-creator/assets');
+        expect(harness.output.normalized).toContain('printf "" && sleep 6');
+        expect(lines.some((line) => /Running command|Executing command/u.test(line))).toBe(true);
+      }, { timeoutMs: 2_500 });
+
+      const realDateNow = Date.now.bind(Date);
+      const acceleratedClockStartedAt = realDateNow();
+      const dateNowSpy = vi.spyOn(Date, 'now').mockImplementation(() => {
+        const now = realDateNow();
+        return now + 46_000 + Math.floor((now - acceleratedClockStartedAt) * 25);
+      });
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 3_200));
+
+        const lines = harness.screen.lines();
+        const activityIndex = lines.findIndex((line) => line.includes('Waiting for command output'));
+        const noteCount = countOccurrences(harness.output.normalized, 'Still working: waiting for command output');
+        const promptRows = lines
+          .map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes('❯'));
+        const statusRows = lines
+          .map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes('project') && line.includes('%'));
+        const promptIndex = promptRows.at(-1)?.index ?? -1;
+        const statusIndex = statusRows.at(-1)?.index ?? -1;
+
+        expect(activityIndex).toBeGreaterThanOrEqual(0);
+        expect(noteCount).toBeGreaterThanOrEqual(3);
+        expect(promptRows).toHaveLength(1);
+        expect(statusRows).toHaveLength(1);
+        expect(promptIndex).toBe(22);
+        expect(statusIndex).toBe(23);
+        expect(promptIndex).toBeGreaterThan(activityIndex);
+        expect(statusIndex).toBeGreaterThan(promptIndex);
+      } finally {
+        dateNowSpy.mockRestore();
+      }
+
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('很多命令完成');
+      }, { timeoutMs: 8_000 });
+      await waitForInputTurnReady(harness);
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 15_000);
+
+  it('keeps the footer singular during a narrow complex report intent while changed and long ran blocks are visible', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-narrow-report-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const projectSettingsDir = join(projectDir, '.xiaok');
+    const projectFiles = reportIntentFixtureNames.map((name) => join(projectDir, name));
+    const reportPrompt = `根据这些文档 ${projectFiles.join('、')} 合并生成 md，然后生成报告`;
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    mkdirSync(projectSettingsDir, { recursive: true });
+    reportIntentFixtureNames.forEach((name, index) => {
+      writeFileSync(projectFiles[index]!, loadReportIntentFixture(name), 'utf8');
+    });
+    writeFileSync(join(projectSettingsDir, 'settings.json'), JSON.stringify({
+      permissions: {
+        allow: ['bash(*)', `write(${projectDir}/*)`],
+      },
+    }, null, 2));
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    process.env.XIAOK_TEST_PROJECT_FILE_A = projectFiles[0];
+    process.env.XIAOK_TEST_PROJECT_FILE_B = projectFiles[1];
+    process.env.XIAOK_TEST_PROJECT_FILE_C = projectFiles[2];
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(60, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send(reportPrompt);
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        const promptRows = lines
+          .map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes('❯'));
+        const statusRows = lines
+          .map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes('project') && line.includes('%'));
+        const promptIndex = promptRows.at(-1)?.index ?? -1;
+        const statusIndex = statusRows.at(-1)?.index ?? -1;
+
+        expect(harness.output.normalized).toContain('Wrote report-analysis.report.md');
+        expect(harness.output.normalized).toContain('printf "const fs = require');
+        expect(lines.some((line) => line.includes('Intent: md -> 报告'))).toBe(true);
+        expect(lines.some((line) => /Running command|Executing command/u.test(line))).toBe(true);
+        expect(promptRows).toHaveLength(1);
+        expect(statusRows).toHaveLength(1);
+        expect(promptIndex).toBe(22);
+        expect(statusIndex).toBe(23);
+        expect(lines[promptIndex]).not.toContain('Intent:');
+      }, { timeoutMs: 4_000 });
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('三份文档已先合并为 Markdown，再生成报告。');
+      }, { timeoutMs: 4_000 });
+
+      await waitForInputTurnReady(harness);
+
+      const finalLines = harness.screen.lines();
+      expectSingleFooter(finalLines);
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      delete process.env.XIAOK_TEST_PROJECT_FILE_A;
+      delete process.env.XIAOK_TEST_PROJECT_FILE_B;
+      delete process.env.XIAOK_TEST_PROJECT_FILE_C;
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 15_000);
+
+  it('keeps the footer visible when a follow-up turn starts right after a completed complex intent', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-report-followup-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const projectSettingsDir = join(projectDir, '.xiaok');
+    const projectFiles = reportIntentFixtureNames.map((name) => join(projectDir, name));
+    const reportPrompt = `根据这些文档 ${projectFiles.join('、')} 合并生成 md，然后生成报告`;
+    const longFollowupPrompt = '报告后慢速长续问，请补充制造业与 SaaS 的差异、风险、建议和下一步行动';
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    mkdirSync(projectSettingsDir, { recursive: true });
+    reportIntentFixtureNames.forEach((name, index) => {
+      writeFileSync(projectFiles[index]!, loadReportIntentFixture(name), 'utf8');
+    });
+    writeFileSync(join(projectSettingsDir, 'settings.json'), JSON.stringify({
+      permissions: {
+        allow: ['bash(*)', `write(${projectDir}/*)`],
+      },
+    }, null, 2));
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    process.env.XIAOK_TEST_PROJECT_FILE_A = projectFiles[0];
+    process.env.XIAOK_TEST_PROJECT_FILE_B = projectFiles[1];
+    process.env.XIAOK_TEST_PROJECT_FILE_C = projectFiles[2];
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(60, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send(reportPrompt);
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('三份文档已先合并为 Markdown，再生成报告。');
+      }, { timeoutMs: 4_000 });
+
+      await waitForInputTurnReady(harness);
+
+      harness.send(longFollowupPrompt);
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expect(harness.output.normalized).not.toContain(`echo:${longFollowupPrompt}`);
+        expectActiveTurnFooter(lines);
+        expect(lines.some((line) => line.includes('Intent:') && line.includes('Completed'))).toBe(false);
+      }, { timeoutMs: 1_500 });
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expect(harness.output.normalized).toContain(`echo:${longFollowupPrompt}`);
+        expectSingleFooter(lines);
+      }, { timeoutMs: 4_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      delete process.env.XIAOK_TEST_PROJECT_FILE_A;
+      delete process.env.XIAOK_TEST_PROJECT_FILE_B;
+      delete process.env.XIAOK_TEST_PROJECT_FILE_C;
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 15_000);
+
+  it('keeps footer spacing intact after the completed-intent feedback prompt runs between turns', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-feedback-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const sessionsDir = join(configDir, 'sessions');
+    const sessionId = 'sess_feedback_footer_gap';
+    const intentId = 'intent_feedback_footer_gap';
+    const stageId = `${intentId}:stage:1`;
+    const stepId = `${stageId}:step:compose`;
+    const now = Date.now() - 20_000;
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    mkdirSync(sessionsDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    const intentDelegation = createEmptySessionIntentLedger(sessionId, now);
+    intentDelegation.activeIntentId = intentId;
+    intentDelegation.instanceId = 'inst_feedback_footer_gap';
+    intentDelegation.intents.push({
+      intentId,
+      instanceId: 'inst_feedback_footer_gap',
+      sessionId,
+      rawIntent: '根据文档生成报告',
+      normalizedIntent: '根据文档生成报告',
+      providedSourcePaths: [],
+      intentType: 'generate',
+      deliverable: '报告',
+      finalDeliverable: '报告',
+      explicitConstraints: [],
+      delegationBoundary: [],
+      riskTier: 'medium',
+      intentMode: 'single_stage',
+      segmentationConfidence: 'high',
+      templateId: 'test-template',
+      stages: [
+        {
+          stageId,
+          order: 0,
+          label: '生成报告',
+          intentType: 'generate',
+          deliverable: '报告',
+          templateId: 'test-template',
+          riskTier: 'medium',
+          dependsOnStageIds: [],
+          steps: [
+            {
+              stepId,
+              key: 'compose',
+              order: 0,
+              role: 'compose',
+              skillName: 'report-skill',
+              dependsOn: [],
+              status: 'completed',
+              riskTier: 'medium',
+            },
+          ],
+          status: 'completed',
+          activeStepId: stepId,
+          structuralValidation: 'passed',
+          semanticValidation: 'passed',
+          needsFreshContextHandoff: false,
+        },
+      ],
+      activeStageId: stageId,
+      artifacts: [],
+      steps: [
+        {
+          stepId,
+          key: 'compose',
+          order: 0,
+          role: 'compose',
+          skillName: 'report-skill',
+          dependsOn: [],
+          status: 'completed',
+          riskTier: 'medium',
+        },
+      ],
+      activeStepId: stepId,
+      overallStatus: 'completed',
+      attemptCount: 1,
+      latestReceipt: 'Completed 报告',
+      createdAt: now,
+      updatedAt: now,
+    });
+    intentDelegation.latestPlan = intentDelegation.intents[0] ?? null;
+
+    const skillEval = createEmptySessionSkillEvalState(now);
+    skillEval.observations.push({
+      observationId: `${stepId}:skill_eval`,
+      sessionId,
+      intentId,
+      stageId,
+      stepId,
+      intentType: 'generate',
+      stageRole: 'compose',
+      deliverable: '报告',
+      deliverableFamily: 'document',
+      selectedSkillName: 'report-skill',
+      actualSkillName: 'report-skill',
+      status: 'completed',
+      artifactRecorded: true,
+      structuralValidation: 'passed',
+      semanticValidation: 'passed',
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    writeFileSync(join(sessionsDir, `${sessionId}.json`), JSON.stringify({
+      schemaVersion: 1,
+      sessionId,
+      cwd: projectDir,
+      createdAt: now - 5_000,
+      updatedAt: now,
+      lineage: [sessionId],
+      messages: [],
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
+      intentDelegation,
+      skillEval,
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('输出30行');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const text = harness.output.normalized;
+        expect(text).toContain('line 30');
+        expect(text).toContain('[xiaok]');
+        expect(text).toContain('跳过');
+      }, { timeoutMs: 4_000 });
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        const promptRows = lines
+          .map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes('❯'));
+        const promptIndex = promptRows.at(-1)?.index ?? -1;
+        const summaryRows = lines.filter((line) => line.includes('Intent:'));
+        let blankRows = 0;
+        let cursor = promptIndex - 1;
+
+        while (cursor >= 0 && lines[cursor] === '') {
+          blankRows += 1;
+          cursor -= 1;
+        }
+
+        expect(promptRows).toHaveLength(1);
+        expect(cursor).toBeGreaterThanOrEqual(0);
+        expect(promptIndex).toBe(22);
+        expect(blankRows).toBeGreaterThanOrEqual(2);
+        expect(lines.slice(0, cursor + 1).some((line) => line.includes('[xiaok]'))).toBe(true);
+        expect(lines.slice(0, cursor + 1).some((line) => line.includes('跳过'))).toBe(true);
+        expect(summaryRows).toHaveLength(0);
+      }, { timeoutMs: 1_500 });
+
+      harness.send('s');
+      harness.send('\r');
+      await waitForInputTurnReady(harness);
+
+      harness.send('延迟回复');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        const submittedIndex = lines.findIndex((line) => line.includes('› 延迟回复'));
+        const activityIndex = lines.findIndex((line) => /Thinking|Exploring codebase|Tracing references|Running command|Working/u.test(line));
+        const statusRows = lines
+          .map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes('project') && line.includes('%'));
+        const promptRows = lines
+          .map((line, index) => ({ line, index }))
+          .filter(({ line, index }) => line.includes('❯') && statusRows.some((row) => row.index === index + 1));
+        const promptIndex = promptRows.at(-1)?.index ?? -1;
+
+        expect(lines.some((line) => line.includes('[xiaok]'))).toBe(false);
+        expect(submittedIndex).toBeGreaterThanOrEqual(0);
+        expect(activityIndex).toBeGreaterThan(submittedIndex);
+        expect(promptRows).toHaveLength(1);
+        expect(promptIndex).toBe(22);
+        expect(lines.slice(activityIndex + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
+        expect(lines[promptIndex]).toContain('Finishing response...');
+        expect(lines.some((line) => line.includes('delayed reply'))).toBe(false);
+      }, { timeoutMs: 1_500 });
+
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('delayed reply');
+      }, { timeoutMs: 4_000 });
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('多行结尾测试');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        const secondSubmittedIndex = lines.findIndex((line) => line.includes('› 多行结尾测试'));
+        const secondTailIndex = lines.findIndex((line) => normalizeAssistantLine(line) === '想吃点重口还是清淡的？');
+        const promptIndex = lines.findIndex((line) => line.includes('❯ Type your message...'));
+
+        expect(lines.some((line) => line.includes('[xiaok]'))).toBe(false);
+        expect(secondSubmittedIndex).toBeGreaterThanOrEqual(0);
+        expect(secondTailIndex).toBeGreaterThan(secondSubmittedIndex);
+        expect(promptIndex).toBeGreaterThanOrEqual(secondTailIndex + 3);
+        expect(lines.slice(secondTailIndex + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
+      }, { timeoutMs: 4_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 30_000);
+
+  it('keeps the footer singular when a feedback-skipped session immediately starts a new intent with consecutive ran blocks', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-feedback-intent-ran-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const projectSettingsDir = join(projectDir, '.xiaok');
+    const sessionsDir = join(configDir, 'sessions');
+    const projectFiles = reportIntentFixtureNames.map((name) => join(projectDir, name));
+    const reportPrompt = `根据这些文档 ${projectFiles.join('、')} 合并生成 md，然后生成报告`;
+    const sessionId = 'sess_feedback_footer_gap_ran';
+    const intentId = 'intent_feedback_footer_gap_ran';
+    const stageId = `${intentId}:stage:1`;
+    const stepId = `${stageId}:step:compose`;
+    const now = Date.now() - 20_000;
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    mkdirSync(projectSettingsDir, { recursive: true });
+    mkdirSync(sessionsDir, { recursive: true });
+    reportIntentFixtureNames.forEach((name, index) => {
+      writeFileSync(projectFiles[index]!, loadReportIntentFixture(name), 'utf8');
+    });
+    writeFileSync(join(projectSettingsDir, 'settings.json'), JSON.stringify({
+      permissions: {
+        allow: ['bash(*)', `write(${projectDir}/*)`],
+      },
+    }, null, 2));
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    const intentDelegation = createEmptySessionIntentLedger(sessionId, now);
+    intentDelegation.activeIntentId = intentId;
+    intentDelegation.instanceId = 'inst_feedback_footer_gap_ran';
+    intentDelegation.intents.push({
+      intentId,
+      instanceId: 'inst_feedback_footer_gap_ran',
+      sessionId,
+      rawIntent: '根据文档生成报告',
+      normalizedIntent: '根据文档生成报告',
+      providedSourcePaths: [],
+      intentType: 'generate',
+      deliverable: '报告',
+      finalDeliverable: '报告',
+      explicitConstraints: [],
+      delegationBoundary: [],
+      riskTier: 'medium',
+      intentMode: 'single_stage',
+      segmentationConfidence: 'high',
+      templateId: 'test-template',
+      stages: [
+        {
+          stageId,
+          order: 0,
+          label: '生成报告',
+          intentType: 'generate',
+          deliverable: '报告',
+          templateId: 'test-template',
+          riskTier: 'medium',
+          dependsOnStageIds: [],
+          steps: [
+            {
+              stepId,
+              key: 'compose',
+              order: 0,
+              role: 'compose',
+              skillName: 'report-skill',
+              dependsOn: [],
+              status: 'completed',
+              riskTier: 'medium',
+            },
+          ],
+          status: 'completed',
+          activeStepId: stepId,
+          structuralValidation: 'passed',
+          semanticValidation: 'passed',
+          needsFreshContextHandoff: false,
+        },
+      ],
+      activeStageId: stageId,
+      artifacts: [],
+      steps: [
+        {
+          stepId,
+          key: 'compose',
+          order: 0,
+          role: 'compose',
+          skillName: 'report-skill',
+          dependsOn: [],
+          status: 'completed',
+          riskTier: 'medium',
+        },
+      ],
+      activeStepId: stepId,
+      overallStatus: 'completed',
+      attemptCount: 1,
+      latestReceipt: 'Completed 报告',
+      createdAt: now,
+      updatedAt: now,
+    });
+    intentDelegation.latestPlan = intentDelegation.intents[0] ?? null;
+
+    const skillEval = createEmptySessionSkillEvalState(now);
+    skillEval.observations.push({
+      observationId: `${stepId}:skill_eval`,
+      sessionId,
+      intentId,
+      stageId,
+      stepId,
+      intentType: 'generate',
+      stageRole: 'compose',
+      deliverable: '报告',
+      deliverableFamily: 'document',
+      selectedSkillName: 'report-skill',
+      actualSkillName: 'report-skill',
+      status: 'completed',
+      artifactRecorded: true,
+      structuralValidation: 'passed',
+      semanticValidation: 'passed',
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    writeFileSync(join(sessionsDir, `${sessionId}.json`), JSON.stringify({
+      schemaVersion: 1,
+      sessionId,
+      cwd: projectDir,
+      createdAt: now - 5_000,
+      updatedAt: now,
+      lineage: [sessionId],
+      messages: [],
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
+      intentDelegation,
+      skillEval,
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    process.env.XIAOK_TEST_PROJECT_FILE_A = projectFiles[0];
+    process.env.XIAOK_TEST_PROJECT_FILE_B = projectFiles[1];
+    process.env.XIAOK_TEST_PROJECT_FILE_C = projectFiles[2];
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('输出30行');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const text = harness.output.normalized;
+        expect(text).toContain('line 30');
+        expect(text).toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
+      }, { timeoutMs: 4_000 });
+
+      harness.send('s');
+      harness.send('\r');
+      await waitForInputTurnReady(harness);
+
+      harness.send(reportPrompt);
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        const statusRows = lines
+          .map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes('project') && line.includes('%'));
+        const promptRows = lines
+          .map((line, index) => ({ line, index }))
+          .filter(({ line, index }) => line.includes('❯') && statusRows.some((row) => row.index === index + 1));
+        const summaryRows = lines.filter((line) => line.includes('Intent:'));
+        const promptIndex = promptRows.at(-1)?.index ?? -1;
+        const statusIndex = statusRows.at(-1)?.index ?? -1;
+
+        expect(harness.output.normalized).toContain('Read 01-market-overview.md');
+        expect(harness.output.normalized).toContain('Read 02-customer-signals.txt');
+        expect(harness.output.normalized).toContain('Read 03-execution-risks.txt');
+        expect(harness.output.normalized).toContain('E2E_RUNTIME_MERGED_MD');
+        expect(promptRows).toHaveLength(1);
+        expect(statusRows).toHaveLength(1);
+        expect(promptIndex).toBe(22);
+        expect(statusIndex).toBe(23);
+        expect(lines[promptIndex]).not.toContain('Intent:');
+        expect(summaryRows.length).toBeLessThanOrEqual(1);
+        if (summaryRows[0]) {
+          expect(summaryRows[0]).not.toContain('Completed');
+        }
+      }, { timeoutMs: 4_000 });
+
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('三份文档已先合并为 Markdown，再生成报告。');
+      }, { timeoutMs: 4_000 });
+
+      await waitForInputTurnReady(harness);
+
+      const finalLines = harness.screen.lines();
+      expectSingleFooter(finalLines);
+      expect(finalLines.some((line) => line.includes('Intent:'))).toBe(false);
+      expect(finalLines.some((line) => line.includes('Completed') && line.includes('Intent:'))).toBe(false);
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      delete process.env.XIAOK_TEST_PROJECT_FILE_A;
+      delete process.env.XIAOK_TEST_PROJECT_FILE_B;
+      delete process.env.XIAOK_TEST_PROJECT_FILE_C;
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 20_000);
+
+  it('keeps the footer singular after confirming feedback and then immediately starting a new complex intent', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-feedback-intent-confirm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const projectSettingsDir = join(projectDir, '.xiaok');
+    const sessionsDir = join(configDir, 'sessions');
+    const projectFiles = reportIntentFixtureNames.map((name) => join(projectDir, name));
+    const reportPrompt = `根据这些文档 ${projectFiles.join('、')} 合并生成 md，然后生成报告`;
+    const sessionId = 'sess_feedback_footer_gap_confirm';
+    const intentId = 'intent_feedback_footer_gap_confirm';
+    const stageId = `${intentId}:stage:1`;
+    const stepId = `${stageId}:step:compose`;
+    const now = Date.now() - 20_000;
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    mkdirSync(projectSettingsDir, { recursive: true });
+    mkdirSync(sessionsDir, { recursive: true });
+    reportIntentFixtureNames.forEach((name, index) => {
+      writeFileSync(projectFiles[index]!, loadReportIntentFixture(name), 'utf8');
+    });
+    writeFileSync(join(projectSettingsDir, 'settings.json'), JSON.stringify({
+      permissions: {
+        allow: ['bash(*)', `write(${projectDir}/*)`],
+      },
+    }, null, 2));
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    const intentDelegation = createEmptySessionIntentLedger(sessionId, now);
+    intentDelegation.activeIntentId = intentId;
+    intentDelegation.instanceId = 'inst_feedback_footer_gap_confirm';
+    intentDelegation.intents.push({
+      intentId,
+      instanceId: 'inst_feedback_footer_gap_confirm',
+      sessionId,
+      rawIntent: '根据文档生成报告',
+      normalizedIntent: '根据文档生成报告',
+      providedSourcePaths: [],
+      intentType: 'generate',
+      deliverable: '报告',
+      finalDeliverable: '报告',
+      explicitConstraints: [],
+      delegationBoundary: [],
+      riskTier: 'medium',
+      intentMode: 'single_stage',
+      segmentationConfidence: 'high',
+      templateId: 'test-template',
+      stages: [
+        {
+          stageId,
+          order: 0,
+          label: '生成报告',
+          intentType: 'generate',
+          deliverable: '报告',
+          templateId: 'test-template',
+          riskTier: 'medium',
+          dependsOnStageIds: [],
+          steps: [
+            {
+              stepId,
+              key: 'compose',
+              order: 0,
+              role: 'compose',
+              skillName: 'report-skill',
+              dependsOn: [],
+              status: 'completed',
+              riskTier: 'medium',
+            },
+          ],
+          status: 'completed',
+          activeStepId: stepId,
+          structuralValidation: 'passed',
+          semanticValidation: 'passed',
+          needsFreshContextHandoff: false,
+        },
+      ],
+      activeStageId: stageId,
+      artifacts: [],
+      steps: [
+        {
+          stepId,
+          key: 'compose',
+          order: 0,
+          role: 'compose',
+          skillName: 'report-skill',
+          dependsOn: [],
+          status: 'completed',
+          riskTier: 'medium',
+        },
+      ],
+      activeStepId: stepId,
+      overallStatus: 'completed',
+      attemptCount: 1,
+      latestReceipt: 'Completed 报告',
+      createdAt: now,
+      updatedAt: now,
+    });
+    intentDelegation.latestPlan = intentDelegation.intents[0] ?? null;
+
+    const skillEval = createEmptySessionSkillEvalState(now);
+    skillEval.observations.push({
+      observationId: `${stepId}:skill_eval`,
+      sessionId,
+      intentId,
+      stageId,
+      stepId,
+      intentType: 'generate',
+      stageRole: 'compose',
+      deliverable: '报告',
+      deliverableFamily: 'document',
+      selectedSkillName: 'report-skill',
+      actualSkillName: 'report-skill',
+      status: 'completed',
+      artifactRecorded: true,
+      structuralValidation: 'passed',
+      semanticValidation: 'passed',
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const sessionPath = join(sessionsDir, `${sessionId}.json`);
+    writeFileSync(sessionPath, JSON.stringify({
+      schemaVersion: 1,
+      sessionId,
+      cwd: projectDir,
+      createdAt: now - 5_000,
+      updatedAt: now,
+      lineage: [sessionId],
+      messages: [],
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
+      intentDelegation,
+      skillEval,
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    process.env.XIAOK_TEST_PROJECT_FILE_A = projectFiles[0];
+    process.env.XIAOK_TEST_PROJECT_FILE_B = projectFiles[1];
+    process.env.XIAOK_TEST_PROJECT_FILE_C = projectFiles[2];
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('输出30行');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const text = harness.output.normalized;
+        expect(text).toContain('line 30');
+        expect(text).toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
+      }, { timeoutMs: 4_000 });
+
+      harness.send('y');
+      harness.send('\r');
+      await waitForInputTurnReady(harness);
+
+      await waitFor(() => {
+        const persistedSession = JSON.parse(readFileSync(sessionPath, 'utf8')) as {
+          skillEval?: {
+            promptedIntentIds?: string[];
+            feedback?: Array<{ intentId: string; sentiment: string }>;
+          };
+        };
+        const persistedSkillEval = persistedSession.skillEval;
+
+        expect(persistedSkillEval?.promptedIntentIds).toContain(intentId);
+        expect(persistedSkillEval?.feedback).toHaveLength(1);
+        expect(persistedSkillEval?.feedback?.[0]).toMatchObject({
+          intentId,
+          sentiment: 'positive',
+        });
+      }, { timeoutMs: 2_000 });
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expectSingleFooter(lines);
+        expect(lines.some((line) => line.includes('[xiaok]'))).toBe(false);
+        expect(lines.some((line) => line.includes('Intent:') && line.includes('Completed'))).toBe(false);
+      }, { timeoutMs: 1_500 });
+
+      harness.send(reportPrompt);
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        const promptRows = lines
+          .map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes('❯'));
+        const statusRows = lines
+          .map((line, index) => ({ line, index }))
+          .filter(({ line }) => line.includes('project') && line.includes('%'));
+        const summaryRows = lines.filter((line) => line.includes('Intent:'));
+        const promptIndex = promptRows.at(-1)?.index ?? -1;
+        const statusIndex = statusRows.at(-1)?.index ?? -1;
+
+        expect(harness.output.normalized).toContain('Read 01-market-overview.md');
+        expect(harness.output.normalized).toContain('Read 02-customer-signals.txt');
+        expect(harness.output.normalized).toContain('Read 03-execution-risks.txt');
+        expect(harness.output.normalized).toContain('E2E_RUNTIME_MERGED_MD');
+        expect(promptRows).toHaveLength(1);
+        expect(statusRows).toHaveLength(1);
+        expect(promptIndex).toBe(22);
+        expect(statusIndex).toBe(23);
+        expect(lines[promptIndex]).not.toContain('Intent:');
+        expect(summaryRows.length).toBeLessThanOrEqual(1);
+        if (summaryRows[0]) {
+          expect(summaryRows[0]).not.toContain('Completed');
+        }
+      }, { timeoutMs: 4_000 });
+
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('三份文档已先合并为 Markdown，再生成报告。');
+      }, { timeoutMs: 4_000 });
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('确认反馈后继续追问');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expect(harness.output.normalized).toContain('echo:确认反馈后继续追问');
+        expectSingleFooter(lines);
+        expect(lines.some((line) => line.includes('Intent:') && line.includes('Completed'))).toBe(false);
+      }, { timeoutMs: 4_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      delete process.env.XIAOK_TEST_PROJECT_FILE_A;
+      delete process.env.XIAOK_TEST_PROJECT_FILE_B;
+      delete process.env.XIAOK_TEST_PROJECT_FILE_C;
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 30_000);
+
+  it('treats free-form input typed into the completed-intent feedback prompt as the next user turn', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-feedback-freeform-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const sessionId = 'sess_feedback_prompt_freeform';
+    const { configDir, projectDir, sessionPath, intentId } = writeCompletedFeedbackResumeSessionFixture(rootDir, sessionId);
+    tempDirs.push(rootDir);
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('输出30行');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const text = harness.output.normalized;
+        expect(text).toContain('line 30');
+        expect(text).toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
+      }, { timeoutMs: 4_000 });
+
+      harness.send('吃什么');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expect(harness.output.normalized).toContain('echo:吃什么');
+        expectSingleFooter(lines);
+        expect(lines.some((line) => line.includes('[xiaok]'))).toBe(false);
+        expect(lines.some((line) => line.includes('Intent:') && line.includes('Completed'))).toBe(false);
+      }, { timeoutMs: 4_000 });
+
+      await waitFor(() => {
+        const persistedSession = JSON.parse(readFileSync(sessionPath, 'utf8')) as {
+          skillEval?: {
+            promptedIntentIds?: string[];
+            feedback?: Array<{ intentId: string; sentiment: string }>;
+          };
+        };
+        const persistedSkillEval = persistedSession.skillEval;
+
+        expect(persistedSkillEval?.promptedIntentIds).toContain(intentId);
+        expect(persistedSkillEval?.feedback ?? []).toHaveLength(0);
+      }, { timeoutMs: 2_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 20_000);
+
+  it('exits cleanly when ctrl+c is pressed while the completed-intent feedback prompt is active', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-feedback-ctrlc-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const sessionId = 'sess_feedback_prompt_ctrlc';
+    const { configDir, projectDir } = writeCompletedFeedbackResumeSessionFixture(rootDir, sessionId);
+    tempDirs.push(rootDir);
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('输出30行');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const text = harness.output.normalized;
+        expect(text).toContain('line 30');
+        expect(text).toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
+      }, { timeoutMs: 4_000 });
+
+      harness.send('\x03');
+      await pending;
+
+      expect(harness.output.normalized).toContain('已退出。');
+      expect(harness.output.normalized).not.toContain('echo:输出30行');
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 20_000);
+
   it('preserves the most recent turn tail lines instead of overwriting them when older content scrolls in a 24-row terminal', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
@@ -1289,9 +3406,9 @@ describe('chat interactive runtime', () => {
       expectNoTransientChrome(lines);
       expectSingleFooter(lines);
       expect(lines.some((line) => line.includes('› 分四次显示1234'))).toBe(true);
-      expect(lines.some((line) => line.trim() === '4')).toBe(true);
+      expect(lines.some((line) => normalizeAssistantLine(line) === '4')).toBe(true);
       expect(lines.some((line) => line.includes('› 分五次显示12345'))).toBe(true);
-      expect(lines.some((line) => line.trim() === '5')).toBe(true);
+      expect(lines.some((line) => normalizeAssistantLine(line) === '5')).toBe(true);
       expect(lines.some((line) => line.includes('› 分三次显示123'))).toBe(false);
 
       harness.send('/exit');
@@ -1355,7 +3472,7 @@ describe('chat interactive runtime', () => {
 
       {
         const lines = harness.screen.lines();
-        const answerIndex = lines.findIndex((line) => line.trim() === 'echo:hi');
+        const answerIndex = lines.findIndex((line) => normalizeAssistantLine(line) === 'echo:hi');
         const promptIndex = lines.findIndex((line) => line.includes('❯ Type your message...'));
         expect(answerIndex).toBeGreaterThanOrEqual(0);
         expect(promptIndex).toBeGreaterThanOrEqual(answerIndex + 3);
@@ -1370,9 +3487,9 @@ describe('chat interactive runtime', () => {
       await waitForInputTurnReady(harness);
       {
         const lines = harness.screen.lines();
-        const firstAnswerIndex = lines.findIndex((line) => line.trim() === 'echo:hi');
+        const firstAnswerIndex = lines.findIndex((line) => normalizeAssistantLine(line) === 'echo:hi');
         const submittedIndex = lines.findIndex((line) => line.includes('› next'));
-        const secondAnswerIndex = lines.findIndex((line) => line.trim() === 'echo:next');
+        const secondAnswerIndex = lines.findIndex((line) => normalizeAssistantLine(line) === 'echo:next');
         expect(firstAnswerIndex).toBeGreaterThanOrEqual(0);
         expect(submittedIndex).toBeGreaterThan(firstAnswerIndex);
         expect(secondAnswerIndex).toBeGreaterThan(submittedIndex);
@@ -1518,9 +3635,9 @@ describe('chat interactive runtime', () => {
 
       {
         const lines = harness.screen.lines();
-        const tailIndex = lines.findIndex((line) => line.trim() === '想吃点重口还是清淡的？');
+        const tailIndex = lines.findIndex((line) => normalizeAssistantLine(line) === '想吃点重口还是清淡的？');
         const submittedIndex = lines.findIndex((line) => line.includes('› 辣的续问'));
-        const secondAnswerIndex = lines.findIndex((line) => line.trim() === '辣的午餐：');
+        const secondAnswerIndex = lines.findIndex((line) => normalizeAssistantLine(line) === '辣的午餐：');
 
         expect(tailIndex).toBeGreaterThanOrEqual(0);
         expect(submittedIndex).toBeGreaterThan(tailIndex);

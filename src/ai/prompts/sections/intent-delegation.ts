@@ -7,6 +7,7 @@ export function getIntentDelegationSection(): string {
     'Only act on the active stage. Do not jump ahead, invent completion for future stages, or consume artifacts that were not explicitly produced.',
     'At any moment there is exactly one active stage and one active step at a time. Use the native intent-delegation tools to keep them accurate.',
     'Prefer stage-scoped execution. The model should reason from the current stage contract, not from the entire historical transcript.',
+    'If the current input is not a workflow intent and there is no unfinished intent to continue, answer the user directly and naturally. Do not force the conversation back into the previous completed run or refuse only because the question is outside workflow scope.',
     'If the user provides explicit absolute or rooted file paths, treat those paths as authoritative source inputs. Use them directly before falling back to basename or workspace search.',
     'If the run contract surfaces a preferred stage skill for the current or downstream stage, invoke that Skill tool before replacing it with ad-hoc shell or file-generation work.',
     'Record stage artifacts explicitly before downstream handoff. Use artifacts, receipts, and breadcrumbs as the durable handoff surface between stages. Do not rely on latent memory of earlier steps.',

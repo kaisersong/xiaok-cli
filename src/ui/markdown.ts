@@ -3,6 +3,9 @@ import { highlightLine } from "./highlight.js";
 import { getDisplayWidth, stripAnsi } from "./text-metrics.js";
 
 const BODY_GUTTER = "";
+const LEAD_BULLET = '●';
+const LEAD_PREFIX_TEXT = `${LEAD_BULLET} `;
+const LEAD_CONTINUATION_PREFIX = '  ';
 
 /**
  * Line-buffered markdown renderer for streaming terminal output.
@@ -17,6 +20,7 @@ export class MarkdownRenderer {
   private lineCount = 0;
   private termWidth = 0;
   private consecutiveBlankLines = 0;
+  private hasRenderedLeadParagraph = false;
   /** Optional callback for newline output (e.g., scroll-region-aware). */
   private newlineFn: (() => void) | null = null;
 
@@ -58,7 +62,9 @@ export class MarkdownRenderer {
         this.renderLine(line);
       } else {
         // No pending text — this is a fresh complete line.
-        this.renderLine(line);
+        const rendered = this.renderLine(line);
+        const renderedRows = this.countRenderedRows(rendered);
+        this.lineCount += renderedRows;
       }
       this.pendingLen = 0;
 
@@ -83,12 +89,6 @@ export class MarkdownRenderer {
       } else {
         process.stdout.write("\n");
       }
-
-      // Track line count including terminal wrapping
-      const displayWidth = getDisplayWidth(stripAnsi(line));
-      const cols = this.termWidth || process.stdout.columns || 80;
-      const wrappedLines = Math.max(1, Math.ceil(displayWidth / cols));
-      this.lineCount += wrappedLines;
     }
 
     // Write remaining buffer as partial line (streaming text without newline).
@@ -116,7 +116,7 @@ export class MarkdownRenderer {
       const flushed = this.buffer;
       renderedLine = this.formatLine(flushed);
       process.stdout.write(renderedLine);
-      flushedRows = this.countRows(flushed);
+      flushedRows = this.countRenderedRows(renderedLine);
       this.lineCount += flushedRows;
       this.buffer = "";
     }
@@ -136,11 +136,24 @@ export class MarkdownRenderer {
     this.pendingLen = 0;
     this.lineCount = 0;
     this.consecutiveBlankLines = 0;
+    this.hasRenderedLeadParagraph = false;
     this.newlineFn = null;
   }
 
-  private renderLine(line: string): void {
-    process.stdout.write(this.formatLine(line));
+  /**
+   * Start a fresh assistant segment inside the same turn.
+   * Used after transcript interruptions such as tool activity blocks so the
+   * next natural-language continuation gets a new lead bullet + hanging indent.
+   */
+  beginNewSegment(): void {
+    this.hasRenderedLeadParagraph = false;
+    this.consecutiveBlankLines = 0;
+  }
+
+  private renderLine(line: string): string {
+    const rendered = this.formatLine(line);
+    process.stdout.write(rendered);
+    return rendered;
   }
 
   private formatLine(line: string): string {
@@ -188,15 +201,32 @@ export class MarkdownRenderer {
     // List items
     const ulMatch = line.match(/^(\s*)[-*+]\s+(.*)/);
     if (ulMatch) {
-      return `${BODY_GUTTER}${ulMatch[1]}${dim("•")} ${this.inlineFormat(ulMatch[2])}`;
+      this.hasRenderedLeadParagraph = true;
+      return this.formatWrappedListItem({
+        indent: ulMatch[1],
+        markerText: '• ',
+        markerRendered: `${dim('•')} `,
+        content: ulMatch[2],
+      });
     }
 
     const olMatch = line.match(/^(\s*)(\d+)\.\s+(.*)/);
     if (olMatch) {
-      return `${BODY_GUTTER}${olMatch[1]}${dim(olMatch[2] + ".")} ${this.inlineFormat(olMatch[3])}`;
+      this.hasRenderedLeadParagraph = true;
+      return this.formatWrappedListItem({
+        indent: olMatch[1],
+        markerText: `${olMatch[2]}. `,
+        markerRendered: `${dim(olMatch[2] + '.')} `,
+        content: olMatch[3],
+      });
     }
 
     // Regular text
+    if (!this.hasRenderedLeadParagraph && line.trim().length > 0) {
+      this.hasRenderedLeadParagraph = true;
+      return this.formatLeadParagraphLine(line);
+    }
+
     return `${BODY_GUTTER}${this.inlineFormat(line)}`;
   }
 
@@ -204,6 +234,85 @@ export class MarkdownRenderer {
     const displayWidth = getDisplayWidth(stripAnsi(text));
     const cols = this.termWidth || process.stdout.columns || 80;
     return Math.max(1, Math.ceil(displayWidth / cols));
+  }
+
+  private countRenderedRows(text: string): number {
+    const lines = text.split('\n');
+    return lines.reduce((sum, line) => sum + this.countRows(line), 0);
+  }
+
+  private formatLeadParagraphLine(line: string): string {
+    const renderedText = this.inlineFormat(line);
+    const plainPrefix = `${BODY_GUTTER}${LEAD_PREFIX_TEXT}`;
+    const plainContinuationPrefix = `${BODY_GUTTER}${LEAD_CONTINUATION_PREFIX}`;
+    const firstLineWidth = this.getWrapWidth(plainPrefix);
+    const continuationWidth = this.getWrapWidth(plainContinuationPrefix);
+    const wrappedLines = this.wrapStyledText(renderedText, firstLineWidth, continuationWidth);
+
+    const bullet = cyan(LEAD_BULLET);
+
+    return wrappedLines
+      .map((wrappedLine, index) => {
+        const prefix = index === 0
+          ? `${BODY_GUTTER}${bullet} `
+          : plainContinuationPrefix;
+        return `${prefix}${wrappedLine}`;
+      })
+      .join('\n');
+  }
+
+  private formatWrappedListItem(input: {
+    indent: string;
+    markerText: string;
+    markerRendered: string;
+    content: string;
+  }): string {
+    const renderedText = this.inlineFormat(input.content);
+    const plainPrefix = `${BODY_GUTTER}${input.indent}${input.markerText}`;
+    const continuationPrefix = `${BODY_GUTTER}${' '.repeat(getDisplayWidth(`${input.indent}${input.markerText}`))}`;
+    const firstLineWidth = this.getWrapWidth(plainPrefix);
+    const continuationWidth = this.getWrapWidth(continuationPrefix);
+    const wrappedLines = this.wrapStyledText(renderedText, firstLineWidth, continuationWidth);
+
+    return wrappedLines
+      .map((wrappedLine, index) => {
+        const prefix = index === 0
+          ? `${BODY_GUTTER}${input.indent}${input.markerRendered}`
+          : continuationPrefix;
+        return `${prefix}${wrappedLine}`;
+      })
+      .join('\n');
+  }
+
+  private getWrapWidth(prefix: string): number {
+    const cols = this.termWidth || process.stdout.columns || 80;
+    return Math.max(8, cols - getDisplayWidth(stripAnsi(prefix)));
+  }
+
+  private wrapStyledText(text: string, firstLineWidth: number, continuationWidth: number): string[] {
+    const lines: string[] = [];
+    let current = '';
+    let currentWidth = 0;
+    let currentLimit = firstLineWidth;
+
+    for (const symbol of Array.from(text)) {
+      const symbolWidth = Math.max(1, getDisplayWidth(stripAnsi(symbol)));
+      if (current !== '' && currentWidth + symbolWidth > currentLimit) {
+        lines.push(current);
+        current = symbol;
+        currentWidth = symbolWidth;
+        currentLimit = continuationWidth;
+        continue;
+      }
+      current += symbol;
+      currentWidth += symbolWidth;
+    }
+
+    if (current.length > 0 || lines.length === 0) {
+      lines.push(current);
+    }
+
+    return lines;
   }
 
   /** Apply inline formatting. */
@@ -219,6 +328,10 @@ export class MarkdownRenderer {
   private getPendingPrefix(): string {
     if (this.inCodeBlock && getTheme() === "default") {
       return `${BODY_GUTTER}${dim("│")} `;
+    }
+
+    if (!this.hasRenderedLeadParagraph) {
+      return `${BODY_GUTTER}${cyan(LEAD_BULLET)} `;
     }
 
     return BODY_GUTTER;

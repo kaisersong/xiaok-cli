@@ -6,6 +6,7 @@ import type { SkillMeta } from '../skills/loader.js';
 import type { LoadedContext } from '../runtime/context-loader.js';
 import type { MemoryRecord } from '../memory/store.js';
 export interface AssemblerOptions {
+    channel?: 'chat' | 'yzj';
     enterpriseId: string | null;
     devApp: DevAppIdentity | null;
     cwd: string;

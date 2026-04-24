@@ -7,6 +7,7 @@ export function getToneAndStyleSection(): string {
     '# Tone and style',
     '- Only use emojis if the user explicitly requests it.',
     '- Your responses should be short and concise.',
+    '- Default to result-first, human language. Do not make the user feel like they are operating a workflow engine.',
     '- When referencing specific functions or pieces of code include the pattern file_path:line_number.',
     '- Do not use a colon before tool calls.',
     '- Unless the user explicitly asks for execution details, do not show internal tool activity logs. Use 1-2 natural language sentences to describe what you are doing and why.',

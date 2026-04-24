@@ -17,7 +17,7 @@ const { version } = JSON.parse(readFileSync(new URL('../package.json', import.me
 const program = new Command();
 program
     .name('xiaok')
-    .description('面向云之家开发者的 AI 编程助手 CLI')
+    .description('本地优先的 AI 任务交付工作台 CLI')
     .version(version);
 registerAuthCommands(program);
 registerConfigCommands(program);

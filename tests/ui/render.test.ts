@@ -3,6 +3,8 @@ import {
   formatProgressNote,
   formatSubmittedInput,
   formatToolActivity,
+  intentHint,
+  intentHintDot,
   renderInputSeparator,
   renderInputPrompt,
   renderWelcomeScreen,
@@ -129,6 +131,20 @@ describe('formatSubmittedInput', () => {
     expect(lines[1]).toBe(' '.repeat(23));
     setColorsEnabled(true);
   });
+
+  it('only prefixes the first wrapped line with the submitted-input marker', () => {
+    setColorsEnabled(false);
+    process.stdout.columns = 24;
+    const output = formatSubmittedInput(
+      '/Users/song/Downloads/salesforce_ai_evolution-report.html 根据这几个文档生成报告',
+    );
+    const lines = output.slice(0, -1).split('\n');
+
+    expect(lines[0]?.startsWith(' › ')).toBe(true);
+    expect(lines.slice(1, -1).every((line) => !line.startsWith(' › '))).toBe(true);
+    expect(lines.slice(1, -1).every((line) => line.startsWith('   '))).toBe(true);
+    setColorsEnabled(true);
+  });
 });
 
 describe('formatProgressNote', () => {
@@ -137,6 +153,24 @@ describe('formatProgressNote', () => {
     expect(formatProgressNote('Still working: tracing code paths and references (48s)'))
       .toContain('  · Still working: tracing code paths and references (48s)\n');
     setColorsEnabled(true);
+  });
+});
+
+describe('intentHint', () => {
+  it('renders intent guidance in rgb(142,142,142)', () => {
+    setColorsEnabled(true);
+    try {
+      expect(intentHint('Intent: Customer proposal')).toContain('\x1b[38;2;142;142;142m');
+      expect(intentHint('Intent: Customer proposal')).toContain('Intent: Customer proposal');
+      expect(intentHintDot('●')).toContain('\x1b[38;2;122;168;255m');
+      expect(intentHintDot('●')).toContain('●');
+    } finally {
+      setColorsEnabled(
+        process.stdout.isTTY !== false &&
+        !process.env.NO_COLOR &&
+        !process.argv.includes('--no-color'),
+      );
+    }
   });
 });
 

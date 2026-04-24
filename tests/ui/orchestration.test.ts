@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   buildIntentReminderBlock,
   formatCurrentIntentSummaryLine,
+  formatCurrentTurnIntentSummaryLine,
   formatIntentCreatedTranscriptBlock,
   formatProgressTranscriptBlock,
   formatReceiptTranscriptBlock,
   formatSalvageTranscriptBlock,
   formatStageActivatedTranscriptBlock,
 } from '../../src/ui/orchestration.js';
+import { setColorsEnabled } from '../../src/ui/render.js';
+import { stripAnsi } from '../../src/ui/display-width.js';
 import type { IntentLedgerRecord, SessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 
 describe('ui orchestration formatting', () => {
@@ -15,7 +18,37 @@ describe('ui orchestration formatting', () => {
     const ledger = createLedger();
 
     expect(formatCurrentIntentSummaryLine(ledger, 'inst_owner')).toContain('Intent: Customer proposal');
+    expect(formatCurrentIntentSummaryLine(ledger, 'inst_owner')).toContain('●');
     expect(formatCurrentIntentSummaryLine(ledger, 'inst_other')).toBe('');
+  });
+
+  it('formats the current turn summary line with the intent hint style', () => {
+    setColorsEnabled(true);
+    try {
+      const line = formatCurrentTurnIntentSummaryLine({
+        deliverable: 'md -> 报告',
+        stageOrder: 0,
+        totalStages: 2,
+        stageLabel: '提取 Markdown',
+        status: 'Drafting Plan',
+      });
+
+      expect(stripAnsi(line)).toContain('● Intent: md -> 报告 · Stage 1/2 提取 Markdown · Drafting Plan');
+      expect(line).toContain('\x1b[38;2;122;168;255m●\x1b[0m');
+      expect(line).toContain('\x1b[38;2;142;142;142mIntent: md -> 报告 · Stage 1/2 提取 Markdown · Drafting Plan\x1b[0m');
+    } finally {
+      setColorsEnabled(
+        process.stdout.isTTY !== false &&
+        !process.env.NO_COLOR &&
+        !process.argv.includes('--no-color'),
+      );
+    }
+  });
+
+  it('hides the sticky summary line once the active intent is terminal', () => {
+    const ledger = createLedger({ overallStatus: 'completed' });
+
+    expect(formatCurrentIntentSummaryLine(ledger, 'inst_owner')).toBe('');
   });
 
   it('builds an intent reminder block from the active intent', () => {
@@ -27,6 +60,12 @@ describe('ui orchestration formatting', () => {
     });
     expect(reminder?.text).toContain('Customer proposal');
     expect(reminder?.text).toContain('Collect');
+  });
+
+  it('does not build a reminder block for a completed active intent', () => {
+    const reminder = buildIntentReminderBlock(createLedger({ overallStatus: 'completed' }), 'inst_owner');
+
+    expect(reminder).toBeUndefined();
   });
 
   it('includes preferred stage skills in the hidden run contract when non-generic skills are planned', () => {

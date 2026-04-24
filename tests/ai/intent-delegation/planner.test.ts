@@ -184,6 +184,34 @@ describe('intent delegation planner', () => {
     });
   });
 
+  it('builds a multi-stage plan for a multi-file Chinese prompt with path-prefixed sources', () => {
+    const result = createIntentPlan({
+      instanceId: 'instance-1',
+      sessionId: 'session-1',
+      input: '根据这几个文档，/Users/song/Downloads/AI原生工作中枢设计推演v2.docx /Users/song/Downloads/AI原生IM协同.md /Users/song/Downloads/AI原生企业的管理思想、管理范式与组织形态.pptx 整理一篇汇总的文档，然后生成幻灯片',
+      skills,
+    });
+
+    const plan = expectPlan(result);
+    expect(plan).toMatchObject({
+      continuationMode: 'new_intent',
+      intentType: 'generate',
+      templateId: 'generate_v1',
+      deliverable: '汇总的文档 -> 幻灯片',
+      finalDeliverable: '幻灯片',
+      providedSourcePaths: [
+        '/Users/song/Downloads/AI原生工作中枢设计推演v2.docx',
+        '/Users/song/Downloads/AI原生IM协同.md',
+        '/Users/song/Downloads/AI原生企业的管理思想、管理范式与组织形态.pptx',
+      ],
+      intentMode: 'multi_stage',
+    });
+    expect(plan?.stages.map((stage) => stage.label)).toEqual([
+      '生成汇总的文档',
+      '生成幻灯片',
+    ]);
+  });
+
   it('returns continue_active for a continuation cue without a deliverable-family change', () => {
     const result = createIntentPlan({
       instanceId: 'instance-1',
@@ -380,6 +408,42 @@ describe('intent delegation planner', () => {
       intentType: 'generate',
       templateId: 'generate_v1',
       deliverable: '产品方案',
+    });
+  });
+
+  it('requires positive delegation evidence before inheriting an active intent into a short follow-up', () => {
+    for (const input of ['先这样吧', '今天先不聊这个', '不继续这个了']) {
+      const result = createIntentPlan({
+        instanceId: 'instance-1',
+        sessionId: 'session-1',
+        input,
+        activeIntent: {
+          intentId: 'intent-active',
+          deliverable: 'md -> 报告',
+          intentType: 'generate',
+          templateId: 'generate_v1',
+        },
+        skills,
+      });
+
+      expect(result).toEqual({
+        kind: 'non_intent',
+        reason: 'non_substantial',
+      });
+    }
+  });
+
+  it('does not treat a bare file path mention as intent without source-task cues or deliverable cues', () => {
+    const result = createIntentPlan({
+      instanceId: 'instance-1',
+      sessionId: 'session-1',
+      input: '文件在这里 /Users/song/Downloads/demo.pdf',
+      skills,
+    });
+
+    expect(result).toEqual({
+      kind: 'non_intent',
+      reason: 'non_substantial',
     });
   });
 

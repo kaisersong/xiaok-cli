@@ -13,6 +13,7 @@ describe('ToolExplorer', () => {
     const first = strip(explorer.record('tool_search', { query: 'LOW_SIGNAL_TOOL_NAMES|describeToolActivity' }));
     const second = strip(explorer.record('grep', { pattern: 'describeToolActivity|tool_started in yzj-runtime-notifier.ts' }));
 
+    expect(first.startsWith('\n\n')).toBe(true);
     expect(first).toContain('  ╭─ Explored');
     expect(first).toContain('  │ Search LOW_SIGNAL_TOOL_NAMES|describeToolActivity');
     expect(second).not.toContain('  ╭─ Explored');
@@ -24,7 +25,7 @@ describe('ToolExplorer', () => {
 
     const output = strip(explorer.record('bash', { command: 'python3 export-pptx.py slides.html slides.pptx' }));
 
-    expect(output).toBe('  ╭─ Ran\n  │ 导出 PPT\n');
+    expect(output).toBe('\n\n  ╭─ Ran\n  │ 导出 PPT\n');
   });
 
   it('keeps the concrete bash command in the Ran block when the generic summary would hide it', () => {
@@ -39,10 +40,23 @@ describe('ToolExplorer', () => {
     expect(output).not.toContain('执行本地命令');
   });
 
+  it('does not inline heredoc bodies into the Ran block preview', () => {
+    const explorer = new ToolExplorer();
+
+    const output = strip(explorer.record('bash', {
+      command: "cat > /tmp/report.html << 'HTMLEOF' <!DOCTYPE html> <html><body>huge body</body></html>",
+    }));
+
+    expect(output).toContain('  ╭─ Ran');
+    expect(output).toContain("cat > /tmp/report.html");
+    expect(output).not.toContain('<!DOCTYPE html>');
+    expect(output).not.toContain('huge body');
+  });
+
   it('groups consecutive file changes under a Changed block', () => {
     const explorer = new ToolExplorer();
 
-    expect(strip(explorer.record('write', { file_path: '/tmp/demo/report.md' }))).toBe('  ╭─ Changed\n  │ Wrote report.md\n');
+    expect(strip(explorer.record('write', { file_path: '/tmp/demo/report.md' }))).toBe('\n\n  ╭─ Changed\n  │ Wrote report.md\n');
     expect(strip(explorer.record('edit', { file_path: '/tmp/demo/render.ts' }))).toBe('  │ Edited render.ts\n');
   });
 
@@ -52,7 +66,7 @@ describe('ToolExplorer', () => {
     explorer.record('tool_search', { query: 'statusbar.ts' });
     const output = strip(explorer.record('edit', { file_path: '/tmp/demo/statusbar.ts' }));
 
-    expect(output).toBe('\n  ╭─ Changed\n  │ Edited statusbar.ts\n');
+    expect(output).toBe('\n\n  ╭─ Changed\n  │ Edited statusbar.ts\n');
   });
 
   it('resets grouping between turns', () => {

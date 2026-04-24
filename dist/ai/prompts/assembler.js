@@ -25,6 +25,20 @@ function loadYzjHelp() {
         return '';
     return result.stdout?.trim() ?? '';
 }
+function shouldInjectYzjContext(opts) {
+    if (opts.channel === 'yzj') {
+        return true;
+    }
+    if (opts.devApp) {
+        return true;
+    }
+    const recentContext = [
+        opts.lastUserMessage,
+        opts.lastAssistantMessage,
+        opts.lspDiagnostics,
+    ].filter(Boolean).join('\n');
+    return /(云之家|yunzhijia|\byzj\b|轻应用|webhook|workflow|审批|open\s*api|appkey|sendmsgurl|message\/send)/i.test(recentContext);
+}
 // ---------------------------------------------------------------------------
 // Assembler
 // ---------------------------------------------------------------------------
@@ -125,7 +139,8 @@ export async function assembleSystemPrompt(opts) {
         apiOverview = readFileSync(API_OVERVIEW_PATH, 'utf-8');
     }
     const yzjHelp = loadYzjHelp();
-    if (apiOverview && remaining > 50) {
+    const includeYzjContext = shouldInjectYzjContext(opts);
+    if (includeYzjContext && apiOverview && remaining > 50) {
         const reserveForYzj = yzjHelp ? 100 : 0;
         const maxApiTokens = Math.max(0, remaining - reserveForYzj);
         const truncated = truncateToTokens(apiOverview, maxApiTokens);
@@ -133,7 +148,7 @@ export async function assembleSystemPrompt(opts) {
         remaining -= estimateTokens(truncated);
     }
     // 11. yzj CLI help
-    if (yzjHelp && remaining > 0) {
+    if (includeYzjContext && yzjHelp && remaining > 0) {
         dynamicSections.push(truncateToTokens(`## yzj CLI usage\n${yzjHelp}`, remaining));
     }
     const dynamicText = dynamicSections.filter(Boolean).join('\n\n');

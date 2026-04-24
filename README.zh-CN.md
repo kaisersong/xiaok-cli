@@ -1,8 +1,8 @@
 # xiaok-cli
 
-> 你在金蝶苍穹和云之家开发项目，需要在本地终端、移动端 IM、多 Agent 之间协作——但没有一个统一的入口。xiaok-cli 将本地终端代理、可扩展技能体系与云之家 IM 网关统一在同一套 agent runtime 之上：7 层 Prompt 架构保证输出质量，Bash 安全分类器拦截危险命令，类型化记忆持久化协作上下文，Intent Broker 集成支持多 Agent 协作。
+> xiaok-cli 是一个本地优先的 AI 任务交付工作台。它会把用户意图收成可执行的 skill 运行链路，在执行中持续纠偏，并尽量把事情真正做成。代码任务、文档整理、报告/幻灯片生成，以及云之家这类可选 channel 入口，都运行在同一套 runtime 上。
 
-面向金蝶苍穹与云之家开发者的 AI 编程 CLI。
+一个面向代码与文档密集型工作的、本地优先的 AI CLI。
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -24,15 +24,24 @@
 1. 本地终端交互式对话：`xiaok`
 2. 恢复上次会话：`xiaok -c`
 3. 单次任务执行：`xiaok "review the changes"`
-4. 启动本地 daemon：`xiaok daemon start`
-5. 云之家 IM 接入：`xiaok yzj serve`
-6. 嵌入式 Channel：会话内 `/yzjchannel` 直连移动端
+4. 通过已安装 skill 生成报告、brief 或幻灯片
+5. 启动本地 daemon：`xiaok daemon start`
+6. 可选的云之家 / 移动端接入：`xiaok yzjchannel serve`、`/yzjchannel`
 
 ---
 
 ## 设计理念
 
-### 1. 7 层 Prompt 架构
+### 1. 意图优先的任务交付
+
+xiaok 的目标是让用户感觉“AI 在做事”，而不是“我在操作一个流程系统”。
+
+- 重要请求会被视作带交付物的 intent，而不是普通聊天 turn。
+- skill 会按当前意图和阶段去匹配，并结合运行时证据做轻量重排。
+- 多阶段工作主要在内部编排，用户看到的是进展和结果，不是模板流程。
+- 最终输出应该更像交付结果，而不是状态回执。
+
+### 2. 7 层 Prompt 架构
 
 System Prompt 采用 CC 风格的 7 层设计，显式静态/动态分界：
 
@@ -40,7 +49,7 @@ System Prompt 采用 CC 风格的 7 层设计，显式静态/动态分界：
 
 | 层 | Section | 内容 |
 |---|---------|------|
-| 1 | Intro | 角色定义 — 金蝶苍穹 + 云之家开发者助手 |
+| 1 | Intro | 角色定义 — 任务交付型 AI skill 工作台；苍穹/云之家属于擅长场景 |
 | 2 | System | 运行时规则 — permission mode、prompt injection 防护 |
 | 3 | DoingTasks | 任务哲学 — 不加功能、先读后改、安全意识 |
 | 4 | Actions | 风险边界 — 破坏性操作需确认 |
@@ -51,7 +60,7 @@ System Prompt 采用 CC 风格的 7 层设计，显式静态/动态分界：
 **动态后缀（每 turn 重建）：**
 - 会话上下文、Session Guidance、Memory 注入、Token Budget、自动上下文
 
-### 2. 安全优先
+### 3. 安全优先
 
 **Bash 安全分类器**（三级风险）：
 
@@ -63,15 +72,15 @@ System Prompt 采用 CC 风格的 7 层设计，显式静态/动态分界：
 
 **工具输入校验** — JSON Schema 验证器在每次工具调用前校验必填字段和类型。
 
-### 3. 智能上下文管理
+### 4. 分阶段上下文管理
 
-三层上下文管理：
+长任务不应该无限堆成一个越来越飘的大上下文。xiaok 会把完整事实保存在会话状态里，但尽量只把当前阶段需要的内容投影给模型：
 
 1. **微压缩** — 工具结果超过 8000 字符自动截断
-2. **AI 驱动压缩** — 上下文达 85% 容量时 AI 摘要替换旧消息
-3. **记忆回注** — 压缩后相关记忆重新注入会话
+2. **阶段交接** — 阶段完成后可把 artifact 交接到新的上下文，而不是把整条历史硬拖下去
+3. **记忆回注** — compact / handoff 后把相关记忆重新注入会话
 
-### 4. 类型化记忆
+### 5. 类型化记忆
 
 持久化文件记忆存储，支持类型分类：
 
@@ -80,7 +89,7 @@ System Prompt 采用 CC 风格的 7 层设计，显式静态/动态分界：
 - `project` — 项目进度、决策、bug
 - `reference` — 外部资源指针
 
-### 5. 非侵入多 Agent 协作
+### 6. 非侵入多 Agent 协作
 
 通过 Intent Broker 生命周期 hook 接入：
 - SessionStart / UserPromptSubmit / Stop
@@ -201,18 +210,26 @@ xiaok daemon status
 xiaok daemon stop
 
 # 启动云之家 IM 网关
-xiaok yzj serve
+xiaok yzjchannel serve
 ```
 
 ### 会话内命令
 
 ```text
-/mode [default|auto|plan]     切换权限模式
+/exit                         退出会话
+/clear                        清屏
+/compact                      压缩当前会话上下文
+/context                      查看当前仓库上下文
+/mode [default|auto|plan]     查看或切换权限模式
 /models                       切换模型
-/tasks                        列出活跃任务
-/task <id>                    查看任务详情
-/yzjchannel                   连接云之家 channel
-/skill-name [args]            调用 skill
+/reminder <自然语言>          创建提醒
+/reminder list                查看提醒列表
+/reminder cancel <id>         取消提醒
+/settings                     查看当前生效配置
+/skills-reload                重新加载已安装 skill
+/yzjchannel                   连接嵌入式云之家 channel
+/help                         显示帮助
+/<skill-name> [args]          调用 skill
 ```
 
 ### 云之家 IM 命令
@@ -220,6 +237,7 @@ xiaok yzj serve
 ```text
 /help                    显示帮助
 /bind <cwd>              绑定工作区
+/bind clear              清除工作区绑定
 /status [taskId]         查看任务状态
 /approve <approvalId>    批准待审批动作
 /deny <approvalId>       拒绝待审批动作
@@ -245,14 +263,14 @@ xiaok review
 xiaok commit
 ```
 
-**云之家集成：**
+**云之家集成（可选 channel 适配器）：**
 
 ```bash
 # 配置
-xiaok yzj config set-send-msg-url "https://..."
+xiaok yzjchannel config set-webhook-url "https://..."
 
 # 启动网关
-xiaok yzj serve
+xiaok yzjchannel serve
 
 # 在云之家机器人聊天窗口使用
 /help

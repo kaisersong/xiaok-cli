@@ -250,6 +250,20 @@ describe('InputReader', () => {
       harness.restore();
     });
 
+    it('does not submit early when a pasted batch contains a wrapped-line carriage return artifact', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+
+      const pending = reader.read('> ');
+      harness.send('根据这几个文档，/Users/song/Downloads/AI原生工作中枢设计推演v2.docx /Users/song/Downloads/AI原生IM协同.md /Users/song/Downloads/AI原生企业的管理思想、管理范���与组织形\r › 态.pptx 整理一篇汇总的文档，然后生成幻灯片\r');
+
+      await expect(pending).resolves.toBe(
+        '根据这几个文档，/Users/song/Downloads/AI原生工作中枢设计推演v2.docx /Users/song/Downloads/AI原生IM协同.md /Users/song/Downloads/AI原生企业的管理思想、管理范���与组织形态.pptx 整理一篇汇总的文档，然后生成幻灯片',
+      );
+
+      harness.restore();
+    });
+
     it('hides the footer status while the slash menu is open', async () => {
       const harness = createTtyHarness();
       reader = new InputReader(new ReplRenderer(process.stdout));

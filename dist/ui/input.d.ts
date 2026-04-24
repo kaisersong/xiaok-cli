@@ -21,6 +21,11 @@ export interface ScrollPromptRenderFrame {
     summaryLine: string;
     statusLine: string;
     overlayLines: string[];
+    overlayKind?: 'generic' | 'permission' | 'feedback';
+}
+export interface InputReadOptions {
+    overlayLines?: string[];
+    overlayKind?: ScrollPromptRenderFrame['overlayKind'];
 }
 /** 向左找词边界（Ctrl+W / Alt+Left 用） */
 export declare function wordBoundaryLeft(text: string, cursor: number): number;
@@ -60,12 +65,14 @@ export declare class InputReader {
     private transcriptLogger?;
     private statusLineProvider?;
     private scrollPromptRenderer?;
+    private forcePlainMode;
     constructor(renderer?: ReplRenderer | undefined);
     setSkills(skills: SkillMeta[]): void;
     setModeCycleHandler(handler: () => PermissionMode): void;
     setTranscriptLogger(logger: TranscriptLogger | undefined): void;
     setStatusLineProvider(provider: (() => string[]) | undefined): void;
     setScrollPromptRenderer(renderer: ((frame: ScrollPromptRenderFrame) => boolean | void) | undefined): void;
-    read(prompt: string): Promise<string | null>;
+    setForcePlainMode(enabled: boolean): void;
+    read(prompt: string, options?: InputReadOptions): Promise<string | null>;
 }
 export {};

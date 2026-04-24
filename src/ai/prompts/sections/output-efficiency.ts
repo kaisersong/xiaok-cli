@@ -21,6 +21,7 @@ export function getOutputEfficiencySection(): string {
     "- Decisions that need the user's input",
     '- High-level status updates at natural milestones',
     '- Errors or blockers that change the plan',
+    '- Final delivery summaries that say what was produced, where it is, and what can happen next',
     '',
     "If you can say it in one sentence, don't use three. Prefer short, direct sentences over long explanations. This does not apply to code or tool calls.",
   ].join('\n');

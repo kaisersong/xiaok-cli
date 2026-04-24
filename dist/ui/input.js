@@ -18,6 +18,12 @@ function log(msg) {
     }
     catch { }
 }
+function normalizeBatchedInput(raw) {
+    return raw
+        .replace(/\r[ \t]*(?:›|❯)\s*/gu, '')
+        .replace(/\r\n/gu, '\n')
+        .replace(/\r(?!$)/gu, '\n');
+}
 /** 向左找词边界（Ctrl+W / Alt+Left 用） */
 export function wordBoundaryLeft(text, cursor) {
     let i = cursor;
@@ -148,6 +154,7 @@ export class InputReader {
     transcriptLogger;
     statusLineProvider;
     scrollPromptRenderer;
+    forcePlainMode = false;
     constructor(renderer) {
         this.renderer = renderer;
     }
@@ -166,7 +173,10 @@ export class InputReader {
     setScrollPromptRenderer(renderer) {
         this.scrollPromptRenderer = renderer;
     }
-    async read(prompt) {
+    setForcePlainMode(enabled) {
+        this.forcePlainMode = enabled;
+    }
+    async read(prompt, options) {
         if (!stdin.isTTY) {
             const rl = readline.createInterface({ input: stdin, output: stdout });
             return new Promise((resolve) => {
@@ -181,8 +191,9 @@ export class InputReader {
             let input = '';
             let cursor = 0;
             let resolved = false;
+            const staticOverlayLines = options?.overlayLines ?? [];
             let historyState = pushInputHistory(createInputHistoryState(), '', 0);
-            let richUiEnabled = Boolean(this.renderer);
+            let richUiEnabled = Boolean(this.renderer) && !this.forcePlainMode;
             let uiErrorNotified = false;
             const degradeUi = (context, error) => {
                 richUiEnabled = false;
@@ -205,9 +216,12 @@ export class InputReader {
                     return; // don't redraw after done()
                 if (this.renderer && richUiEnabled) {
                     try {
-                        const overlayLines = this.menuOpen
-                            ? buildSlashMenuOverlayLines(this.menuItems, this.menuIdx, stdout.columns ?? 80, MAX_MENU_VISIBLE_ITEMS)
-                            : [];
+                        const overlayLines = [
+                            ...staticOverlayLines,
+                            ...(this.menuOpen
+                                ? buildSlashMenuOverlayLines(this.menuItems, this.menuIdx, stdout.columns ?? 80, MAX_MENU_VISIBLE_ITEMS)
+                                : []),
+                        ];
                         const footerLines = (() => {
                             try {
                                 return this.statusLineProvider?.() ?? [];
@@ -231,6 +245,7 @@ export class InputReader {
                                     summaryLine,
                                     statusLine,
                                     overlayLines,
+                                    overlayKind: options?.overlayKind,
                                 });
                                 if (didRender !== false) {
                                     return;
@@ -363,12 +378,13 @@ export class InputReader {
                 // Handle batch input (multiple characters/keys in one data event)
                 // This happens in automated testing (expect/pexpect) and pasted text
                 if (key.length > 1) {
+                    const normalizedBatch = normalizeBatchedInput(key);
                     // Process input with ANSI sequence recognition
                     let i = 0;
                     let skipSyncMenuAfterBatch = false;
-                    while (i < key.length) {
+                    while (i < normalizedBatch.length) {
                         // Try to identify ANSI sequences first
-                        const identified = identifyKey(key, i);
+                        const identified = identifyKey(normalizedBatch, i);
                         if (identified && identified.consumed > 0) {
                             // Found an ANSI sequence or control character
                             const action = resolveAction(identified.key);
@@ -431,7 +447,7 @@ export class InputReader {
                         }
                         else {
                             // Regular character
-                            const ch = key[i];
+                            const ch = normalizedBatch[i];
                             if (ch >= ' ' && !/[\x1b\x7f]/.test(ch)) {
                                 // Printable character
                                 const shouldSyncMenu = input.startsWith('/') || ch === '/';

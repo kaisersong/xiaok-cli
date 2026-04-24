@@ -52,6 +52,9 @@ export function toggleVerbose(): boolean {
 const esc = (code: string) => (s: string) =>
   colorsEnabled ? `\x1b[${code}m${s}\x1b[0m` : s;
 
+const rgb = (r: number, g: number, b: number) => (s: string) =>
+  colorsEnabled ? `\x1b[38;2;${r};${g};${b}m${s}\x1b[0m` : s;
+
 export const dim = esc("2");
 export const bold = esc("1");
 export const red = esc("31");
@@ -78,6 +81,8 @@ export const bgDarkGray = (s: string) =>
   colorsEnabled ? `\x1b[48;5;235m${s}\x1b[0m` : s;
 export const bgInputGray = (s: string) =>
   colorsEnabled ? `\x1b[48;5;238m${s}\x1b[0m` : s;
+export const intentHint = rgb(142, 142, 142);
+export const intentHintDot = rgb(122, 168, 255);
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const RAIL_INDENT = "  ";
@@ -330,14 +335,18 @@ function extractToolActivityTarget(input: Record<string, unknown>): string {
 export function formatSubmittedInput(text: string): string {
   const termWidth = process.stdout.columns ?? 80;
   const safeWidth = Math.max(1, termWidth - 1);
-  const prefix = ' › ';
-  const textWidth = Math.max(1, safeWidth - getDisplayWidth(prefix));
+  const firstLinePrefix = ' › ';
+  const continuationPrefix = '   ';
+  const textWidth = Math.max(1, safeWidth - getDisplayWidth(firstLinePrefix));
   const lines = text
     .split(/\r?\n/)
     .flatMap((line) => wrapDisplayLine(line, textWidth));
 
   return lines
-    .map((line) => bgDarkGray(padToDisplayWidth(`${prefix}${line}`, safeWidth)))
+    .map((line, index) => {
+      const prefix = index === 0 ? firstLinePrefix : continuationPrefix;
+      return bgDarkGray(padToDisplayWidth(`${prefix}${line}`, safeWidth));
+    })
     .concat(bgDarkGray(' '.repeat(safeWidth)))
     .join('\n') + '\n';
 }

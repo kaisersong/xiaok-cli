@@ -31,6 +31,7 @@ const API_OVERVIEW_PATH = join(__dirname, '../../../data/yzj-api-overview.md');
 // ---------------------------------------------------------------------------
 
 export interface AssemblerOptions {
+  channel?: 'chat' | 'yzj';
   enterpriseId: string | null;
   devApp: DevAppIdentity | null;
   cwd: string;
@@ -79,6 +80,24 @@ function loadYzjHelp(): string {
   const result = spawnSync('yzj', ['--help'], { encoding: 'utf-8', timeout: 3000 });
   if (result.error || result.status !== 0) return '';
   return result.stdout?.trim() ?? '';
+}
+
+function shouldInjectYzjContext(opts: AssemblerOptions): boolean {
+  if (opts.channel === 'yzj') {
+    return true;
+  }
+
+  if (opts.devApp) {
+    return true;
+  }
+
+  const recentContext = [
+    opts.lastUserMessage,
+    opts.lastAssistantMessage,
+    opts.lspDiagnostics,
+  ].filter(Boolean).join('\n');
+
+  return /(云之家|yunzhijia|\byzj\b|轻应用|webhook|workflow|审批|open\s*api|appkey|sendmsgurl|message\/send)/i.test(recentContext);
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +215,9 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
   }
   const yzjHelp = loadYzjHelp();
 
-  if (apiOverview && remaining > 50) {
+  const includeYzjContext = shouldInjectYzjContext(opts);
+
+  if (includeYzjContext && apiOverview && remaining > 50) {
     const reserveForYzj = yzjHelp ? 100 : 0;
     const maxApiTokens = Math.max(0, remaining - reserveForYzj);
     const truncated = truncateToTokens(apiOverview, maxApiTokens);
@@ -205,7 +226,7 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
   }
 
   // 11. yzj CLI help
-  if (yzjHelp && remaining > 0) {
+  if (includeYzjContext && yzjHelp && remaining > 0) {
     dynamicSections.push(truncateToTokens(`## yzj CLI usage\n${yzjHelp}`, remaining));
   }
 

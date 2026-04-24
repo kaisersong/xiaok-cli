@@ -27,6 +27,7 @@ describe('intent delegation prompt section', () => {
     expect(snapshot.rendered).toContain('receipt');
     expect(snapshot.rendered).toContain('salvage');
     expect(snapshot.rendered).toContain('authoritative source inputs');
+    expect(snapshot.rendered).toContain('answer the user directly and naturally');
     expect(snapshot.rendered).toContain('Never choose an output path that is identical');
   });
 });

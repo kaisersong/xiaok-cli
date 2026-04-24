@@ -1,0 +1,27 @@
+Customer Signals
+================
+
+Interview batch A:
+- Plant managers asked for a single markdown brief that can be circulated across
+  operations, finance, and IT before any live deployment.
+- Two buyers said that the first deliverable should combine findings from multiple
+  teams, not repeat three separate memos.
+- One VP of operations wants a report section that compares manufacturing AI and
+  SaaS AI across adoption risk, rollout tempo, and ownership model.
+
+Interview batch B:
+- SaaS heads of product want lightweight deliverables first, then a polished report
+  for the exec review meeting.
+- Revenue leaders prefer concise narrative plus tables, not raw bullet dumps.
+- Buyers repeatedly asked for a "what should we do next quarter" section.
+
+Observed requirements:
+1. Merge the source material before analysis so the narrative is consistent.
+2. Produce Markdown first because the team edits it collaboratively.
+3. Produce a report after the Markdown draft is stable.
+4. Keep recommendations grouped by segment and by execution horizon.
+
+Risks surfaced by the interviews:
+- If the merged draft is too generic, stakeholders assume the model hallucinated.
+- If the report skips concrete action items, decision makers do not forward it.
+- If the report ignores data readiness, the rollout plan is judged unrealistic.

@@ -40,7 +40,7 @@ export interface ScrollPromptFrame {
   summaryLine?: string;
   statusLine: string;
   overlayLines?: string[];
-  overlayKind?: 'generic' | 'permission';
+  overlayKind?: 'generic' | 'permission' | 'feedback';
   owner?: 'input' | 'renderer';
 }
 
@@ -114,6 +114,10 @@ export class ScrollRegionManager {
   private _hasStreamedContent = false;
   /** Whether a renderer-owned permission overlay currently owns the prompt/footer area. */
   private _overlayPromptVisible = false;
+  /** Active overlay kind currently rendered above the footer input, if any. */
+  private _activeOverlayKind: ScrollPromptFrame['overlayKind'] | null = null;
+  /** Which subsystem last rendered the active overlay. */
+  private _activeOverlayOwner: ScrollPromptFrame['owner'] | null = null;
   /** Footer is currently visible on screen. */
   private _footerVisible = false;
   /** Tracks if we have already pushed past the welcome screen. */
@@ -157,23 +161,47 @@ export class ScrollRegionManager {
     return Math.max(1, Math.min(MAX_INPUT_ROWS, this.config.rows - this.config.gapHeight - 4));
   }
 
-  private getSummaryReserveRows(summaryLine = this.lastSummaryLine): number {
-    return summaryLine ? 1 : 0;
+  private countFooterLineRows(text: string): number {
+    if (!text) {
+      return 0;
+    }
+    const cols = Math.max(1, this.config.columns);
+    return Math.max(1, Math.ceil(getDisplayWidth(stripAnsi(text)) / cols));
   }
 
-  private getSummaryRow(inputStartRow: number): number {
-    return Math.max(1, inputStartRow - 2);
+  private getSummaryReserveRows(summaryLine = this.lastSummaryLine): number {
+    return this.countFooterLineRows(summaryLine);
+  }
+
+  private getSummaryStartRow(inputStartRow: number, summaryLine = this.lastSummaryLine): number {
+    const summaryRows = this.getSummaryReserveRows(summaryLine);
+    if (summaryRows <= 0) {
+      return -1;
+    }
+    return Math.max(1, inputStartRow - 1 - summaryRows);
+  }
+
+  private getScrollBottomForLayout(
+    inputFrameRows: number,
+    overlayRows: number,
+    summaryLine: string,
+  ): number {
+    const summaryReserveRows = this.getSummaryReserveRows(summaryLine);
+    const reservedRowsAboveInput = overlayRows > 0
+      ? overlayRows + this.config.gapHeight + summaryReserveRows
+      : this.config.gapHeight + summaryReserveRows;
+    return Math.max(1, this.getInputStartRow(inputFrameRows) - reservedRowsAboveInput - 1);
   }
 
   /**
    * Calculate the bottom row of the scroll region (where activity line renders).
    */
   private getScrollBottom(): number {
-    const summaryReserveRows = this.getSummaryReserveRows();
-    const reservedRowsAboveInput = this.lastOverlayRenderRows > 0
-      ? this.lastOverlayRenderRows + this.config.gapHeight + summaryReserveRows
-      : this.config.gapHeight + summaryReserveRows;
-    return Math.max(1, this.getInputStartRow() - reservedRowsAboveInput - 1);
+    return this.getScrollBottomForLayout(
+      this.lastInputRenderRows,
+      this.lastOverlayRenderRows,
+      this.lastSummaryLine,
+    );
   }
 
   /**
@@ -214,8 +242,40 @@ export class ScrollRegionManager {
     return lines.slice(-maxOverlayRows);
   }
 
+  private hasActiveOverlayPrompt(): boolean {
+    return this.lastOverlayRenderRows > 0 && this._activeOverlayKind !== null;
+  }
+
+  private isRendererPermissionOverlayActive(): boolean {
+    return this._activeOverlayKind === 'permission' && this._activeOverlayOwner === 'renderer';
+  }
+
+  private clearActiveOverlayPrompt(): void {
+    this._overlayPromptVisible = false;
+    this._activeOverlayKind = null;
+    this._activeOverlayOwner = null;
+  }
+
   private clearScreenRow(row: number): void {
     this.stream.write(`\x1b[${row};1H${CLEAR_LINE}`);
+  }
+
+  private getClearScreenRowSequence(row: number): string {
+    return `\x1b[${row};1H${CLEAR_LINE}`;
+  }
+
+  private composeActivityLineRender(activityLine: string): string {
+    const previousActivityRow = this.lastActivityRow;
+    const scrollBottom = this.getScrollBottom();
+    const cols = this.config.columns;
+    let output = '';
+
+    if (previousActivityRow !== null && previousActivityRow !== scrollBottom) {
+      output += `${MOVE_TO_ROW.replace('%d', String(previousActivityRow))}${CLEAR_LINE}`;
+    }
+    output += `${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}${this.padLine(activityLine, cols, false)}`;
+    this.lastActivityRow = scrollBottom;
+    return output;
   }
 
   private clearRenderedFooterRows(): void {
@@ -353,6 +413,7 @@ export class ScrollRegionManager {
     this.lastInputRenderRows = this.getInputFrameRows(1);
     this.lastFooterClearStartRow = 0;
     this.lastFooterClearEndRow = 0;
+    this.clearActiveOverlayPrompt();
 
     // Set scroll region (rows 1 to scrollBottom)
     this.setScrollRegion();
@@ -396,6 +457,7 @@ export class ScrollRegionManager {
     this.lastSummaryLine = '';
     this.lastFooterClearStartRow = 0;
     this.lastFooterClearEndRow = 0;
+    this.clearActiveOverlayPrompt();
   }
 
   /**
@@ -416,16 +478,18 @@ export class ScrollRegionManager {
     this.lastStatusLine = frame.statusLine;
 
     if ((frame.overlayLines?.length ?? 0) > 0) {
-      this._overlayPromptVisible = owner === 'renderer' && frame.overlayKind === 'permission';
+      this._activeOverlayKind = frame.overlayKind ?? 'generic';
+      this._activeOverlayOwner = owner;
+      this._overlayPromptVisible = this.isRendererPermissionOverlayActive();
       this.renderOverlayPromptFrame(frame);
       return;
     }
 
-    if (this._overlayPromptVisible && owner !== 'renderer') {
+    if (this.isRendererPermissionOverlayActive() && owner !== 'renderer') {
       return;
     }
 
-    this._overlayPromptVisible = false;
+    this.clearActiveOverlayPrompt();
     this.renderFooter({
       inputPrompt: frame.placeholder,
       summaryLine: frame.summaryLine,
@@ -473,12 +537,17 @@ export class ScrollRegionManager {
       this.lastStatusLine = statusLine;
     }
 
-    const summaryRow = this.getSummaryRow(this.getInputStartRow());
+    const inputStartRow = this.getInputStartRow();
+    const summaryStartRow = this.getSummaryStartRow(inputStartRow, this.lastSummaryLine);
+    const summaryRows = this.getSummaryReserveRows(this.lastSummaryLine);
     const statusBarRow = this.getStatusBarRow();
 
-    if (summaryRow >= 1) {
-      this.stream.write(`${MOVE_TO_ROW.replace('%d', String(summaryRow))}${CLEAR_LINE}`);
+    if (summaryStartRow >= 1) {
+      for (let row = summaryStartRow; row < summaryStartRow + summaryRows; row += 1) {
+        this.stream.write(`${MOVE_TO_ROW.replace('%d', String(row))}${CLEAR_LINE}`);
+      }
       if (this.lastSummaryLine) {
+        this.stream.write(`${MOVE_TO_ROW.replace('%d', String(summaryStartRow))}`);
         this.stream.write(this.lastSummaryLine);
       }
     }
@@ -496,16 +565,28 @@ export class ScrollRegionManager {
    * Status bar shows static info like model, percentage, branch, project.
    * After rendering, cursor is positioned at input line for user typing.
    */
-  renderFooter(options?: {
-    inputPrompt?: string;
-    summaryLine?: string;
-    statusLine?: string;
-  }): void {
+  private renderFooterFrame(
+    options: {
+      inputPrompt?: string;
+      summaryLine?: string;
+      statusLine?: string;
+    } | undefined,
+    restoreActivity: boolean,
+    footerOnly = false,
+  ): void {
     if (!this.active) return;
 
     this._footerVisible = true;
 
     const cols = this.config.columns;
+    const previousInputRows = this.lastInputRenderRows;
+    const previousOverlayRows = this.lastOverlayRenderRows;
+    const previousSummaryLine = this.lastSummaryLine;
+    const previousScrollBottom = this.getScrollBottomForLayout(
+      previousInputRows,
+      previousOverlayRows,
+      previousSummaryLine,
+    );
 
     // Use inputPrompt as a placeholder text when no user input
     const inputPrompt = options?.inputPrompt ?? this.lastInputPrompt ?? 'waiting...';
@@ -524,51 +605,56 @@ export class ScrollRegionManager {
     const inputRows = Math.max(1, inputLines.length);
     const inputFrameRows = this.getInputFrameRows(inputRows);
     const isPlaceholder = !this.lastInputValue;
+    const nextScrollBottom = this.getScrollBottomForLayout(inputFrameRows, 0, summaryLine);
 
     // Use absolute row positioning instead of cursor-down-999 which may be
     // unreliable in some terminals. Calculate exact footer rows.
     const statusBarRow = this.getStatusBarRow();
-    const previousInputStartRow = this.getInputStartRow();
+    const previousInputStartRow = this.getInputStartRow(previousInputRows);
     const inputStartRow = this.getInputStartRow(inputFrameRows);
     const inputTextStartRow = inputStartRow + INPUT_PADDING_ROWS;
     const inputEndRow = this.getInputBarRow();
 
-    // Reset scroll region to allow writing to footer area
-    this.stream.write(RESET_SCROLL_REGION);
-    this.stream.write(SHOW_CURSOR);
+    // Reset scroll region to allow writing to footer area. Batch the footer
+    // redraw into a single terminal write so prompt/status don't flicker apart.
+    let footerOutput = `${RESET_SCROLL_REGION}${SHOW_CURSOR}`;
 
     // Clear previous and current editor rows. This prevents stale rows when
     // the input grows or shrinks between redraws.
-    const previousOverlayStartRow = this.lastOverlayRenderRows > 0
-      ? Math.max(1, previousInputStartRow - this.lastOverlayRenderRows - this.config.gapHeight)
+    const previousOverlayStartRow = previousOverlayRows > 0
+      ? Math.max(
+        1,
+        previousInputStartRow - previousOverlayRows - this.config.gapHeight - this.getSummaryReserveRows(previousSummaryLine),
+      )
       : previousInputStartRow;
-    const footerClearStartRow = Math.max(1, inputStartRow - this.config.gapHeight);
-    const transientClearStartRow = this.lastOverlayRenderRows > 0
+    const footerClearStartRow = Math.max(1, inputStartRow - this.config.gapHeight - this.getSummaryReserveRows(summaryLine));
+    const transientClearStartRow = previousOverlayRows > 0
       ? Math.max(1, this._cursorRow + 1)
       : previousOverlayStartRow;
-    const clearStartRow = Math.max(1, Math.min(previousOverlayStartRow, footerClearStartRow, transientClearStartRow));
+    const clearStartRow = footerOnly
+      ? footerClearStartRow
+      : Math.max(1, Math.min(previousOverlayStartRow, footerClearStartRow, transientClearStartRow));
+    this.reserveTranscriptRows(nextScrollBottom, previousScrollBottom);
     for (let row = clearStartRow; row <= inputEndRow; row += 1) {
-      this.clearScreenRow(row);
+      footerOutput += this.getClearScreenRowSequence(row);
     }
     if (shouldCompactSubmittedInputForWindowsTmux()) {
-      this.setScrollRegion();
+      footerOutput += SET_SCROLL_REGION.replace('%d', String(this.getScrollBottom()));
       for (let row = clearStartRow; row <= statusBarRow; row += 1) {
-        this.clearScreenRow(row);
+        footerOutput += this.getClearScreenRowSequence(row);
       }
     }
 
     for (let index = 0; index < INPUT_PADDING_ROWS; index += 1) {
       const row = inputStartRow + index;
-      this.stream.write(`\x1b[${row};1H${CLEAR_LINE}`);
-      this.stream.write(this.padBackgroundRow(cols));
+      footerOutput += `\x1b[${row};1H${CLEAR_LINE}`;
+      footerOutput += this.padBackgroundRow(cols);
     }
 
-    const summaryRow = this.getSummaryRow(inputStartRow);
-    if (summaryRow >= 1) {
-      this.stream.write(`\x1b[${summaryRow};1H${CLEAR_LINE}`);
-      if (summaryLine) {
-        this.stream.write(summaryLine);
-      }
+    const summaryStartRow = this.getSummaryStartRow(inputStartRow, summaryLine);
+    if (summaryStartRow >= 1 && summaryLine) {
+      footerOutput += `\x1b[${summaryStartRow};1H`;
+      footerOutput += summaryLine;
     }
 
     inputLines.forEach((line, index) => {
@@ -576,19 +662,19 @@ export class ScrollRegionManager {
       const prefix = index === 0
         ? `${INPUT_BG}${PROMPT_FG}${getFooterPromptGlyph()}${RESET_FG} `
         : `${INPUT_BG}  `;
-      this.stream.write(`\x1b[${row};1H${CLEAR_LINE}`);
+      footerOutput += `\x1b[${row};1H${CLEAR_LINE}`;
       if (isPlaceholder) {
-        this.stream.write(this.padLineWithBg(`${prefix}${DIM}${line}`, cols));
+        footerOutput += this.padLineWithBg(`${prefix}${DIM}${line}`, cols);
       } else {
-        this.stream.write(this.padLineWithBg(`${prefix}${line}`, cols));
+        footerOutput += this.padLineWithBg(`${prefix}${line}`, cols);
       }
     });
 
     // Status bar (bottom row) is rendered last so any footer-line wrap quirks
     // in the input editor cannot leave stale status text above it.
-    this.stream.write(`\x1b[${statusBarRow};1H${CLEAR_LINE}`);
+    footerOutput += `\x1b[${statusBarRow};1H${CLEAR_LINE}`;
     if (statusLine) {
-      this.stream.write(statusLine);
+      footerOutput += statusLine;
     }
 
     this.lastInputRenderRows = inputFrameRows;
@@ -600,19 +686,29 @@ export class ScrollRegionManager {
     // after writing the footer rows, so keep the region active before footer
     // output on that path and skip the second application here.
     if (!shouldCompactSubmittedInputForWindowsTmux()) {
-      this.setScrollRegion();
+      footerOutput += SET_SCROLL_REGION.replace('%d', String(this.getScrollBottom()));
     }
 
-    if (this.lastActivityLine && !this._contentStreaming && !this._overlayPromptVisible) {
-      this.renderActivity(this.lastActivityLine);
+    if (restoreActivity && this.lastActivityLine && !this._contentStreaming && !this.hasActiveOverlayPrompt()) {
+      footerOutput += this.composeActivityLineRender(this.lastActivityLine);
     }
+
+    this.stream.write(footerOutput);
 
     // Position cursor after restoring the scroll region. Some terminals move
     // the cursor when DECSTBM is applied, so this must be the final cursor op.
     this.positionCursorForInput();
   }
 
-  private reserveTranscriptRowsForOverlay(nextScrollBottom: number, previousScrollBottom: number): void {
+  renderFooter(options?: {
+    inputPrompt?: string;
+    summaryLine?: string;
+    statusLine?: string;
+  }): void {
+    this.renderFooterFrame(options, true);
+  }
+
+  private reserveTranscriptRows(nextScrollBottom: number, previousScrollBottom: number): void {
     const clampedCurrentBottom = Math.max(1, previousScrollBottom);
     const visibleContentRow = Math.max(1, Math.min(this._cursorRow, clampedCurrentBottom));
     const rowsToScroll = Math.max(0, visibleContentRow - nextScrollBottom);
@@ -634,7 +730,10 @@ export class ScrollRegionManager {
 
   private renderOverlayPromptFrame(frame: ScrollPromptFrame): void {
     const isPermissionOverlay = frame.overlayKind === 'permission';
-    const keepStatusLineVisible = isPermissionOverlay && !shouldSkipPermissionOverlayReserve();
+    const keepStatusLineVisible = (
+      (isPermissionOverlay && !shouldSkipPermissionOverlayReserve())
+      || frame.overlayKind === 'feedback'
+    );
     this._footerVisible = isPermissionOverlay || keepStatusLineVisible;
     const cols = this.config.columns;
     const previousInputRows = this.lastInputRenderRows;
@@ -677,7 +776,7 @@ export class ScrollRegionManager {
       this.clearScreenRow(row);
     }
     if (!(isPermissionOverlay && shouldSkipPermissionOverlayReserve())) {
-      this.reserveTranscriptRowsForOverlay(scrollBottom, previousScrollBottom);
+      this.reserveTranscriptRows(scrollBottom, previousScrollBottom);
     }
     this.setScrollRegion(scrollBottom);
     for (let row = clearStartRow; row <= statusBarRow; row += 1) {
@@ -714,12 +813,11 @@ export class ScrollRegionManager {
       }
     });
 
-    const summaryRow = this.getSummaryRow(inputStartRow);
-    if (summaryRow >= 1) {
-      this.stream.write(`\x1b[${summaryRow};1H${CLEAR_LINE}`);
-      if (frame.summaryLine) {
-        this.stream.write(frame.summaryLine);
-      }
+    const effectiveSummaryLine = frame.summaryLine ?? this.lastSummaryLine;
+    const summaryStartRow = this.getSummaryStartRow(inputStartRow, effectiveSummaryLine);
+    if (summaryStartRow >= 1 && effectiveSummaryLine) {
+      this.stream.write(`\x1b[${summaryStartRow};1H`);
+      this.stream.write(effectiveSummaryLine);
     }
 
     if (keepStatusLineVisible) {
@@ -790,13 +888,17 @@ export class ScrollRegionManager {
    * Clear the last input value.
    * Call this after user submits input so the footer shows placeholder during turn.
    */
-  clearLastInput(options?: { renderFooter?: boolean }): void {
+  clearLastInput(options?: { renderFooter?: boolean; inputPrompt?: string }): void {
     this.lastInputValue = '';
     this.lastInputCursor = 0;
+    if (options?.inputPrompt) {
+      this.lastInputPrompt = options.inputPrompt;
+    }
     if (this.active && options?.renderFooter !== false) {
       this.renderFooter({
         summaryLine: this.lastSummaryLine || undefined,
         statusLine: this.lastStatusLine || undefined,
+        inputPrompt: options?.inputPrompt,
       });
     }
   }
@@ -845,7 +947,10 @@ export class ScrollRegionManager {
     if (!this.active) return;
 
     this._contentStreaming = true;
-    this._footerVisible = false;
+    // Keep the footer rows reserved and visible while content streams so the
+    // prompt/status area never visually disappears. Tool phases may temporarily
+    // end streaming and show live activity above the footer.
+    this._footerVisible = true;
     const scrollBottom = this.getScrollBottom();
     const targetRow = Math.max(1, Math.min(this._cursorRow, scrollBottom));
     this._streamStartRow = targetRow;
@@ -902,23 +1007,30 @@ export class ScrollRegionManager {
       this.stream.write(`\r${CLEAR_LINE}${activityLine}`);
       return;
     }
-    if (this._overlayPromptVisible) {
+    if (this.hasActiveOverlayPrompt()) {
       return;
     }
 
     this.lastActivityLine = activityLine;
 
     // Render activity line at bottom of scroll region
-    const previousActivityRow = this.lastActivityRow;
-    const scrollBottom = this.getScrollBottom();
-    const cols = this.config.columns;
-    if (previousActivityRow !== null && previousActivityRow !== scrollBottom) {
-      this.stream.write(`${MOVE_TO_ROW.replace('%d', String(previousActivityRow))}${CLEAR_LINE}`);
+    this.stream.write(this.composeActivityLineRender(activityLine));
+    if (!this._footerVisible && !this._contentStreaming && !this.hasActiveOverlayPrompt()) {
+      this.renderFooterFrame({
+        inputPrompt: this.lastInputPrompt || 'Type your message...',
+        summaryLine: this.lastSummaryLine || undefined,
+        statusLine: this.lastStatusLine || undefined,
+      }, false);
+      return;
     }
-    this.stream.write(
-      `${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}${this.padLine(activityLine, cols, false)}`,
-    );
-    this.lastActivityRow = scrollBottom;
+    if (this._footerVisible) {
+      this.renderFooterFrame({
+        inputPrompt: this.lastInputPrompt || 'Type your message...',
+        summaryLine: this.lastSummaryLine || undefined,
+        statusLine: this.lastStatusLine || undefined,
+      }, false, true);
+      return;
+    }
     if (shouldCompactSubmittedInputForWindowsTmux()) {
       this.renderFooter({
         inputPrompt: this.lastInputPrompt || 'Type your message...',
@@ -937,6 +1049,10 @@ export class ScrollRegionManager {
       return;
     }
 
+    if (!this.lastActivityLine && this.lastActivityRow === null) {
+      return;
+    }
+
     this.lastActivityLine = '';
     const scrollBottom = this.lastActivityRow ?? this.getScrollBottom();
 
@@ -950,21 +1066,24 @@ export class ScrollRegionManager {
   updateStatusLine(statusLine: string): void {
     this.lastStatusLine = statusLine;
     if (this.active) {
-      if (this._overlayPromptVisible && shouldSkipPermissionOverlayReserve()) {
+      if (this.isRendererPermissionOverlayActive() && shouldSkipPermissionOverlayReserve()) {
         return;
       }
       if (this._contentStreaming || !this._footerVisible) {
         return;
       }
-      const statusBarRow = this.getStatusBarRow();
-      this.stream.write(`${MOVE_TO_ROW.replace('%d', String(statusBarRow))}${CLEAR_LINE}`);
-      this.stream.write(statusLine);
-      if (this._overlayPromptVisible) {
+      if (this.isRendererPermissionOverlayActive()) {
+        const statusBarRow = this.getStatusBarRow();
+        this.stream.write(`${MOVE_TO_ROW.replace('%d', String(statusBarRow))}${CLEAR_LINE}`);
+        this.stream.write(statusLine);
         this.stream.write(HIDE_CURSOR);
         this.positionCursorForPermissionOverlay(this.lastInputRenderRows);
         return;
       }
-      if (this.lastOverlayRenderRows > 0) {
+      if (this.hasActiveOverlayPrompt()) {
+        const statusBarRow = this.getStatusBarRow();
+        this.stream.write(`${MOVE_TO_ROW.replace('%d', String(statusBarRow))}${CLEAR_LINE}`);
+        this.stream.write(statusLine);
         const inputState = this.lastInputValue
           ? this.getFooterInputState(this.lastInputValue, this.lastInputCursor)
           : undefined;
@@ -972,7 +1091,11 @@ export class ScrollRegionManager {
         this.positionCursorForOverlayInput(inputState, inputRows);
         return;
       }
-      this.positionCursorForInput();
+      this.renderFooterFrame({
+        inputPrompt: this.lastInputPrompt || 'Type your message...',
+        summaryLine: this.lastSummaryLine || undefined,
+        statusLine,
+      }, false, true);
     }
   }
 
@@ -1142,7 +1265,7 @@ export class ScrollRegionManager {
     this._cursorUncertain = false;
     this.stream.write(text);
 
-    if (this._footerVisible && !this._contentStreaming && !this._overlayPromptVisible) {
+    if (this._footerVisible && !this._contentStreaming && !this.hasActiveOverlayPrompt()) {
       this.renderFooter({
         inputPrompt: this.lastInputPrompt || 'Type your message...',
         summaryLine: this.lastSummaryLine || undefined,
@@ -1187,14 +1310,15 @@ export class ScrollRegionManager {
     this._cursorCol = 0;
     this._pastWelcome = true;
 
-    // Windows tmux can scroll the fixed footer up by one row when the
-    // submitted transcript block lands right below the visible viewport.
-    // Re-anchor the footer immediately so later status/activity updates don't
-    // duplicate the status line in the prompt gap.
-    if (shouldCompactSubmittedInputForWindowsTmux() && this._footerVisible) {
+    // Some real terminals can scroll the fixed footer up by one or more rows
+    // when a submitted transcript block lands directly against the footer
+    // boundary. Re-anchor the footer immediately so later activity/status
+    // updates never inherit a half-cleared prompt/status chrome.
+    if (this._footerVisible && !this.hasActiveOverlayPrompt()) {
       this.renderFooter({
         inputPrompt: this.lastInputPrompt || 'Type your message...',
-        statusLine: undefined,
+        summaryLine: this.lastSummaryLine || undefined,
+        statusLine: this.lastStatusLine || undefined,
       });
     }
   }

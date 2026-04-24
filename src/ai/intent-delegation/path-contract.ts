@@ -13,7 +13,7 @@ export interface SuggestedOutputPath {
 }
 
 const SOURCE_PATH_PATTERN =
-  /(?:^|\s)(?:"((?:\/|[a-zA-Z]:[\\/])[^"]+)"|'((?:\/|[a-zA-Z]:[\\/])[^']+)'|((?:\/|[a-zA-Z]:[\\/])\S+))/gu;
+  /(?:^|[\s，。！？；：、,!?;:])(?:"((?:\/|[a-zA-Z]:[\\/])[^"]+)"|'((?:\/|[a-zA-Z]:[\\/])[^']+)'|((?:\/|[a-zA-Z]:[\\/])\S+))/gu;
 
 export function extractProvidedSourcePaths(rawIntent: string): string[] {
   const matches = Array.from(rawIntent.matchAll(SOURCE_PATH_PATTERN));

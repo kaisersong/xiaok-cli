@@ -1,8 +1,8 @@
 # xiaok-cli
 
-> You develop on Kingdee Cosmic (苍穹) and Yunzhijia (云之家) projects, needing collaboration across local terminal, mobile IM, and multiple agents — but without a unified entry point. xiaok-cli unifies local terminal agent, extensible skill system, and Yunzhijia IM gateway under the same agent runtime: 7-layer prompt architecture ensures output quality, Bash safety classifier intercepts dangerous commands, typed memory persists collaboration context, and Intent Broker integration enables multi-agent workflows.
+> xiaok-cli is a local-first AI task-delivery workbench. It turns user intent into finished results by matching skills, staging execution, and recovering when runs drift. Coding, document/report/slide generation, and optional channel adapters like Yunzhijia all run on the same runtime.
 
-An AI coding CLI for Kingdee Cosmic and Yunzhijia developers.
+A local-first AI CLI for reliable skill execution across coding and document-heavy workflows.
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -24,15 +24,24 @@ An AI coding CLI for Kingdee Cosmic and Yunzhijia developers.
 1. Local terminal interactive chat: `xiaok`
 2. Resume last session: `xiaok -c`
 3. Single-shot task: `xiaok "review the changes"`
-4. Start local daemon: `xiaok daemon start`
-5. Yunzhijia IM integration: `xiaok yzj serve`
-6. Embedded Channel: `/yzjchannel` inside session for mobile access
+4. Generate reports, briefs, or slides through installed skills
+5. Start local daemon: `xiaok daemon start`
+6. Optional Yunzhijia / mobile access: `xiaok yzjchannel serve`, `/yzjchannel`
 
 ---
 
 ## Design Philosophy
 
-### 1. 7-Layer Prompt Architecture
+### 1. Intent-First Task Delivery
+
+xiaok is designed to feel like a task agent, not a workflow dashboard.
+
+- Substantial requests are treated as intents with a deliverable, not just chat turns.
+- Skills are matched against the current intent and stage, then re-ranked with runtime evidence.
+- Multi-step work is staged internally so the user sees progress, not template mechanics.
+- Final output should feel like delivered work, not a process transcript.
+
+### 2. 7-Layer Prompt Architecture
 
 System Prompt follows CC-style 7-layer design with explicit static/dynamic boundary:
 
@@ -40,7 +49,7 @@ System Prompt follows CC-style 7-layer design with explicit static/dynamic bound
 
 | Layer | Section | Content |
 |-------|---------|---------|
-| 1 | Intro | Role & identity — Kingdee Cosmic + Yunzhijia developer assistant |
+| 1 | Intro | Role & identity — task-delivery AI skill workbench; Cosmic/Yunzhijia as domain strengths |
 | 2 | System | Runtime rules — permission mode, prompt injection防护 |
 | 3 | DoingTasks | Task philosophy — no extra features, read before edit |
 | 4 | Actions | Risk boundary — destructive ops need confirmation |
@@ -51,7 +60,7 @@ System Prompt follows CC-style 7-layer design with explicit static/dynamic bound
 **Dynamic Suffix (per-turn rebuild):**
 - Session context, Session Guidance, Memory injection, Token Budget, Auto context
 
-### 2. Safety First
+### 3. Safety First
 
 **Bash Safety Classifier** (3 risk levels):
 
@@ -63,15 +72,15 @@ System Prompt follows CC-style 7-layer design with explicit static/dynamic bound
 
 **Tool Input Validation** — JSON Schema validator checks required fields and types before every tool call.
 
-### 3. Smart Context Management
+### 4. Stage-Scoped Context Management
 
-Three-layer context management:
+Long tasks should not become one giant drifting transcript. xiaok keeps the full ledger in session state, but narrows the model context to the active stage:
 
 1. **Microcompaction** — Tool results over 8K chars auto-truncated
-2. **AI-driven compact** — At 85% capacity, AI summary replaces old messages
-3. **Memory re-injection** — Relevant memories re-injected after compact
+2. **Fresh handoff** — completed stages can hand off artifacts into a fresh context instead of dragging the whole run forward
+3. **Memory re-injection** — relevant memories re-injected after compact / handoff
 
-### 4. Typed Memory
+### 5. Typed Memory
 
 Persistent file-based memory store with type classification:
 
@@ -80,7 +89,7 @@ Persistent file-based memory store with type classification:
 - `project` — Project progress, decisions, bugs
 - `reference` — External resource pointers
 
-### 5. Non-Invasive Multi-Agent Collaboration
+### 6. Non-Invasive Multi-Agent Collaboration
 
 Via Intent Broker lifecycle hooks:
 - SessionStart / UserPromptSubmit / Stop
@@ -201,18 +210,26 @@ xiaok daemon status
 xiaok daemon stop
 
 # Start Yunzhijia IM gateway
-xiaok yzj serve
+xiaok yzjchannel serve
 ```
 
 ### In-Session Commands
 
 ```text
-/mode [default|auto|plan]     Switch permission mode
+/exit                         Exit chat
+/clear                        Clear the screen
+/compact                      Compact the current conversation context
+/context                      Show loaded repo context
+/mode [default|auto|plan]     Show or switch permission mode
 /models                       Switch model
-/tasks                        List active tasks
-/task <id>                    Show task details
-/yzjchannel                   Connect Yunzhijia channel
-/skill-name [args]            Invoke skill
+/reminder <natural language>  Create a reminder
+/reminder list                List reminders
+/reminder cancel <id>         Cancel a reminder
+/settings                     Show active CLI settings
+/skills-reload                Reload installed skills
+/yzjchannel                   Connect the embedded Yunzhijia channel
+/help                         Show help
+/<skill-name> [args]          Invoke a skill
 ```
 
 ### Yunzhijia IM Commands
@@ -220,6 +237,7 @@ xiaok yzj serve
 ```text
 /help                    Show help
 /bind <cwd>              Bind workspace
+/bind clear              Clear workspace binding
 /status [taskId]         Check task status
 /approve <approvalId>    Approve pending action
 /deny <approvalId>       Deny pending action
@@ -245,14 +263,14 @@ xiaok review
 xiaok commit
 ```
 
-**Yunzhijia Integration:**
+**Yunzhijia Integration (optional channel adapter):**
 
 ```bash
 # Configure
-xiaok yzj config set-send-msg-url "https://..."
+xiaok yzjchannel config set-webhook-url "https://..."
 
 # Start gateway
-xiaok yzj serve
+xiaok yzjchannel serve
 
 # Use in Yunzhijia bot chat
 /help

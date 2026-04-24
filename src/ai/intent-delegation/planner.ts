@@ -83,6 +83,11 @@ const WORK_REQUEST_PATTERNS = [
   /把.+(生成|写成|做成|整理成|总结成|改成|转换成|导出成)/u,
   /^(生成|写|做|整理|总结|分析|修改|重写|润色|升级|更新|导出|转换|提取)(?!到?什么|成什么|为?什么|什么|哪(个|一)?|多少|几|怎么|如何)/u,
 ];
+const SOURCE_TASK_PATTERNS = [
+  /(根据|基于|结合).*(文档|文件|材料|内容)/u,
+  /(这几个|这些).*(文档|文件|材料)/u,
+  /(把|将).*(文档|文件|材料).*(生成|写|做|整理|总结|分析|修改|重写|润色|导出|转换|提取)/u,
+];
 const INFORMATIONAL_QUERY_PATTERNS = [
   /[?？]/u,
   /(什么|几|多少|哪(个|一)?|怎么|如何|是否|有没有|是不是)/u,
@@ -104,6 +109,10 @@ export function createIntentPlan(input: CreateIntentPlanInput): IntentPlannerRes
 
   const normalizedIntent = normalizeIntent(rawIntent);
   const providedSourcePaths = extractProvidedSourcePaths(rawIntent);
+  const workRequestCue = hasWorkRequestCue(rawIntent);
+  const allowActiveIntentFallback = Boolean(
+    input.activeIntent && (isSupplementOrClarification(rawIntent) || hasContinuationCue(rawIntent)),
+  );
   const allowActiveShortReply = Boolean(
     input.activeIntent && (isSupplementOrClarification(rawIntent) || hasContinuationCue(rawIntent)),
   );
@@ -111,7 +120,10 @@ export function createIntentPlan(input: CreateIntentPlanInput): IntentPlannerRes
     return { kind: 'non_intent', reason: 'non_substantial' };
   }
 
-  const extracted = extractIntentShape(rawIntent, providedSourcePaths, input.activeIntent);
+  const extracted = extractIntentShape(rawIntent, providedSourcePaths, input.activeIntent, allowActiveIntentFallback);
+  if (!looksLikeDelegatedWorkRequest(rawIntent, providedSourcePaths, extracted, input.activeIntent, workRequestCue)) {
+    return { kind: 'non_intent', reason: 'non_substantial' };
+  }
   const continuationMode = detectContinuationMode(rawIntent, extracted.finalDeliverable, input.activeIntent);
   const topLevelIntentType = resolveTopLevelIntentType(rawIntent, extracted.stageSpecs, input.activeIntent, continuationMode);
   const topLevelTemplate = DELEGATION_TEMPLATES.find((candidate) => candidate.intentType === topLevelIntentType);
@@ -157,6 +169,14 @@ export function createIntentPlan(input: CreateIntentPlanInput): IntentPlannerRes
   };
 }
 
+function hasWorkRequestCue(input: string): boolean {
+  return WORK_REQUEST_PATTERNS.some((pattern) => pattern.test(input));
+}
+
+function hasSourceTaskCue(input: string): boolean {
+  return SOURCE_TASK_PATTERNS.some((pattern) => pattern.test(input));
+}
+
 function isControlCommand(input: string): boolean {
   return CONTROL_COMMAND_PATTERN.test(input);
 }
@@ -178,8 +198,7 @@ function isLikelyInformationalQuery(input: string): boolean {
     return false;
   }
 
-  const hasWorkRequestCue = WORK_REQUEST_PATTERNS.some((pattern) => pattern.test(normalized));
-  if (hasWorkRequestCue) {
+  if (hasWorkRequestCue(normalized)) {
     return false;
   }
 
@@ -212,6 +231,35 @@ function hasContinuationCue(input: string): boolean {
 
 function isSupplementOrClarification(input: string): boolean {
   return SUPPLEMENT_PATTERNS.some((pattern) => pattern.test(input));
+}
+
+function looksLikeDelegatedWorkRequest(
+  rawIntent: string,
+  providedSourcePaths: string[],
+  extracted: {
+    deliverable: string;
+    finalDeliverable: string;
+  },
+  activeIntent: ActiveIntentContext | undefined,
+  workRequestCue: boolean,
+): boolean {
+  if (providedSourcePaths.length > 0 && hasSourceTaskCue(rawIntent)) {
+    return true;
+  }
+
+  if (workRequestCue) {
+    return true;
+  }
+
+  if (activeIntent && (hasContinuationCue(rawIntent) || isSupplementOrClarification(rawIntent))) {
+    return true;
+  }
+
+  if (extracted.deliverable !== '交付物' || extracted.finalDeliverable !== '交付物') {
+    return true;
+  }
+
+  return false;
 }
 
 function detectContinuationMode(
@@ -271,6 +319,7 @@ function extractIntentShape(
   rawIntent: string,
   providedSourcePaths: string[],
   activeIntent?: ActiveIntentContext,
+  allowActiveIntentFallback = false,
 ): {
   deliverable: string;
   finalDeliverable: string;
@@ -297,7 +346,9 @@ function extractIntentShape(
     };
   }
 
-  const singleDeliverable = extractSingleDeliverable(pathStrippedIntent) || activeIntent?.deliverable || '交付物';
+  const singleDeliverable = extractSingleDeliverable(pathStrippedIntent)
+    || (allowActiveIntentFallback ? activeIntent?.deliverable : '')
+    || '交付物';
   const singleIntentType = classifyByRules(pathStrippedIntent);
   return {
     deliverable: singleDeliverable,
@@ -356,7 +407,9 @@ function extractSingleDeliverable(rawIntent: string): string {
     /生成(?:一版|一个|一份)?([^，。！？,!.?]+?)(?:，|。|！|？|$)/u,
     /写(?:一版|一个|一份)?([^，。！？,!.?]+?)(?:，|。|！|？|$)/u,
     /做(?:一版|一个|一份)?([^，。！？,!.?]+?)(?:，|。|！|？|$)/u,
+    /整理(?:一版|一个|一份|一篇)?([^，。！？,!.?]+?)(?:，|。|！|？|$)/u,
     /整理成(?:一版|一个|一份)?([^，。！？,!.?]+?)(?:，|。|！|？|$)/u,
+    /汇总(?:一版|一个|一份|一篇)?([^，。！？,!.?]+?)(?:，|。|！|？|$)/u,
     /总结成([^，。！？,!.?]+?)(?:，|。|！|？|$)/u,
     /做一个([^，。！？,!.?]+?)(?:，|。|！|？|$)/u,
     /分析一下([^，。！？,!.?]+?)(?:，|。|！|？|$)/u,
@@ -381,7 +434,9 @@ function extractSequencedStageSpecs(rawIntent: string): StageIntentSpec[] {
     '生成',
     '写',
     '做',
+    '整理',
     '整理成',
+    '汇总',
     '总结成',
     '做一个',
     '分析一下',
@@ -395,7 +450,7 @@ function extractSequencedStageSpecs(rawIntent: string): StageIntentSpec[] {
   const matches = Array.from(
     rawIntent.matchAll(
       new RegExp(
-        `(?:先|然后|再|并且|并|接着|之后)?\\s*(${stageVerbPattern})(?:一版|一个|一份)?([^，。！？,!.?；;]+?)(?=(?:然后|再|并且|并|接着|之后)\\s*(?:${stageVerbPattern})|[，。！？,!.?；;]|$)`,
+        `(?:先|然后|再|并且|并|接着|之后)?\\s*(${stageVerbPattern})(?:一版|一个|一份|一篇)?([^，。！？,!.?；;]+?)(?=(?:然后|再|并且|并|接着|之后)\\s*(?:${stageVerbPattern})|[，。！？,!.?；;]|$)`,
         'gu',
       ),
     ),

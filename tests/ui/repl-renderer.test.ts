@@ -130,6 +130,26 @@ describe('ReplRenderer', () => {
     harness.restore();
   });
 
+  it('keeps a reserved blank footer row when the status line is intentionally empty', () => {
+    const harness = createTtyHarness();
+    const renderer = new ReplRenderer(process.stdout);
+
+    renderer.renderInput({
+      prompt: '> ',
+      input: '吃什么',
+      cursor: 3,
+      overlayLines: [],
+      footerLines: [' '],
+    });
+
+    const lines = harness.screen.lines();
+    expect(lines[0]).toMatch(/❯.*吃什么/);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toBe('');
+
+    harness.restore();
+  });
+
   it('positions the cursor using terminal display width for CJK text', () => {
     const writes: string[] = [];
     const stream = {

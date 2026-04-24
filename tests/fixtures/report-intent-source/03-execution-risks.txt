@@ -1,0 +1,27 @@
+Execution Risks and Metrics
+===========================
+
+Metrics that leadership wants in the final report:
+- Time to first value
+- Expansion potential after the initial deployment
+- Data preparation effort
+- Required implementation support
+- Confidence in ROI measurement
+- Cross-functional coordination burden
+
+Execution notes:
+- Manufacturing projects often require cross-site alignment before scaling.
+- SaaS projects move faster but face faster user skepticism when outputs are noisy.
+- A merged markdown draft should preserve source attribution by section so the
+  writer can trace each claim back to a document.
+- The final report should include:
+  - a six-dimension comparison table,
+  - four implications for manufacturing teams,
+  - four implications for SaaS teams,
+  - and two durable AI evolution patterns.
+
+Recommendation framing:
+1. Distinguish near-term wins from long-term platform bets.
+2. Explicitly state where implementation services are unavoidable.
+3. Show how the markdown draft rolls up into the report narrative.
+4. Avoid language that implies both segments have identical sales motions.

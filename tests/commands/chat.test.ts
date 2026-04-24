@@ -14,16 +14,17 @@ describe('chat terminal layout', () => {
 
   it('should use compact helpers for submitted input and tool activity output', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const runtimeStateSource = readFileSync(join(process.cwd(), 'src', 'ui', 'tui', 'runtime-state.ts'), 'utf8');
 
     expect(source).toContain('formatSubmittedInput');
     expect(source).toContain('formatToolActivity');
     expect(source).toContain('ToolExplorer');
     expect(source).toContain('beginActivity');
-    expect(source).toContain('renderLive');
+    expect(source).toContain('TuiRuntimeState');
     expect(source).toContain('Answering');
-    expect(source).toContain('getReassuranceTick');
     expect(source).toContain('TurnLayout');
     expect(source).toContain('consumeAssistantLeadIn');
+    expect(runtimeStateSource).toContain('getReassuranceTick');
   });
 
   it('should let InputReader own the prompt rendering to avoid slash-menu redraw corruption', () => {
@@ -87,15 +88,18 @@ describe('chat terminal layout', () => {
     expect(source).toContain('terminalUiFallbackStream');
     expect(source).toContain('getFallbackWriter');
     expect(source).toContain("stream === process.stdout ? 'stderr' : 'stdout'");
-    expect(source).toContain("终端富交互输出已切换为兼容模式");
+    expect(source).toContain("inputReader.setForcePlainMode(false);");
+    expect(source).not.toContain("终端的富交互刷新出了问题，已退回普通输出模式");
   });
 
   it('should pause and then restore live activity around blocking approval prompts', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const runtimeStateSource = readFileSync(join(process.cwd(), 'src', 'ui', 'tui', 'runtime-state.ts'), 'utf8');
 
-    expect(source).toContain('const withPausedLiveActivity = async');
-    expect(source).toContain('statusBar.getActivitySnapshot()');
-    expect(source).toContain('return withPausedLiveActivity(async () => {');
+    expect(source).toContain('new TuiRuntimeState(');
+    expect(source).toContain('runtimeState.withPausedLiveActivity(action)');
+    expect(runtimeStateSource).toContain('getActivitySnapshot()');
+    expect(runtimeStateSource).toContain('beginActivity(snapshot.label, true, snapshot.startedAt);');
   });
 
   it('should bootstrap new intent plans into the ledger before the model starts the turn', () => {
@@ -106,6 +110,37 @@ describe('chat terminal layout', () => {
     expect(source).toContain('activeIntentReminderBlock = buildIntentReminderBlock');
   });
 
+  it('should ignore completed intents when priming reminders for the next input, while still collecting completion feedback', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+
+    expect(source).toContain("status === 'completed' || status === 'failed' || status === 'cancelled'");
+    expect(source).toContain("intent.overallStatus === 'waiting_user'");
+    expect(source).toContain('getWaitingUserIntentForInput');
+    expect(source).toContain('finalizeCurrentTurnIntentIfNeeded');
+  });
+
+  it('should suppress compatibility-mode input separators and keep the busy state out of the input prompt row', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const runtimeStateSource = readFileSync(join(process.cwd(), 'src', 'ui', 'tui', 'runtime-state.ts'), 'utf8');
+
+    expect(source).toContain('!scrollRegion.isActive() && !terminalUiSuspended');
+    expect(source).toContain('runtimeState.getFooterInputPrompt()');
+    expect(source).toContain("scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() })");
+    expect(source).toContain('if (scrollRegion.isActive() && !terminalUiSuspended) {');
+    expect(runtimeStateSource).toContain("return this.snapshot.footerMode === 'busy' ? 'Finishing response...' : 'Type your message...';");
+  });
+
+  it('should construct a dedicated tui runtime-state owner instead of keeping timer ownership inside chat.ts', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+
+    expect(source).toContain("from '../ui/tui/runtime-state.js'");
+    expect(source).toContain('const runtimeState = new TuiRuntimeState({');
+    expect(source).not.toContain('let liveActivityTimer: NodeJS.Timeout | null = null;');
+    expect(source).not.toContain('let resumeActivityTimer: NodeJS.Timeout | null = null;');
+    expect(source).not.toContain('let reassuranceTimer: NodeJS.Timeout | null = null;');
+    expect(source).not.toContain('let footerBusy = false;');
+  });
+
   it('should collect sparse completed-intent feedback and feed contextual skill reranking', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
@@ -113,6 +148,19 @@ describe('chat terminal layout', () => {
     expect(source).toContain('skillEvalStore.markPromptedIntent');
     expect(source).toContain('skillScoreStore.recordFeedback');
     expect(source).toContain('observation.actualSkillName');
+    expect(source).toContain('这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
+    expect(source).toContain('const answer = (await inputReader.read(');
+    expect(source).toContain("overlayKind: 'feedback'");
+    expect(source).not.toContain('Feedback [y/n/s]: ');
+    expect(source).not.toContain('这次 skill 路由是否合适？');
+    expect(source).not.toContain('主要问题更接近需求理解错了吗？');
+    expect(source).toContain('renderIntentSummaryLine();');
+  });
+
+  it('should always keep a reserved footer status row even when status text is blank', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+
+    expect(source).toContain("lines.push(statusLine || ' ')");
   });
 
   it('should render submitted input before the intent orchestration block in interactive chat', () => {
@@ -124,5 +172,13 @@ describe('chat terminal layout', () => {
     expect(inputWrite).toBeGreaterThan(-1);
     expect(intentPrime).toBeGreaterThan(-1);
     expect(inputWrite).toBeLessThan(intentPrime);
+  });
+
+  it('should route resume replay and stop-hook auto-continue transcript writes through the scroll region instead of raw stdout', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+
+    expect(source).toContain('scrollRegion.writeAtContentCursor(chunk);');
+    expect(source).toContain('scrollRegion.writeSubmittedInput(formatSubmittedInput(stopResult.message));');
+    expect(source).toContain("if (scrollRegion.isActive() && !terminalUiSuspended) {");
   });
 });

@@ -1,5 +1,8 @@
 import type { MessageBlock } from '../types.js';
 import type { IntentLedgerRecord, SessionIntentLedger } from '../runtime/intent-delegation/types.js';
+import { intentHint, intentHintDot } from './render.js';
+
+const TERMINAL_INTENT_STATUSES = new Set<IntentLedgerRecord['overallStatus']>(['completed', 'failed', 'cancelled']);
 
 export function formatCurrentIntentSummaryLine(
   ledger: SessionIntentLedger | null | undefined,
@@ -16,7 +19,21 @@ export function formatCurrentIntentSummaryLine(
   const stageProgress = activeStage
     ? `Stage ${activeStage.order + 1}/${stages.length}`
     : 'Stage';
-  return `Intent: ${activeIntent.deliverable} · ${stageProgress} ${stageLabel} · ${humanizeOverallStatus(activeIntent.overallStatus)}`;
+  return formatIntentSummaryHint(
+    `Intent: ${activeIntent.deliverable} · ${stageProgress} ${stageLabel} · ${humanizeOverallStatus(activeIntent.overallStatus)}`,
+  );
+}
+
+export function formatCurrentTurnIntentSummaryLine(input: {
+  deliverable: string;
+  stageOrder: number;
+  totalStages: number;
+  stageLabel: string;
+  status: string;
+}): string {
+  return formatIntentSummaryHint(
+    `Intent: ${input.deliverable} · Stage ${input.stageOrder + 1}/${input.totalStages} ${input.stageLabel} · ${input.status}`,
+  );
 }
 
 export function buildIntentReminderBlock(
@@ -79,7 +96,7 @@ export function formatIntentCreatedTranscriptBlock(
     intentLines.push(`边界：${intent.delegationBoundary.join(' | ')}`);
   }
 
-  return [...intentLines, ''].join('\n');
+  return intentHint([...intentLines, ''].join('\n'));
 }
 
 export function formatProgressTranscriptBlock(input: {
@@ -131,7 +148,12 @@ function getOwnedActiveIntent(
     return undefined;
   }
 
-  return ledger.intents.find((intent) => intent.intentId === ledger.activeIntentId);
+  const activeIntent = ledger.intents.find((intent) => intent.intentId === ledger.activeIntentId);
+  if (!activeIntent || TERMINAL_INTENT_STATUSES.has(activeIntent.overallStatus)) {
+    return undefined;
+  }
+
+  return activeIntent;
 }
 
 function humanizeStepId(stepId: string): string {
@@ -184,6 +206,10 @@ function buildIntentAcknowledgement(intent: IntentLedgerRecord): string {
 
   const deliverable = intent.finalDeliverable ?? intent.deliverable;
   return `🤝 已理解，会帮你产出${deliverable}。`;
+}
+
+function formatIntentSummaryHint(text: string): string {
+  return `${intentHintDot('●')} ${intentHint(text)}`;
 }
 
 function humanizeStepKey(stepKey: string): string {

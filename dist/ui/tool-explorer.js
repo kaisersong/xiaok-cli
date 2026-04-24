@@ -1,7 +1,27 @@
 import { basename } from 'node:path';
 import { describeToolActivity, formatRailHeader, formatRailLine, formatToolActivity } from './render.js';
+const MAX_DIRECT_COMMAND_PREVIEW = 160;
 function singleLine(text) {
     return text.replace(/\s+/g, ' ').trim();
+}
+function truncatePreview(text, maxWidth = MAX_DIRECT_COMMAND_PREVIEW) {
+    if (text.length <= maxWidth) {
+        return text;
+    }
+    if (maxWidth <= 3) {
+        return '.'.repeat(maxWidth);
+    }
+    return `${text.slice(0, maxWidth - 3)}...`;
+}
+function summarizeBashFallback(command) {
+    const normalized = singleLine(command);
+    if (!normalized) {
+        return '';
+    }
+    const withoutHeredoc = normalized
+        .replace(/\s+<<\s*['"]?[a-z_][\w-]*['"]?.*$/i, '')
+        .trim();
+    return truncatePreview(withoutHeredoc || normalized);
 }
 function summarizePath(input) {
     const target = typeof input.file_path === 'string'
@@ -63,7 +83,8 @@ function describeDirectActivity(toolName, input) {
             return { group: 'Ran', item };
         }
         const command = typeof input.command === 'string' ? singleLine(input.command) : '';
-        return command ? { group: 'Ran', item: command } : (item ? { group: 'Ran', item } : null);
+        const preview = command ? summarizeBashFallback(command) : '';
+        return preview ? { group: 'Ran', item: preview } : (item ? { group: 'Ran', item } : null);
     }
     if (toolName === 'write') {
         const file = summarizePath(input);
@@ -95,8 +116,8 @@ export class ToolExplorer {
         const grouped = describeGroupedActivity(name, input);
         if (grouped) {
             const lines = [];
-            if (this.activeGroup && this.activeGroup !== grouped.group) {
-                lines.push('\n');
+            if (this.activeGroup !== grouped.group) {
+                lines.push('\n\n');
             }
             if (this.activeGroup !== grouped.group) {
                 lines.push(`${formatRailHeader(grouped.group)}\n`);
@@ -108,8 +129,8 @@ export class ToolExplorer {
         const direct = describeDirectActivity(name, input);
         if (direct) {
             const lines = [];
-            if (this.activeGroup && this.activeGroup !== direct.group) {
-                lines.push('\n');
+            if (this.activeGroup !== direct.group) {
+                lines.push('\n\n');
             }
             if (this.activeGroup !== direct.group) {
                 lines.push(`${formatRailHeader(direct.group)}\n`);

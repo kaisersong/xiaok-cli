@@ -36,7 +36,7 @@ export interface ScrollPromptFrame {
     summaryLine?: string;
     statusLine: string;
     overlayLines?: string[];
-    overlayKind?: 'generic' | 'permission';
+    overlayKind?: 'generic' | 'permission' | 'feedback';
     owner?: 'input' | 'renderer';
 }
 export declare class ScrollRegionManager {
@@ -61,6 +61,10 @@ export declare class ScrollRegionManager {
     private _hasStreamedContent;
     /** Whether a renderer-owned permission overlay currently owns the prompt/footer area. */
     private _overlayPromptVisible;
+    /** Active overlay kind currently rendered above the footer input, if any. */
+    private _activeOverlayKind;
+    /** Which subsystem last rendered the active overlay. */
+    private _activeOverlayOwner;
     /** Footer is currently visible on screen. */
     private _footerVisible;
     /** Tracks if we have already pushed past the welcome screen. */
@@ -83,8 +87,10 @@ export declare class ScrollRegionManager {
     constructor(stream?: NodeJS.WriteStream, config?: ScrollRegionConfig);
     private clampCursorRow;
     private maxInputRows;
+    private countFooterLineRows;
     private getSummaryReserveRows;
-    private getSummaryRow;
+    private getSummaryStartRow;
+    private getScrollBottomForLayout;
     /**
      * Calculate the bottom row of the scroll region (where activity line renders).
      */
@@ -101,7 +107,12 @@ export declare class ScrollRegionManager {
      */
     private getStatusBarRow;
     private getOverlayVisibleLines;
+    private hasActiveOverlayPrompt;
+    private isRendererPermissionOverlayActive;
+    private clearActiveOverlayPrompt;
     private clearScreenRow;
+    private getClearScreenRowSequence;
+    private composeActivityLineRender;
     private clearRenderedFooterRows;
     /**
      * Calculate cursor column after the "❯ " prefix.
@@ -150,12 +161,13 @@ export declare class ScrollRegionManager {
      * Status bar shows static info like model, percentage, branch, project.
      * After rendering, cursor is positioned at input line for user typing.
      */
+    private renderFooterFrame;
     renderFooter(options?: {
         inputPrompt?: string;
         summaryLine?: string;
         statusLine?: string;
     }): void;
-    private reserveTranscriptRowsForOverlay;
+    private reserveTranscriptRows;
     private renderOverlayPromptFrame;
     private positionCursorForPermissionOverlay;
     private positionCursorForOverlayInput;
@@ -171,6 +183,7 @@ export declare class ScrollRegionManager {
      */
     clearLastInput(options?: {
         renderFooter?: boolean;
+        inputPrompt?: string;
     }): void;
     /**
      * Clear the activity line at the bottom of the scroll region.
