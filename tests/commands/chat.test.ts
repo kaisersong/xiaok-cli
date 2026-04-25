@@ -30,7 +30,7 @@ describe('chat terminal layout', () => {
   it('should let InputReader own the prompt rendering to avoid slash-menu redraw corruption', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
-    expect(source).toContain("const input = await inputReader.read('> ')");
+    expect(source).toContain("input = await inputReader.read('> ')");
     expect(source).not.toContain('renderInputPrompt();');
   });
 
@@ -149,7 +149,7 @@ describe('chat terminal layout', () => {
     expect(source).toContain('skillScoreStore.recordFeedback');
     expect(source).toContain('observation.actualSkillName');
     expect(source).toContain('这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
-    expect(source).toContain('const answer = (await inputReader.read(');
+    expect(source).toContain('const answer = await inputReader.read(');
     expect(source).toContain("overlayKind: 'feedback'");
     expect(source).not.toContain('Feedback [y/n/s]: ');
     expect(source).not.toContain('这次 skill 路由是否合适？');

@@ -84,8 +84,9 @@ describe('MarkdownRenderer', () => {
     renderer.write('1. 这是一个很长的列表项\n');
 
     const lines = output.split('\n').filter(Boolean);
-    expect(lines[0]).toBe('1. 这是一个很长');
-    expect(lines[1]).toBe('   的列表项');
+    expect(lines[0]).toBe('1. 这是一个');
+    expect(lines[1]).toBe('   很长的列');
+    expect(lines[2]).toBe('   表项');
   });
 
   it('wraps unordered list items with a hanging indent aligned under the item text', () => {
@@ -95,7 +96,7 @@ describe('MarkdownRenderer', () => {
     renderer.write('- 这是一个很长的列表项\n');
 
     const lines = output.split('\n').filter(Boolean);
-    expect(lines[0]).toBe('• 这是一个很长的');
-    expect(lines[1]).toBe('  列表项');
+    expect(lines[0]).toBe('• 这是一个很');
+    expect(lines[1]).toBe('  长的列表项');
   });
 });
