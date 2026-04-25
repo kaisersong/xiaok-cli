@@ -191,6 +191,8 @@ export declare class ScrollRegionManager {
      * Does NOT reposition the cursor — content continues from current position.
      */
     clearActivityLine(): void;
+    clearOverlayPromptState(): void;
+    positionCursorAtContentCursor(): void;
     /**
      * Position cursor for content output, based on how many rows of content
      * were written. Calculates the actual end row (accounting for terminal
@@ -250,7 +252,9 @@ export declare class ScrollRegionManager {
     clearContentArea(): void;
     clearVisibleViewport(): void;
     advanceContentCursor(rows: number): void;
-    advanceContentCursorByRenderedText(text: string): void;
+    advanceContentCursorByRenderedText(text: string, options?: {
+        finalizeLine?: boolean;
+    }): void;
     setContentCursor(row: number): void;
     getContentCursor(): number;
     get maxContentRows(): number;

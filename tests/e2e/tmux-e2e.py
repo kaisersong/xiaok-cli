@@ -1118,8 +1118,19 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_contains(slash_models_overlay, "/mode", "slash menu did not show /mode while filtering /mod")
         assert_contains(slash_models_overlay, "/models", "slash menu did not show /models while filtering /mod")
 
-        tmux.send_key("Down")
-        time.sleep(0.15)
+        selected_models_overlay = slash_models_overlay
+        for _ in range(6):
+            if "❯ /models" in selected_models_overlay:
+                break
+            tmux.send_key("Down")
+            time.sleep(0.15)
+            selected_models_overlay = tmux.capture()
+        assert_contains(
+            selected_models_overlay,
+            "❯ /models",
+            "slash menu did not move selection onto /models before confirmation",
+        )
+
         tmux.send_key("Enter")
 
         model_selector = tmux.wait_for(

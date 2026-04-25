@@ -1,6 +1,6 @@
 {
   "name": "xiaokcode",
-  "version": "0.6.10",
+  "version": "0.6.11",
   "description": "面向云之家开发者的 AI 编程 CLI",
   "license": "MIT",
   "homepage": "https://github.com/kaisersong/xiaok-cli#readme",
@@ -22,7 +22,7 @@
   ],
   "type": "module",
   "bin": {
-    "xiaok": "./dist/index.js"
+    "xiaok": "dist/index.js"
   },
   "scripts": {
     "build": "tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",

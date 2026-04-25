@@ -1,5 +1,7 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { PassThrough } from 'node:stream';
+import { describe, expect, it } from 'vitest';
+import { askQuestion } from '../../src/ui/ask-question.js';
+import { createTtyHarness } from '../support/tty.js';
+import { waitFor } from '../support/wait-for.js';
 
 // We test renderFrame logic and key handling separately from the interactive loop
 describe('ask-question', () => {
@@ -39,6 +41,62 @@ describe('ask-question', () => {
 
       expect(UP).toBe('\x1b[A');
       expect(DOWN).toBe('\x1b[B');
+    });
+
+    it('re-renders wrapped option prompts in place while navigating and clears the menu after confirm', async () => {
+      const harness = createTtyHarness(36, 16);
+      const sendKey = (key: string): void => {
+        harness.emitter.emit('data', key);
+      };
+
+      process.stdout.write(
+        Array.from({ length: 10 }, (_, index) => `prefill line ${index + 1}`).join('\n') + '\n',
+      );
+
+      const pending = askQuestion({
+        question: '想吃什么类型的？',
+        options: [
+          { label: '中餐炒菜（如宫保鸡丁、番茄炒蛋）', description: '经典家常炒菜配米饭' },
+          { label: '面食/粉类（如拉面、米粉、饺子）', description: '面条、粉类、水饺等' },
+          { label: '轻食/沙拉（如三明治、燕麦碗）', description: '低卡健康餐' },
+          { label: '快餐/便当（如汉堡、便当）', description: '方便快捷' },
+          { label: '火锅/烧烤（如麻辣烫、烤肉）', description: '聚餐或想吃点重的' },
+          { label: '其他（告诉我具体想法）', description: '自由输入' },
+        ],
+      });
+
+      await waitFor(() => {
+        const screen = harness.screen.text();
+        expect(screen).toContain('想吃什么类型的？');
+        expect((screen.match(/↑↓ navigate   Enter select/g) ?? []).length).toBe(1);
+      });
+
+      for (let i = 0; i < 10; i += 1) {
+        sendKey('\x1b[B');
+      }
+
+      await waitFor(() => {
+        const screen = harness.screen.text();
+        expect((screen.match(/想吃什么类型的？/g) ?? []).length).toBe(1);
+        expect((screen.match(/↑↓ navigate   Enter select/g) ?? []).length).toBe(1);
+      });
+
+      sendKey('\r');
+
+      await expect(pending).resolves.toEqual({
+        selected: [3],
+        labels: ['快餐/便当（如汉堡、便当）'],
+      });
+
+      await waitFor(() => {
+        const screen = harness.screen.text();
+        expect(screen).toContain('❯ 想吃什么类型的？');
+        expect(screen).toContain('快餐/便当（如汉堡、便当）');
+        expect(screen).not.toContain('↑↓ navigate   Enter select');
+        expect(screen).not.toContain('1. 中餐炒菜（如宫保鸡丁、番茄炒蛋）');
+      });
+
+      harness.restore();
     });
   });
 });

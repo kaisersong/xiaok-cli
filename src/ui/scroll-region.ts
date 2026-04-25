@@ -710,7 +710,10 @@ export class ScrollRegionManager {
 
   private reserveTranscriptRows(nextScrollBottom: number, previousScrollBottom: number): void {
     const clampedCurrentBottom = Math.max(1, previousScrollBottom);
-    const visibleContentRow = Math.max(1, Math.min(this._cursorRow, clampedCurrentBottom));
+    const occupiedContentRow = this._cursorCol > 0
+      ? this._cursorRow + 1
+      : this._cursorRow;
+    const visibleContentRow = Math.max(1, Math.min(occupiedContentRow, clampedCurrentBottom));
     const rowsToScroll = Math.max(0, visibleContentRow - nextScrollBottom);
     if (rowsToScroll === 0) {
       return;
@@ -916,6 +919,24 @@ export class ScrollRegionManager {
     this.stream.write(`${MOVE_TO_ROW.replace('%d', String(activityRow))}${CLEAR_LINE}`);
     this.stream.write(RESET_ALL);
     this.lastActivityRow = null;
+  }
+
+  clearOverlayPromptState(): void {
+    this.clearActiveOverlayPrompt();
+    this.lastOverlayRenderRows = 0;
+  }
+
+  positionCursorAtContentCursor(): void {
+    if (!this.active) return;
+
+    const targetRow = this.clampCursorRow(this._cursorRow);
+    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(targetRow))}`);
+    if (this._cursorCol > 0) {
+      this.stream.write(`\x1b[${this._cursorCol + 1}G`);
+    } else {
+      this.stream.write('\r');
+    }
+    this.stream.write(RESET_ALL);
   }
 
   /**
@@ -1171,7 +1192,10 @@ export class ScrollRegionManager {
     this._cursorUncertain = false;
   }
 
-  advanceContentCursorByRenderedText(text: string): void {
+  advanceContentCursorByRenderedText(
+    text: string,
+    options?: { finalizeLine?: boolean },
+  ): void {
     if (!this.active || text.length === 0) return;
 
     const cols = this.config.columns;
@@ -1194,9 +1218,19 @@ export class ScrollRegionManager {
       col += width;
     }
 
-    this._cursorRow = row;
-    this._cursorCol = col;
-    this._totalRows = Math.max(this._totalRows, row);
+    const finalizeLine = options?.finalizeLine === true;
+    const contentEndRow = row;
+
+    if (finalizeLine && col > 0) {
+      this._cursorRow = this.clampCursorRow(row + 1);
+      this._cursorCol = 0;
+    } else {
+      this._cursorRow = row;
+      this._cursorCol = col;
+    }
+
+    this._contentEndRow = Math.max(this._contentEndRow, contentEndRow);
+    this._totalRows = Math.max(this._totalRows, contentEndRow);
     this._cursorUncertain = false;
   }
 

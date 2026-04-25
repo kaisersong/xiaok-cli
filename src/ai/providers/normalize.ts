@@ -144,13 +144,11 @@ function normalizeLegacyConfig(config: LegacyConfig): Config {
 
 export function normalizeConfig(config: Config | LegacyConfig): Config {
   if (config.schemaVersion === 2) {
-    const defaults = cloneDefaultConfig();
     return {
-      ...defaults,
       ...config,
-      providers: { ...defaults.providers, ...config.providers },
-      models: { ...defaults.models, ...config.models },
-      channels: { ...(defaults.channels ?? {}), ...(config.channels ?? {}) },
+      providers: { ...config.providers },
+      models: { ...config.models },
+      channels: { ...(config.channels ?? {}) },
     };
   }
 

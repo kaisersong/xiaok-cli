@@ -489,7 +489,7 @@ async function runChat(initialInput, opts) {
         const flushResult = mdRenderer.flush();
         if (flushResult.rows > 0 && scrollRegion.isActive() && scrollRegion.isContentStreaming()) {
             if (flushResult.renderedLine) {
-                scrollRegion.advanceContentCursorByRenderedText(flushResult.renderedLine);
+                scrollRegion.advanceContentCursorByRenderedText(flushResult.renderedLine, { finalizeLine: true });
             }
             else {
                 scrollRegion.advanceContentCursor(flushResult.rows);
@@ -574,6 +574,10 @@ async function runChat(initialInput, opts) {
     // Wire up lazy callbacks for AskUserQuestion interactive prompt
     askUserOnEnter = () => {
         runtimeState.stopLiveActivityTimer();
+        if (scrollRegion.isActive()) {
+            scrollRegion.clearActivityLine();
+            scrollRegion.positionCursorAtContentCursor();
+        }
     };
     askUserOnExit = () => {
         runtimeState.beginActivity(describeLiveActivity('AskUserQuestion', {}), true);
@@ -1402,6 +1406,11 @@ async function runChat(initialInput, opts) {
         let deferredInput = null;
         const handleCompletedIntentFeedbackResult = async (result) => {
             if (result.deferredInput !== null) {
+                if (scrollRegion.isActive()) {
+                    scrollRegion.clearOverlayPromptState();
+                }
+                runtimeState.markInputReady();
+                renderFooterChrome();
                 deferredInput = result.deferredInput;
             }
             if (!result.exitRequested) {
@@ -1554,7 +1563,7 @@ async function runChat(initialInput, opts) {
                 continue;
             }
             if (trimmed === '/models') {
-                const selected = await selectModel(config);
+                const selected = await selectModel(config, { renderer: replRenderer });
                 if (selected) {
                     const newConfig = {
                         ...config,
@@ -1802,6 +1811,9 @@ async function runChat(initialInput, opts) {
                 if (await handleCompletedIntentFeedbackResult(feedbackResult)) {
                     break interactiveLoop;
                 }
+                if (deferredInput !== null) {
+                    continue interactiveLoop;
+                }
                 if (deferredInput === null) {
                     renderFooterChrome();
                 }
@@ -1861,6 +1873,9 @@ async function runChat(initialInput, opts) {
                     const autoContinueFeedbackResult = await maybeCollectCompletedIntentFeedback();
                     if (await handleCompletedIntentFeedbackResult(autoContinueFeedbackResult)) {
                         break interactiveLoop;
+                    }
+                    if (deferredInput !== null) {
+                        continue interactiveLoop;
                     }
                     if (deferredInput === null) {
                         renderFooterChrome();

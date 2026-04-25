@@ -82,6 +82,6 @@ describe('normalizeConfig', () => {
       channels: {},
     };
 
-    expect(normalizeConfig(input)).toMatchObject(input);
+    expect(normalizeConfig(input)).toEqual(input);
   });
 });

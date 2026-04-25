@@ -159,6 +159,13 @@ function renderFrame(
   return lines;
 }
 
+function countRenderedTerminalRows(lines: string[], cols: number): number {
+  const safeCols = Math.max(1, cols);
+  return lines.reduce((total, line) => (
+    total + Math.max(1, Math.ceil(getDisplayWidth(stripAnsi(line)) / safeCols))
+  ), 0);
+}
+
 // ─── Main function ────────────────────────────────────────────────────────────
 
 export async function askQuestion(params: AskQuestionParams): Promise<AskQuestionResult> {
@@ -170,7 +177,7 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
     const cols = stdout.columns ?? 80;
     let selectedIdx = 0;
     const checked = new Set<number>();
-    let lineCount = 0;
+    let renderedRowCount = 0;
 
     // Switch to raw mode
     const rl = createInterface({ input: process.stdin });
@@ -179,23 +186,29 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
     process.stdin.setEncoding('utf8');
 
     function clearFrame() {
-      if (lineCount > 0) {
-        // Move up to first line of frame
-        stdout.write(`\x1b[${lineCount}A\r`);
-        // Clear each line, staying on each line (don't move down yet)
-        for (let i = 0; i < lineCount; i++) {
-          stdout.write('\x1b[2K');
-          if (i < lineCount - 1) stdout.write('\x1b[1B\r');
+      if (renderedRowCount > 0) {
+        if (renderedRowCount > 1) {
+          stdout.write(`\x1b[${renderedRowCount - 1}A`);
         }
-        // Move back to first line for redraw
-        stdout.write(`\x1b[${lineCount - 1}A\r`);
+        stdout.write('\r');
+        for (let i = 0; i < renderedRowCount; i++) {
+          stdout.write('\x1b[2K');
+          if (i < renderedRowCount - 1) {
+            stdout.write('\x1b[1B\r');
+          }
+        }
+        if (renderedRowCount > 1) {
+          stdout.write(`\x1b[${renderedRowCount - 1}A`);
+        }
+        stdout.write('\r');
       }
     }
 
     function draw() {
       clearFrame();
-      const frameLines = renderFrame(params, selectedIdx, checked, cols);
-      lineCount = frameLines.length;
+      const terminalCols = stdout.columns ?? cols;
+      const frameLines = renderFrame(params, selectedIdx, checked, terminalCols);
+      renderedRowCount = countRenderedTerminalRows(frameLines, terminalCols);
       // Write lines without trailing newline — cursor stays on last line
       stdout.write(frameLines.join('\n'));
     }

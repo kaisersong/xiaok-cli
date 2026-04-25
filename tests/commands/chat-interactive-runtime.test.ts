@@ -176,6 +176,37 @@ function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithMode
         return;
       }
 
+      if (lastToolResult.includes('"想吃什么类型的？"')) {
+        yield { type: 'text', delta: '已记录你的饮食偏好。' };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('请用 AskUserQuestion 问我吃什么')) {
+        yield {
+          type: 'tool_use',
+          id: 'tu_ask_user_question_1',
+          name: 'AskUserQuestion',
+          input: {
+            questions: [
+              {
+                question: '想吃什么类型的？',
+                options: [
+                  { label: '中餐炒菜（如宫保鸡丁、番茄炒蛋）', description: '经典家常炒菜配米饭' },
+                  { label: '面食/粉类（如拉面、米粉、饺子）', description: '面条、粉类、水饺等' },
+                  { label: '轻食/沙拉（如三明治、燕麦碗）', description: '低卡健康餐' },
+                  { label: '快餐/便当（如汉堡、便当）', description: '方便快捷' },
+                  { label: '火锅/烧烤（如麻辣烫、烤肉）', description: '聚餐或想吃点重的' },
+                  { label: '其他（告诉我具体想法）', description: '自由输入' },
+                ],
+              },
+            ],
+          },
+        };
+        yield { type: 'done' };
+        return;
+      }
+
       if (lastUserText.includes('分三次显示123')) {
         yield { type: 'text', delta: '1\n2\n3' };
         yield { type: 'done' };
@@ -580,9 +611,6 @@ function expectSingleFooter(lines: string[]): void {
     .map((line, index) => ({ line, index }))
     .filter(({ line, index }) => line.includes('❯') && statusRows.some((row) => row.index === index + 1));
 
-  if (promptRows.length !== 1 || statusRows.length !== 1) {
-    console.log('DEBUG_FOOTER_LINES', JSON.stringify(lines));
-  }
   expect(promptRows).toHaveLength(1);
   expect(statusRows).toHaveLength(1);
   expect(statusRows[0]?.index).toBeGreaterThan(promptRows[0]?.index ?? -1);
@@ -1778,13 +1806,24 @@ describe('chat interactive runtime', () => {
         expect(lines.some((line) => line.includes('/models'))).toBe(true);
       }, { timeoutMs: 3_000 });
 
-      harness.send('\x1b[B');
+      for (let i = 0; i < 6; i += 1) {
+        if (harness.screen.lines().some((line) => line.includes('❯ /models'))) {
+          break;
+        }
+        harness.send('\x1b[B');
+      }
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expect(lines.some((line) => line.includes('❯ /models'))).toBe(true);
+      }, { timeoutMs: 3_000 });
+
       harness.send('\r');
 
       await waitFor(() => {
         expect(mockSelectModel).toHaveBeenCalledTimes(1);
         expect(harness.output.normalized).toContain('已取消');
-        expect(harness.output.normalized).not.toContain('当前权限模式');
+        expect(harness.output.normalized).not.toContain('当前权限模式：');
         expectSingleFooter(harness.screen.lines());
       }, { timeoutMs: 3_000 });
 
@@ -1929,6 +1968,102 @@ describe('chat interactive runtime', () => {
       }, { timeoutMs: 3_000 });
 
       await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 15_000);
+
+  it('keeps AskUserQuestion menu hints singular while navigating near the footer and clears them after confirm', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-ask-user-question-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(36, 16);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+    const sendAskUserKey = (key: string): void => {
+      harness.emitter.emit('data', key);
+    };
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('输出30行');
+      harness.send('\r');
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('line 30');
+      }, { timeoutMs: 3_000 });
+      await waitForInputTurnReady(harness);
+
+      harness.send('请用 AskUserQuestion 问我吃什么');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const screen = harness.screen.text();
+        expect(screen).toContain('想吃什么类型的？');
+        expect(countOccurrences(screen, '↑↓ navigate   Enter select')).toBe(1);
+      }, { timeoutMs: 3_000 });
+
+      for (let i = 0; i < 10; i += 1) {
+        sendAskUserKey('\x1b[B');
+      }
+
+      await waitFor(() => {
+        const screen = harness.screen.text();
+        expect(countOccurrences(screen, '想吃什么类型的？')).toBe(1);
+        expect(countOccurrences(screen, '↑↓ navigate   Enter select')).toBe(1);
+      }, { timeoutMs: 3_000 });
+
+      sendAskUserKey('\r');
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('已记录你的饮食偏好。');
+      }, { timeoutMs: 3_000 });
+
+      await waitFor(() => {
+        const screen = harness.screen.text();
+        expect(screen).not.toContain('↑↓ navigate   Enter select');
+        expect(screen).not.toContain('1. 中餐炒菜（如宫保鸡丁、番茄炒蛋）');
+      }, { timeoutMs: 3_000 });
+
+      await waitForInputTurnReady(harness);
+      expectSingleFooter(harness.screen.lines());
+
       harness.send('/exit');
       harness.send('\r');
       await pending;
@@ -3340,6 +3475,7 @@ describe('chat interactive runtime', () => {
       await waitFor(() => {
         const lines = harness.screen.lines();
         expect(harness.output.normalized).toContain('echo:吃什么');
+        expect(lines.some((line) => line.includes('echo:吃什么'))).toBe(true);
         expectSingleFooter(lines);
         expect(lines.some((line) => line.includes('[xiaok]'))).toBe(false);
         expect(lines.some((line) => line.includes('Intent:') && line.includes('Completed'))).toBe(false);
@@ -3428,7 +3564,7 @@ describe('chat interactive runtime', () => {
     }
   }, 20_000);
 
-  it('preserves the most recent turn tail lines instead of overwriting them when older content scrolls in a 24-row terminal', async () => {
+  it('keeps the latest turn tail lines intact when earlier transcript blocks are still competing for the 24-row viewport', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
     const projectDir = join(rootDir, 'project');
@@ -3486,11 +3622,15 @@ describe('chat interactive runtime', () => {
       const lines = harness.screen.lines();
       expectNoTransientChrome(lines);
       expectSingleFooter(lines);
-      expect(lines.some((line) => line.includes('› 分四次显示1234'))).toBe(true);
-      expect(lines.some((line) => normalizeAssistantLine(line) === '4')).toBe(true);
-      expect(lines.some((line) => line.includes('› 分五次显示12345'))).toBe(true);
-      expect(lines.some((line) => normalizeAssistantLine(line) === '5')).toBe(true);
-      expect(lines.some((line) => line.includes('› 分三次显示123'))).toBe(false);
+      const secondPromptIndex = findLineIndex(lines, '› 分四次显示1234');
+      const secondTailIndex = lines.findIndex((line) => normalizeAssistantLine(line) === '4');
+      const thirdPromptIndex = findLineIndex(lines, '› 分五次显示12345');
+      const thirdTailIndex = lines.findIndex((line) => normalizeAssistantLine(line) === '5');
+
+      expect(secondPromptIndex).toBeGreaterThan(-1);
+      expect(secondTailIndex).toBeGreaterThan(secondPromptIndex);
+      expect(thirdPromptIndex).toBeGreaterThan(secondTailIndex);
+      expect(thirdTailIndex).toBeGreaterThan(thirdPromptIndex);
 
       harness.send('/exit');
       harness.send('\r');

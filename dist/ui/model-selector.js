@@ -18,7 +18,21 @@ export function buildModelOptions(config) {
         };
     });
 }
-export async function selectModel(config) {
+function formatModelSelectorLines(models, selectedIdx) {
+    const lines = ['选择模型'];
+    for (let i = 0; i < models.length; i += 1) {
+        const model = models[i];
+        const selected = i === selectedIdx;
+        const prefix = selected ? boldCyan('❯') : ' ';
+        const modelStr = selected
+            ? boldCyan(`[${model.provider}] ${model.label}`)
+            : dim(`[${model.provider}] ${model.label}`);
+        lines.push(`  ${prefix} ${modelStr} - ${dim(model.desc)}`);
+    }
+    lines.push(dim('↑↓ 选择  Enter 确认  Esc 取消'));
+    return lines;
+}
+export async function selectModel(config, options = {}) {
     const models = buildModelOptions(config);
     if (models.length === 0) {
         stdout.write('未配置任何模型。请先运行 xiaok config set 配置模型。\n');
@@ -28,9 +42,27 @@ export async function selectModel(config) {
     let selectedIdx = models.findIndex(m => m.id === currentModelId);
     if (selectedIdx === -1)
         selectedIdx = 0;
+    const renderer = options.renderer;
+    const useRenderer = Boolean(renderer
+        && (renderer.hasActiveScrollRegion()
+            || renderer.getState().prompt !== ''
+            || renderer.getState().input.value !== ''));
     return new Promise((resolve) => {
         let resolved = false;
+        let renderWithRenderer = useRenderer;
         const renderMenu = () => {
+            const lines = formatModelSelectorLines(models, selectedIdx);
+            if (renderWithRenderer && renderer) {
+                const currentState = renderer.getState();
+                renderer.renderInput({
+                    prompt: currentState.prompt || 'Type your message...',
+                    input: '',
+                    cursor: 0,
+                    footerLines: currentState.footerLines,
+                    overlayLines: lines,
+                });
+                return;
+            }
             for (let i = 0; i < models.length; i++) {
                 const m = models[i];
                 const isSelected = i === selectedIdx;
@@ -42,6 +74,10 @@ export async function selectModel(config) {
             stdout.write(`\x1b[${models.length}A`);
         };
         const clearMenu = () => {
+            if (renderWithRenderer && renderer) {
+                renderer.clearOverlay();
+                return;
+            }
             stdout.write('\x1b7');
             for (let i = 0; i < models.length; i++) {
                 stdout.write('\n\x1b[2K');
@@ -54,9 +90,11 @@ export async function selectModel(config) {
             resolved = true;
             clearMenu();
             stdin.removeListener('data', onData);
-            stdin.setRawMode(false);
+            stdin.setRawMode?.(false);
             stdin.pause();
-            stdout.write('\n');
+            if (!renderWithRenderer) {
+                stdout.write('\n');
+            }
             resolve(result);
         };
         const onData = (data) => {
@@ -83,9 +121,11 @@ export async function selectModel(config) {
                 return;
             }
         };
-        stdout.write('\n选择模型 (↑↓ 选择, Enter 确认, Esc 取消):\n');
+        if (!renderWithRenderer) {
+            stdout.write('\n选择模型 (↑↓ 选择, Enter 确认, Esc 取消):\n');
+        }
         renderMenu();
-        stdin.setRawMode(true);
+        stdin.setRawMode?.(true);
         stdin.resume();
         stdin.on('data', onData);
     });
