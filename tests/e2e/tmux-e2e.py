@@ -1111,6 +1111,40 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_contains(help_output, "/plan -", "built-in /help output did not include visible skills")
         print("PASS: built-in slash command output is visible")
 
+        print("--- E2E 5b: slash-selected /models opens the model selector instead of the permission-mode command ---")
+        tmux.send_text("/mod")
+        time.sleep(0.3)
+        slash_models_overlay = tmux.capture()
+        assert_contains(slash_models_overlay, "/mode", "slash menu did not show /mode while filtering /mod")
+        assert_contains(slash_models_overlay, "/models", "slash menu did not show /models while filtering /mod")
+
+        tmux.send_key("Down")
+        time.sleep(0.15)
+        tmux.send_key("Enter")
+
+        model_selector = tmux.wait_for(
+            lambda text: "Custom Default" in text or "当前权限模式" in text,
+            timeout=12,
+        )
+        assert_contains(model_selector, "Custom Default", "slash-selected /models did not enter the model selector")
+        assert_true(
+            "当前权限模式" not in model_selector,
+            f"/models was incorrectly routed into the /mode command path:\n{model_selector}",
+        )
+
+        tmux.send_key("Enter")
+        model_switch_output = tmux.wait_for(
+            lambda text: "已切换到：" in text and has_ready_input_prompt(text),
+            timeout=12,
+        )
+        assert_contains(model_switch_output, "已切换到：", "model selector did not finish with a visible switch confirmation")
+        assert_true(
+            "当前权限模式" not in model_switch_output,
+            f"/models flow still emitted permission-mode output after the model selector:\n{model_switch_output}",
+        )
+        assert_footer_chrome_is_singular(model_switch_output, "· auto · 0% · project")
+        print("PASS: slash-selected /models uses the model selector and keeps the footer singular")
+
         tmux.stop()
         tmux.start()
         welcome = tmux.wait_for(lambda text: "欢迎使用 xiaok code" in text and has_input_prompt(text), timeout=12)

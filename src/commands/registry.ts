@@ -14,7 +14,7 @@ const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
   {
     id: 'exit',
     cmd: '/exit',
-    slashDesc: 'Exit the chat',
+    slashDesc: '退出当前对话',
     helpLine: '  /exit    - 退出',
     showInSlash: true,
     showInHelp: true,
@@ -22,7 +22,7 @@ const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
   {
     id: 'clear',
     cmd: '/clear',
-    slashDesc: 'Clear the screen',
+    slashDesc: '清屏并重新显示欢迎页',
     helpLine: '  /clear   - 清屏',
     showInSlash: true,
     showInHelp: true,
@@ -30,7 +30,7 @@ const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
   {
     id: 'compact',
     cmd: '/compact',
-    slashDesc: 'Compact the current conversation context',
+    slashDesc: '压缩较早对话，减少上下文占用',
     helpLine: '  /compact - 压缩上下文',
     showInSlash: true,
     showInHelp: true,
@@ -38,7 +38,7 @@ const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
   {
     id: 'context',
     cmd: '/context',
-    slashDesc: 'Show loaded repo context',
+    slashDesc: '查看当前自动加载的仓库上下文',
     helpLine: '  /context - 查看当前仓库上下文',
     showInSlash: true,
     showInHelp: true,
@@ -46,7 +46,7 @@ const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
   {
     id: 'models',
     cmd: '/models',
-    slashDesc: 'Switch model',
+    slashDesc: '打开模型选择器',
     helpLine: '  /models  - 切换模型',
     showInSlash: true,
     showInHelp: true,
@@ -54,10 +54,34 @@ const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
   {
     id: 'mode',
     cmd: '/mode',
-    slashDesc: 'Show or change permission mode',
+    slashDesc: '查看当前权限模式',
     helpLine: '  /mode [default|auto|plan] - 查看或切换权限模式',
     showInSlash: true,
     showInHelp: true,
+  },
+  {
+    id: 'mode-default',
+    cmd: '/mode default',
+    slashDesc: '切到 default：危险操作前询问确认',
+    helpLine: '',
+    showInSlash: true,
+    showInHelp: false,
+  },
+  {
+    id: 'mode-auto',
+    cmd: '/mode auto',
+    slashDesc: '切到 auto：自动放行工具调用',
+    helpLine: '',
+    showInSlash: true,
+    showInHelp: false,
+  },
+  {
+    id: 'mode-plan',
+    cmd: '/mode plan',
+    slashDesc: '切到 plan：禁止写入和 bash，只做计划',
+    helpLine: '',
+    showInSlash: true,
+    showInHelp: false,
   },
   ...CHAT_REMINDER_SLASH_COMMANDS.map((command): ChatCommandMetadata => ({
     id: command.cmd.slice(1),
@@ -70,7 +94,7 @@ const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
   {
     id: 'settings',
     cmd: '/settings',
-    slashDesc: 'Show active CLI settings',
+    slashDesc: '查看当前生效配置',
     helpLine: '  /settings - 查看当前生效配置',
     showInSlash: true,
     showInHelp: true,
@@ -78,7 +102,7 @@ const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
   {
     id: 'skills-reload',
     cmd: '/skills-reload',
-    slashDesc: 'Reload the skill catalog',
+    slashDesc: '刷新 skill 目录，不用重启 chat',
     helpLine: '  /skills-reload - 刷新 skill 目录（安装后无需重启即可使用）',
     showInSlash: true,
     showInHelp: true,
@@ -86,7 +110,7 @@ const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
   {
     id: 'yzjchannel',
     cmd: '/yzjchannel',
-    slashDesc: 'Connect the embedded YZJ channel',
+    slashDesc: '连接嵌入式云之家 channel',
     helpLine: '  /yzjchannel - 连接云之家 channel（嵌入式，关闭 chat 即断开）',
     showInSlash: true,
     showInHelp: true,
@@ -94,7 +118,7 @@ const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
   {
     id: 'help',
     cmd: '/help',
-    slashDesc: 'Show help',
+    slashDesc: '查看可用命令和 skills',
     helpLine: '  /help    - 显示帮助',
     showInSlash: true,
     showInHelp: true,

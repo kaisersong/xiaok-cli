@@ -18,7 +18,7 @@ describe('chat workflow wiring', () => {
     expect(source).toContain('SessionIntentDelegationStore');
     expect(source).toContain('wireIntentDelegationToRuntimeSync');
     expect(source).toMatch(/markSessionOwned|resumeSessionOwnership/);
-    expect(source).toContain("trimmed.startsWith('/mode')");
+    expect(source).toContain("trimmed === '/mode' || trimmed.startsWith('/mode ')");
     expect(source).not.toContain("from '../ai/tools/tasks.js'");
     expect(source).not.toContain("from '../runtime/tasking/board.js'");
     expect(source).not.toContain('createTaskTools');

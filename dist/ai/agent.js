@@ -38,7 +38,7 @@ export class Agent {
         this.runtime = this.createRuntime();
     }
     forceCompact() {
-        this.session.forceCompact('[context compacted]');
+        return this.session.forceCompact('[context compacted]');
     }
     getUsage() {
         return this.session.getUsage();

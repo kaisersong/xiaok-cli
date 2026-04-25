@@ -23,17 +23,20 @@ describe('getSlashCommands', () => {
   it('should return base commands when no skills provided', () => {
     const commands = getSlashCommands([]);
 
-    expect(commands).toContainEqual({ cmd: '/exit', desc: 'Exit the chat' });
-    expect(commands).toContainEqual({ cmd: '/clear', desc: 'Clear the screen' });
-    expect(commands).toContainEqual({ cmd: '/settings', desc: 'Show active CLI settings' });
-    expect(commands).toContainEqual({ cmd: '/context', desc: 'Show loaded repo context' });
-    expect(commands).toContainEqual({ cmd: '/compact', desc: 'Compact the current conversation context' });
-    expect(commands).toContainEqual({ cmd: '/models', desc: 'Switch model' });
-    expect(commands).toContainEqual({ cmd: '/mode', desc: 'Show or change permission mode' });
+    expect(commands).toContainEqual({ cmd: '/exit', desc: '退出当前对话' });
+    expect(commands).toContainEqual({ cmd: '/clear', desc: '清屏并重新显示欢迎页' });
+    expect(commands).toContainEqual({ cmd: '/settings', desc: '查看当前生效配置' });
+    expect(commands).toContainEqual({ cmd: '/context', desc: '查看当前自动加载的仓库上下文' });
+    expect(commands).toContainEqual({ cmd: '/compact', desc: '压缩较早对话，减少上下文占用' });
+    expect(commands).toContainEqual({ cmd: '/models', desc: '打开模型选择器' });
+    expect(commands).toContainEqual({ cmd: '/mode', desc: '查看当前权限模式' });
+    expect(commands).toContainEqual({ cmd: '/mode default', desc: '切到 default：危险操作前询问确认' });
+    expect(commands).toContainEqual({ cmd: '/mode auto', desc: '切到 auto：自动放行工具调用' });
+    expect(commands).toContainEqual({ cmd: '/mode plan', desc: '切到 plan：禁止写入和 bash，只做计划' });
     expect(commands).toContainEqual({ cmd: '/reminder', desc: 'Manage reminders: create, list, or cancel' });
-    expect(commands).toContainEqual({ cmd: '/skills-reload', desc: 'Reload the skill catalog' });
-    expect(commands).toContainEqual({ cmd: '/yzjchannel', desc: 'Connect the embedded YZJ channel' });
-    expect(commands).toContainEqual({ cmd: '/help', desc: 'Show help' });
+    expect(commands).toContainEqual({ cmd: '/skills-reload', desc: '刷新 skill 目录，不用重启 chat' });
+    expect(commands).toContainEqual({ cmd: '/yzjchannel', desc: '连接嵌入式云之家 channel' });
+    expect(commands).toContainEqual({ cmd: '/help', desc: '查看可用命令和 skills' });
 
     expect(commands.some((command) => command.cmd === '/commit')).toBe(false);
     expect(commands.some((command) => command.cmd === '/review')).toBe(false);
@@ -43,7 +46,7 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.cmd === '/remind')).toBe(false);
     expect(commands.some((command) => command.cmd === '/reminders')).toBe(false);
     expect(commands.some((command) => command.cmd === '/reminder-cancel')).toBe(false);
-    expect(commands.length).toBe(11);
+    expect(commands.length).toBe(14);
   });
 
   it('should include skills in command list', () => {
@@ -59,7 +62,7 @@ describe('getSlashCommands', () => {
     const commands = getSlashCommands(skills);
 
     expect(commands).toContainEqual({ cmd: '/test-skill', desc: 'A test skill' });
-    expect(commands.length).toBe(12); // 11 base + 1 skill
+    expect(commands.length).toBe(15); // 14 base + 1 skill
   });
 
   it('should sort commands alphabetically', () => {
@@ -85,7 +88,7 @@ describe('getSlashCommands', () => {
     const exitCommands = commands.filter(c => c.cmd === '/exit');
 
     expect(exitCommands.length).toBe(1);
-    expect(exitCommands[0].desc).toBe('Exit the chat'); // Base command takes precedence
+    expect(exitCommands[0].desc).toBe('退出当前对话'); // Base command takes precedence
   });
 
   it('should handle multiple skills', () => {
@@ -97,7 +100,7 @@ describe('getSlashCommands', () => {
 
     const commands = getSlashCommands(skills);
 
-    expect(commands.length).toBe(14); // 11 base + 3 skills
+    expect(commands.length).toBe(17); // 14 base + 3 skills
   });
 
   it('builds base slash commands from shared chat command metadata rather than a local constant table', () => {
@@ -625,8 +628,8 @@ describe('InputReader', () => {
 
       const commands = getSlashCommands(skills);
 
-      // 11 base commands + 20 skills = 31 total
-      expect(commands.length).toBe(31);
+      // 14 base commands + 20 skills = 34 total
+      expect(commands.length).toBe(34);
     });
 
     it('should preserve command descriptions', () => {

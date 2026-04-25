@@ -17,6 +17,10 @@ interface FakeAdapterCall {
   lastToolResult: string;
 }
 
+const { mockSelectModel } = vi.hoisted(() => ({
+  mockSelectModel: vi.fn(),
+}));
+
 const adapterCalls: FakeAdapterCall[] = [];
 const clonedModels: string[] = [];
 let multiToolPhase = 0;
@@ -766,6 +770,10 @@ vi.mock('../../src/ai/models.js', () => ({
   createAdapter: vi.fn(() => createFakeAdapter()),
 }));
 
+vi.mock('../../src/ui/model-selector.js', () => ({
+  selectModel: mockSelectModel,
+}));
+
 describe('chat interactive runtime', () => {
   const tempDirs: string[] = [];
   let originalConfigDir: string | undefined;
@@ -773,6 +781,7 @@ describe('chat interactive runtime', () => {
 
   beforeEach(() => {
     resetAdapterState();
+    mockSelectModel.mockReset();
     originalConfigDir = process.env.XIAOK_CONFIG_DIR;
   });
 
@@ -1705,6 +1714,78 @@ describe('chat interactive runtime', () => {
         expect(lines.some((line) => line.includes('/pr'))).toBe(false);
         expect(lines.some((line) => line.includes('/doctor'))).toBe(false);
         expect(lines.some((line) => line.includes('/init'))).toBe(false);
+      }, { timeoutMs: 3_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('routes a slash-selected /models command to the model selector instead of the /mode branch and keeps the footer singular', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-interactive-models-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+    mockSelectModel.mockResolvedValue(null);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('/mod');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expect(lines.some((line) => line.includes('/mode'))).toBe(true);
+        expect(lines.some((line) => line.includes('/models'))).toBe(true);
+      }, { timeoutMs: 3_000 });
+
+      harness.send('\x1b[B');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(mockSelectModel).toHaveBeenCalledTimes(1);
+        expect(harness.output.normalized).toContain('已取消');
+        expect(harness.output.normalized).not.toContain('当前权限模式');
+        expectSingleFooter(harness.screen.lines());
       }, { timeoutMs: 3_000 });
 
       await waitForInputTurnReady(harness);

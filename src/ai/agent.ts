@@ -10,7 +10,7 @@ import { AgentRunController } from './runtime/controller.js';
 import type { AgentRuntimeEvent } from './runtime/events.js';
 import { toLegacyStreamChunk } from './runtime/events.js';
 import { AgentRuntime } from './runtime/agent-runtime.js';
-import { AgentSessionState, type AgentSessionSnapshot } from './runtime/session.js';
+import { AgentSessionState, type AgentSessionSnapshot, type CompactionRecord } from './runtime/session.js';
 import type { PromptSnapshot } from './prompts/types.js';
 
 export type OnChunk = (chunk: StreamChunk) => void;
@@ -67,8 +67,8 @@ export class Agent {
     this.runtime = this.createRuntime();
   }
 
-  forceCompact(): void {
-    this.session.forceCompact('[context compacted]');
+  forceCompact(): CompactionRecord | null {
+    return this.session.forceCompact('[context compacted]');
   }
 
   getUsage(): UsageStats {

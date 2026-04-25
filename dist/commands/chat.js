@@ -1528,7 +1528,7 @@ async function runChat(initialInput, opts) {
                 embeddedChannels.push(embedded);
                 continue;
             }
-            if (trimmed.startsWith('/mode')) {
+            if (trimmed === '/mode' || trimmed.startsWith('/mode ')) {
                 const [, requestedMode] = trimmed.split(/\s+/, 2);
                 if (!requestedMode) {
                     writeCommandOutput(trimmed, `当前权限模式：${permissionManager.getMode()}\n\n`);
@@ -1544,8 +1544,13 @@ async function runChat(initialInput, opts) {
                 continue;
             }
             if (trimmed === '/compact') {
-                agent.forceCompact();
-                writeCommandOutput(trimmed, `${dim('上下文已压缩。')}\n\n`);
+                const compaction = agent.forceCompact();
+                if (compaction) {
+                    writeCommandOutput(trimmed, `${dim(`已压缩较早对话，保留最近上下文（折叠 ${compaction.replacedMessages} 条历史消息）。`)}\n\n`);
+                }
+                else {
+                    writeCommandOutput(trimmed, `${dim('当前历史很短，暂时无需压缩。')}\n\n`);
+                }
                 continue;
             }
             if (trimmed === '/models') {

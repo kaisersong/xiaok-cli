@@ -1,6 +1,6 @@
 import type { MessageBlock, ModelAdapter, RuntimeHookSink, StreamChunk, UsageStats } from '../types.js';
 import type { ToolRegistry } from './tools/index.js';
-import { AgentSessionState, type AgentSessionSnapshot } from './runtime/session.js';
+import { AgentSessionState, type AgentSessionSnapshot, type CompactionRecord } from './runtime/session.js';
 import type { PromptSnapshot } from './prompts/types.js';
 export type OnChunk = (chunk: StreamChunk) => void;
 export interface AgentOptions {
@@ -23,7 +23,7 @@ export declare class Agent {
     constructor(adapter: ModelAdapter, registry: ToolRegistry, systemPrompt: string, options?: AgentOptions);
     runTurn(userInput: string | MessageBlock[], onChunk: OnChunk, signal?: AbortSignal): Promise<void>;
     clearHistory(): void;
-    forceCompact(): void;
+    forceCompact(): CompactionRecord | null;
     getUsage(): UsageStats;
     exportSession(): AgentSessionSnapshot;
     restoreSession(snapshot: AgentSessionSnapshot): void;
