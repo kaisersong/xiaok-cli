@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {
+      "id": "valid-release-checklist",
+      "fixture": "valid-release-checklist",
+      "expectOk": true,
+      "expectErrors": [],
+      "expectWarnings": []
+    },
+    {
+      "id": "missing-verifiability",
+      "fixture": "missing-verifiability",
+      "expectOk": false,
+      "expectErrors": [
+        "missing_when_to_use",
+        "missing_task_goals",
+        "missing_examples",
+        "missing_success_criteria"
+      ]
+    },
+    {
+      "id": "overloaded-multi-job",
+      "fixture": "overloaded-multi-job",
+      "expectOk": true,
+      "expectWarnings": [
+        "multiple_primary_goals",
+        "progressive_disclosure_missing"
+      ]
+    }
+  ]
+}

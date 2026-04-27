@@ -22,14 +22,34 @@ function findSkillCandidates(dir, scope) {
         return [];
     }
     return readdirSync(dir)
-        .filter((entry) => entry.endsWith('.md'))
-        .map((entry) => {
-        const path = join(dir, entry);
-        const name = parseSkillName(readFileSync(path, 'utf8'));
-        if (!name) {
-            return null;
+        .flatMap((entry) => {
+        const entryPath = join(dir, entry);
+        if (entry.endsWith('.md')) {
+            const name = parseSkillName(readFileSync(entryPath, 'utf8'));
+            if (!name) {
+                return [];
+            }
+            return [{
+                    name,
+                    path: entryPath,
+                    removePath: entryPath,
+                    scope,
+                }];
         }
-        return { name, path, scope };
+        const skillPath = join(entryPath, 'SKILL.md');
+        if (!existsSync(skillPath)) {
+            return [];
+        }
+        const name = parseSkillName(readFileSync(skillPath, 'utf8'));
+        if (!name) {
+            return [];
+        }
+        return [{
+                name,
+                path: skillPath,
+                removePath: entryPath,
+                scope,
+            }];
     })
         .filter((entry) => Boolean(entry));
 }
@@ -75,8 +95,12 @@ export function createUninstallSkillTool(options = {}) {
             if (!match) {
                 return `Error: 未找到 skill "${normalizedName}"`;
             }
-            rmSync(match.path, { force: true });
-            await options.onUninstall?.(match);
+            rmSync(match.removePath, { force: true, recursive: true });
+            await options.onUninstall?.({
+                name: match.name,
+                path: match.path,
+                scope: match.scope,
+            });
             options.capabilityRegistry?.unregister(match.name);
             return [
                 `已卸载 skill "${match.name}"`,

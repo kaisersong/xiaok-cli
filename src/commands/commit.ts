@@ -52,7 +52,7 @@ export async function runCommitCommand(cwd: string, message?: string): Promise<s
 export function registerCommitCommands(program: Command): void {
   program
     .command('commit [message...]')
-    .description('基于已暂存改动创建提交')
+    .description('基于已暂存改动生成并创建 Git 提交')
     .action(async (messageParts?: string[]) => {
       const message = Array.isArray(messageParts) && messageParts.length > 0
         ? messageParts.join(' ').trim()

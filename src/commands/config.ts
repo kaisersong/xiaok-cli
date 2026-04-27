@@ -80,7 +80,7 @@ function ensureDefaultModelForProvider(
 }
 
 export function registerConfigCommands(program: Command): void {
-  const config = program.command('config').description('管理 xiaok 配置');
+  const config = program.command('config').description('管理 xiaok 工作台配置');
 
   const configSet = config.command('set').description('设置配置项');
 

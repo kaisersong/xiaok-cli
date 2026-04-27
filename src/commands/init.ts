@@ -34,7 +34,7 @@ export async function runInitCommand(cwd: string): Promise<string> {
 export function registerInitCommands(program: Command): void {
   program
     .command('init')
-    .description('初始化项目级 xiaok 配置')
+    .description('初始化项目级 xiaok 工作台配置')
     .action(async () => {
       console.log(await runInitCommand(process.cwd()));
     });

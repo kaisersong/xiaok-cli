@@ -273,6 +273,7 @@ Project.`);
 
     expect(skills.some((skill) => skill.source === 'builtin')).toBe(true);
     expect(skills.some((skill) => skill.name === 'plan')).toBe(true);
+    expect(skills.some((skill) => skill.name === 'skill-creator')).toBe(true);
   });
 
   it('reloads newly installed skills through a persistent catalog', async () => {

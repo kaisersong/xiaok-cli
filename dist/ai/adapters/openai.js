@@ -2,6 +2,8 @@ import OpenAI from 'openai';
 import { estimateTokens } from '../runtime/usage.js';
 const MAX_RETRIES = 3;
 const KIMI_CODING_COMPAT_USER_AGENT = 'claude-code/1.0';
+const RAW_THINK_OPEN_TAG = '<think>';
+const RAW_THINK_CLOSE_TAG = '</think>';
 function isKimiCodingEndpoint(baseUrl) {
     if (!baseUrl)
         return false;
@@ -44,6 +46,73 @@ function extractReasoningDeltas(delta) {
         }
     }
     return chunks;
+}
+function getTrailingTagPrefixLength(value, tag) {
+    const maxLength = Math.min(value.length, tag.length - 1);
+    for (let length = maxLength; length > 0; length -= 1) {
+        if (tag.startsWith(value.slice(-length))) {
+            return length;
+        }
+    }
+    return 0;
+}
+function drainLeadingRawThinkSegments(state, chunk, force = false) {
+    state.buffer += chunk;
+    const segments = [];
+    while (state.buffer.length > 0) {
+        if (!state.active) {
+            segments.push({ type: 'text', delta: state.buffer });
+            state.buffer = '';
+            break;
+        }
+        if (state.mode === 'inside') {
+            const closeIndex = state.buffer.indexOf(RAW_THINK_CLOSE_TAG);
+            if (closeIndex >= 0) {
+                const reasoning = state.buffer.slice(0, closeIndex);
+                if (reasoning.length > 0) {
+                    segments.push({ type: 'thinking', delta: reasoning, signature: 'raw_think_tag' });
+                }
+                state.buffer = state.buffer.slice(closeIndex + RAW_THINK_CLOSE_TAG.length);
+                state.mode = 'outside';
+                continue;
+            }
+            if (force) {
+                segments.push({ type: 'text', delta: `${RAW_THINK_OPEN_TAG}${state.buffer}` });
+                state.buffer = '';
+                state.mode = 'outside';
+                state.active = false;
+                break;
+            }
+            const carryLength = getTrailingTagPrefixLength(state.buffer, RAW_THINK_CLOSE_TAG);
+            const stableReasoning = state.buffer.slice(0, state.buffer.length - carryLength);
+            if (stableReasoning.length > 0) {
+                segments.push({ type: 'thinking', delta: stableReasoning, signature: 'raw_think_tag' });
+                state.buffer = state.buffer.slice(state.buffer.length - carryLength);
+            }
+            break;
+        }
+        const leadingWhitespace = state.buffer.match(/^\s+/)?.[0] ?? '';
+        if (leadingWhitespace.length > 0) {
+            state.buffer = state.buffer.slice(leadingWhitespace.length);
+            if (state.buffer.length === 0) {
+                break;
+            }
+            continue;
+        }
+        if (state.buffer.startsWith(RAW_THINK_OPEN_TAG)) {
+            state.buffer = state.buffer.slice(RAW_THINK_OPEN_TAG.length);
+            state.mode = 'inside';
+            continue;
+        }
+        if (!force && RAW_THINK_OPEN_TAG.startsWith(state.buffer)) {
+            break;
+        }
+        state.active = false;
+        segments.push({ type: 'text', delta: state.buffer });
+        state.buffer = '';
+        break;
+    }
+    return segments;
 }
 export class OpenAIAdapter {
     client;
@@ -154,6 +223,11 @@ export class OpenAIAdapter {
             stream_options: { include_usage: true },
         });
         const toolBuffers = new Map();
+        const rawThinkParser = {
+            active: true,
+            mode: 'outside',
+            buffer: '',
+        };
         let emittedDone = false;
         let outputChars = 0;
         let usageReceived = false;
@@ -179,8 +253,14 @@ export class OpenAIAdapter {
                 yield { type: 'thinking', delta: reasoning.text, signature: reasoning.signature };
             }
             if (delta.content) {
-                outputChars += delta.content.length;
-                yield { type: 'text', delta: delta.content };
+                for (const segment of drainLeadingRawThinkSegments(rawThinkParser, delta.content)) {
+                    if (segment.type === 'thinking') {
+                        yield segment;
+                        continue;
+                    }
+                    outputChars += segment.delta.length;
+                    yield segment;
+                }
             }
             if (delta.tool_calls) {
                 for (const tc of delta.tool_calls) {
@@ -195,6 +275,14 @@ export class OpenAIAdapter {
                 }
             }
             if (choice?.finish_reason) {
+                for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
+                    if (segment.type === 'thinking') {
+                        yield segment;
+                        continue;
+                    }
+                    outputChars += segment.delta.length;
+                    yield segment;
+                }
                 for (const buf of toolBuffers.values()) {
                     let input = {};
                     try {
@@ -240,6 +328,14 @@ export class OpenAIAdapter {
             }
         }
         if (!emittedDone) {
+            for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
+                if (segment.type === 'thinking') {
+                    yield segment;
+                    continue;
+                }
+                outputChars += segment.delta.length;
+                yield segment;
+            }
             for (const buf of toolBuffers.values()) {
                 let input = {};
                 try {

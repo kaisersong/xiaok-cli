@@ -15,6 +15,7 @@ import { webFetchTool } from './web-fetch.js';
 import { webSearchTool } from './web-search.js';
 import { installSkillTool } from './install-skill.js';
 import { uninstallSkillTool } from './uninstall-skill.js';
+import { validateSkillTool } from './validate-skill.js';
 import {
   buildCapabilityToolDefinition,
   buildToolSearchEntry,
@@ -40,6 +41,7 @@ export function buildToolList(
     webSearchTool,
     installSkillTool,
     uninstallSkillTool,
+    validateSkillTool,
     ...extraTools,
   ];
   if (skillTool) tools.push(skillTool);

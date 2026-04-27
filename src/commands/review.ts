@@ -52,7 +52,7 @@ export async function runReviewCommand(cwd: string): Promise<string> {
 export function registerReviewCommands(program: Command): void {
   program
     .command('review')
-    .description('汇总当前工作区改动，生成本地评审概览')
+    .description('汇总当前工作区改动，生成交付前评审概览')
     .action(async () => {
       const result = await runReviewCommand(process.cwd());
       console.log(result);

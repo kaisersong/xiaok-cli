@@ -295,6 +295,68 @@ describe('OpenAIAdapter', () => {
     ]);
   });
 
+  it('reclassifies leading raw <think> content blocks into hidden thinking chunks', async () => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { content: '<thi' }, finish_reason: null }] };
+        yield { choices: [{ delta: { content: 'nk>step 1' }, finish_reason: null }] };
+        yield { choices: [{ delta: { content: '\nstep 2</th' }, finish_reason: null }] };
+        yield { choices: [{ delta: { content: 'ink>\n\n正式回答' }, finish_reason: null }] };
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    };
+
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue(mockStream as never);
+
+    const adapter = new OpenAIAdapter('test-key', 'kimi-k2-thinking');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const chunks = [];
+    for await (const chunk of adapter.stream([], [], 'system')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.filter((chunk) => chunk.type === 'thinking')).toEqual([
+      { type: 'thinking', delta: 'step 1', signature: 'raw_think_tag' },
+      { type: 'thinking', delta: '\nstep 2', signature: 'raw_think_tag' },
+    ]);
+    expect(chunks.filter((chunk) => chunk.type === 'text')).toEqual([
+      { type: 'text', delta: '正式回答' },
+    ]);
+  });
+
+  it('keeps literal <think> text once visible assistant prose has already started', async () => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { content: '请输出字面量 <think> 标签' }, finish_reason: null }] };
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    };
+
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue(mockStream as never);
+
+    const adapter = new OpenAIAdapter('test-key', 'kimi-k2-thinking');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const chunks = [];
+    for await (const chunk of adapter.stream([], [], 'system')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.filter((chunk) => chunk.type === 'thinking')).toEqual([]);
+    expect(chunks.filter((chunk) => chunk.type === 'text')).toEqual([
+      { type: 'text', delta: '请输出字面量 <think> 标签' },
+    ]);
+  });
+
   it('joins multiple assistant thinking blocks into one reasoning_content replay payload', async () => {
     const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
 

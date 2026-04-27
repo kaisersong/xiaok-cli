@@ -38,3 +38,10 @@
 - Use `npm test` or `npm run test:sandbox`, which first compiles `src/` and `tests/` into `.test-dist/` and then runs Vitest against emitted JavaScript with `vitest.sandbox.config.mjs`.
 - The reminder/daemon suites open real Unix sockets. In the restricted sandbox they can fail with `listen EPERM`; rerun `npm run test:sandbox` with unrestricted permissions when you need the full pass signal.
 - The sandbox suite excludes subprocess-dependent tests such as `bash` and `grep`; run `npm run test:full` on an unrestricted machine for the complete suite.
+
+## Docs Symlink Scope
+
+- `docs` in this workspace is a symlink to `/Users/song/projects/mydocs/xiaok-cli`.
+- Treat `docs/design/**` and related design/spec docs under `docs/**` as normal in-scope project files for this repo's work.
+- Do not ask for extra confirmation just because a design-doc edit crosses that symlink boundary; update the smallest relevant doc set directly when the task requires it.
+- Remember that `git status` in `/Users/song/projects/xiaok-cli` will not show those doc edits, because the actual files live in the `mydocs` repo.

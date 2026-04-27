@@ -14,7 +14,7 @@ export async function runTranscriptCommand(sessionId) {
 export function registerTranscriptCommands(program) {
     program
         .command('transcript')
-        .description('分析某个会话的交互 transcript')
+        .description('分析会话 transcript，检查交互与执行质量')
         .argument('<sessionId>', '会话 ID')
         .action(async (sessionId) => {
         console.log(await runTranscriptCommand(sessionId));

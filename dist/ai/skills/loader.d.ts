@@ -22,12 +22,37 @@ export interface SkillLoadOptions {
     builtinRoots?: string[];
     extraRoots?: string[];
 }
+export interface ResolvedSkillRoots {
+    builtinRoots: string[];
+    globalSkillsDir: string;
+    projectSkillsDir: string;
+}
 export interface SkillCatalog {
     reload(): Promise<SkillMeta[]>;
     list(): SkillMeta[];
     get(name: string): SkillMeta | undefined;
     resolve(names: string[]): SkillMeta[];
 }
+export interface ParsedFrontmatter {
+    name: string;
+    description: string;
+    content: string;
+    allowedTools: string[];
+    executionContext: SkillExecutionContext;
+    agent?: string;
+    model?: string;
+    effort?: string;
+    dependsOn: string[];
+    userInvocable?: boolean;
+    whenToUse?: string;
+    taskGoals: string[];
+    inputKinds: string[];
+    outputKinds: string[];
+    examples: string[];
+}
+export declare function parseFrontmatter(raw: string): ParsedFrontmatter | null;
+export declare function resolveSkillRoots(xiaokConfigDir?: string, cwd?: string, options?: SkillLoadOptions): ResolvedSkillRoots;
+export declare function discoverSkills(xiaokConfigDir?: string, cwd?: string, options?: SkillLoadOptions): Promise<SkillMeta[]>;
 export declare function loadSkills(xiaokConfigDir?: string, cwd?: string, options?: SkillLoadOptions): Promise<SkillMeta[]>;
 export declare function createSkillCatalog(xiaokConfigDir?: string, cwd?: string, options?: SkillLoadOptions): SkillCatalog;
 export declare function formatSkillEntry(skill: SkillMeta): string;

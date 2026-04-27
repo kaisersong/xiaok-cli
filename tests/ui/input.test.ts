@@ -34,7 +34,7 @@ describe('getSlashCommands', () => {
     expect(commands).toContainEqual({ cmd: '/mode auto', desc: '切到 auto：自动放行工具调用' });
     expect(commands).toContainEqual({ cmd: '/mode plan', desc: '切到 plan：禁止写入和 bash，只做计划' });
     expect(commands).toContainEqual({ cmd: '/reminder', desc: 'Manage reminders: create, list, or cancel' });
-    expect(commands).toContainEqual({ cmd: '/skills-reload', desc: '刷新 skill 目录，不用重启 chat' });
+    expect(commands).toContainEqual({ cmd: '/skills-reload', desc: '强制刷新 skill 目录（通常不需要，默认会自动热更新）' });
     expect(commands).toContainEqual({ cmd: '/yzjchannel', desc: '连接嵌入式云之家 channel' });
     expect(commands).toContainEqual({ cmd: '/help', desc: '查看可用命令和 skills' });
 

@@ -66,7 +66,7 @@ function ensureDefaultModelForProvider(cfg, providerId) {
     return profile.defaultModel.modelId;
 }
 export function registerConfigCommands(program) {
-    const config = program.command('config').description('管理 xiaok 配置');
+    const config = program.command('config').description('管理 xiaok 工作台配置');
     const configSet = config.command('set').description('设置配置项');
     configSet
         .command('model <value>')

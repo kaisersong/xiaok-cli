@@ -60,7 +60,7 @@ export async function runPrCommand(cwd) {
 export function registerPrCommands(program) {
     program
         .command('pr')
-        .description('生成 PR 标题和正文，并在可用时调用 gh 创建 PR')
+        .description('为当前分支生成 PR 草稿，并在可用时调用 gh 创建 PR')
         .action(async () => {
         const result = await runPrCommand(process.cwd());
         console.log(result);

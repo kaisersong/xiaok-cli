@@ -112,6 +112,7 @@ describe('ToolRegistry', () => {
     expect(defs.map(d => d.name)).toContain('web_search');
     expect(defs.map(d => d.name)).toContain('install_skill');
     expect(defs.map(d => d.name)).toContain('uninstall_skill');
+    expect(defs.map(d => d.name)).toContain('validate_skill');
   });
 
   it('denies write tools in plan mode without prompting', async () => {

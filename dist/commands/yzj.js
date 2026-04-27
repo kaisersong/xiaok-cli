@@ -49,7 +49,7 @@ function buildOverrides(options) {
     };
 }
 export function registerYZJCommands(program) {
-    const yzj = program.command('yzjchannel').description('云之家 IM channel gateway');
+    const yzj = program.command('yzjchannel').description('连接云之家 IM channel 网关');
     const yzjConfigCmd = yzj.command('config').description('管理 YZJ 配置');
     yzjConfigCmd
         .command('show')

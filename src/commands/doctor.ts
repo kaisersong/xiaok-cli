@@ -34,7 +34,7 @@ export async function runDoctorCommand(cwd: string): Promise<string> {
 export function registerDoctorCommands(program: Command): void {
   program
     .command('doctor')
-    .description('检查本地 xiaok CLI 环境')
+    .description('检查本地 xiaok 工作台环境与配置')
     .action(async () => {
       console.log(await runDoctorCommand(process.cwd()));
     });

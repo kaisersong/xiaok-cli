@@ -129,6 +129,75 @@ function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithMode
         return;
       }
 
+      if (lastToolResult.includes('"这个 skill 的单一目标是什么？"')) {
+        yield {
+          type: 'tool_use',
+          id: 'tu_skill_creator_write_1',
+          name: 'write',
+          input: {
+            file_path: join(process.cwd(), '.xiaok', 'skills', 'release-checklist', 'SKILL.md'),
+            content: `---
+name: release-checklist
+description: Validate whether a single repository change is ready to ship
+when-to-use: Use when a user asks whether one code change or branch is ready for release.
+task-goals:
+  - verify release readiness for one change
+input-kinds:
+  - branch diff
+output-kinds:
+  - release readiness summary
+examples:
+  - check whether this branch is ready to ship
+---
+# Goal
+
+Run a single release-readiness pass for one code change.
+
+## Workflow
+
+1. Review the stated release candidate.
+2. Check the required verification signals.
+3. Summarize blockers and ready-to-ship confidence.
+
+## Non-Goals
+
+- Do not write release notes.
+- Do not deploy anything.
+
+## Success Criteria
+
+- The result says whether the change is ready to ship.
+- Missing verification is called out explicitly.
+`,
+          },
+        };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastToolResult.includes('已写入:') && lastToolResult.includes('release-checklist')) {
+        yield {
+          type: 'tool_use',
+          id: 'tu_skill_creator_validate_1',
+          name: 'validate_skill',
+          input: {
+            path: join(process.cwd(), '.xiaok', 'skills', 'release-checklist', 'SKILL.md'),
+          },
+        };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (
+        lastToolResult.includes('"path"')
+        && lastToolResult.includes('release-checklist')
+        && lastToolResult.includes('"ok": true')
+      ) {
+        yield { type: 'text', delta: 'release-checklist 已创建并通过校验。' };
+        yield { type: 'done' };
+        return;
+      }
+
       if (lastToolResult.includes('"taskId": "task_1"')) {
         yield { type: 'text', delta: 'task created' };
         yield { type: 'done' };
@@ -156,6 +225,28 @@ function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithMode
             agent: 'planner',
             prompt: 'draft the rollout',
             background: true,
+          },
+        };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('"primarySkill": "skill-creator"')) {
+        yield {
+          type: 'tool_use',
+          id: 'tu_skill_creator_question_1',
+          name: 'AskUserQuestion',
+          input: {
+            questions: [
+              {
+                header: 'skill-scope',
+                question: '这个 skill 的单一目标是什么？',
+                options: [
+                  { label: '发布前检查（Recommended）', description: '只做单次 release readiness 检查' },
+                  { label: '一次包办所有发布相关工作', description: '范围过大，后面应该被拆分' },
+                ],
+              },
+            ],
           },
         };
         yield { type: 'done' };
@@ -1679,6 +1770,93 @@ describe('chat interactive runtime', () => {
       harness.restore();
     }
   }, 10_000);
+
+  it('creates a skill through /skill-creator and hot-reloads it into the live slash menu', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-skill-creator-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+    const generatedSkillPath = join(projectDir, '.xiaok', 'skills', 'release-checklist', 'SKILL.md');
+    const sendAskUserKey = (key: string): void => {
+      harness.emitter.emit('data', key);
+    };
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+      harness.send('\x1b[Z');
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('权限模式已切换为 auto');
+      }, { timeoutMs: 3_000 });
+      await waitForInputTurnReady(harness);
+
+      harness.send('/skill-creator');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('这个 skill 的单一目标是什么？');
+      }, { timeoutMs: 3_000 });
+
+      sendAskUserKey('\r');
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('release-checklist 已创建并通过校验。');
+      }, { timeoutMs: 3_000 });
+
+      await waitForInputTurnReady(harness);
+      await waitFor(() => {
+        expect(readFileSync(generatedSkillPath, 'utf8')).toContain('when-to-use:');
+        expect(readFileSync(generatedSkillPath, 'utf8')).toContain('examples:');
+        expect(readFileSync(generatedSkillPath, 'utf8')).toContain('## Success Criteria');
+      }, { timeoutMs: 3_000 });
+
+      harness.send('/relea');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expect(lines.some((line) => line.includes('/release-checklist'))).toBe(true);
+      }, { timeoutMs: 3_000 });
+
+      harness.send('\x03');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 15_000);
 
   it('renders built-in slash command output in the visible transcript area', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);

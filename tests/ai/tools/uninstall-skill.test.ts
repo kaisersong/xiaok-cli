@@ -78,4 +78,27 @@ Generate reports.
 
     expect(result).toContain('未找到 skill "missing-skill"');
   });
+
+  it('removes a directory-style project skill by name', async () => {
+    const cwd = createTempDir('xiaok-uninstall-skill-project-');
+    const configDir = createTempDir('xiaok-uninstall-skill-config-');
+    tempDirs.push(cwd, configDir);
+
+    const skillDir = join(cwd, '.xiaok', 'skills', 'release-checklist');
+    mkdirSync(skillDir, { recursive: true });
+    const skillPath = join(skillDir, 'SKILL.md');
+    writeFileSync(skillPath, `---
+name: release-checklist
+description: Release checklist skill
+---
+Verify release readiness.
+`, 'utf8');
+
+    const tool = createUninstallSkillTool({ cwd, configDir });
+    const result = await tool.execute({ name: 'release-checklist', scope: 'project' });
+
+    expect(existsSync(skillDir)).toBe(false);
+    expect(result).toContain('已卸载 skill "release-checklist"');
+    expect(result).toContain(skillPath);
+  });
 });

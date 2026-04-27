@@ -2,7 +2,7 @@ import type { Command } from 'commander';
 import { login, logout, status } from '../auth/login.js';
 
 export function registerAuthCommands(program: Command): void {
-  const auth = program.command('auth').description('管理云之家账号认证');
+  const auth = program.command('auth').description('管理云之家连接认证');
 
   auth
     .command('login')

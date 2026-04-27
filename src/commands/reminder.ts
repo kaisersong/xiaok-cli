@@ -12,7 +12,7 @@ function resolveSocketPath(socketPath?: string): string {
 export function registerDaemonCommands(program: Command): void {
   const daemon = program
     .command('daemon')
-    .description('管理本地 xiaok daemon');
+    .description('管理本地 xiaok daemon 与后台服务');
 
   daemon
     .command('serve')

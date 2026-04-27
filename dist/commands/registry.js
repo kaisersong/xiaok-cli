@@ -91,8 +91,8 @@ const BASE_CHAT_COMMANDS = [
     {
         id: 'skills-reload',
         cmd: '/skills-reload',
-        slashDesc: '刷新 skill 目录，不用重启 chat',
-        helpLine: '  /skills-reload - 刷新 skill 目录（安装后无需重启即可使用）',
+        slashDesc: '强制刷新 skill 目录（通常不需要，默认会自动热更新）',
+        helpLine: '  /skills-reload - 强制刷新 skill 目录（通常不需要，默认会自动热更新）',
         showInSlash: true,
         showInHelp: true,
     },

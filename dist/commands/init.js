@@ -28,7 +28,7 @@ export async function runInitCommand(cwd) {
 export function registerInitCommands(program) {
     program
         .command('init')
-        .description('初始化项目级 xiaok 配置')
+        .description('初始化项目级 xiaok 工作台配置')
         .action(async () => {
         console.log(await runInitCommand(process.cwd()));
     });

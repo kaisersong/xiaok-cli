@@ -30,6 +30,12 @@ export interface SkillLoadOptions {
   extraRoots?: string[];
 }
 
+export interface ResolvedSkillRoots {
+  builtinRoots: string[];
+  globalSkillsDir: string;
+  projectSkillsDir: string;
+}
+
 export interface SkillCatalog {
   reload(): Promise<SkillMeta[]>;
   list(): SkillMeta[];
@@ -37,7 +43,7 @@ export interface SkillCatalog {
   resolve(names: string[]): SkillMeta[];
 }
 
-interface ParsedFrontmatter {
+export interface ParsedFrontmatter {
   name: string;
   description: string;
   content: string;
@@ -151,7 +157,7 @@ function readListField(fields: Map<string, string>, listFields: Map<string, stri
   return listFields.get(key) ?? parseInlineList(fields.get(key) ?? '');
 }
 
-function parseFrontmatter(raw: string): ParsedFrontmatter | null {
+export function parseFrontmatter(raw: string): ParsedFrontmatter | null {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) return null;
 
@@ -343,26 +349,45 @@ function loadSkillsFromDir(
   return results;
 }
 
+export function resolveSkillRoots(
+  xiaokConfigDir = getConfigDir(),
+  cwd = process.cwd(),
+  options?: SkillLoadOptions,
+): ResolvedSkillRoots {
+  return {
+    builtinRoots: [
+      ...(options?.builtinRoots ?? getBuiltinSkillRoots()),
+      ...(options?.extraRoots ?? []),
+    ],
+    globalSkillsDir: join(xiaokConfigDir, 'skills'),
+    projectSkillsDir: join(cwd, '.xiaok', 'skills'),
+  };
+}
+
+export async function discoverSkills(
+  xiaokConfigDir = getConfigDir(),
+  cwd = process.cwd(),
+  options?: SkillLoadOptions,
+): Promise<SkillMeta[]> {
+  const roots = resolveSkillRoots(xiaokConfigDir, cwd, options);
+  const builtinSkills = roots.builtinRoots.flatMap((root) => loadSkillsFromDir(root, 'builtin', 'system'));
+  const globalSkills = loadSkillsFromDir(roots.globalSkillsDir, 'global', 'user');
+  const projectSkills = loadSkillsFromDir(roots.projectSkillsDir, 'project', 'project');
+
+  return [...builtinSkills, ...globalSkills, ...projectSkills];
+}
+
 export async function loadSkills(
   xiaokConfigDir = getConfigDir(),
   cwd = process.cwd(),
   options?: SkillLoadOptions,
 ): Promise<SkillMeta[]> {
-  const builtinRoots = [
-    ...(options?.builtinRoots ?? getBuiltinSkillRoots()),
-    ...(options?.extraRoots ?? []),
-  ];
-  const globalSkillsDir = join(xiaokConfigDir, 'skills');
-  const projectSkillsDir = join(cwd, '.xiaok', 'skills');
-
-  const builtinSkills = builtinRoots.flatMap((root) => loadSkillsFromDir(root, 'builtin', 'system'));
-  const globalSkills = loadSkillsFromDir(globalSkillsDir, 'global', 'user');
-  const projectSkills = loadSkillsFromDir(projectSkillsDir, 'project', 'project');
+  const discovered = await discoverSkills(xiaokConfigDir, cwd, options);
 
   const map = new Map<string, SkillMeta>();
-  for (const skill of builtinSkills) map.set(skill.name, skill);
-  for (const skill of globalSkills) map.set(skill.name, skill);
-  for (const skill of projectSkills) map.set(skill.name, skill);
+  for (const skill of discovered) {
+    map.set(skill.name, skill);
+  }
 
   return Array.from(map.values());
 }

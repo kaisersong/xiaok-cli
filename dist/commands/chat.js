@@ -17,6 +17,7 @@ import { showPermissionPrompt } from '../ui/permission-prompt.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
 import { loadSettings, mergeRules } from '../ai/permissions/settings.js';
 import { createSkillCatalog, parseSlashCommand, toSkillEntries, findSkillByCommandName } from '../ai/skills/loader.js';
+import { createSkillCatalogWatcher } from '../ai/skills/watcher.js';
 import { createSkillTool } from '../ai/skills/tool.js';
 import { buildSkillExecutionPlan } from '../ai/skills/planner.js';
 import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
@@ -195,6 +196,7 @@ async function runChat(initialInput, opts) {
     const promptBuilder = new PromptBuilder();
     let agent;
     let runtimeFacade;
+    let skillCatalogWatcher;
     let activeIntentReminderBlock;
     let currentTurnIntentPlan;
     let currentTurnStageIndex = 0;
@@ -424,6 +426,11 @@ async function runChat(initialInput, opts) {
         agent,
         getSkillEntries: () => toSkillEntries(skills),
         getIntentReminderBlock: () => activeIntentReminderBlock,
+    });
+    skillCatalogWatcher = createSkillCatalogWatcher({
+        cwd,
+        options: { extraRoots: pluginRuntime.skillRoots },
+        onChange: refreshSkills,
     });
     if (persistedSession) {
         agent.restoreSession(persistedSession);
@@ -1392,6 +1399,7 @@ async function runChat(initialInput, opts) {
                 if (handleResize) {
                     process.stdout.off('resize', handleResize);
                 }
+                skillCatalogWatcher?.close();
                 clearTurnIntentContext();
                 await releaseSessionOwnershipForExit();
                 await platform.dispose();
@@ -1924,6 +1932,7 @@ async function runChat(initialInput, opts) {
         process.stderr.write = originalStderrWrite;
         stopIntentRuntimeSync();
         stopSkillEvalRuntimeSync();
+        skillCatalogWatcher?.close();
         await platform.dispose();
         for (const ch of embeddedChannels) {
             await ch.cleanup();
@@ -1987,7 +1996,7 @@ function buildCapabilityHealthNotice(health) {
 export function registerChatCommands(program) {
     program
         .command('chat', { isDefault: true })
-        .description('启动 AI 编程助手（默认命令）')
+        .description('启动 AI skill 任务交付工作台（默认命令）')
         .option('--auto', '自动执行所有工具，无需确认（适用于 CI）')
         .option('--dry-run', '打印工具调用但不执行')
         .option('-p, --print', '以纯文本模式输出单次结果')
