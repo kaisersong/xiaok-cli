@@ -923,7 +923,6 @@ export class ScrollRegionManager {
 
   clearOverlayPromptState(): void {
     this.clearActiveOverlayPrompt();
-    this.lastOverlayRenderRows = 0;
   }
 
   positionCursorAtContentCursor(): void {

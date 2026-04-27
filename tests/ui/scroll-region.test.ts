@@ -567,6 +567,41 @@ describe('scroll-region prompt frame ownership', () => {
     }
   });
 
+  it('clears stale feedback overlay rows before restoring the normal footer', () => {
+    const harness = createTtyHarness(60, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderPromptFrame({
+        inputValue: '',
+        cursor: 0,
+        placeholder: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · 4% · project',
+        overlayLines: ['[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过'],
+        overlayKind: 'feedback',
+      });
+
+      manager.clearOverlayPromptState();
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · 4% · project',
+      });
+
+      const lines = harness.screen.lines();
+      const promptRows = lines.filter((line) => line.includes('❯ Type your message...'));
+      const statusRows = lines.filter((line) => line.includes('gpt-terminal-e2e · 4% · project'));
+
+      expect(lines.some((line) => line.includes('[xiaok] 这次结果是否满足预期？'))).toBe(false);
+      expect(promptRows).toHaveLength(1);
+      expect(statusRows).toHaveLength(1);
+      expect(lines[22]).toContain('❯ Type your message...');
+      expect(lines[23]).toContain('gpt-terminal-e2e · 4% · project');
+    } finally {
+      harness.restore();
+    }
+  });
+
   it('renders prompt, status, and overlay from a single scroll-region frame', () => {
     const { manager, getOutput } = createMockScrollRegion();
     manager.begin();

@@ -738,7 +738,6 @@ export class ScrollRegionManager {
     }
     clearOverlayPromptState() {
         this.clearActiveOverlayPrompt();
-        this.lastOverlayRenderRows = 0;
     }
     positionCursorAtContentCursor() {
         if (!this.active)

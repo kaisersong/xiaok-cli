@@ -3691,6 +3691,71 @@ describe('chat interactive runtime', () => {
     }
   }, 20_000);
 
+  it('keeps the footer singular while a free-form feedback follow-up is still answering', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-feedback-freeform-live-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const sessionId = 'sess_feedback_prompt_freeform_live';
+    const { configDir, projectDir } = writeCompletedFeedbackResumeSessionFixture(rootDir, sessionId);
+    tempDirs.push(rootDir);
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('输出30行');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const text = harness.output.normalized;
+        expect(text).toContain('line 30');
+        expect(text).toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
+      }, { timeoutMs: 4_000 });
+
+      harness.send('报告后慢速长续问');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expect(lines.some((line) => line.includes('› 报告后慢速长续问'))).toBe(true);
+        expect(lines.some((line) => line.includes('[xiaok]'))).toBe(false);
+        expect(lines.some((line) => /Thinking|Answering|Working through details|Finalizing response/u.test(line))).toBe(true);
+        expectSingleFooter(lines);
+      }, { timeoutMs: 3_000 });
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('echo:报告后慢速长续问');
+      }, { timeoutMs: 4_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 20_000);
+
   it('exits cleanly when ctrl+c is pressed while the completed-intent feedback prompt is active', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-feedback-ctrlc-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const sessionId = 'sess_feedback_prompt_ctrlc';
