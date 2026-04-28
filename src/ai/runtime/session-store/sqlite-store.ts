@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import type { Message } from '../../../types.js';
 import type { PersistedSessionSnapshot, SessionListEntry, SessionStore } from './store.js';
 import { applySessionStoreSchema } from './schema.js';
+import { cloneSessionSkillExecutionState } from '../../skills/execution-state.js';
 
 interface SessionRow {
   session_id: string;
@@ -21,6 +22,7 @@ interface SessionRow {
   background_job_refs_json: string;
   intent_delegation_json: string | null;
   skill_eval_json: string | null;
+  skill_execution_json: string | null;
 }
 
 interface SessionMessageRow {
@@ -61,8 +63,8 @@ export class SQLiteSessionStore implements SessionStore {
           session_id, cwd, model, created_at, updated_at, forked_from_session_id,
           lineage_json, usage_json, compactions_json, prompt_snapshot_id,
           memory_refs_json, approval_refs_json, background_job_refs_json,
-          intent_delegation_json, skill_eval_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          intent_delegation_json, skill_eval_json, skill_execution_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(session_id) DO UPDATE SET
           cwd = excluded.cwd,
           model = excluded.model,
@@ -77,7 +79,8 @@ export class SQLiteSessionStore implements SessionStore {
           approval_refs_json = excluded.approval_refs_json,
           background_job_refs_json = excluded.background_job_refs_json,
           intent_delegation_json = excluded.intent_delegation_json,
-          skill_eval_json = excluded.skill_eval_json
+          skill_eval_json = excluded.skill_eval_json,
+          skill_execution_json = excluded.skill_execution_json
       `).run(
         nextSnapshot.sessionId,
         nextSnapshot.cwd,
@@ -94,6 +97,7 @@ export class SQLiteSessionStore implements SessionStore {
         JSON.stringify(nextSnapshot.backgroundJobRefs),
         JSON.stringify(nextSnapshot.intentDelegation ?? null),
         JSON.stringify(nextSnapshot.skillEval ?? null),
+        JSON.stringify(nextSnapshot.skillExecution ?? null),
       );
 
       this.db.prepare('DELETE FROM session_messages WHERE session_id = ?').run(nextSnapshot.sessionId);
@@ -162,6 +166,10 @@ export class SQLiteSessionStore implements SessionStore {
       ORDER BY message_index ASC
     `).all(sessionId) as SessionMessageRow[];
 
+    const parsedSkillExecution = row.skill_execution_json
+      ? (JSON.parse(row.skill_execution_json) ?? undefined)
+      : undefined;
+
     return {
       sessionId: row.session_id,
       cwd: row.cwd,
@@ -182,6 +190,7 @@ export class SQLiteSessionStore implements SessionStore {
       backgroundJobRefs: JSON.parse(row.background_job_refs_json) as string[],
       intentDelegation: row.intent_delegation_json ? (JSON.parse(row.intent_delegation_json) ?? undefined) : undefined,
       skillEval: row.skill_eval_json ? (JSON.parse(row.skill_eval_json) ?? undefined) : undefined,
+      skillExecution: parsedSkillExecution ? cloneSessionSkillExecutionState(parsedSkillExecution) : undefined,
     };
   }
 
@@ -240,6 +249,7 @@ export class SQLiteSessionStore implements SessionStore {
       memoryRefs: [...(source.memoryRefs ?? [])],
       approvalRefs: [...(source.approvalRefs ?? [])],
       backgroundJobRefs: [...(source.backgroundJobRefs ?? [])],
+      skillExecution: source.skillExecution ? cloneSessionSkillExecutionState(source.skillExecution) : undefined,
     };
     await this.save(forked);
     return forked;

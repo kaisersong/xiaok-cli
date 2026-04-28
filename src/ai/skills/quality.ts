@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import {
   discoverSkills,
   parseFrontmatter,
@@ -68,6 +68,14 @@ function hasNonGoals(content: string): boolean {
   return /(^|\n)#{1,3}\s*(non-goals?|非目标|不做什么)\b/i.test(content);
 }
 
+function bodyMentionsReferences(content: string): boolean {
+  return /(references\/|read .*references|读取.*references|参考.*references)/i.test(content);
+}
+
+function bodyMentionsScripts(content: string): boolean {
+  return /(scripts\/|run .*scripts?|运行.*scripts?|执行.*scripts?)/i.test(content);
+}
+
 function shouldWarnProgressiveDisclosure(content: string, filePath: string): boolean {
   const lineCount = content.split(/\r?\n/).length;
   const isLong = content.length >= PROGRESSIVE_DISCLOSURE_CHAR_THRESHOLD
@@ -95,6 +103,7 @@ function validateParsedFrontmatter(
 ): SkillValidationIssue[] {
   const issues: SkillValidationIssue[] = [];
   const normalizedName = parsed.name.trim();
+  const skillRoot = basename(filePath) === 'SKILL.md' ? dirname(filePath) : dirname(filePath);
 
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(normalizedName)) {
     issues.push(issue('error', 'invalid_name', 'Skill name must use lowercase hyphen-case.'));
@@ -114,6 +123,40 @@ function validateParsedFrontmatter(
     issues.push(issue('error', 'missing_examples', 'Add examples so the skill can be routed and evaluated.'));
   }
 
+  for (const relativePath of parsed.requiredReferences) {
+    const absolutePath = resolve(join(skillRoot, relativePath));
+    if (!existsSync(absolutePath)) {
+      issues.push(issue('error', 'references_declared_but_missing', `Required reference is missing: ${relativePath}`));
+    }
+  }
+
+  for (const command of parsed.requiredScripts) {
+    const scriptMatch = command.match(/(?:^|\s)(scripts\/\S+)/);
+    if (!scriptMatch) {
+      continue;
+    }
+    const absolutePath = resolve(join(skillRoot, scriptMatch[1]!));
+    if (!existsSync(absolutePath)) {
+      issues.push(issue('error', 'scripts_declared_but_missing', `Required script is missing: ${scriptMatch[1]}`));
+    }
+  }
+
+  if (bodyMentionsReferences(parsed.content) && parsed.requiredReferences.length === 0) {
+    issues.push(issue('error', 'body_mentions_references_without_contract', 'Body mentions reference reading but required-references is empty.'));
+  }
+
+  if (bodyMentionsScripts(parsed.content) && parsed.requiredScripts.length === 0) {
+    issues.push(issue('error', 'body_mentions_scripts_without_contract', 'Body mentions script execution but required-scripts is empty.'));
+  }
+
+  if (parsed.successCheckErrors.length > 0) {
+    issues.push(issue('error', 'invalid_success_check', `Invalid success-check entries: ${parsed.successCheckErrors.join('; ')}`));
+  }
+
+  if (parsed.strict && parsed.successChecks.length === 0) {
+    issues.push(issue('error', 'strict_skill_missing_success_checks', 'Strict skills must declare at least one structured success-check.'));
+  }
+
   if (!hasGoalSection(parsed.content)) {
     issues.push(issue('warning', 'missing_goal_section', 'Add a Goal section so the primary outcome is explicit.'));
   }
@@ -128,6 +171,15 @@ function validateParsedFrontmatter(
 
   if (shouldWarnProgressiveDisclosure(parsed.content, filePath)) {
     issues.push(issue('warning', 'progressive_disclosure_missing', 'This skill is long and should move detail into references/, scripts/, or assets/.'));
+  }
+
+  if (parsed.requiredScripts.length > 1 && !parsed.requiredSteps.includes('run_required_scripts')) {
+    issues.push(issue('warning', 'multiple_required_scripts_without_ordering', 'Multiple required scripts should usually be paired with an explicit run_required_scripts step.'));
+  }
+
+  const contractWeight = parsed.requiredReferences.length + parsed.requiredScripts.length + parsed.requiredSteps.length + parsed.successChecks.length;
+  if (contractWeight >= 8) {
+    issues.push(issue('warning', 'overloaded_skill_contract', 'This skill contract is getting large; consider splitting the skill or reducing strict requirements.'));
   }
 
   return issues;

@@ -69,7 +69,7 @@ describe('createSubAgentTool', () => {
       '-b',
       'reviewer-sess_1',
     ]);
-    expect(createRegistry).toHaveBeenCalledWith(expectedPath, ['read']);
+    expect(createRegistry).toHaveBeenCalledWith(expectedPath, ['read'], 'reviewer');
   });
 
   it('dispatches background agents through the background runner and returns the queued job id', async () => {
@@ -242,7 +242,7 @@ describe('createSubAgentTool', () => {
     });
 
     expect(result).toContain('shared cwd run');
-    expect(createRegistry).toHaveBeenCalledWith('/repo/packages/app', undefined);
+    expect(createRegistry).toHaveBeenCalledWith('/repo/packages/app', undefined, 'reviewer');
     expect(buildSystemPrompt).toHaveBeenCalledWith('/repo/packages/app');
   });
 

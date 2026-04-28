@@ -11,7 +11,7 @@ interface SubAgentToolOptions {
   cwd?: string;
   adapter: () => ModelAdapter;
   agents: CustomAgentDef[];
-  createRegistry(cwd: string, allowedTools?: string[]): ToolRegistry;
+  createRegistry(cwd: string, allowedTools?: string[], agentId?: string): ToolRegistry;
   buildSystemPrompt(cwd: string): Promise<string>;
   backgroundRunner?: BackgroundRunner;
   worktreeManager?: WorktreeManager;

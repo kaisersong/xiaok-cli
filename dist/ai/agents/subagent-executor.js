@@ -2,7 +2,7 @@ import { Agent } from '../agent.js';
 export async function executeNamedSubAgent(options) {
     const resolved = await resolveSubAgentCwd(options.worktreeManager, options.agentDef, options.sessionId, options.cwd);
     const cwd = resolved.cwd;
-    const registry = options.createRegistry(cwd, options.agentDef.allowedTools);
+    const registry = options.createRegistry(cwd, options.agentDef.allowedTools, options.agentDef.name);
     const systemPromptBase = options.forkContext?.systemPrompt ?? await options.buildSystemPrompt(cwd);
     const systemPrompt = [systemPromptBase, options.agentDef.systemPrompt].filter(Boolean).join('\n\n');
     const baseAdapter = options.adapter();

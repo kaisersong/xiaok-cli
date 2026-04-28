@@ -198,4 +198,96 @@ Review one release candidate.
       }),
     ]));
   });
+
+  it('fails strict skills when required references or scripts are missing', async () => {
+    const configDir = createTempDir('xiaok-skill-quality-config');
+    const projectDir = createTempDir('xiaok-skill-quality-project');
+    const skillDir = join(projectDir, '.xiaok', 'skills', 'strict-missing');
+    mkdirSync(skillDir, { recursive: true });
+
+    const skillPath = join(skillDir, 'SKILL.md');
+    writeFileSync(skillPath, `---
+name: strict-missing
+description: strict helper
+when-to-use: Use when a user asks for a strict release readiness pass.
+task-goals:
+  - verify one release candidate
+examples:
+  - run the strict release checklist
+required-references:
+  - references/principles.md
+required-scripts:
+  - python scripts/check_release.py --mode smoke
+success-checks:
+  - must_mention_all: ready, blockers
+strict: true
+---
+# Goal
+
+Read references and run scripts before answering.
+
+## Success Criteria
+
+- A release decision is produced.
+`, 'utf8');
+
+    const result = await validateSkillFile(skillPath, {
+      xiaokConfigDir: configDir,
+      cwd: projectDir,
+      builtinRoots: [],
+    });
+
+    const errorCodes = result.issues
+      .filter((issue) => issue.severity === 'error')
+      .map((issue) => issue.code);
+
+    expect(result.ok).toBe(false);
+    expect(errorCodes).toContain('references_declared_but_missing');
+    expect(errorCodes).toContain('scripts_declared_but_missing');
+  });
+
+  it('fails invalid strict success checks and undeclared body requirements', async () => {
+    const configDir = createTempDir('xiaok-skill-quality-config');
+    const projectDir = createTempDir('xiaok-skill-quality-project');
+    const skillDir = join(projectDir, '.xiaok', 'skills', 'strict-invalid');
+    mkdirSync(skillDir, { recursive: true });
+
+    const skillPath = join(skillDir, 'SKILL.md');
+    writeFileSync(skillPath, `---
+name: strict-invalid
+description: strict helper
+when-to-use: Use when a user asks for a strict workflow.
+task-goals:
+  - complete one strict workflow
+examples:
+  - run the strict workflow
+success-checks:
+  - maybe_say: something
+strict: true
+---
+# Goal
+
+Read references/ and run scripts/ before answering.
+
+## Success Criteria
+
+- A response is produced.
+`, 'utf8');
+
+    const result = await validateSkillFile(skillPath, {
+      xiaokConfigDir: configDir,
+      cwd: projectDir,
+      builtinRoots: [],
+    });
+
+    const errorCodes = result.issues
+      .filter((issue) => issue.severity === 'error')
+      .map((issue) => issue.code);
+
+    expect(result.ok).toBe(false);
+    expect(errorCodes).toContain('invalid_success_check');
+    expect(errorCodes).toContain('strict_skill_missing_success_checks');
+    expect(errorCodes).toContain('body_mentions_references_without_contract');
+    expect(errorCodes).toContain('body_mentions_scripts_without_contract');
+  });
 });

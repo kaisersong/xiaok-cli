@@ -30,6 +30,31 @@ describe('SQLiteSessionStore', () => {
         memoryRefs: [],
         approvalRefs: [],
         backgroundJobRefs: [],
+        skillExecution: {
+          invocations: [{
+            invocationId: 'skill_inv_sqlite',
+            sessionId: 'sess_sqlite',
+            agentId: 'main',
+            skillName: 'release-checklist',
+            requested: ['release-checklist'],
+            strategy: 'inline',
+            strictMode: true,
+            bundleHash: 'hash',
+            status: 'running',
+            plan: {
+              type: 'skill_plan',
+              requested: ['release-checklist'],
+              resolved: [],
+              strategy: 'inline',
+              primarySkill: 'release-checklist',
+              strict: true,
+            },
+            evidence: [],
+            createdAt: 150,
+            updatedAt: 150,
+          }],
+          updatedAt: 150,
+        },
       });
 
       reloaded = new SQLiteSessionStore(dbPath);
@@ -37,6 +62,13 @@ describe('SQLiteSessionStore', () => {
         sessionId: 'sess_sqlite',
         cwd: '/workspace/sqlite',
         model: 'gpt-4.1',
+        skillExecution: {
+          invocations: [
+            expect.objectContaining({
+              skillName: 'release-checklist',
+            }),
+          ],
+        },
       });
       await expect(reloaded.loadLast()).resolves.toMatchObject({
         sessionId: 'sess_sqlite',

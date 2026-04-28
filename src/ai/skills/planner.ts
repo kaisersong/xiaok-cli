@@ -1,9 +1,11 @@
 import { findSkillByCommandName, type SkillCatalog, type SkillMeta } from './loader.js';
+import type { SkillResourceEntry, SkillSuccessCheck } from './loader.js';
 
 export interface SkillPlanStep {
   name: string;
   description: string;
   path: string;
+  rootDir: string;
   source: SkillMeta['source'];
   tier: SkillMeta['tier'];
   executionContext: SkillMeta['executionContext'];
@@ -13,6 +15,14 @@ export interface SkillPlanStep {
   effort?: string;
   dependsOn: string[];
   content: string;
+  referencesManifest: SkillResourceEntry[];
+  scriptsManifest: SkillResourceEntry[];
+  assetsManifest: SkillResourceEntry[];
+  requiredReferences: string[];
+  requiredScripts: string[];
+  requiredSteps: string[];
+  successChecks: SkillSuccessCheck[];
+  strict: boolean;
 }
 
 export interface SkillExecutionPlan {
@@ -21,6 +31,7 @@ export interface SkillExecutionPlan {
   resolved: SkillPlanStep[];
   strategy: 'inline' | 'fork';
   primarySkill: string;
+  strict: boolean;
 }
 
 function toPlanStep(skill: SkillMeta): SkillPlanStep {
@@ -28,6 +39,7 @@ function toPlanStep(skill: SkillMeta): SkillPlanStep {
     name: skill.name,
     description: skill.description,
     path: skill.path,
+    rootDir: skill.rootDir,
     source: skill.source,
     tier: skill.tier,
     executionContext: skill.executionContext,
@@ -37,6 +49,14 @@ function toPlanStep(skill: SkillMeta): SkillPlanStep {
     effort: skill.effort,
     dependsOn: [...skill.dependsOn],
     content: skill.content,
+    referencesManifest: skill.referencesManifest.map((entry) => ({ ...entry })),
+    scriptsManifest: skill.scriptsManifest.map((entry) => ({ ...entry })),
+    assetsManifest: skill.assetsManifest.map((entry) => ({ ...entry })),
+    requiredReferences: [...skill.requiredReferences],
+    requiredScripts: [...skill.requiredScripts],
+    requiredSteps: [...skill.requiredSteps],
+    successChecks: skill.successChecks.map((check) => ({ ...check, terms: [...check.terms] })),
+    strict: skill.strict,
   };
 }
 
@@ -60,6 +80,7 @@ export function buildSkillExecutionPlan(
     resolved: resolvedSkills.map(toPlanStep),
     strategy: primarySkill.executionContext,
     primarySkill: primarySkill.name,
+    strict: primarySkill.strict,
   };
 }
 

@@ -98,4 +98,44 @@ Summarize one update.
       watcher.close();
     }
   });
+
+  it('reloads directory skills when a required reference file changes', async () => {
+    const configDir = createTempDir('xiaok-skill-watch-config');
+    const projectDir = createTempDir('xiaok-skill-watch-project');
+    const skillDir = join(projectDir, '.xiaok', 'skills', 'release-checklist');
+    mkdirSync(join(skillDir, 'references'), { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), `---
+name: release-checklist
+description: release readiness
+required-references:
+  - references/principles.md
+---
+Check release readiness.
+`, 'utf8');
+    writeFileSync(join(skillDir, 'references', 'principles.md'), '# v1\n', 'utf8');
+
+    const catalog = createSkillCatalog(configDir, projectDir, { builtinRoots: [] });
+    await catalog.reload();
+
+    const snapshots: string[][] = [];
+    const watcher = createSkillCatalogWatcher({
+      xiaokConfigDir: configDir,
+      cwd: projectDir,
+      options: { builtinRoots: [] },
+      pollMs: 50,
+      onChange: async () => {
+        snapshots.push((await catalog.reload()).map((skill) => `${skill.name}:${skill.referencesManifest.length}`));
+      },
+    });
+
+    try {
+      writeFileSync(join(skillDir, 'references', 'principles.md'), '# v2 updated content\n', 'utf8');
+
+      await waitFor(() => {
+        expect(snapshots.length).toBeGreaterThan(0);
+      }, { timeoutMs: 3_000 });
+    } finally {
+      watcher.close();
+    }
+  });
 });

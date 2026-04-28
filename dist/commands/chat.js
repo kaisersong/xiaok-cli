@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { loadConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
@@ -20,6 +21,8 @@ import { createSkillCatalog, parseSlashCommand, toSkillEntries, findSkillByComma
 import { createSkillCatalogWatcher } from '../ai/skills/watcher.js';
 import { createSkillTool } from '../ai/skills/tool.js';
 import { buildSkillExecutionPlan } from '../ai/skills/planner.js';
+import { buildComplianceReminder, evaluateSkillCompliance } from '../ai/skills/compliance.js';
+import { activateSkillInvocation, cloneSessionSkillExecutionState, createEmptySessionSkillExecutionState, findLatestRunningInvocation, recordSkillEvidence, updateSkillCompliance, } from '../ai/skills/execution-state.js';
 import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
 import { loadAutoContext, formatLoadedContext } from '../ai/runtime/context-loader.js';
 import { FileSessionStore } from '../ai/runtime/session-store.js';
@@ -64,6 +67,7 @@ import { resolveYZJConfig } from '../channels/yzj.js';
 import { YZJTransport } from '../channels/yzj-transport.js';
 import { InMemoryApprovalStore } from '../channels/approval-store.js';
 import { getProviderProfile } from '../ai/providers/registry.js';
+import { FileSkillAdherenceStore } from '../runtime/skills/adherence-store.js';
 import { buildIntentReminderBlock, formatCurrentIntentSummaryLine, formatCurrentTurnIntentSummaryLine, formatIntentCreatedTranscriptBlock, formatProgressTranscriptBlock, formatReceiptTranscriptBlock, formatSalvageTranscriptBlock, formatStageActivatedTranscriptBlock, } from '../ui/orchestration.js';
 const { version: cliVersion } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 function describeLiveActivity(toolName, input) {
@@ -205,6 +209,11 @@ async function runChat(initialInput, opts) {
     let currentSkillEvalState = persistedSession?.skillEval
         ? cloneSessionSkillEvalState(persistedSession.skillEval)
         : createEmptySessionSkillEvalState(Date.now());
+    let currentSkillExecutionState = persistedSession?.skillExecution
+        ? cloneSessionSkillExecutionState(persistedSession.skillExecution)
+        : createEmptySessionSkillExecutionState(Date.now());
+    const skillAdherenceStore = new FileSkillAdherenceStore();
+    let activeSkillInvocationId = null;
     try {
         currentIntentLedger = initializeChatIntentLedger(persistedIntentLedger, sessionId, instanceId, ownershipMode, {
             confirmHighRiskTakeover: opts.confirmHighRiskTakeover,
@@ -243,6 +252,88 @@ async function runChat(initialInput, opts) {
         skills = await skillCatalog.reload();
         inputReader.setSkills(skills);
         runtimeFacade?.resetSkillTracking();
+    };
+    const getInvocationById = (invocationId) => {
+        if (!invocationId) {
+            return undefined;
+        }
+        return currentSkillExecutionState.invocations.find((invocation) => invocation.invocationId === invocationId);
+    };
+    const getTrackedInvocation = (agentId) => {
+        const active = getInvocationById(activeSkillInvocationId);
+        if (active && active.status === 'running') {
+            return active;
+        }
+        return findLatestRunningInvocation(currentSkillExecutionState, agentId)
+            ?? findLatestRunningInvocation(currentSkillExecutionState);
+    };
+    const activateTrackedSkillPlan = (plan, agentId = 'main') => {
+        const activation = activateSkillInvocation(currentSkillExecutionState, {
+            sessionId,
+            agentId,
+            plan,
+        });
+        currentSkillExecutionState = activation.state;
+        activeSkillInvocationId = activation.invocation.invocationId;
+        return activation.invocation;
+    };
+    const recordSkillReferenceEvidence = (invocation, absolutePath, agentId) => {
+        const normalizedAbsolutePath = absolutePath.replaceAll('\\', '/');
+        for (const step of invocation.plan.resolved) {
+            for (const relativePath of step.requiredReferences) {
+                const expectedAbsolutePath = join(step.rootDir, relativePath).replaceAll('\\', '/');
+                if (expectedAbsolutePath !== normalizedAbsolutePath) {
+                    continue;
+                }
+                currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, invocation.invocationId, {
+                    type: 'read_reference',
+                    agentId,
+                    path: relativePath,
+                });
+            }
+        }
+    };
+    const recordSkillScriptEvidence = (invocation, command, agentId) => {
+        const normalizedCommand = command.trim().replace(/\s+/g, ' ');
+        for (const step of invocation.plan.resolved) {
+            for (const requiredCommand of step.requiredScripts) {
+                const normalizedRequired = requiredCommand.trim().replace(/\s+/g, ' ');
+                if (normalizedCommand !== normalizedRequired) {
+                    continue;
+                }
+                currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, invocation.invocationId, {
+                    type: 'run_script',
+                    agentId,
+                    command: normalizedRequired,
+                });
+            }
+        }
+    };
+    const observeSkillToolResult = (event) => {
+        if (event.toolName !== 'skill' || !event.ok) {
+            return;
+        }
+        try {
+            const parsed = JSON.parse(event.result);
+            if (parsed.type !== 'skill_plan') {
+                return;
+            }
+            activateTrackedSkillPlan(parsed, event.agentId);
+        }
+        catch { }
+    };
+    const observeSkillEvidence = (event) => {
+        const invocation = getTrackedInvocation(event.agentId);
+        if (!invocation) {
+            return;
+        }
+        if (event.toolName === 'read' && event.ok && typeof event.input.file_path === 'string') {
+            recordSkillReferenceEvidence(invocation, event.input.file_path, event.agentId);
+            return;
+        }
+        if (event.toolName === 'bash' && event.ok && typeof event.input.command === 'string') {
+            recordSkillScriptEvidence(invocation, event.input.command, event.agentId);
+        }
     };
     // Lazy callbacks for AskUserQuestion — assigned after functions are declared.
     // This avoids TS2448 (use-before-declare) for const-declared functions.
@@ -397,6 +488,10 @@ async function runChat(initialInput, opts) {
                 process.stdout.write(line);
             }
         },
+        onToolObserved: async (event) => {
+            observeSkillToolResult(event);
+            observeSkillEvidence(event);
+        },
     });
     const registry = registryFactory.createRegistry(cwd);
     const reminders = registryFactory.getReminderApi();
@@ -446,6 +541,7 @@ async function runChat(initialInput, opts) {
         lineage: sessionLineage,
         intentDelegation: currentIntentLedger,
         skillEval: currentSkillEvalState,
+        skillExecution: currentSkillExecutionState,
     });
     // 触发 SessionStart hook
     void lifecycleHooks.runHooks('SessionStart', {
@@ -492,16 +588,27 @@ async function runChat(initialInput, opts) {
         scoreStore: skillScoreStore,
         sessionId,
     });
+    let streamingSegmentText = '';
+    const resetStreamingSegment = () => {
+        streamingSegmentText = '';
+    };
     const flushStreamingMarkdown = () => {
+        const renderedSegment = streamingSegmentText;
         const flushResult = mdRenderer.flush();
-        if (flushResult.rows > 0 && scrollRegion.isActive() && scrollRegion.isContentStreaming()) {
-            if (flushResult.renderedLine) {
-                scrollRegion.advanceContentCursorByRenderedText(flushResult.renderedLine, { finalizeLine: true });
+        if (scrollRegion.isActive() && scrollRegion.isContentStreaming()) {
+            if (renderedSegment) {
+                scrollRegion.syncContentCursorFromRenderedLines(MarkdownRenderer.renderToLines(renderedSegment));
             }
-            else {
-                scrollRegion.advanceContentCursor(flushResult.rows);
+            else if (flushResult.rows > 0) {
+                if (flushResult.renderedLine) {
+                    scrollRegion.advanceContentCursorByRenderedText(flushResult.renderedLine, { finalizeLine: true });
+                }
+                else {
+                    scrollRegion.advanceContentCursor(flushResult.rows);
+                }
             }
         }
+        resetStreamingSegment();
     };
     // 收集历史消息用于稍后打印（在欢迎页之后）
     const historyMessages = persistedSession?.messages ?? [];
@@ -597,6 +704,7 @@ async function runChat(initialInput, opts) {
         toolExplorer.reset();
         turnLayout.reset();
         mdRenderer.reset();
+        resetStreamingSegment();
     };
     const handleTurnFailure = (error) => {
         runtimeState.markInputReady();
@@ -618,6 +726,7 @@ async function runChat(initialInput, opts) {
             if (scrollRegion.isContentStreaming()) {
                 scrollRegion.endContentStreaming(footerOptions);
                 mdRenderer.beginNewSegment();
+                resetStreamingSegment();
             }
             else {
                 scrollRegion.renderFooter(footerOptions);
@@ -646,6 +755,7 @@ async function runChat(initialInput, opts) {
             suspendInteractiveUi('end_streaming_interrupt', error);
         }
         mdRenderer.beginNewSegment();
+        resetStreamingSegment();
     };
     const ensureStreamingPhase = () => {
         if (scrollRegion.isContentStreaming()) {
@@ -690,10 +800,12 @@ async function runChat(initialInput, opts) {
                 suspendInteractiveUi('write_progress_note', error);
             }
             mdRenderer.beginNewSegment();
+            resetStreamingSegment();
             return;
         }
         process.stdout.write(block);
         mdRenderer.beginNewSegment();
+        resetStreamingSegment();
     }
     const isTerminalIntentStatus = (status) => status === 'completed' || status === 'failed' || status === 'cancelled';
     const refreshIntentLedger = async () => {
@@ -701,6 +813,127 @@ async function runChat(initialInput, opts) {
     };
     const refreshSkillEvalState = async () => {
         currentSkillEvalState = await skillEvalStore.load(sessionId) ?? currentSkillEvalState;
+    };
+    const buildComplianceEvidenceView = (invocation) => ({
+        readReferences: invocation.evidence
+            .filter((event) => event.type === 'read_reference' && event.path)
+            .map((event) => event.path),
+        runScripts: invocation.evidence
+            .filter((event) => event.type === 'run_script' && event.command)
+            .map((event) => event.command),
+        completedSteps: invocation.evidence
+            .filter((event) => event.type === 'step_completed' && event.stepId)
+            .map((event) => event.stepId),
+    });
+    const applyComplianceResult = (invocation, finalAnswerText) => {
+        const liveInvocation = getInvocationById(invocation.invocationId) ?? invocation;
+        const compliance = evaluateSkillCompliance({
+            plan: liveInvocation.plan,
+            evidence: buildComplianceEvidenceView(liveInvocation),
+            finalAnswer: finalAnswerText,
+        });
+        currentSkillExecutionState = updateSkillCompliance(currentSkillExecutionState, liveInvocation.invocationId, compliance);
+        const refreshedInvocation = getInvocationById(liveInvocation.invocationId);
+        if (refreshedInvocation) {
+            if (compliance.missingReferences.length === 0) {
+                currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, liveInvocation.invocationId, {
+                    type: 'step_completed',
+                    agentId: refreshedInvocation.agentId,
+                    stepId: 'read_required_references',
+                });
+            }
+            if (compliance.missingScripts.length === 0) {
+                currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, liveInvocation.invocationId, {
+                    type: 'step_completed',
+                    agentId: refreshedInvocation.agentId,
+                    stepId: 'run_required_scripts',
+                });
+            }
+            if (/\S/.test(finalAnswerText)) {
+                currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, liveInvocation.invocationId, {
+                    type: 'step_completed',
+                    agentId: refreshedInvocation.agentId,
+                    stepId: 'summarize_findings',
+                });
+            }
+            for (const failedCheck of compliance.failedChecks) {
+                currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, liveInvocation.invocationId, {
+                    type: 'success_check_result',
+                    agentId: refreshedInvocation.agentId,
+                    stepId: `${failedCheck.type}:${failedCheck.terms.join('|')}`,
+                    passed: false,
+                });
+            }
+            for (const step of liveInvocation.plan.resolved) {
+                for (const successCheck of step.successChecks) {
+                    const key = `${successCheck.type}:${successCheck.terms.join('|')}`;
+                    const failed = compliance.failedChecks.some((check) => `${check.type}:${check.terms.join('|')}` === key);
+                    if (!failed) {
+                        currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, liveInvocation.invocationId, {
+                            type: 'success_check_result',
+                            agentId: refreshedInvocation.agentId,
+                            stepId: key,
+                            passed: true,
+                        });
+                    }
+                }
+            }
+        }
+        return compliance;
+    };
+    const runStrictContinuationTurn = async (input) => {
+        let continuationText = '';
+        await maybePrepareFreshContextHandoff();
+        await runtimeFacade.runTurn({
+            sessionId,
+            cwd,
+            source: 'chat',
+            input,
+        }, (chunk) => {
+            if (chunk.type === 'text') {
+                continuationText += chunk.delta;
+                if (/\S/.test(chunk.delta)) {
+                    runtimeState.noteResponseStarted();
+                    ensureStreamingPhase();
+                }
+                streamingSegmentText += chunk.delta;
+                mdRenderer.write(chunk.delta);
+            }
+            if (chunk.type === 'usage') {
+                statusBar.update(chunk.usage);
+                scrollRegion.updateStatusLine(statusBar.getStatusLine());
+            }
+        });
+        flushStreamingMarkdown();
+        await finalizeCurrentTurnIntentIfNeeded();
+        return continuationText;
+    };
+    const maybeRunStrictCompletionLoop = async (assistantText) => {
+        let combinedAssistantText = assistantText;
+        const invocation = getTrackedInvocation();
+        if (!invocation?.strictMode) {
+            return combinedAssistantText;
+        }
+        let latestInvocation = invocation;
+        let finalCompliance = applyComplianceResult(latestInvocation, combinedAssistantText);
+        let attempts = 0;
+        while (!finalCompliance.passed && attempts < 2) {
+            attempts += 1;
+            const continuationText = await runStrictContinuationTurn(buildComplianceReminder(finalCompliance));
+            combinedAssistantText += continuationText;
+            latestInvocation = getInvocationById(latestInvocation.invocationId) ?? latestInvocation;
+            finalCompliance = applyComplianceResult(latestInvocation, combinedAssistantText);
+        }
+        skillAdherenceStore.record(latestInvocation.skillName, finalCompliance);
+        if (!finalCompliance.passed) {
+            writeProgressTranscriptNote(`Strict skill contract still incomplete: ${[
+                ...finalCompliance.missingReferences.map((item) => `reference:${item}`),
+                ...finalCompliance.missingScripts.map((item) => `script:${item}`),
+                ...finalCompliance.missingSteps.map((item) => `step:${item}`),
+                ...finalCompliance.failedChecks.map((item) => `check:${item.type}`),
+            ].join(', ')}`);
+        }
+        return combinedAssistantText;
     };
     const renderIntentSummaryLine = () => {
         if (!scrollRegion.isActive() || scrollRegion.isContentStreaming()) {
@@ -877,10 +1110,12 @@ async function runChat(initialInput, opts) {
                 suspendInteractiveUi('write_orchestration_block', error);
             }
             mdRenderer.beginNewSegment();
+            resetStreamingSegment();
             return;
         }
         process.stdout.write(block);
         mdRenderer.beginNewSegment();
+        resetStreamingSegment();
     };
     const persistSession = async () => {
         await refreshIntentLedger();
@@ -897,6 +1132,7 @@ async function runChat(initialInput, opts) {
             lineage: sessionLineage,
             intentDelegation: currentIntentLedger,
             skillEval: currentSkillEvalState,
+            skillExecution: currentSkillExecutionState,
         });
     };
     const releaseSessionOwnershipForExit = async () => {
@@ -1272,6 +1508,7 @@ async function runChat(initialInput, opts) {
         runtimeHooks.on('turn_started', () => {
             toolExplorer.reset();
             turnLayout.reset();
+            resetStreamingSegment();
             runtimeState.beginTurn('Thinking');
             if (!terminalUiSuspended) {
                 scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
@@ -1294,6 +1531,7 @@ async function runChat(initialInput, opts) {
                     process.stdout.write(activity);
                 }
                 mdRenderer.beginNewSegment();
+                resetStreamingSegment();
                 beginActivity(describeLiveActivity(e.toolName, e.toolInput), true);
                 renderIntentSummaryLine();
             }
@@ -1674,11 +1912,13 @@ async function runChat(initialInput, opts) {
                     try {
                         const plan = buildSkillExecutionPlan([skill.name], skills);
                         const primaryStep = plan.resolved[plan.resolved.length - 1];
+                        const invocation = activateTrackedSkillPlan(plan, plan.strategy === 'fork' && primaryStep?.agent ? primaryStep.agent : 'main');
                         activeIntentReminderBlock = undefined;
                         process.stdout.write('\n');
                         mdRenderer.reset();
+                        resetStreamingSegment();
                         if (plan.strategy === 'fork' && primaryStep?.agent) {
-                            const result = await executeNamedSubAgent({
+                            let result = await executeNamedSubAgent({
                                 agentDef: customAgents.find((item) => item.name === primaryStep.agent) ?? {
                                     name: primaryStep.name,
                                     systemPrompt: primaryStep.content,
@@ -1700,12 +1940,23 @@ async function runChat(initialInput, opts) {
                                     toolDefinitions: registry.getToolDefinitions(),
                                 },
                             });
+                            if (invocation.strictMode) {
+                                const compliance = applyComplianceResult(invocation, result);
+                                if (!compliance.passed) {
+                                    result += await runStrictContinuationTurn(buildComplianceReminder(compliance));
+                                    result = await maybeRunStrictCompletionLoop(result);
+                                }
+                                else {
+                                    skillAdherenceStore.record(invocation.skillName, compliance);
+                                }
+                            }
                             mdRenderer.write(result);
                         }
                         else {
                             const userMsg = slash.rest
                                 ? `执行 skill plan "${plan.primarySkill}"，用户补充说明：${slash.rest}\n\n${JSON.stringify(plan, null, 2)}`
                                 : `执行 skill plan：\n\n${JSON.stringify(plan, null, 2)}`;
+                            let slashAssistantText = '';
                             clearTurnIntentContext();
                             if (!terminalUiSuspended) {
                                 scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
@@ -1718,10 +1969,12 @@ async function runChat(initialInput, opts) {
                                 input: userMsg,
                             }, (chunk) => {
                                 if (chunk.type === 'text') {
+                                    slashAssistantText += chunk.delta;
                                     if (/\S/.test(chunk.delta)) {
                                         runtimeState.noteResponseStarted();
                                         ensureStreamingPhase();
                                     }
+                                    streamingSegmentText += chunk.delta;
                                     mdRenderer.write(chunk.delta);
                                 }
                                 if (chunk.type === 'usage') {
@@ -1730,6 +1983,7 @@ async function runChat(initialInput, opts) {
                                 }
                             });
                             flushStreamingMarkdown();
+                            slashAssistantText = await maybeRunStrictCompletionLoop(slashAssistantText);
                             await finalizeCurrentTurnIntentIfNeeded();
                             await persistSession();
                             // Feedback is a new interactive prompt. Clear the completed turn
@@ -1766,6 +2020,7 @@ async function runChat(initialInput, opts) {
                 process.stdout.write('\n');
             }
             mdRenderer.reset();
+            resetStreamingSegment();
             try {
                 // UserPromptSubmit hook — broker 可在此注入额外上下文
                 const promptHookResult = await lifecycleHooks.runHooks('UserPromptSubmit', {
@@ -1802,6 +2057,7 @@ async function runChat(initialInput, opts) {
                             runtimeState.noteResponseStarted();
                             ensureStreamingPhase();
                         }
+                        streamingSegmentText += chunk.delta;
                         mdRenderer.write(chunk.delta);
                     }
                     if (chunk.type === 'usage') {
@@ -1810,6 +2066,7 @@ async function runChat(initialInput, opts) {
                     }
                 });
                 flushStreamingMarkdown();
+                lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);
                 await finalizeCurrentTurnIntentIfNeeded();
                 await persistSession();
                 // Feedback prompt should render against a clean footer, not a completed
@@ -1845,6 +2102,7 @@ async function runChat(initialInput, opts) {
                         process.stdout.write('\n');
                     }
                     mdRenderer.reset();
+                    resetStreamingSegment();
                     lastAssistantText = '';
                     const continueBlocks = await parseInputBlocks(stopResult.message, resolveModelCapabilities(adapter).supportsImageInput);
                     clearPastedImagePaths();
@@ -1867,6 +2125,7 @@ async function runChat(initialInput, opts) {
                                 runtimeState.noteResponseStarted();
                                 ensureStreamingPhase();
                             }
+                            streamingSegmentText += chunk.delta;
                             mdRenderer.write(chunk.delta);
                         }
                         if (chunk.type === 'usage') {
@@ -1875,6 +2134,7 @@ async function runChat(initialInput, opts) {
                         }
                     });
                     flushStreamingMarkdown();
+                    lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);
                     await finalizeCurrentTurnIntentIfNeeded();
                     await persistSession();
                     clearTurnIntentContext();

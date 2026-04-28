@@ -11,8 +11,11 @@ describe('skillTool', () => {
 
   beforeEach(() => {
     dir = join(tmpdir(), `xiaok-skills-${Date.now()}`);
-    mkdirSync(join(dir, 'skills'), { recursive: true });
-    writeFileSync(join(dir, 'skills', 'greet.md'), `---
+    mkdirSync(join(dir, 'skills', 'greet', 'references'), { recursive: true });
+    mkdirSync(join(dir, 'skills', 'greet', 'scripts'), { recursive: true });
+    writeFileSync(join(dir, 'skills', 'greet', 'references', 'principles.md'), '# principles');
+    writeFileSync(join(dir, 'skills', 'greet', 'scripts', 'check_release.py'), 'print("ok")');
+    writeFileSync(join(dir, 'skills', 'greet', 'SKILL.md'), `---
 name: greet
 description: 打招呼技能
 task-goals:
@@ -23,6 +26,16 @@ output-kinds:
   - friendly reply
 examples:
   - hello there
+required-references:
+  - references/principles.md
+required-scripts:
+  - python scripts/check_release.py --mode smoke
+required-steps:
+  - read_skill
+  - read_required_references
+success-checks:
+  - must_mention_all: 中文, 友好
+strict: true
 ---
 请用中文打招呼，保持友好。`);
   });
@@ -42,6 +55,13 @@ examples:
         name: string;
         description: string;
         executionContext: string;
+        strict: boolean;
+        requiredReferences: string[];
+        requiredScripts: string[];
+        requiredSteps: string[];
+        referencesManifest: Array<{ relativePath: string }>;
+        scriptsManifest: Array<{ relativePath: string }>;
+        successChecks: Array<{ type: string; terms: string[] }>;
         taskHints: {
           taskGoals: string[];
           inputKinds: string[];
@@ -58,6 +78,19 @@ examples:
     expect(payload.strategy).toBe('inline');
     expect(payload.resolved[0]?.name).toBe('greet');
     expect(payload.resolved[0]?.description).toContain('打招呼');
+    expect(payload.resolved[0]?.strict).toBe(true);
+    expect(payload.resolved[0]?.requiredReferences).toEqual(['references/principles.md']);
+    expect(payload.resolved[0]?.requiredScripts).toEqual(['python scripts/check_release.py --mode smoke']);
+    expect(payload.resolved[0]?.requiredSteps).toEqual(['read_skill', 'read_required_references']);
+    expect(payload.resolved[0]?.referencesManifest).toEqual(expect.arrayContaining([
+      expect.objectContaining({ relativePath: 'references/principles.md' }),
+    ]));
+    expect(payload.resolved[0]?.scriptsManifest).toEqual(expect.arrayContaining([
+      expect.objectContaining({ relativePath: 'scripts/check_release.py' }),
+    ]));
+    expect(payload.resolved[0]?.successChecks).toEqual([
+      { type: 'must_mention_all', terms: ['中文', '友好'] },
+    ]);
     expect(payload.resolved[0]?.taskHints).toEqual({
       taskGoals: ['greet the user warmly'],
       inputKinds: ['greeting'],

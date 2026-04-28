@@ -1,5 +1,5 @@
 import type { ModelAdapter, Tool } from '../../types.js';
-import { ToolRegistry, buildToolList } from '../../ai/tools/index.js';
+import { ToolRegistry, buildToolList, type ToolObservation } from '../../ai/tools/index.js';
 import { createLspTool } from '../../ai/tools/lsp.js';
 import { createSubAgentTool } from '../../ai/tools/subagent.js';
 import { createHooksRunner } from '../../runtime/hooks-runner.js';
@@ -29,10 +29,11 @@ export interface PlatformRegistryFactoryOptions {
   buildSystemPrompt(cwd: string): Promise<string>;
   notifyBackgroundJob?: Parameters<PlatformRuntimeContext['createBackgroundRunner']>[1];
   getCurrentTaskId?: () => string | undefined;
+  onToolObserved?: (event: ToolObservation) => Promise<void> | void;
 }
 
 export interface PlatformRegistryFactory {
-  createRegistry(cwd: string, allowedTools?: string[]): ToolRegistry;
+  createRegistry(cwd: string, allowedTools?: string[], agentId?: string): ToolRegistry;
   getReminderApi(): ReminderApi | undefined;
 }
 
@@ -69,7 +70,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
     });
   }
 
-  function createRegistryForCwd(cwd: string, allowedTools?: string[]): ToolRegistry {
+  function createRegistryForCwd(cwd: string, allowedTools?: string[], agentId = 'main'): ToolRegistry {
     const extraTools = [
       ...(options.workflowTools ?? []),
       ...(reminders
@@ -129,6 +130,8 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
         },
       }),
       onPrompt: options.onPrompt,
+      agentId,
+      onToolObserved: options.onToolObserved,
     }, filteredTools);
   }
 

@@ -1,5 +1,5 @@
 import type { ModelAdapter, Tool } from '../../types.js';
-import { ToolRegistry } from '../../ai/tools/index.js';
+import { ToolRegistry, type ToolObservation } from '../../ai/tools/index.js';
 import type { ReminderApi } from '../../runtime/reminder/service.js';
 import type { PlatformRuntimeContext } from './context.js';
 export interface PlatformRegistryFactoryOptions {
@@ -21,9 +21,10 @@ export interface PlatformRegistryFactoryOptions {
     buildSystemPrompt(cwd: string): Promise<string>;
     notifyBackgroundJob?: Parameters<PlatformRuntimeContext['createBackgroundRunner']>[1];
     getCurrentTaskId?: () => string | undefined;
+    onToolObserved?: (event: ToolObservation) => Promise<void> | void;
 }
 export interface PlatformRegistryFactory {
-    createRegistry(cwd: string, allowedTools?: string[]): ToolRegistry;
+    createRegistry(cwd: string, allowedTools?: string[], agentId?: string): ToolRegistry;
     getReminderApi(): ReminderApi | undefined;
 }
 export declare function createPlatformRegistryFactory(options: PlatformRegistryFactoryOptions): PlatformRegistryFactory;

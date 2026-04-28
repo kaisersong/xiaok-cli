@@ -46,6 +46,7 @@ export function applySessionStoreSchema(db: Database.Database): void {
 
   ensureColumn(db, 'sessions', 'intent_delegation_json', 'TEXT');
   ensureColumn(db, 'sessions', 'skill_eval_json', 'TEXT');
+  ensureColumn(db, 'sessions', 'skill_execution_json', 'TEXT');
 
   db.prepare(`
     INSERT INTO session_meta (key, value)

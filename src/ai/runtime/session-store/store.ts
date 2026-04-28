@@ -2,6 +2,7 @@ import type { Message, UsageStats } from '../../../types.js';
 import type { CompactionRecord } from '../session.js';
 import type { SessionIntentLedger } from '../../../runtime/intent-delegation/types.js';
 import type { SessionSkillEvalState } from '../../../runtime/intent-delegation/skill-eval.js';
+import type { SessionSkillExecutionState } from '../../skills/execution-state.js';
 
 export interface PersistedSessionSnapshot {
   sessionId: string;
@@ -20,6 +21,7 @@ export interface PersistedSessionSnapshot {
   backgroundJobRefs: string[];
   intentDelegation?: SessionIntentLedger;
   skillEval?: SessionSkillEvalState;
+  skillExecution?: SessionSkillExecutionState;
 }
 
 export interface SessionListEntry {

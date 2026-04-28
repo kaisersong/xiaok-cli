@@ -207,10 +207,19 @@ export class ToolRegistry {
         }
         try {
             let result = await tool.execute(input, context);
+            const observedResult = result;
             // Append hook-provided additional context
             if (preHookResult?.additionalContext) {
                 result = `${result}\n${preHookResult.additionalContext}`;
             }
+            await this.options.onToolObserved?.({
+                phase: 'after',
+                agentId: this.options.agentId ?? 'main',
+                toolName: tool.definition.name,
+                input,
+                result: observedResult,
+                ok: isSuccessfulToolResult(observedResult),
+            });
             const warnings = await this.options.hooksRunner?.runPostHooks(tool.definition.name, input) ?? [];
             if (warnings.length === 0) {
                 return result;
@@ -225,4 +234,14 @@ export class ToolRegistry {
     enableAutoMode() {
         this.permissionManager.setMode('auto');
     }
+}
+function isSuccessfulToolResult(result) {
+    const normalized = result.trimStart();
+    if (normalized.startsWith('Error:')) {
+        return false;
+    }
+    if (normalized.startsWith('（已取消')) {
+        return false;
+    }
+    return true;
 }

@@ -20,6 +20,7 @@ export function formatSkillPayload(skill) {
         name: skill.name,
         description: skill.description,
         path: skill.path,
+        rootDir: skill.rootDir,
         source: skill.source,
         tier: skill.tier,
         allowedTools: skill.allowedTools,
@@ -31,6 +32,14 @@ export function formatSkillPayload(skill) {
         userInvocable: skill.userInvocable,
         whenToUse: skill.whenToUse,
         taskHints: skill.taskHints,
+        referencesManifest: skill.referencesManifest,
+        scriptsManifest: skill.scriptsManifest,
+        assetsManifest: skill.assetsManifest,
+        requiredReferences: skill.requiredReferences,
+        requiredScripts: skill.requiredScripts,
+        requiredSteps: skill.requiredSteps,
+        successChecks: skill.successChecks,
+        strict: skill.strict,
         content: skill.content,
     }, null, 2);
 }

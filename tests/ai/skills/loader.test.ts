@@ -90,6 +90,52 @@ Create slides.`);
     });
   });
 
+  it('loads strict contract fields and resource manifests for directory skills', async () => {
+    const skillDir = join(globalDir, 'skills', 'release-checklist');
+    mkdirSync(join(skillDir, 'references'), { recursive: true });
+    mkdirSync(join(skillDir, 'scripts'), { recursive: true });
+    mkdirSync(join(skillDir, 'assets'), { recursive: true });
+    writeFileSync(join(skillDir, 'references', 'principles.md'), '# principles');
+    writeFileSync(join(skillDir, 'scripts', 'check_release.py'), 'print("ok")');
+    writeFileSync(join(skillDir, 'assets', 'template.txt'), 'template');
+    writeFileSync(join(skillDir, 'SKILL.md'), `---
+name: release-checklist
+description: Validate release readiness
+required-references:
+  - references/principles.md
+required-scripts:
+  - python scripts/check_release.py --mode smoke
+required-steps:
+  - read_skill
+  - read_required_references
+  - run_required_scripts
+success-checks:
+  - must_mention_all: ready, blockers
+  - must_answer_yes_no: ready
+strict: true
+---
+Release content.`);
+
+    const skills = await loadSkills(globalDir, projectDir, { builtinRoots: [] });
+    const releaseChecklist = skills.find((skill) => skill.name === 'release-checklist');
+
+    expect(releaseChecklist?.strict).toBe(true);
+    expect(releaseChecklist?.requiredReferences).toEqual(['references/principles.md']);
+    expect(releaseChecklist?.requiredScripts).toEqual(['python scripts/check_release.py --mode smoke']);
+    expect(releaseChecklist?.requiredSteps).toEqual([
+      'read_skill',
+      'read_required_references',
+      'run_required_scripts',
+    ]);
+    expect(releaseChecklist?.successChecks).toEqual([
+      { type: 'must_mention_all', terms: ['ready', 'blockers'] },
+      { type: 'must_answer_yes_no', terms: ['ready'] },
+    ]);
+    expect(releaseChecklist?.referencesManifest.map((entry) => entry.relativePath)).toEqual(['references/principles.md']);
+    expect(releaseChecklist?.scriptsManifest.map((entry) => entry.relativePath)).toEqual(['scripts/check_release.py']);
+    expect(releaseChecklist?.assetsManifest.map((entry) => entry.relativePath)).toEqual(['assets/template.txt']);
+  });
+
   it('loads symlinked directory-style skills from SKILL.md', async () => {
     const externalSkillDir = join(globalDir, 'external-slide-creator');
     mkdirSync(externalSkillDir, { recursive: true });

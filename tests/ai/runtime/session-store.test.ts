@@ -8,6 +8,7 @@ import { createFileSessionStore } from '../../../src/ai/runtime/session-store/fi
 import type { SessionStore } from '../../../src/ai/runtime/session-store/store.js';
 import { createEmptySessionIntentLedger } from '../../../src/runtime/intent-delegation/store.js';
 import { createEmptySessionSkillEvalState } from '../../../src/runtime/intent-delegation/skill-eval.js';
+import { createEmptySessionSkillExecutionState } from '../../../src/ai/skills/execution-state.js';
 
 describe('FileSessionStore', () => {
   let rootDir: string;
@@ -42,6 +43,7 @@ describe('FileSessionStore', () => {
       memoryRefs: [],
       approvalRefs: [],
       backgroundJobRefs: [],
+      skillExecution: createEmptySessionSkillExecutionState(200),
     });
 
     await expect(store.load('sess_alpha')).resolves.toEqual({
@@ -57,6 +59,7 @@ describe('FileSessionStore', () => {
       memoryRefs: [],
       approvalRefs: [],
       backgroundJobRefs: [],
+      skillExecution: createEmptySessionSkillExecutionState(200),
     });
   });
 
@@ -123,6 +126,45 @@ describe('FileSessionStore', () => {
       memoryRefs: ['mem_1'],
       approvalRefs: ['apr_1'],
       backgroundJobRefs: ['bg_1'],
+      skillExecution: {
+        invocations: [{
+          invocationId: 'skill_inv_1',
+          sessionId: 'sess_source',
+          agentId: 'main',
+          skillName: 'release-checklist',
+          requested: ['release-checklist'],
+          strategy: 'inline',
+          strictMode: true,
+          bundleHash: 'hash',
+          status: 'completed',
+          plan: {
+            type: 'skill_plan',
+            requested: ['release-checklist'],
+            strategy: 'inline',
+            primarySkill: 'release-checklist',
+            strict: true,
+            resolved: [],
+          },
+          evidence: [{
+            type: 'step_completed',
+            invocationId: 'skill_inv_1',
+            agentId: 'main',
+            stepId: 'read_skill',
+            createdAt: 160,
+          }],
+          createdAt: 150,
+          updatedAt: 160,
+          compliance: {
+            passed: true,
+            missingReferences: [],
+            missingScripts: [],
+            missingSteps: [],
+            failedChecks: [],
+            checkedAt: 160,
+          },
+        }],
+        updatedAt: 160,
+      },
     });
 
     const forked = await store.fork('sess_source');
@@ -139,6 +181,7 @@ describe('FileSessionStore', () => {
     expect(forked.memoryRefs).toEqual(['mem_1']);
     expect(forked.approvalRefs).toEqual(['apr_1']);
     expect(forked.backgroundJobRefs).toEqual(['bg_1']);
+    expect(forked.skillExecution?.invocations[0]?.skillName).toBe('release-checklist');
   });
 
   it('rekeys nested intent delegation session identities when forking', async () => {

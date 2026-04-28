@@ -15,6 +15,29 @@ export interface SkillCatalogWatcher {
   close(): void;
 }
 
+function fingerprintSubtree(root: string, prefix: string): string[] {
+  if (!existsSync(root)) {
+    return [];
+  }
+
+  const entries = readdirSync(root, { withFileTypes: true });
+  const fingerprints: string[] = [];
+
+  for (const entry of entries) {
+    const fullPath = join(root, entry.name);
+    if (entry.isFile()) {
+      const stat = statSync(fullPath);
+      fingerprints.push(`${prefix}:${fullPath}:${stat.mtimeMs}:${stat.size}`);
+      continue;
+    }
+    if (entry.isDirectory() || entry.isSymbolicLink()) {
+      fingerprints.push(...fingerprintSubtree(fullPath, prefix));
+    }
+  }
+
+  return fingerprints;
+}
+
 function computeRootFingerprint(root: string): string[] {
   const resolvedRoot = resolve(root);
   if (!existsSync(resolvedRoot)) {
@@ -44,6 +67,9 @@ function computeRootFingerprint(root: string): string[] {
 
     const stat = statSync(skillPath);
     fingerprints.push(`dir-skill:${skillPath}:${stat.mtimeMs}:${stat.size}`);
+    fingerprints.push(...fingerprintSubtree(join(resolvedRoot, entry.name, 'references'), 'dir-reference'));
+    fingerprints.push(...fingerprintSubtree(join(resolvedRoot, entry.name, 'scripts'), 'dir-script'));
+    fingerprints.push(...fingerprintSubtree(join(resolvedRoot, entry.name, 'assets'), 'dir-asset'));
   }
 
   return fingerprints;

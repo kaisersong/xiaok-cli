@@ -5,6 +5,7 @@ import { getConfigDir } from '../../../utils/config.js';
 import type { SessionListEntry, SessionStore, PersistedSessionSnapshot } from './store.js';
 import { cloneSessionIntentLedger, rekeySessionIntentLedger } from '../../../runtime/intent-delegation/types.js';
 import { cloneSessionSkillEvalState } from '../../../runtime/intent-delegation/skill-eval.js';
+import { cloneSessionSkillExecutionState } from '../../skills/execution-state.js';
 
 const SESSION_SCHEMA_VERSION = 1;
 
@@ -62,6 +63,7 @@ export class FileSessionStore implements SessionStore {
       backgroundJobRefs: snapshot.backgroundJobRefs ?? [],
       intentDelegation: snapshot.intentDelegation ? cloneSessionIntentLedger(snapshot.intentDelegation) : undefined,
       skillEval: snapshot.skillEval ? cloneSessionSkillEvalState(snapshot.skillEval) : undefined,
+      skillExecution: snapshot.skillExecution ? cloneSessionSkillExecutionState(snapshot.skillExecution) : undefined,
     } as PersistedSessionSnapshot;
   }
 
@@ -113,6 +115,7 @@ export class FileSessionStore implements SessionStore {
       backgroundJobRefs: [...(source.backgroundJobRefs ?? [])],
       intentDelegation: source.intentDelegation ? rekeySessionIntentLedger(source.intentDelegation, nextSessionId) : undefined,
       skillEval: source.skillEval ? cloneSessionSkillEvalState(source.skillEval) : undefined,
+      skillExecution: source.skillExecution ? cloneSessionSkillExecutionState(source.skillExecution) : undefined,
     };
     await this.save(forked);
     return forked;

@@ -34,7 +34,7 @@ export function createPlatformRegistryFactory(options) {
             process.stdout.write(`\n[reminder] ${message}\n`);
         });
     }
-    function createRegistryForCwd(cwd, allowedTools) {
+    function createRegistryForCwd(cwd, allowedTools, agentId = 'main') {
         const extraTools = [
             ...(options.workflowTools ?? []),
             ...(reminders
@@ -86,6 +86,8 @@ export function createPlatformRegistryFactory(options) {
                 },
             }),
             onPrompt: options.onPrompt,
+            agentId,
+            onToolObserved: options.onToolObserved,
         }, filteredTools);
     }
     return {

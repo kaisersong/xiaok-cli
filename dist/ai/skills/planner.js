@@ -4,6 +4,7 @@ function toPlanStep(skill) {
         name: skill.name,
         description: skill.description,
         path: skill.path,
+        rootDir: skill.rootDir,
         source: skill.source,
         tier: skill.tier,
         executionContext: skill.executionContext,
@@ -13,6 +14,14 @@ function toPlanStep(skill) {
         effort: skill.effort,
         dependsOn: [...skill.dependsOn],
         content: skill.content,
+        referencesManifest: skill.referencesManifest.map((entry) => ({ ...entry })),
+        scriptsManifest: skill.scriptsManifest.map((entry) => ({ ...entry })),
+        assetsManifest: skill.assetsManifest.map((entry) => ({ ...entry })),
+        requiredReferences: [...skill.requiredReferences],
+        requiredScripts: [...skill.requiredScripts],
+        requiredSteps: [...skill.requiredSteps],
+        successChecks: skill.successChecks.map((check) => ({ ...check, terms: [...check.terms] })),
+        strict: skill.strict,
     };
 }
 export function buildSkillExecutionPlan(names, source) {
@@ -30,6 +39,7 @@ export function buildSkillExecutionPlan(names, source) {
         resolved: resolvedSkills.map(toPlanStep),
         strategy: primarySkill.executionContext,
         primarySkill: primarySkill.name,
+        strict: primarySkill.strict,
     };
 }
 function resolveFromArray(names, skills) {

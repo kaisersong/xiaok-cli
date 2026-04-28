@@ -297,6 +297,8 @@ xiaok yzjchannel serve
 - **依赖解析** — 技能间依赖自动解析
 - **allowed-tools** — 白名单约束技能可用工具
 - **安装/卸载** — 技能目录加载与刷新
+- **结构化 skill 合同** — 支持 `required-references`、`required-scripts`、`required-steps`、`success-checks`
+- **严格执行可靠性** — execution bundle、evidence 记录、completion gate 和 adherence eval
 
 ### 内置 Agent
 
@@ -391,7 +393,9 @@ src/
 
 ```bash
 npm run build       # 构建
-npm test            # 运行测试（765 个测试，153 个文件）
+npm test            # 默认 sandbox + eval 套件
+npm run test:skill:fast     # 日常快速 skill 回归
+npm run test:skill:release  # 发版前 skill 执行套件
 npm run test:watch  # 监听模式
 npm run dev -- --help  # 从源码运行
 ```
@@ -415,6 +419,8 @@ npm run dev -- --help  # 从源码运行
 ---
 
 ## 版本日志
+
+**v0.6.14** — Skill 执行可靠性与发版分层验证：把 strict skill 从“只靠提示词”升级为带 required references/scripts/steps 与 success checks 的结构化合同，引入 execution bundle、运行时 evidence 与 completion gate，持久化 adherence 结果用于后续调优，并把 skill 验证拆成日常快速套件与发版专用慢套件，分别覆盖 inline 与 fork 的 strict 执行路径。
 
 **v0.6.8** — Windows tmux 终端稳定性与配置路径一致性：通过更保守的 footer 宽度预算和更严格的权限流重绘断言，修复真实 Windows tmux 下 pending/permission 阶段的 prompt、activity、status 错位；让自定义 agents 与 skills 从当前生效的 `xiaok` 配置目录解析，而不是写死 `~/.xiaok`；同时规范 Windows / npm 全局安装场景下的安装来源识别，并补强 Windows smoke test 的临时目录清理重试。
 

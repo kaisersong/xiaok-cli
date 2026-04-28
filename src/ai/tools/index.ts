@@ -55,6 +55,17 @@ export interface RegistryOptions {
   dryRun?: boolean;
   onPrompt?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
   hooksRunner?: HooksRunner;
+  agentId?: string;
+  onToolObserved?: (event: ToolObservation) => Promise<void> | void;
+}
+
+export interface ToolObservation {
+  phase: 'after';
+  agentId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  result: string;
+  ok: boolean;
 }
 
 export class ToolRegistry {
@@ -267,11 +278,21 @@ export class ToolRegistry {
 
     try {
       let result = await tool.execute(input, context);
+      const observedResult = result;
 
       // Append hook-provided additional context
       if (preHookResult?.additionalContext) {
         result = `${result}\n${preHookResult.additionalContext}`;
       }
+
+      await this.options.onToolObserved?.({
+        phase: 'after',
+        agentId: this.options.agentId ?? 'main',
+        toolName: tool.definition.name,
+        input,
+        result: observedResult,
+        ok: isSuccessfulToolResult(observedResult),
+      });
 
       const warnings = await this.options.hooksRunner?.runPostHooks(tool.definition.name, input) ?? [];
       if (warnings.length === 0) {
@@ -287,4 +308,15 @@ export class ToolRegistry {
   enableAutoMode(): void {
     this.permissionManager.setMode('auto');
   }
+}
+
+function isSuccessfulToolResult(result: string): boolean {
+  const normalized = result.trimStart();
+  if (normalized.startsWith('Error:')) {
+    return false;
+  }
+  if (normalized.startsWith('（已取消')) {
+    return false;
+  }
+  return true;
 }

@@ -1,10 +1,28 @@
-import { readdirSync, readFileSync, existsSync, Dirent } from 'fs';
-import { basename, join } from 'path';
+import { readdirSync, readFileSync, existsSync, Dirent, statSync } from 'fs';
+import { basename, dirname, join, relative } from 'path';
 import { getBuiltinSkillRoots } from './defaults.js';
 import { getConfigDir } from '../../utils/config.js';
 import type { TaskSkillHints } from '../intent-delegation/types.js';
 
 export type SkillExecutionContext = 'inline' | 'fork';
+export type SkillResourceKind = 'reference' | 'script' | 'asset';
+export type SkillSuccessCheckType =
+  | 'must_mention_any'
+  | 'must_mention_all'
+  | 'must_answer_yes_no'
+  | 'must_emit_field';
+
+export interface SkillResourceEntry {
+  kind: SkillResourceKind;
+  absolutePath: string;
+  relativePath: string;
+  size: number;
+}
+
+export interface SkillSuccessCheck {
+  type: SkillSuccessCheckType;
+  terms: string[];
+}
 
 export interface SkillMeta {
   name: string;
@@ -12,6 +30,7 @@ export interface SkillMeta {
   description: string;
   content: string;
   path: string;
+  rootDir: string;
   source: 'builtin' | 'global' | 'project';
   tier: 'system' | 'user' | 'project';
   allowedTools: string[];
@@ -23,6 +42,14 @@ export interface SkillMeta {
   userInvocable: boolean;
   whenToUse?: string;
   taskHints: TaskSkillHints;
+  referencesManifest: SkillResourceEntry[];
+  scriptsManifest: SkillResourceEntry[];
+  assetsManifest: SkillResourceEntry[];
+  requiredReferences: string[];
+  requiredScripts: string[];
+  requiredSteps: string[];
+  successChecks: SkillSuccessCheck[];
+  strict: boolean;
 }
 
 export interface SkillLoadOptions {
@@ -59,7 +86,20 @@ export interface ParsedFrontmatter {
   inputKinds: string[];
   outputKinds: string[];
   examples: string[];
+  requiredReferences: string[];
+  requiredScripts: string[];
+  requiredSteps: string[];
+  successChecks: SkillSuccessCheck[];
+  successCheckErrors: string[];
+  strict: boolean;
 }
+
+const SUCCESS_CHECK_TYPES = new Set<SkillSuccessCheckType>([
+  'must_mention_any',
+  'must_mention_all',
+  'must_answer_yes_no',
+  'must_emit_field',
+]);
 
 function decodeQuotedScalar(value: string): string {
   if (
@@ -157,6 +197,48 @@ function readListField(fields: Map<string, string>, listFields: Map<string, stri
   return listFields.get(key) ?? parseInlineList(fields.get(key) ?? '');
 }
 
+function normalizeRelativePath(value: string): string {
+  return value.replaceAll('\\', '/').replace(/^\.\/+/, '').trim();
+}
+
+function parseSuccessChecks(rawChecks: string[]): {
+  successChecks: SkillSuccessCheck[];
+  successCheckErrors: string[];
+} {
+  const successChecks: SkillSuccessCheck[] = [];
+  const successCheckErrors: string[] = [];
+
+  for (const rawCheck of rawChecks) {
+    const normalized = rawCheck.trim();
+    const match = normalized.match(/^([a-z_]+)\s*:\s*(.+)$/i);
+    if (!match) {
+      successCheckErrors.push(normalized);
+      continue;
+    }
+
+    const type = match[1] as SkillSuccessCheckType;
+    if (!SUCCESS_CHECK_TYPES.has(type)) {
+      successCheckErrors.push(normalized);
+      continue;
+    }
+
+    const terms = parseInlineList(match[2]).map((term) => term.trim()).filter(Boolean);
+    if (terms.length === 0) {
+      successCheckErrors.push(normalized);
+      continue;
+    }
+
+    if ((type === 'must_answer_yes_no' || type === 'must_emit_field') && terms.length !== 1) {
+      successCheckErrors.push(normalized);
+      continue;
+    }
+
+    successChecks.push({ type, terms });
+  }
+
+  return { successChecks, successCheckErrors };
+}
+
 export function parseFrontmatter(raw: string): ParsedFrontmatter | null {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) return null;
@@ -245,6 +327,12 @@ export function parseFrontmatter(raw: string): ParsedFrontmatter | null {
   const inputKinds = readListField(fields, listFields, 'input-kinds');
   const outputKinds = readListField(fields, listFields, 'output-kinds');
   const examples = readListField(fields, listFields, 'examples');
+  const requiredReferences = readListField(fields, listFields, 'required-references').map(normalizeRelativePath);
+  const requiredScripts = readListField(fields, listFields, 'required-scripts').map((value) => value.trim()).filter(Boolean);
+  const requiredSteps = readListField(fields, listFields, 'required-steps').map((value) => value.trim()).filter(Boolean);
+  const { successChecks, successCheckErrors } = parseSuccessChecks(
+    readListField(fields, listFields, 'success-checks'),
+  );
   const executionContext = fields.get('context') === 'fork' ? 'fork' : 'inline';
 
   return {
@@ -263,7 +351,64 @@ export function parseFrontmatter(raw: string): ParsedFrontmatter | null {
     inputKinds,
     outputKinds,
     examples,
+    requiredReferences,
+    requiredScripts,
+    requiredSteps,
+    successChecks,
+    successCheckErrors,
+    strict: parseBoolean(fields.get('strict')) ?? false,
   };
+}
+
+function walkFiles(rootDir: string, maxDepth = 6): string[] {
+  if (!existsSync(rootDir)) {
+    return [];
+  }
+
+  const files: string[] = [];
+  const visit = (currentDir: string, depth: number) => {
+    if (depth > maxDepth) {
+      return;
+    }
+
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const fullPath = join(currentDir, entry.name);
+      if (entry.isFile()) {
+        files.push(fullPath);
+        continue;
+      }
+      if (entry.isDirectory() || entry.isSymbolicLink()) {
+        visit(fullPath, depth + 1);
+      }
+    }
+  };
+
+  visit(rootDir, 0);
+  return files;
+}
+
+function toManifestEntry(rootDir: string, absolutePath: string, kind: SkillResourceKind): SkillResourceEntry {
+  return {
+    kind,
+    absolutePath,
+    relativePath: normalizeRelativePath(relative(rootDir, absolutePath)),
+    size: statSync(absolutePath).size,
+  };
+}
+
+function collectSkillResources(skillRoot: string, folderName: string, kind: SkillResourceKind): SkillResourceEntry[] {
+  const folderPath = join(skillRoot, folderName);
+  return walkFiles(folderPath)
+    .filter((absolutePath) => existsSync(absolutePath))
+    .map((absolutePath) => toManifestEntry(skillRoot, absolutePath, kind))
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
 function normalizeSkill(
@@ -273,6 +418,7 @@ function normalizeSkill(
   tier: SkillMeta['tier'],
   aliases: string[] = [],
 ): SkillMeta {
+  const rootDir = dirname(filePath);
   const normalizedAliases = Array.from(
     new Set(aliases.map((alias) => alias.trim()).filter((alias) => alias && alias !== parsed.name)),
   );
@@ -282,6 +428,7 @@ function normalizeSkill(
     description: parsed.description,
     content: parsed.content,
     path: filePath,
+    rootDir,
     source,
     tier,
     allowedTools: parsed.allowedTools,
@@ -298,6 +445,14 @@ function normalizeSkill(
       outputKinds: parsed.outputKinds,
       examples: parsed.examples,
     },
+    referencesManifest: collectSkillResources(rootDir, 'references', 'reference'),
+    scriptsManifest: collectSkillResources(rootDir, 'scripts', 'script'),
+    assetsManifest: collectSkillResources(rootDir, 'assets', 'asset'),
+    requiredReferences: parsed.requiredReferences,
+    requiredScripts: parsed.requiredScripts,
+    requiredSteps: parsed.requiredSteps,
+    successChecks: parsed.successChecks,
+    strict: parsed.strict,
   };
 }
 

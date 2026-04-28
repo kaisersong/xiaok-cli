@@ -210,6 +210,51 @@ Run a single release-readiness pass for one code change.
         return;
       }
 
+      if (!lastToolResult && lastUserText.includes('strict-release') && lastUserText.includes('skill_plan')) {
+        yield {
+          type: 'tool_use',
+          id: 'tu_strict_release_read_1',
+          name: 'read',
+          input: {
+            file_path: join(process.cwd(), '.xiaok', 'skills', 'strict-release', 'references', 'principles.md'),
+          },
+        };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastToolResult.includes('# release principles')) {
+        yield {
+          type: 'tool_use',
+          id: 'tu_strict_release_bash_1',
+          name: 'bash',
+          input: {
+            command: `sh ${join(process.cwd(), '.xiaok', 'skills', 'strict-release', 'scripts', 'check_release.sh')}`,
+          },
+        };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastToolResult.includes('smoke ok')) {
+        yield { type: 'text', delta: 'I reviewed the branch.' };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('Continue the current strict skill. Do not restart from scratch.')) {
+        yield {
+          type: 'text',
+          delta: [
+            'ready: yes',
+            'blockers: none',
+            'The branch is ready to ship.',
+          ].join('\n'),
+        };
+        yield { type: 'done' };
+        return;
+      }
+
       if (lastUserText.includes('draft the rollout')) {
         yield { type: 'text', delta: `background worker finished via ${model}` };
         yield { type: 'done' };
@@ -319,6 +364,18 @@ Run a single release-readiness pass for one code change.
       if (lastUserText.includes('报告后慢速长续问')) {
         await new Promise((resolve) => setTimeout(resolve, 450));
         yield { type: 'text', delta: `echo:${lastUserText}` };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('长段落收尾测试')) {
+        yield {
+          type: 'text',
+          delta: [
+            '这是一个非常非常非常非常非常长的第一段，用来逼近终端底部并触发多次自动换行，确保 markdown 渲染后的真实光标位置会超过单纯按换行计数得到的位置。',
+            '第二段同样故意写得很长，用来验证 turn 结束后 footer 恢复完成，但下一轮输入仍然应该从真实 transcript 尾部继续，而不是掉进底部输入栏里。',
+          ].join('\n'),
+        };
         yield { type: 'done' };
         return;
       }
@@ -969,7 +1026,7 @@ describe('chat interactive runtime', () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--auto']);
 
       await waitForInputTurnReady(harness);
       expect(harness.output.normalized).not.toContain('[platform] degraded capabilities detected');
@@ -2838,6 +2895,84 @@ describe('chat interactive runtime', () => {
       harness.restore();
     }
   }, 15_000);
+
+  it('keeps the busy footer anchored after a wrapped long reply finishes and the next turn starts immediately', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-wrapped-followup-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(60, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('长段落收尾测试');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('第二段同样故意写得很长');
+      }, { timeoutMs: 4_000 });
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('报告后慢速长续问');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expect(lines.some((line) => line.includes('› 报告后慢速长续问'))).toBe(true);
+        expectSingleFooter(lines);
+        expect(lines[22]).toContain('❯ Finishing response...');
+        expect(lines[22]).not.toContain('› 报告后慢速长续问');
+      }, { timeoutMs: 2_000 });
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('echo:报告后慢速长续问');
+      }, { timeoutMs: 4_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 20_000);
 
   it('keeps footer spacing intact after the completed-intent feedback prompt runs between turns', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-feedback-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);

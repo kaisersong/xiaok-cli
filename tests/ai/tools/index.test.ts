@@ -158,6 +158,45 @@ describe('ToolRegistry', () => {
     expect(await registry.executeTool('echo_tool', {})).toBe('ok');
   });
 
+  it('emits a post-execution tool observation with success state', async () => {
+    const observed: Array<{
+      phase: string;
+      toolName: string;
+      ok: boolean;
+      agentId: string;
+    }> = [];
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      agentId: 'worker-1',
+      onToolObserved: async (event) => {
+        observed.push({
+          phase: event.phase,
+          toolName: event.toolName,
+          ok: event.ok,
+          agentId: event.agentId,
+        });
+      },
+    }, [{
+      permission: 'safe',
+      definition: {
+        name: 'echo_tool',
+        description: 'echo',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      execute: async () => 'ok',
+    }]);
+
+    await expect(registry.executeTool('echo_tool', {})).resolves.toBe('ok');
+    expect(observed).toEqual([
+      {
+        phase: 'after',
+        toolName: 'echo_tool',
+        ok: true,
+        agentId: 'worker-1',
+      },
+    ]);
+  });
+
   it('normalizes thrown tool errors without duplicating the Error prefix', async () => {
     const registry = new ToolRegistry({
       permissionManager: new PermissionManager({ mode: 'auto' }),

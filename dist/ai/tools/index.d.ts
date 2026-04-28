@@ -11,6 +11,16 @@ export interface RegistryOptions {
     dryRun?: boolean;
     onPrompt?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
     hooksRunner?: HooksRunner;
+    agentId?: string;
+    onToolObserved?: (event: ToolObservation) => Promise<void> | void;
+}
+export interface ToolObservation {
+    phase: 'after';
+    agentId: string;
+    toolName: string;
+    input: Record<string, unknown>;
+    result: string;
+    ok: boolean;
 }
 export declare class ToolRegistry {
     private tools;

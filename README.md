@@ -297,6 +297,8 @@ xiaok yzjchannel serve
 - **Dependency resolution** — Auto-resolve skill dependencies
 - **allowed-tools** — Whitelist enforcement
 - **Install/uninstall** — Catalog reload
+- **Structured skill contracts** — `required-references`, `required-scripts`, `required-steps`, and `success-checks`
+- **Strict execution reliability** — execution bundles, evidence tracking, completion gates, and adherence evals
 
 ### Built-in Agents
 
@@ -391,7 +393,9 @@ src/
 
 ```bash
 npm run build       # Build
-npm test            # Run tests (765 tests, 153 files)
+npm test            # Default sandbox + eval suite
+npm run test:skill:fast     # Fast skill regression suite
+npm run test:skill:release  # Release-only skill execution suite
 npm run test:watch  # Watch mode
 npm run dev -- --help  # Run from source
 ```
@@ -415,6 +419,8 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v0.6.14** — Skill execution reliability and release-gated validation: upgraded strict skills from prompt-only instructions to structured contracts with required references/scripts/steps and success checks, added execution bundles plus runtime evidence/completion gating, persisted adherence outcomes for follow-up tuning, and split skill verification into a fast everyday suite plus a slower release-only suite for inline and fork strict execution paths.
 
 **v0.6.8** — Windows tmux terminal stabilization and config-path consistency: stabilized the pending/permission footer in real Windows tmux by using a safer footer width budget and stronger permission-flow redraw assertions, made custom agents and skills resolve from the active `xiaok` config directory instead of a hardcoded home path, normalized install-source detection for Windows and npm-global layouts, and hardened Windows smoke-test temp cleanup retries.
 

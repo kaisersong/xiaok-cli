@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "id": "passes-when-all-evidence-and-checks-exist",
+      "expectPassed": true,
+      "evidence": {
+        "readReferences": ["references/principles.md"],
+        "runScripts": ["python scripts/check_release.py --mode smoke"],
+        "completedSteps": ["read_skill", "read_required_references", "run_required_scripts", "summarize_findings"]
+      },
+      "finalAnswer": "ready: yes\nblockers: none\nThe branch is ready to ship."
+    },
+    {
+      "id": "fails-missing-reference-and-script",
+      "expectPassed": false,
+      "expectMissingReferences": ["references/principles.md"],
+      "expectMissingScripts": ["python scripts/check_release.py --mode smoke"],
+      "evidence": {
+        "readReferences": [],
+        "runScripts": [],
+        "completedSteps": ["read_skill"]
+      },
+      "finalAnswer": "I reviewed the branch."
+    },
+    {
+      "id": "fails-success-check-when-ready-field-missing",
+      "expectPassed": false,
+      "expectFailedChecks": ["must_answer_yes_no"],
+      "evidence": {
+        "readReferences": ["references/principles.md"],
+        "runScripts": ["python scripts/check_release.py --mode smoke"],
+        "completedSteps": ["read_skill", "read_required_references", "run_required_scripts", "summarize_findings"]
+      },
+      "finalAnswer": "blockers: none\nThe branch can probably ship."
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "cases": [
+    {
+      "id": "passes-complex-contract-with-multiple-references-and-fields",
+      "expectPassed": true,
+      "evidence": {
+        "readReferences": [
+          "references/principles.md",
+          "references/ship-criteria.md"
+        ],
+        "runScripts": [
+          "python scripts/check_release.py --mode smoke",
+          "python scripts/check_release.py --mode policy"
+        ],
+        "completedSteps": [
+          "read_skill",
+          "read_required_references",
+          "run_required_scripts",
+          "summarize_findings"
+        ]
+      },
+      "finalAnswer": "ready: yes\nblockers: none\nrecommendation: ship now\nrollback: documented"
+    },
+    {
+      "id": "fails-when-one-of-multiple-scripts-is-missing",
+      "expectPassed": false,
+      "expectMissingScripts": [
+        "python scripts/check_release.py --mode policy"
+      ],
+      "evidence": {
+        "readReferences": [
+          "references/principles.md",
+          "references/ship-criteria.md"
+        ],
+        "runScripts": [
+          "python scripts/check_release.py --mode smoke"
+        ],
+        "completedSteps": [
+          "read_skill",
+          "read_required_references",
+          "summarize_findings"
+        ]
+      },
+      "finalAnswer": "ready: yes\nblockers: none\nrecommendation: ship now"
+    },
+    {
+      "id": "fails-when-structured-fields-are-missing-even-if-keywords-appear",
+      "expectPassed": false,
+      "expectFailedChecks": [
+        "must_emit_field"
+      ],
+      "evidence": {
+        "readReferences": [
+          "references/principles.md",
+          "references/ship-criteria.md"
+        ],
+        "runScripts": [
+          "python scripts/check_release.py --mode smoke",
+          "python scripts/check_release.py --mode policy"
+        ],
+        "completedSteps": [
+          "read_skill",
+          "read_required_references",
+          "run_required_scripts",
+          "summarize_findings"
+        ]
+      },
+      "finalAnswer": "The branch is ready to ship and rollback is documented."
+    }
+  ]
+}

@@ -1,11 +1,24 @@
 import type { TaskSkillHints } from '../intent-delegation/types.js';
 export type SkillExecutionContext = 'inline' | 'fork';
+export type SkillResourceKind = 'reference' | 'script' | 'asset';
+export type SkillSuccessCheckType = 'must_mention_any' | 'must_mention_all' | 'must_answer_yes_no' | 'must_emit_field';
+export interface SkillResourceEntry {
+    kind: SkillResourceKind;
+    absolutePath: string;
+    relativePath: string;
+    size: number;
+}
+export interface SkillSuccessCheck {
+    type: SkillSuccessCheckType;
+    terms: string[];
+}
 export interface SkillMeta {
     name: string;
     aliases?: string[];
     description: string;
     content: string;
     path: string;
+    rootDir: string;
     source: 'builtin' | 'global' | 'project';
     tier: 'system' | 'user' | 'project';
     allowedTools: string[];
@@ -17,6 +30,14 @@ export interface SkillMeta {
     userInvocable: boolean;
     whenToUse?: string;
     taskHints: TaskSkillHints;
+    referencesManifest: SkillResourceEntry[];
+    scriptsManifest: SkillResourceEntry[];
+    assetsManifest: SkillResourceEntry[];
+    requiredReferences: string[];
+    requiredScripts: string[];
+    requiredSteps: string[];
+    successChecks: SkillSuccessCheck[];
+    strict: boolean;
 }
 export interface SkillLoadOptions {
     builtinRoots?: string[];
@@ -49,6 +70,12 @@ export interface ParsedFrontmatter {
     inputKinds: string[];
     outputKinds: string[];
     examples: string[];
+    requiredReferences: string[];
+    requiredScripts: string[];
+    requiredSteps: string[];
+    successChecks: SkillSuccessCheck[];
+    successCheckErrors: string[];
+    strict: boolean;
 }
 export declare function parseFrontmatter(raw: string): ParsedFrontmatter | null;
 export declare function resolveSkillRoots(xiaokConfigDir?: string, cwd?: string, options?: SkillLoadOptions): ResolvedSkillRoots;
