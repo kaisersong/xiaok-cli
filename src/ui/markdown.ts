@@ -17,6 +17,7 @@ export class MarkdownRenderer {
   private inCodeBlock = false;
   private codeLang = "";
   private pendingLen = 0;
+  private pendingPrefix = "";
   private lineCount = 0;
   private termWidth = 0;
   private consecutiveBlankLines = 0;
@@ -53,12 +54,12 @@ export class MarkdownRenderer {
       if (this.pendingLen > 0 && this.pendingLen < line.length) {
         // Streaming update: new chars arrived after initial render.
         // Clear the old render and re-render with the full line.
-        process.stdout.write(`\x1b[1G\x1b[2K`);
+        this.clearPendingRender(line.slice(0, this.pendingLen));
         this.renderLine(line);
       } else if (this.pendingLen > 0 && this.pendingLen >= line.length) {
         // Full line was already rendered (or over-rendered) by pending.
         // The pending text was written raw (unformatted); re-render with formatting.
-        process.stdout.write(`\x1b[1G\x1b[2K`);
+        this.clearPendingRender(line);
         this.renderLine(line);
       } else {
         // No pending text — this is a fresh complete line.
@@ -67,6 +68,7 @@ export class MarkdownRenderer {
         this.lineCount += renderedRows;
       }
       this.pendingLen = 0;
+      this.pendingPrefix = "";
 
       const isBlank = line.trim() === "";
       // Skip all blank lines outside code blocks to prevent
@@ -96,7 +98,8 @@ export class MarkdownRenderer {
     if (this.buffer.length > this.pendingLen) {
       const newChars = this.buffer.slice(this.pendingLen);
       if (this.pendingLen === 0) {
-        process.stdout.write(this.getPendingPrefix());
+        this.pendingPrefix = this.getPendingPrefix();
+        process.stdout.write(this.pendingPrefix);
       }
       process.stdout.write(newChars);
       this.pendingLen = this.buffer.length;
@@ -110,8 +113,9 @@ export class MarkdownRenderer {
 
     if (this.buffer) {
       if (this.pendingLen > 0) {
-        process.stdout.write(`\x1b[1G\x1b[2K`);
+        this.clearPendingRender(this.buffer);
         this.pendingLen = 0;
+        this.pendingPrefix = "";
       }
       const flushed = this.buffer;
       renderedLine = this.formatLine(flushed);
@@ -125,6 +129,7 @@ export class MarkdownRenderer {
     // This can happen if the footer has been rendered between flush()
     // and the next write().
     this.pendingLen = 0;
+    this.pendingPrefix = "";
     return { rows: flushedRows, renderedLine };
   }
 
@@ -134,6 +139,7 @@ export class MarkdownRenderer {
     this.inCodeBlock = false;
     this.codeLang = "";
     this.pendingLen = 0;
+    this.pendingPrefix = "";
     this.lineCount = 0;
     this.consecutiveBlankLines = 0;
     this.hasRenderedLeadParagraph = false;
@@ -148,6 +154,7 @@ export class MarkdownRenderer {
   beginNewSegment(): void {
     this.hasRenderedLeadParagraph = false;
     this.consecutiveBlankLines = 0;
+    this.pendingPrefix = "";
   }
 
   private renderLine(line: string): string {
@@ -239,6 +246,26 @@ export class MarkdownRenderer {
   private countRenderedRows(text: string): number {
     const lines = text.split('\n');
     return lines.reduce((sum, line) => sum + this.countRows(line), 0);
+  }
+
+  private clearPendingRender(text: string): void {
+    const rows = this.countRenderedRows(`${this.pendingPrefix}${text}`);
+    const rowsAboveCurrent = rows - 1;
+
+    if (rowsAboveCurrent > 0) {
+      process.stdout.write(`\x1b[${rowsAboveCurrent}A`);
+    }
+
+    for (let row = 0; row < rows; row += 1) {
+      process.stdout.write(`\x1b[1G\x1b[2K`);
+      if (row < rows - 1) {
+        process.stdout.write(`\x1b[1B`);
+      }
+    }
+
+    if (rowsAboveCurrent > 0) {
+      process.stdout.write(`\x1b[${rowsAboveCurrent}A`);
+    }
   }
 
   private formatLeadParagraphLine(line: string): string {

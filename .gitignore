@@ -35,3 +35,18 @@ manual-test.sh
 .test-dist/
 .worktrees/
 .xiaok/
+.tmp*/
+.superpowers/
+__pycache__/
+
+# 本地生成的发布/报告/幻灯片产物
+/*.tgz
+/BRIEF*.json
+/.tmp-*
+/tmp_*.md
+/report-*.html
+/report-*.report.md
+/salesforce-ai-evolution*.html
+/salesforce-ai-evolution*.report.md
+/slides-*.html
+/*.eval.json

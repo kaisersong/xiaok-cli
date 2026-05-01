@@ -167,4 +167,21 @@ describe('TuiRuntimeState', () => {
 
     expect(scrollRegion.renderActivity).toHaveBeenCalledTimes(1);
   });
+
+  it('does not emit reassurance notes while a blocking interactive prompt is active', async () => {
+    const { runtimeState, statusBar, writeProgressNote } = createRuntimeState();
+    vi.mocked(statusBar.getReassuranceTick).mockReturnValue({
+      bucket: 1,
+      line: 'Still working: making steady progress (6m 40s)',
+    });
+
+    runtimeState.beginTurn('Thinking');
+    runtimeState.noteResponseStarted();
+
+    await runtimeState.withPausedLiveActivity(async () => {
+      await vi.advanceTimersByTimeAsync(21_000);
+    });
+
+    expect(writeProgressNote).not.toHaveBeenCalled();
+  });
 });

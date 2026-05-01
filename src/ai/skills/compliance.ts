@@ -22,13 +22,6 @@ export interface SkillComplianceEvidenceView {
   completedSteps: string[];
 }
 
-const RESERVED_STEPS = new Set([
-  'read_skill',
-  'read_required_references',
-  'run_required_scripts',
-  'summarize_findings',
-]);
-
 export function evaluateSkillCompliance(input: {
   plan: SkillExecutionPlan;
   evidence: SkillComplianceEvidenceView;
@@ -53,9 +46,6 @@ export function evaluateSkillCompliance(input: {
     .filter((entry) => !runScripts.has(normalizeCommand(entry)));
 
   const missingSteps = expectedSteps.filter((step) => {
-    if (!RESERVED_STEPS.has(step)) {
-      return false;
-    }
     if (step === 'read_required_references') {
       return missingReferences.length > 0;
     }

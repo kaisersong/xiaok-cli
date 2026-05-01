@@ -64,6 +64,33 @@ describe('terminal-frame', () => {
     expect(frame.cursor).toEqual({ line: 0, column: 2 });
   });
 
+  it('renders an intent summary above the prompt with two blank guard rows', () => {
+    const frame = buildTerminalFrame({
+      prompt: '> ',
+      transcript: [],
+      input: { value: '', cursorOffset: 0, history: [] },
+      footerLines: [
+        '● Intent: 报告 -> 幻灯片 · Stage 2/2 生成幻灯片 · Completed',
+        'kimi-for-coding · 2% · master · xiaok-cli',
+      ],
+      overlay: null,
+      modal: null,
+      focusTarget: 'input',
+      terminalSize: { columns: 80, rows: 24 },
+    });
+
+    const summaryIndex = frame.lines.findIndex((line) => line.includes('Intent: 报告 -> 幻灯片'));
+    const promptIndex = frame.lines.findIndex((line) => line.includes('❯'));
+    const statusIndex = frame.lines.findIndex((line) => line.includes('kimi-for-coding'));
+
+    expect(summaryIndex).toBe(0);
+    expect(frame.lines[summaryIndex + 1]).toBe('');
+    expect(frame.lines[summaryIndex + 2]).toBe('');
+    expect(promptIndex).toBe(summaryIndex + 3);
+    expect(statusIndex).toBe(promptIndex + 1);
+    expect(frame.cursor).toEqual({ line: promptIndex, column: 2 });
+  });
+
   it('suppresses footer status when an overlay is visible', () => {
     const frame = buildTerminalFrame({
       prompt: '> ',

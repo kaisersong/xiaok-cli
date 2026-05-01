@@ -30,12 +30,13 @@ describe('ui orchestration formatting', () => {
         stageOrder: 0,
         totalStages: 2,
         stageLabel: '提取 Markdown',
+        skillNames: ['kai-report-creator'],
         status: 'Drafting Plan',
       });
 
-      expect(stripAnsi(line)).toContain('● Intent: md -> 报告 · Stage 1/2 提取 Markdown · Drafting Plan');
+      expect(stripAnsi(line)).toContain('● Intent: md -> 报告 · Stage 1/2 提取 Markdown · Skill: kai-report-creator · Drafting Plan');
       expect(line).toContain('\x1b[38;2;122;168;255m●\x1b[0m');
-      expect(line).toContain('\x1b[38;2;142;142;142mIntent: md -> 报告 · Stage 1/2 提取 Markdown · Drafting Plan\x1b[0m');
+      expect(line).toContain('\x1b[38;2;142;142;142mIntent: md -> 报告 · Stage 1/2 提取 Markdown · Skill: kai-report-creator · Drafting Plan\x1b[0m');
     } finally {
       setColorsEnabled(
         process.stdout.isTTY !== false &&

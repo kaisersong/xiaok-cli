@@ -217,53 +217,53 @@ function inferContextLimitFromModel(modelName) {
 }
 function resolveActivityLabel(label, elapsedMs) {
     if (label === 'Thinking') {
-        if (elapsedMs >= 90_000) {
+        if (elapsedMs >= activityLabelThresholdMs(90_000)) {
             return 'Finalizing response';
         }
-        if (elapsedMs >= 45_000) {
+        if (elapsedMs >= activityLabelThresholdMs(45_000)) {
             return 'Working through details';
         }
-        if (elapsedMs >= 15_000) {
+        if (elapsedMs >= activityLabelThresholdMs(15_000)) {
             return 'Still working';
         }
     }
     if (label === 'Exploring codebase') {
-        if (elapsedMs >= 45_000) {
+        if (elapsedMs >= activityLabelThresholdMs(45_000)) {
             return 'Tracing references';
         }
-        if (elapsedMs >= 20_000) {
+        if (elapsedMs >= activityLabelThresholdMs(20_000)) {
             return 'Digging through repo';
         }
     }
     if (label === 'Updating files') {
-        if (elapsedMs >= 40_000) {
+        if (elapsedMs >= activityLabelThresholdMs(40_000)) {
             return 'Finishing edits';
         }
-        if (elapsedMs >= 15_000) {
+        if (elapsedMs >= activityLabelThresholdMs(15_000)) {
             return 'Applying changes';
         }
     }
     if (label === 'Running verification') {
-        if (elapsedMs >= 45_000) {
+        if (elapsedMs >= activityLabelThresholdMs(45_000)) {
             return 'Checking for regressions';
         }
-        if (elapsedMs >= 20_000) {
+        if (elapsedMs >= activityLabelThresholdMs(20_000)) {
             return 'Verifying changes';
         }
     }
     if (label === 'Updating skills') {
-        if (elapsedMs >= 30_000) {
+        if (elapsedMs >= activityLabelThresholdMs(30_000)) {
             return 'Refreshing skill catalog';
         }
-        if (elapsedMs >= 12_000) {
+        if (elapsedMs >= activityLabelThresholdMs(12_000)) {
             return 'Installing skill updates';
         }
     }
     if (label === 'Exporting presentation') {
-        if (elapsedMs >= 40_000) {
+        if (elapsedMs >= activityLabelThresholdMs(40_000)) {
             return 'Writing presentation file';
         }
-        if (elapsedMs >= 15_000) {
+        if (elapsedMs >= activityLabelThresholdMs(15_000)) {
             return 'Packaging slides';
         }
     }
@@ -292,6 +292,13 @@ function resolveActivityLabel(label, elapsedMs) {
         }
     }
     return label;
+}
+function activityLabelThresholdMs(defaultThresholdMs) {
+    const factor = Number(process.env.XIAOK_E2E_ACTIVITY_LABEL_FACTOR || '1');
+    if (!Number.isFinite(factor) || factor <= 1) {
+        return defaultThresholdMs;
+    }
+    return Math.max(LIVE_RENDER_DELAY_MS, Math.floor(defaultThresholdMs / factor));
 }
 function resolveReassuranceDetail(label, elapsedMs) {
     if (label === 'Thinking') {

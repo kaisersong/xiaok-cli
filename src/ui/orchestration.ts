@@ -29,10 +29,12 @@ export function formatCurrentTurnIntentSummaryLine(input: {
   stageOrder: number;
   totalStages: number;
   stageLabel: string;
+  skillNames?: string[];
   status: string;
 }): string {
+  const skillText = formatSkillSummary(input.skillNames ?? []);
   return formatIntentSummaryHint(
-    `Intent: ${input.deliverable} · Stage ${input.stageOrder + 1}/${input.totalStages} ${input.stageLabel} · ${input.status}`,
+    `Intent: ${input.deliverable} · Stage ${input.stageOrder + 1}/${input.totalStages} ${input.stageLabel}${skillText} · ${input.status}`,
   );
 }
 
@@ -120,6 +122,24 @@ export function formatStageActivatedTranscriptBlock(input: {
   ]);
 }
 
+export function formatIntentStageSummaryTranscriptBlock(input: {
+  deliverable: string;
+  stages: Array<{
+    order: number;
+    totalStages: number;
+    label: string;
+    skillNames?: string[];
+    status: string;
+  }>;
+}): string {
+  return formatTranscriptRailBlock('Stages', [
+    `Goal: ${input.deliverable}`,
+    ...input.stages.map((stage) => (
+      `Stage ${stage.order + 1}/${stage.totalStages} ${stage.label}${formatSkillSummary(stage.skillNames ?? [])} · ${stage.status}`
+    )),
+  ]);
+}
+
 export function formatReceiptTranscriptBlock(note: string): string {
   return formatTranscriptRailBlock('Receipt', [note]);
 }
@@ -170,7 +190,7 @@ function describeActiveStage(intent: IntentLedgerRecord): string {
   return `${activeStage.order + 1}/${stages.length} ${activeStage.label}`;
 }
 
-function getIntentStages(intent: IntentLedgerRecord): Array<{ stageId: string; order: number; label: string }> {
+function getIntentStages(intent: IntentLedgerRecord): Array<{ stageId: string; order: number; label: string; steps: IntentLedgerRecord['steps'] }> {
   if (Array.isArray(intent.stages) && intent.stages.length > 0) {
     return intent.stages;
   }
@@ -179,6 +199,7 @@ function getIntentStages(intent: IntentLedgerRecord): Array<{ stageId: string; o
     stageId: intent.activeStageId ?? `${intent.intentId}:stage:1`,
     order: 0,
     label: `生成${intent.finalDeliverable ?? intent.deliverable}`,
+    steps: intent.steps,
   }];
 }
 
@@ -196,6 +217,16 @@ function describePreferredStageSkills(intent: IntentLedgerRecord): string {
     .filter((value): value is string => Boolean(value));
 
   return preferred.join(' | ');
+}
+
+function formatSkillSummary(skillNames: Array<string | null | undefined>): string {
+  const normalized = [...new Set(skillNames
+    .map((name) => typeof name === 'string' ? name.trim() : '')
+    .filter((name) => name && !name.startsWith('generic_llm::')))];
+  if (normalized.length === 0) {
+    return '';
+  }
+  return ` · ${normalized.length === 1 ? 'Skill' : 'Skills'}: ${normalized.join(', ')}`;
 }
 
 function buildIntentAcknowledgement(intent: IntentLedgerRecord): string {

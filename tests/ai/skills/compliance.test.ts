@@ -88,6 +88,36 @@ describe('skill compliance', () => {
     expect(result.failedChecks).toEqual([]);
   });
 
+  it('fails when custom required steps have no execution evidence', () => {
+    const plan = buildSkillExecutionPlan(['release-checklist'], [makeSkill({
+      requiredSteps: [
+        'read_skill',
+        'create_brief_json',
+        'render_from_brief',
+        'validate_artifact',
+        'summarize_findings',
+      ],
+      requiredScripts: [],
+    })]);
+    const result = evaluateSkillCompliance({
+      plan,
+      evidence: {
+        readReferences: ['references/principles.md'],
+        runScripts: [],
+        completedSteps: ['read_skill', 'summarize_findings'],
+      },
+      finalAnswer: 'ready: yes\nblockers: none',
+      checkedAt: 789,
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.missingSteps).toEqual([
+      'create_brief_json',
+      'render_from_brief',
+      'validate_artifact',
+    ]);
+  });
+
   it('builds a continuation reminder from failed checks', () => {
     const reminder = buildComplianceReminder({
       passed: false,

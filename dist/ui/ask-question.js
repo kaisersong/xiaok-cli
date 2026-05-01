@@ -23,7 +23,7 @@ import { createInterface } from 'node:readline';
 import { boldCyan, dim, bold, cyan } from './render.js';
 import { getDisplayWidth } from './display-width.js';
 import { MarkdownRenderer } from './markdown.js';
-import { stripAnsi } from './text-metrics.js';
+import { sliceByDisplayColumns, stripAnsi } from './text-metrics.js';
 // ─── ANSI helpers ────────────────────────────────────────────────────────────
 const RESET = '\x1b[0m';
 const BG_SEL = '\x1b[48;5;238m'; // selected row background
@@ -32,6 +32,12 @@ const FG_BOLD_CYAN = '\x1b[1;36m';
 const FG_RESET = '\x1b[22;39m';
 function chip(text) {
     return `\x1b[48;5;238m\x1b[1;37m □ ${text} ${RESET}`;
+}
+function truncatePlainLine(text, width) {
+    if (getDisplayWidth(text) <= width) {
+        return text;
+    }
+    return `${sliceByDisplayColumns(text, 0, Math.max(0, width - 1))}…`;
 }
 // ─── Renderer ────────────────────────────────────────────────────────────────
 function renderFrame(params, selectedIdx, checked, cols) {
@@ -47,7 +53,6 @@ function renderFrame(params, selectedIdx, checked, cols) {
     }
     // Question
     lines.push(bold(params.question));
-    lines.push('');
     // If has preview, add boxTop as a separate line above options
     if (hasPreview) {
         const innerWidth = rightWidth - 2;
@@ -69,6 +74,8 @@ function renderFrame(params, selectedIdx, checked, cols) {
         const checkMark = params.multiSelect ? (isChecked ? `${FG_BOLD_CYAN}✓${FG_RESET} ` : '  ') : '';
         const labelStr = isSelected ? `${FG_BOLD_CYAN}${opt.label}${RESET}` : opt.label;
         const descStr = opt.description ? `  ${FG_DIM}${opt.description}${RESET}` : '';
+        const checkText = params.multiSelect ? (isChecked ? '✓ ' : '  ') : '';
+        const plainLeftContent = `  ${isSelected ? '❯' : ' '} ${i + 1}. ${checkText}${opt.label}${opt.description ? `  ${opt.description}` : ''}`;
         // Left side: option
         let leftContent = `  ${prefix} ${num} ${checkMark}${labelStr}${descStr}`;
         const leftVisible = `  ${isSelected ? '❯' : ' '} ${i + 1}. ${checkMark.replace(/\x1b\[[^m]*m/g, '')}${opt.label}${opt.description ? '  ' + opt.description : ''}`;
@@ -80,7 +87,7 @@ function renderFrame(params, selectedIdx, checked, cols) {
             leftContent = leftContent + ' '.repeat(leftPad);
         }
         if (!hasPreview) {
-            lines.push(leftContent);
+            lines.push(truncatePlainLine(plainLeftContent, leftWidth));
         }
         else {
             // Right side: preview content (or empty)
@@ -109,7 +116,6 @@ function renderFrame(params, selectedIdx, checked, cols) {
         const boxBottom = `└${'─'.repeat(innerWidth)}┘`;
         lines.push(' '.repeat(leftWidth + 3) + dim(boxBottom));
     }
-    lines.push('');
     // Footer hint
     if (params.multiSelect) {
         lines.push(dim('  ↑↓ navigate   Space select   Enter confirm'));

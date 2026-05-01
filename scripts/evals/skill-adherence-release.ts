@@ -6,9 +6,11 @@ import type { SkillMeta } from '../../src/ai/skills/loader.js';
 
 type EvalCase = {
   id: string;
+  skill?: 'release-audit' | 'artifact-deck';
   expectPassed: boolean;
   expectMissingReferences?: string[];
   expectMissingScripts?: string[];
+  expectMissingSteps?: string[];
   expectFailedChecks?: string[];
   evidence: {
     readReferences: string[];
@@ -22,7 +24,7 @@ type EvalFixture = {
   cases: EvalCase[];
 };
 
-function makeSkill(): SkillMeta {
+function makeReleaseAuditSkill(): SkillMeta {
   return {
     name: 'release-audit',
     description: 'release audit helper',
@@ -59,6 +61,45 @@ function makeSkill(): SkillMeta {
   };
 }
 
+function makeArtifactDeckSkill(): SkillMeta {
+  return {
+    name: 'artifact-deck',
+    description: 'high-quality deck artifact helper',
+    content: 'content',
+    path: '/tmp/artifact-deck/SKILL.md',
+    rootDir: '/tmp/artifact-deck',
+    source: 'project',
+    tier: 'project',
+    allowedTools: [],
+    executionContext: 'inline',
+    dependsOn: [],
+    userInvocable: true,
+    taskHints: {
+      taskGoals: [],
+      inputKinds: [],
+      outputKinds: [],
+      examples: [],
+    },
+    referencesManifest: [],
+    scriptsManifest: [],
+    assetsManifest: [],
+    requiredReferences: ['references/data-story.md'],
+    requiredScripts: ['node scripts/render_from_brief.js --brief BRIEF.json --style data-story'],
+    requiredSteps: [
+      'read_skill',
+      'create_brief_json',
+      'render_from_brief',
+      'validate_artifact',
+      'summarize_findings',
+    ],
+    successChecks: [
+      { type: 'must_emit_field', terms: ['brief', 'composition_routes', 'watermark', 'validation'] },
+      { type: 'must_mention_all', terms: ['data-story', 'watermark'] },
+    ],
+    strict: true,
+  };
+}
+
 function loadFixture(): EvalFixture {
   return JSON.parse(
     readFileSync(resolve(process.cwd(), 'evals/skill-adherence.release.cases.json'), 'utf8'),
@@ -67,10 +108,12 @@ function loadFixture(): EvalFixture {
 
 async function main(): Promise<void> {
   const fixture = loadFixture();
-  const plan = buildSkillExecutionPlan(['release-audit'], [makeSkill()]);
+  const releaseAuditPlan = buildSkillExecutionPlan(['release-audit'], [makeReleaseAuditSkill()]);
+  const artifactDeckPlan = buildSkillExecutionPlan(['artifact-deck'], [makeArtifactDeckSkill()]);
   const failures: string[] = [];
 
   for (const testCase of fixture.cases) {
+    const plan = testCase.skill === 'artifact-deck' ? artifactDeckPlan : releaseAuditPlan;
     const result = evaluateSkillCompliance({
       plan,
       evidence: testCase.evidence,
@@ -91,6 +134,11 @@ async function main(): Promise<void> {
     for (const expectedScript of testCase.expectMissingScripts ?? []) {
       if (!result.missingScripts.includes(expectedScript)) {
         failures.push(`[skill-adherence-release] ${testCase.id}: missing expected script ${expectedScript}`);
+      }
+    }
+    for (const expectedStep of testCase.expectMissingSteps ?? []) {
+      if (!result.missingSteps.includes(expectedStep)) {
+        failures.push(`[skill-adherence-release] ${testCase.id}: missing expected step ${expectedStep}`);
       }
     }
     for (const expectedCheck of testCase.expectFailedChecks ?? []) {

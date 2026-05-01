@@ -420,6 +420,14 @@ npm run dev -- --help  # 从源码运行
 
 ## 版本日志
 
+**v0.6.21** — 终端 stdout EPIPE 恢复与第二轮输入栏保持：从用户本机 transcript 复现已安装包失败，`[xiaok] UI 输出已停用：stdout_stream_error (Error: write EPIPE)` 会结束 scroll region，导致后续输入后的 `Thinking` 只以内联形式输出，输入栏/状态栏消失。现在 stdout EPIPE 只切换到原始 stderr 输出，不再停用 TUI；补充红绿验证的 injected-EPIPE chat runtime 回归、短视口 `file:///... report-creator` follow-up 测试、26 场景 tmux E2E，并在 bugfix 文档中记录之前错误的测试方式为什么漏掉这条路径。
+
+**v0.6.20** — 终端 footer fallback 顺序与真实 TTY 不变量加固：修复非 scroll-region 的 `TerminalFrame` 路径，当 footer lines 是 `[summary,status]` 时 completed `Intent` 会错误渲染到输入栏下面；现在统一渲染为 `summary -> 两行空白保护 -> prompt -> status`。新增该顺序的红灯回归测试，并加严 tmux E2E：任何 `Intent` 出现在 prompt 下方、或 status 不是紧贴 prompt 下方的截图都会失败；同时在 bugfix 文档中记录这是第 12 轮 footer/input 修复，以及前 11 轮为什么没有覆盖这个 fallback 路径。
+
+**v0.6.18** — 终端软换行补丁与路径开头 intent 修复，补齐 0.6.17 footer 回归遗漏：先用真实 tmux 复现用户反馈的窄终端失败，再修复 `MarkdownRenderer.flush()`，确保 streamed pending 行在真实终端软换行成多行时，会先清掉所有占用的物理行再渲染最终 Markdown；同时修复 `/Users/... 生成报告，然后生成幻灯片` 这类以本地绝对路径开头的工作请求被 intent planner 当成 slash control command 的问题，并补上 markdown、planner、chat-runtime 与 E2E 回归测试。
+
+**v0.6.17** — 终端 footer/input 间距闭环与真实 TTY 回归加固：修复 activity 刷新时可能先出现 `Finalizing response` 但没有输入栏/状态栏的中间帧，提高 footer 安全间距，修正 wrapped Markdown 内部换行的 cursor 计数，把过长 footer 状态限制为单行，并用 scroll-region 聚焦回归和 23 场景真实 tmux E2E 锁住截图同类失败。
+
 **v0.6.14** — Skill 执行可靠性与发版分层验证：把 strict skill 从“只靠提示词”升级为带 required references/scripts/steps 与 success checks 的结构化合同，引入 execution bundle、运行时 evidence 与 completion gate，持久化 adherence 结果用于后续调优，并把 skill 验证拆成日常快速套件与发版专用慢套件，分别覆盖 inline 与 fork 的 strict 执行路径。
 
 **v0.6.8** — Windows tmux 终端稳定性与配置路径一致性：通过更保守的 footer 宽度预算和更严格的权限流重绘断言，修复真实 Windows tmux 下 pending/permission 阶段的 prompt、activity、status 错位；让自定义 agents 与 skills 从当前生效的 `xiaok` 配置目录解析，而不是写死 `~/.xiaok`；同时规范 Windows / npm 全局安装场景下的安装来源识别，并补强 Windows smoke test 的临时目录清理重试。

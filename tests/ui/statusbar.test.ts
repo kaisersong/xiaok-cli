@@ -238,6 +238,26 @@ describe('StatusBar', () => {
       expect(line).toContain('1m 35s');
     });
 
+    it('can shorten activity label thresholds for terminal e2e without speeding timers', () => {
+      const previousFactor = process.env.XIAOK_E2E_ACTIVITY_LABEL_FACTOR;
+      process.env.XIAOK_E2E_ACTIVITY_LABEL_FACTOR = '120';
+
+      try {
+        statusBar.beginActivity('Thinking', 0);
+
+        const line = statusBar.getLiveStatusLine(900, 0);
+
+        expect(line).toContain('Finalizing response');
+        expect(line).toContain('0s');
+      } finally {
+        if (previousFactor === undefined) {
+          delete process.env.XIAOK_E2E_ACTIVITY_LABEL_FACTOR;
+        } else {
+          process.env.XIAOK_E2E_ACTIVITY_LABEL_FACTOR = previousFactor;
+        }
+      }
+    });
+
     it('adds a deeper long-wait stage for repo exploration', () => {
       statusBar.beginActivity('Exploring codebase', 0);
 

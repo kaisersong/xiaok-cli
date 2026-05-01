@@ -653,5 +653,6 @@ export function parseSlashCommand(input: string): { skillName: string; rest: str
   if (!trimmed.startsWith('/')) return null;
   const [token, ...rest] = trimmed.slice(1).split(/\s+/);
   if (!token) return null;
+  if (token.includes('/')) return null;
   return { skillName: token, rest: rest.join(' ') };
 }

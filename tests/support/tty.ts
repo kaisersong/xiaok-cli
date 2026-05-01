@@ -8,6 +8,7 @@ export interface TtyHarness {
   output: { raw: string; normalized: string };
   screen: { lines: () => string[]; text: () => string };
   send: (text: string) => void;
+  failNextStdoutWrite: (error: Error) => void;
   restore: () => void;
 }
 
@@ -212,6 +213,7 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
   const originalPause = process.stdin.pause;
   const originalOn = process.stdin.on;
   const originalRemoveListener = process.stdin.removeListener;
+  let nextStdoutWriteError: Error | null = null;
 
   process.stdout.columns = columns;
   if (rows !== undefined) {
@@ -231,6 +233,11 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
   }) as typeof process.stdin.removeListener;
 
   process.stdout.write = ((chunk: WritableChunk) => {
+    if (nextStdoutWriteError) {
+      const error = nextStdoutWriteError;
+      nextStdoutWriteError = null;
+      throw error;
+    }
     raw += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
     return true;
   }) as typeof process.stdout.write;
@@ -261,6 +268,9 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
     },
     send(text: string) {
       emitter.emit('data', Buffer.from(text, 'utf8'));
+    },
+    failNextStdoutWrite(error: Error) {
+      nextStdoutWriteError = error;
     },
     restore() {
       process.stdout.write = originalStdoutWrite;

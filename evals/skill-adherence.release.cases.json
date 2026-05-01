@@ -66,6 +66,81 @@
         ]
       },
       "finalAnswer": "The branch is ready to ship and rollback is documented."
+    },
+    {
+      "id": "passes-complex-artifact-skill-with-brief-render-validate-and-style-evidence",
+      "skill": "artifact-deck",
+      "expectPassed": true,
+      "evidence": {
+        "readReferences": [
+          "references/data-story.md"
+        ],
+        "runScripts": [
+          "node scripts/render_from_brief.js --brief BRIEF.json --style data-story"
+        ],
+        "completedSteps": [
+          "read_skill",
+          "create_brief_json",
+          "render_from_brief",
+          "validate_artifact",
+          "summarize_findings"
+        ]
+      },
+      "finalAnswer": "brief: BRIEF.json\ncomposition_routes: hero, grid, timeline, insight, takeaway, contrast, metric, roadmap, quote, closing\nwatermark: injected on final page\nvalidation: passed data-story narrative, composition diversity, and watermark checks\nThe data-story deck includes the required watermark."
+    },
+    {
+      "id": "fails-simplified-handwritten-artifact-that-skips-skill-pipeline",
+      "skill": "artifact-deck",
+      "expectPassed": false,
+      "expectMissingReferences": [
+        "references/data-story.md"
+      ],
+      "expectMissingScripts": [
+        "node scripts/render_from_brief.js --brief BRIEF.json --style data-story"
+      ],
+      "expectMissingSteps": [
+        "create_brief_json",
+        "render_from_brief",
+        "validate_artifact"
+      ],
+      "expectFailedChecks": [
+        "must_emit_field",
+        "must_mention_all"
+      ],
+      "evidence": {
+        "readReferences": [],
+        "runScripts": [],
+        "completedSteps": [
+          "read_skill",
+          "summarize_findings"
+        ]
+      },
+      "finalAnswer": "I wrote a quick HTML deck by hand. It has several insight pages and should be usable."
+    },
+    {
+      "id": "fails-artifact-final-answer-claims-without-runtime-evidence",
+      "skill": "artifact-deck",
+      "expectPassed": false,
+      "expectMissingReferences": [
+        "references/data-story.md"
+      ],
+      "expectMissingScripts": [
+        "node scripts/render_from_brief.js --brief BRIEF.json --style data-story"
+      ],
+      "expectMissingSteps": [
+        "create_brief_json",
+        "render_from_brief",
+        "validate_artifact"
+      ],
+      "evidence": {
+        "readReferences": [],
+        "runScripts": [],
+        "completedSteps": [
+          "read_skill",
+          "summarize_findings"
+        ]
+      },
+      "finalAnswer": "brief: BRIEF.json\ncomposition_routes: hero, grid, timeline, insight, takeaway\nwatermark: injected on final page\nvalidation: passed\nThis data-story deck includes the required watermark."
     }
   ]
 }

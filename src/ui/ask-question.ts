@@ -24,7 +24,7 @@ import { createInterface } from 'node:readline';
 import { boldCyan, dim, bold, cyan } from './render.js';
 import { getDisplayWidth } from './display-width.js';
 import { MarkdownRenderer } from './markdown.js';
-import { stripAnsi } from './text-metrics.js';
+import { sliceByDisplayColumns, stripAnsi } from './text-metrics.js';
 
 export interface AskOption {
   label: string;
@@ -57,6 +57,13 @@ function chip(text: string): string {
   return `\x1b[48;5;238m\x1b[1;37m □ ${text} ${RESET}`;
 }
 
+function truncatePlainLine(text: string, width: number): string {
+  if (getDisplayWidth(text) <= width) {
+    return text;
+  }
+  return `${sliceByDisplayColumns(text, 0, Math.max(0, width - 1))}…`;
+}
+
 // ─── Renderer ────────────────────────────────────────────────────────────────
 
 function renderFrame(
@@ -80,7 +87,6 @@ function renderFrame(
 
   // Question
   lines.push(bold(params.question));
-  lines.push('');
 
   // If has preview, add boxTop as a separate line above options
   if (hasPreview) {
@@ -105,6 +111,8 @@ function renderFrame(
     const checkMark = params.multiSelect ? (isChecked ? `${FG_BOLD_CYAN}✓${FG_RESET} ` : '  ') : '';
     const labelStr = isSelected ? `${FG_BOLD_CYAN}${opt.label}${RESET}` : opt.label;
     const descStr = opt.description ? `  ${FG_DIM}${opt.description}${RESET}` : '';
+    const checkText = params.multiSelect ? (isChecked ? '✓ ' : '  ') : '';
+    const plainLeftContent = `  ${isSelected ? '❯' : ' '} ${i + 1}. ${checkText}${opt.label}${opt.description ? `  ${opt.description}` : ''}`;
 
     // Left side: option
     let leftContent = `  ${prefix} ${num} ${checkMark}${labelStr}${descStr}`;
@@ -118,7 +126,7 @@ function renderFrame(
     }
 
     if (!hasPreview) {
-      lines.push(leftContent);
+      lines.push(truncatePlainLine(plainLeftContent, leftWidth));
     } else {
       // Right side: preview content (or empty)
       const pl = previewLines[i] ?? '';
@@ -146,8 +154,6 @@ function renderFrame(
     const boxBottom = `└${'─'.repeat(innerWidth)}┘`;
     lines.push(' '.repeat(leftWidth + 3) + dim(boxBottom));
   }
-
-  lines.push('');
 
   // Footer hint
   if (params.multiSelect) {

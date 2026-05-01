@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { Command } from 'commander';
 import type { ModelAdapter, MessageBlock } from '../types.js';
 import type { IntentPlanDraft } from '../ai/intent-delegation/types.js';
-import { loadConfig } from '../utils/config.js';
+import { loadConfig, saveConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
 import { createAdapter } from '../ai/models.js';
@@ -105,6 +105,7 @@ import {
   formatCurrentIntentSummaryLine,
   formatCurrentTurnIntentSummaryLine,
   formatIntentCreatedTranscriptBlock,
+  formatIntentStageSummaryTranscriptBlock,
   formatProgressTranscriptBlock,
   formatReceiptTranscriptBlock,
   formatSalvageTranscriptBlock,
@@ -114,6 +115,11 @@ import {
 const { version: cliVersion } = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
 ) as { version: string };
+
+// Completed-intent feedback currently re-enters the footer/input surface and
+// has repeatedly regressed in narrow real TTYs. Keep the data path in place,
+// but do not prompt interactively until feedback has a non-footer surface.
+const COMPLETED_INTENT_FEEDBACK_ENABLED = false;
 
 interface ChatOptions {
   auto: boolean;
@@ -253,6 +259,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   let terminalUiSuspended = false;
   let terminalUiFailureNoted = false;
   let terminalUiFallbackStream: 'stdout' | 'stderr' | null = null;
+  let stdoutFallbackToStderr = false;
   let suspendInteractiveUi = (
     _context: string,
     _error: unknown,
@@ -280,6 +287,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   let currentTurnIntentPlan: IntentPlanDraft | undefined;
   let currentTurnStageIndex = 0;
   let currentTurnStageStatus = 'Drafting Plan';
+  let currentTurnStageObservedSkillNames = new Map<number, Set<string>>();
+  let completedTurnIntentSummaryLine = '';
   let currentIntentLedger: SessionIntentLedger;
   let currentSkillEvalState: SessionSkillEvalState = persistedSession?.skillEval
     ? cloneSessionSkillEvalState(persistedSession.skillEval)
@@ -386,20 +395,70 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
   };
 
-  const recordSkillScriptEvidence = (invocation: SkillInvocationState, command: string, agentId: string): void => {
+  const recordSkillScriptEvidence = (invocation: SkillInvocationState, command: string, agentId: string): string[] => {
     const normalizedCommand = command.trim().replace(/\s+/g, ' ');
+    const matchedRequiredCommands: string[] = [];
     for (const step of invocation.plan.resolved) {
       for (const requiredCommand of step.requiredScripts) {
         const normalizedRequired = requiredCommand.trim().replace(/\s+/g, ' ');
         if (normalizedCommand !== normalizedRequired) {
           continue;
         }
+        matchedRequiredCommands.push(normalizedRequired);
         currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, invocation.invocationId, {
           type: 'run_script',
           agentId,
           command: normalizedRequired,
         });
       }
+    }
+    return matchedRequiredCommands;
+  };
+
+  const invocationRequiresStep = (invocation: SkillInvocationState, stepId: string): boolean => (
+    invocation.plan.resolved.some((step) => step.requiredSteps.includes(stepId))
+  );
+
+  const recordSkillStepCompletionEvidence = (
+    invocation: SkillInvocationState,
+    stepId: string,
+    agentId: string,
+  ): void => {
+    if (!invocationRequiresStep(invocation, stepId)) {
+      return;
+    }
+    currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, invocation.invocationId, {
+      type: 'step_completed',
+      agentId,
+      stepId,
+    });
+  };
+
+  const recordSkillArtifactFileEvidence = (
+    invocation: SkillInvocationState,
+    filePath: string,
+    agentId: string,
+  ): void => {
+    const fileName = basename(filePath).toLowerCase();
+    if (fileName === 'brief.json') {
+      recordSkillStepCompletionEvidence(invocation, 'create_brief_json', agentId);
+    }
+  };
+
+  const recordSkillCommandStepEvidence = (
+    invocation: SkillInvocationState,
+    matchedRequiredCommands: string[],
+    agentId: string,
+  ): void => {
+    if (matchedRequiredCommands.length === 0) {
+      return;
+    }
+    const normalizedCommands = matchedRequiredCommands.join('\n').toLowerCase();
+    if (/(^|[/\s_-])render(?:_from_brief)?(?:[.\s_-]|$)/u.test(normalizedCommands)) {
+      recordSkillStepCompletionEvidence(invocation, 'render_from_brief', agentId);
+    }
+    if (/(^|[/\s_-])(validate|check)(?:[.\s_-]|$)/u.test(normalizedCommands)) {
+      recordSkillStepCompletionEvidence(invocation, 'validate_artifact', agentId);
     }
   };
 
@@ -428,8 +487,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       return;
     }
 
+    if ((event.toolName === 'write' || event.toolName === 'edit') && event.ok && typeof event.input.file_path === 'string') {
+      recordSkillArtifactFileEvidence(invocation, event.input.file_path, event.agentId);
+      return;
+    }
+
     if (event.toolName === 'bash' && event.ok && typeof event.input.command === 'string') {
-      recordSkillScriptEvidence(invocation, event.input.command, event.agentId);
+      const matchedRequiredCommands = recordSkillScriptEvidence(invocation, event.input.command, event.agentId);
+      recordSkillCommandStepEvidence(invocation, matchedRequiredCommands, event.agentId);
     }
   };
 
@@ -799,13 +864,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   // Wire up lazy callbacks for AskUserQuestion interactive prompt
   askUserOnEnter = () => {
-    runtimeState.stopLiveActivityTimer();
+    runtimeState.enterInteractivePrompt();
     if (scrollRegion.isActive()) {
       scrollRegion.clearActivityLine();
       scrollRegion.positionCursorAtContentCursor();
     }
   };
   askUserOnExit = () => {
+    runtimeState.exitInteractivePrompt();
     runtimeState.beginActivity(describeLiveActivity('AskUserQuestion', {}), true);
   };
 
@@ -898,6 +964,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (currentTurnIntentPlan) {
       source = 'turn';
       line = getCurrentTurnSummaryLine();
+    } else if (completedTurnIntentSummaryLine) {
+      source = 'completed_turn';
+      line = completedTurnIntentSummaryLine;
     } else if (
       currentIntentLedger.activeIntentId
       && currentIntentLedger.intents.find((intent) => (
@@ -1136,16 +1205,127 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const resetCurrentTurnSummary = (): void => {
     currentTurnStageIndex = 0;
     currentTurnStageStatus = 'Drafting Plan';
+    currentTurnStageObservedSkillNames = new Map<number, Set<string>>();
   };
 
-  const getPlannedStageIndexBySkillName = (skillName: string): number => {
+  const normalizeStageMatchText = (value: string): string => value.toLowerCase();
+
+  const stageLooksLikeReport = (value: string): boolean => /(报告|report|brief|document|doc)/iu.test(value);
+  const stageLooksLikeSlides = (value: string): boolean => /(幻灯片|slide|slides|deck|ppt|presentation)/iu.test(value);
+  const stageLooksLikeMarkdown = (value: string): boolean => /(^|[^a-z])md([^a-z]|$)|markdown|提取\s*markdown/iu.test(value);
+
+  const scoreStageForSkillName = (
+    stage: IntentPlanDraft['stages'][number],
+    skillName: string,
+  ): number => {
+    const stageText = normalizeStageMatchText(`${stage.deliverable} ${stage.label}`);
+    const skillText = normalizeStageMatchText(skillName);
+    let score = 0;
+    if (stageLooksLikeReport(stageText) && /(report|报告)/iu.test(skillText)) {
+      score += 20;
+    }
+    if (stageLooksLikeSlides(stageText) && /(slide|slides|deck|ppt|幻灯片)/iu.test(skillText)) {
+      score += 20;
+    }
+    if (stageLooksLikeMarkdown(stageText) && /(^|[^a-z])md([^a-z]|$)|markdown|extract/iu.test(skillText)) {
+      score += 20;
+    }
+    return score;
+  };
+
+  const scoreStageForToolInput = (
+    stage: IntentPlanDraft['stages'][number],
+    toolName: string,
+    toolInput: Record<string, unknown>,
+  ): number => {
+    const stageText = normalizeStageMatchText(`${stage.deliverable} ${stage.label}`);
+    const inputText = normalizeStageMatchText(JSON.stringify(toolInput));
+    const toolText = `${normalizeStageMatchText(toolName)} ${inputText}`;
+    let score = 0;
+    if (stageLooksLikeReport(stageText) && /(report|报告|\.report\.md|生成报告|report-)/iu.test(toolText)) {
+      score += 12;
+    }
+    if (stageLooksLikeSlides(stageText) && /(slide|slides|deck|ppt|幻灯片|演示文稿)/iu.test(toolText)) {
+      score += 12;
+    }
+    if (
+      stageLooksLikeMarkdown(stageText)
+      && /(markdown|merged_md|提取\s*markdown|\.md["'\s,}])/iu.test(toolText)
+      && !/\.report\.md/iu.test(toolText)
+    ) {
+      score += 8;
+    }
+    return score;
+  };
+
+  const findBestMatchingStageIndex = (
+    scoreStage: (stage: IntentPlanDraft['stages'][number]) => number,
+  ): number => {
     if (!currentTurnIntentPlan) {
       return -1;
     }
 
-    return currentTurnIntentPlan.stages.findIndex((stage) => (
-      stage.steps.some((step) => step.skillName === skillName)
-    ));
+    let bestIndex = -1;
+    let bestScore = 0;
+    currentTurnIntentPlan.stages.forEach((stage, index) => {
+      const score = scoreStage(stage);
+      if (score > bestScore || (score === bestScore && score > 0 && index > bestIndex)) {
+        bestIndex = index;
+        bestScore = score;
+      }
+    });
+    return bestScore > 0 ? bestIndex : -1;
+  };
+
+  const inferStageIndexForSkillName = (skillName: string): number => (
+    findBestMatchingStageIndex((stage) => scoreStageForSkillName(stage, skillName))
+  );
+
+  const inferStageIndexForTool = (
+    toolName: string,
+    toolInput: Record<string, unknown>,
+  ): number => (
+    findBestMatchingStageIndex((stage) => scoreStageForToolInput(stage, toolName, toolInput))
+  );
+
+  const advanceCurrentTurnStage = (stageIndex: number, announce = false): void => {
+    if (!currentTurnIntentPlan || stageIndex < 0 || stageIndex >= currentTurnIntentPlan.stages.length) {
+      return;
+    }
+
+    if (stageIndex > currentTurnStageIndex) {
+      currentTurnStageIndex = stageIndex;
+      if (announce) {
+        const stage = currentTurnIntentPlan.stages[stageIndex];
+        if (stage) {
+          writeOrchestrationBlock(formatStageActivatedTranscriptBlock({
+            order: stage.order,
+            totalStages: currentTurnIntentPlan.stages.length,
+            label: stage.label,
+          }));
+        }
+      }
+    }
+  };
+
+  const getStageSkillNames = (stage: IntentPlanDraft['stages'][number]): string[] => (
+    [...(currentTurnStageObservedSkillNames.get(stage.order) ?? [])]
+  );
+
+  const recordCurrentTurnStageSkill = (stageIndex: number, skillName: string): void => {
+    const normalized = skillName.trim();
+    if (
+      !currentTurnIntentPlan
+      || stageIndex < 0
+      || stageIndex >= currentTurnIntentPlan.stages.length
+      || !normalized
+      || normalized.startsWith('generic_llm::')
+    ) {
+      return;
+    }
+    const current = currentTurnStageObservedSkillNames.get(stageIndex) ?? new Set<string>();
+    current.add(normalized);
+    currentTurnStageObservedSkillNames.set(stageIndex, current);
   };
 
   const maybeAdvanceCurrentTurnStageForTool = (
@@ -1157,6 +1337,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
 
     if (toolName !== 'skill') {
+      advanceCurrentTurnStage(inferStageIndexForTool(toolName, toolInput), true);
       currentTurnStageStatus = 'Working';
       return;
     }
@@ -1167,10 +1348,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       return;
     }
 
-    const plannedIndex = getPlannedStageIndexBySkillName(skillName);
-    if (plannedIndex >= 0) {
-      currentTurnStageIndex = Math.max(currentTurnStageIndex, plannedIndex);
-    }
+    const stageIndex = inferStageIndexForSkillName(skillName);
+    advanceCurrentTurnStage(stageIndex, true);
+    recordCurrentTurnStageSkill(stageIndex, skillName);
     currentTurnStageStatus = 'Working';
   };
 
@@ -1190,7 +1370,26 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       stageOrder: stage.order,
       totalStages: stages.length,
       stageLabel: stage.label,
+      skillNames: getStageSkillNames(stage),
       status: currentTurnStageStatus,
+    });
+  };
+
+  const getCurrentTurnStageSummaryBlock = (): string => {
+    if (!currentTurnIntentPlan || currentTurnIntentPlan.stages.length <= 1) {
+      return '';
+    }
+
+    const totalStages = currentTurnIntentPlan.stages.length;
+    return formatIntentStageSummaryTranscriptBlock({
+      deliverable: currentTurnIntentPlan.deliverable,
+      stages: currentTurnIntentPlan.stages.map((stage) => ({
+        order: stage.order,
+        totalStages,
+        label: stage.label,
+        skillNames: getStageSkillNames(stage),
+        status: stage.order <= currentTurnStageIndex ? 'Completed' : 'Skipped',
+      })),
     });
   };
 
@@ -1307,9 +1506,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
 
     endStreamingPhaseForInterrupt();
+    const separatedBlock = block.startsWith('\n') ? block : `\n${block}`;
     if (scrollRegion.isActive()) {
       try {
-        scrollRegion.writeAtContentCursor(block);
+        scrollRegion.writeAtContentCursor(separatedBlock);
       } catch (error) {
         suspendInteractiveUi('write_orchestration_block', error);
       }
@@ -1318,7 +1518,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       return;
     }
 
-    process.stdout.write(block);
+    process.stdout.write(separatedBlock);
     mdRenderer.beginNewSegment();
     resetStreamingSegment();
   };
@@ -1462,6 +1662,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   const maybeCollectCompletedIntentFeedback = async (): Promise<CompletedIntentFeedbackResult> => {
     const noFeedbackResult: CompletedIntentFeedbackResult = { deferredInput: null, exitRequested: false };
+    if (!COMPLETED_INTENT_FEEDBACK_ENABLED) {
+      return noFeedbackResult;
+    }
     if (!isTTY() || opts.auto) {
       return noFeedbackResult;
     }
@@ -1609,6 +1812,20 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   inputReader.setTranscriptLogger(transcriptLogger);
   const originalStdoutWrite = process.stdout.write.bind(process.stdout);
   const originalStderrWrite = process.stderr.write.bind(process.stderr);
+  const isBrokenPipeError = (error: unknown): boolean => (
+    typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === 'EPIPE'
+  );
+  const activateStdoutFallback = (error: unknown): boolean => {
+    if (!isBrokenPipeError(error)) {
+      return false;
+    }
+    stdoutFallbackToStderr = true;
+    terminalUiFallbackStream = 'stderr';
+    return true;
+  };
   const getFallbackWriter = (): typeof originalStdoutWrite | typeof originalStderrWrite | null => {
     if (terminalUiFallbackStream === 'stderr') {
       return originalStderrWrite;
@@ -1633,8 +1850,16 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       return true;
     }
     try {
-      return originalStdoutWrite(chunk, ...args);
+      const writer = stdoutFallbackToStderr ? originalStderrWrite : originalStdoutWrite;
+      return writer(chunk, ...args);
     } catch (error) {
+      if (activateStdoutFallback(error)) {
+        try {
+          return originalStderrWrite(chunk, ...args);
+        } catch {
+          return true;
+        }
+      }
       suspendInteractiveUi('stdout_write', error);
       return true;
     }
@@ -1759,6 +1984,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       if (stream !== process.stdout && stream !== process.stderr) {
         return false;
       }
+      if (stream === process.stdout && activateStdoutFallback(error)) {
+        return true;
+      }
       suspendInteractiveUi(
         stream === process.stdout ? 'stdout_stream_error' : 'stderr_stream_error',
         error,
@@ -1771,6 +1999,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     inputReader.setSkills(skills);
 
   runtimeHooks.on('turn_started', () => {
+    completedTurnIntentSummaryLine = '';
     toolExplorer.reset();
     turnLayout.reset();
     resetStreamingSegment();
@@ -1864,6 +2093,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (currentTurnIntentPlan?.stages.length) {
       currentTurnStageIndex = currentTurnIntentPlan.stages.length - 1;
       currentTurnStageStatus = 'Completed';
+      completedTurnIntentSummaryLine = getCurrentTurnSummaryLine();
+      const stageSummaryBlock = getCurrentTurnStageSummaryBlock();
+      if (stageSummaryBlock) {
+        writeOrchestrationBlock(stageSummaryBlock);
+      }
     }
     runtimeState.markBusyFinishing();
     stopActivity();
@@ -1871,12 +2105,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
 
   runtimeHooks.on('turn_failed', () => {
+    completedTurnIntentSummaryLine = '';
     runtimeState.markInputReady();
     resetTurnChrome();
     void refreshIntentLedger().then(renderIntentSummaryLine);
   });
 
   runtimeHooks.on('turn_aborted', () => {
+    completedTurnIntentSummaryLine = '';
     runtimeState.markInputReady();
     resetTurnChrome();
     void refreshIntentLedger().then(renderIntentSummaryLine);
@@ -1979,6 +2215,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
     const trimmed = input.trim();
     if (!trimmed) continue;
+
+    if (completedTurnIntentSummaryLine) {
+      completedTurnIntentSummaryLine = '';
+      renderFooterChrome();
+    }
 
     await refreshSkills();
 
@@ -2114,7 +2355,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           defaultModelId: selected.modelId,
         };
         try {
-          adapter = createAdapter(newConfig);
+          const nextAdapter = createAdapter(newConfig);
+          await saveConfig(newConfig);
+          adapter = nextAdapter;
           config = newConfig;
           agent.setAdapter(adapter);
           statusBar.updateModel(selected.model);

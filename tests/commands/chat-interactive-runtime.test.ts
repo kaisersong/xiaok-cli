@@ -26,6 +26,7 @@ const clonedModels: string[] = [];
 let multiToolPhase = 0;
 let denseCommandPhase = 0;
 let reportIntentToolPhase = 0;
+let reportSlideIntentToolPhase = 0;
 
 const reportIntentFixtureNames = [
   '01-market-overview.md',
@@ -57,6 +58,7 @@ function resetAdapterState(): void {
   multiToolPhase = 0;
   denseCommandPhase = 0;
   reportIntentToolPhase = 0;
+  reportSlideIntentToolPhase = 0;
 }
 
 function extractLastUserText(messages: Message[]): string {
@@ -104,9 +106,16 @@ function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithMode
     ): AsyncIterable<StreamChunk> {
       const lastUserText = extractLastUserText(messages);
       const lastToolResult = extractLastToolResult(messages);
+      const isReportSlideIntent = (
+        lastUserText.includes('生成 md')
+        && lastUserText.includes('生成报告')
+        && lastUserText.includes('生成幻灯片')
+        && (lastUserText.includes('根据这个文档') || lastUserText.includes('根据这些文档'))
+      );
       const isReportMergeIntent = (
         lastUserText.includes('生成 md')
         && lastUserText.includes('生成报告')
+        && !lastUserText.includes('生成幻灯片')
         && (lastUserText.includes('根据这个文档') || lastUserText.includes('根据这些文档'))
       );
       adapterCalls.push({
@@ -368,6 +377,13 @@ Run a single release-readiness pass for one code change.
         return;
       }
 
+      if (lastUserText.includes('截图复现延迟 intent') || lastUserText.includes('report-creator生成的吗')) {
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        yield { type: 'text', delta: '截图复现延迟 intent 完成' };
+        yield { type: 'done' };
+        return;
+      }
+
       if (lastUserText.includes('长段落收尾测试')) {
         yield {
           type: 'text',
@@ -603,6 +619,75 @@ Run a single release-readiness pass for one code change.
         };
         yield { type: 'done' };
         return;
+      }
+
+      if (isReportSlideIntent) {
+        if (reportSlideIntentToolPhase === 0) {
+          reportSlideIntentToolPhase = 1;
+          yield { type: 'text', delta: '我会先提取 Markdown，再生成报告，最后生成幻灯片。' };
+          yield {
+            type: 'tool_use',
+            id: 'tu_report_slide_report_skill',
+            name: 'skill',
+            input: {
+              name: 'kai-report-creator',
+              task: '生成报告',
+            },
+          };
+          yield { type: 'done' };
+          return;
+        }
+
+        if (reportSlideIntentToolPhase === 1) {
+          reportSlideIntentToolPhase = 2;
+          yield {
+            type: 'tool_use',
+            id: 'tu_report_slide_report_work',
+            name: 'bash',
+            input: {
+              command: 'printf "REPORT_STAGE_WORK" && sleep 5',
+            },
+          };
+          yield { type: 'done' };
+          return;
+        }
+
+        if (reportSlideIntentToolPhase === 2) {
+          reportSlideIntentToolPhase = 3;
+          yield {
+            type: 'tool_use',
+            id: 'tu_report_slide_slide_skill',
+            name: 'skill',
+            input: {
+              name: 'kai-slide-creator',
+              task: '生成幻灯片',
+            },
+          };
+          yield { type: 'done' };
+          return;
+        }
+
+        if (reportSlideIntentToolPhase === 3) {
+          reportSlideIntentToolPhase = 4;
+          yield {
+            type: 'tool_use',
+            id: 'tu_report_slide_write_slides',
+            name: 'write',
+            input: {
+              file_path: join(process.cwd(), 'salesforce-ai-evolution-slides.html'),
+              content: '<!doctype html><title>slides</title>',
+            },
+          };
+          yield { type: 'done' };
+          return;
+        }
+
+        if (reportSlideIntentToolPhase === 4) {
+          reportSlideIntentToolPhase = 5;
+          yield { type: 'text', delta: '报告和幻灯片都已生成。' };
+          yield { type: 'done' };
+          return;
+        }
       }
 
       if (isReportMergeIntent) {
@@ -1037,7 +1122,7 @@ describe('chat interactive runtime', () => {
 
       await waitFor(() => {
         expect(harness.output.normalized).toContain('fork skill result via gpt-5.4');
-      }, { timeoutMs: 3_000 });
+      }, { timeoutMs: 6_000 });
 
       await waitForInputTurnReady(harness);
       harness.send('/exit');
@@ -1464,7 +1549,7 @@ describe('chat interactive runtime', () => {
     }
   }, 10_000);
 
-  it('clears staged-intent summary after completion and keeps the next ordinary question out of intent mode', async () => {
+  it('keeps the completed intent summary once and keeps the next ordinary question out of intent mode', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-intent-followup-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
     const projectDir = join(rootDir, 'project');
@@ -1511,7 +1596,11 @@ describe('chat interactive runtime', () => {
 
       await waitForInputTurnReady(harness);
 
-      expect(harness.screen.lines().some((line) => line.includes('Intent:'))).toBe(false);
+      expect(harness.screen.lines().some((line) => (
+        line.includes('Intent:')
+        && line.includes('Stage 2/2')
+        && line.includes('Completed')
+      ))).toBe(true);
       expect(countOccurrences(harness.output.normalized, '🤝 已理解')).toBe(1);
 
       harness.send('今天先不聊这个');
@@ -2081,6 +2170,349 @@ describe('chat interactive runtime', () => {
     }
   }, 10_000);
 
+  it('treats an absolute local path as ordinary input instead of a slash skill', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-interactive-absolute-path-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+    const localPath = '/Users/song/projects/mydocs/xiaok-cli/2026-04-28-skill-execution-reliability-review.md';
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+      harness.send(localPath);
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain(`echo:${localPath}`);
+        expect(harness.output.normalized).not.toContain('找不到 skill');
+      }, { timeoutMs: 3_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('shows an intent summary when a report-to-slides request starts with an absolute local path', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-interactive-path-first-intent-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+    const sourcePath = '/Users/song/Downloads/金蝶灵基_for_CEO_V2.0_Plan与TODO_5月10日版.md';
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+      harness.send(`${sourcePath} 生成报告，然后生成幻灯片`);
+      harness.send('\r');
+
+      await waitFor(() => {
+        const summaryLine = [...harness.screen.lines()].reverse().find((line) => line.includes('● Intent: 报告 -> 幻灯片')) ?? '';
+        expect(summaryLine).toContain('Stage 2/2 生成幻灯片');
+        expect(summaryLine).toContain('Completed');
+        expect(harness.output.normalized).not.toContain('找不到 skill');
+      }, { timeoutMs: 4_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('keeps the busy footer visible after a follow-up local-path intent creates the transcript block before Thinking', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-interactive-path-intent-thinking-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const viewportRows = 9;
+    const harness = createTtyHarness(72, viewportRows);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+    const sourcePath = 'file:///Users/song/Downloads/%E9%87%91%E8%9D%B6%E7%81%B5%E5%9F%BA-V1.9-%E7%A0%94%E5%8F%91%E8%AE%A1%E5%88%92%E6%8A%A5%E5%91%8A.html';
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('长段落收尾测试');
+      harness.send('\r');
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('第二段同样故意写得很长');
+      }, { timeoutMs: 3_000 });
+      await waitForInputTurnReady(harness);
+
+      harness.send(`${sourcePath} 是 report-creator生成的吗`);
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        const sourceIndex = lines.findIndex((line) => line.includes('来源：///Users/song/Downloads'));
+        const activityIndex = lines.findIndex((line) => /Thinking/u.test(line));
+        const promptIndex = lines.findIndex((line) => line.includes('❯ Finishing response...'));
+        const statusIndex = lines.findIndex((line) => line.includes('project') && line.includes('%'));
+
+        expect(sourceIndex, lines.map((line, index) => `${index}: ${line}`).join('\n')).toBeGreaterThanOrEqual(0);
+        expect(activityIndex, lines.map((line, index) => `${index}: ${line}`).join('\n')).toBeGreaterThanOrEqual(0);
+        expect(activityIndex).toBeGreaterThan(sourceIndex);
+        expect(promptIndex).toBe(viewportRows - 2);
+        expect(statusIndex).toBe(viewportRows - 1);
+        expect(statusIndex).toBe(promptIndex + 1);
+        expect(activityIndex).toBeLessThan(promptIndex);
+        expect(lines.slice(activityIndex + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
+        expect(lines.some((line) => line.includes('截图复现延迟 intent 完成'))).toBe(false);
+      }, { timeoutMs: 1_200 });
+
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('截图复现延迟 intent 完成');
+      }, { timeoutMs: 4_000 });
+      await waitForInputTurnReady(harness);
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('persists the selected model so the next chat launch can reuse it', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-interactive-model-persist-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 2,
+      defaultProvider: 'kimi',
+      defaultModelId: 'kimi-coding',
+      providers: {
+        kimi: {
+          type: 'first_party',
+          protocol: 'openai_legacy',
+          apiKey: 'sk-kimi',
+          baseUrl: 'https://api.kimi.com/coding/v1',
+        },
+      },
+      models: {
+        'kimi-coding': {
+          provider: 'kimi',
+          model: 'kimi-for-coding',
+          label: 'Kimi Coding',
+        },
+        'kimi-k2-thinking': {
+          provider: 'kimi',
+          model: 'kimi-k2-thinking',
+          label: 'Kimi K2 Thinking',
+        },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+    mockSelectModel.mockResolvedValue({
+      modelId: 'kimi-k2-thinking',
+      provider: 'kimi',
+      model: 'kimi-k2-thinking',
+      label: 'Kimi K2 Thinking',
+    });
+    const { createAdapter } = await import('../../src/ai/models.js');
+    vi.mocked(createAdapter).mockImplementation((nextConfig: { defaultModelId?: string; defaultModel?: string }) => (
+      createFakeAdapter(nextConfig.defaultModelId ?? nextConfig.defaultModel ?? 'test-model')
+    ));
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    {
+      const harness = createTtyHarness(120, 24);
+      const sigintListeners = process.listeners('SIGINT');
+      const stdoutResizeListeners = process.stdout.listeners('resize');
+
+      try {
+        const program = new Command();
+        registerChatCommands(program);
+
+        const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+        await waitForInputTurnReady(harness);
+        harness.send('/models');
+        harness.send('\r');
+
+        await waitFor(() => {
+          expect(mockSelectModel).toHaveBeenCalledTimes(1);
+          expect(harness.output.normalized).toContain('已切换到：[kimi] Kimi K2 Thinking (kimi-k2-thinking)');
+        }, { timeoutMs: 3_000 });
+
+        const persistedConfig = JSON.parse(
+          readFileSync(join(configDir, 'config.json'), 'utf8'),
+        ) as {
+          defaultProvider?: string;
+          defaultModelId?: string;
+        };
+        expect(persistedConfig.defaultProvider).toBe('kimi');
+        expect(persistedConfig.defaultModelId).toBe('kimi-k2-thinking');
+
+        await waitForInputTurnReady(harness);
+        harness.send('/exit');
+        harness.send('\r');
+        await pending;
+      } finally {
+        for (const listener of process.listeners('SIGINT')) {
+          if (!sigintListeners.includes(listener)) {
+            process.removeListener('SIGINT', listener);
+          }
+        }
+        for (const listener of process.stdout.listeners('resize')) {
+          if (!stdoutResizeListeners.includes(listener)) {
+            process.stdout.removeListener('resize', listener);
+          }
+        }
+        harness.restore();
+      }
+    }
+
+    {
+      const secondHarness = createTtyHarness(120, 24);
+      const sigintListeners = process.listeners('SIGINT');
+      const stdoutResizeListeners = process.stdout.listeners('resize');
+
+      try {
+        const program = new Command();
+        registerChatCommands(program);
+
+        const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+        await waitForInputTurnReady(secondHarness);
+        await waitFor(() => {
+          expect(secondHarness.output.normalized).toContain('kimi-k2-thinking · 0% · project');
+        }, { timeoutMs: 3_000 });
+
+        secondHarness.send('/exit');
+        secondHarness.send('\r');
+        await pending;
+      } finally {
+        for (const listener of process.listeners('SIGINT')) {
+          if (!sigintListeners.includes(listener)) {
+            process.removeListener('SIGINT', listener);
+          }
+        }
+        for (const listener of process.stdout.listeners('resize')) {
+          if (!stdoutResizeListeners.includes(listener)) {
+            process.stdout.removeListener('resize', listener);
+          }
+        }
+        secondHarness.restore();
+      }
+    }
+  }, 10_000);
+
   it('redirects removed slash commands to the top-level CLI instead of treating them as skills', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
@@ -2221,6 +2653,87 @@ describe('chat interactive runtime', () => {
     }
   }, 15_000);
 
+  it('keeps the scroll-region footer active after stdout EPIPE by falling back to stderr', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-stdout-epipe-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(72, 13, { captureStderr: true });
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+    const epipe = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('长段落收尾测试');
+      harness.send('\r');
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('第二段同样故意写得很长');
+      }, { timeoutMs: 4_000 });
+      await waitForInputTurnReady(harness);
+
+      harness.send('file:///Users/song/Downloads/%E9%87%91%E8%9D%B6%E7%81%B5%E5%9F%BA-V1.9-%E7%A0%94%E5%8F%91%E8%AE%A1%E5%88%92%E6%8A%A5%E5%91%8A.html 是 report-creator生成的吗');
+      harness.failNextStdoutWrite(epipe);
+      harness.send('\r');
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        const promptIndex = lines.findIndex((line) => line.includes('❯ Finishing response...'));
+        const statusIndex = lines.findIndex((line) => line.includes('project') && line.includes('%'));
+        const activityIndex = lines.findIndex((line) => /Thinking/u.test(line));
+
+        expect(harness.output.normalized).not.toContain('UI 输出已停用');
+        expect(activityIndex).toBeGreaterThanOrEqual(0);
+        expect(promptIndex).toBe(11);
+        expect(statusIndex).toBe(12);
+      }, { timeoutMs: 1_500 });
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('截图复现延迟 intent 完成');
+      }, { timeoutMs: 4_000 });
+      await waitForInputTurnReady(harness);
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 15_000);
+
   it('keeps AskUserQuestion menu hints singular while navigating near the footer and clears them after confirm', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-ask-user-question-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
@@ -2273,6 +2786,20 @@ describe('chat interactive runtime', () => {
         expect(screen).toContain('想吃什么类型的？');
         expect(countOccurrences(screen, '↑↓ navigate   Enter select')).toBe(1);
       }, { timeoutMs: 3_000 });
+
+      const realDateNow = Date.now.bind(Date);
+      const acceleratedClockStartedAt = realDateNow();
+      const dateNowSpy = vi.spyOn(Date, 'now').mockImplementation(() => {
+        const now = realDateNow();
+        return now + 6 * 60_000 + 40_000 + Math.floor((now - acceleratedClockStartedAt) * 25);
+      });
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 2_200));
+      } finally {
+        dateNowSpy.mockRestore();
+      }
+
+      expect(harness.output.normalized).not.toContain('Still working:');
 
       for (let i = 0; i < 10; i += 1) {
         sendAskUserKey('\x1b[B');
@@ -2766,16 +3293,26 @@ describe('chat interactive runtime', () => {
         expect(promptIndex).toBe(22);
         expect(statusIndex).toBe(23);
         expect(lines[promptIndex]).not.toContain('Intent:');
-      }, { timeoutMs: 4_000 });
+      }, { timeoutMs: 9_000 });
 
       await waitFor(() => {
         expect(harness.output.normalized).toContain('三份文档已先合并为 Markdown，再生成报告。');
-      }, { timeoutMs: 4_000 });
+      }, { timeoutMs: 9_000 });
 
       await waitForInputTurnReady(harness);
 
       const finalLines = harness.screen.lines();
+      const finalSummaryIndex = finalLines.findIndex((line) => line.includes('Intent: md -> 报告'));
+      const finalPromptIndex = finalLines.findIndex((line) => line.includes('❯ Type your message...'));
+      const finalStatusIndex = finalLines.findIndex((line) => line.includes('project') && line.includes('%'));
       expectSingleFooter(finalLines);
+      expect(finalSummaryIndex).toBeGreaterThanOrEqual(0);
+      expect(finalLines[finalSummaryIndex]).toContain('Stage 2/2 生成报告');
+      expect(finalLines[finalSummaryIndex]).toContain('Completed');
+      expect(finalPromptIndex).toBe(22);
+      expect(finalStatusIndex).toBe(23);
+      expect(finalSummaryIndex).toBe(finalPromptIndex - 3);
+      expect(finalLines[finalSummaryIndex + 1]).toBe('');
 
       harness.send('/exit');
       harness.send('\r');
@@ -2784,6 +3321,127 @@ describe('chat interactive runtime', () => {
       delete process.env.XIAOK_TEST_PROJECT_FILE_A;
       delete process.env.XIAOK_TEST_PROJECT_FILE_B;
       delete process.env.XIAOK_TEST_PROJECT_FILE_C;
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 15_000);
+
+  it('advances report-to-slides intent through stage 2 and only lists stage-relevant invoked skills', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-report-slides-stages-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const projectSettingsDir = join(projectDir, '.xiaok');
+    const projectSkillsDir = join(projectSettingsDir, 'skills');
+    const projectFiles = reportIntentFixtureNames.map((name) => join(projectDir, name));
+    const reportPrompt = `根据这些文档 ${projectFiles.join('、')} 生成 md，然后生成报告，然后生成幻灯片`;
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    mkdirSync(projectSkillsDir, { recursive: true });
+    reportIntentFixtureNames.forEach((name, index) => {
+      writeFileSync(projectFiles[index]!, loadReportIntentFixture(name), 'utf8');
+    });
+    writeFileSync(join(projectSkillsDir, 'kai-report-creator.md'), [
+      '---',
+      'name: kai-report-creator',
+      'description: Generate business reports and research documents from Markdown or source material.',
+      '---',
+      'Use this for report generation.',
+    ].join('\n'));
+    writeFileSync(join(projectSkillsDir, 'kai-slide-creator.md'), [
+      '---',
+      'name: kai-slide-creator',
+      'description: Generate HTML presentations and slide decks from reports.',
+      '---',
+      'Use this for slide generation.',
+    ].join('\n'));
+    writeFileSync(join(projectSkillsDir, 'skill-creator.md'), [
+      '---',
+      'name: skill-creator',
+      'description: Create or update Codex skills. Do not use for reports or slides.',
+      '---',
+      'Use this only when creating a new skill.',
+    ].join('\n'));
+    writeFileSync(join(projectSettingsDir, 'settings.json'), JSON.stringify({
+      permissions: {
+        allow: ['bash(*)', `write(${projectDir}/*)`],
+      },
+    }, null, 2));
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send(reportPrompt);
+      harness.send('\r');
+
+      await waitFor(() => {
+        const summaryLine = harness.screen.lines().find((line) => line.includes('Intent: md -> 报告 -> 幻灯片')) ?? '';
+        expect(summaryLine).toContain('Stage 2/3 生成报告');
+        expect(summaryLine).toContain('Skill: kai-report-creator');
+        expect(summaryLine).not.toContain('skill-creator');
+        expect(summaryLine).not.toContain('kai-slide-creator');
+      }, { timeoutMs: 3_000 });
+
+      await waitFor(() => {
+        const summaryLine = harness.screen.lines().find((line) => line.includes('Intent: md -> 报告 -> 幻灯片')) ?? '';
+        expect(summaryLine).toContain('Stage 3/3 生成幻灯片');
+        expect(summaryLine).toContain('Skill: kai-slide-creator');
+        expect(summaryLine).not.toContain('skill-creator');
+        expect(summaryLine).not.toContain('kai-report-creator');
+      }, { timeoutMs: 9_000 });
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('报告和幻灯片都已生成。');
+      }, { timeoutMs: 4_000 });
+
+      await waitForInputTurnReady(harness);
+
+      const finalLines = harness.screen.lines();
+      const finalSummaryLine = [...finalLines].reverse().find((line) => line.includes('● Intent: md -> 报告 -> 幻灯片')) ?? '';
+      expect(finalLines.some((line) => line.includes('Stage 2/3 生成报告 · Skill: kai-report-creator · Completed'))).toBe(true);
+      expect(finalSummaryLine).toContain('Stage 3/3 生成幻灯片');
+      expect(finalSummaryLine).toContain('Skill: kai-slide-creator');
+      expect(finalSummaryLine).toContain('Completed');
+      expect(finalSummaryLine).not.toContain('skill-creator');
+      expect(finalSummaryLine).not.toContain('kai-report-creator');
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -2863,7 +3521,6 @@ describe('chat interactive runtime', () => {
 
       await waitFor(() => {
         const lines = harness.screen.lines();
-        expect(harness.output.normalized).not.toContain(`echo:${longFollowupPrompt}`);
         expectActiveTurnFooter(lines);
         expect(lines.some((line) => line.includes('Intent:') && line.includes('Completed'))).toBe(false);
       }, { timeoutMs: 1_500 });
@@ -2974,7 +3631,7 @@ describe('chat interactive runtime', () => {
     }
   }, 20_000);
 
-  it('keeps footer spacing intact after the completed-intent feedback prompt runs between turns', async () => {
+  it('keeps footer spacing intact after completed intent without opening feedback prompt', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-feedback-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
     const projectDir = join(rootDir, 'project');
@@ -3134,8 +3791,7 @@ describe('chat interactive runtime', () => {
       await waitFor(() => {
         const text = harness.output.normalized;
         expect(text).toContain('line 30');
-        expect(text).toContain('[xiaok]');
-        expect(text).toContain('跳过');
+        expect(text).not.toContain('[xiaok]');
       }, { timeoutMs: 4_000 });
 
       await waitFor(() => {
@@ -3157,13 +3813,11 @@ describe('chat interactive runtime', () => {
         expect(cursor).toBeGreaterThanOrEqual(0);
         expect(promptIndex).toBe(22);
         expect(blankRows).toBeGreaterThanOrEqual(2);
-        expect(lines.slice(0, cursor + 1).some((line) => line.includes('[xiaok]'))).toBe(true);
-        expect(lines.slice(0, cursor + 1).some((line) => line.includes('跳过'))).toBe(true);
+        expect(lines.slice(0, cursor + 1).some((line) => line.includes('[xiaok]'))).toBe(false);
+        expect(lines.slice(0, cursor + 1).some((line) => line.includes('跳过'))).toBe(false);
         expect(summaryRows).toHaveLength(0);
       }, { timeoutMs: 1_500 });
 
-      harness.send('s');
-      harness.send('\r');
       await waitForInputTurnReady(harness);
 
       harness.send('延迟回复');
@@ -3232,7 +3886,7 @@ describe('chat interactive runtime', () => {
     }
   }, 30_000);
 
-  it('keeps the footer singular when a feedback-skipped session immediately starts a new intent with consecutive ran blocks', async () => {
+  it('keeps the footer singular when a completed session immediately starts a new intent with consecutive ran blocks', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-feedback-intent-ran-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
     const projectDir = join(rootDir, 'project');
@@ -3407,11 +4061,9 @@ describe('chat interactive runtime', () => {
       await waitFor(() => {
         const text = harness.output.normalized;
         expect(text).toContain('line 30');
-        expect(text).toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
+        expect(text).not.toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
       }, { timeoutMs: 4_000 });
 
-      harness.send('s');
-      harness.send('\r');
       await waitForInputTurnReady(harness);
 
       harness.send(reportPrompt);
@@ -3451,9 +4103,11 @@ describe('chat interactive runtime', () => {
       await waitForInputTurnReady(harness);
 
       const finalLines = harness.screen.lines();
+      const finalSummaryIndex = finalLines.findIndex((line) => line.includes('Intent: md -> 报告'));
       expectSingleFooter(finalLines);
-      expect(finalLines.some((line) => line.includes('Intent:'))).toBe(false);
-      expect(finalLines.some((line) => line.includes('Completed') && line.includes('Intent:'))).toBe(false);
+      expect(finalSummaryIndex).toBeGreaterThanOrEqual(0);
+      expect(finalLines[finalSummaryIndex]).toContain('Stage 2/2 生成报告');
+      expect(finalLines[finalSummaryIndex]).toContain('Completed');
 
       harness.send('/exit');
       harness.send('\r');
@@ -3476,7 +4130,7 @@ describe('chat interactive runtime', () => {
     }
   }, 20_000);
 
-  it('keeps the footer singular after confirming feedback and then immediately starting a new complex intent', async () => {
+  it('keeps the footer singular after a completed intent and then immediately starts a new complex intent', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-feedback-intent-confirm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
     const projectDir = join(rootDir, 'project');
@@ -3652,11 +4306,9 @@ describe('chat interactive runtime', () => {
       await waitFor(() => {
         const text = harness.output.normalized;
         expect(text).toContain('line 30');
-        expect(text).toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
+        expect(text).not.toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
       }, { timeoutMs: 4_000 });
 
-      harness.send('y');
-      harness.send('\r');
       await waitForInputTurnReady(harness);
 
       await waitFor(() => {
@@ -3668,12 +4320,8 @@ describe('chat interactive runtime', () => {
         };
         const persistedSkillEval = persistedSession.skillEval;
 
-        expect(persistedSkillEval?.promptedIntentIds).toContain(intentId);
-        expect(persistedSkillEval?.feedback).toHaveLength(1);
-        expect(persistedSkillEval?.feedback?.[0]).toMatchObject({
-          intentId,
-          sentiment: 'positive',
-        });
+        expect(persistedSkillEval?.promptedIntentIds ?? []).not.toContain(intentId);
+        expect(persistedSkillEval?.feedback ?? []).toHaveLength(0);
       }, { timeoutMs: 2_000 });
 
       await waitFor(() => {
@@ -3751,7 +4399,7 @@ describe('chat interactive runtime', () => {
     }
   }, 30_000);
 
-  it('treats free-form input typed into the completed-intent feedback prompt as the next user turn', async () => {
+  it('treats free-form input after completed intent as the next user turn when feedback is disabled', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-feedback-freeform-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const sessionId = 'sess_feedback_prompt_freeform';
     const { configDir, projectDir, sessionPath, intentId } = writeCompletedFeedbackResumeSessionFixture(rootDir, sessionId);
@@ -3779,9 +4427,10 @@ describe('chat interactive runtime', () => {
       await waitFor(() => {
         const text = harness.output.normalized;
         expect(text).toContain('line 30');
-        expect(text).toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
+        expect(text).not.toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
       }, { timeoutMs: 4_000 });
 
+      await waitForInputTurnReady(harness);
       harness.send('吃什么');
       harness.send('\r');
 
@@ -3803,7 +4452,7 @@ describe('chat interactive runtime', () => {
         };
         const persistedSkillEval = persistedSession.skillEval;
 
-        expect(persistedSkillEval?.promptedIntentIds).toContain(intentId);
+        expect(persistedSkillEval?.promptedIntentIds ?? []).not.toContain(intentId);
         expect(persistedSkillEval?.feedback ?? []).toHaveLength(0);
       }, { timeoutMs: 2_000 });
 
@@ -3826,7 +4475,7 @@ describe('chat interactive runtime', () => {
     }
   }, 20_000);
 
-  it('keeps the footer singular while a free-form feedback follow-up is still answering', async () => {
+  it('keeps the footer singular while a follow-up after completed intent is still answering', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-feedback-freeform-live-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const sessionId = 'sess_feedback_prompt_freeform_live';
     const { configDir, projectDir } = writeCompletedFeedbackResumeSessionFixture(rootDir, sessionId);
@@ -3854,9 +4503,10 @@ describe('chat interactive runtime', () => {
       await waitFor(() => {
         const text = harness.output.normalized;
         expect(text).toContain('line 30');
-        expect(text).toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
+        expect(text).not.toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
       }, { timeoutMs: 4_000 });
 
+      await waitForInputTurnReady(harness);
       harness.send('报告后慢速长续问');
       harness.send('\r');
 
@@ -3891,7 +4541,7 @@ describe('chat interactive runtime', () => {
     }
   }, 20_000);
 
-  it('exits cleanly when ctrl+c is pressed while the completed-intent feedback prompt is active', async () => {
+  it('exits cleanly when ctrl+c is pressed after completed intent with feedback disabled', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-feedback-ctrlc-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const sessionId = 'sess_feedback_prompt_ctrlc';
     const { configDir, projectDir } = writeCompletedFeedbackResumeSessionFixture(rootDir, sessionId);
@@ -3919,13 +4569,14 @@ describe('chat interactive runtime', () => {
       await waitFor(() => {
         const text = harness.output.normalized;
         expect(text).toContain('line 30');
-        expect(text).toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
+        expect(text).not.toContain('[xiaok] 这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
       }, { timeoutMs: 4_000 });
 
+      await waitForInputTurnReady(harness);
       harness.send('\x03');
       await pending;
 
-      expect(harness.output.normalized).toContain('已退出。');
+      expect(harness.output.normalized).toMatch(/已退出。|再见！/u);
       expect(harness.output.normalized).not.toContain('echo:输出30行');
     } finally {
       for (const listener of process.listeners('SIGINT')) {

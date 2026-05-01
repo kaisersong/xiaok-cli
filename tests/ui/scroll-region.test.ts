@@ -94,6 +94,25 @@ describe('ScrollRegionManager activity rendering', () => {
       expect(statusChunks).toHaveLength(1);
       expect(promptChunks[0]).toContain('⠋ Thinking · 1s');
     });
+
+    it('does not emit a standalone activity-only frame when refreshing activity above a visible footer', () => {
+      const { manager, getChunks, resetOutput } = createMockScrollRegion();
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Finishing response...',
+        statusLine: 'kimi-for-coding · 29% · master',
+      });
+      resetOutput();
+
+      manager.renderActivity('⠼ Finalizing response · 4m 49s');
+
+      const chunks = getChunks();
+      const activityChunks = chunks.filter((chunk) => chunk.includes('Finalizing response'));
+
+      expect(activityChunks).toHaveLength(1);
+      expect(activityChunks[0]).toContain('Finishing response...');
+      expect(activityChunks[0]).toContain('kimi-for-coding');
+    });
   });
 
   describe('content streaming flag behavior', () => {
@@ -415,6 +434,40 @@ describe('scroll-region prompt frame ownership', () => {
     }
   });
 
+  it('keeps the footer visible when a long ran block fills a short terminal before finalizing activity', () => {
+    const harness = createTtyHarness(60, 8);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Finishing response...',
+        statusLine: 'kimi-for-coding · 29% · master',
+      });
+
+      manager.writeAtContentCursor(
+        '\n\n  ╭─ Ran\n'
+        + '  │ cd /Users/song/projects/xiaok-cli/.tmp-slide-brief.json\n'
+        + '  │ cd /Users/song/projects/xiaok-cli/.tmp-slide-brief.json --output\n'
+        + '  │ cp "/Users/song/projects/xiaok-cli/Downloads/金蝶灵基-V1.9-"*\n',
+      );
+      manager.renderActivity('⠼ Finalizing response · 4m 49s');
+
+      const lines = harness.screen.lines();
+      const promptRows = lines.filter((line) => line.includes('❯'));
+      const statusRows = lines.filter((line) => line.includes('kimi-for-coding'));
+      const activityIndex = lines.findIndex((line) => line.includes('Finalizing response'));
+      const promptIndex = lines.findIndex((line) => line.includes('❯ Finishing response...'));
+
+      expect(promptRows).toHaveLength(1);
+      expect(statusRows).toHaveLength(1);
+      expect(promptIndex).toBe(6);
+      expect(activityIndex).toBeLessThan(promptIndex);
+    } finally {
+      harness.restore();
+    }
+  });
+
   it('keeps the prompt row visible while activity ticks refresh above an existing footer', () => {
     const harness = createTtyHarness(60, 24);
     const manager = new ScrollRegionManager(process.stdout);
@@ -675,10 +728,11 @@ describe('scroll-region prompt frame ownership', () => {
       const promptIndex = lines.findIndex((line) => line.includes('❯ /'));
 
       expect(overlayBottomIndex).toBeGreaterThanOrEqual(0);
-      expect(promptIndex).toBe(overlayBottomIndex + 4);
+      expect(promptIndex).toBe(overlayBottomIndex + 5);
       expect(lines[overlayBottomIndex + 1]).toBe('');
       expect(lines[overlayBottomIndex + 2]).toBe('');
       expect(lines[overlayBottomIndex + 3]).toBe('');
+      expect(lines[overlayBottomIndex + 4]).toBe('');
     } finally {
       harness.restore();
     }
@@ -704,10 +758,11 @@ describe('scroll-region prompt frame ownership', () => {
       const overlayBottomIndex = lines.findIndex((line) => line.includes('line 30'));
 
       expect(overlayBottomIndex).toBeGreaterThanOrEqual(0);
-      expect(promptIndex).toBe(overlayBottomIndex + 4);
+      expect(promptIndex).toBe(overlayBottomIndex + 5);
       expect(lines[overlayBottomIndex + 1]).toBe('');
       expect(lines[overlayBottomIndex + 2]).toBe('');
       expect(lines[overlayBottomIndex + 3]).toBe('');
+      expect(lines[overlayBottomIndex + 4]).toBe('');
     } finally {
       harness.restore();
     }
@@ -903,9 +958,10 @@ describe('scroll-region prompt frame ownership', () => {
 
       expect(tailIndex).toBeGreaterThanOrEqual(0);
       expect(summaryIndex).toBe(promptIndex - 3);
-      expect(tailIndex).toBe(summaryIndex - 2);
+      expect(tailIndex).toBeLessThan(summaryIndex);
       expect(lines[summaryIndex - 1]).toBe('');
       expect(lines[summaryIndex + 1]).toBe('');
+      expect(lines[summaryIndex + 2]).toBe('');
       expect(statusIndex).toBe(promptIndex + 1);
     } finally {
       harness.restore();
@@ -970,7 +1026,7 @@ describe('ANSI compatibility', () => {
     manager.renderFooter({ inputPrompt: 'Type...', statusLine: 'gpt-5.4' });
 
     const output = getOutput();
-    expect(output).toMatch(/\x1b\[1;19r\x1b\[23;3H$/);
+    expect(output).toMatch(/\x1b\[1;18r\x1b\[23;3H$/);
   });
 
   it('does not leave the input background SGR active after footer rendering', () => {
@@ -979,7 +1035,7 @@ describe('ANSI compatibility', () => {
     manager.renderInput('abc', 3);
 
     const output = getOutput();
-    expect(output).toMatch(/\x1b\[0m\x1b\[24;1H\x1b\[2K(?:\x1b\[2m.*?\x1b\[0m)?\x1b\[1;19r\x1b\[23;6H$/);
+    expect(output).toMatch(/\x1b\[0m\x1b\[24;1H\x1b\[2K(?:\x1b\[2m.*?\x1b\[0m)?\x1b\[1;18r\x1b\[23;6H$/);
     expect(output).not.toMatch(/\x1b\[23;6H\x1b\[48;5;244m$/);
   });
 
@@ -991,6 +1047,32 @@ describe('ANSI compatibility', () => {
     const output = getOutput();
     expect(output).toContain('\x1b[48;5;238m');
     expect(output).not.toContain('\x1b[48;5;244m');
+  });
+
+  it('truncates an overlong status line so the footer still occupies a single terminal row', () => {
+    const harness = createTtyHarness(40, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const longStatusLine = 'kimi-for-coding · auto · master · 37% · xiaok-cli';
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: longStatusLine,
+      });
+
+      const lines = harness.screen.lines();
+      const promptIndex = lines.findIndex((line) => line.includes('❯'));
+      const statusIndex = lines.findIndex((line) => line.includes('kimi-for-coding'));
+
+      expect(promptIndex).toBe(22);
+      expect(statusIndex).toBe(23);
+      expect(lines[22]).toContain('❯ Type your message...');
+      expect(lines[23]).toContain('kimi-for-coding');
+      expect(lines[23]).not.toContain('xiaok-cli');
+    } finally {
+      harness.restore();
+    }
   });
 
   it('expands multiline prompt input while keeping a single status line', () => {
@@ -1086,17 +1168,18 @@ describe('ANSI compatibility', () => {
     expect(delta.lastIndexOf('\x1b[23;3H')).toBeGreaterThan(delta.indexOf('\x1b[19;1H'));
   });
 
-  it('renders activity above the input footer with two blank gap rows', () => {
-    const harness = createTtyHarness(80, 24);
-    const manager = new ScrollRegionManager(process.stdout);
+    it('renders activity above the input footer with two blank gap rows', () => {
+      const harness = createTtyHarness(80, 24);
+      const manager = new ScrollRegionManager(process.stdout);
 
-    try {
+      try {
       manager.begin();
       manager.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'gpt-5.4 · 5%' });
-      manager.renderActivity('⠋ Thinking');
+        manager.renderActivity('⠋ Thinking');
 
-      const lines = harness.screen.lines();
-      expect(lines[18]).toContain('Thinking');
+        const lines = harness.screen.lines();
+      expect(lines[17]).toContain('Thinking');
+      expect(lines[18]).toBe('');
       expect(lines[19]).toBe('');
       expect(lines[20]).toBe('');
       expect(lines[21]).toBe('');
@@ -1124,7 +1207,10 @@ describe('ANSI compatibility', () => {
       manager.renderActivity('⠋ Working · 11s');
 
       const lines = harness.screen.lines();
-      expect(lines[18]).toContain('Working · 11s');
+      const activityIndex = lines.findIndex((line) => line.includes('Working · 11s'));
+      const promptIndex = lines.findIndex((line) => line.includes('❯'));
+      expect(activityIndex).toBeGreaterThanOrEqual(0);
+      expect(activityIndex).toBeLessThan(promptIndex);
       expect(lines[22]).toContain('❯');
       expect(lines[23]).toContain('gpt-5.4 · 5% · project');
     } finally {
@@ -1157,10 +1243,112 @@ describe('ANSI compatibility', () => {
       expect(promptIndex).toBe(22);
       expect(statusIndex).toBe(23);
       expect(summaryIndex).toBe(promptIndex - 3);
-      expect(activityIndex).toBe(summaryIndex - 2);
+      expect(lines.slice(summaryIndex + 1, promptIndex).filter((line) => line === '')).toHaveLength(2);
+      expect(activityIndex).toBeLessThan(summaryIndex);
     } finally {
       harness.restore();
     }
+  });
+
+  it('keeps blank gap above the input after a flushed wrapped markdown list tail', () => {
+    const harness = createTtyHarness(60, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const renderer = new MarkdownRenderer();
+    const response = [
+      '- 报告：金蝶灵基_for_CEO_V2.0，包含 KPI 概览、里程碑时间线、组织能力地图',
+      '- 幻灯片：金蝶灵基_for_CEO_V2.0，瑞士现代风格（Swiss Modern）',
+    ].join('\n');
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'kimi-for-coding · 29% · master',
+      });
+      manager.setContentCursor(manager.maxContentRows);
+      manager.beginContentStreaming();
+      renderer.setNewlineCallback(manager.getNewlineCallback());
+      renderer.write(response);
+      const flushResult = renderer.flush();
+      manager.syncContentCursorFromRenderedLines(MarkdownRenderer.renderToLines(response));
+      expect(flushResult.renderedLine).toContain('\n');
+      manager.endContentStreaming({
+        inputPrompt: 'Type your message...',
+        statusLine: 'kimi-for-coding · 29% · master',
+      });
+
+      const lines = harness.screen.lines();
+      const promptIndex = lines.findIndex((line) => line.includes('❯ Type your message...'));
+      const lastContentIndex = Math.max(
+        lines.findIndex((line) => line.includes('报告：金蝶灵基')),
+        lines.findIndex((line) => line.includes('瑞士现代风格')),
+        lines.findIndex((line) => line.includes('Swiss Modern')),
+      );
+
+      expect(promptIndex).toBe(22);
+      expect(lastContentIndex).toBeGreaterThanOrEqual(0);
+      expect(lines.slice(lastContentIndex + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
+      expect(lines[23]).toContain('kimi-for-coding · 29% · master');
+    } finally {
+      renderer.reset();
+      harness.restore();
+    }
+  });
+
+  it('keeps blank gap above the input after a final plain Chinese paragraph following bullets', () => {
+    const harness = createTtyHarness(40, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const renderer = new MarkdownRenderer();
+    const response = [
+      '- 报告：金蝶灵基-V1.9-研发计划报告.html',
+      '- 幻灯片：金蝶灵基-V1.9-研发计划演示.html',
+      '',
+      '两个文件均为零依赖，可直接浏览器打开查看；幻灯片按 F5 进入演讲模式。',
+    ].join('\n');
+
+    try {
+      manager.begin();
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'kimi-for-coding · 18% · master',
+      });
+      manager.setContentCursor(manager.maxContentRows);
+      manager.beginContentStreaming();
+      renderer.setNewlineCallback(manager.getNewlineCallback());
+      renderer.write(response);
+      renderer.flush();
+      manager.syncContentCursorFromRenderedLines(MarkdownRenderer.renderToLines(response));
+      manager.endContentStreaming({
+        inputPrompt: 'Type your message...',
+        statusLine: 'kimi-for-coding · 18% · master',
+      });
+
+      const lines = harness.screen.lines();
+      const promptIndex = lines.findIndex((line) => line.includes('❯ Type your message...'));
+      const finalParagraphIndex = lines.findIndex((line) => line.includes('两个文件均为零依赖'));
+
+      expect(promptIndex).toBeGreaterThan(finalParagraphIndex);
+      expect(finalParagraphIndex).toBeGreaterThanOrEqual(0);
+      expect(lines.slice(finalParagraphIndex + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
+      expect(lines[23]).toContain('kimi-for-coding');
+    } finally {
+      renderer.reset();
+      harness.restore();
+    }
+  });
+
+  it('counts embedded newlines from markdown-wrapped rendered lines when syncing the content cursor', () => {
+    const { manager } = createMockScrollRegion();
+    const renderedLines = [
+      '• 报告：金蝶灵基_for_CEO_V2.0，包含 KPI 概览\n  里程碑时间线、组织能力地图',
+      '• 幻灯片：金蝶灵基_for_CEO_V2.0，瑞士现代风格',
+    ];
+
+    manager.begin();
+    manager.beginContentStreaming();
+    manager.syncContentCursorFromRenderedLines(renderedLines);
+
+    expect((manager as any)._cursorRow).toBe(3);
   });
 
   it('clears submitted input without putting working text in the input footer', () => {
@@ -1570,12 +1758,12 @@ describe('Bug 11: Terminal resize handling', () => {
 
   it('updateSize changes maxContentRows', () => {
     const { manager } = createMock(24, 80);
-    // Before: 2 gap rows + padded input footer keep the scroll region bottom at row 19
-    expect((manager as any).maxContentRows).toBe(19);
+    // Before: 3 gap rows + padded input footer keep the scroll region bottom at row 18
+    expect((manager as any).maxContentRows).toBe(18);
 
     manager.updateSize(30, 100);
-    // After resize the same chrome leaves the scroll region bottom at row 25
-    expect((manager as any).maxContentRows).toBe(25);
+    // After resize the same chrome leaves the scroll region bottom at row 24
+    expect((manager as any).maxContentRows).toBe(24);
   });
 
   it('updateSize changes columns for wrap calculation', () => {

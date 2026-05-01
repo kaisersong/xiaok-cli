@@ -10,7 +10,7 @@ export type TuiTurnSurfaceState =
   | 'compat_streaming';
 
 export type TuiFooterMode = 'input_ready' | 'busy' | 'feedback' | 'compat';
-export type TuiSummarySource = 'none' | 'turn' | 'waiting_user';
+export type TuiSummarySource = 'none' | 'turn' | 'completed_turn' | 'waiting_user';
 
 export interface TuiSurfaceSnapshot {
   turnSurfaceState: TuiTurnSurfaceState;
@@ -54,6 +54,7 @@ export class TuiRuntimeState {
   private resumeActivityTimer: NodeJS.Timeout | null = null;
   private reassuranceTimer: NodeJS.Timeout | null = null;
   private pauseActivityTimer: NodeJS.Timeout | null = null;
+  private interactivePromptDepth = 0;
   private liveActivityFrame = 0;
   private liveActivityVisible = false;
   private responseStarted = false;
@@ -180,6 +181,9 @@ export class TuiRuntimeState {
       return;
     }
     this.reassuranceTimer = setInterval(() => {
+      if (this.interactivePromptDepth > 0) {
+        return;
+      }
       if (this.options.scrollRegion.isContentStreaming()) {
         return;
       }
@@ -235,19 +239,30 @@ export class TuiRuntimeState {
 
   async withPausedLiveActivity<T>(action: () => Promise<T>): Promise<T> {
     const snapshot = this.options.statusBar.getActivitySnapshot();
-    this.stopLiveActivityTimer();
+    this.enterInteractivePrompt();
     try {
       return await action();
     } finally {
+      this.exitInteractivePrompt();
       if (
         snapshot
         && !this.options.isTerminalUiSuspended()
         && this.turnActive
         && !this.options.scrollRegion.isContentStreaming()
+        && this.interactivePromptDepth === 0
       ) {
         this.beginActivity(snapshot.label, true, snapshot.startedAt);
       }
     }
+  }
+
+  enterInteractivePrompt(): void {
+    this.interactivePromptDepth += 1;
+    this.stopLiveActivityTimer();
+  }
+
+  exitInteractivePrompt(): void {
+    this.interactivePromptDepth = Math.max(0, this.interactivePromptDepth - 1);
   }
 
   stopActivity(): void {
@@ -260,6 +275,7 @@ export class TuiRuntimeState {
     this.liveActivityFrame = 0;
     this.responseStarted = false;
     this.lastReassuranceBucket = -1;
+    this.interactivePromptDepth = 0;
   }
 
   destroy(): void {

@@ -141,11 +141,11 @@ describe('chat terminal layout', () => {
     expect(source).not.toContain('let footerBusy = false;');
   });
 
-  it('should collect sparse completed-intent feedback and feed contextual skill reranking', () => {
+  it('should keep completed-intent feedback disabled by default to avoid footer/input collisions', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
+    expect(source).toContain('const COMPLETED_INTENT_FEEDBACK_ENABLED = false;');
     expect(source).toContain('maybeCollectCompletedIntentFeedback');
-    expect(source).toContain('skillEvalStore.markPromptedIntent');
     expect(source).toContain('skillScoreStore.recordFeedback');
     expect(source).toContain('observation.actualSkillName');
     expect(source).toContain('这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
@@ -154,6 +154,7 @@ describe('chat terminal layout', () => {
     expect(source).not.toContain('Feedback [y/n/s]: ');
     expect(source).not.toContain('这次 skill 路由是否合适？');
     expect(source).not.toContain('主要问题更接近需求理解错了吗？');
+    expect(source).toContain('if (!COMPLETED_INTENT_FEEDBACK_ENABLED) {');
     expect(source).toContain('renderIntentSummaryLine();');
   });
 

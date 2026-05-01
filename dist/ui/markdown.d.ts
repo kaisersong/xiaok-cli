@@ -8,6 +8,7 @@ export declare class MarkdownRenderer {
     private inCodeBlock;
     private codeLang;
     private pendingLen;
+    private pendingPrefix;
     private lineCount;
     private termWidth;
     private consecutiveBlankLines;
@@ -40,6 +41,7 @@ export declare class MarkdownRenderer {
     private formatLine;
     private countRows;
     private countRenderedRows;
+    private clearPendingRender;
     private formatLeadParagraphLine;
     private formatWrappedListItem;
     private getWrapWidth;

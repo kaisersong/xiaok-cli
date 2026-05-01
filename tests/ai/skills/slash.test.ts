@@ -18,4 +18,16 @@ describe('parseSlashCommand', () => {
   it('normalizes extra whitespace after the slash command', () => {
     expect(parseSlashCommand('/review    api   layer  ')).toEqual({ skillName: 'review', rest: 'api layer' });
   });
+
+  it('returns null for absolute local paths', () => {
+    expect(parseSlashCommand('/Users/song/projects/mydocs/report.md')).toBeNull();
+    expect(parseSlashCommand('/tmp/xiaok/input.txt')).toBeNull();
+  });
+
+  it('still allows slash commands with absolute paths as arguments', () => {
+    expect(parseSlashCommand('/review /Users/song/projects/mydocs/report.md')).toEqual({
+      skillName: 'review',
+      rest: '/Users/song/projects/mydocs/report.md',
+    });
+  });
 });

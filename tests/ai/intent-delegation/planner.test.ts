@@ -184,6 +184,31 @@ describe('intent delegation planner', () => {
     });
   });
 
+  it('plans a work request that starts with an absolute local path instead of treating it as a slash command', () => {
+    const sourcePath = '/Users/song/Downloads/金蝶灵基_for_CEO_V2.0_Plan与TODO_5月10日版.md';
+    const result = createIntentPlan({
+      instanceId: 'instance-1',
+      sessionId: 'session-1',
+      input: `${sourcePath} 生成报告，然后生成幻灯片`,
+      skills,
+    });
+
+    const plan = expectPlan(result);
+    expect(plan).toMatchObject({
+      continuationMode: 'new_intent',
+      intentType: 'generate',
+      templateId: 'generate_v1',
+      deliverable: '报告 -> 幻灯片',
+      finalDeliverable: '幻灯片',
+      providedSourcePaths: [sourcePath],
+      intentMode: 'multi_stage',
+    });
+    expect(plan?.stages.map((stage) => stage.label)).toEqual([
+      '生成报告',
+      '生成幻灯片',
+    ]);
+  });
+
   it('builds a multi-stage plan for a multi-file Chinese prompt with path-prefixed sources', () => {
     const result = createIntentPlan({
       instanceId: 'instance-1',

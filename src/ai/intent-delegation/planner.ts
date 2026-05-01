@@ -63,6 +63,7 @@ const CONTINUATION_PATTERNS = [
 ];
 
 const CONTROL_COMMAND_PATTERN = /^\s*[/!][\w-]+/u;
+const POSIX_ABSOLUTE_PATH_TOKEN_PATTERN = /^\/\S*\/\S+/u;
 const ACKNOWLEDGEMENT_PATTERNS = [
   /^(好的|好|收到|明白了|明白|了解了|了解|ok|okay)\s*$/iu,
 ];
@@ -178,7 +179,15 @@ function hasSourceTaskCue(input: string): boolean {
 }
 
 function isControlCommand(input: string): boolean {
-  return CONTROL_COMMAND_PATTERN.test(input);
+  const trimmed = input.trimStart();
+  if (trimmed.startsWith('/')) {
+    const firstToken = trimmed.split(/\s+/u, 1)[0] ?? '';
+    if (POSIX_ABSOLUTE_PATH_TOKEN_PATTERN.test(firstToken)) {
+      return false;
+    }
+  }
+
+  return CONTROL_COMMAND_PATTERN.test(trimmed);
 }
 
 function isAcknowledgement(input: string): boolean {

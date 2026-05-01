@@ -147,7 +147,7 @@ export class ScrollRegionManager {
     const columns = stream.columns ?? 80;
     this.config = config ?? {
       footerHeight: 3, // Input padding row + input bar + status bar
-      gapHeight: 2,    // Empty gap between transcript/activity/overlay and input bar
+      gapHeight: 3,    // Conservative empty gap between transcript/activity/overlay and input bar
       rows,
       columns,
     };
@@ -553,7 +553,7 @@ export class ScrollRegionManager {
     }
     this.stream.write(`${MOVE_TO_ROW.replace('%d', String(statusBarRow))}${CLEAR_LINE}`);
     if (statusLine) {
-      this.stream.write(DIM + statusLine + RESET_ALL);
+      this.stream.write(this.renderSingleFooterTextLine(statusLine, this.config.columns));
     }
 
     // Position cursor at input line for typing
@@ -674,7 +674,7 @@ export class ScrollRegionManager {
     // in the input editor cannot leave stale status text above it.
     footerOutput += `\x1b[${statusBarRow};1H${CLEAR_LINE}`;
     if (statusLine) {
-      footerOutput += statusLine;
+      footerOutput += this.renderSingleFooterTextLine(statusLine, cols);
     }
 
     this.lastInputRenderRows = inputFrameRows;
@@ -825,7 +825,7 @@ export class ScrollRegionManager {
 
     if (keepStatusLineVisible) {
       this.stream.write(`\x1b[${statusBarRow};1H${CLEAR_LINE}`);
-      this.stream.write(frame.statusLine);
+      this.stream.write(this.renderSingleFooterTextLine(frame.statusLine, cols));
     }
 
     this.lastInputRenderRows = inputFrameRows;
@@ -1033,24 +1033,26 @@ export class ScrollRegionManager {
 
     this.lastActivityLine = activityLine;
 
-    // Render activity line at bottom of scroll region
-    this.stream.write(this.composeActivityLineRender(activityLine));
+    const footerFrame = {
+      inputPrompt: this.lastInputPrompt || 'Type your message...',
+      summaryLine: this.lastSummaryLine || undefined,
+      statusLine: this.lastStatusLine || undefined,
+    };
+
+    // When the footer is visible, render activity and footer in one batched
+    // frame. Writing an activity-only frame first creates a visible flicker
+    // where screenshots can catch the input/status footer as missing.
     if (!this._footerVisible && !this._contentStreaming && !this.hasActiveOverlayPrompt()) {
-      this.renderFooterFrame({
-        inputPrompt: this.lastInputPrompt || 'Type your message...',
-        summaryLine: this.lastSummaryLine || undefined,
-        statusLine: this.lastStatusLine || undefined,
-      }, false);
+      this.renderFooterFrame(footerFrame, true);
       return;
     }
     if (this._footerVisible) {
-      this.renderFooterFrame({
-        inputPrompt: this.lastInputPrompt || 'Type your message...',
-        summaryLine: this.lastSummaryLine || undefined,
-        statusLine: this.lastStatusLine || undefined,
-      }, false, true);
+      this.renderFooterFrame(footerFrame, true, true);
       return;
     }
+
+    // Render activity line at bottom of scroll region
+    this.stream.write(this.composeActivityLineRender(activityLine));
     if (shouldCompactSubmittedInputForWindowsTmux()) {
       this.renderFooter({
         inputPrompt: this.lastInputPrompt || 'Type your message...',
@@ -1095,7 +1097,7 @@ export class ScrollRegionManager {
       if (this.isRendererPermissionOverlayActive()) {
         const statusBarRow = this.getStatusBarRow();
         this.stream.write(`${MOVE_TO_ROW.replace('%d', String(statusBarRow))}${CLEAR_LINE}`);
-        this.stream.write(statusLine);
+        this.stream.write(this.renderSingleFooterTextLine(statusLine, this.config.columns));
         this.stream.write(HIDE_CURSOR);
         this.positionCursorForPermissionOverlay(this.lastInputRenderRows);
         return;
@@ -1103,7 +1105,7 @@ export class ScrollRegionManager {
       if (this.hasActiveOverlayPrompt()) {
         const statusBarRow = this.getStatusBarRow();
         this.stream.write(`${MOVE_TO_ROW.replace('%d', String(statusBarRow))}${CLEAR_LINE}`);
-        this.stream.write(statusLine);
+        this.stream.write(this.renderSingleFooterTextLine(statusLine, this.config.columns));
         const inputState = this.lastInputValue
           ? this.getFooterInputState(this.lastInputValue, this.lastInputCursor)
           : undefined;
@@ -1379,6 +1381,12 @@ export class ScrollRegionManager {
       col = 0;
 
       for (const ch of text) {
+        if (ch === '\n') {
+          row = this.clampCursorRow(row + 1);
+          col = 0;
+          continue;
+        }
+
         const w = getDisplayWidth(ch);
         if (col + w >= cols) {
           row = this.clampCursorRow(row + 1);
@@ -1428,6 +1436,10 @@ export class ScrollRegionManager {
 
   private padBackgroundRow(width: number): string {
     return this.padLineWithBg(INPUT_BG, width);
+  }
+
+  private renderSingleFooterTextLine(line: string, width: number): string {
+    return this.padLine(line, width, false);
   }
 
 }

@@ -69,7 +69,16 @@ export function buildTerminalFrame(state: SurfaceState): TerminalFrame {
   const overlayLines = buildOverlayLines(state);
   const shouldHideFooter = modalLines.length > 0 || overlayLines.length > 0;
   const footerLines = shouldHideFooter ? [] : (state.footerLines ?? []);
-  const lines = [...promptLines, ...footerLines, ...(modalLines.length > 0 ? modalLines : overlayLines)];
+  const hasSummaryLine = footerLines.length > 1 && (footerLines[0] ?? '').trim().length > 0;
+  const summaryLines = hasSummaryLine ? [footerLines[0] ?? '', '', ''] : [];
+  const statusLines = footerLines.length > 1 ? footerLines.slice(1) : footerLines;
+  const promptLineOffset = summaryLines.length;
+  const lines = [
+    ...summaryLines,
+    ...promptLines,
+    ...statusLines,
+    ...(modalLines.length > 0 ? modalLines : overlayLines),
+  ];
 
   // Calculate cursor position across multi-line input
   const cursorLineIndex = Math.min(
@@ -83,7 +92,7 @@ export function buildTerminalFrame(state: SurfaceState): TerminalFrame {
   return {
     lines,
     cursor: state.focusTarget === 'input'
-      ? { line: cursorLineIndex, column: cursorColumn }
+      ? { line: promptLineOffset + cursorLineIndex, column: cursorColumn }
       : null,
   };
 }

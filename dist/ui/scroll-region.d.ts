@@ -269,4 +269,5 @@ export declare class ScrollRegionManager {
      */
     private padLineWithBg;
     private padBackgroundRow;
+    private renderSingleFooterTextLine;
 }
