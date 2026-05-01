@@ -10,6 +10,9 @@ import {
   getMenuClearSequence,
   getVisibleMenuItems,
   getSlashCommands,
+  getCursorLogicalLine,
+  moveCursorDownLogicalLine,
+  moveCursorUpLogicalLine,
   truncateMenuDescription,
   wordBoundaryLeft,
   wordBoundaryRight,
@@ -173,6 +176,140 @@ describe('InputReader', () => {
     it('uses stdout for readline output in non-tty mode', async () => {
       const source = readFileSync(join(process.cwd(), 'src', 'ui', 'input.ts'), 'utf8');
       expect(source).toContain("readline.createInterface({ input: stdin, output: stdout })");
+    });
+
+    it('recalls submitted prompts with real up/down arrow escape sequences', async () => {
+      const harness = createTtyHarness();
+      let pending: Promise<string | null> | undefined;
+
+      try {
+        pending = reader.read('> ');
+        harness.send('first prompt');
+        harness.send('\r');
+        await expect(pending).resolves.toBe('first prompt');
+        pending = undefined;
+
+        pending = reader.read('> ');
+        harness.send('second prompt');
+        harness.send('\r');
+        await expect(pending).resolves.toBe('second prompt');
+        pending = undefined;
+
+        pending = reader.read('> ');
+        harness.send('\x1b[A');
+        expect(harness.screen.text()).toContain('second prompt');
+        harness.send('\r');
+        await expect(pending).resolves.toBe('second prompt');
+        pending = undefined;
+
+        pending = reader.read('> ');
+        harness.send('\x1b[A');
+        harness.send('\x1b[A');
+        expect(harness.screen.text()).toContain('first prompt');
+        harness.send('\r');
+        await expect(pending).resolves.toBe('first prompt');
+        pending = undefined;
+      } finally {
+        if (pending) {
+          harness.send('\x03');
+          await pending.catch(() => null);
+        }
+        harness.restore();
+      }
+    });
+
+    it('restores an unsent draft after browsing prompt history', async () => {
+      const harness = createTtyHarness();
+      let pending: Promise<string | null> | undefined;
+
+      try {
+        pending = reader.read('> ');
+        harness.send('previous prompt');
+        harness.send('\r');
+        await expect(pending).resolves.toBe('previous prompt');
+        pending = undefined;
+
+        pending = reader.read('> ');
+        harness.send('draft prompt');
+        harness.send('\x1b[A');
+        expect(harness.screen.text()).toContain('previous prompt');
+        harness.send('\x1b[B');
+        expect(harness.screen.text()).toContain('draft prompt');
+        harness.send('\r');
+        await expect(pending).resolves.toBe('draft prompt');
+        pending = undefined;
+      } finally {
+        if (pending) {
+          harness.send('\x03');
+          await pending.catch(() => null);
+        }
+        harness.restore();
+      }
+    });
+
+    it('uses up/down for explicit multiline cursor movement before history recall', async () => {
+      const harness = createTtyHarness();
+      let pending: Promise<string | null> | undefined;
+
+      try {
+        pending = reader.read('> ');
+        harness.send('previous prompt');
+        harness.send('\r');
+        await expect(pending).resolves.toBe('previous prompt');
+        pending = undefined;
+
+        pending = reader.read('> ');
+        harness.send('line1');
+        harness.send('\x0a');
+        harness.send('line2');
+        harness.send('\x1b[A');
+        harness.send('-edit');
+        harness.send('\r');
+
+        await expect(pending).resolves.toBe('line1-edit\nline2');
+        pending = undefined;
+      } finally {
+        if (pending) {
+          harness.send('\x03');
+          await pending.catch(() => null);
+        }
+        harness.restore();
+      }
+    });
+
+    it('does not overwrite an edited recalled prompt on the next up arrow', async () => {
+      const harness = createTtyHarness();
+      let pending: Promise<string | null> | undefined;
+
+      try {
+        pending = reader.read('> ');
+        harness.send('first prompt');
+        harness.send('\r');
+        await expect(pending).resolves.toBe('first prompt');
+        pending = undefined;
+
+        pending = reader.read('> ');
+        harness.send('second prompt');
+        harness.send('\r');
+        await expect(pending).resolves.toBe('second prompt');
+        pending = undefined;
+
+        pending = reader.read('> ');
+        harness.send('\x1b[A');
+        expect(harness.screen.text()).toContain('second prompt');
+        harness.send(' edited');
+        harness.send('\x1b[A');
+        harness.send('\r');
+
+        await expect(pending).resolves.toBe('second prompt edited');
+        pending = undefined;
+      } finally {
+        if (pending) {
+          harness.send('\x03');
+          await pending.catch(() => null);
+        }
+        harness.restore();
+      }
     });
 
     it('replays slash-menu interaction without appending each typed character onto a new line', async () => {
@@ -691,6 +828,25 @@ describe('word navigation helpers', () => {
     expect(wordBoundaryRight('hello world', 5)).toBe(11);
     expect(wordBoundaryRight('hello world', 6)).toBe(11);
     expect(wordBoundaryRight('', 0)).toBe(0);
+  });
+
+  it('finds the logical line for the current cursor', () => {
+    expect(getCursorLogicalLine('one\ntwo', 0)).toEqual({ start: 0, end: 3, column: 0 });
+    expect(getCursorLogicalLine('one\ntwo', 3)).toEqual({ start: 0, end: 3, column: 3 });
+    expect(getCursorLogicalLine('one\ntwo', 4)).toEqual({ start: 4, end: 7, column: 0 });
+    expect(getCursorLogicalLine('one\ntwo', 99)).toEqual({ start: 4, end: 7, column: 3 });
+  });
+
+  it('moves up and down by logical line while preserving columns', () => {
+    expect(moveCursorUpLogicalLine('short\nmuch longer', 17)).toBe(5);
+    expect(moveCursorDownLogicalLine('short\nmuch longer', 5)).toBe(11);
+  });
+
+  it('clamps logical-line movement to the target line length', () => {
+    expect(moveCursorUpLogicalLine('short\nmuch longer', 17)).toBe(5);
+    expect(moveCursorDownLogicalLine('much longer\nshort', 11)).toBe(17);
+    expect(moveCursorUpLogicalLine('top', 3)).toBeNull();
+    expect(moveCursorDownLogicalLine('bottom', 0)).toBeNull();
   });
 });
 

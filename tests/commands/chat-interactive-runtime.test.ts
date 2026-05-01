@@ -499,6 +499,33 @@ Run a single release-readiness pass for one code change.
         return;
       }
 
+      if (lastToolResult.includes('silent notice fixture')) {
+        yield { type: 'text', delta: '静默工具轮完成' };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('无可见文字工具轮')) {
+        yield {
+          type: 'tool_use',
+          id: 'tu_silent_tool_read',
+          name: 'read',
+          input: {
+            file_path: process.env.XIAOK_TEST_PROJECT_FILE ?? '',
+          },
+        };
+        yield {
+          type: 'tool_use',
+          id: 'tu_silent_tool_read_again',
+          name: 'read',
+          input: {
+            file_path: process.env.XIAOK_TEST_PROJECT_FILE ?? '',
+          },
+        };
+        yield { type: 'done' };
+        return;
+      }
+
       if (lastToolResult.includes('outside file A')) {
         if (lastUserText.includes('连续工具块') && multiToolPhase === 1) {
           multiToolPhase = 2;
@@ -1287,14 +1314,96 @@ describe('chat interactive runtime', () => {
 
       const finalLines = harness.screen.lines();
       const firstSegmentIndex = finalLines.findIndex((line) => line.trim() === '● 我先读取项目文件。');
+      const toolLineIndex = finalLines.findIndex((line) => line.includes('│ Read notes.txt'));
       const secondSegmentIndex = finalLines.findIndex((line) => line.trim() === '● 继续总结如下：');
       const finalPromptIndex = finalLines.findIndex((line) => line.includes('❯ Type your message...'));
 
       expect(firstSegmentIndex).toBeGreaterThanOrEqual(0);
+      expect(toolLineIndex).toBeGreaterThan(firstSegmentIndex);
       expect(secondSegmentIndex).toBeGreaterThan(firstSegmentIndex);
+      expect(secondSegmentIndex).toBeGreaterThan(toolLineIndex);
+      expect(finalLines.slice(toolLineIndex + 1, secondSegmentIndex).some((line) => line.trim() === '')).toBe(true);
       expect(finalPromptIndex).toBeGreaterThanOrEqual(secondSegmentIndex + 3);
       expect(finalLines.slice(secondSegmentIndex + 1, finalPromptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
+      expect(harness.output.normalized).not.toContain('模型本轮直接进入工具执行');
 
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      delete process.env.XIAOK_TEST_PROJECT_FILE;
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('shows a transparent notice when a model enters tools without visible text', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-silent-tool-turn-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(projectDir, { recursive: true });
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    const projectFile = join(projectDir, 'silent.txt');
+    writeFileSync(projectFile, 'silent notice fixture\n', 'utf8');
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    process.env.XIAOK_TEST_PROJECT_FILE = projectFile;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 30);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+    let pending: Promise<void> | undefined;
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('无可见文字工具轮');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const text = harness.output.normalized;
+        expect(text).toContain('模型本轮直接进入工具执行');
+        expect(text).toContain('Read silent.txt');
+        expect(text).toContain('静默工具轮完成');
+      }, { timeoutMs: 3_000 });
+
+      expect(countOccurrences(harness.output.normalized, '模型本轮直接进入工具执行')).toBe(1);
+      const lines = harness.screen.lines();
+      const noticeIndex = findLineIndex(lines, '模型本轮直接进入工具执行');
+      const toolIndex = findLineIndex(lines, 'Read silent.txt');
+      expect(noticeIndex).toBeGreaterThanOrEqual(0);
+      expect(toolIndex).toBeGreaterThan(noticeIndex);
+
+      await waitForInputTurnReady(harness);
       harness.send('/exit');
       harness.send('\r');
       await pending;

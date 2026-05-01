@@ -31,6 +31,14 @@ export interface InputReadOptions {
 export declare function wordBoundaryLeft(text: string, cursor: number): number;
 /** 向右找词边界（Alt+Right 用） */
 export declare function wordBoundaryRight(text: string, cursor: number): number;
+export interface CursorLogicalLine {
+    start: number;
+    end: number;
+    column: number;
+}
+export declare function getCursorLogicalLine(text: string, cursor: number): CursorLogicalLine;
+export declare function moveCursorUpLogicalLine(text: string, cursor: number): number | null;
+export declare function moveCursorDownLogicalLine(text: string, cursor: number): number | null;
 export declare function getSlashCommands(skills: SkillMeta[]): MenuItem[];
 export declare function truncateMenuDescription(desc: string, maxWidth: number): string;
 export declare function getMenuClearSequence(lineCount: number): string;

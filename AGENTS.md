@@ -12,6 +12,13 @@
 - The completed refactor scope was the `xiaok chat` CLI runtime only.
 - Do not fold `yzj` channel or webhook/websocket work into this runtime refactor.
 
+## Requirement Implementation Gate
+
+- For any new requirement or behavior change, write the design documentation first.
+- Run an adversarial review against that design before implementation.
+- Write the test cases after the review and before production code.
+- Only write or edit production code after the docs, adversarial review, and tests are in place.
+
 ## Current Release Notes
 
 - `xiaok` is currently linked from the main workspace only and reports `0.6.7`.

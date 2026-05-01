@@ -46,6 +46,36 @@ export function wordBoundaryRight(text, cursor) {
         i++;
     return i;
 }
+export function getCursorLogicalLine(text, cursor) {
+    const safeCursor = Math.max(0, Math.min(cursor, text.length));
+    const start = text.lastIndexOf('\n', safeCursor - 1) + 1;
+    const nextBreak = text.indexOf('\n', safeCursor);
+    const end = nextBreak === -1 ? text.length : nextBreak;
+    return {
+        start,
+        end,
+        column: safeCursor - start,
+    };
+}
+export function moveCursorUpLogicalLine(text, cursor) {
+    const current = getCursorLogicalLine(text, cursor);
+    if (current.start === 0) {
+        return null;
+    }
+    const previousEnd = current.start - 1;
+    const previousStart = text.lastIndexOf('\n', previousEnd - 1) + 1;
+    return Math.min(previousStart + current.column, previousEnd);
+}
+export function moveCursorDownLogicalLine(text, cursor) {
+    const current = getCursorLogicalLine(text, cursor);
+    if (current.end >= text.length) {
+        return null;
+    }
+    const nextStart = current.end + 1;
+    const nextBreak = text.indexOf('\n', nextStart);
+    const nextEnd = nextBreak === -1 ? text.length : nextBreak;
+    return Math.min(nextStart + current.column, nextEnd);
+}
 export function getSlashCommands(skills) {
     const commands = [...getChatSlashCommands()];
     for (const skill of skills) {
@@ -195,6 +225,9 @@ export class InputReader {
             let historyState = pushInputHistory(createInputHistoryState(), '', 0);
             let richUiEnabled = Boolean(this.renderer) && !this.forcePlainMode;
             let uiErrorNotified = false;
+            let historyDraft = null;
+            let lastRecalledHistoryInput = null;
+            let editedRecalledDraft = false;
             const degradeUi = (context, error) => {
                 richUiEnabled = false;
                 this.menuOpen = false;
@@ -348,6 +381,101 @@ export class InputReader {
                     redraw();
                 }
             };
+            const markInputEdited = () => {
+                if (lastRecalledHistoryInput !== null && input !== lastRecalledHistoryInput) {
+                    editedRecalledDraft = input.length > 0;
+                }
+                else if (input.length === 0) {
+                    editedRecalledDraft = false;
+                }
+                this.historyIdx = this.history.length;
+                historyDraft = null;
+                lastRecalledHistoryInput = null;
+            };
+            const moveMenuSelection = (direction) => {
+                if (!this.menuOpen || this.menuItems.length === 0) {
+                    return false;
+                }
+                this.menuIdx = (this.menuIdx + direction + this.menuItems.length) % this.menuItems.length;
+                if (this.renderer) {
+                    redraw();
+                }
+                else {
+                    clearMenu();
+                    renderMenu();
+                }
+                return true;
+            };
+            const recallPreviousHistory = () => {
+                if (this.history.length === 0 || this.historyIdx <= 0) {
+                    return false;
+                }
+                if (editedRecalledDraft && input.length > 0) {
+                    return false;
+                }
+                if (this.historyIdx === this.history.length) {
+                    historyDraft = input;
+                }
+                this.historyIdx--;
+                input = this.history[this.historyIdx] ?? '';
+                cursor = input.length;
+                lastRecalledHistoryInput = input;
+                editedRecalledDraft = false;
+                redraw();
+                return true;
+            };
+            const recallNextHistory = () => {
+                if (this.history.length === 0) {
+                    return false;
+                }
+                if (editedRecalledDraft && input.length > 0) {
+                    return false;
+                }
+                if (this.historyIdx < this.history.length - 1) {
+                    this.historyIdx++;
+                    input = this.history[this.historyIdx] ?? '';
+                    cursor = input.length;
+                    lastRecalledHistoryInput = input;
+                    editedRecalledDraft = false;
+                    redraw();
+                    return true;
+                }
+                if (this.historyIdx === this.history.length - 1) {
+                    this.historyIdx = this.history.length;
+                    input = historyDraft ?? '';
+                    cursor = input.length;
+                    historyDraft = null;
+                    lastRecalledHistoryInput = null;
+                    editedRecalledDraft = false;
+                    redraw();
+                    return true;
+                }
+                return false;
+            };
+            const handleHistoryPrevious = () => {
+                if (moveMenuSelection(-1)) {
+                    return true;
+                }
+                const movedCursor = moveCursorUpLogicalLine(input, cursor);
+                if (movedCursor !== null) {
+                    cursor = movedCursor;
+                    redraw();
+                    return true;
+                }
+                return recallPreviousHistory();
+            };
+            const handleHistoryNext = () => {
+                if (moveMenuSelection(1)) {
+                    return true;
+                }
+                const movedCursor = moveCursorDownLogicalLine(input, cursor);
+                if (movedCursor !== null) {
+                    cursor = movedCursor;
+                    redraw();
+                    return true;
+                }
+                return recallNextHistory();
+            };
             const done = (result) => {
                 if (resolved)
                     return;
@@ -365,7 +493,7 @@ export class InputReader {
                 stdin.removeListener('data', onData);
                 stdin.setRawMode(false);
                 stdin.pause();
-                if (result !== null && result.length > 0) {
+                if (result !== null && result.length > 0 && this.history[this.history.length - 1] !== result) {
                     this.history.push(result);
                 }
                 this.historyIdx = this.history.length;
@@ -382,6 +510,7 @@ export class InputReader {
                     // Process input with ANSI sequence recognition
                     let i = 0;
                     let skipSyncMenuAfterBatch = false;
+                    let needsFinalRedraw = false;
                     while (i < normalizedBatch.length) {
                         // Try to identify ANSI sequences first
                         const identified = identifyKey(normalizedBatch, i);
@@ -400,7 +529,9 @@ export class InputReader {
                                 else if (action === 'newline') {
                                     input = input.slice(0, cursor) + '\n' + input.slice(cursor);
                                     cursor++;
+                                    markInputEdited();
                                     historyState = pushInputHistory(historyState, input, cursor);
+                                    needsFinalRedraw = true;
                                 }
                                 else if (action === 'cancel') {
                                     done(null);
@@ -416,29 +547,36 @@ export class InputReader {
                                     if (cursor > 0) {
                                         input = input.slice(0, cursor - 1) + input.slice(cursor);
                                         cursor--;
+                                        markInputEdited();
                                         historyState = pushInputHistory(historyState, input, cursor);
+                                        needsFinalRedraw = true;
                                     }
                                 }
                                 else if (action === 'cursor-left') {
-                                    if (cursor > 0)
+                                    if (cursor > 0) {
                                         cursor--;
+                                        needsFinalRedraw = true;
+                                    }
                                 }
                                 else if (action === 'cursor-right') {
-                                    if (cursor < input.length)
+                                    if (cursor < input.length) {
                                         cursor++;
+                                        needsFinalRedraw = true;
+                                    }
                                 }
                                 else if (action === 'shift-tab') {
                                     if (this.onModeCycle) {
                                         const nextMode = this.onModeCycle();
                                         stdout.write(`\n${dim(`权限模式已切换为 ${nextMode}`)}\n`);
+                                        needsFinalRedraw = true;
                                     }
                                 }
-                                else if (action === 'history-prev' && this.menuOpen && this.menuItems.length > 0) {
-                                    this.menuIdx = (this.menuIdx - 1 + this.menuItems.length) % this.menuItems.length;
+                                else if (action === 'history-prev') {
+                                    handleHistoryPrevious();
                                     skipSyncMenuAfterBatch = true;
                                 }
-                                else if (action === 'history-next' && this.menuOpen && this.menuItems.length > 0) {
-                                    this.menuIdx = (this.menuIdx + 1) % this.menuItems.length;
+                                else if (action === 'history-next') {
+                                    handleHistoryNext();
                                     skipSyncMenuAfterBatch = true;
                                 }
                                 // Skip other actions in batch mode for simplicity
@@ -454,13 +592,17 @@ export class InputReader {
                                 clearMenuIfLegacy();
                                 input = input.slice(0, cursor) + ch + input.slice(cursor);
                                 cursor += 1;
+                                markInputEdited();
                                 historyState = pushInputHistory(historyState, input, cursor);
+                                needsFinalRedraw = true;
                             }
                             i++;
                         }
                     }
                     // Redraw once after processing all batch input
-                    redraw();
+                    if (needsFinalRedraw) {
+                        redraw();
+                    }
                     if (input.startsWith('/') && !skipSyncMenuAfterBatch) {
                         syncMenu(input);
                     }
@@ -483,6 +625,7 @@ export class InputReader {
                             require('fs').writeFileSync(tempPath, Buffer.from(base64Data, 'base64'));
                             input = input.slice(0, cursor) + tempPath + input.slice(cursor);
                             cursor += tempPath.length;
+                            markInputEdited();
                             historyState = pushInputHistory(historyState, input, cursor);
                             redraw();
                             return;
@@ -519,6 +662,7 @@ export class InputReader {
                         const selected = this.menuItems[this.menuIdx].cmd;
                         input = selected;
                         cursor = selected.length;
+                        markInputEdited();
                         closeMenu();
                     }
                     else if (input.startsWith('/')) {
@@ -526,6 +670,7 @@ export class InputReader {
                         if (matches.length === 1) {
                             input = matches[0].cmd;
                             cursor = matches[0].cmd.length;
+                            markInputEdited();
                             redraw();
                         }
                         else if (matches.length > 1) {
@@ -559,6 +704,7 @@ export class InputReader {
                         // Shift+Enter: insert newline at cursor
                         input = input.slice(0, cursor) + '\n' + input.slice(cursor);
                         cursor++;
+                        markInputEdited();
                         historyState = pushInputHistory(historyState, input, cursor);
                         redraw();
                         return true;
@@ -569,6 +715,7 @@ export class InputReader {
                             clearMenuIfLegacy();
                             input = input.slice(0, cursor - 1) + input.slice(cursor);
                             cursor--;
+                            markInputEdited();
                             historyState = pushInputHistory(historyState, input, cursor);
                             redraw();
                             if (shouldSyncMenu && input.startsWith('/')) {
@@ -603,47 +750,11 @@ export class InputReader {
                         return true;
                     }
                     if (action === 'history-prev') {
-                        if (this.menuOpen) {
-                            this.menuIdx = (this.menuIdx - 1 + this.menuItems.length) % this.menuItems.length;
-                            if (this.renderer) {
-                                redraw();
-                            }
-                            else {
-                                clearMenu();
-                                renderMenu();
-                            }
-                        }
-                        else if (this.historyIdx > 0) {
-                            this.historyIdx--;
-                            input = this.history[this.historyIdx];
-                            cursor = input.length;
-                            redraw();
-                        }
+                        handleHistoryPrevious();
                         return true;
                     }
                     if (action === 'history-next') {
-                        if (this.menuOpen) {
-                            this.menuIdx = (this.menuIdx + 1) % this.menuItems.length;
-                            if (this.renderer) {
-                                redraw();
-                            }
-                            else {
-                                clearMenu();
-                                renderMenu();
-                            }
-                        }
-                        else if (this.historyIdx < this.history.length - 1) {
-                            this.historyIdx++;
-                            input = this.history[this.historyIdx];
-                            cursor = input.length;
-                            redraw();
-                        }
-                        else if (this.historyIdx === this.history.length - 1) {
-                            this.historyIdx = this.history.length;
-                            input = '';
-                            cursor = 0;
-                            redraw();
-                        }
+                        handleHistoryNext();
                         return true;
                     }
                     if (action === 'cursor-home') {
@@ -665,6 +776,7 @@ export class InputReader {
                         historyState = undone.history;
                         input = undone.input;
                         cursor = undone.cursor;
+                        markInputEdited();
                         redraw();
                         return true;
                     }
@@ -673,6 +785,7 @@ export class InputReader {
                         historyState = redone.history;
                         input = redone.input;
                         cursor = redone.cursor;
+                        markInputEdited();
                         redraw();
                         return true;
                     }
@@ -683,6 +796,7 @@ export class InputReader {
                             clearMenuIfLegacy();
                             input = input.slice(0, newCursor) + input.slice(cursor);
                             cursor = newCursor;
+                            markInputEdited();
                             historyState = pushInputHistory(historyState, input, cursor);
                             redraw();
                             if (shouldSyncMenu && input.startsWith('/') && input.length > 0) {
@@ -710,6 +824,7 @@ export class InputReader {
                             clearMenuIfLegacy();
                             input = input.slice(cursor);
                             cursor = 0;
+                            markInputEdited();
                             historyState = pushInputHistory(historyState, input, cursor);
                             redraw();
                             if (shouldSyncMenu && input.startsWith('/')) {
@@ -726,6 +841,7 @@ export class InputReader {
                             const shouldSyncMenu = input.startsWith('/');
                             clearMenuIfLegacy();
                             input = input.slice(0, cursor);
+                            markInputEdited();
                             historyState = pushInputHistory(historyState, input, cursor);
                             redraw();
                             if (shouldSyncMenu && input.startsWith('/')) {
@@ -774,6 +890,7 @@ export class InputReader {
                     clearMenuIfLegacy();
                     input = input.slice(0, cursor) + key + input.slice(cursor);
                     cursor += key.length;
+                    markInputEdited();
                     historyState = pushInputHistory(historyState, input, cursor);
                     redraw();
                     if (shouldSyncMenu && input.startsWith('/')) {

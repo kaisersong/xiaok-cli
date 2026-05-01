@@ -11,6 +11,16 @@ describe('TurnLayout', () => {
     expect(layout.consumeAssistantLeadIn()).toBe('');
   });
 
+  it('adds a lead-in before a later assistant segment after tool activity in the same turn', () => {
+    const layout = new TurnLayout();
+
+    expect(layout.consumeAssistantLeadIn()).toBe('');
+
+    layout.noteToolActivity();
+
+    expect(layout.consumeAssistantLeadIn()).toBe('\n');
+  });
+
   it('adds a lead-in blank line before assistant text after a progress note', () => {
     const layout = new TurnLayout();
 

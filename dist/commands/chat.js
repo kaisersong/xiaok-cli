@@ -74,6 +74,7 @@ const { version: cliVersion } = JSON.parse(readFileSync(new URL('../../package.j
 // has repeatedly regressed in narrow real TTYs. Keep the data path in place,
 // but do not prompt interactively until feedback has a non-footer surface.
 const COMPLETED_INTENT_FEEDBACK_ENABLED = false;
+const THINKING_ONLY_TOOL_TURN_NOTICE = '模型本轮直接进入工具执行；以下只显示安全进度，不展示隐藏推理。';
 function describeLiveActivity(toolName, input) {
     if (['tool_search', 'grep', 'glob', 'read', 'skill', 'web_fetch', 'web_search'].includes(toolName)) {
         return 'Exploring codebase';
@@ -633,8 +634,15 @@ async function runChat(initialInput, opts) {
         sessionId,
     });
     let streamingSegmentText = '';
+    let turnVisibleAssistantTextSeen = false;
+    let turnThinkingOnlyToolNoticeWritten = false;
     const resetStreamingSegment = () => {
         streamingSegmentText = '';
+    };
+    const noteVisibleAssistantText = (delta) => {
+        if (/\S/.test(delta)) {
+            turnVisibleAssistantTextSeen = true;
+        }
     };
     const flushStreamingMarkdown = () => {
         const renderedSegment = streamingSegmentText;
@@ -808,7 +816,15 @@ async function runChat(initialInput, opts) {
             return;
         }
         scrollRegion.clearActivityLine();
-        turnLayout.consumeAssistantLeadIn();
+        const assistantLeadIn = turnLayout.consumeAssistantLeadIn();
+        if (assistantLeadIn) {
+            if (scrollRegion.isActive()) {
+                scrollRegion.writeAtContentCursor(assistantLeadIn);
+            }
+            else {
+                process.stdout.write(assistantLeadIn);
+            }
+        }
         scrollRegion.beginContentStreaming();
         runtimeState.enterStreamingContent();
         beginActivity('Answering');
@@ -856,6 +872,14 @@ async function runChat(initialInput, opts) {
         mdRenderer.beginNewSegment();
         resetStreamingSegment();
     }
+    const maybeWriteThinkingOnlyToolNotice = () => {
+        if (turnVisibleAssistantTextSeen || turnThinkingOnlyToolNoticeWritten) {
+            return;
+        }
+        turnThinkingOnlyToolNoticeWritten = true;
+        turnLayout.noteProgressNote();
+        writeProgressTranscriptNote(THINKING_ONLY_TOOL_TURN_NOTICE);
+    };
     const isTerminalIntentStatus = (status) => status === 'completed' || status === 'failed' || status === 'cancelled';
     const refreshIntentLedger = async () => {
         currentIntentLedger = await intentLedgerStore.load(sessionId) ?? currentIntentLedger;
@@ -940,6 +964,7 @@ async function runChat(initialInput, opts) {
             input,
         }, (chunk) => {
             if (chunk.type === 'text') {
+                noteVisibleAssistantText(chunk.delta);
                 continuationText += chunk.delta;
                 if (/\S/.test(chunk.delta)) {
                     runtimeState.noteResponseStarted();
@@ -1685,6 +1710,8 @@ async function runChat(initialInput, opts) {
             toolExplorer.reset();
             turnLayout.reset();
             resetStreamingSegment();
+            turnVisibleAssistantTextSeen = false;
+            turnThinkingOnlyToolNoticeWritten = false;
             runtimeState.beginTurn('Thinking');
             if (!terminalUiSuspended) {
                 scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
@@ -1695,6 +1722,7 @@ async function runChat(initialInput, opts) {
             runtimeState.enterToolInterrupt();
             beginActivity(describeLiveActivity(e.toolName, e.toolInput));
             maybeAdvanceCurrentTurnStageForTool(e.toolName, e.toolInput);
+            maybeWriteThinkingOnlyToolNotice();
             const activity = toolExplorer.record(e.toolName, e.toolInput);
             if (activity) {
                 turnLayout.noteToolActivity();
@@ -2158,6 +2186,7 @@ async function runChat(initialInput, opts) {
                                 input: userMsg,
                             }, (chunk) => {
                                 if (chunk.type === 'text') {
+                                    noteVisibleAssistantText(chunk.delta);
                                     slashAssistantText += chunk.delta;
                                     if (/\S/.test(chunk.delta)) {
                                         runtimeState.noteResponseStarted();
@@ -2241,6 +2270,7 @@ async function runChat(initialInput, opts) {
                     input: inputBlocks,
                 }, (chunk) => {
                     if (chunk.type === 'text') {
+                        noteVisibleAssistantText(chunk.delta);
                         lastAssistantText += chunk.delta;
                         if (/\S/.test(chunk.delta)) {
                             runtimeState.noteResponseStarted();
@@ -2309,6 +2339,7 @@ async function runChat(initialInput, opts) {
                         input: continueBlocks,
                     }, (chunk) => {
                         if (chunk.type === 'text') {
+                            noteVisibleAssistantText(chunk.delta);
                             lastAssistantText += chunk.delta;
                             if (/\S/.test(chunk.delta)) {
                                 runtimeState.noteResponseStarted();
