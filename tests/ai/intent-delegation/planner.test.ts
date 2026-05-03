@@ -609,6 +609,42 @@ describe('intent delegation planner', () => {
     });
   });
 
+  it('splits 和-joined deliverables into separate stages', () => {
+    const result = createIntentPlan({
+      instanceId: 'instance-1',
+      sessionId: 'session-1',
+      input: '/Users/song/Downloads/简历.docx 把这个文档生成报告和幻灯片',
+      skills,
+    });
+
+    const plan = expectPlan(result);
+    expect(plan?.stages.map((stage) => stage.label)).toEqual([
+      '生成报告',
+      '生成幻灯片',
+    ]);
+    expect(plan).toMatchObject({
+      intentMode: 'multi_stage',
+      finalDeliverable: '幻灯片',
+    });
+  });
+
+  it('splits 、-joined deliverables into separate stages', () => {
+    const result = createIntentPlan({
+      instanceId: 'instance-1',
+      sessionId: 'session-1',
+      input: '帮我生成PPT、报告、摘要',
+      skills,
+    });
+
+    const plan = expectPlan(result);
+    expect(plan?.stages.length).toBe(3);
+    expect(plan?.stages.map((stage) => stage.label)).toEqual([
+      '生成PPT',
+      '生成报告',
+      '提炼摘要',
+    ]);
+  });
+
   it('allows contextual skill scoring to rerank otherwise similar matches without overriding stage semantics', () => {
     const rerankedSkills: SkillMeta[] = [
       makeSkill(

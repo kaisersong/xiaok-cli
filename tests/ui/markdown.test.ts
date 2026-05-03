@@ -63,7 +63,7 @@ describe('MarkdownRenderer', () => {
     expect(lines[0]?.startsWith('● ')).toBe(true);
     expect(lines[1]?.startsWith('  ')).toBe(true);
     expect(lines[1]?.startsWith('● ')).toBe(false);
-    expect(lines.at(-1)).toBe('第二行贴边');
+    expect(lines.at(-1)).toBe('  第二行贴边');
   });
 
   it('starts a fresh lead paragraph after an explicit transcript boundary', () => {
@@ -99,6 +99,22 @@ describe('MarkdownRenderer', () => {
     const lines = output.split('\n').filter(Boolean);
     expect(lines[0]).toBe('• 这是一个很');
     expect(lines[1]).toBe('  长的列表项');
+  });
+
+  it('indents continuation text lines with 2-space alignment', () => {
+    const renderer = new MarkdownRenderer();
+
+    renderer.write('Lead paragraph line.\n');
+    renderer.write('Second paragraph line.\n');
+    renderer.write('Third line.\n');
+    renderer.flush();
+
+    const lines = output.split('\n').filter(Boolean);
+    expect(lines[0]?.startsWith('● ')).toBe(true);
+    expect(lines[1]?.startsWith('  ')).toBe(true);
+    expect(lines[1]).toBe('  Second paragraph line.');
+    expect(lines[2]?.startsWith('  ')).toBe(true);
+    expect(lines[2]).toBe('  Third line.');
   });
 
   it('clears every visual row of a soft-wrapped pending line before flushing it formatted', () => {
