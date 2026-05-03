@@ -98,7 +98,7 @@ export function compactMessages(messages, placeholder = '[context compacted]', k
     return {
         messages: [
             {
-                role: 'assistant',
+                role: 'user',
                 content: [{ type: 'text', text: summary.text || placeholder }],
             },
             ...messages.slice(-keepRecent),

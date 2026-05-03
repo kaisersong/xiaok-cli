@@ -1,4 +1,4 @@
-import { compactMessages, mergeUsage } from './usage.js';
+import { compactMessages, estimateTokens, mergeUsage } from './usage.js';
 import { AgentSessionGraph } from './session-graph.js';
 let nextCompactionId = 0;
 export class AgentSessionState {
@@ -72,6 +72,15 @@ export class AgentSessionState {
         if (compacted.summary.replacedMessages <= 0) {
             return null;
         }
+        // Compact 后更新 usage.inputTokens 为估算值
+        const estimatedInput = estimateTokens(this.graph.getMessages());
+        const currentUsage = this.graph.getUsage();
+        this.graph.replaceUsage({
+            inputTokens: estimatedInput,
+            outputTokens: currentUsage.outputTokens,
+            cacheCreationInputTokens: currentUsage.cacheCreationInputTokens,
+            cacheReadInputTokens: currentUsage.cacheReadInputTokens,
+        });
         const record = {
             id: `cmp_${Date.now().toString(36)}_${nextCompactionId += 1}`,
             createdAt: Date.now(),

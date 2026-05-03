@@ -2042,6 +2042,7 @@ async function runChat(initialInput, opts) {
             }
             if (trimmed === '/compact') {
                 const compaction = agent.forceCompact();
+                statusBar.update(agent.getUsage()); // 立即更新 statusline 显示
                 if (compaction) {
                     writeCommandOutput(trimmed, `${dim(`已压缩较早对话，保留最近上下文（折叠 ${compaction.replacedMessages} 条历史消息）。`)}\n\n`);
                 }

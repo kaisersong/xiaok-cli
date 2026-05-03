@@ -1,27 +1,67 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChatInput } from './ChatInput';
-import { api } from '../api';
+import { api, type ThreadRecord } from '../api';
 
 export function WelcomePage() {
   const navigate = useNavigate();
   const [prompt, setPrompt] = useState('');
+  const [recentThreads, setRecentThreads] = useState<ThreadRecord[]>([]);
 
-  const handleSubmit = async (text: string) => {
+  useEffect(() => {
+    api.listThreads({ limit: 5 }).then(setRecentThreads);
+  }, []);
+
+  const handleSubmit = async (text: string, _files: Array<{ filePath: string; name: string }>) => {
     const thread = await api.createThread({ title: text.slice(0, 40) });
     await api.createTask({ prompt: text, materials: [] });
     navigate(`/t/${thread.id}`);
   };
 
+  const formatTime = (ts: number) => {
+    const d = new Date(ts);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    return d.toLocaleDateString();
+  };
+
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-8 p-8">
       <h1 className="text-3xl font-medium">What do you want to build?</h1>
-      <ChatInput
-        value={prompt}
-        onChange={setPrompt}
-        onSubmit={handleSubmit}
-        placeholder="Describe your task..."
-      />
+      <div className="w-full max-w-xl">
+        <ChatInput
+          value={prompt}
+          onChange={setPrompt}
+          onSubmit={handleSubmit}
+          placeholder="Describe your task..."
+        />
+      </div>
+
+      {recentThreads.length > 0 && (
+        <div className="w-full max-w-xl">
+          <p className="mb-2 text-xs font-medium text-[var(--c-text-secondary)]">Recent</p>
+          <div className="flex flex-col gap-1">
+            {recentThreads.map(thread => (
+              <button
+                key={thread.id}
+                type="button"
+                onClick={() => navigate(`/t/${thread.id}`)}
+                className="flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--c-bg-card)]"
+              >
+                <span className="truncate">{thread.title || 'Untitled'}</span>
+                <span className="ml-2 shrink-0 text-xs text-[var(--c-text-secondary)]">
+                  {formatTime(thread.createdAt)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

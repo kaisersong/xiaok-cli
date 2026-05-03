@@ -70,7 +70,7 @@ export function ChatShell() {
     }).catch(() => {});
   }, [taskId, handleEvent]);
 
-  const handleSubmit = async (text: string) => {
+  const handleSubmit = async (text: string, _files?: Array<{ filePath: string; name: string }>) => {
     if (!taskId) return;
     setPrompt('');
     setStatus('running');

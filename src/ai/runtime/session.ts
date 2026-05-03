@@ -1,5 +1,5 @@
 import type { Message, MessageBlock, UsageStats } from '../../types.js';
-import { compactMessages, mergeUsage } from './usage.js';
+import { compactMessages, estimateTokens, mergeUsage } from './usage.js';
 import { AgentSessionGraph, type CompactionRecord, type SessionGraphSnapshot } from './session-graph.js';
 
 export type { CompactionRecord } from './session-graph.js';
@@ -95,6 +95,16 @@ export class AgentSessionState {
     if (compacted.summary.replacedMessages <= 0) {
       return null;
     }
+
+    // Compact 后更新 usage.inputTokens 为估算值
+    const estimatedInput = estimateTokens(this.graph.getMessages());
+    const currentUsage = this.graph.getUsage();
+    this.graph.replaceUsage({
+      inputTokens: estimatedInput,
+      outputTokens: currentUsage.outputTokens,
+      cacheCreationInputTokens: currentUsage.cacheCreationInputTokens,
+      cacheReadInputTokens: currentUsage.cacheReadInputTokens,
+    });
 
     const record: CompactionRecord = {
       id: `cmp_${Date.now().toString(36)}_${nextCompactionId += 1}`,

@@ -2392,6 +2392,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
     if (trimmed === '/compact') {
       const compaction = agent.forceCompact();
+      statusBar.update(agent.getUsage()); // 立即更新 statusline 显示
       if (compaction) {
         writeCommandOutput(
           trimmed,
