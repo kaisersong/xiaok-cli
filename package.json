@@ -1,6 +1,6 @@
 {
   "name": "xiaokcode",
-  "version": "0.6.23",
+  "version": "0.6.24",
   "description": "本地优先的 AI 任务交付工作台 CLI",
   "license": "MIT",
   "homepage": "https://github.com/kaisersong/xiaok-cli#readme",
