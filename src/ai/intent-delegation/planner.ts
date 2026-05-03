@@ -466,21 +466,27 @@ function extractSequencedStageSpecs(rawIntent: string): StageIntentSpec[] {
   );
 
   const specs = matches
-    .map((match) => {
+    .flatMap((match) => {
       const verb = (match[1] ?? '').trim();
-      const deliverable = cleanupDeliverable(match[2] ?? '');
-      if (!deliverable) {
-        return null;
+      const rawDeliverable = cleanupDeliverable(match[2] ?? '');
+      if (!rawDeliverable) {
+        return [];
       }
 
-      const rawSegment = `${verb}${deliverable}`;
-      const intentType = classifyByRules(rawSegment);
-      return {
-        rawSegment,
-        deliverable,
-        intentType,
-        stageLabel: buildStageLabel(intentType, deliverable),
-      } satisfies StageIntentSpec;
+      // Split "报告和幻灯片" / "报告、幻灯片" into separate deliverables
+      const deliverables = rawDeliverable.split(/[和、]/u).map((d) => d.trim()).filter(Boolean);
+      if (deliverables.length === 0) return [];
+
+      return deliverables.map((deliverable) => {
+        const rawSegment = `${verb}${deliverable}`;
+        const intentType = classifyByRules(rawSegment);
+        return {
+          rawSegment,
+          deliverable,
+          intentType,
+          stageLabel: buildStageLabel(intentType, deliverable),
+        } satisfies StageIntentSpec;
+      });
     })
     .filter((value): value is StageIntentSpec => Boolean(value));
 
