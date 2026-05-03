@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Plus, Trash2, Star, X, Eye, EyeOff, Mic, ChevronDown, Pencil } from 'lucide-react'
-import { getDesktopApi } from '@arkloop/shared/desktop'
-import type { DesktopConfig } from '@arkloop/shared/desktop'
+// TODO: migrate @arkloop/shared import: import { getDesktopApi } from '@arkloop/shared/desktop'
+// TODO: migrate @arkloop/shared import: import type { DesktopConfig } from '@arkloop/shared/desktop'
 import { useLocale } from '../../contexts/LocaleContext'
 import {
   listAsrCredentials,
@@ -14,7 +14,7 @@ import {
   type CreateAsrCredentialRequest,
   type UpdateAsrCredentialRequest,
 } from '../../api'
-import { PillToggle } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { PillToggle } from '@arkloop/shared'
 
 type Props = {
   accessToken: string

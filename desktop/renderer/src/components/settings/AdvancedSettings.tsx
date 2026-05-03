@@ -16,8 +16,8 @@ import {
   TrendingUp,
   type LucideIcon,
 } from 'lucide-react'
-import { getDesktopApi } from '@arkloop/shared/desktop'
-import { Modal, PillToggle, TabBar, formatDateTime, useTimeZone, useToast } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { getDesktopApi } from '@arkloop/shared/desktop'
+// TODO: migrate @arkloop/shared import: import { Modal, PillToggle, TabBar, formatDateTime, useTimeZone, useToast } from '@arkloop/shared'
 import type {
   AgentImportDiscovery,
   DesktopExportSection,

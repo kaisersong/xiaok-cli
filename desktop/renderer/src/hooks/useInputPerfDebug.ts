@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useCallback } from 'react'
-import { debugBus } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { debugBus } from '@arkloop/shared'
 
 const DEBUG_PANEL_KEY = 'arkloop:web:developer_show_debug_panel'
 const EMIT_INTERVAL_MS = 500

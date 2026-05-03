@@ -15,7 +15,7 @@ import {
   updateChannelBinding,
 } from '../../api'
 import { useLocale } from '../../contexts/LocaleContext'
-import { PillToggle } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { PillToggle } from '@arkloop/shared'
 import { secondaryButtonSmCls, secondaryButtonBorderStyle } from '../buttonStyles'
 import {
   BindingsCard,

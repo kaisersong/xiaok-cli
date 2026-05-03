@@ -1,5 +1,5 @@
 import { Download, Github, Loader2, MessageSquare, MoreHorizontal, RefreshCw, Trash2 } from 'lucide-react'
-import { PillToggle } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { PillToggle } from '@arkloop/shared'
 import { openExternal } from '../../openExternal'
 import type { ViewSkill } from './types'
 import { formatDate } from './types'

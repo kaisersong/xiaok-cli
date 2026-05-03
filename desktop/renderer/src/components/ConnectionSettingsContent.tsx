@@ -8,8 +8,8 @@ import {
   Wifi,
   XCircle,
 } from 'lucide-react'
-import { ErrorCallout } from '@arkloop/shared'
-import { getDesktopApi } from '@arkloop/shared/desktop'
+// TODO: migrate @arkloop/shared import: import { ErrorCallout } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { getDesktopApi } from '@arkloop/shared/desktop'
 import type {
   ConnectionMode,
   DesktopConfig,

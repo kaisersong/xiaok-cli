@@ -1,4 +1,4 @@
-import { AuthPage as SharedAuthPage, type AuthApi } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { AuthPage as SharedAuthPage, type AuthApi } from '@arkloop/shared'
 import {
   login,
   register,

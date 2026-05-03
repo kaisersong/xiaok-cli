@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Download, ExternalLink } from 'lucide-react'
-import { apiBaseUrl } from '@arkloop/shared/api'
+// TODO: migrate @arkloop/shared import: import { apiBaseUrl } from '@arkloop/shared/api'
 import type { ArtifactRef } from '../../storage'
 import { LIGHTBOX_ANIM_MS } from './utils'
 import { CopyIconButton } from '../CopyIconButton'

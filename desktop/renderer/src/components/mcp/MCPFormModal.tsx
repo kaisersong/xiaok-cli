@@ -1,5 +1,5 @@
 import { Loader2 } from 'lucide-react'
-import { AutoResizeTextarea, Modal } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { AutoResizeTextarea, Modal } from '@arkloop/shared'
 import { SettingsLabel } from '../settings/_SettingsLabel'
 import { SettingsInput, settingsInputCls } from '../settings/_SettingsInput'
 import { SettingsSelect } from '../settings/_SettingsSelect'

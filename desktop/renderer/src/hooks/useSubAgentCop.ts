@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef } from 'react'
-import { pickLogicalToolName } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { pickLogicalToolName } from '@arkloop/shared'
 import { useSSE } from './useSSE'
 import type { WebSearchPhaseStep } from '../components/CopTimeline'
 import type { WebSource } from '../storage'

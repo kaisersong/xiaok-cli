@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, Glasses, Pencil, Share2, Star, Trash2 } from 'lucide-react'
-import { isDesktop } from '@arkloop/shared/desktop'
+// TODO: migrate @arkloop/shared import: import { isDesktop } from '@arkloop/shared/desktop'
 import { useLocale } from '../contexts/LocaleContext'
 import { useChatSession } from '../contexts/chat-session'
 import { useAuth } from '../contexts/auth'

@@ -1,4 +1,4 @@
-import { createLocaleContext } from '@arkloop/shared/contexts/locale'
+// TODO: migrate @arkloop/shared import: import { createLocaleContext } from '@arkloop/shared/contexts/locale'
 import { locales, type LocaleStrings } from '../locales'
 import { readLocaleFromStorage, writeLocaleToStorage } from '../storage'
 import type { ReactNode } from 'react'

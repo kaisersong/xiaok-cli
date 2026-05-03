@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { X, ImageOff, CalendarClock, FileText, FileWarning, ShieldAlert, Globe } from 'lucide-react'
 import { createThreadReport, isApiError } from '../api'
 import { useLocale } from '../contexts/LocaleContext'
-import { AutoResizeTextarea } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { AutoResizeTextarea } from '@arkloop/shared'
 
 function SpinnerIcon() {
   return (

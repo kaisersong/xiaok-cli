@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
-import { isApiError } from '@arkloop/shared/api'
+// TODO: migrate @arkloop/shared import: import { isApiError } from '@arkloop/shared/api'
 import { useLocale } from '../../contexts/LocaleContext'
 import {
   listPlatformSettings,
@@ -19,7 +19,7 @@ import {
   TABS,
   type Tab,
 } from '@arkloop/shared/components/prompt-injection'
-import { useToast } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { useToast } from '@arkloop/shared'
 import { SettingsSectionHeader } from './_SettingsSectionHeader'
 
 type Props = { accessToken: string }

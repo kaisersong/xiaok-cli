@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, Fragment } from 'react'
 import { X } from 'lucide-react'
-import { getActiveTimeZone } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { getActiveTimeZone } from '@arkloop/shared'
 import { listNotifications, markAllNotificationsRead, type NotificationItem } from '../api'
 import { useLocale } from '../contexts/LocaleContext'
 

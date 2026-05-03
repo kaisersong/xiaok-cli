@@ -21,9 +21,9 @@ import {
   Shield,
   Info,
 } from "lucide-react";
-import { getDesktopApi } from "@arkloop/shared/desktop";
+// TODO: migrate @arkloop/shared import: import { getDesktopApi } from "@arkloop/shared/desktop";
 import type { MeResponse } from "@/api";
-import type { DesktopConfig } from "@arkloop/shared/desktop";
+// TODO: migrate @arkloop/shared import: import type { DesktopConfig } from "@arkloop/shared/desktop";
 import { listPlatformSettings } from "../api-admin";
 import { bridgeClient } from "../api-bridge";
 import { useLocale } from "../contexts/LocaleContext";

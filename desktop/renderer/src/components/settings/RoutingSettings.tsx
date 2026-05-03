@@ -7,8 +7,8 @@ import {
 } from '../../api'
 import type { SpawnProfile, LlmProvider } from '../../api'
 import { useLocale } from '../../contexts/LocaleContext'
-import { isLocalMode } from '@arkloop/shared/desktop'
-import { getAvailableCatalogFromAdvancedJson } from '@arkloop/shared/llm/available-catalog-advanced-json'
+// TODO: migrate @arkloop/shared import: import { isLocalMode } from '@arkloop/shared/desktop'
+// TODO: migrate @arkloop/shared import: import { getAvailableCatalogFromAdvancedJson } from '@arkloop/shared/llm/available-catalog-advanced-json'
 import { SettingsModelDropdown } from './SettingsModelDropdown'
 
 type Props = {

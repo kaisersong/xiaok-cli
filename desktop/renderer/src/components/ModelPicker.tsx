@@ -1,10 +1,10 @@
 import { useRef, useEffect, useState, useCallback, useLayoutEffect } from 'react'
 import { ChevronDown, Brain, Check } from 'lucide-react'
-import { PillToggle } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { PillToggle } from '@arkloop/shared'
 import { listLlmProviders, type LlmProvider } from '../api'
 import { useLocale } from '../contexts/LocaleContext'
-import { isDesktop } from '@arkloop/shared/desktop'
-import { getAvailableCatalogFromAdvancedJson } from '@arkloop/shared/llm/available-catalog-advanced-json'
+// TODO: migrate @arkloop/shared import: import { isDesktop } from '@arkloop/shared/desktop'
+// TODO: migrate @arkloop/shared import: import { getAvailableCatalogFromAdvancedJson } from '@arkloop/shared/llm/available-catalog-advanced-json'
 
 const REASONING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'max'] as const
 const SUBMENU_INSET_LEFT = 10

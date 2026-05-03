@@ -3,7 +3,7 @@ import { RefreshCw } from 'lucide-react'
 import { listRuns, type Run } from '../../api'
 import { RunDetailPanel } from '../RunDetailPanel'
 import { useLocale } from '../../contexts/LocaleContext'
-import { formatDateTime } from '@arkloop/shared'
+// TODO: migrate @arkloop/shared import: import { formatDateTime } from '@arkloop/shared'
 
 type Props = {
   accessToken: string
