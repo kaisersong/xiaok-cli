@@ -1,0 +1,50 @@
+{
+  "name": "xiaok-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "xiaok Desktop Intent Cockpit",
+  "author": "xiaok",
+  "type": "module",
+  "main": "dist/main/desktop/electron/main.js",
+  "scripts": {
+    "build:icon": "node ../scripts/desktop-icon.mjs",
+    "build": "npm run build:main && npm run build:renderer",
+    "build:main": "tsc -p tsconfig.electron.json && node -e \"const fs=require('fs'); fs.copyFileSync('electron/preload.cjs','dist/main/desktop/electron/preload.cjs');\"",
+    "build:renderer": "vite build",
+    "dev": "vite --host 127.0.0.1",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "pack:dir": "npm run build:icon && npm run build && electron-builder --dir --config electron-builder.json"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "framer-motion": "^12.34.3",
+    "highlight.js": "^11.11.1",
+    "katex": "^0.16.28",
+    "lucide-react": "^0.575.0",
+    "mermaid": "^11.13.0",
+    "openai": "^4.77.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.13.0",
+    "react-virtuoso": "^4.18.6",
+    "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.2",
+    "@vitejs/plugin-react": "^5.1.1",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "vitest": "^3.2.4"
+  }
+}
