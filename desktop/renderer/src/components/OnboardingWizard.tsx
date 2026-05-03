@@ -1,0 +1,2067 @@
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  CheckCircle,
+  ChevronRight,
+  Cloud,
+  HardDrive,
+  Search,
+  Server,
+  Settings,
+  XCircle,
+} from "lucide-react";
+import { ErrorCallout, isApiError, type AppError } from "@/shared";
+import {
+  Reveal,
+  inputCls,
+  inputStyle,
+  labelStyle,
+  SpinnerIcon,
+  normalizeError,
+} from "@arkloop/shared/components/auth-ui";
+import { getDesktopApi, getDesktopAccessToken } from "@arkloop/shared/desktop";
+import { useLocale } from "../contexts/LocaleContext";
+import { LogoDrawAnimation } from "./LogoDrawAnimation";
+import { SettingsModelDropdown } from "./settings/SettingsModelDropdown";
+import { LanguageContent } from "./settings/AppearanceSettings";
+import { useAppearance } from "../contexts/AppearanceContext";
+import { BUILTIN_PRESETS } from "../themes/presets";
+import type { ThemePreset } from "../themes/types";
+import {
+  createLlmProvider,
+  createProviderModel,
+  listAvailableModels,
+  listLlmProviders,
+  updateLlmProvider,
+} from "@/api";
+import type { AvailableModel, LlmProvider, LlmProviderModel } from "@/api";
+import type { AgentImportDiscovery, ImportItemKey, ImportSourceKind } from "@arkloop/shared/desktop";
+import { routeAdvancedJsonFromAvailableCatalog } from "@arkloop/shared/llm/available-catalog-advanced-json";
+
+type Step = "welcome" | "mode" | "provider" | "appearance" | "import" | "complete";
+
+type Vendor = "openai_responses" | "openai_chat_completions" | "anthropic" | "gemini";
+type VerifyStatus = "idle" | "verifying" | "verified" | "failed";
+type ModelImportStatus =
+  | "idle"
+  | "loading"
+  | "ready"
+  | "empty"
+  | "importing"
+  | "done"
+  | "failed";
+
+type Props = { onComplete: () => void };
+type ImportSelectionState = Partial<Record<ImportSourceKind, Record<ImportItemKey, boolean>>>;
+const LOCAL_ACCESS_TOKEN =
+  getDesktopAccessToken() ?? "";
+
+const IMPORT_ITEM_KEYS = ["identity", "skills", "mcp", "providers"] as const;
+
+const VENDOR_OPTIONS = [
+  {
+    key: "openai_responses" as const,
+    label: "OpenAI (Responses)",
+    provider: "openai",
+    openai_api_mode: "responses" as string | undefined,
+  },
+  {
+    key: "openai_chat_completions" as const,
+    label: "OpenAI (Chat Completions)",
+    provider: "openai",
+    openai_api_mode: "chat_completions" as string | undefined,
+  },
+  {
+    key: "anthropic" as const,
+    label: "Anthropic",
+    provider: "anthropic",
+    openai_api_mode: undefined as string | undefined,
+  },
+  {
+    key: "gemini" as const,
+    label: "Gemini",
+    provider: "gemini",
+    openai_api_mode: undefined as string | undefined,
+  },
+] as const;
+
+const VENDOR_URLS: Record<Vendor, string> = {
+  openai_responses: "https://api.openai.com/v1",
+  openai_chat_completions: "https://api.openai.com/v1",
+  anthropic: "https://api.anthropic.com/v1",
+  gemini: "https://generativelanguage.googleapis.com/v1beta",
+};
+
+const RECOMMENDED_PATTERNS: Record<Vendor, string[]> = {
+  openai_responses: ["gpt-4o", "gpt-4o-mini"],
+  openai_chat_completions: ["gpt-4o", "gpt-4o-mini"],
+  anthropic: ["claude-3-5-sonnet", "claude-3-5-haiku", "claude-3-haiku"],
+  gemini: ["gemini-2.0-flash", "gemini-1.5-pro"],
+};
+
+function getDefaultSelectedIds(
+  models: AvailableModel[],
+  vendor: Vendor,
+): Set<string> {
+  const patterns = RECOMMENDED_PATTERNS[vendor];
+  const selected = new Set<string>();
+  const importable = models.filter((m) => !m.configured);
+
+  for (const pattern of patterns) {
+    const match = importable.find((m) => m.id.toLowerCase().includes(pattern));
+    if (match) selected.add(match.id);
+  }
+
+  if (selected.size === 0) {
+    importable.slice(0, 2).forEach((m) => selected.add(m.id));
+  }
+
+  return selected;
+}
+
+const btnBase: React.CSSProperties = {
+  height: "38px",
+  borderRadius: "10px",
+  border: "none",
+  cursor: "pointer",
+  fontSize: "14px",
+  fontWeight: 500,
+  fontFamily: "inherit",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "6px",
+  width: "100%",
+};
+
+const primaryBtn: React.CSSProperties = {
+  ...btnBase,
+  background: "var(--c-btn-bg)",
+  color: "var(--c-btn-text)",
+};
+
+const ghostBtn: React.CSSProperties = {
+  ...btnBase,
+  marginTop: "4px",
+  background: "transparent",
+  color: "var(--c-placeholder)",
+};
+
+const sectionCardStyle: React.CSSProperties = {
+  border: "0.5px solid var(--c-border-subtle)",
+  borderRadius: "14px",
+  background: "var(--c-bg-menu)",
+  padding: "14px",
+};
+
+function normalizeMode(mode?: string | null): string | null {
+  const value = mode?.trim();
+  return value ? value : null;
+}
+
+function providerMatches(
+  provider: LlmProvider,
+  vendorOpt: (typeof VENDOR_OPTIONS)[number],
+): boolean {
+  return (
+    provider.provider === vendorOpt.provider &&
+    normalizeMode(provider.openai_api_mode) ===
+      normalizeMode(vendorOpt.openai_api_mode)
+  );
+}
+
+function mergeConfiguredModels(
+  current: LlmProviderModel[],
+  next: LlmProviderModel[],
+): LlmProviderModel[] {
+  const merged = new Map<string, LlmProviderModel>();
+  for (const model of current) merged.set(model.model, model);
+  for (const model of next) merged.set(model.model, model);
+  return Array.from(merged.values());
+}
+
+function createDefaultImportSelections(
+  sources: AgentImportDiscovery[],
+): ImportSelectionState {
+  return sources.reduce<ImportSelectionState>((acc, source) => {
+    acc[source.kind] = {
+      identity: true,
+      skills: true,
+      mcp: true,
+      providers: true,
+    };
+    return acc;
+  }, {});
+}
+
+function ImportSourceIcon({ source }: { source: ImportSourceKind }) {
+  if (source === "hermes") {
+    return (
+      <svg viewBox="0 0 64 64" aria-hidden="true" style={{ width: 16, height: 16, display: "block" }}>
+        <path d="M30 10h4v44h-4z" fill="currentColor" opacity="0.9" />
+        <path d="M30 18c-7-5-15-5-20-1 6-1 13 0 19 5zM34 18c7-5 15-5 20-1-6-1-13 0-19 5z" fill="currentColor" opacity="0.72" />
+        <path d="M30 24c-5-3-11-3-16 0 5-1 10 0 15 4zM34 24c5-3 11-3 16 0-5-1-10 0-15 4z" fill="currentColor" opacity="0.48" />
+        <path d="M32 49c-10-4-13-12-5-17-8 3-10 11-3 16m8 1c10-4 13-12 5-17 8 3 10 11 3 16" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" />
+        <circle cx="32" cy="10" r="4" fill="currentColor" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 120 120" aria-hidden="true" style={{ width: 16, height: 16, display: "block" }}>
+      <path d="M60 12c-25 0-43 18-43 43 0 19 12 35 28 42v10h10v-7c3 1 7 1 10 0v7h10V97c16-7 28-23 28-42 0-25-18-43-43-43Z" fill="currentColor" opacity="0.9" />
+      <path d="M23 47C9 43 1 51 7 62c6 10 17 6 22-7 2-5-1-8-6-8Zm74 0c14-4 22 4 16 15-6 10-17 6-22-7-2-5 1-8 6-8Z" fill="currentColor" opacity="0.72" />
+      <circle cx="45" cy="36" r="5" fill="var(--c-bg-page)" />
+      <circle cx="75" cy="36" r="5" fill="var(--c-bg-page)" />
+    </svg>
+  );
+}
+
+function ImportButtonContent({
+  source,
+  label,
+}: {
+  source: ImportSourceKind;
+  label: string;
+}) {
+  return (
+    <span className="onb-centered-icon-label">
+      <span className="onb-centered-icon">
+        <ImportSourceIcon source={source} />
+      </span>
+      <span className="onb-centered-label">{label}</span>
+      <span aria-hidden="true" />
+    </span>
+  );
+}
+
+function StepIndicator({
+  current,
+  total,
+  stepOf,
+}: {
+  current: number;
+  total: number;
+  stepOf: (c: number, t: number) => string;
+}) {
+  return (
+    <div
+      style={{
+        fontSize: "12px",
+        color: "var(--c-text-muted)",
+        marginBottom: "24px",
+      }}
+    >
+      {stepOf(current, total)}
+    </div>
+  );
+}
+
+function ProgressBar({ percent }: { percent: number }) {
+  return (
+    <div
+      style={{
+        height: "4px",
+        borderRadius: "2px",
+        background: "var(--c-border-subtle)",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          height: "100%",
+          borderRadius: "2px",
+          background: "var(--c-btn-bg)",
+          width: `${percent}%`,
+          transition: "width 0.3s ease",
+        }}
+      />
+    </div>
+  );
+}
+
+function ToggleSwitch({
+  checked,
+  onChange,
+  disabled,
+}: {
+  checked: boolean;
+  onChange?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={onChange}
+      disabled={disabled}
+      style={{
+        width: "36px",
+        height: "20px",
+        borderRadius: "10px",
+        background: checked ? "var(--c-btn-bg)" : "var(--c-border-subtle)",
+        border: "none",
+        cursor: disabled ? "default" : "pointer",
+        position: "relative",
+        transition: "background 0.2s",
+        flexShrink: 0,
+        opacity: disabled ? 0.5 : 1,
+        padding: 0,
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          top: "2px",
+          left: checked ? "18px" : "2px",
+          width: "16px",
+          height: "16px",
+          borderRadius: "50%",
+          background: "white",
+          transition: "left 0.2s ease",
+          boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
+          display: "block",
+        }}
+      />
+    </button>
+  );
+}
+
+function ModeCard({
+  icon,
+  title,
+  desc,
+  onClick,
+  disabled,
+  comingSoon,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  comingSoon?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="onb-mode-card"
+      style={{
+        border: "0.5px solid var(--c-border-subtle)",
+        borderRadius: "12px",
+        background: "var(--c-bg-menu)",
+        padding: "14px 16px",
+        cursor: disabled ? "default" : "pointer",
+        textAlign: "left",
+        width: "100%",
+        fontFamily: "inherit",
+        opacity: disabled ? 0.55 : 1,
+        display: "flex",
+        alignItems: "center",
+        gap: "14px",
+        transition: "border-color 0.15s, background 0.15s",
+      }}
+    >
+      <div
+        style={{
+          width: "36px",
+          height: "36px",
+          borderRadius: "10px",
+          background: "var(--c-bg-deep)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          color: "var(--c-text-secondary)",
+        }}
+      >
+        {icon}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: "14px",
+            fontWeight: 500,
+            color: "var(--c-text-primary)",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+          }}
+        >
+          {title}
+          {comingSoon && (
+            <span
+              style={{
+                fontSize: "10px",
+                color: "var(--c-text-muted)",
+                background: "var(--c-bg-deep)",
+                padding: "2px 6px",
+                borderRadius: "4px",
+                fontWeight: 400,
+              }}
+            >
+              {comingSoon}
+            </span>
+          )}
+        </div>
+        <div
+          style={{
+            fontSize: "12px",
+            color: "var(--c-placeholder)",
+            marginTop: "2px",
+          }}
+        >
+          {desc}
+        </div>
+      </div>
+      {!disabled && (
+        <ChevronRight
+          size={16}
+          style={{ color: "var(--c-text-muted)", flexShrink: 0 }}
+        />
+      )}
+    </button>
+  );
+}
+
+export function OnboardingWizard({ onComplete }: Props) {
+  const { t, locale, setLocale } = useLocale();
+  const ob = t.onboarding;
+  const api = getDesktopApi();
+  const { themePreset, setThemePreset } = useAppearance();
+
+  const [step, setStep] = useState<Step>("welcome");
+  const [importSources, setImportSources] = useState<AgentImportDiscovery[]>([]);
+  const [selectedImportSource, setSelectedImportSource] =
+    useState<ImportSourceKind | null>(null);
+  const [providerImportedFromAgent, setProviderImportedFromAgent] =
+    useState(false);
+  const [importSelections, setImportSelections] = useState<ImportSelectionState>(
+    {},
+  );
+  const [importingAgent, setImportingAgent] = useState(false);
+  const [importError, setImportError] = useState<AppError | null>(null);
+
+  // Welcome animation phases
+  type WelcomePhase = "animating" | "greeting" | "ready";
+  const [welcomePhase, setWelcomePhase] = useState<WelcomePhase>("animating");
+
+  // Sidecar readiness
+  const [sidecarReady, setSidecarReady] = useState<boolean | null>(null);
+  const [downloadPhase, setDownloadPhase] = useState("");
+  const [downloadPercent, setDownloadPercent] = useState(0);
+  const [downloadError, setDownloadError] = useState("");
+
+  // Provider state
+  const [vendor, setVendor] = useState<Vendor>("openai_responses");
+  const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState(VENDOR_URLS.openai_responses);
+  const [verifyStatus, setVerifyStatus] = useState<VerifyStatus>("idle");
+  const [providerError, setProviderError] = useState<AppError | null>(null);
+
+  // Model state
+  const [modelImportStatus, setModelImportStatus] =
+    useState<ModelImportStatus>("idle");
+  const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
+  const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [createdProviderId, setCreatedProviderId] = useState<string | null>(
+    null,
+  );
+  const [configuredModels, setConfiguredModels] = useState<LlmProviderModel[]>(
+    [],
+  );
+  const [modelError, setModelError] = useState<AppError | null>(null);
+  const [modelSearchQuery, setModelSearchQuery] = useState("");
+  const [manualModelName, setManualModelName] = useState("");
+  const [addingModel, setAddingModel] = useState(false);
+
+  const [saving, setSaving] = useState(false);
+  const apiKeyRef = useRef<HTMLInputElement>(null);
+  const manualModelRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const detectImports = api?.onboarding.detectImports;
+    if (!detectImports) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void detectImports().then((sources) => {
+        if (cancelled) return;
+        setImportSources(sources);
+        setImportSelections(createDefaultImportSelections(sources));
+      }).catch(() => {
+        if (cancelled) return;
+        setImportSources([]);
+        setImportSelections({});
+      });
+    }, 360);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [api]);
+
+  const handleLogoComplete = useCallback(() => {
+    setWelcomePhase("greeting");
+    setTimeout(() => setWelcomePhase("ready"), 1800);
+  }, []);
+
+  const appearanceInitRef = useRef(false);
+  useEffect(() => {
+    if (step === "appearance" && !appearanceInitRef.current) {
+      appearanceInitRef.current = true;
+      if (!themePreset || themePreset === "default") {
+        setThemePreset("terra" as ThemePreset);
+      }
+    }
+  }, [step, themePreset, setThemePreset]);
+
+  const hasImportStep = importSources.length > 0;
+  const selectedImportSourceData =
+    importSources.find((source) => source.kind === selectedImportSource) ?? null;
+  const hasImportDetailStep = selectedImportSourceData !== null;
+
+  const stepMeta = useMemo(() => {
+    const total = hasImportDetailStep ? 5 : hasImportStep ? 4 : 3;
+    switch (step) {
+      case "appearance":
+        return { n: 1, total };
+      case "import":
+        return { n: hasImportDetailStep ? 3 : 2, total };
+      case "provider":
+        return { n: hasImportDetailStep ? 4 : hasImportStep ? 3 : 2, total };
+      case "complete":
+        return { n: total, total };
+      default:
+        return null;
+    }
+  }, [hasImportDetailStep, hasImportStep, step]);
+
+  const providerVerified =
+    step === "provider" && verifyStatus === "verified" && !!createdProviderId;
+
+  // Models filtered + sorted (stable sort — enabled first by initial state)
+  const sortedModels = useMemo(() => {
+    return [...availableModels].sort((a, b) => {
+      if (a.configured !== b.configured) return a.configured ? -1 : 1;
+      return (a.name || a.id).localeCompare(b.name || b.id);
+    });
+  }, [availableModels]);
+
+  const filteredModels = useMemo(() => {
+    const query = modelSearchQuery.toLowerCase().trim();
+    if (!query) return sortedModels;
+    return sortedModels.filter(
+      (m) =>
+        m.id.toLowerCase().includes(query) ||
+        (m.name && m.name.toLowerCase().includes(query)),
+    );
+  }, [sortedModels, modelSearchQuery]);
+
+  const enabledCount = useMemo(
+    () =>
+      availableModels.filter((m) => m.configured || selectedModelIds.has(m.id))
+        .length,
+    [availableModels, selectedModelIds],
+  );
+
+  const resetProviderState = useCallback(() => {
+    setVerifyStatus("idle");
+    setProviderError(null);
+    setModelError(null);
+    setModelImportStatus("idle");
+    setAvailableModels([]);
+    setSelectedModelIds(new Set());
+    setCreatedProviderId(null);
+    setConfiguredModels([]);
+    setModelSearchQuery("");
+    setManualModelName("");
+  }, []);
+
+  const handleVendorChange = useCallback(
+    (nextVendor: Vendor) => {
+      setVendor(nextVendor);
+      setBaseUrl(VENDOR_URLS[nextVendor]);
+      resetProviderState();
+    },
+    [resetProviderState],
+  );
+
+  const ensureSidecar = useCallback(async () => {
+    if (!api) return;
+    const available = await api.sidecar.isAvailable();
+    if (available) {
+      setSidecarReady(true);
+      return;
+    }
+
+    setSidecarReady(false);
+    setDownloadError("");
+    setDownloadPercent(0);
+    setDownloadPhase(ob.localDownloading);
+
+    const unsub = api.sidecar.onDownloadProgress((progress) => {
+      setDownloadPhase(progress.phase);
+      setDownloadPercent(progress.percent);
+      if (progress.error) setDownloadError(progress.error);
+    });
+
+    try {
+      const result = await api.sidecar.download();
+      unsub();
+      if (!result.ok) {
+        setDownloadError(ob.localDownloadFailed);
+        return;
+      }
+      setDownloadPhase(ob.localStarting);
+      await api.sidecar.restart();
+      setSidecarReady(true);
+    } catch (error) {
+      unsub();
+      setDownloadError(
+        error instanceof Error ? error.message : ob.localDownloadFailed,
+      );
+    }
+  }, [api, ob.localDownloadFailed, ob.localDownloading, ob.localStarting]);
+
+  useEffect(() => {
+    if (step === "provider") {
+      void ensureSidecar();
+    }
+  }, [ensureSidecar, step]);
+
+  useEffect(() => {
+    if (step === "provider" && sidecarReady) {
+      const timer = setTimeout(() => apiKeyRef.current?.focus(), 420);
+      return () => clearTimeout(timer);
+    }
+  }, [step, sidecarReady]);
+
+  const handleWelcomeNext = useCallback(() => {
+    setStep("appearance");
+  }, []);
+
+  const handleAppearanceNext = useCallback(() => {
+    setSelectedImportSource(null);
+    setProviderImportedFromAgent(false);
+    setImportError(null);
+    setStep(hasImportStep ? "import" : "provider");
+  }, [hasImportStep]);
+
+  const handleImportItemToggle = useCallback(
+    (source: ImportSourceKind, item: ImportItemKey) => {
+      setImportSelections((current) => {
+        const currentSource = current[source] ?? {
+          identity: true,
+          skills: true,
+          mcp: true,
+          providers: true,
+        };
+        return {
+          ...current,
+          [source]: {
+            ...currentSource,
+            [item]: !currentSource[item],
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  const handleImportSelected = useCallback(async () => {
+    if (!selectedImportSourceData || !api?.onboarding.applyImport || importingAgent) return;
+    const selection = importSelections[selectedImportSourceData.kind] ?? {
+      identity: true,
+      skills: true,
+      mcp: true,
+      providers: true,
+    };
+    setImportError(null);
+    setImportingAgent(true);
+    try {
+      await ensureSidecar();
+      const result = await api.onboarding.applyImport({
+        source: selectedImportSourceData.kind,
+        selection,
+      });
+      if (!result.ok) {
+        throw new Error(result.errors[0] ?? t.requestFailed);
+      }
+      setProviderImportedFromAgent(result.imported.providers > 0);
+      setStep("provider");
+    } catch (error) {
+      setImportError(normalizeError(error, t.requestFailed));
+    } finally {
+      setImportingAgent(false);
+    }
+  }, [api, ensureSidecar, importSelections, importingAgent, selectedImportSourceData, t.requestFailed]);
+
+  const handleSkipImport = useCallback(() => {
+    setProviderImportedFromAgent(false);
+    setImportError(null);
+    setStep("provider");
+  }, []);
+
+  const handleModeSelectLocal = useCallback(async () => {
+    if (!api) return;
+    setStep("provider"); // immediate, no wait
+    api.config.get().then((current) => api.config.set({ ...current, mode: "local" })).catch(() => {});
+  }, [api]);
+
+  const upsertProviderCredential =
+    useCallback(async (): Promise<LlmProvider> => {
+      const vendorOpt = VENDOR_OPTIONS.find((option) => option.key === vendor)!;
+      const trimmedUrl = baseUrl.trim().replace(/\/$/, "");
+      const providers = await listLlmProviders(LOCAL_ACCESS_TOKEN);
+      const existing =
+        providers.find(
+          (provider) =>
+            provider.name === vendorOpt.label &&
+            providerMatches(provider, vendorOpt),
+        ) ?? providers.find((provider) => providerMatches(provider, vendorOpt));
+
+      if (existing) {
+        return await updateLlmProvider(LOCAL_ACCESS_TOKEN, existing.id, {
+          name: vendorOpt.label,
+          provider: vendorOpt.provider,
+          api_key: apiKey.trim(),
+          base_url: trimmedUrl || null,
+          openai_api_mode: vendorOpt.openai_api_mode ?? null,
+        });
+      }
+
+      try {
+        return await createLlmProvider(LOCAL_ACCESS_TOKEN, {
+          name: vendorOpt.label,
+          provider: vendorOpt.provider,
+          api_key: apiKey.trim(),
+          ...(trimmedUrl ? { base_url: trimmedUrl } : {}),
+          ...(vendorOpt.openai_api_mode
+            ? { openai_api_mode: vendorOpt.openai_api_mode }
+            : {}),
+        });
+      } catch (error) {
+        if (
+          !isApiError(error) ||
+          error.code !== "llm_providers.name_conflict"
+        ) {
+          throw error;
+        }
+
+        const latestProviders = await listLlmProviders(LOCAL_ACCESS_TOKEN);
+        const conflicted =
+          latestProviders.find(
+            (provider) =>
+              provider.name === vendorOpt.label &&
+              providerMatches(provider, vendorOpt),
+          ) ??
+          latestProviders.find((provider) => provider.name === vendorOpt.label);
+
+        if (!conflicted) throw error;
+
+        return await updateLlmProvider(LOCAL_ACCESS_TOKEN, conflicted.id, {
+          name: vendorOpt.label,
+          provider: vendorOpt.provider,
+          api_key: apiKey.trim(),
+          base_url: trimmedUrl || null,
+          openai_api_mode: vendorOpt.openai_api_mode ?? null,
+        });
+      }
+    }, [apiKey, baseUrl, vendor]);
+
+  const handleVerify = useCallback(async () => {
+    setVerifyStatus("verifying");
+    setProviderError(null);
+    setModelError(null);
+    setModelImportStatus("idle");
+    try {
+      const provider = await upsertProviderCredential();
+      setCreatedProviderId(provider.id);
+      setConfiguredModels(provider.models ?? []);
+
+      // Real connectivity test: fetch available models from the provider API
+      setModelImportStatus("loading");
+      const response = await listAvailableModels(
+        LOCAL_ACCESS_TOKEN,
+        provider.id,
+      );
+      const models = response.models ?? [];
+      setAvailableModels(models);
+      setSelectedModelIds(getDefaultSelectedIds(models, vendor));
+      setModelImportStatus(
+        models.filter((m) => !m.configured).length > 0 ? "ready" : "empty",
+      );
+
+      // Only set verified after the real HTTP test succeeds
+      setVerifyStatus("verified");
+    } catch (error) {
+      setVerifyStatus("failed");
+      setModelImportStatus("idle");
+      setProviderError(normalizeError(error, t.requestFailed));
+    }
+  }, [t.requestFailed, upsertProviderCredential, vendor]);
+
+  const toggleModelSelection = useCallback((modelId: string) => {
+    setSelectedModelIds((current) => {
+      const next = new Set(current);
+      if (next.has(modelId)) next.delete(modelId);
+      else next.add(modelId);
+      return next;
+    });
+  }, []);
+
+  const handleAddModel = useCallback(async () => {
+    const model = manualModelName.trim();
+    if (!createdProviderId || !model) return;
+
+    setAddingModel(true);
+    setModelError(null);
+    try {
+      const created = await createProviderModel(
+        LOCAL_ACCESS_TOKEN,
+        createdProviderId,
+        {
+          model,
+          is_default: configuredModels.length === 0,
+        },
+      );
+      setConfiguredModels((current) =>
+        mergeConfiguredModels(current, [created]),
+      );
+      setAvailableModels((current) => {
+        const exists = current.some((m) => m.id === model);
+        if (exists)
+          return current.map((m) =>
+            m.id === model ? { ...m, configured: true } : m,
+          );
+        return [...current, { id: model, name: model, configured: true }];
+      });
+      setManualModelName("");
+      // Keep form visible so user can add multiple models
+      setTimeout(() => manualModelRef.current?.focus(), 50);
+    } catch (error) {
+      setModelError(normalizeError(error, t.requestFailed));
+    } finally {
+      setAddingModel(false);
+    }
+  }, [
+    configuredModels.length,
+    createdProviderId,
+    manualModelName,
+    t.requestFailed,
+  ]);
+
+  const handleNextFromPanel = useCallback(async () => {
+    if (!createdProviderId || selectedModelIds.size === 0) {
+      setStep("complete");
+      return;
+    }
+
+    setModelImportStatus("importing");
+    setModelError(null);
+
+    try {
+      const ids = Array.from(selectedModelIds);
+      const imported: LlmProviderModel[] = [];
+      for (const [index, modelId] of ids.entries()) {
+        const am = availableModels.find((m) => m.id === modelId);
+        const created = await createProviderModel(
+          LOCAL_ACCESS_TOKEN,
+          createdProviderId,
+          {
+            model: modelId,
+            is_default: configuredModels.length === 0 && index === 0,
+            priority: Math.max(ids.length - index, 1),
+            advanced_json: routeAdvancedJsonFromAvailableCatalog({
+              id: modelId,
+              name: am?.name ?? modelId,
+              type: am?.type,
+              context_length: am?.context_length,
+              max_output_tokens: am?.max_output_tokens,
+              input_modalities: am?.input_modalities,
+              output_modalities: am?.output_modalities,
+            }),
+          },
+        );
+        imported.push(created);
+      }
+
+      setConfiguredModels((current) =>
+        mergeConfiguredModels(current, imported),
+      );
+      const importedIdSet = new Set(ids);
+      setAvailableModels((current) =>
+        current.map((m) => (importedIdSet.has(m.id) ? { ...m, configured: true } : m)),
+      );
+      setSelectedModelIds(new Set());
+      setModelImportStatus("done");
+      setStep("complete");
+    } catch (error) {
+      setModelImportStatus("failed");
+      setModelError(normalizeError(error, t.requestFailed));
+    }
+  }, [
+    availableModels,
+    configuredModels.length,
+    createdProviderId,
+    selectedModelIds,
+    t.requestFailed,
+  ]);
+
+  const handleComplete = useCallback(async () => {
+    if (!api) return;
+    setSaving(true);
+    try {
+      await api.onboarding.complete();
+      onComplete();
+    } finally {
+      setSaving(false);
+    }
+  }, [api, onComplete]);
+
+  if (!api) return null;
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "var(--c-bg-page)",
+        display: "flex",
+        flexDirection: "column",
+        position: "relative",
+        overflowX: "hidden",
+        overflowY: "auto",
+      }}
+    >
+      <style>{`
+        @keyframes onb-slide-in {
+          from { opacity: 0; transform: translateX(20px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes onb-fade-up {
+          from { opacity: 0; transform: translateY(14px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .onb-mode-card:not(:disabled):hover {
+          border-color: var(--c-border) !important;
+          background: var(--c-bg-deep) !important;
+        }
+        .onb-model-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 8px 4px;
+          border-bottom: 0.5px solid var(--c-border-subtle);
+          transition: background 0.12s;
+        }
+        .onb-model-row:last-child { border-bottom: none; }
+        .onb-search-wrap { position: relative; }
+        .onb-search-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--c-placeholder); }
+        .onb-search-input { padding-left: 32px !important; }
+        .onb-btn-primary {
+          transition: filter 0.2s cubic-bezier(0.16,1,0.3,1);
+        }
+        .onb-btn-primary:hover {
+          filter: brightness(1.12);
+        }
+        .onb-btn-primary:active {
+          filter: brightness(0.95);
+        }
+        .onb-btn-ghost {
+          transition: color 0.2s cubic-bezier(0.16,1,0.3,1), background 0.2s cubic-bezier(0.16,1,0.3,1);
+        }
+        .onb-btn-ghost:hover {
+          color: var(--c-text-secondary) !important;
+          background: var(--c-bg-sub) !important;
+        }
+        .onb-centered-icon-label {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+          align-items: center;
+          width: 100%;
+        }
+        .onb-centered-icon {
+          display: flex;
+          justify-self: end;
+          margin-right: 6px;
+        }
+        .onb-centered-label {
+          grid-column: 2;
+          justify-self: center;
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .onb-import-actions {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+          gap: 10px;
+          margin-top: 20px;
+        }
+        .onb-import-items {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .onb-import-source-options {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          margin-top: 44px;
+        }
+        .onb-import-detail-actions {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          margin-top: 20px;
+        }
+        .onb-import-source:hover {
+          border-color: var(--c-border) !important;
+        }
+        .onb-import-row:hover {
+          background: var(--c-bg-deep) !important;
+        }
+      `}</style>
+      <div className="auth-dots" />
+      <div className="auth-glow auth-glow-top" />
+      <div className="auth-glow auth-glow-bottom" />
+
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "48px 20px 80px",
+          position: "relative",
+          zIndex: 1,
+        }}
+      >
+        {/* Two-column layout: right column pre-allocated on provider step to prevent jitter */}
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-start", width: "100%", position: "relative" }}>
+          <section style={{
+            width: "min(520px, 100%)",
+            flexShrink: 0,
+            transform: providerVerified ? "translateX(-192px)" : "translateX(0)",
+            transition: "transform 0.5s cubic-bezier(0.16,1,0.3,1)",
+          }}>
+            {stepMeta && (
+              <StepIndicator
+                current={stepMeta.n}
+                total={stepMeta.total}
+                stepOf={ob.stepOf}
+              />
+            )}
+
+            {/* Welcome — greeting stays, content fades in below */}
+            <Reveal active={step === "welcome"}>
+              <div style={{ textAlign: "center" }}>
+                {/* Logo draw + brand name */}
+                {welcomePhase === "animating" && (
+                  <LogoDrawAnimation onComplete={handleLogoComplete} size={120} />
+                )}
+
+                {/* Greeting + Welcome content coexist */}
+                {welcomePhase !== "animating" && (
+                  <>
+                    <div
+                      style={{
+                        fontSize: "38px",
+                        fontWeight: 400,
+                        color: "var(--c-text-primary)",
+                        letterSpacing: "0.08em",
+                        marginBottom: welcomePhase === "ready" ? "16px" : "0",
+                        paddingTop: welcomePhase === "ready" ? "0" : "80px",
+                        transition: "margin-bottom 0.8s cubic-bezier(0.16,1,0.3,1), padding-top 0.8s cubic-bezier(0.16,1,0.3,1)",
+                        animation: "onb-fade-up 0.8s cubic-bezier(0.16,1,0.3,1) forwards",
+                      }}
+                    >
+                      {ob.greeting}
+                    </div>
+
+                    {/* Welcome title + desc + button — slow fade in */}
+                    <div
+                      style={{
+                        opacity: welcomePhase === "ready" ? 1 : 0,
+                        transform: welcomePhase === "ready" ? "translateY(0)" : "translateY(16px)",
+                        transition: "opacity 1.2s cubic-bezier(0.16,1,0.3,1), transform 1.2s cubic-bezier(0.16,1,0.3,1)",
+                        pointerEvents: welcomePhase === "ready" ? "auto" : "none",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "16px",
+                          color: "var(--c-text-secondary)",
+                          marginBottom: "32px",
+                          letterSpacing: "0.01em",
+                        }}
+                      >
+                        {ob.welcomeDesc}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleWelcomeNext}
+                        className="onb-btn-primary" style={primaryBtn}
+                      >
+                        {ob.getStarted}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </Reveal>
+
+            {/* Mode selection */}
+            <Reveal active={step === "mode"}>
+              <div>
+                <div
+                  style={{
+                    fontSize: "18px",
+                    fontWeight: 500,
+                    color: "var(--c-text-heading)",
+                    marginBottom: "4px",
+                  }}
+                >
+                  {ob.modeTitle}
+                </div>
+                <div
+                  style={{
+                    fontSize: "13px",
+                    color: "var(--c-placeholder)",
+                    marginBottom: "20px",
+                  }}
+                >
+                  {ob.modeDesc}
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px",
+                    marginBottom: "16px",
+                  }}
+                >
+                  <ModeCard
+                    icon={<HardDrive size={18} />}
+                    title={ob.localTitle}
+                    desc={ob.localDesc}
+                    onClick={() => void handleModeSelectLocal()}
+                  />
+                  <ModeCard
+                    icon={<Cloud size={18} />}
+                    title={ob.saasTitle}
+                    desc={ob.saasDesc}
+                    disabled
+                    comingSoon={t.comingSoon}
+                  />
+                  <ModeCard
+                    icon={<Server size={18} />}
+                    title={ob.selfHostTitle}
+                    desc={ob.selfHostDesc}
+                    disabled
+                    comingSoon={t.comingSoon}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setStep("welcome")}
+                  className="onb-btn-ghost" style={ghostBtn}
+                >
+                  {ob.back}
+                </button>
+              </div>
+            </Reveal>
+
+            {/* Provider configuration */}
+            <Reveal active={step === "provider"}>
+              <div>
+                {sidecarReady === false && !downloadError && (
+                  <div style={{ marginBottom: "24px" }}>
+                    <div
+                      style={{
+                        fontSize: "14px",
+                        color: "var(--c-placeholder)",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      {downloadPhase || ob.localDownloading}
+                    </div>
+                    <ProgressBar percent={downloadPercent} />
+                  </div>
+                )}
+
+                {downloadError && (
+                  <div style={{ marginBottom: "24px" }}>
+                    <div
+                      className="flex items-center gap-2"
+                      style={{
+                        fontSize: "13px",
+                        color: "#ef4444",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      <XCircle size={14} />
+                      {downloadError}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDownloadError("");
+                        void ensureSidecar();
+                      }}
+                      className="onb-btn-primary" style={primaryBtn}
+                    >
+                      {ob.localRetryDownload}
+                    </button>
+                  </div>
+                )}
+
+                {(sidecarReady === true || sidecarReady === null) && (
+                  <>
+                    <div
+                      style={{
+                        fontSize: "18px",
+                        fontWeight: 500,
+                        color: "var(--c-text-heading)",
+                        marginBottom: "4px",
+                      }}
+                    >
+                      {ob.localProviderTitle}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "13px",
+                        color: "var(--c-placeholder)",
+                        marginBottom: "20px",
+                      }}
+                    >
+                      {ob.localProviderDesc}
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "14px",
+                        marginBottom: "18px",
+                      }}
+                    >
+                      <div>
+                        <label style={labelStyle}>
+                          {ob.localProviderVendor}
+                        </label>
+                        <SettingsModelDropdown
+                          value={vendor}
+                          options={VENDOR_OPTIONS.map((opt) => ({ value: opt.key, label: opt.label }))}
+                          placeholder=""
+                          disabled={false}
+                          onChange={(v) => handleVendorChange(v as Vendor)}
+                          showEmpty={false}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={labelStyle}>
+                          {ob.localProviderApiKey}
+                        </label>
+                        <input
+                          ref={apiKeyRef}
+                          className={inputCls}
+                          style={inputStyle}
+                          type="password"
+                          placeholder={ob.localProviderApiKeyPlaceholder}
+                          value={apiKey}
+                          onChange={(event) => {
+                            setApiKey(event.target.value);
+                            resetProviderState();
+                          }}
+                          autoComplete="off"
+                        />
+                      </div>
+
+                      <div>
+                        <label style={labelStyle}>
+                          {ob.localProviderBaseUrl}
+                        </label>
+                        <input
+                          className={inputCls}
+                          style={inputStyle}
+                          type="text"
+                          placeholder={ob.localProviderBaseUrlPlaceholder}
+                          value={baseUrl}
+                          onChange={(event) => {
+                            setBaseUrl(event.target.value);
+                            resetProviderState();
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {verifyStatus === "failed" && !providerError && (
+                      <div
+                        className="flex items-center gap-2"
+                        style={{
+                          fontSize: "13px",
+                          color: "#ef4444",
+                          marginBottom: "12px",
+                        }}
+                      >
+                        <XCircle size={14} />
+                        {ob.localProviderFailed}
+                      </div>
+                    )}
+
+                    {providerError && (
+                      <ErrorCallout
+                        error={providerError}
+                        locale={locale}
+                        requestFailedText={t.requestFailed}
+                      />
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => void handleVerify()}
+                      disabled={!apiKey.trim() || verifyStatus === "verifying"}
+                      className="onb-btn-primary disabled:cursor-not-allowed disabled:opacity-50" style={primaryBtn}
+                    >
+                      {verifyStatus === "verifying" ? (
+                        <>
+                          <SpinnerIcon /> {ob.localProviderVerifying}
+                        </>
+                      ) : (
+                        ob.localProviderVerify
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setStep(verifyStatus === "verified" ? (hasImportStep ? "import" : "appearance") : "complete")}
+                      className={providerImportedFromAgent && verifyStatus !== "verified" ? "onb-btn-primary" : "onb-btn-ghost"}
+                      style={
+                        providerImportedFromAgent && verifyStatus !== "verified"
+                          ? { ...primaryBtn, marginTop: "10px" }
+                          : ghostBtn
+                      }
+                    >
+                      {verifyStatus === "verified"
+                        ? ob.back
+                        : providerImportedFromAgent
+                          ? ob.localProviderSkipConfig
+                          : ob.localProviderSkip}
+                    </button>
+                  </>
+                )}
+              </div>
+            </Reveal>
+
+            {/* Appearance */}
+            <Reveal active={step === "appearance"}>
+              <div>
+                <div
+                  style={{
+                    fontSize: "18px",
+                    fontWeight: 500,
+                    color: "var(--c-text-heading)",
+                    marginBottom: "4px",
+                  }}
+                >
+                  {ob.appearanceTitle}
+                </div>
+                <div
+                  style={{
+                    fontSize: "13px",
+                    color: "var(--c-placeholder)",
+                    marginBottom: "20px",
+                  }}
+                >
+                  {ob.appearanceDesc}
+                </div>
+                <div style={{ marginBottom: "20px" }}>
+                  <LanguageContent locale={locale} setLocale={setLocale} label={ob.languageLabel} />
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, 1fr)",
+                    gap: "10px",
+                    marginBottom: "24px",
+                  }}
+                >
+                  {(["default", "terra", "github", "nord", "catppuccin", "tokyo-night"] as const).map((presetId) => {
+                    const def = BUILTIN_PRESETS[presetId];
+                    if (!def) return null;
+                    const dark = def.dark ?? {};
+                    const isActive = themePreset === presetId || (!themePreset && presetId === "default");
+                    return (
+                      <button
+                        key={presetId}
+                        type="button"
+                        onClick={() => setThemePreset(presetId as ThemePreset)}
+                        style={{
+                          border: isActive
+                            ? "1.5px solid var(--c-accent, #6284FF)"
+                            : "0.5px solid var(--c-border-subtle)",
+                          borderRadius: "12px",
+                          background: "var(--c-bg-menu)",
+                          padding: "0",
+                          cursor: "pointer",
+                          overflow: "hidden",
+                          textAlign: "left",
+                          fontFamily: "inherit",
+                          transition: "border-color 0.15s, background 0.15s",
+                        }}
+                      >
+                        {/* Mini preview */}
+                        <div
+                          style={{
+                            height: "52px",
+                            display: "flex",
+                            overflow: "hidden",
+                          }}
+                        >
+                          {/* Sidebar strip */}
+                          <div
+                            style={{
+                              width: "16px",
+                              background: dark["--c-bg-sidebar"] ?? dark["--c-bg-page"] ?? "#1a1a1a",
+                              flexShrink: 0,
+                            }}
+                          />
+                          {/* Main area */}
+                          <div
+                            style={{
+                              flex: 1,
+                              background: dark["--c-bg-page"] ?? "#1a1a1a",
+                              padding: "8px 8px 0",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "4px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                height: "4px",
+                                width: "70%",
+                                borderRadius: "2px",
+                                background: dark["--c-text-primary"] ?? "#eee",
+                                opacity: 0.7,
+                              }}
+                            />
+                            <div
+                              style={{
+                                height: "3px",
+                                width: "50%",
+                                borderRadius: "2px",
+                                background: dark["--c-text-primary"] ?? "#eee",
+                                opacity: 0.35,
+                              }}
+                            />
+                            <div
+                              style={{
+                                height: "3px",
+                                width: "55%",
+                                borderRadius: "2px",
+                                background: dark["--c-text-primary"] ?? "#eee",
+                                opacity: 0.35,
+                              }}
+                            />
+                            {/* Accent bar */}
+                            <div
+                              style={{
+                                marginTop: "auto",
+                                height: "6px",
+                                borderRadius: "3px 3px 0 0",
+                                background: dark["--c-accent"] ?? dark["--c-btn-bg"] ?? "#6284FF",
+                              }}
+                            />
+                          </div>
+                        </div>
+                        {/* Label */}
+                        <div
+                          style={{
+                            padding: "6px 10px",
+                            fontSize: "12px",
+                            fontWeight: 500,
+                            color: isActive ? "var(--c-text-heading)" : "var(--c-text-secondary)",
+                            borderTop: "0.5px solid var(--c-border-subtle)",
+                          }}
+                        >
+                          {presetId === "default" ? "Default" : def.name}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAppearanceNext}
+                  className="onb-btn-primary" style={primaryBtn}
+                >
+                  {ob.next}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStep("welcome")}
+                  className="onb-btn-ghost" style={ghostBtn}
+                >
+                  {ob.back}
+                </button>
+              </div>
+            </Reveal>
+
+            {/* Import */}
+            <Reveal active={step === "import"}>
+              <div>
+                <Reveal active={!selectedImportSourceData}>
+                  <div>
+                    <div
+                      style={{
+                        fontSize: "18px",
+                        fontWeight: 500,
+                        color: "var(--c-text-heading)",
+                        marginBottom: "4px",
+                      }}
+                    >
+                      {ob.importTitle}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "13px",
+                        color: "var(--c-placeholder)",
+                      }}
+                    >
+                      {ob.importDesc}
+                    </div>
+
+                    <div className="onb-import-source-options">
+                      {importSources.map((source) => (
+                        <button
+                          key={source.kind}
+                          type="button"
+                          onClick={() => {
+                            setImportError(null);
+                            setSelectedImportSource(source.kind);
+                          }}
+                          className="onb-btn-primary"
+                          style={{ ...primaryBtn, marginTop: 0 }}
+                        >
+                          <ImportButtonContent
+                            source={source.kind}
+                            label={ob.importFrom(source.name)}
+                          />
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={handleSkipImport}
+                        className="onb-btn-primary"
+                        style={{ ...primaryBtn, marginTop: 0 }}
+                      >
+                        {ob.importSkip}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStep("appearance")}
+                        className="onb-btn-ghost"
+                        style={{ ...ghostBtn, marginTop: 0 }}
+                      >
+                        {ob.back}
+                      </button>
+                    </div>
+                  </div>
+                </Reveal>
+
+                <Reveal active={!!selectedImportSourceData}>
+                  <div>
+                    {selectedImportSourceData && (
+                      <>
+                    <div
+                      style={{
+                        fontSize: "18px",
+                        fontWeight: 500,
+                        color: "var(--c-text-heading)",
+                        marginBottom: "4px",
+                      }}
+                    >
+                      {ob.importFrom(selectedImportSourceData.name)}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "13px",
+                        color: "var(--c-placeholder)",
+                        marginBottom: "20px",
+                      }}
+                    >
+                      {ob.importDetectedAt(selectedImportSourceData.sourcePath)}
+                    </div>
+
+                    <div className="onb-import-items">
+                      {IMPORT_ITEM_KEYS.map((itemKey) => {
+                        const selection = importSelections[selectedImportSourceData.kind] ?? {
+                          identity: true,
+                          skills: true,
+                          mcp: true,
+                          providers: true,
+                        };
+                        const title = {
+                          identity: ob.importAgentIdentity,
+                          skills: ob.importSkills,
+                          mcp: ob.importMcpServers,
+                          providers: ob.importLlmProviders,
+                        }[itemKey];
+                        const desc = {
+                          identity:
+                            selectedImportSourceData.kind === "hermes"
+                              ? ob.importAgentIdentityHermesDesc
+                              : ob.importAgentIdentityOpenClawDesc,
+                          skills: ob.importSkillsDesc(selectedImportSourceData.skillsCount),
+                          mcp: ob.importMcpServersDesc(selectedImportSourceData.mcpServers.join(", ")),
+                          providers: ob.importLlmProvidersDesc(selectedImportSourceData.llmProviders.join(", ")),
+                        }[itemKey];
+                        return (
+                          <div
+                            key={itemKey}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => handleImportItemToggle(selectedImportSourceData.kind, itemKey)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                handleImportItemToggle(selectedImportSourceData.kind, itemKey);
+                              }
+                            }}
+                            className="onb-import-row"
+                            style={{
+                              ...sectionCardStyle,
+                              background: "var(--c-bg-menu)",
+                              borderRadius: "10px",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "12px",
+                              transition: "background 0.15s",
+                            }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div
+                                style={{
+                                  fontSize: "13px",
+                                  fontWeight: 500,
+                                  color: selection[itemKey]
+                                    ? "var(--c-text-primary)"
+                                    : "var(--c-text-secondary)",
+                                }}
+                              >
+                                {title}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: "11px",
+                                  color: "var(--c-placeholder)",
+                                  marginTop: "2px",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {desc}
+                              </div>
+                            </div>
+                            <span
+                              onClick={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => event.stopPropagation()}
+                            >
+                              <ToggleSwitch
+                                checked={selection[itemKey]}
+                                onChange={() => handleImportItemToggle(selectedImportSourceData.kind, itemKey)}
+                              />
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {importError && (
+                      <ErrorCallout
+                        error={importError}
+                        locale={locale}
+                        requestFailedText={t.requestFailed}
+                      />
+                    )}
+
+                    <div className="onb-import-detail-actions">
+                      <button
+                        type="button"
+                        onClick={handleImportSelected}
+                        disabled={importingAgent}
+                        className="onb-btn-primary"
+                        style={{ ...primaryBtn, whiteSpace: "nowrap", opacity: importingAgent ? 0.72 : 1 }}
+                      >
+                        {importingAgent ? (
+                          <>
+                            <SpinnerIcon /> {ob.importSelected}
+                          </>
+                        ) : (
+                          <ImportButtonContent
+                            source={selectedImportSourceData.kind}
+                            label={ob.importSelected}
+                          />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSkipImport}
+                        disabled={importingAgent}
+                        className="onb-btn-ghost"
+                        style={{ ...ghostBtn, marginTop: 0, whiteSpace: "nowrap", opacity: importingAgent ? 0.72 : 1 }}
+                      >
+                        {ob.importSkip}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setImportError(null);
+                          setSelectedImportSource(null);
+                        }}
+                        disabled={importingAgent}
+                        className="onb-btn-ghost"
+                        style={{ ...ghostBtn, marginTop: 0, opacity: importingAgent ? 0.72 : 1 }}
+                      >
+                        {ob.back}
+                      </button>
+                    </div>
+                      </>
+                    )}
+                  </div>
+                </Reveal>
+              </div>
+            </Reveal>
+
+            {/* Completion */}
+            <Reveal active={step === "complete"}>
+              <div style={{ textAlign: "center" }}>
+                <CheckCircle
+                  size={40}
+                  style={{ color: "#22c55e", margin: "0 auto 16px" }}
+                />
+                <div
+                  style={{
+                    fontSize: "18px",
+                    fontWeight: 500,
+                    color: "var(--c-text-heading)",
+                    marginBottom: "8px",
+                  }}
+                >
+                  {ob.completionTitle}
+                </div>
+                <div
+                  style={{
+                    fontSize: "14px",
+                    color: "var(--c-placeholder)",
+                    marginBottom: "12px",
+                  }}
+                >
+                  {ob.completionDesc}
+                </div>
+                <div
+                  className="flex items-center justify-center gap-2"
+                  style={{
+                    fontSize: "13px",
+                    color: "var(--c-text-muted)",
+                    marginBottom: "32px",
+                    padding: "10px 16px",
+                    borderRadius: "10px",
+                    background: "var(--c-bg-menu)",
+                    border: "0.5px solid var(--c-border-subtle)",
+                  }}
+                >
+                  <Settings size={14} />
+                  {ob.completionModulesHint}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleComplete()}
+                  disabled={saving}
+                  className="onb-btn-primary disabled:cursor-not-allowed disabled:opacity-50" style={primaryBtn}
+                >
+                  {saving ? <SpinnerIcon /> : ob.startChatting}
+                </button>
+              </div>
+            </Reveal>
+          </section>
+
+          {/* Right panel — absolute positioned, slides in when verified */}
+          {step === "provider" && (
+            <div
+              style={{
+                position: "absolute",
+                left: "calc(50% + 68px + 24px)",
+                top: 0,
+                width: "min(360px, 40vw)",
+                opacity: providerVerified ? 1 : 0,
+                transform: providerVerified ? "translateX(0)" : "translateX(-12px)",
+                transition: "opacity 0.4s cubic-bezier(0.16,1,0.3,1), transform 0.4s cubic-bezier(0.16,1,0.3,1)",
+                pointerEvents: providerVerified ? "auto" : "none",
+              }}
+            >
+              <div>
+              <div
+                style={{
+                  ...sectionCardStyle,
+                  display: "flex",
+                  flexDirection: "column",
+                  maxHeight: "420px",
+                  gap: 0,
+                }}
+              >
+                {/* Header */}
+                <div style={{ marginBottom: "12px", flexShrink: 0 }}>
+                  <div
+                    style={{
+                      fontSize: "14px",
+                      fontWeight: 500,
+                      color: "var(--c-text-heading)",
+                    }}
+                  >
+                    {ob.localImportModels}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: "var(--c-placeholder)",
+                      marginTop: "3px",
+                    }}
+                  >
+                    {ob.localImportModelsDesc}
+                  </div>
+                </div>
+
+                {/* Search */}
+                <div
+                  className="onb-search-wrap"
+                  style={{ marginBottom: "8px", flexShrink: 0 }}
+                >
+                  <Search size={14} />
+                  <input
+                    className={`${inputCls} onb-search-input`}
+                    style={{ ...inputStyle, height: "34px", fontSize: "13px" }}
+                    type="text"
+                    placeholder={ob.localSearchModels}
+                    value={modelSearchQuery}
+                    onChange={(e) => setModelSearchQuery(e.target.value)}
+                  />
+                </div>
+
+                {/* Model count */}
+                {modelImportStatus !== "loading" &&
+                  availableModels.length > 0 && (
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        color: "var(--c-text-muted)",
+                        marginBottom: "6px",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {ob.localModelsShowing(
+                        filteredModels.length,
+                        enabledCount,
+                      )}
+                    </div>
+                  )}
+
+                {/* Model list */}
+                <div
+                  style={{
+                    flex: 1,
+                    overflowY: "auto",
+                    minHeight: 0,
+                    margin: "0 -2px",
+                    padding: "0 2px",
+                  }}
+                >
+                  {modelImportStatus === "loading" && (
+                    <div
+                      className="flex items-center gap-2"
+                      style={{
+                        fontSize: "13px",
+                        color: "var(--c-text-muted)",
+                        padding: "12px 0",
+                      }}
+                    >
+                      <SpinnerIcon />
+                      {ob.localImportingModels}
+                    </div>
+                  )}
+
+                  {modelImportStatus !== "loading" &&
+                    filteredModels.length === 0 && (
+                      <div
+                        style={{
+                          fontSize: "13px",
+                          color: "var(--c-text-muted)",
+                          padding: "12px 0",
+                        }}
+                      >
+                        {modelSearchQuery
+                          ? ob.localNoModels
+                          : ob.localNoImportableModels}
+                      </div>
+                    )}
+
+                  {filteredModels.map((model) => {
+                    const isOn =
+                      model.configured || selectedModelIds.has(model.id);
+                    return (
+                      <div key={model.id} className="onb-model-row">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              color: "var(--c-text-primary)",
+                              fontWeight: 450,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {model.name || model.id}
+                          </div>
+                          {model.name && model.name !== model.id && (
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: "var(--c-text-muted)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {model.id}
+                            </div>
+                          )}
+                        </div>
+                        <ToggleSwitch
+                          checked={isOn}
+                          onChange={
+                            model.configured
+                              ? undefined
+                              : () => toggleModelSelection(model.id)
+                          }
+                          disabled={model.configured}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Add model inline */}
+                <div
+                  style={{
+                    marginTop: "10px",
+                    paddingTop: "10px",
+                    borderTop: "0.5px solid var(--c-border-subtle)",
+                    flexShrink: 0,
+                  }}
+                >
+                  {modelError && (
+                    <div style={{ marginBottom: "8px" }}>
+                      <ErrorCallout
+                        error={modelError}
+                        locale={locale}
+                        requestFailedText={t.requestFailed}
+                      />
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      ref={manualModelRef}
+                      className={inputCls}
+                      style={{
+                        ...inputStyle,
+                        flex: 1,
+                        height: "34px",
+                        fontSize: "13px",
+                      }}
+                      type="text"
+                      placeholder={ob.localManualModelPlaceholder}
+                      value={manualModelName}
+                      onChange={(e) => setManualModelName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void handleAddModel();
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleAddModel()}
+                      disabled={!manualModelName.trim() || addingModel}
+                      style={{
+                        height: "34px",
+                        borderRadius: "10px",
+                        border: "0.5px solid var(--c-border-subtle)",
+                        background: "var(--c-bg-page)",
+                        color: "var(--c-text-secondary)",
+                        fontSize: "13px",
+                        fontFamily: "inherit",
+                        cursor: "pointer",
+                        padding: "0 14px",
+                        flexShrink: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        fontWeight: 500,
+                        whiteSpace: "nowrap",
+                      }}
+                      className="disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {addingModel ? <SpinnerIcon /> : ob.localAddModel}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Next button */}
+                <button
+                  type="button"
+                  onClick={() => void handleNextFromPanel()}
+                  disabled={modelImportStatus === "importing"}
+                  style={{ ...primaryBtn, marginTop: "10px", flexShrink: 0 }}
+                  className="disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {modelImportStatus === "importing" ? (
+                    <>
+                      <SpinnerIcon /> {ob.localImportingModels}
+                    </>
+                  ) : (
+                    ob.next
+                  )}
+                </button>
+              </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <footer
+        style={{
+          textAlign: "center",
+          padding: "16px",
+          fontSize: "12px",
+          color: "var(--c-text-muted)",
+          position: "relative",
+          zIndex: 1,
+        }}
+      >
+        &copy; 2026 Arkloop
+      </footer>
+    </div>
+  );
+}

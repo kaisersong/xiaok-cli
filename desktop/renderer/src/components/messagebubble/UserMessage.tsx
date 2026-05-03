@@ -1,0 +1,439 @@
+import { useState, useRef, useEffect, useCallback, type CSSProperties } from 'react'
+import { Pencil, Paperclip } from 'lucide-react'
+import type { MessageResponse } from '../../api'
+import type { ArtifactRef } from '../../storage'
+import { extractLegacyFilesFromContent, isFilePart, isImagePart, isPastedFile, messageAttachmentParts, messageTextContent } from '../../messageContent'
+import { useLocale } from '../../contexts/LocaleContext'
+import { ImageThumbnailCard } from './ImageThumbnailCard'
+import { PastedBubbleCard } from './PastedBubbleCard'
+import { ArtifactDownload } from '../ArtifactDownload'
+import { MessageDate } from './MessageDate'
+import { AutoResizeTextarea, normalizeChannelEnvelopeText } from '@arkloop/shared'
+import { CopyIconButton } from '../CopyIconButton'
+import { ActionIconButton } from '../ActionIconButton'
+import { RefreshIconButton } from '../RefreshIconButton'
+import {
+  getUserPromptEnterScale,
+  USER_PROMPT_ENTER_BASE_SCALE,
+  USER_TEXT_COLLAPSED_HEIGHT,
+  USER_TEXT_FADE_HEIGHT,
+} from './utils'
+
+type Props = {
+  message: MessageResponse
+  animateEnter?: boolean
+  onEnterAnimationEnd?: () => void
+  onRetry?: () => void
+  onEdit?: (newContent: string) => void
+  accessToken?: string
+  isWorkMode?: boolean
+}
+
+export function UserMessage({ message, onRetry, onEdit, accessToken, animateEnter, onEnterAnimationEnd, isWorkMode = false }: Props) {
+  const { t } = useLocale()
+  const [editing, setEditing] = useState(false)
+  const [editText, setEditText] = useState('')
+  const [userTextExpanded, setUserTextExpanded] = useState(false)
+  const [userTextFullHeight, setUserTextFullHeight] = useState<number | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const userTextRef = useRef<HTMLDivElement>(null)
+  const enterBubbleRef = useRef<HTMLDivElement>(null)
+  const roRef = useRef<ResizeObserver | null>(null)
+
+  useEffect(() => {
+    if (!animateEnter || !onEnterAnimationEnd) return
+    const el = enterBubbleRef.current
+    let cleared = false
+    const done = () => {
+      if (cleared) return
+      cleared = true
+      onEnterAnimationEnd()
+    }
+    const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const fallbackMs = reduced ? 48 : 2000
+    const t = window.setTimeout(done, fallbackMs)
+    const onEnd = () => {
+      window.clearTimeout(t)
+      done()
+    }
+    el?.addEventListener('animationend', onEnd, { once: true })
+    return () => {
+      window.clearTimeout(t)
+      el?.removeEventListener('animationend', onEnd)
+    }
+  }, [animateEnter, onEnterAnimationEnd])
+
+  const handleCopy = () => {
+    const plainText = messageTextContent(message)
+    void navigator.clipboard.writeText(plainText)
+  }
+
+  const handleEditStart = () => {
+    setEditText(messageTextContent(message))
+    setEditing(true)
+  }
+
+  const handleEditCancel = () => {
+    setEditing(false)
+    setEditText('')
+  }
+
+  const handleEditDone = () => {
+    const trimmed = editText.trim()
+    if (trimmed && onEdit) {
+      onEdit(trimmed)
+    }
+    setEditing(false)
+    setEditText('')
+  }
+
+  useEffect(() => {
+    if (editing && textareaRef.current) {
+      const el = textareaRef.current
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+    }
+  }, [editing])
+
+  const legacy = extractLegacyFilesFromContent(message.content)
+  const attachmentParts = messageAttachmentParts(message)
+  const imageAttachments = attachmentParts.filter(isImagePart)
+  const allFileAttachments = attachmentParts.filter(isFilePart)
+  const pastedAttachments = allFileAttachments.filter((p) => isPastedFile(p.attachment.filename))
+  const fileAttachments = allFileAttachments.filter((p) => !isPastedFile(p.attachment.filename))
+  const text = normalizeChannelEnvelopeText(messageTextContent(message))
+  const displayText = !accessToken && attachmentParts.length > 0 ? message.content : text
+  const userTextOverflows = userTextFullHeight !== null
+  const fileNames = attachmentParts.length > 0
+    ? [...imageAttachments, ...allFileAttachments].map((part) => part.attachment.filename)
+    : legacy.fileNames
+
+  useEffect(() => {
+    const setEnterScale = (scale: number) => {
+      enterBubbleRef.current?.style.setProperty('--user-prompt-enter-scale', String(scale))
+    }
+    if (!animateEnter) {
+      setEnterScale(USER_PROMPT_ENTER_BASE_SCALE)
+      return
+    }
+    const el = enterBubbleRef.current
+    if (!el) return
+    if (typeof ResizeObserver === 'undefined') {
+      const width = el.getBoundingClientRect().width ?? 0
+      setEnterScale(getUserPromptEnterScale(width))
+      return
+    }
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      const width = entry.contentRect.width
+      setEnterScale(getUserPromptEnterScale(width))
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [animateEnter, displayText])
+
+  const measureFullHeight = useCallback((el: HTMLDivElement) => {
+    const fullHeight = el.scrollHeight
+    const nextHeight = fullHeight > USER_TEXT_COLLAPSED_HEIGHT + 1 ? fullHeight : null
+    setUserTextFullHeight(nextHeight)
+    if (nextHeight === null) setUserTextExpanded(false)
+  }, [])
+
+  useEffect(() => {
+    const el = userTextRef.current
+    if (!el) return
+    if (typeof ResizeObserver === 'undefined') {
+      measureFullHeight(el)
+      return
+    }
+    if (roRef.current) {
+      roRef.current.disconnect()
+    }
+    el.style.maxHeight = 'none'
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      measureFullHeight(el)
+    })
+    ro.observe(el)
+    roRef.current = ro
+    measureFullHeight(el)
+    return () => {
+      ro.disconnect()
+      roRef.current = null
+    }
+  }, [displayText, measureFullHeight])
+
+  if (editing) {
+    return (
+      <div style={{ display: 'flex', justifyContent: isWorkMode ? 'flex-start' : 'flex-end' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%', maxWidth: '663px' }}>
+          {fileNames.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: isWorkMode ? 'flex-start' : 'flex-end' }}>
+              {fileNames.map((name) => (
+                <div
+                  key={name}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: 'var(--c-bg-sub)',
+                    border: '0.5px solid var(--c-border-subtle)',
+                    borderRadius: '8px',
+                    padding: '4px 10px',
+                    fontSize: '12px',
+                    color: 'var(--c-text-secondary)',
+                  }}
+                >
+                  <Paperclip size={11} style={{ color: 'var(--c-text-icon)', flexShrink: 0 }} />
+                  <span style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ position: 'relative', background: 'var(--c-bg-deep)', borderRadius: '12px', padding: '10px 16px' }}>
+            <AutoResizeTextarea
+              ref={textareaRef}
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') handleEditCancel()
+              }}
+              minRows={1}
+              style={{
+                width: '100%',
+                background: 'transparent',
+                border: 'none',
+                outline: 'none',
+                resize: 'none',
+                color: 'var(--c-text-primary)',
+                fontSize: '16px',
+                lineHeight: 1.6,
+                letterSpacing: '-0.64px',
+                fontFamily: 'inherit',
+                minHeight: '28px',
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: isWorkMode ? 'flex-start' : 'flex-end', gap: '8px' }}>
+            <button
+              onClick={handleEditCancel}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '8px',
+                border: '0.5px solid var(--c-border-subtle)',
+                background: 'transparent',
+                color: 'var(--c-text-primary)',
+                fontSize: '14px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleEditDone}
+              disabled={!editText.trim()}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '8px',
+                border: 'none',
+                background: editText.trim() ? 'var(--c-text-primary)' : 'var(--c-text-muted)',
+                color: 'var(--c-bg-page)',
+                fontSize: '14px',
+                cursor: editText.trim() ? 'pointer' : 'default',
+                fontFamily: 'inherit',
+                fontWeight: 500,
+              }}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      style={{ display: 'flex', justifyContent: isWorkMode ? 'flex-start' : 'flex-end' }}
+    >
+      <div
+        style={{ display: 'flex', flexDirection: 'column', alignItems: isWorkMode ? 'flex-start' : 'flex-end', maxWidth: '663px' }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: isWorkMode ? 'flex-start' : 'flex-end', gap: '8px' }}>
+        {(imageAttachments.length > 0 || pastedAttachments.length > 0) && accessToken && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: isWorkMode ? 'flex-start' : 'flex-end' }}>
+            {imageAttachments.map((part) => (
+              <ImageThumbnailCard
+                key={part.attachment.key}
+                artifact={part.attachment as ArtifactRef}
+                accessToken={accessToken}
+                pathPrefix="/v1/attachments"
+              />
+            ))}
+            {pastedAttachments.map((part) => {
+              const fullText = part.extracted_text || ''
+              const preview = fullText.split('\n').slice(0, 4).join('\n')
+              return (
+                <PastedBubbleCard
+                  key={part.attachment.key}
+                  preview={preview}
+                  fullText={fullText}
+                  size={part.attachment.size}
+                />
+              )
+            })}
+          </div>
+        )}
+        {fileAttachments.length > 0 && accessToken && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: isWorkMode ? 'flex-start' : 'flex-end' }}>
+            {fileAttachments.map((part) => (
+              <ArtifactDownload
+                key={part.attachment.key}
+                artifact={part.attachment as ArtifactRef}
+                accessToken={accessToken}
+                pathPrefix="/v1/attachments"
+              />
+            ))}
+          </div>
+        )}
+        {((!accessToken && fileNames.length > 0) || (fileAttachments.length === 0 && imageAttachments.length === 0 && pastedAttachments.length === 0 && fileNames.length > 0)) && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: isWorkMode ? 'flex-start' : 'flex-end' }}>
+            {fileNames.map((name) => (
+              <div
+                key={name}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: 'var(--c-bg-sub)',
+                  border: '0.5px solid var(--c-border-subtle)',
+                  borderRadius: '8px',
+                  padding: '4px 10px',
+                  fontSize: '12px',
+                  color: 'var(--c-text-secondary)',
+                }}
+              >
+                <Paperclip size={11} style={{ color: 'var(--c-text-icon)', flexShrink: 0 }} />
+                <span style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {name}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {displayText && (() => {
+          const isCollapsed = userTextOverflows && !userTextExpanded
+          const fadeMask = `linear-gradient(to bottom, black calc(100% - ${USER_TEXT_FADE_HEIGHT}px), transparent)`
+          const resolvedMaxHeight = isCollapsed
+            ? `${USER_TEXT_COLLAPSED_HEIGHT}px`
+            : userTextFullHeight != null
+              ? `${userTextFullHeight}px`
+              : undefined
+          return (
+            <div
+              ref={enterBubbleRef}
+              className={[animateEnter ? 'user-prompt-bubble-enter' : '', 'user-prompt-bubble'].filter(Boolean).join(' ')}
+              style={{
+                '--user-prompt-enter-scale': String(USER_PROMPT_ENTER_BASE_SCALE),
+                borderRadius: isWorkMode ? '12px 12px 12px 8px' : '12px',
+                padding: '10px 16px',
+                fontSize: '16.5px',
+                fontWeight: 300,
+                lineHeight: 1.6,
+                letterSpacing: '-0.64px',
+                wordBreak: 'break-word',
+              } as CSSProperties}
+            >
+              <div
+                ref={userTextRef}
+                style={{
+                  maxHeight: resolvedMaxHeight,
+                  overflow: 'hidden',
+                  transition: 'max-height 0.3s cubic-bezier(0.25, 0.1, 0.25, 1), mask-image 0.25s ease, -webkit-mask-image 0.25s ease',
+                  willChange: 'max-height',
+                  ...(isCollapsed
+                    ? {
+                        WebkitMaskImage: fadeMask,
+                        maskImage: fadeMask,
+                      }
+                    : {
+                        WebkitMaskImage: 'none',
+                        maskImage: 'none',
+                      }),
+                }}
+              >
+                {displayText.split(/(\n{2,})/).map((part, i) =>
+                  /^\n{2,}$/.test(part)
+                    ? <div key={i} style={{ height: '0.3em' }} />
+                    : <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{part}</span>
+                )}
+              </div>
+              {userTextOverflows && (
+                <button
+                  type="button"
+                  onClick={() => setUserTextExpanded(prev => !prev)}
+                  className="text-[var(--c-text-muted)] hover:text-[var(--c-text-icon)]"
+                  style={{
+                    marginTop: '6px',
+                    fontSize: '13px',
+                    fontWeight: 300,
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    transition: 'color 150ms',
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                  }}
+                >
+                  {userTextExpanded ? 'Show less' : 'Show more'}
+                </button>
+              )}
+            </div>
+          )
+        })()}
+        </div>
+
+        <div
+          className="pointer-events-none opacity-0 transition-[opacity] duration-[180ms] ease-out group-hover/turn:pointer-events-auto group-hover/turn:opacity-100"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '2px',
+            marginTop: '8px',
+          }}
+        >
+          <CopyIconButton
+            onCopy={handleCopy}
+            size={16}
+            tooltip={t.copyAction}
+            hoverBackground="var(--c-bg-deep)"
+            className="flex h-9 w-9 items-center justify-center rounded-[7px] text-[var(--c-text-secondary)] opacity-60 transition-[opacity,color] duration-[60ms] hover:opacity-100 hover:text-[var(--c-text-primary)] cursor-pointer border-none bg-transparent"
+          />
+          <RefreshIconButton
+            onRefresh={onRetry!}
+            disabled={!onRetry}
+            size={16}
+            tooltip={t.retryAction}
+            className={`flex h-9 w-9 items-center justify-center rounded-[7px] text-[var(--c-text-secondary)] transition-[opacity,color] duration-[60ms] border-none bg-transparent ${onRetry ? 'opacity-60 hover:opacity-100 hover:text-[var(--c-text-primary)] cursor-pointer' : 'opacity-25 cursor-default'}`}
+          />
+          <ActionIconButton
+            onClick={handleEditStart}
+            tooltip={t.editAction}
+            hoverBackground="var(--c-bg-deep)"
+            className="flex h-9 w-9 items-center justify-center rounded-[7px] text-[var(--c-text-secondary)] opacity-60 transition-[opacity,color] duration-[60ms] hover:opacity-100 hover:text-[var(--c-text-primary)] cursor-pointer border-none bg-transparent"
+          >
+            <Pencil size={16} />
+          </ActionIconButton>
+          <div style={{ marginLeft: '12px', marginBottom: '0px' }}>
+            <MessageDate createdAt={message.created_at} isWorkMode={isWorkMode} />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

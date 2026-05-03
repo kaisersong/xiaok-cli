@@ -1,0 +1,510 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ExternalLink, MessageCircle } from 'lucide-react'
+import { openExternal } from '../../openExternal'
+import {
+  type ChannelBindingResponse,
+  type ChannelResponse,
+  type LlmProvider,
+  type Persona,
+  createChannel,
+  createChannelBindCode,
+  deleteChannelBinding,
+  isApiError,
+  listChannelBindings,
+  updateChannel,
+  updateChannelBinding,
+} from '../../api'
+import { useLocale } from '../../contexts/LocaleContext'
+import { PillToggle } from '@arkloop/shared'
+import {
+  BindingsCard,
+  buildModelOptions,
+  inputCls,
+  ListField,
+  mergeListValues,
+  ModelDropdown,
+  readStringArrayConfig,
+  resolvePersonaID,
+  sameItems,
+  SaveActions,
+  StatusBadge,
+  TokenField,
+} from './DesktopChannelSettingsShared'
+
+type Props = {
+  accessToken: string
+  channel: ChannelResponse | null
+  personas: Persona[]
+  providers: LlmProvider[]
+  reload: () => Promise<void>
+}
+
+function readStringConfig(channel: ChannelResponse | null, key: string): string {
+  const raw = channel?.config_json?.[key]
+  return typeof raw === 'string' ? raw : ''
+}
+
+export function DesktopQQBotSettingsPanel({
+  accessToken,
+  channel,
+  personas,
+  providers,
+  reload,
+}: Props) {
+  const { t } = useLocale()
+  const ct = t.channels
+  const ds = t.desktopSettings
+
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
+  const [enabled, setEnabled] = useState(channel?.is_active ?? false)
+  const [appID, setAppID] = useState(readStringConfig(channel, 'app_id'))
+  const [clientSecretDraft, setClientSecretDraft] = useState('')
+  const [personaID, setPersonaID] = useState(resolvePersonaID(personas, channel?.persona_id))
+  const [allowedUserIDs, setAllowedUserIDs] = useState(readStringArrayConfig(channel, 'allowed_user_ids'))
+  const [allowedUserInput, setAllowedUserInput] = useState('')
+  const [allowedGroupIDs, setAllowedGroupIDs] = useState(readStringArrayConfig(channel, 'allowed_group_ids'))
+  const [allowedGroupInput, setAllowedGroupInput] = useState('')
+  const [defaultModel, setDefaultModel] = useState(readStringConfig(channel, 'default_model'))
+  const [bindCode, setBindCode] = useState<string | null>(null)
+  const [generatingCode, setGeneratingCode] = useState(false)
+  const [bindings, setBindings] = useState<ChannelBindingResponse[]>([])
+
+  const refreshBindings = useCallback(async () => {
+    if (!channel?.id) {
+      setBindings([])
+      return
+    }
+    try {
+      setBindings(await listChannelBindings(accessToken, channel.id))
+    } catch {
+      setBindings([])
+    }
+  }, [accessToken, channel?.id])
+
+  useEffect(() => {
+    setEnabled(channel?.is_active ?? false)
+    setAppID(readStringConfig(channel, 'app_id'))
+    setClientSecretDraft('')
+    setPersonaID(resolvePersonaID(personas, channel?.persona_id))
+    setAllowedUserIDs(readStringArrayConfig(channel, 'allowed_user_ids'))
+    setAllowedUserInput('')
+    setAllowedGroupIDs(readStringArrayConfig(channel, 'allowed_group_ids'))
+    setAllowedGroupInput('')
+    setDefaultModel(readStringConfig(channel, 'default_model'))
+  }, [channel, personas])
+
+  useEffect(() => {
+    void refreshBindings()
+    if (!channel?.id) return
+    const timer = window.setInterval(() => {
+      void refreshBindings()
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [channel?.id, refreshBindings])
+
+  const modelOptions = useMemo(() => buildModelOptions(providers), [providers])
+  const personaOptions = useMemo(
+    () => personas.map((p) => ({ value: p.id, label: p.display_name || p.id })),
+    [personas],
+  )
+  const persistedAllowedUserIDs = useMemo(() => readStringArrayConfig(channel, 'allowed_user_ids'), [channel])
+  const persistedAllowedGroupIDs = useMemo(() => readStringArrayConfig(channel, 'allowed_group_ids'), [channel])
+  const effectiveAllowedUserIDs = useMemo(
+    () => mergeListValues(allowedUserIDs, allowedUserInput),
+    [allowedUserIDs, allowedUserInput],
+  )
+  const effectiveAllowedGroupIDs = useMemo(
+    () => mergeListValues(allowedGroupIDs, allowedGroupInput),
+    [allowedGroupIDs, allowedGroupInput],
+  )
+  const effectivePersonaID = useMemo(
+    () => resolvePersonaID(personas, channel?.persona_id),
+    [personas, channel?.persona_id],
+  )
+  const persistedAppID = readStringConfig(channel, 'app_id')
+  const persistedDefaultModel = readStringConfig(channel, 'default_model')
+  const credentialConfigured = channel?.has_credentials === true
+
+  const dirty = useMemo(() => {
+    if ((channel?.is_active ?? false) !== enabled) return true
+    if (effectivePersonaID !== personaID) return true
+    if (appID !== persistedAppID) return true
+    if (!sameItems(persistedAllowedUserIDs, effectiveAllowedUserIDs)) return true
+    if (!sameItems(persistedAllowedGroupIDs, effectiveAllowedGroupIDs)) return true
+    if (defaultModel !== persistedDefaultModel) return true
+    return clientSecretDraft.trim().length > 0
+  }, [
+    appID,
+    channel,
+    clientSecretDraft,
+    defaultModel,
+    effectiveAllowedGroupIDs,
+    effectiveAllowedUserIDs,
+    effectivePersonaID,
+    enabled,
+    personaID,
+    persistedAllowedGroupIDs,
+    persistedAllowedUserIDs,
+    persistedAppID,
+    persistedDefaultModel,
+  ])
+  const canSave =
+    dirty &&
+    appID.trim().length > 0 &&
+    (credentialConfigured || clientSecretDraft.trim().length > 0)
+
+  const handleAddAllowedUsers = () => {
+    const nextIDs = mergeListValues(allowedUserIDs, allowedUserInput)
+    if (nextIDs.length === allowedUserIDs.length) return
+    setAllowedUserIDs(nextIDs)
+    setAllowedUserInput('')
+    setSaved(false)
+  }
+
+  const handleAddAllowedGroups = () => {
+    const nextIDs = mergeListValues(allowedGroupIDs, allowedGroupInput)
+    if (nextIDs.length === allowedGroupIDs.length) return
+    setAllowedGroupIDs(nextIDs)
+    setAllowedGroupInput('')
+    setSaved(false)
+  }
+
+  const handleSave = async () => {
+    const nextAppID = appID.trim()
+    const nextClientSecret = clientSecretDraft.trim()
+    const nextAllowedUserIDs = mergeListValues(allowedUserIDs, allowedUserInput)
+    const nextAllowedGroupIDs = mergeListValues(allowedGroupIDs, allowedGroupInput)
+    const clientSecretRequired = !credentialConfigured
+
+    if (!nextAppID) {
+      setError(ct.qqBotAppIDRequired)
+      return
+    }
+    if (clientSecretRequired && !nextClientSecret) {
+      setError(ct.qqBotClientSecretRequired)
+      return
+    }
+    if (enabled && !personaID) {
+      setError(ct.personaRequired)
+      return
+    }
+
+    setSaving(true)
+    setError('')
+    try {
+      const base =
+        channel?.config_json !== null &&
+        channel?.config_json !== undefined &&
+        typeof channel.config_json === 'object' &&
+        !Array.isArray(channel.config_json)
+          ? { ...(channel.config_json as Record<string, unknown>) }
+          : {}
+
+      const configJSON: Record<string, unknown> = {
+        ...base,
+        app_id: nextAppID,
+        allowed_user_ids: nextAllowedUserIDs,
+        allowed_group_ids: nextAllowedGroupIDs,
+        default_model: defaultModel.trim(),
+      }
+
+      if (channel == null) {
+        const created = await createChannel(accessToken, {
+          channel_type: 'qqbot',
+          bot_token: nextClientSecret,
+          persona_id: personaID || undefined,
+          config_json: configJSON,
+        })
+        if (enabled) {
+          await updateChannel(accessToken, created.id, { is_active: true })
+        }
+      } else {
+        await updateChannel(accessToken, channel.id, {
+          bot_token: nextClientSecret || undefined,
+          persona_id: personaID || null,
+          is_active: enabled,
+          config_json: configJSON,
+        })
+      }
+
+      setAppID(nextAppID)
+      setClientSecretDraft('')
+      setAllowedUserIDs(nextAllowedUserIDs)
+      setAllowedUserInput('')
+      setAllowedGroupIDs(nextAllowedGroupIDs)
+      setAllowedGroupInput('')
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+      await reload()
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError(ds.connectorSaveTimeout)
+      } else {
+        setError(isApiError(err) ? err.message : ct.saveFailed)
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleGenerateBindCode = async () => {
+    setGeneratingCode(true)
+    setError('')
+    try {
+      const result = await createChannelBindCode(accessToken, 'qqbot')
+      setBindCode(result.token)
+    } catch {
+      setError(ct.loadFailed)
+    } finally {
+      setGeneratingCode(false)
+    }
+  }
+
+  const handleUnbind = async (binding: ChannelBindingResponse) => {
+    if (!channel) return
+    if (!confirm(ct.unbindConfirm)) return
+    try {
+      await deleteChannelBinding(accessToken, channel.id, binding.binding_id)
+      await refreshBindings()
+    } catch {
+      setError(ct.unbindFailed)
+    }
+  }
+
+  const handleMakeOwner = async (binding: ChannelBindingResponse) => {
+    if (!channel) return
+    setError('')
+    try {
+      await updateChannelBinding(accessToken, channel.id, binding.binding_id, { make_owner: true })
+      await refreshBindings()
+    } catch {
+      setError(ct.saveFailed)
+    }
+  }
+
+  const handleSaveHeartbeat = async (
+    binding: ChannelBindingResponse,
+    next: { enabled: boolean; interval: number; model: string },
+  ) => {
+    if (!channel) return
+    setError('')
+    try {
+      await updateChannelBinding(accessToken, channel.id, binding.binding_id, {
+        heartbeat_enabled: next.enabled,
+        heartbeat_interval_minutes: next.interval,
+        heartbeat_model: next.model,
+      })
+      await refreshBindings()
+    } catch {
+      setError(ct.saveFailed)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      {error && (
+        <div
+          className="rounded-xl px-4 py-3 text-sm"
+          style={{
+            border: '0.5px solid color-mix(in srgb, var(--c-status-error) 24%, transparent)',
+            background: 'var(--c-status-error-bg)',
+            color: 'var(--c-status-error-text)',
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <div
+        className="rounded-2xl p-5"
+        style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-menu)' }}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
+                  <MessageCircle size={18} />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-[var(--c-text-heading)]">{ct.qq}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <StatusBadge active={enabled} label={enabled ? ct.active : ct.inactive} />
+                    <StatusBadge
+                      active={credentialConfigured}
+                      label={credentialConfigured ? ds.connectorConfigured : ds.connectorNotConfigured}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <PillToggle checked={enabled} onChange={(next) => { setEnabled(next); setSaved(false) }} />
+          </div>
+
+          <div
+            className="rounded-xl px-4 py-3"
+            style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-sub)' }}
+          >
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="text-xs font-medium text-[var(--c-text-heading)]">{ct.qqBotOfficialIntro}</div>
+              <button
+                type="button"
+                onClick={() => openExternal('https://q.qq.com/qqbot/')}
+                className="inline-flex shrink-0 items-center gap-1 text-xs text-[var(--c-text-secondary)] underline underline-offset-2 hover:text-[var(--c-text-primary)]"
+              >
+                <ExternalLink size={13} />
+                {ct.qqBotOfficialPortal}
+              </button>
+            </div>
+            <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs leading-5 text-[var(--c-text-tertiary)]">
+              {ct.qqBotSetupSteps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <label className="mb-1.5 block text-xs font-medium text-[var(--c-text-secondary)]">
+                {ct.qqBotAppID}
+              </label>
+              <input
+                type="text"
+                value={appID}
+                onChange={(event) => {
+                  setAppID(event.target.value)
+                  setSaved(false)
+                }}
+                placeholder={ct.qqBotAppIDPlaceholder}
+                disabled={saving}
+                className={inputCls}
+              />
+            </div>
+
+            <TokenField
+              label={ct.qqBotClientSecret}
+              value={clientSecretDraft}
+              placeholder={
+                credentialConfigured && !clientSecretDraft
+                  ? ct.tokenAlreadyConfigured
+                  : ct.qqBotClientSecretPlaceholder
+              }
+              onChange={(value) => {
+                setClientSecretDraft(value)
+                setSaved(false)
+              }}
+            />
+
+            <div className="md:col-span-2">
+              <label className="mb-1.5 block text-xs font-medium text-[var(--c-text-secondary)]">
+                {ct.persona}
+              </label>
+              <ModelDropdown
+                value={personaID}
+                options={personaOptions}
+                placeholder={ct.personaDefault}
+                disabled={saving}
+                onChange={(value) => {
+                  setPersonaID(value)
+                  setSaved(false)
+                }}
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="mb-1.5 block text-xs font-medium text-[var(--c-text-secondary)]">
+                {ds.connectorDefaultModel}
+              </label>
+              <ModelDropdown
+                value={defaultModel}
+                options={modelOptions}
+                placeholder={ds.connectorDefaultModelPlaceholder}
+                disabled={saving}
+                onChange={(value) => {
+                  setDefaultModel(value)
+                  setSaved(false)
+                }}
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <ListField
+                label={ct.qqBotAllowedUsers}
+                values={allowedUserIDs}
+                inputValue={allowedUserInput}
+                placeholder={ct.qqBotAllowedUsersPlaceholder}
+                addLabel={t.skills.add}
+                onInputChange={setAllowedUserInput}
+                onAdd={handleAddAllowedUsers}
+                onRemove={(value) => {
+                  setAllowedUserIDs((current) => current.filter((item) => item !== value))
+                  setSaved(false)
+                }}
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <ListField
+                label={ct.qqBotAllowedGroups}
+                values={allowedGroupIDs}
+                inputValue={allowedGroupInput}
+                placeholder={ct.qqBotAllowedGroupsPlaceholder}
+                addLabel={t.skills.add}
+                onInputChange={setAllowedGroupInput}
+                onAdd={handleAddAllowedGroups}
+                onRemove={(value) => {
+                  setAllowedGroupIDs((current) => current.filter((item) => item !== value))
+                  setSaved(false)
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <BindingsCard
+        title={ct.bindingsTitle}
+        bindings={bindings}
+        bindCode={bindCode}
+        generating={generatingCode}
+        generateLabel={generatingCode ? ct.generating : ct.generateCode}
+        regenerateLabel={ds.connectorRegenerateCode}
+        emptyLabel={ct.bindingsEmpty}
+        ownerLabel={ct.bindingOwner}
+        adminLabel={ct.bindingAdmin}
+        setOwnerLabel={ct.setOwner}
+        unbindLabel={ct.unbind}
+        heartbeatEnabledLabel={ct.heartbeatEnabled}
+        heartbeatIntervalLabel={ct.heartbeatInterval}
+        heartbeatModelLabel={ct.heartbeatModel}
+        heartbeatSaveLabel={ct.save}
+        heartbeatSavingLabel={ct.saving}
+        modelOptions={modelOptions}
+        onGenerate={() => void handleGenerateBindCode()}
+        onUnbind={(binding) => handleUnbind(binding)}
+        onMakeOwner={(binding) => handleMakeOwner(binding)}
+        onSaveHeartbeat={(binding, next) => handleSaveHeartbeat(binding, next)}
+        onOwnerUnbindAttempt={() => setError(ct.ownerUnbindBlocked)}
+      />
+
+      <SaveActions
+        saving={saving}
+        saved={saved}
+        dirty={dirty}
+        canSave={canSave}
+        canVerify={false}
+        verifying={false}
+        saveLabel={ct.save}
+        savingLabel={ct.saving}
+        verifyLabel=""
+        verifyingLabel=""
+        savedLabel={ds.connectorSaved}
+        onSave={() => void handleSave()}
+        onVerify={() => {}}
+      />
+    </div>
+  )
+}
