@@ -48,7 +48,7 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     envPrefixes: ['DEEPSEEK'],
     defaultModel: {
       modelId: 'deepseek-default',
-      model: 'deepseek-chat',
+      model: 'deepseek-v4-pro',
       label: 'DeepSeek Default',
       capabilities: ['tools'],
     },

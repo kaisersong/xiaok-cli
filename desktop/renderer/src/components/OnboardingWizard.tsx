@@ -18,7 +18,7 @@ import {
   SpinnerIcon,
   normalizeError,
 } from "@arkloop/shared/components/auth-ui";
-// TODO: migrate @arkloop/shared import: import { getDesktopApi, getDesktopAccessToken } from "@arkloop/shared/desktop";
+import { getDesktopApi, getDesktopAccessToken } from "@arkloop/shared/desktop";
 import { useLocale } from "../contexts/LocaleContext";
 import { LogoDrawAnimation } from "./LogoDrawAnimation";
 import { SettingsModelDropdown } from "./settings/SettingsModelDropdown";
@@ -34,8 +34,8 @@ import {
   updateLlmProvider,
 } from "@/api";
 import type { AvailableModel, LlmProvider, LlmProviderModel } from "@/api";
-// TODO: migrate @arkloop/shared import: import type { AgentImportDiscovery, ImportItemKey, ImportSourceKind } from "@arkloop/shared/desktop";
-// TODO: migrate @arkloop/shared import: import { routeAdvancedJsonFromAvailableCatalog } from "@arkloop/shared/llm/available-catalog-advanced-json";
+import type { AgentImportDiscovery, ImportItemKey, ImportSourceKind } from "@arkloop/shared/desktop";
+import { routeAdvancedJsonFromAvailableCatalog } from "@arkloop/shared/llm/available-catalog-advanced-json";
 
 type Step = "welcome" | "mode" | "provider" | "appearance" | "import" | "complete";
 

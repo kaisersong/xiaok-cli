@@ -57,6 +57,13 @@ export type RuntimeEvent = {
     status: 'running' | 'blocked' | 'completed' | 'failed';
     message: string;
 } | {
+    type: 'assistant_delta';
+    sessionId: string;
+    turnId: string;
+    intentId: string;
+    stepId: string;
+    delta: string;
+} | {
     type: 'receipt_emitted';
     sessionId: string;
     turnId: string;

@@ -1,4 +1,4 @@
-// TODO: migrate @arkloop/shared import: import type { PromptInjectionTexts } from "@arkloop/shared/components/prompt-injection";
+import type { PromptInjectionTexts } from "@arkloop/shared/components/prompt-injection";
 import { zh } from "./zh";
 import { en } from "./en";
 

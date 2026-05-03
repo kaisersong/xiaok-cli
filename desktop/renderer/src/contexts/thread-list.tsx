@@ -8,8 +8,8 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-// TODO: migrate @arkloop/shared import: import { silentRefresh } from '@arkloop/shared'
-// TODO: migrate @arkloop/shared import: import { isLocalMode } from '@arkloop/shared/desktop'
+import { silentRefresh } from '@arkloop/shared'
+import { isLocalMode } from '@arkloop/shared/desktop'
 import {
   isApiError,
   listThreads,

@@ -31,7 +31,7 @@ import { CreditsContent } from './settings/CreditsSettings'
 import { UpdateSettingsContent } from './settings/UpdateSettings'
 import { ToolsSettings } from './settings/ToolsSettings'
 import { TimeZoneSettings } from './settings/TimeZoneSettings'
-// TODO: migrate @arkloop/shared import: import { isDesktop, isLocalMode } from '@arkloop/shared/desktop'
+import { isDesktop, isLocalMode } from '@arkloop/shared/desktop'
 
 export type SettingsTab = 'account' | 'appearance' | 'settings' | 'tools' | 'skills' | 'credits' | 'models' | 'agents' | 'channels' | 'connection' | 'updates'
 

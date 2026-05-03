@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Download, ExternalLink, Globe, Loader2 } from 'lucide-react'
-// TODO: migrate @arkloop/shared import: import { apiBaseUrl } from '@arkloop/shared/api'
+import { apiBaseUrl } from '@arkloop/shared/api'
 import type { ArtifactRef } from '../storage'
 
 const ANIM_MS = 120

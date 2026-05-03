@@ -10,9 +10,9 @@ import {
 } from 'lucide-react'
 import { useLocale } from '../../contexts/LocaleContext'
 import { listToolProviders } from '../../api-admin'
-// TODO: migrate @arkloop/shared import: import { getDesktopAccessToken, getDesktopApi } from '@arkloop/shared/desktop'
-// TODO: migrate @arkloop/shared import: import type { ConnectorsConfig, FetchProvider, SearchProvider } from '@arkloop/shared/desktop'
-// TODO: migrate @arkloop/shared import: import { useToast } from '@arkloop/shared'
+import { getDesktopAccessToken, getDesktopApi } from '@arkloop/shared/desktop'
+import type { ConnectorsConfig, FetchProvider, SearchProvider } from '@arkloop/shared/desktop'
+import { useToast } from '@arkloop/shared'
 import { ProviderSelectCard } from './ProviderSelectCard'
 
 // ---------------------------------------------------------------------------

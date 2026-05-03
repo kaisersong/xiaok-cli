@@ -8,7 +8,7 @@ import {
   XCircle,
   type LucideIcon,
 } from "lucide-react";
-// TODO: migrate @arkloop/shared import: import { SpinnerIcon } from "@arkloop/shared/components/auth-ui";
+import { SpinnerIcon } from "@arkloop/shared/components/auth-ui";
 import { useLocale } from "../../contexts/LocaleContext";
 import { secondaryButtonBorderStyle, secondaryButtonXsCls } from "../buttonStyles";
 import {

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { FileDown } from 'lucide-react'
-// TODO: migrate @arkloop/shared import: import { apiBaseUrl } from '@arkloop/shared/api'
+import { apiBaseUrl } from '@arkloop/shared/api'
 import type { ArtifactRef } from '../storage'
 
 function formatSize(bytes: number): string {

@@ -8,7 +8,9 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["renderer/src/*"]
+      "@/*": ["renderer/src/*"],
+      "@arkloop/shared": ["renderer/src/shared/index.ts"],
+      "@arkloop/shared/*": ["renderer/src/shared/*"]
     }
   },
   "include": [

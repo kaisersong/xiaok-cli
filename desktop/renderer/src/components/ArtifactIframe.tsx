@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback, useImperativeHandle, forwardRef, useState } from 'react'
-// TODO: migrate @arkloop/shared import: import { apiBaseUrl } from '@arkloop/shared/api'
+import { apiBaseUrl } from '@arkloop/shared/api'
 import type { ArtifactRef } from '../storage'
 import { ARTIFACT_SVG_STYLES } from './artifactSvgStyles'
 

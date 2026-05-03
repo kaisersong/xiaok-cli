@@ -3,7 +3,7 @@ import { HelpCircle, ArrowUpRight, Flag, X } from 'lucide-react'
 import { isApiError, createSuggestionFeedback } from '../../api'
 import { useLocale } from '../../contexts/LocaleContext'
 import { openExternal } from '../../openExternal'
-// TODO: migrate @arkloop/shared import: import { AutoResizeTextarea } from '@arkloop/shared'
+import { AutoResizeTextarea } from '@arkloop/shared'
 
 export function HelpContent({ label }: { label: string }) {
   const { locale } = useLocale()

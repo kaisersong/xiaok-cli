@@ -5,7 +5,7 @@ import {
   redeemCode,
 } from '../../api'
 import { useLocale } from '../../contexts/LocaleContext'
-// TODO: migrate @arkloop/shared import: import { formatDateTime, getActiveTimeZone } from '@arkloop/shared'
+import { formatDateTime, getActiveTimeZone } from '@arkloop/shared'
 
 function getCurrentYearMonth(timeZone: string): { year: number; month: number } {
   const parts = formatDateTime(new Date(), { timeZone, includeZone: false }).slice(0, 7).split('-')

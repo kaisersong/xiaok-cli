@@ -15,7 +15,7 @@ import {
   updateChannelBinding,
 } from '../../api'
 import { useLocale } from '../../contexts/LocaleContext'
-// TODO: migrate @arkloop/shared import: import { PillToggle } from '@arkloop/shared'
+import { PillToggle } from '@arkloop/shared'
 import {
   BindingsCard,
   buildModelOptions,

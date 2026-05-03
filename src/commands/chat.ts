@@ -120,7 +120,7 @@ const { version: cliVersion } = JSON.parse(
 // has repeatedly regressed in narrow real TTYs. Keep the data path in place,
 // but do not prompt interactively until feedback has a non-footer surface.
 const COMPLETED_INTENT_FEEDBACK_ENABLED = false;
-const THINKING_ONLY_TOOL_TURN_NOTICE = '模型本轮直接进入工具执行；以下只显示安全进度，不展示隐藏推理。';
+const THINKING_ONLY_TOOL_TURN_NOTICE = '正在执行工具...';
 
 interface ChatOptions {
   auto: boolean;
@@ -757,6 +757,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   let streamingSegmentText = '';
   let turnVisibleAssistantTextSeen = false;
   let turnThinkingOnlyToolNoticeWritten = false;
+  let thinkingOnlyToolNoticeTimer: NodeJS.Timeout | null = null;
   const resetStreamingSegment = (): void => {
     streamingSegmentText = '';
   };
@@ -1025,9 +1026,19 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       return;
     }
 
-    turnThinkingOnlyToolNoticeWritten = true;
-    turnLayout.noteProgressNote();
-    writeProgressTranscriptNote(THINKING_ONLY_TOOL_TURN_NOTICE);
+    // 延迟判断，给文本 chunk 时间到达
+    if (thinkingOnlyToolNoticeTimer) {
+      return;
+    }
+
+    thinkingOnlyToolNoticeTimer = setTimeout(() => {
+      if (!turnVisibleAssistantTextSeen && !turnThinkingOnlyToolNoticeWritten) {
+        turnThinkingOnlyToolNoticeWritten = true;
+        turnLayout.noteProgressNote();
+        writeProgressTranscriptNote(THINKING_ONLY_TOOL_TURN_NOTICE);
+      }
+      thinkingOnlyToolNoticeTimer = null;
+    }, 150); // 150ms 延迟
   };
 
   const isTerminalIntentStatus = (
@@ -2031,6 +2042,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     resetStreamingSegment();
     turnVisibleAssistantTextSeen = false;
     turnThinkingOnlyToolNoticeWritten = false;
+    if (thinkingOnlyToolNoticeTimer) {
+      clearTimeout(thinkingOnlyToolNoticeTimer);
+      thinkingOnlyToolNoticeTimer = null;
+    }
     runtimeState.beginTurn('Thinking');
     if (!terminalUiSuspended) {
       scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });

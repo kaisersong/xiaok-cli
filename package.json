@@ -27,6 +27,9 @@
   "scripts": {
     "build": "tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
     "dev": "tsx src/index.ts",
+    "desktop:pack": "npm run pack:dir --prefix desktop",
+    "desktop:launch": "node scripts/desktop-launch.mjs",
+    "desktop:install": "npm run desktop:pack && node scripts/desktop-install.mjs",
     "hygiene:check": "node scripts/check-repo-hygiene.mjs",
     "test": "npm run test:sandbox",
     "test:full": "vitest run",

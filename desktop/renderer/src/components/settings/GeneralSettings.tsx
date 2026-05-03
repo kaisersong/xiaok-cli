@@ -11,7 +11,7 @@ import {
 } from '../../api'
 import type { LlmProvider, SpawnProfile } from '../../api'
 import { useLocale } from '../../contexts/LocaleContext'
-// TODO: migrate @arkloop/shared import: import { getDesktopMode, isDesktop, isLocalMode, getDesktopApi } from '@arkloop/shared/desktop'
+import { getDesktopMode, isDesktop, isLocalMode, getDesktopApi } from '@arkloop/shared/desktop'
 import { openExternal } from '../../openExternal'
 import { LanguageContent, ThemeModePicker } from './AppearanceSettings'
 import { bridgeClient, checkBridgeAvailable } from '../../api-bridge'

@@ -26,8 +26,8 @@ import {
   testLlmProviderModel,
   isApiError,
 } from '../../api'
-// TODO: migrate @arkloop/shared import: import { routeAdvancedJsonFromAvailableCatalog } from '@arkloop/shared/llm/available-catalog-advanced-json'
-// TODO: migrate @arkloop/shared import: import { ConfirmDialog, PillToggle } from '@arkloop/shared'
+import { routeAdvancedJsonFromAvailableCatalog } from '@arkloop/shared/llm/available-catalog-advanced-json'
+import { ConfirmDialog, PillToggle } from '@arkloop/shared'
 import { useLocale } from '../../contexts/LocaleContext'
 import { ModelOptionsModal } from '../ModelOptionsModal'
 import { AnimatedCheck } from '../AnimatedCheck'

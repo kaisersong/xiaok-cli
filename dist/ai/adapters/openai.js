@@ -37,7 +37,7 @@ function extractReasoningDeltas(delta) {
         }
     }
     if (!usedReasoningDetails) {
-        for (const field of ['reasoning_content', 'reasoning', 'reasoning_text']) {
+        for (const field of ['reasoning_content', 'reasoning', 'reasoning_text', 'thinking', 'thought']) {
             const value = delta[field];
             if (typeof value === 'string' && value.length > 0) {
                 chunks.push({ signature: field, text: value });

@@ -45,7 +45,7 @@ function extractReasoningDeltas(delta: Record<string, unknown>): Array<{ signatu
   }
 
   if (!usedReasoningDetails) {
-    for (const field of ['reasoning_content', 'reasoning', 'reasoning_text'] as const) {
+    for (const field of ['reasoning_content', 'reasoning', 'reasoning_text', 'thinking', 'thought'] as const) {
       const value = delta[field];
       if (typeof value === 'string' && value.length > 0) {
         chunks.push({ signature: field, text: value });

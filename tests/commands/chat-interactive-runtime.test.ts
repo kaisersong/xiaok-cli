@@ -1325,7 +1325,7 @@ describe('chat interactive runtime', () => {
       expect(finalLines.slice(toolLineIndex + 1, secondSegmentIndex).some((line) => line.trim() === '')).toBe(true);
       expect(finalPromptIndex).toBeGreaterThanOrEqual(secondSegmentIndex + 3);
       expect(finalLines.slice(secondSegmentIndex + 1, finalPromptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
-      expect(harness.output.normalized).not.toContain('模型本轮直接进入工具执行');
+      expect(harness.output.normalized).not.toContain('正在执行工具...');
 
       harness.send('/exit');
       harness.send('\r');
@@ -1391,14 +1391,14 @@ describe('chat interactive runtime', () => {
 
       await waitFor(() => {
         const text = harness.output.normalized;
-        expect(text).toContain('模型本轮直接进入工具执行');
+        expect(text).toContain('正在执行工具...');
         expect(text).toContain('Read silent.txt');
         expect(text).toContain('静默工具轮完成');
       }, { timeoutMs: 3_000 });
 
-      expect(countOccurrences(harness.output.normalized, '模型本轮直接进入工具执行')).toBe(1);
+      expect(countOccurrences(harness.output.normalized, '正在执行工具...')).toBe(1);
       const lines = harness.screen.lines();
-      const noticeIndex = findLineIndex(lines, '模型本轮直接进入工具执行');
+      const noticeIndex = findLineIndex(lines, '正在执行工具...');
       const toolIndex = findLineIndex(lines, 'Read silent.txt');
       expect(noticeIndex).toBeGreaterThanOrEqual(0);
       expect(toolIndex).toBeGreaterThan(noticeIndex);

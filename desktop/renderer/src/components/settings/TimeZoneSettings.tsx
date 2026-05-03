@@ -11,7 +11,7 @@ import { ChevronDown } from 'lucide-react'
 import type { MeResponse } from '../../api'
 import { updateMe } from '../../api'
 import { useLocale } from '../../contexts/LocaleContext'
-// TODO: migrate @arkloop/shared import: import { useToast } from '@arkloop/shared'
+import { useToast } from '@arkloop/shared'
 import {
   detectDeviceTimeZone,
   formatTimeZoneOffset,

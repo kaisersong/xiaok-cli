@@ -9,7 +9,7 @@ import {
   CheckCheck,
   Minus,
 } from 'lucide-react'
-// TODO: migrate @arkloop/shared import: import { AutoResizeTextarea, Modal, ConfirmDialog } from '@arkloop/shared'
+import { AutoResizeTextarea, Modal, ConfirmDialog } from '@arkloop/shared'
 import { useLocale } from '../../contexts/LocaleContext'
 import { isApiError } from '../../api'
 import { listLlmProviders, type LlmProvider } from '../../api'

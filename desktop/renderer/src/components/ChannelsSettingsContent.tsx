@@ -16,7 +16,7 @@ import {
   isApiError,
 } from '../api'
 import { useLocale } from '../contexts/LocaleContext'
-// TODO: migrate @arkloop/shared import: import { AutoResizeTextarea } from '@arkloop/shared'
+import { AutoResizeTextarea } from '@arkloop/shared'
 import { QQLoginFlow } from './QQLoginFlow'
 import { CopyIconButton } from './CopyIconButton'
 import { ModelDropdown } from './settings/DesktopChannelSettingsShared'

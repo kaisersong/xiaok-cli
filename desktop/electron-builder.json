@@ -1,0 +1,15 @@
+{
+  "appId": "com.xiaok.desktop",
+  "productName": "xiaok",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "dist/**/*",
+    "package.json"
+  ],
+  "mac": {
+    "target": ["dir"],
+    "icon": "build/icon.icns"
+  }
+}

@@ -1,5 +1,5 @@
 import { Loader2, RefreshCw, Trash2 } from 'lucide-react'
-// TODO: migrate @arkloop/shared import: import { PillToggle } from '@arkloop/shared'
+import { PillToggle } from '@arkloop/shared'
 import { listPlatformSkills, setPlatformSkillOverride, type PlatformSkillItem } from '../../api'
 import type { ViewSkill } from './types'
 import { matchesSkillQuery } from './types'

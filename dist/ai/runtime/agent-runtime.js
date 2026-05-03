@@ -130,8 +130,9 @@ export class AgentRuntime {
                         break;
                     }
                 }
-                if (assistantBlocks.length === 0) {
-                    // 空响应自动重试（模型偶尔返回空响应）
+                const hasVisibleOutput = assistantBlocks.some((block) => block.type === 'text' || block.type === 'tool_use');
+                if (!hasVisibleOutput) {
+                    // 模型只返回了 thinking（无 text/tool_use），视为空响应自动重试
                     if (emptyRetries < AgentRuntime.MAX_EMPTY_RETRIES) {
                         emptyRetries++;
                         continue;

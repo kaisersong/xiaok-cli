@@ -74,7 +74,7 @@ const { version: cliVersion } = JSON.parse(readFileSync(new URL('../../package.j
 // has repeatedly regressed in narrow real TTYs. Keep the data path in place,
 // but do not prompt interactively until feedback has a non-footer surface.
 const COMPLETED_INTENT_FEEDBACK_ENABLED = false;
-const THINKING_ONLY_TOOL_TURN_NOTICE = '模型本轮直接进入工具执行；以下只显示安全进度，不展示隐藏推理。';
+const THINKING_ONLY_TOOL_TURN_NOTICE = '正在执行工具...';
 function describeLiveActivity(toolName, input) {
     if (['tool_search', 'grep', 'glob', 'read', 'skill', 'web_fetch', 'web_search'].includes(toolName)) {
         return 'Exploring codebase';
@@ -636,6 +636,7 @@ async function runChat(initialInput, opts) {
     let streamingSegmentText = '';
     let turnVisibleAssistantTextSeen = false;
     let turnThinkingOnlyToolNoticeWritten = false;
+    let thinkingOnlyToolNoticeTimer = null;
     const resetStreamingSegment = () => {
         streamingSegmentText = '';
     };
@@ -876,9 +877,18 @@ async function runChat(initialInput, opts) {
         if (turnVisibleAssistantTextSeen || turnThinkingOnlyToolNoticeWritten) {
             return;
         }
-        turnThinkingOnlyToolNoticeWritten = true;
-        turnLayout.noteProgressNote();
-        writeProgressTranscriptNote(THINKING_ONLY_TOOL_TURN_NOTICE);
+        // 延迟判断，给文本 chunk 时间到达
+        if (thinkingOnlyToolNoticeTimer) {
+            return;
+        }
+        thinkingOnlyToolNoticeTimer = setTimeout(() => {
+            if (!turnVisibleAssistantTextSeen && !turnThinkingOnlyToolNoticeWritten) {
+                turnThinkingOnlyToolNoticeWritten = true;
+                turnLayout.noteProgressNote();
+                writeProgressTranscriptNote(THINKING_ONLY_TOOL_TURN_NOTICE);
+            }
+            thinkingOnlyToolNoticeTimer = null;
+        }, 150); // 150ms 延迟
     };
     const isTerminalIntentStatus = (status) => status === 'completed' || status === 'failed' || status === 'cancelled';
     const refreshIntentLedger = async () => {
@@ -1712,6 +1722,10 @@ async function runChat(initialInput, opts) {
             resetStreamingSegment();
             turnVisibleAssistantTextSeen = false;
             turnThinkingOnlyToolNoticeWritten = false;
+            if (thinkingOnlyToolNoticeTimer) {
+                clearTimeout(thinkingOnlyToolNoticeTimer);
+                thinkingOnlyToolNoticeTimer = null;
+            }
             runtimeState.beginTurn('Thinking');
             if (!terminalUiSuspended) {
                 scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });

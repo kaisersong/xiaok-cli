@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-// TODO: migrate @arkloop/shared import: import { silentRefresh } from '@arkloop/shared'
-// TODO: migrate @arkloop/shared import: import { isLocalMode } from '@arkloop/shared/desktop'
+import { silentRefresh } from '@arkloop/shared'
+import { isLocalMode } from '@arkloop/shared/desktop'
 import { createSSEClient, type RunEvent, type SSEClient, type SSEClientState } from '../sse'
 import { clearLastSeqInStorage, readLastSeqFromStorage, writeLastSeqToStorage } from '../storage'
 import { emitStreamDebug } from '../streamDebug'

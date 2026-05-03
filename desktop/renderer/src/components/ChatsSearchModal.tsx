@@ -5,7 +5,7 @@ import type { ThreadMode, ThreadResponse } from '../api'
 import { searchThreads } from '../api'
 import { useLocale } from '../contexts/LocaleContext'
 import { isPerfDebugEnabled, recordPerfDuration, recordPerfValue } from '../perfDebug'
-// TODO: migrate @arkloop/shared import: import { useTimeZone } from '@arkloop/shared'
+import { useTimeZone } from '@arkloop/shared'
 
 type DateGroup = {
   label: string

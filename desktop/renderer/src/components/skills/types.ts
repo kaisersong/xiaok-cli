@@ -1,5 +1,5 @@
 import type { InstalledSkill, MarketSkill, SkillPackageResponse, SkillReference } from '../../api'
-// TODO: migrate @arkloop/shared import: import { getActiveTimeZone } from '@arkloop/shared'
+import { getActiveTimeZone } from '@arkloop/shared'
 
 export type ViewMode = 'installed' | 'marketplace' | 'builtin'
 

@@ -13,6 +13,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': '/src',
+      '@arkloop/shared': '/src/shared',
     },
   },
 });

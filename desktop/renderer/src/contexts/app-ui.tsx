@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-// TODO: migrate @arkloop/shared import: import { isDesktop } from '@arkloop/shared/desktop'
+import { isDesktop } from '@arkloop/shared/desktop'
 import type { SettingsTab } from '../components/SettingsModal'
 import type { DesktopSettingsKey } from '../components/DesktopSettings'
 import {
