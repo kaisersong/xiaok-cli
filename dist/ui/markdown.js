@@ -214,6 +214,16 @@ export class MarkdownRenderer {
             this.hasRenderedLeadParagraph = true;
             return this.formatLeadParagraphLine(line);
         }
+        // Continuation text after lead paragraph - align with 2-space indent
+        if (line.trim().length > 0) {
+            const renderedText = this.inlineFormat(line);
+            const plainPrefix = `${BODY_GUTTER}${LEAD_CONTINUATION_PREFIX}`;
+            const continuationWidth = this.getWrapWidth(plainPrefix);
+            const wrappedLines = this.wrapStyledText(renderedText, continuationWidth, continuationWidth);
+            return wrappedLines
+                .map((wrappedLine) => `${plainPrefix}${wrappedLine}`)
+                .join('\n');
+        }
         return `${BODY_GUTTER}${this.inlineFormat(line)}`;
     }
     countRows(text) {
