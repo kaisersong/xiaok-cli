@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { api } from '../api';
 import { ChatView } from './ChatView';
 import type { ThreadRecord } from '../api/types';
-import type { DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../src/runtime/task-host/types';
+import type { DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
 
 export function ChatShell() {
   const { taskId } = useParams<{ taskId: string }>();

@@ -31,7 +31,7 @@ import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
 import { ScrollRegionManager } from '../ui/scroll-region.js';
 import { TuiRuntimeState } from '../ui/tui/runtime-state.js';
-import { renderWelcomeScreen, renderInputSeparator, dim, formatProgressNote, formatSubmittedInput, formatToolActivity, formatHistoryBlock } from '../ui/render.js';
+import { renderWelcomeScreen, renderInputSeparator, dim, boldCyan, formatProgressNote, formatSubmittedInput, formatToolActivity, formatHistoryBlock } from '../ui/render.js';
 import { getDisplayWidth, stripAnsi } from '../ui/display-width.js';
 import { InputReader } from '../ui/input.js';
 import { sliceByDisplayColumns } from '../ui/text-metrics.js';
@@ -68,6 +68,7 @@ import { YZJTransport } from '../channels/yzj-transport.js';
 import { InMemoryApprovalStore } from '../channels/approval-store.js';
 import { getProviderProfile } from '../ai/providers/registry.js';
 import { FileSkillAdherenceStore } from '../runtime/skills/adherence-store.js';
+import { checkForUpdate } from '../update/version-check.js';
 import { buildIntentReminderBlock, formatCurrentIntentSummaryLine, formatCurrentTurnIntentSummaryLine, formatIntentCreatedTranscriptBlock, formatIntentStageSummaryTranscriptBlock, formatProgressTranscriptBlock, formatReceiptTranscriptBlock, formatSalvageTranscriptBlock, formatStageActivatedTranscriptBlock, } from '../ui/orchestration.js';
 const { version: cliVersion } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 // Completed-intent feedback currently re-enters the footer/input surface and
@@ -1628,6 +1629,18 @@ async function runChat(initialInput, opts) {
         // setWelcomeRows updates both _totalRows and _cursorRow based on
         // the row count returned by renderWelcomeScreen (console.log calls).
         scrollRegion.setWelcomeRows(contentRows);
+        // Async update check — show hint below welcome if newer version exists
+        checkForUpdate(cliVersion).then((result) => {
+            if (result?.hasUpdate && !terminalUiSuspended) {
+                const hint = `${boldCyan('⬆')} ${dim(`有新版本可用: ${result.latest} (当前 ${result.current})，运行`)} ${boldCyan('npm i -g xiaokcode')} ${dim('更新')}`;
+                if (scrollRegion.isActive()) {
+                    scrollRegion.writeAtContentCursor(`  ${hint}\n`);
+                }
+                else {
+                    process.stdout.write(`  ${hint}\n`);
+                }
+            }
+        }).catch(() => { });
         // 设置初始 usage
         statusBar.update({ inputTokens: 0, outputTokens: 0 });
         if (opts.dryRun)

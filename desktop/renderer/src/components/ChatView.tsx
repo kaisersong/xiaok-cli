@@ -1,7 +1,7 @@
 import { useRef, useEffect } from 'react';
 import { ChatInput } from './ChatInput';
 import type { ThreadRecord } from '../api/types';
-import type { DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../src/runtime/task-host/types';
+import type { DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
 
 interface ChatViewProps {
   thread: ThreadRecord;

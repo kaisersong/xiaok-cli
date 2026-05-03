@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChatInput } from './ChatInput';
-import { createThread, createTask } from '../api';
+import { api } from '../api';
 
 export function WelcomePage() {
   const navigate = useNavigate();
   const [prompt, setPrompt] = useState('');
 
   const handleSubmit = async (text: string) => {
-    const thread = await createThread({ title: text.slice(0, 40) });
-    await createTask({ prompt: text, materials: [] });
+    const thread = await api.createThread({ title: text.slice(0, 40) });
+    await api.createTask({ prompt: text, materials: [] });
     navigate(`/t/${thread.id}`);
   };
 
