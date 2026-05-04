@@ -237,44 +237,66 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       // Artifact opening stays behind the semantic API even before rich preview exists.
     },
 
-    // ---- Channel API ----
+    // ---- Channel API (shared config.json) ----
     async listChannels(): Promise<Array<{ id: string; type: string; name: string; webhookUrl?: string; enabled: boolean; createdAt: number; updatedAt: number }>> {
-      const path = join(options.dataRoot, 'channels.json');
-      try { return JSON.parse(readFileSync(path, 'utf-8')) } catch { return []; }
+      const config = await loadConfig();
+      const channels = (config as unknown as Record<string, unknown>).channels ?? {};
+      return Object.entries(channels).map(([key, ch]) => {
+        const c = ch as { sendMsgUrl?: string; webhookUrl?: string; inboundMode?: string; enabled?: boolean; name?: string };
+        return {
+          id: key,
+          type: key,
+          name: c.name || key,
+          webhookUrl: c.webhookUrl || c.sendMsgUrl,
+          enabled: c.enabled !== false,
+          createdAt: 0,
+          updatedAt: 0,
+        };
+      });
     },
     async createChannel(input: { type: string; name: string; webhookUrl?: string }): Promise<{ id: string; type: string; name: string; webhookUrl?: string; enabled: boolean; createdAt: number; updatedAt: number }> {
-      const path = join(options.dataRoot, 'channels.json');
-      const channels = await loadJsonFile<ChannelRecord[]>(path, []);
-      const channel: ChannelRecord = {
-        id: crypto.randomUUID(),
-        type: input.type as ChannelRecord['type'],
+      const config = await loadConfig();
+      const raw = config as unknown as Record<string, unknown>;
+      if (!raw.channels) raw.channels = {};
+      (raw.channels as Record<string, unknown>)[input.type] = {
+        name: input.name,
+        sendMsgUrl: input.webhookUrl || '',
+        inboundMode: 'webhook',
+        enabled: true,
+      };
+      await saveConfig(config);
+      return {
+        id: input.type,
+        type: input.type,
         name: input.name,
         webhookUrl: input.webhookUrl,
         enabled: true,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-      channels.push(channel);
-      await saveJsonFile(path, channels);
-      return toChannelView(channel);
     },
-    async updateChannel(id: string, input: { type?: string; name?: string; webhookUrl?: string; enabled?: boolean }) {
-      const path = join(options.dataRoot, 'channels.json');
-      const channels = await loadJsonFile<ChannelRecord[]>(path, []);
-      const idx = channels.findIndex(c => c.id === id);
-      if (idx < 0) throw new Error('Channel not found');
-      if (input.type !== undefined) channels[idx].type = input.type as ChannelRecord['type'];
-      if (input.name !== undefined) channels[idx].name = input.name;
-      if (input.webhookUrl !== undefined) channels[idx].webhookUrl = input.webhookUrl;
-      if (input.enabled !== undefined) channels[idx].enabled = input.enabled;
-      channels[idx].updatedAt = Date.now();
-      await saveJsonFile(path, channels);
-      return toChannelView(channels[idx]);
+    async updateChannel(id: string, input: { type?: string; name?: string; webhookUrl?: string; enabled?: boolean }): Promise<{ id: string; type: string; name: string; webhookUrl?: string; enabled: boolean; createdAt: number; updatedAt: number }> {
+      const config = await loadConfig();
+      const raw = config as unknown as Record<string, unknown>;
+      const channels = (raw.channels as Record<string, unknown>) || {};
+      const ch = channels[id] as Record<string, unknown> | undefined;
+      if (!ch) throw new Error('Channel not found');
+      if (input.name !== undefined) ch.name = input.name;
+      if (input.webhookUrl !== undefined) ch.sendMsgUrl = input.webhookUrl;
+      if (input.enabled !== undefined) ch.enabled = input.enabled;
+      await saveConfig(config);
+      return {
+        id, type: id, name: (ch.name as string) || id,
+        webhookUrl: ch.sendMsgUrl as string | undefined,
+        enabled: ch.enabled !== false, createdAt: 0, updatedAt: Date.now(),
+      };
     },
     async deleteChannel(id: string) {
-      const path = join(options.dataRoot, 'channels.json');
-      const channels = await loadJsonFile<ChannelRecord[]>(path, []);
-      await saveJsonFile(path, channels.filter(c => c.id !== id));
+      const config = await loadConfig();
+      const raw = config as unknown as Record<string, unknown>;
+      const channels = raw.channels as Record<string, unknown> | undefined;
+      if (channels) delete channels[id];
+      await saveConfig(config);
     },
 
     // ---- MCP API ----
