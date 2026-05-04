@@ -11,13 +11,13 @@ import { ChevronDown } from 'lucide-react'
 import type { MeResponse } from '../../api'
 import { updateMe } from '../../api'
 import { useLocale } from '../../contexts/LocaleContext'
-import { useToast } from '@arkloop/shared'
+import { useToast } from '../shared'
 import {
   detectDeviceTimeZone,
   formatTimeZoneOffset,
   listSupportedTimeZones,
   normalizeTimeZone,
-} from '@arkloop/shared'
+} from '../shared'
 
 type Props = {
   me: MeResponse | null

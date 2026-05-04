@@ -8,14 +8,14 @@ import {
   Wifi,
   XCircle,
 } from 'lucide-react'
-import { ErrorCallout } from '@arkloop/shared'
-import { getDesktopApi } from '@arkloop/shared/desktop'
+import { ErrorCallout } from '../shared'
+import { getDesktopApi } from '../shared/desktop'
 import type {
   ConnectionMode,
   DesktopConfig,
   LocalPortMode,
   SidecarRuntime,
-} from '@arkloop/shared/desktop'
+} from '../shared/desktop'
 import { useLocale } from '../contexts/LocaleContext'
 import { SettingsSelect } from './settings/_SettingsSelect'
 

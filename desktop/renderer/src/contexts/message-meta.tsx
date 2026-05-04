@@ -52,7 +52,7 @@ import {
   writeThreadRunHandoff,
 } from '../storage'
 import type { AssistantTurnUi } from '../assistantTurnSegments'
-import type { AppError } from '@arkloop/shared'
+import type { AppError } from '../shared'
 
 export type MessageMeta = {
   sources?: WebSource[]

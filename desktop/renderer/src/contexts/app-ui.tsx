@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { isDesktop } from '@arkloop/shared/desktop'
+import { isDesktop } from '../shared/desktop'
 import type { SettingsTab } from '../components/SettingsModal'
 import type { DesktopSettingsKey } from '../components/DesktopSettings'
 import {
@@ -286,7 +286,7 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
         sample,
       }
       sidebarToggleTraceRef.current = beginPerfTrace('desktop_sidebar_toggle', sample)
-      window.dispatchEvent(new CustomEvent('arkloop:sidebar-toggle-started', {
+      window.dispatchEvent(new CustomEvent('xiaok:sidebar-toggle-started', {
         detail: {
           startedAt: sidebarLifecycleRef.current.startedAt,
           sample,
@@ -499,8 +499,8 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
       setDesktopSettingsSection('general')
       setSettingsOpen(true)
     }
-    window.addEventListener('arkloop:app:open-settings', handler as EventListener)
-    return () => window.removeEventListener('arkloop:app:open-settings', handler as EventListener)
+    window.addEventListener('xiaok:app:open-settings', handler as EventListener)
+    return () => window.removeEventListener('xiaok:app:open-settings', handler as EventListener)
   }, [desktop, location.pathname])
 
   useEffect(() => {

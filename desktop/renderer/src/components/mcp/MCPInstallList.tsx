@@ -1,5 +1,5 @@
 import { Loader2, MoreHorizontal, Pencil, RefreshCw, Trash2 } from 'lucide-react'
-import { PillToggle } from '@arkloop/shared'
+import { PillToggle } from '../shared'
 import { DropdownAction } from '../skills/DropdownAction'
 import { statusVariant, type MCPCopy } from './types'
 import type { MCPInstall } from '../../api'

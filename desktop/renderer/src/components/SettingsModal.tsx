@@ -31,7 +31,7 @@ import { CreditsContent } from './settings/CreditsSettings'
 import { UpdateSettingsContent } from './settings/UpdateSettings'
 import { ToolsSettings } from './settings/ToolsSettings'
 import { TimeZoneSettings } from './settings/TimeZoneSettings'
-import { isDesktop, isLocalMode } from '@arkloop/shared/desktop'
+import { isDesktop, isLocalMode } from '../shared/desktop'
 
 export type SettingsTab = 'account' | 'appearance' | 'settings' | 'tools' | 'skills' | 'credits' | 'models' | 'agents' | 'channels' | 'connection' | 'updates'
 
@@ -102,7 +102,7 @@ export function SettingsModal({ me, accessToken, initialTab = 'account', onClose
           style={{ borderRight: '0.5px solid rgba(0,0,0,0.14)' }}
         >
           <div className="mb-2 px-4 py-1">
-            <span className="text-sm font-semibold text-[var(--c-text-heading)]">Arkloop</span>
+            <span className="text-sm font-semibold text-[var(--c-text-heading)]">Xiaok</span>
           </div>
 
           <nav className="flex flex-col gap-[2px] px-2">

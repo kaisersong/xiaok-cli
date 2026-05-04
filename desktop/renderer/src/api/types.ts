@@ -88,3 +88,35 @@ export interface ConnectorsConfig {
   search: { provider: 'none' };
 }
 export interface CreditsBalance { balance: number; }
+
+// Channel types
+export type ChannelType = 'discord' | 'feishu' | 'qq' | 'qqbot' | 'weixin' | 'telegram';
+
+export interface ChannelConfig {
+  id: string;
+  type: ChannelType;
+  name: string;
+  webhookUrl?: string;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ChannelBindCode {
+  code: string;
+  expiresAt: number;
+}
+
+// MCP types
+export type MCPInstallSource = 'npm' | 'github' | 'local';
+
+export interface MCPInstallConfig {
+  id: string;
+  name: string;
+  source: MCPInstallSource;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  enabled: boolean;
+  createdAt: number;
+}

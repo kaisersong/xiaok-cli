@@ -4,10 +4,23 @@
   --c-bg-page: #f7f5f1;
   --c-bg-sidebar: #f0f0f0;
   --c-bg-card: #ffffff;
+  --c-bg-deep: rgba(0,0,0,0.04);
+  --c-bg-sub: rgba(0,0,0,0.02);
   --c-text-primary: #1a1a1a;
   --c-text-secondary: #666666;
+  --c-text-tertiary: #999999;
+  --c-text-icon: #666666;
   --c-accent: #0b6e6e;
+  --c-accent-send: #0b6e6e;
+  --c-accent-send-hover: #095858;
+  --c-accent-send-text: #ffffff;
   --c-border: #e0e0e0;
+  --c-border-subtle: #eeeeee;
+  --c-input-border-color: #e0e0e0;
+  --c-input-border-color-focus: #0b6e6e;
+  --c-input-shadow: 0 2px 16px -4px rgba(0,0,0,0.06);
+  --c-input-shadow-focus: 0 4px 10px -2px rgba(0,0,0,0.10);
+  --c-placeholder: #999999;
 }
 
 body {

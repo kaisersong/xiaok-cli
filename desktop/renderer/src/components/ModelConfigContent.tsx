@@ -15,8 +15,8 @@ import {
   listAvailableModels,
   isApiError,
 } from '../api'
-import { routeAdvancedJsonFromAvailableCatalog } from '@arkloop/shared/llm/available-catalog-advanced-json'
-import { PillToggle } from '@arkloop/shared'
+import { routeAdvancedJsonFromAvailableCatalog } from '../shared/llm/available-catalog-advanced-json'
+import { PillToggle } from '../shared'
 import { useLocale } from '../contexts/LocaleContext'
 import { ModelOptionsModal } from './ModelOptionsModal'
 

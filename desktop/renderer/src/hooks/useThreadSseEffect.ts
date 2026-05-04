@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, type RefObject } from 'react'
-import { canonicalToolName, pickLogicalToolName } from '@arkloop/shared'
+import { canonicalToolName, pickLogicalToolName } from '../shared'
 import { setThreadTodos } from '../todoDb'
 import { useAuth } from '../contexts/auth'
 import { useChatSession } from '../contexts/chat-session'

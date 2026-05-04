@@ -2,8 +2,8 @@ import { readThemeFromStorage, writeThemeToStorage } from '../storage'
 import {
   ThemeProvider as SharedThemeProvider,
   useTheme,
-} from '@arkloop/shared/contexts/theme'
-import type { Theme } from '@arkloop/shared/contexts/theme'
+} from '../shared/contexts/theme'
+import type { Theme } from '../shared/contexts/theme'
 import type { ReactNode } from 'react'
 
 export function ThemeProvider({ children }: { children: ReactNode }) {

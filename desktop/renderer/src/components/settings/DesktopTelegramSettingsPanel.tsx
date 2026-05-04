@@ -16,7 +16,7 @@ import {
   verifyChannel,
 } from '../../api'
 import { useLocale } from '../../contexts/LocaleContext'
-import { PillToggle } from '@arkloop/shared'
+import { PillToggle } from '../shared'
 import {
   BindingsCard,
   buildModelOptions,

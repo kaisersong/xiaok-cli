@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { RefreshCw, CheckCircle, XCircle, Search } from 'lucide-react'
-import { Modal } from '@arkloop/shared'
-import { SpinnerIcon } from '@arkloop/shared/components/auth-ui'
+import { Modal } from '../shared'
+import { SpinnerIcon } from '../shared/components/auth-ui'
 import { useLocale } from '../../contexts/LocaleContext'
-import { getDesktopApi } from '@arkloop/shared/desktop'
-import type { MemoryConfig, NowledgeDesktopConfig, OpenVikingDesktopConfig } from '@arkloop/shared/desktop'
+import { getDesktopApi } from '../shared/desktop'
+import type { MemoryConfig, NowledgeDesktopConfig, OpenVikingDesktopConfig } from '../shared/desktop'
 import {
   bridgeClient,
   checkBridgeAvailable,

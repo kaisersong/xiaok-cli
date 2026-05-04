@@ -3,11 +3,11 @@ import { HelpCircle, ArrowUpRight, Flag, X } from 'lucide-react'
 import { isApiError, createSuggestionFeedback } from '../../api'
 import { useLocale } from '../../contexts/LocaleContext'
 import { openExternal } from '../../openExternal'
-import { AutoResizeTextarea } from '@arkloop/shared'
+import { AutoResizeTextarea } from '../shared'
 
 export function HelpContent({ label }: { label: string }) {
   const { locale } = useLocale()
-  const docsUrl = locale === 'en' ? 'https://arkloop.io/en/docs/guide' : 'https://arkloop.io/zh/docs/guide'
+  const docsUrl = locale === 'en' ? 'https://xiaok.io/en/docs/guide' : 'https://xiaok.io/zh/docs/guide'
 
   return (
     <div className="flex flex-col gap-2">

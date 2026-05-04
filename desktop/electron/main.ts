@@ -5,6 +5,7 @@ import { createDesktopServices } from './desktop-services.js';
 import { registerDesktopIpc } from './ipc.js';
 import { buildBrowserWindowOptions, isAllowedNavigationUrl } from './security.js';
 import { attachMacCloseToMinimize, attachWindowRepaintHandlers, restoreExistingWindow } from './window-lifecycle.js';
+import { setupMenuBar, destroyMenuBar } from './menubar.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -20,7 +21,11 @@ async function createWindow(): Promise<BrowserWindow> {
   });
   registerDesktopIpc(ipcMain, window, services);
 
+  // Setup menubar with K icon
+  setupMenuBar(window);
+
   window.on('closed', () => {
+    destroyMenuBar();
     if (mainWindow === window) {
       mainWindow = null;
     }
@@ -68,6 +73,7 @@ if (!singleInstanceLock) {
   });
   app.on('before-quit', () => {
     isQuitting = true;
+    destroyMenuBar();
   });
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {

@@ -16,7 +16,7 @@ import {
   isApiError,
 } from '../api'
 import { useLocale } from '../contexts/LocaleContext'
-import { AutoResizeTextarea } from '@arkloop/shared'
+import { AutoResizeTextarea } from '../shared'
 import { QQLoginFlow } from './QQLoginFlow'
 import { CopyIconButton } from './CopyIconButton'
 import { ModelDropdown } from './settings/DesktopChannelSettingsShared'

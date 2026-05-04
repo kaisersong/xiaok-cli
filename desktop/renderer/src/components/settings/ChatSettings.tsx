@@ -6,8 +6,8 @@ import {
   updatePlatformSetting,
 } from '../../api-admin'
 import { bridgeClient } from '../../api-bridge'
-import { PillToggle } from '@arkloop/shared'
-import { useToast } from '@arkloop/shared'
+import { PillToggle } from '../shared'
+import { useToast } from '../shared'
 import type { DesktopSettingsHydrationSnapshot } from '../DesktopSettings'
 
 const DEFAULT_FALLBACK_WINDOW = 128_000

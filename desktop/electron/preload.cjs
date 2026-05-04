@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   saveModelConfig: (input) => ipcRenderer.invoke('desktop:saveModelConfig', input),
   selectMaterials: () => ipcRenderer.invoke('desktop:selectMaterials'),
   importMaterial: (input) => ipcRenderer.invoke('desktop:importMaterial', input),
+  listSkills: () => ipcRenderer.invoke('desktop:listSkills'),
+  createTaskWithFiles: (input) => ipcRenderer.invoke('desktop:createTaskWithFiles', input),
   createTask: (input) => ipcRenderer.invoke('desktop:createTask', input),
   subscribeTask(taskId, handler) {
     const channel = `desktop:taskEvent:${taskId}`;

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Brain, ChevronDown, Eye, Image as ImageIcon, Loader2, Wrench, X } from 'lucide-react'
-import { AutoResizeTextarea, FormField, PillToggle } from '@arkloop/shared'
+import { AutoResizeTextarea, FormField, PillToggle } from '../shared'
 import type { AvailableModel, LlmProviderModel } from '../api'
 import {
   AVAILABLE_CATALOG_ADVANCED_KEY,
@@ -9,7 +9,7 @@ import {
   mergeAvailableCatalogIntoAdvancedJson,
   routeAdvancedJsonFromAvailableCatalog,
   stripAvailableCatalogFromAdvancedJson,
-} from '@arkloop/shared/llm/available-catalog-advanced-json'
+} from '../shared/llm/available-catalog-advanced-json'
 
 type Labels = {
   modelOptionsTitle: string

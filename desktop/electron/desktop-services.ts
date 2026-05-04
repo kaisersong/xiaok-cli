@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createAdapter } from '../../src/ai/models.js';
 import { getProviderProfile, listProviderProfiles } from '../../src/ai/providers/registry.js';
@@ -83,7 +83,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
 
   return {
     async importMaterial(input: { taskId: string; filePath: string; role: MaterialRole }) {
-      await mkdir(options.dataRoot, { recursive: true });
+      mkdirSync(options.dataRoot, { recursive: true });
       const record = await materialRegistry.importMaterial({
         taskId: input.taskId,
         sourcePath: input.filePath,
@@ -107,7 +107,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       prompt: string;
       filePaths: string[];
     }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
-      await mkdir(options.dataRoot, { recursive: true });
+      mkdirSync(options.dataRoot, { recursive: true });
       const taskId = `task_${Date.now().toString(36)}`;
       const materials: Array<{ materialId: string; role?: MaterialRole }> = [];
       for (const filePath of input.filePaths) {
@@ -236,8 +236,132 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     async openArtifact(_artifactId: string): Promise<void> {
       // Artifact opening stays behind the semantic API even before rich preview exists.
     },
+
+    // ---- Channel API ----
+    async listChannels(): Promise<Array<{ id: string; type: string; name: string; webhookUrl?: string; enabled: boolean; createdAt: number; updatedAt: number }>> {
+      const path = join(options.dataRoot, 'channels.json');
+      try { return JSON.parse(readFileSync(path, 'utf-8')) } catch { return []; }
+    },
+    async createChannel(input: { type: string; name: string; webhookUrl?: string }): Promise<{ id: string; type: string; name: string; webhookUrl?: string; enabled: boolean; createdAt: number; updatedAt: number }> {
+      const path = join(options.dataRoot, 'channels.json');
+      const channels = await loadJsonFile<ChannelRecord[]>(path, []);
+      const channel: ChannelRecord = {
+        id: crypto.randomUUID(),
+        type: input.type as ChannelRecord['type'],
+        name: input.name,
+        webhookUrl: input.webhookUrl,
+        enabled: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      channels.push(channel);
+      await saveJsonFile(path, channels);
+      return toChannelView(channel);
+    },
+    async updateChannel(id: string, input: { type?: string; name?: string; webhookUrl?: string; enabled?: boolean }) {
+      const path = join(options.dataRoot, 'channels.json');
+      const channels = await loadJsonFile<ChannelRecord[]>(path, []);
+      const idx = channels.findIndex(c => c.id === id);
+      if (idx < 0) throw new Error('Channel not found');
+      if (input.type !== undefined) channels[idx].type = input.type as ChannelRecord['type'];
+      if (input.name !== undefined) channels[idx].name = input.name;
+      if (input.webhookUrl !== undefined) channels[idx].webhookUrl = input.webhookUrl;
+      if (input.enabled !== undefined) channels[idx].enabled = input.enabled;
+      channels[idx].updatedAt = Date.now();
+      await saveJsonFile(path, channels);
+      return toChannelView(channels[idx]);
+    },
+    async deleteChannel(id: string) {
+      const path = join(options.dataRoot, 'channels.json');
+      const channels = await loadJsonFile<ChannelRecord[]>(path, []);
+      await saveJsonFile(path, channels.filter(c => c.id !== id));
+    },
+
+    // ---- MCP API ----
+    async listMCPInstalls(): Promise<Array<{ id: string; name: string; source: string; command: string; args?: string[]; enabled: boolean; createdAt: number }>> {
+      const path = join(options.dataRoot, 'mcp-installs.json');
+      try { return JSON.parse(readFileSync(path, 'utf-8')) } catch { return []; }
+    },
+    async createMCPInstall(input: { name: string; source: 'npm' | 'github' | 'local'; command: string; args?: string[] }) {
+      const path = join(options.dataRoot, 'mcp-installs.json');
+      const installs = await loadJsonFile<MCPRecord[]>(path, []);
+      const record: MCPRecord = {
+        id: crypto.randomUUID(),
+        name: input.name,
+        source: input.source,
+        command: input.command,
+        args: input.args,
+        enabled: true,
+        createdAt: Date.now(),
+      };
+      installs.push(record);
+      await saveJsonFile(path, installs);
+      return toMCPView(record);
+    },
+    async updateMCPInstall(id: string, input: { name?: string; source?: 'npm' | 'github' | 'local'; command?: string; enabled?: boolean }) {
+      const path = join(options.dataRoot, 'mcp-installs.json');
+      const installs = await loadJsonFile<MCPRecord[]>(path, []);
+      const idx = installs.findIndex(c => c.id === id);
+      if (idx < 0) throw new Error('MCP install not found');
+      if (input.name !== undefined) installs[idx].name = input.name;
+      if (input.source !== undefined) installs[idx].source = input.source;
+      if (input.command !== undefined) installs[idx].command = input.command;
+      if (input.enabled !== undefined) installs[idx].enabled = input.enabled;
+      await saveJsonFile(path, installs);
+      return toMCPView(installs[idx]);
+    },
+    async deleteMCPInstall(id: string) {
+      const path = join(options.dataRoot, 'mcp-installs.json');
+      const installs = await loadJsonFile<MCPRecord[]>(path, []);
+      await saveJsonFile(path, installs.filter(c => c.id !== id));
+    },
   };
 }
+
+// ---- Channel types ----
+
+interface ChannelRecord {
+  id: string;
+  type: 'discord' | 'feishu' | 'qq' | 'qqbot' | 'weixin' | 'telegram';
+  name: string;
+  webhookUrl?: string;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+function toChannelView(c: ChannelRecord): { id: string; type: string; name: string; webhookUrl?: string; enabled: boolean; createdAt: number; updatedAt: number } {
+  return { id: c.id, type: c.type, name: c.name, webhookUrl: c.webhookUrl, enabled: c.enabled, createdAt: c.createdAt, updatedAt: c.updatedAt };
+}
+
+// ---- MCP types ----
+
+interface MCPRecord {
+  id: string;
+  name: string;
+  source: 'npm' | 'github' | 'local';
+  command: string;
+  args?: string[];
+  enabled: boolean;
+  createdAt: number;
+}
+
+function toMCPView(r: MCPRecord): { id: string; name: string; source: string; command: string; args?: string[]; enabled: boolean; createdAt: number } {
+  return { id: r.id, name: r.name, source: r.source, command: r.command, args: r.args, enabled: r.enabled, createdAt: r.createdAt };
+}
+
+// ---- File helpers ----
+
+async function loadJsonFile<T>(path: string, defaultVal: T): Promise<T> {
+  try { return JSON.parse(readFileSync(path, 'utf-8')) as T } catch { return defaultVal; }
+}
+
+async function saveJsonFile(path: string, data: unknown): Promise<void> {
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(path, JSON.stringify(data, null, 2));
+}
+
+// File helpers only
 
 function normalizeProviderId(value: string): string {
   const providerId = value.trim().toLowerCase();

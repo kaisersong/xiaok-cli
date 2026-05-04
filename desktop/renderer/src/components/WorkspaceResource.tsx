@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Download, ExternalLink, FileCode2, X } from 'lucide-react'
-import { apiBaseUrl } from '@arkloop/shared/api'
+import { apiBaseUrl } from '../shared/api'
 import { useLocale } from '../contexts/LocaleContext'
 import { ArtifactIframe } from './ArtifactIframe'
 

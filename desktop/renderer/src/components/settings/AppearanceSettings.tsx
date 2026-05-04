@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { ChevronDown, Monitor, Sun, Moon } from 'lucide-react'
 import type { Locale } from '../../locales'
-import type { Theme } from '@arkloop/shared/contexts/theme'
+import type { Theme } from '../shared/contexts/theme'
 import { useLocale } from '../../contexts/LocaleContext'
 import { useTheme } from '../../contexts/ThemeContext'
 import { readGtdEnabled, writeGtdEnabled } from '../../storage'
@@ -366,7 +366,7 @@ export function SidebarGroupingPicker() {
               onClick={() => {
                 setGtdEnabled(value)
                 writeGtdEnabled(value)
-                window.dispatchEvent(new CustomEvent('arkloop:gtd-enabled-changed', { detail: value }))
+                window.dispatchEvent(new CustomEvent('xiaok:gtd-enabled-changed', { detail: value }))
               }}
               className="flex flex-col items-center gap-2"
             >

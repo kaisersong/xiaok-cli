@@ -5,7 +5,7 @@ import type { ThreadMode, ThreadResponse } from '../api'
 import { searchThreads } from '../api'
 import { useLocale } from '../contexts/LocaleContext'
 import { isPerfDebugEnabled, recordPerfDuration, recordPerfValue } from '../perfDebug'
-import { useTimeZone } from '@arkloop/shared'
+import { useTimeZone } from '../shared'
 
 type DateGroup = {
   label: string
@@ -100,11 +100,11 @@ export function ChatsSearchModal({ threads, mode, accessToken, onClose }: Props)
   useLayoutEffect(() => {
     if (!isPerfDebugEnabled() || typeof performance === 'undefined') return
     const marker = (window as Window & {
-      __arkloopSearchOpenStarted?: {
+      __xiaokSearchOpenStarted?: {
         startedAt: number
         sample: Record<string, string | number | boolean | null | undefined>
       }
-    }).__arkloopSearchOpenStarted
+    }).__xiaokSearchOpenStarted
     if (!marker) return
     openMarkerRef.current = marker
     recordPerfDuration('desktop_search_modal_mount_commit', performance.now() - marker.startedAt, {
@@ -112,7 +112,7 @@ export function ChatsSearchModal({ threads, mode, accessToken, onClose }: Props)
       threadCount: threads.length,
       phase: 'commit',
     })
-    ;(window as Window & { __arkloopSearchOpenStarted?: unknown }).__arkloopSearchOpenStarted = undefined
+    ;(window as Window & { __xiaokSearchOpenStarted?: unknown }).__xiaokSearchOpenStarted = undefined
   }, [threads.length])
 
   useEffect(() => {

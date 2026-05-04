@@ -1,4 +1,4 @@
-import type { DesktopConfig } from '@arkloop/shared/desktop'
+import type { DesktopConfig } from '../shared/desktop'
 import { ConnectionSettingsContent } from '../ConnectionSettingsContent'
 
 type Props = {

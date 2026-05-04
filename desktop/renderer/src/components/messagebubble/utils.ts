@@ -1,5 +1,5 @@
 import type { ArtifactRef } from '../../storage'
-import { formatDateTime, formatMonthDay, getActiveTimeZone, isSameCalendarDay } from '@arkloop/shared'
+import { formatDateTime, formatMonthDay, getActiveTimeZone, isSameCalendarDay } from '../shared'
 
 export function isDocumentArtifact(artifact: ArtifactRef): boolean {
   if (artifact.display === 'panel') return true

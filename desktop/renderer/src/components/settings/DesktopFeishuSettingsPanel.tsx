@@ -11,7 +11,7 @@ import {
 } from '../../api'
 import { CopyIconButton } from '../CopyIconButton'
 import { useLocale } from '../../contexts/LocaleContext'
-import { PillToggle } from '@arkloop/shared'
+import { PillToggle } from '../shared'
 import {
   buildModelOptions,
   inputCls,

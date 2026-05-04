@@ -7,7 +7,7 @@ import {
   confirmEmailVerification,
 } from '../../api'
 import { useLocale } from '../../contexts/LocaleContext'
-import { useToast } from '@arkloop/shared'
+import { useToast } from '../shared'
 import { CopyIconButton } from '../CopyIconButton'
 
 export function AccountContent({

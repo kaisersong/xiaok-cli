@@ -1,4 +1,4 @@
-import { AuthPage as SharedAuthPage, type AuthApi } from '@arkloop/shared'
+import { AuthPage as SharedAuthPage, type AuthApi } from '../shared'
 import {
   login,
   register,
@@ -28,7 +28,7 @@ export function AuthPage({ onLoggedIn }: Props) {
   return (
     <SharedAuthPage
       onLoggedIn={onLoggedIn}
-      brandLabel="Arkloop"
+      brandLabel="Xiaok"
       locale={locale}
       t={t}
       api={api}

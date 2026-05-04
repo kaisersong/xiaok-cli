@@ -1,9 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
+import { createLogger } from '../lib/logger';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, X } from 'lucide-react';
+import { Plus, Search, X, Bolt, Pencil } from 'lucide-react';
 import { api, type ThreadRecord } from '../api';
 
-export function Sidebar() {
+const log = createLogger('Sidebar');
+
+interface SidebarProps {
+  onOpenSettings?: () => void;
+}
+
+export function Sidebar({ onOpenSettings }: SidebarProps) {
   const navigate = useNavigate();
   const [threads, setThreads] = useState<ThreadRecord[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -12,7 +19,10 @@ export function Sidebar() {
   const editRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    api.listThreads({ limit: 50 }).then(setThreads);
+    const load = () => api.listThreads({ limit: 50 }).then(setThreads);
+    load();
+    const interval = setInterval(load, 2000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -25,11 +35,16 @@ export function Sidebar() {
   const filteredThreads = searchQuery
     ? threads.filter(t => t.title?.toLowerCase().includes(searchQuery.toLowerCase()))
     : threads;
+  if (searchQuery && filteredThreads.length !== threads.length) {
+    // Search filter changed - no log spam for every render
+  }
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    log.info('deleteThread', id);
     await api.deleteThread(id);
     setThreads(prev => prev.filter(t => t.id !== id));
+    log.info('deleteThread ok');
   };
 
   const handleDoubleClick = (thread: ThreadRecord) => {
@@ -39,7 +54,9 @@ export function Sidebar() {
 
   const handleRenameSubmit = async () => {
     if (editingId && editTitle.trim()) {
+      log.info('renameThread', JSON.stringify({ id: editingId, newTitle: editTitle.trim() }));
       await api.updateThreadTitle(editingId, editTitle.trim());
+      log.info('renameThread ok');
       setThreads(prev =>
         prev.map(t => t.id === editingId ? { ...t, title: editTitle.trim() } : t)
       );
@@ -95,11 +112,12 @@ export function Sidebar() {
         {filteredThreads.map(thread => (
           <div
             key={thread.id}
-            className="group flex items-center rounded-lg px-2 py-1.5 text-sm hover:bg-[var(--c-bg-card)]"
+            className="group flex cursor-pointer items-center rounded-lg px-2 py-1.5 text-sm hover:bg-[var(--c-bg-card)]"
             onClick={() => navigate(`/t/${thread.id}`)}
-            onDoubleClick={() => handleDoubleClick(thread)}
+            onKeyDown={e => { if (e.key === 'Enter') navigate(`/t/${thread.id}`); }}
             role="button"
             tabIndex={0}
+            data-testid={`thread-item-${thread.id}`}
           >
             {editingId === thread.id ? (
               <input
@@ -117,8 +135,19 @@ export function Sidebar() {
             )}
             <button
               type="button"
+              onClick={e => {
+                e.stopPropagation();
+                handleDoubleClick(thread);
+              }}
+              className="ml-1 hidden shrink-0 p-0.5 text-[var(--c-text-secondary)] hover:text-[var(--c-accent)] group-hover:block"
+              title="Rename"
+            >
+              <Pencil className="size-3" />
+            </button>
+            <button
+              type="button"
               onClick={e => handleDelete(e, thread.id)}
-              className="ml-1 hidden shrink-0 p-0.5 text-[var(--c-text-secondary)] hover:text-red-500 group-hover:block"
+              className="ml-0.5 hidden shrink-0 p-0.5 text-[var(--c-text-secondary)] hover:text-red-500 group-hover:block"
             >
               <X className="size-3" />
             </button>
@@ -126,9 +155,20 @@ export function Sidebar() {
         ))}
       </div>
 
-      {/* Footer */}
+      {/* Footer with settings button */}
       <div className="border-t border-[var(--c-border)] p-3">
-        <div className="text-xs text-[var(--c-text-secondary)]">local@xiaok</div>
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-[var(--c-text-secondary)]">local@xiaok</div>
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--c-text-icon)] transition-[background-color,color,transform] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] active:scale-[0.96]"
+            >
+              <Bolt size={18} />
+            </button>
+          )}
+        </div>
       </div>
     </aside>
   );

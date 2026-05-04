@@ -1,21 +1,32 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { ChatInput } from './ChatInput';
 import { api, type ThreadRecord } from '../api';
 
 export function WelcomePage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [prompt, setPrompt] = useState('');
   const [recentThreads, setRecentThreads] = useState<ThreadRecord[]>([]);
 
   useEffect(() => {
     api.listThreads({ limit: 5 }).then(setRecentThreads);
-  }, []);
+  }, [location.key]);
 
   const handleSubmit = async (text: string, _files: Array<{ filePath: string; name: string }>) => {
+    // Always create the thread first so it appears in sidebar regardless of task outcome
     const thread = await api.createThread({ title: text.slice(0, 40) });
-    await api.createTask({ prompt: text, materials: [] });
-    navigate(`/t/${thread.id}`);
+
+    try {
+      const { taskId } = await api.createTask({ prompt: text, materials: [] });
+      await api.updateThreadTaskId(thread.id, taskId);
+    } catch (e) {
+      // Task creation failed (e.g., active task exists). Thread still exists, user can retry from chat.
+      console.error('[WelcomePage] createTask failed:', (e as Error).message);
+    }
+
+    // Always navigate so user can see their thread
+    navigate(`/t/${thread.id}`, { state: { initialPrompt: text } });
   };
 
   const formatTime = (ts: number) => {

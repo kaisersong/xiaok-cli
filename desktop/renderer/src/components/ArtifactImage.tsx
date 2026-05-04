@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Download, ExternalLink } from 'lucide-react'
-import { apiBaseUrl } from '@arkloop/shared/api'
+import { apiBaseUrl } from '../shared/api'
 import type { ArtifactRef } from '../storage'
 
 const ANIM_MS = 120

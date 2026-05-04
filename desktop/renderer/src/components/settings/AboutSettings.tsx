@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ExternalLink, Github, HardDrive } from 'lucide-react'
-import { getDesktopApi, type DesktopAdvancedOverview } from '@arkloop/shared/desktop'
-import { Button, PillToggle } from '@arkloop/shared'
+import { getDesktopApi, type DesktopAdvancedOverview } from '../shared/desktop'
+import { Button, PillToggle } from '../shared'
 import { useLocale } from '../../contexts/LocaleContext'
 import { openExternal } from '../../openExternal'
 import { readDeveloperMode, writeDeveloperMode } from '../../storage'
@@ -50,7 +50,7 @@ export function AboutSettings({ accessToken: _accessToken }: { accessToken: stri
     }
   }, [api, overview?.appVersion])
 
-  const appName = overview?.appName ?? 'Arkloop'
+  const appName = overview?.appName ?? 'Xiaok'
   const appVersion = overview?.appVersion ?? fallbackVersion
   const links = overview?.links ?? []
   const iconDataUrl = overview?.iconDataUrl ?? null

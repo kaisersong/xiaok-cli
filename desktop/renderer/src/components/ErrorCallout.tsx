@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, X } from 'lucide-react'
-import { ErrorCallout as SharedErrorCallout, formatErrorForDisplay, type AppError } from '@arkloop/shared'
+import { ErrorCallout as SharedErrorCallout, formatErrorForDisplay, type AppError } from '../shared'
 import { useLocale } from '../contexts/LocaleContext'
 
 const RUN_ERROR_TITLE_BG = '#ea4d3c'

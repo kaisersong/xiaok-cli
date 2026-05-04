@@ -83,7 +83,7 @@ type Props = {
 export function LogoDrawAnimation({
   onComplete,
   size = 120,
-  brandName = "Arkloop",
+  brandName = "Xiaok",
 }: Props) {
   const [phase, setPhase] = useState<Phase>("drawing");
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);

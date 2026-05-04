@@ -1,5 +1,5 @@
 import { Download, Github, MessageSquare, Trash2, X } from 'lucide-react'
-import { PillToggle } from '@arkloop/shared'
+import { PillToggle } from '../shared'
 import type { ViewSkill } from './types'
 import { formatDate } from './types'
 import { openExternal } from '../../openExternal'

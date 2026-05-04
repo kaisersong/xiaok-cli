@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
-import { Send, Plus, X } from 'lucide-react';
+import { Send, Square, X, Plus } from 'lucide-react';
 import { api } from '../api';
 
 interface AttachedFile {
@@ -13,11 +13,14 @@ interface ChatInputProps {
   onSubmit: (text: string, files: AttachedFile[]) => void;
   placeholder?: string;
   disabled?: boolean;
+  isRunning?: boolean;
+  onStop?: () => void;
 }
 
-export function ChatInput({ value, onChange, onSubmit, placeholder = 'Type a message...', disabled }: ChatInputProps) {
+export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...', disabled, isRunning, onStop }: ChatInputProps) {
   const [internalValue, setInternalValue] = useState(value ?? '');
   const [files, setFiles] = useState<AttachedFile[]>([]);
+  const [focused, setFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -53,68 +56,146 @@ export function ChatInput({ value, onChange, onSubmit, placeholder = 'Type a mes
     }
   };
 
-  const handleAttach = async () => {
-    try {
-      const { filePaths } = await api.selectMaterials();
-      const newFiles = filePaths.map(p => ({
-        filePath: p,
-        name: p.split('/').pop() || p,
-      }));
-      setFiles(prev => [...prev, ...newFiles]);
-    } catch {
-      // User cancelled or not available
-    }
-  };
-
   const removeFile = (index: number) => {
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleAttach = async () => {
+    try {
+      const result = await api.selectMaterials();
+      if (result.filePaths.length > 0) {
+        const newFiles = result.filePaths.map(path => ({
+          filePath: path,
+          name: path.split('/').pop() || path,
+        }));
+        setFiles(prev => [...prev, ...newFiles]);
+      }
+    } catch (e) {
+      console.error('[ChatInput] selectMaterials error:', e);
+    }
+  };
+
   return (
     <div className="w-full">
-      <div className="flex items-end gap-2 rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] p-3">
-        <button
-          type="button"
-          onClick={handleAttach}
-          className="p-1 text-[var(--c-text-secondary)] hover:text-[var(--c-text-primary)]"
-          disabled={disabled}
-        >
-          <Plus className="size-5" />
-        </button>
-        <textarea
-          ref={textareaRef}
-          value={internalValue}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          disabled={disabled}
-          className="flex-1 resize-none overflow-hidden bg-transparent text-sm outline-none"
-          rows={1}
-        />
-        <button
-          type="button"
-          onClick={submit}
-          disabled={disabled || !internalValue.trim()}
-          className="rounded-lg p-2 text-[var(--c-text-secondary)] hover:text-[var(--c-accent)] disabled:opacity-50"
-        >
-          <Send className="size-5" />
-        </button>
-      </div>
+      {/* Attachment grid */}
       {files.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '12px',
+            padding: '14px 16px 8px',
+          }}
+        >
           {files.map((f, i) => (
-            <span
+            <div
               key={i}
-              className="flex items-center gap-1 rounded-md bg-[var(--c-bg-sidebar)] px-2 py-0.5 text-xs"
+              className="flex items-center gap-2 rounded-lg px-3 py-2"
+              style={{
+                background: 'var(--c-bg-deep)',
+                border: '0.5px solid var(--c-border-subtle)',
+              }}
             >
-              <span className="max-w-[120px] truncate">{f.name}</span>
-              <button type="button" onClick={() => removeFile(i)} className="text-[var(--c-text-secondary)] hover:text-red-500">
-                <X className="size-3" />
+              <span className="text-sm text-[var(--c-text-primary)] max-w-[120px] truncate">{f.name}</span>
+              <button
+                type="button"
+                onClick={() => removeFile(i)}
+                className="flex items-center justify-center rounded-md hover:bg-[rgba(0,0,0,0.05)]"
+                style={{ width: '20px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}
+              >
+                <X size={14} style={{ color: 'var(--c-text-secondary)' }} />
               </button>
-            </span>
+            </div>
           ))}
         </div>
       )}
+
+      {/* Input container - pill shaped with shadow */}
+      <div
+        className={[
+          focused && 'is-focused',
+        ].filter(Boolean).join(' ')}
+        style={{
+          borderWidth: '0.5px',
+          borderStyle: 'solid',
+          borderColor: focused ? 'var(--c-input-border-color-focus)' : 'var(--c-input-border-color)',
+          borderRadius: '20px',
+          boxShadow: focused ? 'var(--c-input-shadow-focus)' : 'var(--c-input-shadow)',
+          transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+          background: 'var(--c-bg-card)',
+          cursor: 'default',
+        }}
+        onClick={(e) => {
+          const tag = (e.target as HTMLElement).tagName;
+          if (tag !== 'BUTTON' && tag !== 'TEXTAREA' && tag !== 'INPUT' && tag !== 'SVG' && tag !== 'PATH') {
+            textareaRef.current?.focus();
+          }
+        }}
+      >
+        <form
+          onSubmit={(e) => { e.preventDefault(); submit(); }}
+          style={{ padding: '10px 12px 8px' }}
+        >
+          {/* Textarea */}
+          <div style={{ position: 'relative', marginBottom: '8px' }}>
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              className="w-full resize-none bg-transparent outline-none"
+              value={internalValue}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              placeholder={placeholder}
+              disabled={disabled}
+              style={{
+                fontFamily: 'inherit',
+                fontSize: '16px',
+                fontWeight: 310,
+                lineHeight: 1.45,
+                color: 'var(--c-text-primary)',
+                letterSpacing: '-0.16px',
+              }}
+            />
+          </div>
+
+          {/* Bottom row */}
+          <div
+            className="flex items-center"
+            style={{ gap: '8px', minHeight: '32px', width: '100%', minWidth: 0 }}
+          >
+            {!isRunning && (
+              <button
+                type="button"
+                onClick={handleAttach}
+                className="flex h-[33.5px] w-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] transition-[opacity,background] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:opacity-100 opacity-70"
+              >
+                <Plus size={18} />
+              </button>
+            )}
+            <div style={{ flex: 1, minWidth: 0 }} />
+
+            {isRunning ? (
+              <button
+                type="button"
+                onClick={onStop}
+                className="flex h-[33.5px] w-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] transition-[opacity,background] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:opacity-100 opacity-70"
+              >
+                <Square size={14} />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={disabled || !internalValue.trim()}
+                className="flex h-[33.5px] w-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-accent-send)] text-[var(--c-accent-send-text)] transition-[background-color,opacity] duration-[60ms] hover:bg-[var(--c-accent-send-hover)] active:opacity-[0.75] active:scale-[0.93] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Send size={18} />
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

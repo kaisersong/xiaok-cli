@@ -12,7 +12,7 @@ export function buildBrowserWindowOptions(preloadPath: string): BrowserWindowCon
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: false, // preload.cjs uses require()
     },
   };
 }

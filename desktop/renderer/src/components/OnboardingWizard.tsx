@@ -17,8 +17,8 @@ import {
   labelStyle,
   SpinnerIcon,
   normalizeError,
-} from "@arkloop/shared/components/auth-ui";
-import { getDesktopApi, getDesktopAccessToken } from "@arkloop/shared/desktop";
+} from "../shared/components/auth-ui";
+import { getDesktopApi, getDesktopAccessToken } from "../shared/desktop";
 import { useLocale } from "../contexts/LocaleContext";
 import { LogoDrawAnimation } from "./LogoDrawAnimation";
 import { SettingsModelDropdown } from "./settings/SettingsModelDropdown";
@@ -34,8 +34,8 @@ import {
   updateLlmProvider,
 } from "@/api";
 import type { AvailableModel, LlmProvider, LlmProviderModel } from "@/api";
-import type { AgentImportDiscovery, ImportItemKey, ImportSourceKind } from "@arkloop/shared/desktop";
-import { routeAdvancedJsonFromAvailableCatalog } from "@arkloop/shared/llm/available-catalog-advanced-json";
+import type { AgentImportDiscovery, ImportItemKey, ImportSourceKind } from "../shared/desktop";
+import { routeAdvancedJsonFromAvailableCatalog } from "../shared/llm/available-catalog-advanced-json";
 
 type Step = "welcome" | "mode" | "provider" | "appearance" | "import" | "complete";
 
@@ -2060,7 +2060,7 @@ export function OnboardingWizard({ onComplete }: Props) {
           zIndex: 1,
         }}
       >
-        &copy; 2026 Arkloop
+        &copy; 2026 Xiaok
       </footer>
     </div>
   );

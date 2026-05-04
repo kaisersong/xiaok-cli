@@ -20,6 +20,7 @@ function statusLabel(status: SubAgentRef['status']): string {
     case 'completed': return 'Completed'
     case 'failed': return 'Failed'
     case 'closed': return 'Closed'
+    default: return 'Unknown'
   }
 }
 

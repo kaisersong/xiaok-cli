@@ -119,6 +119,16 @@ export function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow, serv
     log('info', 'listSkills', { count: r.length });
     return r;
   });
+  // Channel IPC
+  ipcMain.handle('desktop:listChannels', async () => services.listChannels());
+  ipcMain.handle('desktop:createChannel', async (_event, input) => services.createChannel(input));
+  ipcMain.handle('desktop:updateChannel', async (_event, id, input) => services.updateChannel(id, input));
+  ipcMain.handle('desktop:deleteChannel', async (_event, id) => services.deleteChannel(id));
+  // MCP IPC
+  ipcMain.handle('desktop:listMCPInstalls', async () => services.listMCPInstalls());
+  ipcMain.handle('desktop:createMCPInstall', async (_event, input) => services.createMCPInstall(input));
+  ipcMain.handle('desktop:updateMCPInstall', async (_event, id, input) => services.updateMCPInstall(id, input));
+  ipcMain.handle('desktop:deleteMCPInstall', async (_event, id) => services.deleteMCPInstall(id));
   ipcMain.handle('desktop:createTaskWithFiles', async (_event, input) => {
     log('info', 'createTaskWithFiles', { prompt: input?.prompt?.slice(0, 50), files: input?.filePaths?.length });
     const r = await services.createTaskWithFiles(input);

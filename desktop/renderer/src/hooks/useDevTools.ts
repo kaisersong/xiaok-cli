@@ -11,16 +11,16 @@ export function useDevTools() {
     const handleChange = (e: Event) => {
       setShowRunEvents((e as CustomEvent<boolean>).detail)
     }
-    window.addEventListener('arkloop:developer_show_run_events', handleChange)
-    return () => window.removeEventListener('arkloop:developer_show_run_events', handleChange)
+    window.addEventListener('xiaok:developer_show_run_events', handleChange)
+    return () => window.removeEventListener('xiaok:developer_show_run_events', handleChange)
   }, [])
 
   useEffect(() => {
     const handleChange = (e: Event) => {
       setShowDebugPanel((e as CustomEvent<boolean>).detail)
     }
-    window.addEventListener('arkloop:developer_show_debug_panel', handleChange)
-    return () => window.removeEventListener('arkloop:developer_show_debug_panel', handleChange)
+    window.addEventListener('xiaok:developer_show_debug_panel', handleChange)
+    return () => window.removeEventListener('xiaok:developer_show_debug_panel', handleChange)
   }, [])
 
   return {

@@ -21,6 +21,14 @@ describe('preload API contract', () => {
       'recoverTask',
       'openArtifact',
       'listSkills',
+      'listChannels',
+      'createChannel',
+      'updateChannel',
+      'deleteChannel',
+      'listMCPInstalls',
+      'createMCPInstall',
+      'updateMCPInstall',
+      'deleteMCPInstall',
     ]);
   });
 

@@ -38,6 +38,14 @@ export const PRELOAD_API_KEYS = [
   'recoverTask',
   'openArtifact',
   'listSkills',
+  'listChannels',
+  'createChannel',
+  'updateChannel',
+  'deleteChannel',
+  'listMCPInstalls',
+  'createMCPInstall',
+  'updateMCPInstall',
+  'deleteMCPInstall',
 ] as const;
 
 export interface DesktopModelProviderView {
@@ -101,6 +109,41 @@ export interface TestProviderConnectionResult {
   error?: string;
 }
 
+export type DesktopChannelType = 'discord' | 'feishu' | 'qq' | 'qqbot' | 'weixin' | 'telegram';
+
+export interface DesktopChannelView {
+  id: string;
+  type: DesktopChannelType;
+  name: string;
+  webhookUrl?: string;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DesktopChannelInput {
+  type: DesktopChannelType;
+  name: string;
+  webhookUrl?: string;
+}
+
+export interface DesktopMCPInstallView {
+  id: string;
+  name: string;
+  source: 'npm' | 'github' | 'local';
+  command: string;
+  args?: string[];
+  enabled: boolean;
+  createdAt: number;
+}
+
+export interface DesktopMCPInput {
+  name: string;
+  source: 'npm' | 'github' | 'local';
+  command: string;
+  args?: string[];
+}
+
 export interface DesktopApi {
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
@@ -125,6 +168,14 @@ export interface DesktopApi {
   recoverTask(taskId: string): Promise<{ snapshot: TaskSnapshot }>;
   openArtifact(artifactId: string): Promise<void>;
   listSkills(): Promise<Array<{ name: string; aliases: string[]; description: string; source: string; tier: string }>>;
+  listChannels(): Promise<DesktopChannelView[]>;
+  createChannel(input: DesktopChannelInput): Promise<DesktopChannelView>;
+  updateChannel(id: string, input: Partial<DesktopChannelInput>): Promise<DesktopChannelView>;
+  deleteChannel(id: string): Promise<void>;
+  listMCPInstalls(): Promise<DesktopMCPInstallView[]>;
+  createMCPInstall(input: DesktopMCPInput): Promise<DesktopMCPInstallView>;
+  updateMCPInstall(id: string, input: Partial<DesktopMCPInput>): Promise<DesktopMCPInstallView>;
+  deleteMCPInstall(id: string): Promise<void>;
 }
 
 interface IpcRendererLike {
@@ -162,6 +213,14 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     recoverTask: (taskId) => ipcRenderer.invoke('desktop:recoverTask', { taskId }) as ReturnType<DesktopApi['recoverTask']>,
     openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }) as Promise<void>,
     listSkills: () => ipcRenderer.invoke('desktop:listSkills') as ReturnType<DesktopApi['listSkills']>,
+    listChannels: () => ipcRenderer.invoke('desktop:listChannels') as Promise<DesktopChannelView[]>,
+    createChannel: (input) => ipcRenderer.invoke('desktop:createChannel', input) as Promise<DesktopChannelView>,
+    updateChannel: (id, input) => ipcRenderer.invoke('desktop:updateChannel', id, input) as Promise<DesktopChannelView>,
+    deleteChannel: (id) => ipcRenderer.invoke('desktop:deleteChannel', id) as Promise<void>,
+    listMCPInstalls: () => ipcRenderer.invoke('desktop:listMCPInstalls') as Promise<DesktopMCPInstallView[]>,
+    createMCPInstall: (input) => ipcRenderer.invoke('desktop:createMCPInstall', input) as Promise<DesktopMCPInstallView>,
+    updateMCPInstall: (id, input) => ipcRenderer.invoke('desktop:updateMCPInstall', id, input) as Promise<DesktopMCPInstallView>,
+    deleteMCPInstall: (id) => ipcRenderer.invoke('desktop:deleteMCPInstall', id) as Promise<void>,
   };
 }
 

@@ -4,8 +4,8 @@ import {
   Plus, Settings, Info, Globe, Search, Key,
   CheckCircle, XCircle,
 } from 'lucide-react'
-import { PillToggle } from '@arkloop/shared'
-import { TabBar } from '@arkloop/shared/components/prompt-injection'
+import { PillToggle } from '../shared'
+import { TabBar } from '../shared/components/prompt-injection'
 import { SettingsSectionHeader } from './_SettingsSectionHeader'
 
 // ---------------------------------------------------------------------------

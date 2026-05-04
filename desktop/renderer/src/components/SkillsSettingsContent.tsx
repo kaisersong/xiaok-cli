@@ -8,7 +8,7 @@ import {
   Search,
   Upload,
 } from 'lucide-react'
-import { Modal, TabBar } from '@arkloop/shared'
+import { Modal, TabBar } from '../shared'
 import {
   type InstalledSkill,
   type MarketSkill,

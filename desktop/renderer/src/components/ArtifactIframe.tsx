@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback, useImperativeHandle, forwardRef, useState } from 'react'
-import { apiBaseUrl } from '@arkloop/shared/api'
+import { apiBaseUrl } from '../shared/api'
 import type { ArtifactRef } from '../storage'
 import { ARTIFACT_SVG_STYLES } from './artifactSvgStyles'
 
@@ -121,7 +121,7 @@ function buildShellHTML(snapshot: ThemeSnapshot, compactSpacing: boolean): strin
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; style-src 'unsafe-inline'; img-src data: blob: https:; font-src https:; connect-src https:;">
-<style id="arkloop-theme-vars">
+<style id="xiaok-theme-vars">
 ${buildThemeCSS(snapshot.cssVars)}
 </style>
 <style>
@@ -146,20 +146,20 @@ ${buildThemeCSS(snapshot.cssVars)}
   }
   #root > :first-child { margin-top: 0 !important; }
   #root > :last-child { margin-bottom: 0 !important; }
-  .arkloop-embed-body {
+  .xiaok-embed-body {
     display: block;
     width: 100%;
     color: inherit;
     background: transparent;
   }
-  .arkloop-svg-stage {
+  .xiaok-svg-stage {
     display: flex;
     width: 100%;
     justify-content: center;
     align-items: flex-start;
     padding: 10px 0;
   }
-  .arkloop-svg-stage > svg {
+  .xiaok-svg-stage > svg {
     display: block;
     max-width: 100%;
     height: auto;
@@ -223,8 +223,8 @@ ${buildThemeCSS(snapshot.cssVars)}
       linear-gradient(
         to right,
         var(--color-text-primary) 0%,
-        var(--color-text-primary) var(--arkloop-range-fill, 0%),
-        var(--color-border-primary) var(--arkloop-range-fill, 0%),
+        var(--color-text-primary) var(--xiaok-range-fill, 0%),
+        var(--color-border-primary) var(--xiaok-range-fill, 0%),
         var(--color-border-primary) 100%
       )
       center / 100% 4px no-repeat;
@@ -293,13 +293,13 @@ ${ARTIFACT_SVG_STYLES}
   var firstDomSent = false;
   var scriptsDoneSent = false;
 
-  window.arkloop = {
+  window.xiaok = {
     sendPrompt: function(text) {
-      window.parent.postMessage({ type: 'arkloop:artifact:action', action: 'prompt', text: String(text).slice(0, 4000) }, '*');
+      window.parent.postMessage({ type: 'xiaok:artifact:action', action: 'prompt', text: String(text).slice(0, 4000) }, '*');
     }
   };
   window.sendPrompt = function(text) {
-    window.arkloop.sendPrompt(text);
+    window.xiaok.sendPrompt(text);
   };
 
   function sanitizeHttpUrl(raw) {
@@ -316,7 +316,7 @@ ${ARTIFACT_SVG_STYLES}
   window.openLink = function(url) {
     var ok = sanitizeHttpUrl(url);
     if (!ok) return;
-    window.parent.postMessage({ type: 'arkloop:artifact:action', action: 'open_link', url: ok }, '*');
+    window.parent.postMessage({ type: 'xiaok:artifact:action', action: 'open_link', url: ok }, '*');
   };
 
   document.addEventListener('click', function(ev) {
@@ -328,15 +328,15 @@ ${ARTIFACT_SVG_STYLES}
     if (!ok) return;
     ev.preventDefault();
     ev.stopPropagation();
-    window.parent.postMessage({ type: 'arkloop:artifact:action', action: 'open_link', url: ok }, '*');
+    window.parent.postMessage({ type: 'xiaok:artifact:action', action: 'open_link', url: ok }, '*');
   }, true);
 
   function reportError(message) {
-    window.parent.postMessage({ type: 'arkloop:artifact:action', action: 'error', message: String(message || 'render error').slice(0, 4000) }, '*');
+    window.parent.postMessage({ type: 'xiaok:artifact:action', action: 'error', message: String(message || 'render error').slice(0, 4000) }, '*');
   }
 
   function reportDebug(phase) {
-    window.parent.postMessage({ type: 'arkloop:artifact:action', action: 'debug', phase: phase }, '*');
+    window.parent.postMessage({ type: 'xiaok:artifact:action', action: 'debug', phase: phase }, '*');
   }
 
   function maybeReportFirstDom(root) {
@@ -397,7 +397,7 @@ ${ARTIFACT_SVG_STYLES}
     if (!Number.isFinite(value)) value = min;
     var ratio = ((value - min) / (max - min)) * 100;
     var clamped = Math.max(0, Math.min(100, ratio));
-    input.style.setProperty('--arkloop-range-fill', clamped + '%');
+    input.style.setProperty('--xiaok-range-fill', clamped + '%');
   }
 
   function decorateRangeInputs(root) {
@@ -405,8 +405,8 @@ ${ARTIFACT_SVG_STYLES}
     var inputs = root.querySelectorAll('input[type="range"]');
     Array.prototype.forEach.call(inputs, function(input) {
       updateRangeFill(input);
-      if (input.dataset.arkloopRangeBound === 'true') return;
-      input.dataset.arkloopRangeBound = 'true';
+      if (input.dataset.xiaokRangeBound === 'true') return;
+      input.dataset.xiaokRangeBound = 'true';
       input.addEventListener('input', function() {
         updateRangeFill(input);
       });
@@ -427,7 +427,7 @@ ${ARTIFACT_SVG_STYLES}
       var cleanedSvg = trimmed
         .replace(/^<\\?xml[\\s\\S]*?\\?>\\s*/i, '')
         .replace(/^<!doctype[\\s\\S]*?>\\s*/i, '');
-      return '<div class="arkloop-svg-stage">' + cleanedSvg + '</div>';
+      return '<div class="xiaok-svg-stage">' + cleanedSvg + '</div>';
     }
 
     if (!/(<!doctype|<html[\\s>]|<head[\\s>]|<body[\\s>])/i.test(trimmed)) {
@@ -449,7 +449,7 @@ ${ARTIFACT_SVG_STYLES}
       var bodyStyle = doc.body && doc.body.getAttribute('style') ? doc.body.getAttribute('style') : '';
       var bodyClass = doc.body && doc.body.getAttribute('class') ? doc.body.getAttribute('class') : '';
       var wrapper = doc.createElement('div');
-      wrapper.className = ('arkloop-embed-body ' + bodyClass).trim();
+      wrapper.className = ('xiaok-embed-body ' + bodyClass).trim();
       if (bodyStyle) wrapper.setAttribute('style', bodyStyle);
       wrapper.innerHTML = body ? body.innerHTML : trimmed;
 
@@ -476,7 +476,7 @@ ${ARTIFACT_SVG_STYLES}
     } else {
       root.removeAttribute('data-theme');
     }
-    var style = document.getElementById('arkloop-theme-vars');
+    var style = document.getElementById('xiaok-theme-vars');
     if (style && payload && typeof payload.cssVars === 'string') {
       style.textContent = buildThemeCSS(payload.cssVars);
     }
@@ -571,7 +571,7 @@ ${ARTIFACT_SVG_STYLES}
     if (!root) return;
     var rect = root.getBoundingClientRect();
     var height = Math.max(root.scrollHeight, Math.ceil(rect.height), document.body.scrollHeight) + ${heightPadding};
-    window.parent.postMessage({ type: 'arkloop:artifact:action', action: 'resize', height: height }, '*');
+    window.parent.postMessage({ type: 'xiaok:artifact:action', action: 'resize', height: height }, '*');
   };
 
   var morphScript = document.querySelector('script[src*="morphdom"]');
@@ -599,11 +599,11 @@ ${ARTIFACT_SVG_STYLES}
   window.addEventListener('message', function(event) {
     var data = event.data;
     if (!data) return;
-    if (data.type === 'arkloop:artifact:set-theme') {
+    if (data.type === 'xiaok:artifact:set-theme') {
       window._applyTheme(data);
       return;
     }
-    if (data.type !== 'arkloop:artifact:set-content') return;
+    if (data.type !== 'xiaok:artifact:set-content') return;
     window._setContent(data.html, data.finalize === true, data.contentType);
   });
 
@@ -663,7 +663,7 @@ export const ArtifactIframe = forwardRef<ArtifactIframeHandle, Props>(
       const snapshot = collectThemeSnapshot()
       try {
         iframe.contentWindow.postMessage({
-          type: 'arkloop:artifact:set-theme',
+          type: 'xiaok:artifact:set-theme',
           theme: snapshot.theme ?? '',
           cssVars: snapshot.cssVars,
         }, '*')
@@ -682,7 +682,7 @@ export const ArtifactIframe = forwardRef<ArtifactIframeHandle, Props>(
       if (!pending || !iframe?.contentWindow || !isReadyRef.current) return
       try {
         iframe.contentWindow.postMessage({
-          type: 'arkloop:artifact:set-content',
+          type: 'xiaok:artifact:set-content',
           html: pending.html,
           finalize: pending.finalize,
           contentType: pending.contentType,
@@ -812,7 +812,7 @@ export const ArtifactIframe = forwardRef<ArtifactIframeHandle, Props>(
       const handler = (event: MessageEvent) => {
         const iframe = iframeRef.current
         if (!iframe || event.source !== iframe.contentWindow) return
-        if (event.data?.type !== 'arkloop:artifact:action') return
+        if (event.data?.type !== 'xiaok:artifact:action') return
         const action = event.data.action
         if (action === 'resize' && typeof event.data.height === 'number') {
           iframe.style.height = `${Math.min(event.data.height, 2000)}px`

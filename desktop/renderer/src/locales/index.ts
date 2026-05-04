@@ -1,4 +1,4 @@
-import type { PromptInjectionTexts } from "@arkloop/shared/components/prompt-injection";
+import type { PromptInjectionTexts } from "../shared/components/prompt-injection";
 import { zh } from "./zh";
 import { en } from "./en";
 
@@ -129,8 +129,8 @@ export interface LocaleStrings {
     addFromSkillsmpDesc: string;
     addFromGitHub: string;
     addFromGitHubDesc: string;
-    createWithArkloop: string;
-    createWithArkloopHint: string;
+    createWithXiaok: string;
+    createWithXiaokHint: string;
     uploadTitle: string;
     githubTitle: string;
     officialImportTitle: string;

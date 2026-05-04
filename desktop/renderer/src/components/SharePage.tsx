@@ -86,7 +86,7 @@ export function SharePage() {
         className="text-base font-semibold tracking-tight"
         style={{ color: 'var(--c-text-primary)' }}
       >
-        Arkloop
+        Xiaok
       </button>
       <div className="flex items-center gap-2">
         <button

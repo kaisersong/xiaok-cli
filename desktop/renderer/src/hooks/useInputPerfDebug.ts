@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useCallback } from 'react'
-import { debugBus } from '@arkloop/shared'
+import { debugBus } from '../shared'
 
-const DEBUG_PANEL_KEY = 'arkloop:web:developer_show_debug_panel'
+const DEBUG_PANEL_KEY = 'xiaok:web:developer_show_debug_panel'
 const EMIT_INTERVAL_MS = 500
 
 function isDebugEnabled(): boolean {
@@ -42,8 +42,8 @@ export function useInputPerfDebug() {
     const handler = (e: Event) => {
       enabledRef.current = !!(e as CustomEvent<boolean>).detail
     }
-    window.addEventListener('arkloop:developer_show_debug_panel', handler as EventListener)
-    return () => window.removeEventListener('arkloop:developer_show_debug_panel', handler as EventListener)
+    window.addEventListener('xiaok:developer_show_debug_panel', handler as EventListener)
+    return () => window.removeEventListener('xiaok:developer_show_debug_panel', handler as EventListener)
   }, [])
 
   // long task detection via PerformanceObserver

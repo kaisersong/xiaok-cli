@@ -14,7 +14,7 @@ import {
   Ban,
   Plug,
 } from 'lucide-react'
-import { AutoResizeTextarea, Modal, ConfirmDialog, useToast } from '@arkloop/shared'
+import { AutoResizeTextarea, Modal, ConfirmDialog, useToast } from '../shared'
 import { useLocale } from '../../contexts/LocaleContext'
 import {
   type ToolProviderGroup,

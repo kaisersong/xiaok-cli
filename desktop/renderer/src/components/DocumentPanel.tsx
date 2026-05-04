@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { X, FileText, Download, Eye, Code } from 'lucide-react'
-import { apiBaseUrl } from '@arkloop/shared/api'
+import { apiBaseUrl } from '../shared/api'
 import type { ArtifactRef } from '../storage'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ArtifactIframe } from './ArtifactIframe'

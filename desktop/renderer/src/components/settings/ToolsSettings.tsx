@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { isDesktop } from '@arkloop/shared/desktop'
-import { TabBar } from '@arkloop/shared/components/prompt-injection'
+import { isDesktop } from '../shared/desktop'
+import { TabBar } from '../shared/components/prompt-injection'
 import { ConnectorsSettings } from './ConnectorsSettings'
 import { SearchFetchSettings } from './SearchFetchSettings'
 import { useLocale } from '../../contexts/LocaleContext'

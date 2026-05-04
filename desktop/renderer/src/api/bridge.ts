@@ -364,6 +364,38 @@ export const api = {
   },
 
   // ---------------------
+  // Channel API (IPC)
+  // ---------------------
+  async listChannels() {
+    return window.xiaokDesktop.listChannels();
+  },
+  async createChannel(input: { type: string; name: string; webhookUrl?: string }) {
+    return window.xiaokDesktop.createChannel(input as never);
+  },
+  async updateChannel(id: string, input: { type?: string; name?: string; webhookUrl?: string; enabled?: boolean }) {
+    return window.xiaokDesktop.updateChannel(id, input as never);
+  },
+  async deleteChannel(id: string) {
+    await window.xiaokDesktop.deleteChannel(id);
+  },
+
+  // ---------------------
+  // MCP API (IPC)
+  // ---------------------
+  async listMCPInstalls() {
+    return window.xiaokDesktop.listMCPInstalls();
+  },
+  async createMCPInstall(input: { name: string; source: string; command: string; args?: string[] }) {
+    return window.xiaokDesktop.createMCPInstall(input as never);
+  },
+  async updateMCPInstall(id: string, input: { name?: string; source?: string; command?: string; enabled?: boolean }) {
+    return window.xiaokDesktop.updateMCPInstall(id, input as never);
+  },
+  async deleteMCPInstall(id: string) {
+    await window.xiaokDesktop.deleteMCPInstall(id);
+  },
+
+  // ---------------------
   // Persona API (mock)
   // ---------------------
   async listPersonas() {
@@ -418,10 +450,18 @@ export const api = {
   },
 
   // ---------------------
-  // Memory API (mock)
+  // Memory API (localStorage)
   // ---------------------
   async getMemoryConfig() {
-    return { enabled: false };
+    try {
+      const raw = localStorage.getItem('xiaok:memory-config');
+      return raw ? JSON.parse(raw) : { enabled: false };
+    } catch { return { enabled: false }; }
+  },
+
+  async saveMemoryConfig(config: { enabled: boolean }) {
+    try { localStorage.setItem('xiaok:memory-config', JSON.stringify(config)) } catch { /* noop */ }
+    return config;
   },
 
   // ---------------------
@@ -432,6 +472,25 @@ export const api = {
       fetch: { provider: 'none' },
       search: { provider: 'none' },
     };
+  },
+
+  // ---------------------
+  // Appearance API (localStorage)
+  // ---------------------
+  async getAppearanceConfig() {
+    try {
+      const raw = localStorage.getItem('xiaok:appearance-config');
+      return raw ? JSON.parse(raw) : { fontSize: 'default', density: 'default', themeMode: 'system' };
+    } catch { return { fontSize: 'default', density: 'default', themeMode: 'system' }; }
+  },
+
+  async saveAppearanceConfig(config: Record<string, string>) {
+    try {
+      const current = await api.getAppearanceConfig();
+      const next = { ...current, ...config };
+      localStorage.setItem('xiaok:appearance-config', JSON.stringify(next));
+      return next;
+    } catch { return config; }
   },
 
   // ---------------------

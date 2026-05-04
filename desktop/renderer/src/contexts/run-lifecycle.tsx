@@ -9,8 +9,8 @@ import {
   type ReactNode,
 } from 'react'
 import { useSSE, type UseSSEResult } from '../hooks/useSSE'
-import { type AppError } from '@arkloop/shared'
-import { apiBaseUrl } from '@arkloop/shared/api'
+import { type AppError } from '../shared'
+import { apiBaseUrl } from '../shared/api'
 import type { UserInputRequest } from '../userInputTypes'
 import { useAuth } from './auth'
 import { useChatSession } from './chat-session'

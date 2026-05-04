@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { RefreshCw } from 'lucide-react'
-import { Button } from '@arkloop/shared'
-import { SpinnerIcon } from '@arkloop/shared/components/auth-ui'
+import { Button } from '../shared'
+import { SpinnerIcon } from '../shared/components/auth-ui'
 import { useLocale } from '../../contexts/LocaleContext'
-import { getDesktopApi, type UpdaterComponent, type AppUpdaterState } from '@arkloop/shared/desktop'
+import { getDesktopApi, type UpdaterComponent, type AppUpdaterState } from '../shared/desktop'
 import { SettingsSectionHeader } from './_SettingsSectionHeader'
 
 type ComponentStatus = {

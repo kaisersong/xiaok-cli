@@ -16,8 +16,8 @@ import {
   TrendingUp,
   type LucideIcon,
 } from 'lucide-react'
-import { getDesktopApi } from '@arkloop/shared/desktop'
-import { Modal, PillToggle, TabBar, formatDateTime, useTimeZone, useToast } from '@arkloop/shared'
+import { getDesktopApi } from '../shared/desktop'
+import { Modal, PillToggle, TabBar, formatDateTime, useTimeZone, useToast } from '../shared'
 import type {
   AgentImportDiscovery,
   DesktopExportSection,
@@ -26,7 +26,7 @@ import type {
   DesktopLogQuery,
   ImportItemKey,
   ImportSourceKind,
-} from '@arkloop/shared/desktop'
+} from '../shared/desktop'
 import type { MeDailyUsageItem, MeHourlyUsageItem, MeModelUsageItem, MeUsageSummary } from '../../api'
 import { getMyDailyUsage, getMyHourlyUsage, getMyUsage, getMyUsageByModel } from '../../api'
 import { useAppearance } from '../../contexts/AppearanceContext'
@@ -349,7 +349,7 @@ function NetworkPane({ onReloadOverview }: { onReloadOverview: () => Promise<voi
             <input
               value={config.userAgent}
               onChange={(e) => setConfig((p) => ({ ...p, userAgent: e.target.value }))}
-              placeholder="Arkloop Desktop"
+              placeholder="Xiaok Desktop"
               className={INPUT}
             />
           </div>

@@ -14,7 +14,7 @@ export const COP_TIMELINE_CONTENT_PADDING_LEFT_PX = 24
 /** 仅 thinking 完结直出时正文行高，与 DOT 几何中心对齐：DOT_TOP + DOT_SIZE/2 - lh/2 */
 export const COP_TIMELINE_THINKING_PLAIN_LINE_HEIGHT_PX = 18
 
-export const DEVELOPER_SHOW_DEBUG_PANEL_KEY = 'arkloop:web:developer_show_debug_panel'
+export const DEVELOPER_SHOW_DEBUG_PANEL_KEY = 'xiaok:web:developer_show_debug_panel'
 
 export function TypewriterText({ text, className, live }: { text: string; className?: string; live?: boolean }) {
   const displayed = useTypewriter(text, !live)

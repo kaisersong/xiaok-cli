@@ -11,7 +11,7 @@ import {
 } from '../../api'
 import type { LlmProvider, SpawnProfile } from '../../api'
 import { useLocale } from '../../contexts/LocaleContext'
-import { getDesktopMode, isDesktop, isLocalMode, getDesktopApi } from '@arkloop/shared/desktop'
+import { getDesktopMode, isDesktop, isLocalMode, getDesktopApi } from '../shared/desktop'
 import { openExternal } from '../../openExternal'
 import { LanguageContent, ThemeModePicker } from './AppearanceSettings'
 import { bridgeClient, checkBridgeAvailable } from '../../api-bridge'
@@ -37,9 +37,9 @@ const generalSettingsCache = new Map<string, GeneralSettingsCacheEntry>()
 export function GeneralSettings({ me, accessToken, onLogout, onMeUpdated }: Props) {
   const { t, locale, setLocale } = useLocale()
   const ds = t.desktopSettings
-  const docsUrl = locale === 'en' ? 'https://arkloop.io/en/docs/guide' : 'https://arkloop.io/zh/docs/guide'
+  const docsUrl = locale === 'en' ? 'https://xiaok.io/en/docs/guide' : 'https://xiaok.io/zh/docs/guide'
   const localMode = isLocalMode()
-  // 桌面壳或本地连接都不应出现「平台默认」文案（与 isDesktop 是否已挂 arkloop 解耦）
+  // 桌面壳或本地连接都不应出现「平台默认」文案（与 isDesktop 是否已挂 xiaok 解耦）
   const nonSaaSUi =
     getDesktopMode() !== null || isDesktop() || localMode
 
