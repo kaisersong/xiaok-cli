@@ -6,8 +6,11 @@ import type { ProtocolId } from '../../src/ai/providers/types.js';
 import { MaterialRegistry } from '../../src/runtime/task-host/material-registry.js';
 import { FileTaskSnapshotStore } from '../../src/runtime/task-host/snapshot-store.js';
 import { InProcessTaskRuntimeHost, type TaskRunner } from '../../src/runtime/task-host/task-runtime-host.js';
-import type { MaterialRole } from '../../src/runtime/task-host/types.js';
-import type { Config, Message } from '../../src/types.js';
+import type { MaterialRole, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
+import type { Config, Message, MessageBlock, StreamChunk, ToolCall } from '../../src/types.js';
+import { buildToolList, ToolRegistry } from '../../src/ai/tools/index.js';
+import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName } from '../../src/ai/skills/loader.js';
+import { createSkillTool } from '../../src/ai/skills/tool.js';
 import { getConfigPath, loadConfig, saveConfig } from '../../src/utils/config.js';
 
 export interface DesktopServicesOptions {
@@ -89,6 +92,35 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       });
       return materialRegistry.toView(record);
     },
+    async listSkills() {
+      const catalog = createSkillCatalog(undefined, process.cwd());
+      const skills = await catalog.reload();
+      return skills.map(s => ({
+        name: s.name,
+        aliases: s.aliases ?? [],
+        description: s.description,
+        source: s.source,
+        tier: s.tier,
+      }));
+    },
+    async createTaskWithFiles(input: {
+      prompt: string;
+      filePaths: string[];
+    }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
+      await mkdir(options.dataRoot, { recursive: true });
+      const taskId = `task_${Date.now().toString(36)}`;
+      const materials: Array<{ materialId: string; role?: MaterialRole }> = [];
+      for (const filePath of input.filePaths) {
+        const record = await materialRegistry.importMaterial({
+          taskId,
+          sourcePath: filePath,
+          role: 'customer_material',
+          roleSource: 'user',
+        });
+        materials.push({ materialId: record.materialId, role: record.role });
+      }
+      return host.createTask({ prompt: input.prompt, materials });
+    },
     async getModelConfig() {
       return createModelConfigSnapshot(await loadConfig());
     },
@@ -119,6 +151,81 @@ export function createDesktopServices(options: DesktopServicesOptions) {
 
       await saveConfig(config);
       return createModelConfigSnapshot(config);
+    },
+    async testProviderConnection(input: { providerId: string; modelId?: string }): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
+      const config = await loadConfig();
+      const provider = config.providers[input.providerId];
+      if (!provider?.apiKey) {
+        return { success: false, error: 'API key not configured' };
+      }
+      try {
+        const adapter = createAdapter(config);
+        const start = Date.now();
+        // Simple test: create a minimal request to verify connection
+        const testMessages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }];
+        // Use a minimal tools array to reduce overhead
+        const testTools = [{ name: 'ping', description: 'Test tool', inputSchema: {} }];
+        const systemPrompt = 'Reply with "ok" to verify connection.';
+        // Stream just one chunk then cancel
+        for await (const _chunk of adapter.stream(testMessages, testTools, systemPrompt)) {
+          break; // Just verify first chunk works
+        }
+        return { success: true, latencyMs: Date.now() - start };
+      } catch (e) {
+        return { success: false, error: (e as Error).message };
+      }
+    },
+    async listAvailableModelsForProvider(providerId: string) {
+      const profile = getProviderProfile(providerId);
+      if (profile?.availableModels) {
+        return profile.availableModels.map(m => ({
+          modelId: m.modelId,
+          model: m.model,
+          label: m.label,
+          capabilities: m.capabilities,
+        }));
+      }
+      return [];
+    },
+    async deleteProvider(providerId: string): Promise<void> {
+      const config = await loadConfig();
+      delete config.providers[providerId];
+      // Delete associated models
+      for (const [modelId, model] of Object.entries(config.models)) {
+        if (model.provider === providerId) {
+          delete config.models[modelId];
+        }
+      }
+      if (config.defaultProvider === providerId) {
+        const remaining = Object.keys(config.providers);
+        config.defaultProvider = remaining[0] ?? 'anthropic';
+        if (remaining.length === 0) {
+          // Ensure at least one provider exists
+          const profile = getProviderProfile('anthropic')!;
+          config.providers['anthropic'] = {
+            type: 'first_party',
+            protocol: profile.protocol,
+            baseUrl: profile.baseUrl,
+            apiKey: undefined,
+          };
+        }
+      }
+      if (config.defaultModelId && config.models[config.defaultModelId]?.provider === providerId) {
+        // Reset to default model of new default provider
+        const profile = getProviderProfile(config.defaultProvider);
+        config.defaultModelId = profile?.defaultModel.modelId ?? `${config.defaultProvider}-default`;
+      }
+      await saveConfig(config);
+    },
+    async deleteModel(modelId: string): Promise<void> {
+      const config = await loadConfig();
+      delete config.models[modelId];
+      if (config.defaultModelId === modelId) {
+        // Reset to provider default
+        const profile = getProviderProfile(config.defaultProvider);
+        config.defaultModelId = profile?.defaultModel.modelId ?? `${config.defaultProvider}-default`;
+      }
+      await saveConfig(config);
     },
     createTask: host.createTask.bind(host),
     subscribeTask: host.subscribeTask.bind(host),
@@ -234,60 +341,113 @@ function createModelConfigSnapshot(config: Config): DesktopModelConfigSnapshot {
   };
 }
 
+const BASE_SYSTEM_PROMPT = `你是 xiaok desktop 的助手。你可以使用工具来帮助用户完成各种任务。
+
+你有以下工具可用：
+- Read: 读取文件内容
+- Write: 创建或覆盖文件
+- Edit: 精确编辑文件中的特定内容
+- Bash: 执行 shell 命令
+- Grep: 搜索文件内容
+- Glob: 按模式匹配查找文件
+- skill: 调用已安装的 skill
+
+当用户要求执行操作时，直接使用工具完成，不要说"我没有权限"。用户已经授权你使用所有工具。
+保持简洁、准确。`;
+
 function createDesktopModelRunner(): TaskRunner {
   const history: Message[] = [];
+  const cwd = process.cwd();
+  let skillCatalog = createSkillCatalog(undefined, cwd);
+  let skillsLoaded = false;
+  const tools = buildToolList();
+  const registry = new ToolRegistry({ autoMode: true }, tools);
   return async ({ sessionId, prompt, signal, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
+    if (!skillsLoaded) {
+      try {
+        const skills = await skillCatalog.reload();
+        if (skills.length > 0) {
+          const skillTool = createSkillTool(skillCatalog);
+          registry.registerTool(skillTool);
+          tools.push(skillTool);
+        }
+        skillsLoaded = true;
+      } catch {
+        skillsLoaded = true;
+      }
+    }
+    const currentSkills = skillCatalog.list();
+    const skillsContext = currentSkills.length > 0 ? formatSkillsContext(currentSkills) : '';
+    const slashMatch = parseSlashCommand(prompt);
+    let effectivePrompt = prompt;
+    if (slashMatch) {
+      const skill = findSkillByCommandName(currentSkills, slashMatch.skillName);
+      if (skill) {
+        effectivePrompt = slashMatch.rest
+          ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
+          : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
+      }
+    }
     const config = await loadConfig();
     const adapter = createAdapter(config);
+    const systemPrompt = skillsContext
+      ? `${BASE_SYSTEM_PROMPT}\n\nAvailable skills:\n${skillsContext}`
+      : BASE_SYSTEM_PROMPT;
+    const allToolDefs = registry.getToolDefinitions();
     const messages: Message[] = [...history, {
       role: 'user',
-      content: [{ type: 'text', text: prompt }],
+      content: [{ type: 'text', text: effectivePrompt }],
     }];
     let reply = '';
-    for await (const chunk of adapter.stream(messages, [], '你是 xiaok desktop 的助手。直接回答用户问题，保持简洁、准确，不输出内部执行步骤。')) {
-      if (signal.aborted) {
-        throw new Error('task cancelled');
+    let iteration = 0;
+    const MAX_ITERATIONS = 20;
+    while (iteration < MAX_ITERATIONS) {
+      if (signal.aborted) throw new Error('task cancelled');
+      iteration++;
+      const assistantBlocks: MessageBlock[] = [];
+      for await (const chunk of adapter.stream(messages, allToolDefs, systemPrompt)) {
+        if (signal.aborted) throw new Error('task cancelled');
+        if (chunk.type === 'text') {
+          const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+          if (lastBlock?.type === 'text') {
+            lastBlock.text += chunk.delta;
+          } else {
+            assistantBlocks.push({ type: 'text', text: chunk.delta });
+          }
+          reply += chunk.delta;
+          emitRuntimeEvent({ type: 'assistant_delta', sessionId, turnId, intentId, stepId, delta: chunk.delta });
+        } else if (chunk.type === 'tool_use') {
+          assistantBlocks.push({ type: 'tool_use', id: chunk.id, name: chunk.name, input: chunk.input });
+        } else if (chunk.type === 'thinking') {
+          const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+          if (lastBlock?.type === 'thinking') {
+            lastBlock.thinking += chunk.delta;
+          } else {
+            assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
+          }
+        }
       }
-      if (chunk.type === 'text') {
-        reply += chunk.delta;
-        emitRuntimeEvent({
-          type: 'assistant_delta',
-          sessionId,
-          turnId,
-          intentId,
-          stepId,
-          delta: chunk.delta,
-        });
+      messages.push({ role: 'assistant', content: assistantBlocks });
+      const toolCalls = assistantBlocks.filter((b): b is ToolCall => b.type === 'tool_use');
+      if (toolCalls.length === 0) break;
+      const toolResults: MessageBlock[] = [];
+      for (const toolCall of toolCalls) {
+        if (signal.aborted) throw new Error('task cancelled');
+        const result = await registry.executeTool(toolCall.name, toolCall.input);
+        const ok = !result.startsWith('Error');
+        toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: result.slice(0, 50000), is_error: !ok });
       }
+      messages.push({ role: 'user', content: toolResults });
     }
     const note = reply.trim() || '模型没有返回内容。';
     history.push(
-      { role: 'user', content: [{ type: 'text', text: prompt }] },
+      { role: 'user', content: [{ type: 'text', text: effectivePrompt }] },
       { role: 'assistant', content: [{ type: 'text', text: note }] },
     );
-    emitRuntimeEvent({
-      type: 'receipt_emitted',
-      sessionId,
-      turnId,
-      intentId,
-      stepId,
-      note,
-    });
+    emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note });
   };
 }
 
-async function wait(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) {
-    throw new Error('task cancelled');
-  }
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => {
-      clearTimeout(timer);
-      reject(new Error('task cancelled'));
-    }, { once: true });
-  });
-}

@@ -116,6 +116,141 @@ describe('desktop services', () => {
       isDefault: true,
     });
   });
+
+  it('lists available models for a first-party provider', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const models = await services.listAvailableModelsForProvider('anthropic');
+    expect(models.length).toBeGreaterThan(0);
+    expect(models[0]).toMatchObject({
+      modelId: expect.stringContaining('anthropic'),
+      model: expect.stringContaining('claude'),
+      label: expect.stringContaining('Claude'),
+    });
+  });
+
+  it('returns empty array for unknown provider', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const models = await services.listAvailableModelsForProvider('unknown-provider');
+    expect(models).toEqual([]);
+  });
+
+  it('deletes a provider and its associated models', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    // First add a custom provider
+    await services.saveModelConfig({
+      providerId: 'custom-test',
+      modelName: 'test-model',
+      baseUrl: 'https://api.test.com/v1',
+      apiKey: 'test-key',
+      protocol: 'openai_legacy',
+    });
+
+    let snapshot = await services.getModelConfig();
+    expect(snapshot.providers.find(p => p.id === 'custom-test')).toBeDefined();
+    expect(snapshot.models.find(m => m.provider === 'custom-test')).toBeDefined();
+
+    // Delete the provider
+    await services.deleteProvider('custom-test');
+
+    snapshot = await services.getModelConfig();
+    expect(snapshot.providers.find(p => p.id === 'custom-test')).toBeUndefined();
+    expect(snapshot.models.find(m => m.provider === 'custom-test')).toBeUndefined();
+  });
+
+  it('deletes a specific model but keeps the provider', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    // Add a custom model
+    await services.saveModelConfig({
+      providerId: 'anthropic',
+      modelName: 'claude-test-model',
+      label: 'Test Model',
+    });
+
+    let snapshot = await services.getModelConfig();
+    const testModel = snapshot.models.find(m => m.model === 'claude-test-model');
+    expect(testModel).toBeDefined();
+
+    // Delete the model
+    await services.deleteModel(testModel!.id);
+
+    snapshot = await services.getModelConfig();
+    expect(snapshot.models.find(m => m.model === 'claude-test-model')).toBeUndefined();
+    expect(snapshot.providers.find(p => p.id === 'anthropic')).toBeDefined();
+  });
+
+  it('testProviderConnection returns error when API key not configured', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    // Default config has no API key
+    const result = await services.testProviderConnection({ providerId: 'anthropic' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('API key');
+  });
+
+  it('testProviderConnection attempts connection when API key is configured', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+      runner: async () => { // Minimal runner
+      },
+    });
+
+    // Configure with API key (but fake, so connection will fail)
+    await services.saveModelConfig({
+      providerId: 'anthropic',
+      apiKey: 'sk-test-key',
+    });
+
+    // With a fake API key, the connection will fail, but we can verify it tried
+    const result = await services.testProviderConnection({ providerId: 'anthropic' });
+    // Either succeeds (if adapter returns immediately) or fails with connection error
+    expect(result.success).toBeDefined();
+    if (!result.success) {
+      expect(result.error).toBeDefined();
+    }
+  });
+
+  it('resets defaultProvider when deleted provider was default', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    // Set kimi as default
+    await services.saveModelConfig({
+      providerId: 'kimi',
+      apiKey: 'sk-kimi',
+    });
+
+    let snapshot = await services.getModelConfig();
+    expect(snapshot.defaultProvider).toBe('kimi');
+
+    // Delete kimi
+    await services.deleteProvider('kimi');
+
+    snapshot = await services.getModelConfig();
+    expect(snapshot.defaultProvider).not.toBe('kimi');
+    expect(snapshot.providers.find(p => p.id === 'anthropic')).toBeDefined(); // Falls back to anthropic
+  });
 });
 
 async function collectFirst<T>(events: AsyncIterable<T>, count: number): Promise<T[]> {

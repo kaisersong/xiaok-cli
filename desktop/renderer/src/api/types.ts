@@ -12,13 +12,56 @@ export interface ThreadRecord {
   starred: boolean;
   gtdBucket: ThreadGtdBucket | null;
   pinnedAt: number | null;
+  currentTaskId: string | null;
+}
+
+// Provider types
+export interface AvailableModelView {
+  modelId: string;
+  model: string;
+  label: string;
+  capabilities?: string[];
+}
+
+export interface TestProviderConnectionResult {
+  success: boolean;
+  latencyMs?: number;
+  error?: string;
 }
 
 // Persona types (mock)
 export interface Persona {
+  id?: string;
   persona_key: string;
   display_name: string;
   description?: string;
+  scope?: string;
+  budgets?: unknown[];
+}
+
+// LLM Provider types (mapped from config)
+export interface LlmProvider {
+  id: string;
+  label: string;
+  type: 'first_party' | 'custom';
+  protocol: string;
+  baseUrl?: string;
+  apiKeyConfigured: boolean;
+  advanced_json?: Record<string, unknown>;
+}
+
+export interface LlmProviderModel {
+  id: string;
+  provider: string;
+  model: string;
+  label: string;
+  capabilities?: string[];
+  isDefault: boolean;
+}
+
+export interface SpawnProfile {
+  name: string;
+  model: string;
 }
 
 // Skill types (mock)

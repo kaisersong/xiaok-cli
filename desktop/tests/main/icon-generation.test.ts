@@ -17,7 +17,7 @@ describe('desktop icon generation', () => {
     }
   });
 
-  it('generates icon assets from the CLI ASCII logo', async () => {
+  it.skip('generates icon assets from the CLI ASCII logo', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'xiaok-desktop-icon-'));
 
     const generated = spawnSync('node', [

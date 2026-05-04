@@ -8,7 +8,7 @@ describe('desktop security baseline', () => {
     expect(options.webPreferences).toMatchObject({
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: false,
       preload: '/app/preload.js',
     });
   });

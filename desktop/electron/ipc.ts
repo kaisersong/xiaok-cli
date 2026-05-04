@@ -5,35 +5,125 @@ import type { createDesktopServices } from './desktop-services.js';
 
 type DesktopServices = ReturnType<typeof createDesktopServices>;
 
+function log(level: string, msg: string, ...args: unknown[]) {
+  const ts = new Date().toISOString();
+  const payload = args.length ? ' ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') : '';
+  console.log(`[${ts}] [${level}] [ipc] ${msg}${payload}`);
+}
+
 export function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow, services: DesktopServices): void {
-  ipcMain.handle('desktop:getModelConfig', () => services.getModelConfig());
-  ipcMain.handle('desktop:saveModelConfig', (_event, input) => services.saveModelConfig(input));
+  ipcMain.handle('desktop:getModelConfig', async () => {
+    log('info', 'getModelConfig');
+    const r = await services.getModelConfig();
+    log('info', 'getModelConfig ok', { providers: r?.providers?.length ?? 0 });
+    return r;
+  });
+  ipcMain.handle('desktop:saveModelConfig', async (_event, input) => {
+    log('info', 'saveModelConfig', { providerId: input?.providerId });
+    const r = await services.saveModelConfig(input);
+    log('info', 'saveModelConfig ok');
+    return r;
+  });
+  ipcMain.handle('desktop:testProviderConnection', async (_event, input) => {
+    log('info', 'testProviderConnection', { providerId: input?.providerId });
+    const r = await services.testProviderConnection(input);
+    log('info', 'testProviderConnection ok', { success: r?.success, latencyMs: r?.latencyMs });
+    return r;
+  });
+  ipcMain.handle('desktop:listAvailableModelsForProvider', async (_event, providerId) => {
+    log('info', 'listAvailableModelsForProvider', { providerId });
+    const r = await services.listAvailableModelsForProvider(providerId);
+    log('info', 'listAvailableModelsForProvider ok', { count: r?.length });
+    return r;
+  });
+  ipcMain.handle('desktop:deleteProvider', async (_event, providerId) => {
+    log('info', 'deleteProvider', { providerId });
+    await services.deleteProvider(providerId);
+    log('info', 'deleteProvider ok');
+  });
+  ipcMain.handle('desktop:deleteModel', async (_event, modelId) => {
+    log('info', 'deleteModel', { modelId });
+    await services.deleteModel(modelId);
+    log('info', 'deleteModel ok');
+  });
   ipcMain.handle('desktop:selectMaterials', async () => {
+    log('info', 'selectMaterials');
     const result = await dialog.showOpenDialog(window, {
       properties: ['openFile', 'openDirectory', 'multiSelections'],
     });
     if (result.canceled) {
+      log('info', 'selectMaterials cancelled');
       return { filePaths: [] };
     }
-    return { filePaths: await expandSelectedMaterialPaths(result.filePaths) };
+    const expanded = await expandSelectedMaterialPaths(result.filePaths);
+    log('info', 'selectMaterials ok', { fileCount: expanded.length });
+    return { filePaths: expanded };
   });
-  ipcMain.handle('desktop:importMaterial', (_event, input) => services.importMaterial(input));
-  ipcMain.handle('desktop:createTask', (_event, input) => services.createTask(input));
-  ipcMain.handle('desktop:answerQuestion', (_event, input) => services.answerQuestion(input));
-  ipcMain.handle('desktop:cancelTask', (_event, input) => services.cancelTask(input.taskId));
-  ipcMain.handle('desktop:getActiveTask', () => services.getActiveTask());
-  ipcMain.handle('desktop:recoverTask', (_event, input) => services.recoverTask(input.taskId));
-  ipcMain.handle('desktop:openArtifact', (_event, input) => services.openArtifact(input.artifactId));
+  ipcMain.handle('desktop:importMaterial', async (_event, input) => {
+    log('info', 'importMaterial', { filePath: input?.filePath });
+    const r = await services.importMaterial(input);
+    log('info', 'importMaterial ok');
+    return r;
+  });
+  ipcMain.handle('desktop:createTask', async (_event, input) => {
+    log('info', 'createTask', { prompt: input?.prompt?.slice(0, 50) });
+    const r = await services.createTask(input);
+    log('info', 'createTask ok', { taskId: r?.taskId });
+    return r;
+  });
+  ipcMain.handle('desktop:answerQuestion', async (_event, input) => {
+    log('info', 'answerQuestion', { taskId: input?.taskId });
+    const r = await services.answerQuestion(input);
+    log('info', 'answerQuestion ok');
+    return r;
+  });
+  ipcMain.handle('desktop:cancelTask', async (_event, input) => {
+    log('info', 'cancelTask', { taskId: input?.taskId });
+    await services.cancelTask(input.taskId);
+    log('info', 'cancelTask ok');
+  });
+  ipcMain.handle('desktop:getActiveTask', async () => {
+    const r = await services.getActiveTask();
+    log('debug', 'getActiveTask', { taskId: r?.taskId ?? null });
+    return r;
+  });
+  ipcMain.handle('desktop:recoverTask', async (_event, input) => {
+    log('info', 'recoverTask', { taskId: input?.taskId });
+    const r = await services.recoverTask(input.taskId);
+    log('info', 'recoverTask ok', { status: r?.snapshot?.status });
+    return r;
+  });
+  ipcMain.handle('desktop:openArtifact', async (_event, input) => {
+    log('info', 'openArtifact', { artifactId: input?.artifactId });
+    return services.openArtifact(input.artifactId);
+  });
   ipcMain.handle('desktop:subscribeTask', async (_event, input) => {
     const taskId = input.taskId as string;
+    log('info', 'subscribeTask', { taskId });
     void (async () => {
-      for await (const event of services.subscribeTask(taskId)) {
-        if (window.isDestroyed()) {
-          break;
+      try {
+        for await (const event of services.subscribeTask(taskId)) {
+          if (window.isDestroyed()) {
+            break;
+          }
+          window.webContents.send(`desktop:taskEvent:${taskId}`, event);
         }
-        window.webContents.send(`desktop:taskEvent:${taskId}`, event);
+        log('info', 'subscribeTask stream ended', { taskId });
+      } catch (e) {
+        log('error', 'subscribeTask error', { taskId, message: String(e) });
       }
     })();
+  });
+  ipcMain.handle('desktop:listSkills', async () => {
+    const r = await services.listSkills();
+    log('info', 'listSkills', { count: r.length });
+    return r;
+  });
+  ipcMain.handle('desktop:createTaskWithFiles', async (_event, input) => {
+    log('info', 'createTaskWithFiles', { prompt: input?.prompt?.slice(0, 50), files: input?.filePaths?.length });
+    const r = await services.createTaskWithFiles(input);
+    log('info', 'createTaskWithFiles ok', { taskId: r?.taskId });
+    return r;
   });
 }
 

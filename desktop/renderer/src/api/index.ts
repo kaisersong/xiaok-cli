@@ -1,3 +1,3 @@
 export * from './types';
-export { api } from './bridge';
+export { api, isApiError } from './bridge';
 export type { Api } from './bridge';
