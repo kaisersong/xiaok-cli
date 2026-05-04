@@ -109,7 +109,7 @@ export interface TestProviderConnectionResult {
   error?: string;
 }
 
-export type DesktopChannelType = 'discord' | 'feishu' | 'qq' | 'qqbot' | 'weixin' | 'telegram';
+export type DesktopChannelType = 'yunzhijia' | 'discord' | 'feishu' | 'qq' | 'qqbot' | 'weixin' | 'telegram';
 
 export interface DesktopChannelView {
   id: string;

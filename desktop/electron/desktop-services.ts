@@ -322,7 +322,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
 
 interface ChannelRecord {
   id: string;
-  type: 'discord' | 'feishu' | 'qq' | 'qqbot' | 'weixin' | 'telegram';
+  type: 'yunzhijia' | 'discord' | 'feishu' | 'qq' | 'qqbot' | 'weixin' | 'telegram';
   name: string;
   webhookUrl?: string;
   enabled: boolean;

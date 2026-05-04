@@ -90,7 +90,7 @@ export interface ConnectorsConfig {
 export interface CreditsBalance { balance: number; }
 
 // Channel types
-export type ChannelType = 'discord' | 'feishu' | 'qq' | 'qqbot' | 'weixin' | 'telegram';
+export type ChannelType = 'yunzhijia' | 'discord' | 'feishu' | 'qq' | 'qqbot' | 'weixin' | 'telegram';
 
 export interface ChannelConfig {
   id: string;
