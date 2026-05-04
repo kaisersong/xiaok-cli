@@ -434,7 +434,60 @@ export const api = {
   // ---------------------
   async listLlmProviders() {
     const config = await api.getModelConfig();
-    return config.providers;
+    return config.providers.map(p => ({ ...p, models: config.models.filter(m => m.provider === p.id) }));
+  },
+
+  async createLlmProvider(input: { providerId: string; label: string; protocol: string; apiKey?: string; baseUrl?: string; advanced_json?: Record<string, unknown> }) {
+    return api.saveModelConfig({
+      providerId: input.providerId,
+      apiKey: input.apiKey,
+      baseUrl: input.baseUrl,
+      protocol: input.protocol as never,
+    });
+  },
+
+  async updateLlmProvider(providerId: string, input: { label?: string; protocol?: string; apiKey?: string; baseUrl?: string; advanced_json?: Record<string, unknown> }) {
+    return api.saveModelConfig({
+      providerId,
+      ...input,
+    });
+  },
+
+  async deleteLlmProvider(providerId: string) {
+    await api.deleteProvider(providerId);
+  },
+
+  async createProviderModel(input: { providerId: string; model: string; label: string; capabilities?: string[] }) {
+    return api.saveModelConfig({
+      providerId: input.providerId,
+      modelName: input.model,
+      label: input.label,
+    });
+  },
+
+  async deleteProviderModel(modelId: string) {
+    await api.deleteModel(modelId);
+  },
+
+  async patchProviderModel(modelId: string, input: { label?: string; capabilities?: string[] }) {
+    const config = await api.getModelConfig();
+    const model = config.models.find(m => m.id === modelId);
+    if (!model) throw new Error('Model not found');
+    return api.saveModelConfig({
+      providerId: model.provider,
+      modelName: model.model,
+      label: input.label || model.label,
+    });
+  },
+
+  async listAvailableModels() {
+    // Return all profiles from config
+    const config = await api.getModelConfig();
+    return config.providerProfiles;
+  },
+
+  async testLlmProviderModel(input: { providerId: string; modelId?: string }) {
+    return api.testProviderConnection({ providerId: input.providerId, modelId: input.modelId });
   },
 
   // ---------------------

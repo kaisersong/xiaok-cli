@@ -15,30 +15,6 @@ export interface ThreadRecord {
   currentTaskId: string | null;
 }
 
-// Provider types
-export interface AvailableModelView {
-  modelId: string;
-  model: string;
-  label: string;
-  capabilities?: string[];
-}
-
-export interface TestProviderConnectionResult {
-  success: boolean;
-  latencyMs?: number;
-  error?: string;
-}
-
-// Persona types (mock)
-export interface Persona {
-  id?: string;
-  persona_key: string;
-  display_name: string;
-  description?: string;
-  scope?: string;
-  budgets?: unknown[];
-}
-
 // LLM Provider types (mapped from config)
 export interface LlmProvider {
   id: string;
@@ -59,9 +35,34 @@ export interface LlmProviderModel {
   isDefault: boolean;
 }
 
+export type AvailableModel = { modelId: string; model: string; label: string; capabilities?: string[] };
+
+export interface AvailableModelView {
+  modelId: string;
+  model: string;
+  label: string;
+  capabilities?: string[];
+}
+
+export interface TestProviderConnectionResult {
+  success: boolean;
+  latencyMs?: number;
+  error?: string;
+}
+
 export interface SpawnProfile {
   name: string;
   model: string;
+}
+
+// Persona types (mock)
+export interface Persona {
+  id?: string;
+  persona_key: string;
+  display_name: string;
+  description?: string;
+  scope?: string;
+  budgets?: unknown[];
 }
 
 // Skill types (mock)
@@ -121,12 +122,11 @@ export interface MCPInstallConfig {
   createdAt: number;
 }
 
-// Usage / Credits types
+// Usage types
 export interface MeUsageSummary { totalRequests: number; totalTokens: number }
 export interface MeHourlyUsageItem { hour: string; requests: number; tokens: number }
 export interface MeDailyUsageItem { date: string; requests: number; tokens: number }
 export interface MeModelUsageItem { model: string; requests: number; tokens: number; cost: number }
-export type CreditsBalance = { balance: number };
 
 // Channel / Persona types (for settings shared)
 export interface ChannelResponse { id: string; type: string; name: string; enabled: boolean }
@@ -134,10 +134,6 @@ export interface ChannelBindingResponse { id: string; channelType: string; bindi
 
 // Memory types
 export type MemoryErrorEvent = { id: string; message: string; timestamp: number; errorType: string }
-
-// Spawn / LLM types
-export interface SpawnProfile { name: string; model: string }
-export interface LlmProvider { id: string; label: string; type: string; protocol: string; baseUrl?: string; apiKeyConfigured: boolean }
 
 // Run type
 export interface Run { id: string; threadId: string; status: string; createdAt: number; completedAt?: number }
