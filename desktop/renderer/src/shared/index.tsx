@@ -1,7 +1,8 @@
-import React from 'react';
+// Export types
+export type AppError = { message: string; traceId?: string; code?: string };
+export type AuthApi = unknown;
 
 // Error types
-export type AppError = { message: string; traceId?: string; code?: string };
 export function formatErrorForDisplay(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
@@ -20,6 +21,14 @@ export function AutoResizeTextarea(props: Record<string, unknown>) {
   return <textarea {...props} />;
 }
 
+export function FormField(props: Record<string, unknown>) {
+  return <div {...props} />;
+}
+
+export function Button({ children, ...props }: Record<string, unknown> & { children?: React.ReactNode }) {
+  return <button {...props}>{children}</button>;
+}
+
 // Modal
 export function Modal({ children, ...props }: Record<string, unknown> & { children?: React.ReactNode }) {
   return <div {...props}>{children}</div>;
@@ -29,6 +38,18 @@ export function Modal({ children, ...props }: Record<string, unknown> & { childr
 export function Badge({ children, ...props }: Record<string, unknown> & { children?: React.ReactNode }) {
   return <span {...props}>{children}</span>;
 }
+
+// Toast (stub)
+export function useToast() {
+  return { show: () => {} };
+}
+
+// Debug bus (stub)
+export const debugBus = {
+  on: () => () => {},
+  off: () => {},
+  emit: () => {},
+};
 
 // ConfirmDialog
 export function ConfirmDialog({
@@ -132,11 +153,7 @@ export function TabBar({ tabs, activeTab, onTabChange }: Record<string, unknown>
 
 // Loading states
 export function FullScreenLoading({ label }: { label?: string }) {
-  return (
-    <div className="flex h-screen items-center justify-center">
-      {label || 'Loading...'}
-    </div>
-  );
+  return <div className="flex h-screen items-center justify-center">{label || 'Loading...'}</div>;
 }
 
 export function LoadingPage({
@@ -161,25 +178,37 @@ export function LoadingPage({
         )}
       </div>
     );
-  return (
-    <div className="flex h-screen items-center justify-center">
-      {label || 'Loading...'}
-    </div>
-  );
-}
-
-// Locale helper
-export function createLocaleContext(strings: Record<string, unknown>) {
-  return {
-    Provider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    useLocale: () => ({ t: strings }),
-  };
+  return <div className="flex h-screen items-center justify-center">{label || 'Loading...'}</div>;
 }
 
 // Auth page stub
 export function AuthPage(props: Record<string, unknown>) {
   return <div {...props} />;
 }
+
+// Date/time helpers (stubs)
+export function formatDateTime(ts: number): string {
+  try { return new Date(ts).toLocaleString() } catch { return ''; }
+}
+export function formatMonthDay(ts: number): string {
+  try { return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) } catch { return ''; }
+}
+export function getActiveTimeZone(): string {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC'; }
+}
+export function isSameCalendarDay(a: number, b: number): boolean {
+  try {
+    const da = new Date(a), db = new Date(b);
+    return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
+  } catch { return false; }
+}
+
+// Tool name helpers (stubs)
+export function canonicalToolName(name: string): string { return name; }
+export function pickLogicalToolName(): string { return 'default'; }
+
+// Channel envelope helper (stub)
+export function normalizeChannelEnvelopeText(text: string): string { return text; }
 
 // Catalog routing stub
 export const routeAdvancedJsonFromAvailableCatalog = (c: unknown) => c;
