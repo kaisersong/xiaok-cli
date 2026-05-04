@@ -497,8 +497,75 @@ export const api = {
   // Credits API (mock)
   // ---------------------
   async getCreditsBalance() {
-    // No credits in local mode
     return { balance: 0 };
+  },
+
+  // ---------------------
+  // Account Settings (localStorage)
+  // ---------------------
+  async getAccountSettings() {
+    try {
+      const raw = localStorage.getItem('xiaok:account-settings');
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  },
+  async updateAccountSettings(settings: Record<string, unknown>) {
+    const current = await api.getAccountSettings();
+    const next = { ...current, ...settings };
+    try { localStorage.setItem('xiaok:account-settings', JSON.stringify(next)) } catch { /* noop */ }
+    return next;
+  },
+  async updateMe(payload: { username?: string; timezone?: string | null }) {
+    try {
+      const key = 'xiaok:me';
+      const current = JSON.parse(localStorage.getItem(key) || '{}');
+      const next = { ...current, ...payload };
+      localStorage.setItem(key, JSON.stringify(next));
+      return next;
+    } catch { return {}; }
+  },
+
+  // ---------------------
+  // Usage Analytics (mock — no usage tracking in local mode)
+  // ---------------------
+  async getMyUsage() {
+    return { totalRequests: 0, totalTokens: 0 };
+  },
+  async getMyDailyUsage() {
+    return [];
+  },
+  async getMyHourlyUsage() {
+    return [];
+  },
+  async getMyUsageByModel() {
+    return [];
+  },
+
+  // ---------------------
+  // Memory API (localStorage stub)
+  // ---------------------
+  async listMemoryErrors() {
+    return [];
+  },
+
+  // ---------------------
+  // Runs API (mock)
+  // ---------------------
+  async listRuns() {
+    return [];
+  },
+
+  // ---------------------
+  // Feedback API (mock)
+  // ---------------------
+  async createSuggestionFeedback() {
+    // Store locally for now
+    try {
+      const key = 'xiaok:suggestions';
+      const existing = JSON.parse(localStorage.getItem(key) || '[]');
+      existing.push({ createdAt: Date.now() });
+      localStorage.setItem(key, JSON.stringify(existing));
+    } catch { /* noop */ }
   },
 };
 

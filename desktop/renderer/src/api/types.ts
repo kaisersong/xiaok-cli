@@ -120,3 +120,26 @@ export interface MCPInstallConfig {
   enabled: boolean;
   createdAt: number;
 }
+
+// Usage / Credits types
+export interface MeUsageSummary { totalRequests: number; totalTokens: number }
+export interface MeHourlyUsageItem { hour: string; requests: number; tokens: number }
+export interface MeDailyUsageItem { date: string; requests: number; tokens: number }
+export interface MeModelUsageItem { model: string; requests: number; tokens: number; cost: number }
+export type CreditsBalance = { balance: number };
+
+// Channel / Persona types (for settings shared)
+export interface ChannelResponse { id: string; type: string; name: string; enabled: boolean }
+export interface ChannelBindingResponse { id: string; channelType: string; bindingType: string }
+
+// Memory types
+export type MemoryErrorEvent = { id: string; message: string; timestamp: number; errorType: string }
+
+// Spawn / LLM types
+export interface SpawnProfile { name: string; model: string }
+export interface LlmProvider { id: string; label: string; type: string; protocol: string; baseUrl?: string; apiKeyConfigured: boolean }
+
+// Run type
+export interface Run { id: string; threadId: string; status: string; createdAt: number; completedAt?: number }
+
+export interface UploadedThreadAttachment { id: string; fileName: string; fileSize: number }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDesktopServices } from '../../electron/desktop-services.js';
@@ -250,6 +250,195 @@ describe('desktop services', () => {
     snapshot = await services.getModelConfig();
     expect(snapshot.defaultProvider).not.toBe('kimi');
     expect(snapshot.providers.find(p => p.id === 'anthropic')).toBeDefined(); // Falls back to anthropic
+  });
+
+  // ===== Channel API Tests (shared config.json) =====
+
+  it('returns empty channels when config has no channels', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const channels = await services.listChannels();
+    expect(channels).toEqual([]);
+  });
+
+  it('reads channels from config.json', async () => {
+    // Write config with channels first
+    const configDir = join(rootDir, 'config');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 2,
+      defaultProvider: 'anthropic',
+      defaultModelId: 'anthropic-default',
+      providers: { anthropic: { type: 'first_party', protocol: 'anthropic' } },
+      models: { 'anthropic-default': { provider: 'anthropic', model: 'claude-opus-4-6', label: 'Opus' } },
+      channels: {
+        yzj: { sendMsgUrl: 'https://example.com/webhook', inboundMode: 'websocket' },
+      },
+    }));
+
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const channels = await services.listChannels();
+    expect(channels).toHaveLength(1);
+    expect(channels[0].id).toBe('yzj');
+    expect(channels[0].type).toBe('yzj');
+    expect(channels[0].webhookUrl).toBe('https://example.com/webhook');
+  });
+
+  it('creates a channel and persists to config.json', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const channel = await services.createChannel({ type: 'discord', name: 'My Discord', webhookUrl: 'https://discord.com/api/webhooks/...' });
+    expect(channel.id).toBe('discord');
+    expect(channel.type).toBe('discord');
+    expect(channel.name).toBe('My Discord');
+    expect(channel.enabled).toBe(true);
+
+    // Verify it's in config.json
+    const configPath = join(rootDir, 'config', 'config.json');
+    expect(existsSync(configPath)).toBe(true);
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(config.channels.discord).toBeDefined();
+  });
+
+  it('updates an existing channel', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    // First create
+    await services.createChannel({ type: 'telegram', name: 'Old Name' });
+
+    // Then update
+    const updated = await services.updateChannel('telegram', { name: 'New Name', webhookUrl: 'https://api.telegram.org/bot123' });
+    expect(updated.name).toBe('New Name');
+    expect(updated.webhookUrl).toBe('https://api.telegram.org/bot123');
+  });
+
+  it('throws on updating non-existent channel', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    await expect(services.updateChannel('nonexistent', { name: 'test' })).rejects.toThrow('not found');
+  });
+
+  it('deletes a channel from config.json', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    await services.createChannel({ type: 'feishu', name: 'Feishu' });
+    let channels = await services.listChannels();
+    expect(channels.find(c => c.id === 'feishu')).toBeDefined();
+
+    await services.deleteChannel('feishu');
+    channels = await services.listChannels();
+    expect(channels.find(c => c.id === 'feishu')).toBeUndefined();
+  });
+
+  // ===== MCP API Tests =====
+
+  it('returns empty MCP installs initially', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const installs = await services.listMCPInstalls();
+    expect(installs).toEqual([]);
+  });
+
+  it('creates an MCP install and persists to file', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const install = await services.createMCPInstall({
+      name: 'Playwright',
+      source: 'npm',
+      command: '@anthropic/mcp-playwright',
+    });
+
+    expect(install.id).toBeDefined();
+    expect(install.name).toBe('Playwright');
+    expect(install.source).toBe('npm');
+    expect(install.enabled).toBe(true);
+
+    // Verify file
+    const mcpPath = join(rootDir, 'data', 'mcp-installs.json');
+    expect(existsSync(mcpPath)).toBe(true);
+    const saved = JSON.parse(readFileSync(mcpPath, 'utf-8'));
+    expect(saved).toHaveLength(1);
+    expect(saved[0].name).toBe('Playwright');
+  });
+
+  it('updates an MCP install', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const created = await services.createMCPInstall({
+      name: 'Brave Search',
+      source: 'npm',
+      command: '@anthropic/mcp-brave-search',
+    });
+
+    const updated = await services.updateMCPInstall(created.id, { enabled: false });
+    expect(updated.enabled).toBe(false);
+  });
+
+  it('throws on updating non-existent MCP install', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    await expect(services.updateMCPInstall('nonexistent', { enabled: false })).rejects.toThrow('not found');
+  });
+
+  it('deletes an MCP install', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const created = await services.createMCPInstall({ name: 'Test MCP', source: 'npm', command: 'test' });
+    await services.deleteMCPInstall(created.id);
+
+    const installs = await services.listMCPInstalls();
+    expect(installs).toHaveLength(0);
+  });
+
+  it('supports multiple MCP installs with distinct IDs', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const install1 = await services.createMCPInstall({ name: 'MCP1', source: 'npm', command: 'cmd1' });
+    const install2 = await services.createMCPInstall({ name: 'MCP2', source: 'github', command: 'cmd2' });
+
+    expect(install1.id).not.toBe(install2.id);
+    expect(install1.source).toBe('npm');
+    expect(install2.source).toBe('github');
+
+    const installs = await services.listMCPInstalls();
+    expect(installs).toHaveLength(2);
   });
 });
 
