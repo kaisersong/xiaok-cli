@@ -448,17 +448,38 @@ export function ChatShell() {
     return <div className="flex h-full items-center justify-center text-[var(--c-text-secondary)]">Loading...</div>;
   }
 
-  // Extract generated files from Write tool calls (most reliable source)
-  const generatedFiles = allEventsRef.current
-    .filter(e => e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write')
-    .map(e => {
-      const call = e as { input: Record<string, unknown> };
-      const filePath = call.input?.file_path as string | undefined;
-      if (!filePath) return null;
-      const parts = filePath.split('/');
-      return { filePath, name: parts[parts.length - 1] };
-    })
-    .filter((f): f is { filePath: string; name: string } => f !== null);
+  // Extract generated files from multiple sources
+  const generatedFiles = (() => {
+    const seen = new Set<string>();
+    const files: { filePath: string; name: string }[] = [];
+    const addFile = (fp: string) => {
+      if (seen.has(fp) || !fp) return;
+      seen.add(fp);
+      const parts = fp.split('/');
+      files.push({ filePath: fp, name: parts[parts.length - 1] });
+    };
+
+    // Source 1: Write tool calls
+    for (const e of allEventsRef.current) {
+      if (e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write') {
+        const fp = ((e as unknown) as { input?: { file_path?: string } }).input?.file_path;
+        if (fp) addFile(fp);
+      }
+    }
+
+    // Source 2: result summary (extract file paths from text)
+    if (result) {
+      const summary = result.summary || '';
+      const fileExtMatch = /([^\s<`]+?\.(?:md|html|txt|csv|json|pdf|png|jpg|svg))\b/g;
+      let m;
+      while ((m = fileExtMatch.exec(summary)) !== null) {
+        const candidate = m[1];
+        if (candidate.startsWith('/')) addFile(candidate);
+      }
+    }
+
+    return files;
+  })();
 
   return (
     <div className="flex h-full overflow-hidden">

@@ -59,7 +59,7 @@ export function DesktopSettings({ onClose }: Props) {
       {/* Navigation sidebar */}
       <div
         className="flex w-[200px] shrink-0 flex-col overflow-y-auto"
-        style={{ borderRight: '0.5px solid var(--c-border)' }}
+        style={{ borderRight: '0.5px solid var(--c-border)', paddingTop: 12 }}
       >
         <div className="p-3">
           <button

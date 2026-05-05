@@ -174,6 +174,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   return (
     <aside
       className="relative flex w-60 flex-col border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)]"
+      style={{ paddingTop: 12 }}
     >
       {/* Main navigation */}
       <div className="px-2">
