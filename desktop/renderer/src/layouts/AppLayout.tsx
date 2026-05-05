@@ -31,7 +31,7 @@ export function AppLayout() {
       <div className="flex h-screen flex-col overflow-hidden bg-[var(--c-bg-page)]">
         <div className="flex min-h-0 flex-1">
           <Sidebar onOpenSettings={() => setSettingsOpen(true)} collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(v => !v)} />
-          <main className="relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--c-bg-page)]" style={{ scrollbarGutter: 'stable' }}>
+          <main className="relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--c-bg-page)]" style={{ scrollbarGutter: 'stable', paddingTop: 28 }}>
             <Outlet />
           </main>
         </div>

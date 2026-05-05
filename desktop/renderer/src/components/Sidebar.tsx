@@ -175,11 +175,11 @@ export function Sidebar({ onOpenSettings, collapsed, onToggleCollapse }: Sidebar
 
   return (
     <aside
-      className="flex flex-col border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)] transition-[width] duration-200"
-      style={{ width: collapsed ? 52 : 240 }}
+      className="relative flex flex-col border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)] transition-[width] duration-200"
+      style={{ width: collapsed ? 52 : 240, paddingTop: 28 }}
     >
-      {/* Collapse toggle at top */}
-      <div className="flex items-center justify-end px-2 py-2" style={{ minHeight: 40 }}>
+      {/* Collapse toggle at top - positioned for macOS traffic lights */}
+      <div className="absolute top-3 flex items-center justify-end" style={{ width: collapsed ? 52 : 240, paddingRight: collapsed ? 8 : 12 }}>
         <button
           type="button"
           onClick={onToggleCollapse}

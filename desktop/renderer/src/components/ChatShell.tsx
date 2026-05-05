@@ -303,7 +303,9 @@ export function ChatShell() {
             const { snapshot } = await api.recoverTask(tid);
             if (snapshot) {
               const isFirst = tid === allTaskIds[0];
-              const msgs = replaySnapshot(snapshot, isFirst && !initialPrompt);
+              // Add prompt for every task (not just first)
+              const addPrompt = snapshot.prompt && (!isFirst || !initialPrompt);
+              const msgs = replaySnapshot(snapshot, addPrompt);
               allMessages.push(...msgs);
 
               // Check last task status for live subscription

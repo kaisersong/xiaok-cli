@@ -8,6 +8,7 @@ export function buildBrowserWindowOptions(preloadPath: string): BrowserWindowCon
     minHeight: 680,
     backgroundColor: '#f7f7f2',
     title: 'xiaok',
+    titleBarStyle: 'hiddenInset',
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
