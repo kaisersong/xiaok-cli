@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { X, FolderTree, Code, Wrench } from 'lucide-react';
+import { X, FolderTree, Code, Wrench, Maximize2, Minimize2 } from 'lucide-react';
 import { WorkspaceTree } from './WorkspaceTree';
 import { CanvasPreview } from './CanvasPreview';
 import { ToolsPanel } from './ToolsPanel';
@@ -11,6 +11,8 @@ interface CanvasPanelProps {
   onClose: () => void;
   initialPreviewFile?: string;
   initialPreviewContent?: string;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
 }
 
 type CanvasTab = 'workspace' | 'preview' | 'tools';
@@ -21,7 +23,7 @@ const TABS: Array<{ key: CanvasTab; label: string; icon: typeof X }> = [
   { key: 'tools', label: 'Tools', icon: Wrench },
 ];
 
-export function CanvasPanel({ events, onClose, initialPreviewFile, initialPreviewContent }: CanvasPanelProps) {
+export function CanvasPanel({ events, onClose, initialPreviewFile, initialPreviewContent, expanded, onToggleExpand }: CanvasPanelProps) {
   const [activeTab, setActiveTab] = useState<CanvasTab>('workspace');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [previewContent, setPreviewContent] = useState<string>('');
@@ -79,18 +81,33 @@ export function CanvasPanel({ events, onClose, initialPreviewFile, initialPrevie
   };
 
   return (
-    <div className="flex h-full flex-col border-l border-[var(--c-border)] bg-[var(--c-bg-page)]" style={{ width: 360, minWidth: 360, maxWidth: 480 }}>
+    <div
+      className="flex h-full flex-col border-l border-[var(--c-border)] bg-[var(--c-bg-page)] transition-[width,min-width,max-width] duration-200"
+      style={{ width: expanded ? '60%' : 360, minWidth: expanded ? 500 : 360, maxWidth: expanded ? '70%' : 480, flexShrink: 0 }}
+    >
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between border-b border-[var(--c-border)] px-3 py-2">
         <span className="text-sm font-medium text-[var(--c-text-heading)]">Canvas</span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded p-1 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
-          title="Close Canvas"
-        >
-          <X size={16} />
-        </button>
+        <div className="flex items-center gap-1">
+          {onToggleExpand && (
+            <button
+              type="button"
+              onClick={onToggleExpand}
+              className="rounded p-1 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
+              title={expanded ? '收起 Canvas' : '展开 Canvas'}
+            >
+              {expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
+            title="Close Canvas"
+          >
+            <X size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}

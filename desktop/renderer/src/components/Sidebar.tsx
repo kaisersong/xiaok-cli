@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Search, X, Bolt, Pencil, Download, RefreshCw, Clock } from 'lucide-react';
+import { Plus, Search, X, Bolt, Pencil, Download, RefreshCw, Clock, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { api, type ThreadRecord } from '../api';
 
 const log = createLogger('Sidebar');
@@ -27,9 +27,11 @@ type NavSection = 'new' | 'scheduled';
 
 interface SidebarProps {
   onOpenSettings?: () => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
-export function Sidebar({ onOpenSettings }: SidebarProps) {
+export function Sidebar({ onOpenSettings, collapsed, onToggleCollapse }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [threads, setThreads] = useState<ThreadRecord[]>([]);
@@ -172,33 +174,52 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
   const isOnScheduled = activeNav === 'scheduled';
 
   return (
-    <aside className="flex w-60 flex-col border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)]">
+    <aside
+      className="flex flex-col border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)] transition-[width] duration-200"
+      style={{ width: collapsed ? 52 : 240 }}
+    >
+      {/* Collapse toggle at top */}
+      <div className="flex items-center justify-end px-2 py-2" style={{ minHeight: 40 }}>
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className="flex h-7 w-7 items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
+          title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+        >
+          {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
+      </div>
+
       {/* Main navigation */}
-      <div className="px-2 py-3">
+      <div className="px-2">
         <div className="flex flex-col gap-0.5">
           <button
             type="button"
             onClick={() => navigate('/')}
-            className={`flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-colors ${
+            className={`flex h-[36px] items-center gap-2.5 rounded-lg text-sm transition-colors ${
               activeNav === 'new'
                 ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]'
                 : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]'
             }`}
+            style={{ padding: collapsed ? '0 0 0 14px' : '0 12px' }}
+            title="New task"
           >
-            <Plus size={16} />
-            <span>New task</span>
+            <Plus size={16} className="shrink-0" />
+            {!collapsed && <span>New task</span>}
           </button>
           <button
             type="button"
             onClick={() => navigate('/scheduled')}
-            className={`flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-colors ${
+            className={`flex h-[36px] items-center gap-2.5 rounded-lg text-sm transition-colors ${
               isOnScheduled
                 ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]'
                 : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]'
             }`}
+            style={{ padding: collapsed ? '0 0 0 14px' : '0 12px' }}
+            title="Scheduled"
           >
-            <Clock size={16} />
-            <span>Scheduled</span>
+            <Clock size={16} className="shrink-0" />
+            {!collapsed && <span>Scheduled</span>}
           </button>
         </div>
       </div>
@@ -234,7 +255,7 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
       )}
 
       {/* Divider before thread list */}
-      {(!isOnScheduled) && (
+      {!collapsed && !isOnScheduled && (
         <>
           {/* Search */}
           <div className="px-3 py-2">
@@ -314,12 +335,13 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
       )}
 
       {/* Spacer for scheduled page view */}
-      {isOnScheduled && <div className="flex-1" />}
+      {(isOnScheduled || collapsed) && <div className="flex-1" />}
 
       {/* Footer with settings button */}
       <div className="border-t border-[var(--c-border)] p-3">
         <div className="flex items-center justify-between">
-          <div className="text-xs text-[var(--c-text-secondary)]">local@xiaok</div>
+          {!collapsed && <div className="text-xs text-[var(--c-text-secondary)]">local@xiaok</div>}
+          {collapsed && <div />}
           <div className="flex items-center gap-1">
             {updateStatus?.downloaded && (
               <button

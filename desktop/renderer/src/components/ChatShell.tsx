@@ -6,12 +6,14 @@ import { ChatView, type ChatMessage, type ToolStep } from './ChatView';
 import { CanvasPanel } from './CanvasPanel';
 import type { ThreadRecord } from '../api/types';
 import type { DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
+import { useSidebarCollapse } from '../layouts/AppLayout';
 
 const log = createLogger('ChatShell');
 
 export function ChatShell() {
   const { taskId } = useParams<{ taskId: string }>();
   const location = useLocation();
+  const sidebarCollapse = useSidebarCollapse();
   const [thread, setThread] = useState<ThreadRecord | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streamingText, setStreamingText] = useState('');
@@ -20,6 +22,7 @@ export function ChatShell() {
   const [result, setResult] = useState<TaskResult | null>(null);
   const [prompt, setPrompt] = useState('');
   const [canvasOpen, setCanvasOpen] = useState(false);
+  const [canvasExpanded, setCanvasExpanded] = useState(false);
   const [canvasPreviewFile, setCanvasPreviewFile] = useState<string | undefined>();
   const [canvasPreviewContent, setCanvasPreviewContent] = useState<string | undefined>();
   const unsubRef = useRef<(() => void) | null>(null);
@@ -71,6 +74,10 @@ export function ChatShell() {
       }
       case 'result': {
         const r = (event as { type: 'result'; result: TaskResult }).result;
+        // Check for generated files from canvas_file_changed events
+        const hasGeneratedFiles = allEventsRef.current.some(
+          e => e.type === 'canvas_file_changed' && (e as { change: string }).change === 'add'
+        );
         if (r.artifacts && r.artifacts.length > 0) {
           if (streamRef.current.trim()) {
             setMessages(prev => [...prev, {
@@ -107,6 +114,10 @@ export function ChatShell() {
           ));
           toolStepsMsgIdRef.current = null;
           toolStepsActiveRef.current = false;
+        }
+        // Auto-open canvas when generated files exist
+        if (hasGeneratedFiles && !canvasOpen) {
+          setCanvasOpen(true);
         }
         break;
       }
@@ -458,9 +469,15 @@ export function ChatShell() {
       {canvasOpen && (
         <CanvasPanel
           events={allEventsRef.current}
-          onClose={() => setCanvasOpen(false)}
+          onClose={() => { setCanvasOpen(false); setCanvasExpanded(false); }}
           initialPreviewFile={canvasPreviewFile}
           initialPreviewContent={canvasPreviewContent}
+          expanded={canvasExpanded}
+          onToggleExpand={() => {
+            const next = !canvasExpanded;
+            setCanvasExpanded(next);
+            sidebarCollapse.setCollapsed(next);
+          }}
         />
       )}
     </div>
