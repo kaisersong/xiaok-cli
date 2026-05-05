@@ -74,7 +74,6 @@ export function ChatShell() {
       }
       case 'result': {
         const r = (event as { type: 'result'; result: TaskResult }).result;
-        // Check for generated files from Write tool calls
         const hasGeneratedFiles = allEventsRef.current.some(
           e => e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
             && (e as { input: Record<string, unknown> }).input?.file_path
@@ -95,6 +94,8 @@ export function ChatShell() {
             api.updateThreadTitle(taskId, r.summary.slice(0, 40)).catch(() => {});
           }
         } else {
+          // Desktop tasks: artifacts is [], but still set result for generatedFiles extraction
+          setResult(r);
           const finalText = streamRef.current || r.summary;
           if (finalText.trim()) {
             setMessages(prev => [...prev, {
@@ -462,7 +463,8 @@ export function ChatShell() {
       if (msg.role === 'assistant' && msg.content) textsToScan.push(msg.content);
     }
     for (const text of textsToScan) {
-      const fileExtMatch = /([^\s<`"']+?\.(?:md|html|txt|csv|json|pdf|png|jpg|svg|pptx|docx|xlsx))\b/g;
+      // Match file paths that may be inside markdown code blocks (backticks)
+      const fileExtMatch = /`?([^\s<`"'|]+?\.(?:md|html|txt|csv|json|pdf|png|jpg|svg|pptx|docx|xlsx))`?\b/g;
       let m;
       while ((m = fileExtMatch.exec(text)) !== null) {
         const candidate = m[1];

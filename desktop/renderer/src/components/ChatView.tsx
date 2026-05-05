@@ -96,11 +96,17 @@ export function ChatView({
                   </div>
                 ) : msg.role === 'progress' ? (
                   <div className="flex items-center gap-2 py-1 text-sm text-[var(--c-text-secondary)] select-text">
-                    <div className="relative size-3 shrink-0">
-                      <svg className="size-3 animate-spin" viewBox="0 0 24 24">
-                        <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" style={{ color: 'var(--c-accent)' }} />
-                        <path className="opacity-80" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="M4 12a8 8 0 0 1 8-8" style={{ color: 'var(--c-accent)' }} />
-                      </svg>
+                    <div className="relative size-3 shrink-0" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {msg.stage === 'completed' ? (
+                        <span style={{ color: '#22c55e', fontSize: 13 }}>✓</span>
+                      ) : msg.stage === 'failed' ? (
+                        <span style={{ color: '#ef4444', fontSize: 13 }}>✕</span>
+                      ) : (
+                        <svg className="size-3 animate-spin" viewBox="0 0 24 24">
+                          <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" style={{ color: 'var(--c-accent)' }} />
+                          <path className="opacity-80" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="M4 12a8 8 0 0 1 8-8" style={{ color: 'var(--c-accent)' }} />
+                        </svg>
+                      )}
                     </div>
                     <span>{msg.content}</span>
                   </div>
@@ -141,7 +147,7 @@ export function ChatView({
             )}
 
             {/* Result card + generated files */}
-            {(result && status === 'completed') || generatedFiles.length > 0 ? (
+            {(result && (status === 'completed' || status === 'idle')) || generatedFiles.length > 0 ? (
               <div className="rounded-xl border border-[var(--c-accent)]/30 bg-[var(--c-bg-card)] p-4">
                 {result && (
                   <>
@@ -167,13 +173,14 @@ export function ChatView({
                 {generatedFiles.length > 0 && (
                   <div className={result ? 'mt-3' : ''}>
                     {!result && <h3 className="mb-2 text-sm font-medium text-[var(--c-text-primary)]">生成物</h3>}
-                    <div className="space-y-1">
+                    <div className="space-y-1" data-testid="generated-files-list">
                       {generatedFiles.map(f => (
                         <button
                           key={f.filePath}
                           type="button"
                           onClick={() => onArtifactClick?.({ artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath })}
                           className="flex items-center gap-1.5 text-sm text-[var(--c-accent)] hover:underline cursor-pointer"
+                          data-testid={`generated-file-${f.name}`}
                         >
                           <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="currentColor"><path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zm5 0v4h4M7 9h4M7 12h4M5 9h1M5 12h1"/></svg>
                           {f.name}

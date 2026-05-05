@@ -65,4 +65,5 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   },
   getSkillDebugConfig: () => ipcRenderer.invoke('desktop:getSkillDebugConfig'),
   saveSkillDebugConfig: (input) => ipcRenderer.invoke('desktop:saveSkillDebugConfig', input),
+  readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }),
 });
