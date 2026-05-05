@@ -211,47 +211,29 @@ export function ChatShell() {
     if (snapshot?.events && snapshot.events.length > 0) {
       let accumulated = '';
       let lastProgress: ChatMessage | null = null;
-      let toolStepsMsgId: string | null = null;
+      // Note: During replay we do NOT create tool_steps groups.
+      // Tool_steps is only for live streaming. Replay preserves original progress messages.
       for (const ev of snapshot.events) {
         if (ev.type === 'canvas_file_changed') {
           allEventsRef.current.push(ev);
           continue;
         }
         if (ev.type === 'canvas_tool_call') {
-          const call = ev as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string };
           allEventsRef.current.push(ev);
-          if (!toolStepsMsgId) {
-            toolStepsMsgId = `msg-tool-steps-replay-${call.eventId}`;
-            msgs.push({ id: toolStepsMsgId, role: 'tool_steps', content: '', steps: [], stepsLive: false });
-          }
-          const msg = msgs.find(m => m.id === toolStepsMsgId)!;
-          msg.steps = [...(msg.steps ?? []), { toolUseId: call.toolUseId, toolName: call.toolName, input: call.input, status: 'done' as const }];
           continue;
         }
         if (ev.type === 'canvas_tool_result') {
-          const res = ev as { type: 'canvas_tool_result'; toolUseId: string; ok: boolean; response: string };
           allEventsRef.current.push(ev);
-          const msg = msgs.find(m => m.id === toolStepsMsgId);
-          if (msg?.steps) {
-            msg.steps = msg.steps.map(s =>
-              s.toolUseId === res.toolUseId ? { ...s, status: res.ok ? 'done' as const : 'error' as const, response: res.response } : s
-            );
-          }
           continue;
         }
         if (ev.type === 'progress') {
           const prog = (ev as { type: 'progress'; message: string; stage?: string; eventId: string });
-          // Suppress tool progress when tool_steps group is active
-          if ((prog.stage === 'tool' || prog.stage === 'completed' || prog.stage === 'failed') && toolStepsMsgId) {
-            // keep lastProgress but don't overwrite if tool_steps is showing
-          } else {
-            lastProgress = {
-              id: `msg-progress-${prog.eventId}`,
-              role: 'progress',
-              content: prog.message,
-              stage: prog.stage,
-            };
-          }
+          lastProgress = {
+            id: `msg-progress-${prog.eventId}`,
+            role: 'progress',
+            content: prog.message,
+            stage: prog.stage,
+          };
         } else if (ev.type === 'assistant_delta') {
           accumulated += (ev as { delta: string }).delta;
           lastProgress = null;
@@ -266,7 +248,6 @@ export function ChatShell() {
             accumulated = '';
           }
           lastResult = r;
-          toolStepsMsgId = null;
         }
       }
       if (lastProgress) {
