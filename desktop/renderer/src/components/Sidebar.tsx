@@ -175,17 +175,16 @@ export function SidebarComponent({ onOpenSettings, onToggleCollapse }: SidebarPr
   return (
     <aside
       className="relative flex w-60 flex-col border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)]"
-      style={{ paddingTop: 28 }}
     >
-      {/* Collapse button - top right, next to traffic lights area */}
-      <div className="absolute top-3 right-2">
+      {/* Collapse button - aligned with traffic lights */}
+      <div className="absolute top-[5px] right-2">
         <button
           type="button"
           onClick={onToggleCollapse}
-          className="flex h-7 w-7 items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
+          className="flex h-[18px] w-[18px] items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
           title="收起侧边栏"
         >
-          <SidebarClose size={16} />
+          <SidebarClose size={14} />
         </button>
       </div>
 

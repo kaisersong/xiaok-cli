@@ -766,6 +766,10 @@ function createDesktopModelRunner(): TaskRunner {
         } else {
           emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id, error: result.slice(0, 10000) });
         }
+        // Emit file_changed for Write tool so canvas can track generated files
+        if (ok && toolCall.name === 'Write' && toolCall.input?.file_path) {
+          emitRuntimeEvent({ type: 'file_changed', sessionId, filePath: toolCall.input.file_path as string, event: 'add' });
+        }
         toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: result.slice(0, 50000), is_error: !ok });
       }
       messages.push({ role: 'user', content: toolResults });
