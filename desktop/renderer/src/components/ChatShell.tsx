@@ -417,6 +417,14 @@ export function ChatShell() {
     return <div className="flex h-full items-center justify-center text-[var(--c-text-secondary)]">Loading...</div>;
   }
 
+  const generatedFiles = allEventsRef.current
+    .filter((e): e is Extract<DesktopTaskEvent, { type: 'canvas_file_changed' }> => e.type === 'canvas_file_changed' && (e as { change: string }).change === 'add')
+    .map(e => {
+      const ev = e as { filePath: string };
+      const parts = ev.filePath.split('/');
+      return { filePath: ev.filePath, name: parts[parts.length - 1] };
+    });
+
   return (
     <div className="flex h-full overflow-hidden">
       <div className="flex flex-1 min-w-0">
@@ -427,6 +435,7 @@ export function ChatShell() {
           status={status}
           currentQuestion={currentQuestion}
           result={result}
+          generatedFiles={generatedFiles}
           prompt={prompt}
           onPromptChange={setPrompt}
           onSubmit={handleSubmit}

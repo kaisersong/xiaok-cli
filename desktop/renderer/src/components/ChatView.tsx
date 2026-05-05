@@ -24,6 +24,11 @@ export interface ChatMessage {
   stepsLive?: boolean;
 }
 
+interface GeneratedFile {
+  filePath: string;
+  name: string;
+}
+
 interface ChatViewProps {
   thread: ThreadRecord;
   messages: ChatMessage[];
@@ -31,6 +36,7 @@ interface ChatViewProps {
   status: 'idle' | 'running' | 'waiting_user' | 'completed' | 'failed';
   currentQuestion: NeedsUserQuestion | null;
   result: TaskResult | null;
+  generatedFiles: GeneratedFile[];
   prompt: string;
   onPromptChange: (value: string) => void;
   onSubmit: (text: string, files?: Array<{ filePath: string; name: string }>) => void;
@@ -43,6 +49,7 @@ interface ChatViewProps {
 
 export function ChatView({
   thread, messages, streamingText, status, currentQuestion, result,
+  generatedFiles,
   prompt, onPromptChange, onSubmit, onAnswer, onCancel,
   canvasOpen, onToggleCanvas, onArtifactClick,
 }: ChatViewProps) {
@@ -133,12 +140,16 @@ export function ChatView({
               </div>
             )}
 
-            {/* Result card */}
-            {result && status === 'completed' && (
+            {/* Result card + generated files */}
+            {(result && status === 'completed') || generatedFiles.length > 0 ? (
               <div className="rounded-xl border border-[var(--c-accent)]/30 bg-[var(--c-bg-card)] p-4">
-                <h3 className="mb-2 text-sm font-medium text-[var(--c-text-primary)]">Result</h3>
-                <p className="text-sm text-[var(--c-text-secondary)]">{result.summary}</p>
-                {result.artifacts && result.artifacts.length > 0 && (
+                {result && (
+                  <>
+                    <h3 className="mb-2 text-sm font-medium text-[var(--c-text-primary)]">Result</h3>
+                    <p className="text-sm text-[var(--c-text-secondary)]">{result.summary}</p>
+                  </>
+                )}
+                {result?.artifacts && result.artifacts.length > 0 && (
                   <div className="mt-3 space-y-1">
                     {result.artifacts.map(a => (
                       <button
@@ -153,8 +164,26 @@ export function ChatView({
                     ))}
                   </div>
                 )}
+                {generatedFiles.length > 0 && (
+                  <div className={result ? 'mt-3' : ''}>
+                    {!result && <h3 className="mb-2 text-sm font-medium text-[var(--c-text-primary)]">生成物</h3>}
+                    <div className="space-y-1">
+                      {generatedFiles.map(f => (
+                        <button
+                          key={f.filePath}
+                          type="button"
+                          onClick={() => onArtifactClick?.({ artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath })}
+                          className="flex items-center gap-1.5 text-sm text-[var(--c-accent)] hover:underline cursor-pointer"
+                        >
+                          <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="currentColor"><path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zm5 0v4h4M7 9h4M7 12h4M5 9h1M5 12h1"/></svg>
+                          {f.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
+            ) : null}
 
             {/* Thinking indicator */}
             {status === 'running' && !streamingText && (
