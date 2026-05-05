@@ -13,22 +13,25 @@
     "icon": "build/icon.icns",
     "category": "public.app-category.productivity",
     "publish": {
-      "provider": "generic",
-      "url": "https://github.com/songkai-/xiaok-cli/releases/download/latest/"
+      "provider": "github",
+      "owner": "kaisersong",
+      "repo": "xiaok-cli"
     }
   },
   "win": {
     "target": ["nsis", "portable"],
     "publish": {
-      "provider": "generic",
-      "url": "https://github.com/songkai-/xiaok-cli/releases/download/latest/"
+      "provider": "github",
+      "owner": "kaisersong",
+      "repo": "xiaok-cli"
     }
   },
   "linux": {
     "target": ["AppImage", "deb"],
     "publish": {
-      "provider": "generic",
-      "url": "https://github.com/songkai-/xiaok-cli/releases/download/latest/"
+      "provider": "github",
+      "owner": "kaisersong",
+      "repo": "xiaok-cli"
     }
   }
 }

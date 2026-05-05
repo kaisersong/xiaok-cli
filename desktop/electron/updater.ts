@@ -27,14 +27,13 @@ export function setupAutoUpdater(window: BrowserWindow): void {
   mainWindow = window;
 
   // Configure autoUpdater
-  autoUpdater.autoDownload = true; // Auto download when update available
-  autoUpdater.autoInstallOnAppQuit = true; // Auto install on quit
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
 
   // Check for updates immediately on startup (production only)
   if (process.env.NODE_ENV !== 'development') {
-    autoUpdater.checkForUpdates().catch(() => {
-      // Silently fail - no internet or no updates
-    });
+    autoUpdater.checkForUpdatesAndNotify().catch(() => {});
   }
 
   // Also check periodically (every 4 hours)

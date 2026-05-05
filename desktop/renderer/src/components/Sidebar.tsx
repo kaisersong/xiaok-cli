@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Search, X, Bolt, Pencil, Download, RefreshCw, Clock, SidebarClose } from 'lucide-react';
+import { Plus, Search, X, Bolt, Pencil, Download, RefreshCw, Clock } from 'lucide-react';
 import { api, type ThreadRecord } from '../api';
 
 const log = createLogger('Sidebar');
@@ -27,10 +27,9 @@ type NavSection = 'new' | 'scheduled';
 
 interface SidebarProps {
   onOpenSettings?: () => void;
-  onToggleCollapse?: () => void;
 }
 
-export function SidebarComponent({ onOpenSettings, onToggleCollapse }: SidebarProps) {
+export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [threads, setThreads] = useState<ThreadRecord[]>([]);
@@ -176,18 +175,6 @@ export function SidebarComponent({ onOpenSettings, onToggleCollapse }: SidebarPr
     <aside
       className="relative flex w-60 flex-col border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)]"
     >
-      {/* Collapse button - aligned with traffic lights */}
-      <div className="absolute top-[5px] right-2">
-        <button
-          type="button"
-          onClick={onToggleCollapse}
-          className="flex h-[18px] w-[18px] items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
-          title="收起侧边栏"
-        >
-          <SidebarClose size={14} />
-        </button>
-      </div>
-
       {/* Main navigation */}
       <div className="px-2">
         <div className="flex flex-col gap-0.5">

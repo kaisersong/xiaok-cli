@@ -74,9 +74,10 @@ export function ChatShell() {
       }
       case 'result': {
         const r = (event as { type: 'result'; result: TaskResult }).result;
-        // Check for generated files from canvas_file_changed events
+        // Check for generated files from Write tool calls
         const hasGeneratedFiles = allEventsRef.current.some(
-          e => e.type === 'canvas_file_changed' && (e as { change: string }).change === 'add'
+          e => e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
+            && (e as { input: Record<string, unknown> }).input?.file_path
         );
         if (r.artifacts && r.artifacts.length > 0) {
           if (streamRef.current.trim()) {
@@ -115,9 +116,26 @@ export function ChatShell() {
           toolStepsMsgIdRef.current = null;
           toolStepsActiveRef.current = false;
         }
-        // Auto-open canvas when generated files exist
+        // Auto-open canvas when generated files exist, preview first file
         if (hasGeneratedFiles && !canvasOpen) {
-          setCanvasOpen(true);
+          const writeCall = allEventsRef.current.find(
+            e => e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
+              && (e as { input: Record<string, unknown> }).input?.file_path
+          );
+          if (writeCall) {
+            const fp = (writeCall as { input: Record<string, unknown> }).input.file_path as string;
+            setCanvasPreviewFile(fp);
+            // Try to read file content for preview
+            api.readFileContent(fp).then(r => {
+              setCanvasPreviewContent(r.content);
+              setCanvasOpen(true);
+            }).catch(() => {
+              setCanvasPreviewContent('');
+              setCanvasOpen(true);
+            });
+          } else {
+            setCanvasOpen(true);
+          }
         }
         break;
       }
@@ -430,13 +448,17 @@ export function ChatShell() {
     return <div className="flex h-full items-center justify-center text-[var(--c-text-secondary)]">Loading...</div>;
   }
 
+  // Extract generated files from Write tool calls (most reliable source)
   const generatedFiles = allEventsRef.current
-    .filter((e): e is Extract<DesktopTaskEvent, { type: 'canvas_file_changed' }> => e.type === 'canvas_file_changed' && (e as { change: string }).change === 'add')
+    .filter(e => e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write')
     .map(e => {
-      const ev = e as { filePath: string };
-      const parts = ev.filePath.split('/');
-      return { filePath: ev.filePath, name: parts[parts.length - 1] };
-    });
+      const call = e as { input: Record<string, unknown> };
+      const filePath = call.input?.file_path as string | undefined;
+      if (!filePath) return null;
+      const parts = filePath.split('/');
+      return { filePath, name: parts[parts.length - 1] };
+    })
+    .filter((f): f is { filePath: string; name: string } => f !== null);
 
   return (
     <div className="flex h-full overflow-hidden">

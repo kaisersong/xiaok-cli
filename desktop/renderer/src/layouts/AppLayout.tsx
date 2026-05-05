@@ -1,6 +1,6 @@
 import { useState, createContext, useContext } from 'react';
 import { Outlet } from 'react-router-dom';
-import { Sidebar } from 'lucide-react';
+import { Sidebar, PanelLeftClose } from 'lucide-react';
 import { SidebarComponent } from '../components/Sidebar';
 import { DesktopSettings } from '../components/DesktopSettings';
 
@@ -30,27 +30,38 @@ export function AppLayout() {
   return (
     <SidebarContext.Provider value={{ collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed }}>
       <div className="flex h-screen flex-col overflow-hidden bg-[var(--c-bg-page)]">
-        {/* Draggable title bar area */}
+        {/* Draggable title bar - spans full width, traffic lights are at left */}
         <div
-          style={{ height: 28, WebkitAppRegion: 'drag', flexShrink: 0 } as React.CSSProperties}
-          className="relative"
+          style={{ height: 36, WebkitAppRegion: 'drag', flexShrink: 0, position: 'relative' } as React.CSSProperties}
         >
-          {/* Expand sidebar button (only when sidebar hidden) */}
+          {/* Collapse button (when sidebar visible) - inside sidebar column area */}
+          {!sidebarCollapsed && (
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(true)}
+              style={{ WebkitAppRegion: 'no-drag', position: 'absolute', top: 8, left: 212 } as React.CSSProperties}
+              className="flex h-[20px] w-[20px] items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors z-50"
+              title="收起侧边栏"
+            >
+              <PanelLeftClose size={15} />
+            </button>
+          )}
+          {/* Expand button (when sidebar hidden) */}
           {sidebarCollapsed && (
             <button
               type="button"
               onClick={() => setSidebarCollapsed(false)}
-              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              className="absolute top-[5px] left-[84px] flex h-[18px] w-[18px] items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors z-50"
+              style={{ WebkitAppRegion: 'no-drag', position: 'absolute', top: 8, left: 84 } as React.CSSProperties}
+              className="flex h-[20px] w-[20px] items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors z-50"
               title="展开侧边栏"
             >
-              <Sidebar size={14} />
+              <Sidebar size={15} />
             </button>
           )}
         </div>
         <div className="flex min-h-0 flex-1">
           {!sidebarCollapsed && (
-            <SidebarComponent onOpenSettings={() => setSettingsOpen(true)} onToggleCollapse={() => setSidebarCollapsed(true)} />
+            <SidebarComponent onOpenSettings={() => setSettingsOpen(true)} />
           )}
           <main className="relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--c-bg-page)]" style={{ scrollbarGutter: 'stable' }}>
             {/* Fade at top to soften edge */}
