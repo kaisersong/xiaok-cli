@@ -10,9 +10,15 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     defaultModel: {
       modelId: 'openai-default',
       model: 'gpt-4o',
-      label: 'OpenAI Default',
+      label: 'GPT-4o',
       capabilities: ['tools'],
     },
+    availableModels: [
+      { modelId: 'openai-gpt-4o', model: 'gpt-4o', label: 'GPT-4o', capabilities: ['tools'] },
+      { modelId: 'openai-gpt-4.1', model: 'gpt-4.1', label: 'GPT-4.1', capabilities: ['tools'] },
+      { modelId: 'openai-o4-mini', model: 'o4-mini', label: 'o4-mini', capabilities: ['tools', 'thinking'] },
+      { modelId: 'openai-o3', model: 'o3', label: 'o3', capabilities: ['tools', 'thinking'] },
+    ],
   },
   anthropic: {
     id: 'anthropic',
@@ -23,9 +29,14 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     defaultModel: {
       modelId: 'anthropic-default',
       model: 'claude-opus-4-6',
-      label: 'Anthropic Default',
+      label: 'Claude Opus 4.6',
       capabilities: ['tools'],
     },
+    availableModels: [
+      { modelId: 'anthropic-claude-opus-4-6', model: 'claude-opus-4-6', label: 'Claude Opus 4.6', capabilities: ['tools'] },
+      { modelId: 'anthropic-claude-sonnet-4-6', model: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', capabilities: ['tools'] },
+      { modelId: 'anthropic-claude-haiku-4-6', model: 'claude-haiku-4-6', label: 'Claude Haiku 4.6', capabilities: ['tools'] },
+    ],
   },
   kimi: {
     id: 'kimi',
@@ -49,9 +60,13 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     defaultModel: {
       modelId: 'deepseek-default',
       model: 'deepseek-v4-pro',
-      label: 'DeepSeek Default',
+      label: 'DeepSeek V4 Pro',
       capabilities: ['tools'],
     },
+    availableModels: [
+      { modelId: 'deepseek-v4-pro', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', capabilities: ['tools'] },
+      { modelId: 'deepseek-v4-flash', model: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', capabilities: ['tools'] },
+    ],
   },
   glm: {
     id: 'glm',

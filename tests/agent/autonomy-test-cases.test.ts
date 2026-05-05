@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
 
 export interface AutonomyTestCase {
   id: string;
-  category: 'autonomy' | 'clarification' | 'investigation' | 'action';
+  category: 'autonomy' | 'clarification' | 'investigation' | 'action' | 'decomposition' | 'verification' | 'parallel';
   name: string;
   description: string;
   userInput: string;
@@ -527,6 +527,140 @@ export const config = {
       autonomyScore: 4,
       efficiencyScore: 3,
       correctnessScore: 4,
+    },
+  },
+
+  // ---------------------------------------------------------------------------
+  // Category 7: Decomposition - complex tasks should be broken down
+  // ---------------------------------------------------------------------------
+  {
+    id: 'DEC-001',
+    category: 'decomposition',
+    name: 'Large file editing should preview first',
+    description: 'When editing a file >100 lines, agent should preview structure before modifying',
+    userInput: '给 src/services/order.ts 里的 calculateOrderPrice 函数添加错误处理',
+    mockContext: {
+      files: {
+        'src/services/order.ts': `
+export interface Order { items: Item[]; discount?: number; }
+
+export function calculateOrderPrice(order: Order): number {
+  return order.items.reduce((sum, item) => sum + item.price * item.quantity, 0) - (order.discount ?? 0);
+}
+
+export function processOrder(order: Order): OrderResult {
+  const total = calculateOrderPrice(order);
+  return { total, itemCount: order.items.length };
+}
+
+export function validateOrder(order: Order): boolean {
+  return order.items.length > 0 && order.items.every(item => item.price >= 0);
+}
+
+export function formatOrderSummary(order: Order): string {
+  const total = calculateOrderPrice(order);
+  return \`Order: \${order.items.length} items, total: \${total}\`;
+}
+`,
+      },
+    },
+    expectedBehavior: {
+      shouldDo: [
+        'Read the file to understand structure',
+        'Locate the specific function',
+        'Understand surrounding context',
+        'Edit only the targeted function',
+      ],
+      shouldNotDo: [
+        'Edit without reading first',
+        'Modify unrelated code',
+      ],
+      maxAskUserQuestionCalls: 0,
+      requiredTools: ['read', 'edit'],
+    },
+    evaluationCriteria: {
+      autonomyScore: 5,
+      efficiencyScore: 4,
+      correctnessScore: 5,
+    },
+  },
+
+  // ---------------------------------------------------------------------------
+  // Category 8: Verification - success claims require evidence
+  // ---------------------------------------------------------------------------
+  {
+    id: 'VER-001',
+    category: 'verification',
+    name: 'Test success requires running tests',
+    description: 'Agent should run tests and check output before claiming they pass',
+    userInput: '修复 calculator.ts 的 bug 并确认测试通过',
+    mockContext: {
+      files: {
+        'src/calculator.ts': `
+export function add(a: number, b: number): number {
+  return a - b; // Bug: should be a + b
+}
+`,
+        'src/calculator.test.ts': `
+import { add } from './calculator';
+test('add', () => { expect(add(1, 2)).toBe(3); });
+`,
+      },
+    },
+    expectedBehavior: {
+      shouldDo: [
+        'Read the bug file',
+        'Fix the bug',
+        'Run tests',
+        'Check test output for pass/fail',
+        'Report actual test results',
+      ],
+      shouldNotDo: [
+        'Claim "tests pass" without running them',
+        'Claim success based on exit code only',
+      ],
+      maxAskUserQuestionCalls: 0,
+      requiredTools: ['read', 'edit', 'bash'],
+    },
+    evaluationCriteria: {
+      autonomyScore: 5,
+      efficiencyScore: 4,
+      correctnessScore: 5,
+    },
+  },
+
+  // ---------------------------------------------------------------------------
+  // Category 9: Parallel - independent operations should be batched
+  // ---------------------------------------------------------------------------
+  {
+    id: 'PAR-001',
+    category: 'parallel',
+    name: 'Independent reads should be parallel',
+    description: 'Agent should read multiple independent files in one turn',
+    userInput: '查看这三个配置文件的内容：config.ts, env.ts, constants.ts',
+    mockContext: {
+      files: {
+        'src/config.ts': `export const config = { port: 3000, host: 'localhost' };`,
+        'src/env.ts': `export const env = { NODE_ENV: 'development' };`,
+        'src/constants.ts': `export const constants = { MAX_ITEMS: 100, TIMEOUT: 5000 };`,
+      },
+    },
+    expectedBehavior: {
+      shouldDo: [
+        'Call Read for all three files in one response',
+        'Report findings after all reads complete',
+      ],
+      shouldNotDo: [
+        'Read one file, wait, read next (sequential when parallel possible)',
+        'Ask which file to read first',
+      ],
+      maxAskUserQuestionCalls: 0,
+      requiredTools: ['read'],
+    },
+    evaluationCriteria: {
+      autonomyScore: 5,
+      efficiencyScore: 5,
+      correctnessScore: 5,
     },
   },
 ];

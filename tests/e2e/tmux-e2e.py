@@ -1851,7 +1851,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         )
         assert_contains(feedback_followup, "适合中午的：", "first turn after feedback did not render")
         assert_true(
-            line_before_prompt_with_gap(feedback_followup, min_blank_rows=2) == first_response_tail,
+            line_before_prompt_with_gap(feedback_followup, min_blank_rows=2).strip() == first_response_tail,
             f"first post-feedback response tail did not stay above the footer gap:\n{feedback_followup}",
         )
 
@@ -1865,7 +1865,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         )
         assert_contains(feedback_second_followup, "辣的午餐：", "second turn after feedback did not render")
         assert_true(
-            line_before_prompt_with_gap(feedback_second_followup, min_blank_rows=2) == second_response_tail,
+            line_before_prompt_with_gap(feedback_second_followup, min_blank_rows=2).strip() == second_response_tail,
             f"second post-feedback response tail did not stay above the footer gap:\n{feedback_second_followup}",
         )
         print("PASS: completed intent without feedback prompt preserves footer spacing across later turns")

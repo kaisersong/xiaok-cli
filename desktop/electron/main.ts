@@ -6,6 +6,9 @@ import { registerDesktopIpc } from './ipc.js';
 import { buildBrowserWindowOptions, isAllowedNavigationUrl } from './security.js';
 import { attachMacCloseToMinimize, attachWindowRepaintHandlers, restoreExistingWindow } from './window-lifecycle.js';
 import { setupMenuBar, destroyMenuBar } from './menubar.js';
+import { setupAutoUpdater, checkForUpdates, quitAndInstall, getUpdateStatus } from './updater.js';
+import { JsonReminderStore } from './reminder-store.js';
+import { ReminderScheduler } from './reminder-scheduler.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -21,8 +24,41 @@ async function createWindow(): Promise<BrowserWindow> {
   });
   registerDesktopIpc(ipcMain, window, services);
 
+  // Register update IPC handlers
+  ipcMain.handle('desktop:getUpdateStatus', () => getUpdateStatus());
+  ipcMain.handle('desktop:checkForUpdates', async () => { await checkForUpdates(); });
+  ipcMain.handle('desktop:quitAndInstall', () => quitAndInstall());
+
+  // Initialize reminder scheduler
+  const reminderDataDir = join(app.getPath('home'), '.xiaok', 'desktop');
+  const reminderStore = new JsonReminderStore(reminderDataDir);
+  const reminderScheduler = new ReminderScheduler(reminderStore);
+  reminderScheduler.setMainWindow(window);
+  reminderScheduler.setOnDelivery((event) => {
+    // Broadcast to renderer
+    window.webContents.send('desktop:reminder', event);
+  });
+  reminderScheduler.start();
+
+  // Reminder IPC handlers
+  ipcMain.handle('desktop:createReminder', (_event, input: { content: string; scheduleAt: number; timezone?: string }) => {
+    return reminderScheduler.createReminder(input.content, input.scheduleAt, input.timezone);
+  });
+  ipcMain.handle('desktop:listReminders', () => reminderScheduler.listReminders());
+  ipcMain.handle('desktop:cancelReminder', (_event, id: string) => reminderScheduler.cancelReminder(id));
+  ipcMain.handle('desktop:getReminderStatus', () => reminderScheduler.getStatus());
+
+  // Skill debug config IPC handlers
+  ipcMain.handle('desktop:getSkillDebugConfig', () => services.getSkillDebugConfig());
+  ipcMain.handle('desktop:saveSkillDebugConfig', (_event, input: { enabled: boolean }) => services.saveSkillDebugConfig(input));
+
   // Setup menubar with K icon
   setupMenuBar(window);
+
+  // Setup auto-updater (production only)
+  if (process.env.NODE_ENV !== 'development' && !process.env.XIAOK_DESKTOP_DEV_SERVER) {
+    setupAutoUpdater(window);
+  }
 
   window.on('closed', () => {
     destroyMenuBar();

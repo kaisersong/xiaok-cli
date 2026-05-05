@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, copyFileSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { deflateSync } from 'node:zlib';
@@ -12,15 +12,24 @@ const outArgIndex = args.indexOf('--out');
 const outputRoot = resolve(repoRoot, outArgIndex >= 0 ? args[outArgIndex + 1] ?? '' : 'desktop/build');
 const skipIcns = args.includes('--skip-icns');
 
-const logoPath = join(repoRoot, 'data', 'logo.txt');
-const logo = (await readFile(logoPath, 'utf8')).replace(/\s+$/u, '');
+const srcPngPath = join(repoRoot, 'data', 'xiaok.png');
 const iconsetPath = join(outputRoot, 'icon.iconset');
 const pngPath = join(outputRoot, 'icon.png');
 const icnsPath = join(outputRoot, 'icon.icns');
 
+// Use PNG source if available, fall back to text logo
+const usePng = existsSync(srcPngPath);
+
 await rm(iconsetPath, { recursive: true, force: true });
 await mkdir(iconsetPath, { recursive: true });
-await writeFile(join(outputRoot, 'icon-source.txt'), `${logo}\n`, 'utf8');
+
+if (usePng) {
+  await writeFile(join(outputRoot, 'icon-source.txt'), 'xiaok.png\n', 'utf8');
+} else {
+  const logoPath = join(repoRoot, 'data', 'logo.txt');
+  const logo = (await readFile(logoPath, 'utf8')).replace(/\s+$/u, '');
+  await writeFile(join(outputRoot, 'icon-source.txt'), logo + '\n', 'utf8');
+}
 
 const iconSizes = [
   ['icon_16x16.png', 16],
@@ -35,11 +44,28 @@ const iconSizes = [
   ['icon_512x512@2x.png', 1024],
 ];
 
-for (const [name, size] of iconSizes) {
-  const png = renderLogoPng(size, logo);
-  await writeFile(join(iconsetPath, name), png);
-  if (size === 1024) {
-    await writeFile(pngPath, png);
+if (usePng) {
+  // Resize PNG source for each icon size using sips
+  for (const [name, size] of iconSizes) {
+    const outPath = join(iconsetPath, name);
+    const result = spawnSync('sips', ['-z', String(size), String(size), srcPngPath, '--out', outPath], { encoding: 'utf8' });
+    if (result.status !== 0) {
+      console.error('sips failed:', result.stderr);
+    }
+    if (size === 1024) {
+      const { copyFileSync } = await import('node:fs');
+      copyFileSync(outPath, pngPath);
+    }
+  }
+} else {
+  const logoPath = join(repoRoot, 'data', 'logo.txt');
+  const logo = (await readFile(logoPath, 'utf8')).replace(/\s+$/u, '');
+  for (const [name, size] of iconSizes) {
+    const png = renderLogoPng(size, logo);
+    await writeFile(join(iconsetPath, name), png);
+    if (size === 1024) {
+      await writeFile(pngPath, png);
+    }
   }
 }
 

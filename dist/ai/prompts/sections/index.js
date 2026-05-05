@@ -6,4 +6,7 @@ export { getActionsSection } from './actions.js';
 export { getUsingToolsSection } from './using-tools.js';
 export { getToneAndStyleSection } from './tone-and-style.js';
 export { getOutputEfficiencySection } from './output-efficiency.js';
+export { getDecompositionSection } from './decomposition.js';
+export { getVerificationSection } from './verification.js';
+export { getParallelExecutionSection } from './parallel-execution.js';
 export { getSessionGuidanceSection } from './session-guidance.js';

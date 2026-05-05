@@ -20,6 +20,7 @@ export const DEFAULT_CONFIG = {
         },
     },
     defaultMode: 'interactive',
+    skillDebug: false,
     channels: {},
 };
 /** 校验 legacy defaultModel 是否合法，防止脏数据写入 */

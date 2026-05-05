@@ -17,7 +17,11 @@ interface ModelSelectorOptions {
 }
 
 export function buildModelOptions(config: Config): ModelOption[] {
-  return Object.entries(config.models).map(([id, modelEntry]) => {
+  const seen = new Set<string>();
+  const result: ModelOption[] = [];
+
+  // 1. 已配置的模型（来自 config.models）
+  for (const [id, modelEntry] of Object.entries(config.models)) {
     const providerConfig = config.providers[modelEntry.provider];
     const providerProfile = getProviderProfile(modelEntry.provider);
     const providerLabel = providerProfile?.label ?? modelEntry.provider;
@@ -25,14 +29,37 @@ export function buildModelOptions(config: Config): ModelOption[] {
       ? `Custom (${providerConfig.baseUrl ?? 'no baseUrl'})`
       : providerLabel;
 
-    return {
+    seen.add(id);
+    result.push({
       id,
       provider: modelEntry.provider,
       model: modelEntry.model,
       label: modelEntry.label,
       desc: providerDesc,
-    };
-  });
+    });
+  }
+
+  // 2. Provider 目录中尚未配置的模型变体（对齐 Claude Code getModelOptions 模式）
+  for (const [providerId, providerConfig] of Object.entries(config.providers)) {
+    if (providerConfig.type !== 'first_party') continue;
+    const profile = getProviderProfile(providerId);
+    if (!profile?.availableModels) continue;
+
+    const providerLabel = profile.label;
+    for (const variant of profile.availableModels) {
+      if (seen.has(variant.modelId)) continue;
+      seen.add(variant.modelId);
+      result.push({
+        id: variant.modelId,
+        provider: providerId,
+        model: variant.model,
+        label: variant.label,
+        desc: providerLabel,
+      });
+    }
+  }
+
+  return result;
 }
 
 function formatModelSelectorLines(models: ModelOption[], selectedIdx: number): string[] {

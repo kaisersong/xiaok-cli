@@ -2,9 +2,10 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
 import { useParams, useLocation } from 'react-router-dom';
 import { api } from '../api';
-import { ChatView, type ChatMessage } from './ChatView';
+import { ChatView, type ChatMessage, type ToolStep } from './ChatView';
+import { CanvasPanel } from './CanvasPanel';
 import type { ThreadRecord } from '../api/types';
-import type { NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
+import type { DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
 
 const log = createLogger('ChatShell');
 
@@ -18,20 +19,42 @@ export function ChatShell() {
   const [currentQuestion, setCurrentQuestion] = useState<NeedsUserQuestion | null>(null);
   const [result, setResult] = useState<TaskResult | null>(null);
   const [prompt, setPrompt] = useState('');
+  const [canvasOpen, setCanvasOpen] = useState(false);
+  const [canvasPreviewFile, setCanvasPreviewFile] = useState<string | undefined>();
+  const [canvasPreviewContent, setCanvasPreviewContent] = useState<string | undefined>();
   const unsubRef = useRef<(() => void) | null>(null);
   const streamRef = useRef('');
-  const initRef = useRef(false);
+  const loadingRef = useRef(false);
+  const allEventsRef = useRef<DesktopTaskEvent[]>([]);
+  const toolStepsMsgIdRef = useRef<string | null>(null);
 
   // Read initialPrompt from navigation state (from WelcomePage)
   const state = location.state as { initialPrompt?: string } | undefined;
   const initialPrompt = state?.initialPrompt;
 
-  const handleEvent = useCallback((event: { type: string }) => {
+  const handleEvent = useCallback((rawEvent: { type: string }) => {
+    const event = rawEvent as DesktopTaskEvent;
     console.log('[ChatShell] event:', event.type);
+
+    // Collect all events for Canvas
+    allEventsRef.current = [...allEventsRef.current, event];
 
     switch (event.type) {
       case 'task_started': {
-        // Task started, nothing to do
+        break;
+      }
+      case 'progress': {
+        const prog = (event as { type: 'progress'; message: string; stage?: string; eventId: string });
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.role !== 'progress');
+          return [...filtered, {
+            id: `msg-progress-${prog.eventId}`,
+            role: 'progress',
+            content: prog.message,
+            stage: prog.stage,
+          }];
+        });
+        setStatus('running');
         break;
       }
       case 'assistant_delta': {
@@ -43,11 +66,7 @@ export function ChatShell() {
       }
       case 'result': {
         const r = (event as { type: 'result'; result: TaskResult }).result;
-        // When artifacts.length > 0, it's artifact_recorded (final result)
-        // When artifacts.length === 0, it's receipt_emitted (intermediate completion)
         if (r.artifacts && r.artifacts.length > 0) {
-          // Final result with artifacts
-          // First, finalize streaming text as message
           if (streamRef.current.trim()) {
             setMessages(prev => [...prev, {
               id: `msg-${Date.now()}-assistant`,
@@ -63,7 +82,6 @@ export function ChatShell() {
             api.updateThreadTitle(taskId, r.summary.slice(0, 40)).catch(() => {});
           }
         } else {
-          // Receipt without artifacts - finalize streaming text
           const finalText = streamRef.current || r.summary;
           if (finalText.trim()) {
             setMessages(prev => [...prev, {
@@ -76,6 +94,48 @@ export function ChatShell() {
           setStreamingText('');
           setStatus('idle');
         }
+        // Seal tool-steps group
+        if (toolStepsMsgIdRef.current) {
+          const sealId = toolStepsMsgIdRef.current;
+          setMessages(prev => prev.map(m =>
+            m.id === sealId ? { ...m, stepsLive: false } : m
+          ));
+          toolStepsMsgIdRef.current = null;
+        }
+        break;
+      }
+      case 'canvas_tool_call': {
+        const ev = event as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string };
+        const newStep: ToolStep = { toolUseId: ev.toolUseId, toolName: ev.toolName, input: ev.input, status: 'running' };
+        setMessages(prev => {
+          const existingIdx = prev.findIndex(m => m.id === toolStepsMsgIdRef.current);
+          if (existingIdx !== -1) {
+            const updated = [...prev];
+            updated[existingIdx] = { ...updated[existingIdx], steps: [...(updated[existingIdx].steps ?? []), newStep] };
+            return updated;
+          }
+          const msgId = `msg-tool-steps-${ev.eventId}`;
+          toolStepsMsgIdRef.current = msgId;
+          return [...prev, { id: msgId, role: 'tool_steps', content: '', steps: [newStep], stepsLive: true }];
+        });
+        break;
+      }
+      case 'canvas_tool_result': {
+        const ev = event as { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string };
+        const sealId = toolStepsMsgIdRef.current;
+        if (!sealId) break;
+        setMessages(prev => {
+          const existingIdx = prev.findIndex(m => m.id === sealId);
+          if (existingIdx === -1) return prev;
+          const updated = [...prev];
+          updated[existingIdx] = {
+            ...updated[existingIdx],
+            steps: (updated[existingIdx].steps ?? []).map(s =>
+              s.toolUseId === ev.toolUseId ? { ...s, status: ev.ok ? 'done' : 'error', response: ev.response } : s
+            ),
+          };
+          return updated;
+        });
         break;
       }
       case 'needs_user': {
@@ -85,7 +145,6 @@ export function ChatShell() {
       }
       case 'error': {
         const msg = (event as { type: 'error'; message: string }).message;
-        // Finalize any pending streaming text as error
         streamRef.current = '';
         setStreamingText('');
         setMessages(prev => [...prev, {
@@ -99,11 +158,103 @@ export function ChatShell() {
     }
   }, [taskId]);
 
-  useEffect(() => {
-    if (!taskId || initRef.current) return;
-    initRef.current = true;
+  // Replay events from a single snapshot into messages
+  const replaySnapshot = useCallback((snapshot: { events?: DesktopTaskEvent[]; prompt?: string }, addPromptAsUser: boolean): ChatMessage[] => {
+    const msgs: ChatMessage[] = [];
+    if (addPromptAsUser && snapshot?.prompt) {
+      msgs.push({
+        id: `msg-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        role: 'user',
+        content: snapshot.prompt,
+      });
+    }
 
-    // If we have an initialPrompt from WelcomePage, pre-populate user message
+    if (snapshot?.events && snapshot.events.length > 0) {
+      let accumulated = '';
+      let lastProgress: ChatMessage | null = null;
+      let toolStepsMsgId: string | null = null;
+      for (const ev of snapshot.events) {
+        if (ev.type === 'canvas_file_changed') {
+          allEventsRef.current.push(ev);
+          continue;
+        }
+        if (ev.type === 'canvas_tool_call') {
+          const call = ev as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string };
+          allEventsRef.current.push(ev);
+          if (!toolStepsMsgId) {
+            toolStepsMsgId = `msg-tool-steps-replay-${call.eventId}`;
+            msgs.push({ id: toolStepsMsgId, role: 'tool_steps', content: '', steps: [], stepsLive: false });
+          }
+          const msg = msgs.find(m => m.id === toolStepsMsgId)!;
+          msg.steps = [...(msg.steps ?? []), { toolUseId: call.toolUseId, toolName: call.toolName, input: call.input, status: 'done' as const }];
+          continue;
+        }
+        if (ev.type === 'canvas_tool_result') {
+          const res = ev as { type: 'canvas_tool_result'; toolUseId: string; ok: boolean; response: string };
+          allEventsRef.current.push(ev);
+          const msg = msgs.find(m => m.id === toolStepsMsgId);
+          if (msg?.steps) {
+            msg.steps = msg.steps.map(s =>
+              s.toolUseId === res.toolUseId ? { ...s, status: res.ok ? 'done' as const : 'error' as const, response: res.response } : s
+            );
+          }
+          continue;
+        }
+        if (ev.type === 'progress') {
+          const prog = (ev as { type: 'progress'; message: string; stage?: string; eventId: string });
+          lastProgress = {
+            id: `msg-progress-${prog.eventId}`,
+            role: 'progress',
+            content: prog.message,
+            stage: prog.stage,
+          };
+        } else if (ev.type === 'assistant_delta') {
+          accumulated += (ev as { delta: string }).delta;
+          lastProgress = null;
+        } else if (ev.type === 'result') {
+          const r = (ev as { result: TaskResult }).result;
+          if (accumulated || r.summary) {
+            msgs.push({
+              id: `msg-assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              role: 'assistant',
+              content: accumulated || r.summary,
+            });
+            accumulated = '';
+          }
+          toolStepsMsgId = null;
+        }
+      }
+      if (lastProgress) {
+        msgs.push(lastProgress);
+      }
+      if (accumulated) {
+        streamRef.current = accumulated;
+        setStreamingText(accumulated);
+      }
+    }
+    return msgs;
+  }, []);
+
+  useEffect(() => {
+    if (!taskId) return;
+    if (loadingRef.current) return;
+
+    // Cleanup previous subscription
+    unsubRef.current?.();
+    unsubRef.current = null;
+    allEventsRef.current = [];
+    toolStepsMsgIdRef.current = null;
+    streamRef.current = '';
+    setStreamingText('');
+    setResult(null);
+    setMessages([]);
+    setCurrentQuestion(null);
+    setThread(null);
+    setStatus('idle');
+
+    loadingRef.current = true;
+
+    // If we have an initialPrompt from WelcomePage, pre-populate
     if (initialPrompt) {
       setMessages([{
         id: `msg-initial-user`,
@@ -113,45 +264,37 @@ export function ChatShell() {
       setStatus('running');
     }
 
-    api.getThread(taskId).then(t => {
+    api.getThread(taskId).then(async (t) => {
       if (t) {
         setThread(t);
-        // Recover task if it was running
-        if (t.currentTaskId) {
-          api.recoverTask(t.currentTaskId).then(({ snapshot }) => {
-            if (snapshot?.status === 'running' || snapshot?.status === 'waiting_user') {
-              setStatus(snapshot.status);
-              // Replay events into assistant messages
-              if (snapshot.events) {
-                let accumulated = '';
-                const replayMessages: ChatMessage[] = [];
-                for (const ev of snapshot.events) {
-                  if (ev.type === 'assistant_delta') {
-                    accumulated += (ev as { delta: string }).delta;
-                  } else if (ev.type === 'result') {
-                    const r = (ev as { result: TaskResult }).result;
-                    if (accumulated || r.summary) {
-                      replayMessages.push({
-                        id: `msg-replay-${Date.now()}`,
-                        role: 'assistant',
-                        content: accumulated || r.summary,
-                      });
-                      accumulated = '';
-                    }
-                  }
-                }
-                if (accumulated) {
-                  setStreamingText(accumulated);
-                }
-                // Merge replay messages with existing (initialPrompt) messages
-                if (replayMessages.length > 0) {
-                  setMessages(prev => [...prev, ...replayMessages]);
+
+        // Load ALL tasks' events, not just currentTaskId
+        const allTaskIds = (t.taskIds && t.taskIds.length > 0) ? t.taskIds : (t.currentTaskId ? [t.currentTaskId] : []);
+        const allMessages: ChatMessage[] = [];
+
+        for (const tid of allTaskIds) {
+          try {
+            const { snapshot } = await api.recoverTask(tid);
+            if (snapshot) {
+              const isFirst = tid === allTaskIds[0];
+              const msgs = replaySnapshot(snapshot, isFirst && !initialPrompt);
+              allMessages.push(...msgs);
+
+              // Check last task status for live subscription
+              if (tid === allTaskIds[allTaskIds.length - 1]) {
+                if (snapshot.status === 'running' || snapshot.status === 'waiting_user') {
+                  setStatus(snapshot.status);
+                  unsubRef.current = api.subscribeTask(tid, handleEvent);
+                } else if (snapshot.status === 'completed') {
+                  setStatus('idle');
                 }
               }
-              // Subscribe to continue receiving events
-              unsubRef.current = api.subscribeTask(t.currentTaskId!, handleEvent);
             }
-          }).catch(() => {});
+          } catch { /* skip failed task */ }
+        }
+
+        if (allMessages.length > 0) {
+          setMessages(allMessages);
         }
       } else {
         setThread({
@@ -165,13 +308,23 @@ export function ChatShell() {
           gtdBucket: 'inbox',
           pinnedAt: null,
           currentTaskId: null,
+          taskIds: [],
         });
       }
-    }).catch(() => {});
-  }, [taskId, initialPrompt, handleEvent]);
+      loadingRef.current = false;
+    }).catch(() => {
+      loadingRef.current = false;
+    });
+
+    return () => {
+      loadingRef.current = false;
+    };
+  }, [taskId, initialPrompt, handleEvent, replaySnapshot]);
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
     if (!taskId) return;
+
+    toolStepsMsgIdRef.current = null;
 
     // Add user message immediately (include file names in content)
     const fileNames = files?.map(f => f.name).filter(Boolean);
@@ -203,7 +356,11 @@ export function ChatShell() {
 
       // Update thread with new taskId
       await api.updateThreadTaskId(taskId, newTaskId);
-      setThread(prev => prev ? { ...prev, currentTaskId: newTaskId } : prev);
+      setThread(prev => prev ? {
+        ...prev,
+        currentTaskId: newTaskId,
+        taskIds: prev.taskIds.includes(newTaskId) ? prev.taskIds : [...prev.taskIds, newTaskId],
+      } : prev);
 
       // Unsubscribe previous and subscribe new
       unsubRef.current?.();
@@ -246,18 +403,42 @@ export function ChatShell() {
   }
 
   return (
-    <ChatView
-      thread={thread}
-      messages={messages}
-      streamingText={streamingText}
-      status={status}
-      currentQuestion={currentQuestion}
-      result={result}
-      prompt={prompt}
-      onPromptChange={setPrompt}
-      onSubmit={handleSubmit}
-      onAnswer={handleAnswer}
-      onCancel={handleCancel}
-    />
+    <div className="flex h-full overflow-hidden">
+      <div className="flex flex-1 min-w-0">
+        <ChatView
+          thread={thread}
+          messages={messages}
+          streamingText={streamingText}
+          status={status}
+          currentQuestion={currentQuestion}
+          result={result}
+          prompt={prompt}
+          onPromptChange={setPrompt}
+          onSubmit={handleSubmit}
+          onAnswer={handleAnswer}
+          onCancel={handleCancel}
+          canvasOpen={canvasOpen}
+          onToggleCanvas={() => setCanvasOpen(v => !v)}
+          onArtifactClick={async (artifact) => {
+            let content = '';
+            if (artifact.filePath) {
+              const r = await api.readFileContent(artifact.filePath);
+              content = r.content;
+            }
+            setCanvasPreviewFile(artifact.filePath ?? artifact.title);
+            setCanvasPreviewContent(content);
+            setCanvasOpen(true);
+          }}
+        />
+      </div>
+      {canvasOpen && (
+        <CanvasPanel
+          events={allEventsRef.current}
+          onClose={() => setCanvasOpen(false)}
+          initialPreviewFile={canvasPreviewFile}
+          initialPreviewContent={canvasPreviewContent}
+        />
+      )}
+    </div>
   );
 }

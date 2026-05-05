@@ -9,7 +9,26 @@
     "package.json"
   ],
   "mac": {
-    "target": ["dir"],
-    "icon": "build/icon.icns"
+    "target": ["dir", "dmg", "zip"],
+    "icon": "build/icon.icns",
+    "category": "public.app-category.productivity",
+    "publish": {
+      "provider": "generic",
+      "url": "https://github.com/songkai-/xiaok-cli/releases/download/latest/"
+    }
+  },
+  "win": {
+    "target": ["nsis", "portable"],
+    "publish": {
+      "provider": "generic",
+      "url": "https://github.com/songkai-/xiaok-cli/releases/download/latest/"
+    }
+  },
+  "linux": {
+    "target": ["AppImage", "deb"],
+    "publish": {
+      "provider": "generic",
+      "url": "https://github.com/songkai-/xiaok-cli/releases/download/latest/"
+    }
   }
 }

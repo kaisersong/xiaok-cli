@@ -1,5 +1,5 @@
 import { dialog, type BrowserWindow, type IpcMain } from 'electron';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
 
@@ -96,6 +96,16 @@ export function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow, serv
   ipcMain.handle('desktop:openArtifact', async (_event, input) => {
     log('info', 'openArtifact', { artifactId: input?.artifactId });
     return services.openArtifact(input.artifactId);
+  });
+  ipcMain.handle('desktop:readFileContent', async (_event, input) => {
+    const filePath = input?.filePath as string;
+    log('info', 'readFileContent', { filePath });
+    try {
+      const content = await readFile(filePath, 'utf-8');
+      return { content };
+    } catch (e) {
+      return { content: '', error: String(e) };
+    }
   });
   ipcMain.handle('desktop:subscribeTask', async (_event, input) => {
     const taskId = input.taskId as string;

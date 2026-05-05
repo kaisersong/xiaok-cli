@@ -26,6 +26,13 @@ export interface ModelConfigEntry {
   capabilities?: string[];
 }
 
+export interface ProviderModelVariant {
+  modelId: string;
+  model: string;
+  label: string;
+  capabilities?: string[];
+}
+
 export interface ProviderProfile {
   id: FirstPartyProviderId;
   label: string;
@@ -33,10 +40,7 @@ export interface ProviderProfile {
   baseUrl?: string;
   envPrefixes: string[];
   defaultHeaders?: Record<string, string>;
-  defaultModel: {
-    modelId: string;
-    model: string;
-    label: string;
-    capabilities?: string[];
-  };
+  defaultModel: ProviderModelVariant;
+  /** 该 provider 的已知模型变体。不在 config.models 中的也会显示在模型选择器里。 */
+  availableModels?: ProviderModelVariant[];
 }

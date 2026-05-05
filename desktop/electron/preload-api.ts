@@ -37,6 +37,7 @@ export const PRELOAD_API_KEYS = [
   'getActiveTask',
   'recoverTask',
   'openArtifact',
+  'readFileContent',
   'listSkills',
   'listChannels',
   'createChannel',
@@ -46,6 +47,17 @@ export const PRELOAD_API_KEYS = [
   'createMCPInstall',
   'updateMCPInstall',
   'deleteMCPInstall',
+  'getUpdateStatus',
+  'checkForUpdates',
+  'quitAndInstall',
+  'onUpdateStatus',
+  'createReminder',
+  'listReminders',
+  'cancelReminder',
+  'getReminderStatus',
+  'onReminder',
+  'getSkillDebugConfig',
+  'saveSkillDebugConfig',
 ] as const;
 
 export interface DesktopModelProviderView {
@@ -144,6 +156,31 @@ export interface DesktopMCPInput {
   args?: string[];
 }
 
+export interface UpdateStatus {
+  checking: boolean;
+  available: boolean;
+  downloading: boolean;
+  downloaded: boolean;
+  progress: number;
+  version?: string;
+  error?: string;
+}
+
+export interface ReminderRecord {
+  reminderId: string;
+  content: string;
+  scheduleAt: number;
+  timezone: string;
+  status: 'pending' | 'delivering' | 'sent' | 'failed' | 'cancelled';
+  retryCount: number;
+  maxRetry: number;
+  nextAttemptAt: number;
+  lastError?: string;
+  createdAt: number;
+  updatedAt: number;
+  sentAt?: number;
+}
+
 export interface DesktopApi {
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
@@ -167,6 +204,7 @@ export interface DesktopApi {
   getActiveTask(): Promise<{ taskId: string } | null>;
   recoverTask(taskId: string): Promise<{ snapshot: TaskSnapshot }>;
   openArtifact(artifactId: string): Promise<void>;
+  readFileContent(filePath: string): Promise<{ content: string; error?: string }>;
   listSkills(): Promise<Array<{ name: string; aliases: string[]; description: string; source: string; tier: string }>>;
   listChannels(): Promise<DesktopChannelView[]>;
   createChannel(input: DesktopChannelInput): Promise<DesktopChannelView>;
@@ -176,6 +214,17 @@ export interface DesktopApi {
   createMCPInstall(input: DesktopMCPInput): Promise<DesktopMCPInstallView>;
   updateMCPInstall(id: string, input: Partial<DesktopMCPInput>): Promise<DesktopMCPInstallView>;
   deleteMCPInstall(id: string): Promise<void>;
+  getUpdateStatus(): Promise<UpdateStatus>;
+  checkForUpdates(): Promise<void>;
+  quitAndInstall(): Promise<void>;
+  onUpdateStatus(handler: (status: UpdateStatus) => void): () => void;
+  createReminder(input: { content: string; scheduleAt: number; timezone?: string }): Promise<ReminderRecord>;
+  listReminders(): Promise<ReminderRecord[]>;
+  cancelReminder(id: string): Promise<boolean>;
+  getReminderStatus(): Promise<{ pendingCount: number; activeReminders: ReminderRecord[] }>;
+  onReminder(handler: (event: { reminderId: string; content: string; createdAt: number }) => void): () => void;
+  getSkillDebugConfig(): Promise<{ enabled: boolean }>;
+  saveSkillDebugConfig(input: { enabled: boolean }): Promise<{ enabled: boolean }>;
 }
 
 interface IpcRendererLike {
@@ -212,6 +261,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     getActiveTask: () => ipcRenderer.invoke('desktop:getActiveTask') as ReturnType<DesktopApi['getActiveTask']>,
     recoverTask: (taskId) => ipcRenderer.invoke('desktop:recoverTask', { taskId }) as ReturnType<DesktopApi['recoverTask']>,
     openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }) as Promise<void>,
+    readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }) as Promise<{ content: string; error?: string }>,
     listSkills: () => ipcRenderer.invoke('desktop:listSkills') as ReturnType<DesktopApi['listSkills']>,
     listChannels: () => ipcRenderer.invoke('desktop:listChannels') as Promise<DesktopChannelView[]>,
     createChannel: (input) => ipcRenderer.invoke('desktop:createChannel', input) as Promise<DesktopChannelView>,
@@ -221,6 +271,35 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     createMCPInstall: (input) => ipcRenderer.invoke('desktop:createMCPInstall', input) as Promise<DesktopMCPInstallView>,
     updateMCPInstall: (id, input) => ipcRenderer.invoke('desktop:updateMCPInstall', id, input) as Promise<DesktopMCPInstallView>,
     deleteMCPInstall: (id) => ipcRenderer.invoke('desktop:deleteMCPInstall', id) as Promise<void>,
+    getUpdateStatus: () => ipcRenderer.invoke('desktop:getUpdateStatus') as Promise<UpdateStatus>,
+    checkForUpdates: () => ipcRenderer.invoke('desktop:checkForUpdates') as Promise<void>,
+    quitAndInstall: () => ipcRenderer.invoke('desktop:quitAndInstall') as Promise<void>,
+    onUpdateStatus(handler) {
+      const channel = 'desktop:updateStatus';
+      const listener = (_event: unknown, payload: unknown) => {
+        handler(payload as UpdateStatus);
+      };
+      ipcRenderer.on(channel, listener);
+      return () => {
+        ipcRenderer.off(channel, listener);
+      };
+    },
+    createReminder: (input) => ipcRenderer.invoke('desktop:createReminder', input) as Promise<ReminderRecord>,
+    listReminders: () => ipcRenderer.invoke('desktop:listReminders') as Promise<ReminderRecord[]>,
+    cancelReminder: (id) => ipcRenderer.invoke('desktop:cancelReminder', id) as Promise<boolean>,
+    getReminderStatus: () => ipcRenderer.invoke('desktop:getReminderStatus') as Promise<{ pendingCount: number; activeReminders: ReminderRecord[] }>,
+    onReminder(handler) {
+      const channel = 'desktop:reminder';
+      const listener = (_event: unknown, payload: unknown) => {
+        handler(payload as { reminderId: string; content: string; createdAt: number });
+      };
+      ipcRenderer.on(channel, listener);
+      return () => {
+        ipcRenderer.off(channel, listener);
+      };
+    },
+    getSkillDebugConfig: () => ipcRenderer.invoke('desktop:getSkillDebugConfig') as Promise<{ enabled: boolean }>,
+    saveSkillDebugConfig: (input) => ipcRenderer.invoke('desktop:saveSkillDebugConfig', input) as Promise<{ enabled: boolean }>,
   };
 }
 

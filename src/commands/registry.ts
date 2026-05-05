@@ -108,6 +108,14 @@ const BASE_CHAT_COMMANDS: ChatCommandMetadata[] = [
     showInHelp: true,
   },
   {
+    id: 'skill-debug',
+    cmd: '/skill-debug',
+    slashDesc: '切换 stage 执行调试输出（显示 intent 分析、context 检查、耗时）',
+    helpLine: '  /skill-debug [on|off] - 切换 stage 执行调试输出',
+    showInSlash: true,
+    showInHelp: true,
+  },
+  {
     id: 'yzjchannel',
     cmd: '/yzjchannel',
     slashDesc: '连接嵌入式云之家 channel',

@@ -88,6 +88,38 @@ describe('Agent Autonomy Prompt 检查', () => {
   it('should include AskUserQuestion denial handling', () => {
     expect(promptText).toContain('If you do not understand why the user has denied a tool call');
   });
+
+  // ---------------------------------------------------------------------------
+  // Prompt Enhancement: Decomposition, Verification, Parallel-First
+  // ---------------------------------------------------------------------------
+
+  it('should include "Always decompose before you act"', () => {
+    expect(promptText).toContain('Always decompose before you act');
+  });
+
+  it('should include PREVIEW/CHUNK/RECURSIVE patterns', () => {
+    expect(promptText).toContain('PREVIEW');
+    expect(promptText).toContain('CHUNK');
+    expect(promptText).toContain('RECURSIVE');
+  });
+
+  it('should include "Verify before claiming success"', () => {
+    expect(promptText).toContain('Verify before claiming success');
+  });
+
+  it('should include stdout/stderr verification instruction', () => {
+    expect(promptText).toContain('Check stdout');
+    expect(promptText).toContain('Check stderr');
+  });
+
+  it('should include "Parallel-first" heuristic', () => {
+    expect(promptText).toContain('Parallel-first');
+  });
+
+  it('should include parallel execution rules', () => {
+    expect(promptText).toContain('Multiple independent file reads');
+    expect(promptText).toContain('Dependent operations MUST be sequential');
+  });
 });
 
 // =============================================================================

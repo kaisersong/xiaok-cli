@@ -6,12 +6,16 @@ import type { ProtocolId } from '../../src/ai/providers/types.js';
 import { MaterialRegistry } from '../../src/runtime/task-host/material-registry.js';
 import { FileTaskSnapshotStore } from '../../src/runtime/task-host/snapshot-store.js';
 import { InProcessTaskRuntimeHost, type TaskRunner } from '../../src/runtime/task-host/task-runtime-host.js';
-import type { MaterialRole, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
+import type { MaterialRecord, MaterialRole, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
 import type { Config, Message, MessageBlock, StreamChunk, ToolCall } from '../../src/types.js';
 import { buildToolList, ToolRegistry } from '../../src/ai/tools/index.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
 import { getConfigPath, loadConfig, saveConfig } from '../../src/utils/config.js';
+import { createIntentDelegationTools } from '../../src/ai/tools/intent-delegation.js';
+import { analyzeIntent as analyzeStageIntent } from '../../src/runtime/stage/executor.js';
+import { createEmptySessionIntentLedger, cloneSessionIntentLedger, createIntentLedgerRecord, type SessionIntentLedger, type IntentPlanDraft, type IntentLedgerRecord } from '../../src/runtime/intent-delegation/types.js';
+import { DELEGATION_TEMPLATES } from '../../src/ai/intent-delegation/templates.js';
 
 export interface DesktopServicesOptions {
   dataRoot: string;
@@ -151,6 +155,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
 
       await saveConfig(config);
       return createModelConfigSnapshot(config);
+    },
+    async getSkillDebugConfig() {
+      const config = await loadConfig();
+      return { enabled: config.skillDebug ?? false };
+    },
+    async saveSkillDebugConfig(input: { enabled: boolean }) {
+      const config = await loadConfig();
+      config.skillDebug = input.enabled;
+      await saveConfig(config);
+      return { enabled: config.skillDebug };
     },
     async testProviderConnection(input: { providerId: string; modelId?: string }): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
       const config = await loadConfig();
@@ -487,6 +501,82 @@ function createModelConfigSnapshot(config: Config): DesktopModelConfigSnapshot {
   };
 }
 
+// Simplified in-memory intent ledger store for Desktop
+class InMemoryIntentLedgerStore {
+  private ledgers = new Map<string, SessionIntentLedger>();
+
+  async load(sessionId: string): Promise<SessionIntentLedger | null> {
+    return this.ledgers.get(sessionId) ?? null;
+  }
+
+  async appendIntent(sessionId: string, plan: IntentPlanDraft): Promise<SessionIntentLedger> {
+    const intent = createIntentLedgerRecord(plan);
+    const ledger: SessionIntentLedger = {
+      sessionId,
+      instanceId: 'desktop-instance',
+      activeIntentId: intent.intentId,
+      intents: [intent],
+      latestPlan: intent,
+      breadcrumbs: [],
+      receipt: null,
+      salvage: null,
+      ownership: { state: 'owned', ownerInstanceId: 'desktop-instance', updatedAt: Date.now() },
+      updatedAt: Date.now(),
+    };
+    this.ledgers.set(sessionId, ledger);
+    return cloneSessionIntentLedger(ledger);
+  }
+
+  async updateIntent(sessionId: string, intentId: string, patch: Record<string, unknown>): Promise<SessionIntentLedger> {
+    const ledger = this.ledgers.get(sessionId);
+    if (!ledger) throw new Error(`session not found: ${sessionId}`);
+    const intent = ledger.intents.find(i => i.intentId === intentId);
+    if (!intent) throw new Error(`intent not found: ${intentId}`);
+    Object.assign(intent, patch, { updatedAt: Date.now() });
+    ledger.updatedAt = Date.now();
+    return cloneSessionIntentLedger(ledger);
+  }
+
+  async recordBreadcrumb(sessionId: string, input: { intentId: string; stepId: string; status: string; message: string }): Promise<SessionIntentLedger> {
+    const ledger = this.ledgers.get(sessionId);
+    if (!ledger) throw new Error(`session not found: ${sessionId}`);
+    ledger.breadcrumbs.push({
+      intentId: input.intentId,
+      stepId: input.stepId,
+      status: input.status as 'running' | 'blocked' | 'completed' | 'failed',
+      message: input.message,
+      createdAt: Date.now(),
+    });
+    ledger.updatedAt = Date.now();
+    return cloneSessionIntentLedger(ledger);
+  }
+
+  async recordReceipt(sessionId: string, input: { intentId: string; stepId: string; note: string }): Promise<SessionIntentLedger> {
+    const ledger = this.ledgers.get(sessionId);
+    if (!ledger) throw new Error(`session not found: ${sessionId}`);
+    ledger.receipt = { ...input, createdAt: Date.now() };
+    ledger.updatedAt = Date.now();
+    return cloneSessionIntentLedger(ledger);
+  }
+
+  async recordSalvage(sessionId: string, input: { intentId: string; summary: string[]; reason?: string }): Promise<SessionIntentLedger> {
+    const ledger = this.ledgers.get(sessionId);
+    if (!ledger) throw new Error(`session not found: ${sessionId}`);
+    ledger.salvage = { ...input, createdAt: Date.now() };
+    ledger.updatedAt = Date.now();
+    return cloneSessionIntentLedger(ledger);
+  }
+
+  async saveDispatchedIntent(sessionId: string, intent: IntentLedgerRecord): Promise<SessionIntentLedger> {
+    const ledger = this.ledgers.get(sessionId);
+    if (!ledger) throw new Error(`session not found: ${sessionId}`);
+    const idx = ledger.intents.findIndex(i => i.intentId === intent.intentId);
+    if (idx >= 0) ledger.intents[idx] = intent;
+    ledger.updatedAt = Date.now();
+    return cloneSessionIntentLedger(ledger);
+  }
+}
+
 const BASE_SYSTEM_PROMPT = `你是 xiaok desktop 的助手。你可以使用工具来帮助用户完成各种任务。
 
 你有以下工具可用：
@@ -497,6 +587,33 @@ const BASE_SYSTEM_PROMPT = `你是 xiaok desktop 的助手。你可以使用工�
 - Grep: 搜索文件内容
 - Glob: 按模式匹配查找文件
 - skill: 调用已安装的 skill
+- intent_create: 分析用户意图，生成有序的执行计划
+- intent_step_update: 更新当前执行步骤的状态
+
+## 关于用户上传的附件
+
+当用户消息提到"附件"、"文档"、"上传的文档"、"上传的文件"时，指的是用户通过 Plus 按钮上传的文件。
+这些文件会被自动导入到工作目录，你可以通过以下方式访问：
+1. 先用 Glob 工具查找工作目录下的文件（如 materials 目录）
+2. 用 Read 工具读取具体文件内容
+3. 如果是图片文件（.png/.jpg），可以用 Bash 打开查看
+
+用户上传文件后，消息中会显示"附件: 文件名"的提示。你应该：
+1. 确认收到附件
+2. 读取附件内容进行分析
+3. 基于附件内容回答问题或执行任务
+
+## 意图识别规则
+
+收到用户请求时，先用 intent_create 工具分析意图：
+- raw_intent: 用户原始请求
+- normalized_intent: 规范化后的意图描述
+- intent_type: generate(生成新内容) / revise(修改已有内容) / summarize(总结) / analyze(分析)
+- deliverable: 期望交付物描述
+- risk_tier: low/medium/high
+- template_id: generate_v1 / revise_v1 / summarize_v1 / analyze_v1
+
+然后用 intent_step_update 跟踪执行进度。
 
 当用户要求执行操作时，直接使用工具完成，不要说"我没有权限"。用户已经授权你使用所有工具。
 保持简洁、准确。`;
@@ -508,7 +625,19 @@ function createDesktopModelRunner(): TaskRunner {
   let skillsLoaded = false;
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
-  return async ({ sessionId, prompt, signal, emitRuntimeEvent }) => {
+  const intentStore = new InMemoryIntentLedgerStore();
+
+  // Register intent delegation tools
+  const intentTools = createIntentDelegationTools({
+    ledgerStore: intentStore as never,
+    sessionId: 'desktop-session',
+    instanceId: 'desktop-instance',
+  });
+  for (const tool of intentTools) {
+    registry.registerTool(tool);
+  }
+
+  return async ({ sessionId, prompt, materials, signal, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
@@ -537,11 +666,37 @@ function createDesktopModelRunner(): TaskRunner {
           : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
       }
     }
+
+    // Build prompt with materials context
+    let materialsContext = '';
+    if (materials && materials.length > 0) {
+      materialsContext = '\n\n## 用户上传的文件\n\n用户上传了以下文件，你需要读取并处理它们：\n';
+      for (const m of materials) {
+        // MaterialRecord contains originalName and workspacePath
+        materialsContext += `- 文件: ${m.originalName}\n  路径: ${m.workspacePath}\n  类型: ${m.mimeType || '未知'}\n`;
+      }
+      materialsContext += '\n请先使用 Read 工具读取这些文件的内容，然后根据内容回答用户的问题。\n';
+    }
+
     const config = await loadConfig();
     const adapter = createAdapter(config);
+    const skillDebugEnabled = config.skillDebug ?? false;
+
+    // Stage analysis for debug mode
+    if (skillDebugEnabled && currentSkills.length > 0) {
+      try {
+        const stages = analyzeStageIntent(prompt, currentSkills, process.cwd());
+        const stageSummary = stages.map(s => `  ${s.id}. ${s.title} (${s.skill})`).join('\n');
+        const debugText = `[stage:plan] Detected ${stages.length} stages:\n${stageSummary}`;
+        emitRuntimeEvent({ type: 'assistant_delta', sessionId, turnId, intentId, stepId, delta: `${debugText}\n\n` });
+      } catch {
+        // Stage analysis is optional, don't block execution
+      }
+    }
+
     const systemPrompt = skillsContext
-      ? `${BASE_SYSTEM_PROMPT}\n\nAvailable skills:\n${skillsContext}`
-      : BASE_SYSTEM_PROMPT;
+      ? `${BASE_SYSTEM_PROMPT}\n\nAvailable skills:\n${skillsContext}${materialsContext}`
+      : `${BASE_SYSTEM_PROMPT}${materialsContext}`;
     const allToolDefs = registry.getToolDefinitions();
     const messages: Message[] = [...history, {
       role: 'user',
@@ -582,8 +737,14 @@ function createDesktopModelRunner(): TaskRunner {
       const toolResults: MessageBlock[] = [];
       for (const toolCall of toolCalls) {
         if (signal.aborted) throw new Error('task cancelled');
+        emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id });
         const result = await registry.executeTool(toolCall.name, toolCall.input);
         const ok = !result.startsWith('Error');
+        if (ok) {
+          emitRuntimeEvent({ type: 'post_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
+        } else {
+          emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id, error: result.slice(0, 10000) });
+        }
         toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: result.slice(0, 50000), is_error: !ok });
       }
       messages.push({ role: 'user', content: toolResults });

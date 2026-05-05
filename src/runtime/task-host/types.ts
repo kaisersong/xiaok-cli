@@ -86,6 +86,7 @@ export interface ArtifactSummary {
   title: string;
   createdAt: string;
   previewAvailable: boolean;
+  filePath?: string;
   sizeBytes?: number;
   sourceMaterialIds?: string[];
 }
@@ -111,7 +112,11 @@ export type DesktopTaskEvent =
   | { type: 'needs_user'; question: NeedsUserQuestion }
   | { type: 'result'; result: TaskResult }
   | { type: 'salvage'; salvage: SalvageSummary }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  // Canvas events (appended, do not replace existing progress events)
+  | { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string }
+  | { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string; eventId: string }
+  | { type: 'canvas_file_changed'; filePath: string; change: 'add' | 'change' | 'unlink'; eventId: string };
 
 export type TaskSnapshotStatus = 'understanding' | 'running' | 'waiting_user' | 'completed' | 'failed' | 'cancelled';
 

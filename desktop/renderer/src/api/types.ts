@@ -13,6 +13,7 @@ export interface ThreadRecord {
   gtdBucket: ThreadGtdBucket | null;
   pinnedAt: number | null;
   currentTaskId: string | null;
+  taskIds: string[];  // All task IDs for this thread (in order)
 }
 
 // LLM Provider types (mapped from config)

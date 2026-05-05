@@ -1,5 +1,5 @@
 import type { RuntimeEvent } from '../events.js';
-import { projectRuntimeEventToDesktopEvent } from './event-projection.js';
+import { projectRuntimeEventsToDesktopEvents } from './event-projection.js';
 import type { MaterialRegistry } from './material-registry.js';
 import { NeedsUserQuestionCorrelator } from './question-correlator.js';
 import type { FileTaskSnapshotStore } from './snapshot-store.js';
@@ -259,8 +259,8 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   }
 
   private async appendRuntimeEvent(taskId: string, event: RuntimeEvent): Promise<void> {
-    const desktopEvent = projectRuntimeEventToDesktopEvent({ taskId, event });
-    if (desktopEvent) {
+    const desktopEvents = projectRuntimeEventsToDesktopEvents({ taskId, events: [event] });
+    for (const desktopEvent of desktopEvents) {
       await this.appendEvent(taskId, desktopEvent);
     }
   }

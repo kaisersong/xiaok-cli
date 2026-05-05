@@ -121,6 +121,7 @@ export interface Config {
         appSecret: string;
     };
     defaultMode: 'interactive';
+    skillDebug?: boolean;
     channels?: {
         yzj?: YZJChannelConfig;
     };

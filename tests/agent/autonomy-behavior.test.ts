@@ -309,4 +309,113 @@ describe('Agent Autonomy Behavior - Mock Model', () => {
   it('PROMPT CHECK: should include interactive command boundary', async () => {
     expect(systemPrompt).toContain('genuine interactive input');
   });
+
+  // -------------------------------------------------------------------------
+  // Prompt Enhancement: Decomposition, Verification, Parallel-First
+  // -------------------------------------------------------------------------
+
+  it('PROMPT CHECK: should include decomposition philosophy', async () => {
+    expect(systemPrompt).toContain('Always decompose before you act');
+    expect(systemPrompt).toContain('PREVIEW');
+    expect(systemPrompt).toContain('CHUNK');
+    expect(systemPrompt).toContain('RECURSIVE');
+  });
+
+  it('PROMPT CHECK: should include verification principle', async () => {
+    expect(systemPrompt).toContain('Verify before claiming success');
+    expect(systemPrompt).toContain('Check stdout');
+    expect(systemPrompt).toContain('Check stderr');
+  });
+
+  it('PROMPT CHECK: should include parallel execution heuristic', async () => {
+    expect(systemPrompt).toContain('Parallel-first');
+    expect(systemPrompt).toContain('Multiple independent file reads');
+    expect(systemPrompt).toContain('Dependent operations MUST be sequential');
+  });
+
+  // -------------------------------------------------------------------------
+  // Decomposition behavior: model should read before editing large files
+  // -------------------------------------------------------------------------
+
+  it('DECOMPOSITION: model should read file first before editing (tool call order)', async () => {
+    const adapter = createMockAdapter([
+      [
+        { type: 'tool_use', id: 'tu_1', name: 'Read', input: { file_path: 'src/services/order.ts' } },
+        { type: 'done' },
+      ],
+      [
+        { type: 'tool_use', id: 'tu_2', name: 'Read', input: { file_path: 'src/services/order.ts' } },
+        { type: 'done' },
+      ],
+      [{ type: 'text', delta: '已添加错误处理' }, { type: 'done' }],
+    ]);
+
+    const result = await runAgentAndCollectBehavior(
+      adapter,
+      '给 src/services/order.ts 里的 calculateOrderPrice 函数添加错误处理',
+      systemPrompt,
+    );
+
+    expect(result.toolCalls.length).toBeGreaterThanOrEqual(1);
+    expect(result.toolCalls[0].name).toBe('Read');
+  });
+
+  // -------------------------------------------------------------------------
+  // Verification behavior: model should run tests after fixing a bug
+  // -------------------------------------------------------------------------
+
+  it('VERIFICATION: model should run tests after fixing bug (not just claim success)', async () => {
+    const adapter = createMockAdapter([
+      [
+        { type: 'tool_use', id: 'tu_1', name: 'Read', input: { file_path: 'src/calculator.ts' } },
+        { type: 'done' },
+      ],
+      [
+        { type: 'tool_use', id: 'tu_2', name: 'Read', input: { file_path: 'src/calculator.ts' } },
+        { type: 'done' },
+      ],
+      [
+        { type: 'tool_use', id: 'tu_3', name: 'Bash', input: { command: 'npm test' } },
+        { type: 'done' },
+      ],
+      [{ type: 'text', delta: '已修复并验证' }, { type: 'done' }],
+    ]);
+
+    const result = await runAgentAndCollectBehavior(
+      adapter,
+      '修复 calculator.ts 的 bug 并确认测试通过',
+      systemPrompt,
+    );
+
+    expect(result.toolCalls.length).toBeGreaterThanOrEqual(3);
+    const hasTestRun = result.toolCalls.some(
+      (tc) => tc.name === 'Bash' && String(tc.input.command).includes('test'),
+    );
+    expect(hasTestRun).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Parallel behavior: model should batch independent reads
+  // -------------------------------------------------------------------------
+
+  it('PARALLEL: model should call multiple reads in one response (batch)', async () => {
+    const adapter = createMockAdapter([
+      [
+        { type: 'tool_use', id: 'tu_1', name: 'Read', input: { file_path: 'src/config.ts' } },
+        { type: 'tool_use', id: 'tu_2', name: 'Read', input: { file_path: 'src/env.ts' } },
+        { type: 'tool_use', id: 'tu_3', name: 'Read', input: { file_path: 'src/constants.ts' } },
+        { type: 'done' },
+      ],
+      [{ type: 'text', delta: '三个文件内容如下...' }, { type: 'done' }],
+    ]);
+
+    const result = await runAgentAndCollectBehavior(
+      adapter,
+      '查看这三个配置文件的内容：config.ts, env.ts, constants.ts',
+      systemPrompt,
+    );
+
+    expect(result.toolCalls.length).toBe(3);
+    expect(result.toolCalls.every((tc) => tc.name === 'Read')).toBe(true);
+  });
 });

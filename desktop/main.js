@@ -5,6 +5,8 @@ import { createDesktopServices } from './desktop-services.js';
 import { registerDesktopIpc } from './ipc.js';
 import { buildBrowserWindowOptions, isAllowedNavigationUrl } from './security.js';
 import { attachMacCloseToMinimize, attachWindowRepaintHandlers, restoreExistingWindow } from './window-lifecycle.js';
+import { setupMenuBar, destroyMenuBar } from './menubar.js';
+import { setupAutoUpdater, checkForUpdates, quitAndInstall, getUpdateStatus } from './updater.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow = null;
 let isQuitting = false;
@@ -17,7 +19,18 @@ async function createWindow() {
         dataRoot: join(app.getPath('home'), '.xiaok', 'desktop'),
     });
     registerDesktopIpc(ipcMain, window, services);
+    // Register update IPC handlers
+    ipcMain.handle('desktop:getUpdateStatus', () => getUpdateStatus());
+    ipcMain.handle('desktop:checkForUpdates', async () => { await checkForUpdates(); });
+    ipcMain.handle('desktop:quitAndInstall', () => quitAndInstall());
+    // Setup menubar with K icon
+    setupMenuBar(window);
+    // Setup auto-updater (production only)
+    if (process.env.NODE_ENV !== 'development' && !process.env.XIAOK_DESKTOP_DEV_SERVER) {
+        setupAutoUpdater(window);
+    }
     window.on('closed', () => {
+        destroyMenuBar();
         if (mainWindow === window) {
             mainWindow = null;
         }
@@ -63,6 +76,7 @@ else {
     });
     app.on('before-quit', () => {
         isQuitting = true;
+        destroyMenuBar();
     });
     app.on('window-all-closed', () => {
         if (process.platform !== 'darwin') {

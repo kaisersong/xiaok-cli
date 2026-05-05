@@ -29,6 +29,10 @@ describe('preload API contract', () => {
       'createMCPInstall',
       'updateMCPInstall',
       'deleteMCPInstall',
+      'getUpdateStatus',
+      'checkForUpdates',
+      'quitAndInstall',
+      'onUpdateStatus',
     ]);
   });
 

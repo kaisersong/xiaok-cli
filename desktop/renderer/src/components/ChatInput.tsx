@@ -7,6 +7,14 @@ interface AttachedFile {
   name: string;
 }
 
+interface SkillItem {
+  name: string;
+  aliases: string[];
+  description: string;
+  source: string;
+  tier: string;
+}
+
 interface ChatInputProps {
   value?: string;
   onChange?: (value: string) => void;
@@ -21,7 +29,16 @@ export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...'
   const [internalValue, setInternalValue] = useState(value ?? '');
   const [files, setFiles] = useState<AttachedFile[]>([]);
   const [focused, setFocused] = useState(false);
+  const [skills, setSkills] = useState<SkillItem[]>([]);
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const slashMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    api.listSkills().then(list => setSkills(list)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (value !== undefined) setInternalValue(value);
@@ -34,6 +51,23 @@ export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...'
     }
   }, [internalValue]);
 
+  // Show slash menu when input starts with /
+  useEffect(() => {
+    if (internalValue.startsWith('/')) {
+      const query = internalValue.slice(1).toLowerCase();
+      setSlashQuery(query);
+      setShowSlashMenu(true);
+      setSelectedIndex(0);
+    } else {
+      setShowSlashMenu(false);
+    }
+  }, [internalValue]);
+
+  const matchedSkills = skills.filter(s =>
+    s.name.toLowerCase().includes(slashQuery) ||
+    s.aliases.some(a => a.toLowerCase().includes(slashQuery))
+  );
+
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value;
     setInternalValue(v);
@@ -41,15 +75,50 @@ export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...'
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showSlashMenu && matchedSkills.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedIndex(i => Math.min(i + 1, matchedSkills.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedIndex(i => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === 'Tab' || e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        selectSkill(matchedSkills[selectedIndex]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSlashMenu(false);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      submit();
+      // Allow submit with text OR files
+      if (internalValue.trim() || files.length > 0) {
+        submit();
+      }
     }
   };
 
+  const selectSkill = (skill: SkillItem) => {
+    const newValue = `/${skill.name} `;
+    setInternalValue(newValue);
+    onChange?.(newValue);
+    setShowSlashMenu(false);
+    textareaRef.current?.focus();
+  };
+
   const submit = () => {
-    if (internalValue.trim()) {
-      onSubmit(internalValue.trim(), files);
+    const hasText = internalValue.trim();
+    const hasFiles = files.length > 0;
+    if (hasText || hasFiles) {
+      onSubmit(internalValue.trim() || '请处理这些文件', files);
       setInternalValue('');
       onChange?.('');
       setFiles([]);
@@ -76,7 +145,35 @@ export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...'
   };
 
   return (
-    <div className="w-full">
+    <div className="w-full relative">
+      {/* Slash command menu */}
+      {showSlashMenu && matchedSkills.length > 0 && (
+        <div
+          ref={slashMenuRef}
+          className="absolute bottom-full left-0 right-0 mb-2 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] shadow-lg overflow-hidden z-50"
+          style={{ maxWidth: '100%' }}
+        >
+          <div className="p-2 text-xs text-[var(--c-text-secondary)] border-b border-[var(--c-border)]">
+            技能命令 (↑↓选择, Tab确认)
+          </div>
+          <div className="max-h-[200px] overflow-y-auto">
+            {matchedSkills.map((skill, i) => (
+              <button
+                key={skill.name}
+                type="button"
+                onClick={() => selectSkill(skill)}
+                className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 ${
+                  i === selectedIndex ? 'bg-[var(--c-accent)]/10' : 'hover:bg-[var(--c-bg-deep)]'
+                }`}
+              >
+                <span className="text-[var(--c-accent)] font-mono shrink-0">/{skill.name}</span>
+                <span className="text-[var(--c-text-secondary)] truncate">{skill.description?.slice(0, 50) || ''}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Attachment grid */}
       {files.length > 0 && (
         <div
@@ -187,7 +284,7 @@ export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...'
             ) : (
               <button
                 type="submit"
-                disabled={disabled || !internalValue.trim()}
+                disabled={disabled || (!internalValue.trim() && files.length === 0)}
                 className="flex h-[33.5px] w-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-accent-send)] text-[var(--c-accent-send-text)] transition-[background-color,opacity] duration-[60ms] hover:bg-[var(--c-accent-send-hover)] active:opacity-[0.75] active:scale-[0.93] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Send size={18} />

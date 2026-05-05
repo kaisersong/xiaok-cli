@@ -114,6 +114,7 @@ export interface Config {
   models: Record<string, ModelConfigEntry>;
   devApp?: { appKey: string; appSecret: string };
   defaultMode: 'interactive';
+  skillDebug?: boolean;
   channels?: {
     yzj?: YZJChannelConfig;
   };
@@ -141,6 +142,7 @@ export const DEFAULT_CONFIG: Config = {
     },
   },
   defaultMode: 'interactive',
+  skillDebug: false,
   channels: {},
 };
 

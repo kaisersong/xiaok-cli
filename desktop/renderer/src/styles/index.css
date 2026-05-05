@@ -23,6 +23,12 @@
   --c-placeholder: #999999;
 }
 
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
 body {
   font-family: system-ui, -apple-system, sans-serif;
   background-color: var(--c-bg-page);

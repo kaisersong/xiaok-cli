@@ -8,6 +8,7 @@ import { PermissionManager } from '../ai/permissions/manager.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
 import { createAskUserQuestionTool } from '../ai/tools/ask-user-question.js';
 import { createIntentDelegationTools } from '../ai/tools/intent-delegation.js';
+import { formatDebugOutput, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
@@ -48,6 +49,7 @@ import { createPlatformRegistryFactory } from '../platform/runtime/registry-fact
 import { extractSandboxAllowedPaths } from '../platform/sandbox/policy.js';
 import { FileTranscriptLogger } from '../ui/transcript.js';
 import { setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
+import { createLogger } from '../utils/logger.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
 import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
 import { executeNamedSubAgent } from '../ai/agents/subagent-executor.js';
@@ -112,6 +114,7 @@ function countTerminalRowsForOutput(output, columns) {
     const lines = normalized.split('\n');
     return lines.reduce((sum, line) => sum + countTerminalRowsForLine(line, columns), 0);
 }
+const log = createLogger('chat');
 async function runChat(initialInput, opts) {
     if ((opts.print || opts.json) && !initialInput) {
         writeError('print/json 模式需要提供单次输入');
@@ -132,6 +135,7 @@ async function runChat(initialInput, opts) {
         console.warn('\x1b[33m[警告]\x1b[0m stdin 非 TTY，自动切换为 --auto 模式');
     }
     // 加载配置和凭据
+    log.info('chat started', { initialInput: initialInput?.slice(0, 80) });
     let config = await loadConfig();
     let adapter;
     try {
@@ -147,6 +151,7 @@ async function runChat(initialInput, opts) {
     const builtinCommands = ['chat', 'doctor', 'init', 'review', 'pr', 'commit', 'settings', 'context'];
     const platform = await createPlatformRuntimeContext({ cwd, builtinCommands });
     const pluginRuntime = platform.pluginRuntime;
+    let skillDebugEnabled = opts.skillDebug ?? false;
     const customAgents = platform.customAgents;
     const sessionStore = new FileSessionStore();
     const intentLedgerStore = new SessionIntentDelegationStore(sessionStore);
@@ -558,6 +563,7 @@ async function runChat(initialInput, opts) {
             rawRuntimeHooks.emit({ ...event, sessionId });
         },
     };
+    log.info('agent created', { provider: config.defaultProvider, model: config.defaultModelId, skills: skills.length });
     agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks: runtimeHooks });
     agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
     agent.setPromptSnapshot(initialPromptSnapshot);
@@ -674,6 +680,7 @@ async function runChat(initialInput, opts) {
         if (terminalUiSuspended) {
             return;
         }
+        log.warn('UI suspended', { context, fallbackStream });
         terminalUiSuspended = true;
         terminalUiFallbackStream = fallbackStream;
         runtimeState.deactivateTurn();
@@ -1246,6 +1253,47 @@ async function runChat(initialInput, opts) {
         activeIntentReminderBlock = undefined;
         resetCurrentTurnSummary();
     };
+    // Stage executor debug analysis
+    const runStageAnalysis = async (userInput) => {
+        const stages = analyzeStageIntent(userInput, skills, cwd);
+        const debugEvents = [];
+        debugEvents.push({
+            timestamp: Date.now(),
+            phase: 'intent_analysis',
+            detail: `Detected ${stages.length} stages: ${stages.map(s => s.title).join(', ')}`,
+            durationMs: 1,
+            level: 'info',
+        });
+        const currentTokens = agent?.getUsage().inputTokens ?? 0;
+        const usageRate = modelCapabilities.contextLimit > 0 ? Math.round(currentTokens / modelCapabilities.contextLimit * 100) : 0;
+        const results = stages.map(stage => {
+            const skill = skills.find(s => s.name === stage.skill);
+            const skillSize = skill?.content.length ?? 0;
+            const refsSize = skill ? skill.referencesManifest.reduce((sum, r) => sum + r.size, 0) : 0;
+            const needsSubagent = usageRate > 60;
+            return {
+                stage,
+                status: 'completed',
+                timing: {
+                    totalMs: 0,
+                    contextCheckMs: 0,
+                    subagentSpawnMs: needsSubagent ? 1 : 0,
+                    subagentExecMs: 0,
+                    skillLoadMs: Math.ceil((skillSize + refsSize) / 1000) * 100,
+                    skillExecMs: 0,
+                    artifactReadMs: 0,
+                },
+                debugEvents: [],
+                contextCheck: {
+                    usagePercent: usageRate,
+                    estimatedNeeded: Math.ceil((skillSize + refsSize) / 4) + 4000,
+                    available: modelCapabilities.contextLimit - currentTokens,
+                    needsSubagent,
+                },
+            };
+        });
+        return { stages, results, debugEvents };
+    };
     const primeTurnIntentPlan = async (renderTranscriptBlock = false) => {
         if (!currentTurnIntentPlan) {
             return;
@@ -1472,6 +1520,11 @@ async function runChat(initialInput, opts) {
             await refreshSkills();
             await refreshIntentLedger();
             prepareIntentReminderForInput(initialInput);
+            // Stage executor debug output (when --skill-debug is enabled)
+            if (skillDebugEnabled) {
+                const stageOutput = await runStageAnalysis(initialInput);
+                process.stdout.write(formatDebugOutput(stageOutput) + '\n\n');
+            }
             await primeTurnIntentPlan();
             await maybePrepareFreshContextHandoff();
             await runtimeFacade.runTurn({
@@ -1717,6 +1770,7 @@ async function runChat(initialInput, opts) {
             }
         };
         setStreamErrorHandler((error, stream) => {
+            log.error('stream_error', JSON.stringify({ stream: stream?.constructor?.name, error: String(error) }));
             if (stream !== process.stdout && stream !== process.stderr) {
                 return false;
             }
@@ -1728,7 +1782,8 @@ async function runChat(initialInput, opts) {
         });
         // 创建输入读取器
         inputReader.setSkills(skills);
-        runtimeHooks.on('turn_started', () => {
+        runtimeHooks.on('turn_started', (e) => {
+            log.debug('turn_started', JSON.stringify({ turnId: e?.turnId }));
             completedTurnIntentSummaryLine = '';
             toolExplorer.reset();
             turnLayout.reset();
@@ -1745,6 +1800,7 @@ async function runChat(initialInput, opts) {
             }
         });
         runtimeHooks.on('tool_started', (e) => {
+            log.debug('tool_started', JSON.stringify({ tool: e?.toolName }));
             endStreamingPhaseForInterrupt();
             runtimeState.enterToolInterrupt();
             beginActivity(describeLiveActivity(e.toolName, e.toolInput));
@@ -1768,6 +1824,7 @@ async function runChat(initialInput, opts) {
             }
         });
         runtimeHooks.on('tool_finished', (_e) => {
+            log.debug('tool_finished', JSON.stringify({ tool: _e?.toolName, ok: _e?.ok }));
             scheduleActivityResume('Thinking', 160);
         });
         runtimeHooks.on('intent_created', async (event) => {
@@ -1846,6 +1903,7 @@ async function runChat(initialInput, opts) {
         });
         // Context 压缩通知
         runtimeHooks.on('compact_triggered', () => {
+            log.info('compact_triggered');
             beginActivity('Compacting context');
             turnLayout.noteProgressNote();
             pauseActivity();
@@ -1927,6 +1985,7 @@ async function runChat(initialInput, opts) {
                 await releaseSessionOwnershipForExit();
                 scrollRegion.end();
                 statusBar.destroy();
+                log.info('chat exited', { sessionId });
                 process.stdout.write(`\n再见！${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
                 break;
             }
@@ -1985,6 +2044,20 @@ async function runChat(initialInput, opts) {
                 else {
                     writeCommandOutput(trimmed, `已刷新 skill 目录，当前共 ${newCount} 个 skill。\n\n`);
                 }
+                continue;
+            }
+            if (trimmed === '/skill-debug' || trimmed.startsWith('/skill-debug ')) {
+                const arg = trimmed.replace('/skill-debug', '').trim().toLowerCase();
+                if (arg === 'on' || arg === '1' || arg === 'true') {
+                    skillDebugEnabled = true;
+                }
+                else if (arg === 'off' || arg === '0' || arg === 'false') {
+                    skillDebugEnabled = false;
+                }
+                else {
+                    skillDebugEnabled = !skillDebugEnabled;
+                }
+                writeCommandOutput(trimmed, `Skill debug mode: ${skillDebugEnabled ? 'ON' : 'OFF'}\n每次输入将显示 stage 分析（intent、context 检查、耗时预估）。\n\n`);
                 continue;
             }
             if (trimmed === '/yzjchannel') {
@@ -2054,6 +2127,18 @@ async function runChat(initialInput, opts) {
             if (trimmed === '/models') {
                 const selected = await selectModel(config, { renderer: replRenderer });
                 if (selected) {
+                    // 如果选的是 provider 目录里的模型（尚未在 config.models 中），自动注册
+                    if (!config.models[selected.modelId]) {
+                        const providerConfig = config.providers[selected.provider];
+                        const providerProfile = getProviderProfile(selected.provider);
+                        const variant = providerProfile?.availableModels?.find(v => v.modelId === selected.modelId);
+                        config.models[selected.modelId] = {
+                            provider: selected.provider,
+                            model: variant?.model ?? selected.model,
+                            label: variant?.label ?? selected.label,
+                            capabilities: variant?.capabilities,
+                        };
+                    }
                     const newConfig = {
                         ...config,
                         defaultProvider: selected.provider,
@@ -2280,6 +2365,17 @@ async function runChat(initialInput, opts) {
                 clearPastedImagePaths();
                 await refreshIntentLedger();
                 prepareIntentReminderForInput(trimmed);
+                // Stage executor debug output (when --skill-debug is enabled)
+                if (skillDebugEnabled) {
+                    const stageOutput = await runStageAnalysis(trimmed);
+                    const debugText = formatDebugOutput(stageOutput);
+                    if (scrollRegion.isActive() && !terminalUiSuspended) {
+                        scrollRegion.writeAtContentCursor(debugText + '\n');
+                    }
+                    else {
+                        process.stdout.write(debugText + '\n');
+                    }
+                }
                 let lastAssistantText = '';
                 // Clear previously typed input so footer shows placeholder during turn
                 if (!terminalUiSuspended) {
@@ -2514,6 +2610,7 @@ export function registerChatCommands(program) {
         .option('--confirm-high-risk-takeover', '确认接管处于高风险步骤的会话')
         .option('-c, --continue', '恢复上一次会话')
         .option('--fork-session <id>', '从已有会话分叉一个新会话')
+        .option('--skill-debug', '显示 skill 执行详情（stage、context 检查、耗时）')
         .argument('[input]', '单次任务描述（省略则进入交互模式）')
         .action(async (input, opts) => {
         setCrashContext({ command: 'chat', args: process.argv.slice(2), cwd: process.cwd() });

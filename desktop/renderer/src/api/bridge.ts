@@ -143,6 +143,7 @@ export const api = {
       gtdBucket: 'inbox',
       pinnedAt: null,
       currentTaskId: null,
+      taskIds: [],
     };
     await withStore('readwrite', (store) => store.add(thread));
     return thread;
@@ -151,7 +152,11 @@ export const api = {
   async getThread(id: string): Promise<ThreadRecord | null> {
     const result = await withStore('readonly', (store) => store.get(id));
     if (!result) return null;
-    return { ...result, currentTaskId: result.currentTaskId ?? null };
+    return {
+      ...result,
+      currentTaskId: result.currentTaskId ?? null,
+      taskIds: result.taskIds ?? [],
+    };
   },
 
   async listThreads(options?: {
@@ -195,6 +200,9 @@ export const api = {
     const thread = await api.getThread(id);
     if (!thread) throw new Error(`Thread ${id} not found`);
     thread.currentTaskId = taskId;
+    if (!thread.taskIds.includes(taskId)) {
+      thread.taskIds.push(taskId);
+    }
     thread.updatedAt = Date.now();
     await withStore('readwrite', (store) => store.put(thread));
   },
@@ -361,6 +369,11 @@ export const api = {
   async openArtifact(artifactId: string): Promise<void> {
     log.info('openArtifact', artifactId);
     return await window.xiaokDesktop.openArtifact(artifactId);
+  },
+
+  async readFileContent(filePath: string): Promise<{ content: string; error?: string }> {
+    log.info('readFileContent', filePath);
+    return await window.xiaokDesktop.readFileContent(filePath);
   },
 
   // ---------------------
@@ -619,6 +632,51 @@ export const api = {
       existing.push({ createdAt: Date.now() });
       localStorage.setItem(key, JSON.stringify(existing));
     } catch { /* noop */ }
+  },
+
+  // ---------------------
+  // Update API (IPC)
+  // ---------------------
+  async getUpdateStatus() {
+    return window.xiaokDesktop.getUpdateStatus();
+  },
+  async checkForUpdates() {
+    return window.xiaokDesktop.checkForUpdates();
+  },
+  async quitAndInstall() {
+    return window.xiaokDesktop.quitAndInstall();
+  },
+  onUpdateStatus(handler: (status: { checking: boolean; available: boolean; downloading: boolean; downloaded: boolean; progress: number; version?: string; error?: string }) => void) {
+    return window.xiaokDesktop.onUpdateStatus(handler);
+  },
+
+  // ---------------------
+  // Reminder API (IPC)
+  // ---------------------
+  async createReminder(input: { content: string; scheduleAt: number; timezone?: string }) {
+    return window.xiaokDesktop.createReminder(input);
+  },
+  async listReminders() {
+    return window.xiaokDesktop.listReminders();
+  },
+  async cancelReminder(id: string) {
+    return window.xiaokDesktop.cancelReminder(id);
+  },
+  async getReminderStatus() {
+    return window.xiaokDesktop.getReminderStatus();
+  },
+  onReminder(handler: (event: { reminderId: string; content: string; createdAt: number }) => void) {
+    return window.xiaokDesktop.onReminder(handler);
+  },
+
+  // ---------------------
+  // Skill Debug API (IPC)
+  // ---------------------
+  async getSkillDebugConfig() {
+    return window.xiaokDesktop.getSkillDebugConfig();
+  },
+  async saveSkillDebugConfig(input: { enabled: boolean }) {
+    return window.xiaokDesktop.saveSkillDebugConfig(input);
   },
 };
 

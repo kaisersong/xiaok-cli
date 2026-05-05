@@ -26,6 +26,15 @@ const MIME_BY_EXTENSION = new Map<string, string>([
   ['.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
   ['.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
   ['.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.webp', 'image/webp'],
+  ['.svg', 'image/svg+xml'],
+  ['.html', 'text/html'],
+  ['.json', 'application/json'],
+  ['.csv', 'text/csv'],
 ]);
 
 export class MaterialRegistry {

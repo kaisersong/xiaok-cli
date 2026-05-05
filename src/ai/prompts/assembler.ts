@@ -21,6 +21,9 @@ import {
   getToneAndStyleSection,
   getOutputEfficiencySection,
   getSessionGuidanceSection,
+  getDecompositionSection,
+  getVerificationSection,
+  getParallelExecutionSection,
 } from './sections/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -122,6 +125,9 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
     getUsingToolsSection(),
     getToneAndStyleSection(),
     getOutputEfficiencySection(),
+    getDecompositionSection(),
+    getVerificationSection(),
+    getParallelExecutionSection(),
   ];
   const staticText = staticSections.join('\n\n');
   const segments: PromptSegment[] = [{

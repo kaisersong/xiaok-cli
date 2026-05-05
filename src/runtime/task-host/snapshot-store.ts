@@ -49,10 +49,8 @@ export class FileTaskSnapshotStore {
       const parsed = JSON.parse(raw) as Partial<SnapshotIndex>;
       return { activeTaskId: parsed.activeTaskId ?? null };
     } catch (error) {
-      if (isNodeErrorCode(error, 'ENOENT')) {
-        return { activeTaskId: null };
-      }
-      throw error;
+      // Handle both missing file (ENOENT) and corrupted/empty file (SyntaxError)
+      return { activeTaskId: null };
     }
   }
 

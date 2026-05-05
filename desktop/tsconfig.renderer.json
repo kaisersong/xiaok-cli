@@ -9,8 +9,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["renderer/src/*"],
-      "@arkloop/shared": ["renderer/src/shared/index.ts"],
-      "@arkloop/shared/*": ["renderer/src/shared/*"]
+      "@xiaok/shared": ["renderer/src/shared/index.ts"],
+      "@xiaok/shared/*": ["renderer/src/shared/*"]
     }
   },
   "include": [
