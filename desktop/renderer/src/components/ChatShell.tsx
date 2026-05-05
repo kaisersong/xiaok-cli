@@ -27,6 +27,7 @@ export function ChatShell() {
   const loadingRef = useRef(false);
   const allEventsRef = useRef<DesktopTaskEvent[]>([]);
   const toolStepsMsgIdRef = useRef<string | null>(null);
+  const toolStepsActiveRef = useRef(false);
 
   // Read initialPrompt from navigation state (from WelcomePage)
   const state = location.state as { initialPrompt?: string } | undefined;
@@ -45,8 +46,8 @@ export function ChatShell() {
       }
       case 'progress': {
         const prog = (event as { type: 'progress'; message: string; stage?: string; eventId: string });
-        // Suppress progress messages for tool stages when tool_steps is active
-        if ((prog.stage === 'tool' || prog.stage === 'completed' || prog.stage === 'failed') && toolStepsMsgIdRef.current) {
+        // Suppress tool-related progress when tool_steps is active
+        if ((prog.stage === 'tool' || prog.stage === 'completed' || prog.stage === 'failed') && toolStepsActiveRef.current) {
           break;
         }
         setMessages(prev => {
@@ -105,22 +106,26 @@ export function ChatShell() {
             m.id === sealId ? { ...m, stepsLive: false } : m
           ));
           toolStepsMsgIdRef.current = null;
+          toolStepsActiveRef.current = false;
         }
         break;
       }
       case 'canvas_tool_call': {
         const ev = event as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string };
         const newStep: ToolStep = { toolUseId: ev.toolUseId, toolName: ev.toolName, input: ev.input, status: 'running' };
+        toolStepsActiveRef.current = true;
         setMessages(prev => {
-          const existingIdx = prev.findIndex(m => m.id === toolStepsMsgIdRef.current);
+          // Remove stale progress messages with tool stage
+          const cleaned = prev.filter(m => m.role !== 'progress' || (m.stage !== 'tool' && m.stage !== 'completed' && m.stage !== 'failed'));
+          const existingIdx = cleaned.findIndex(m => m.id === toolStepsMsgIdRef.current);
           if (existingIdx !== -1) {
-            const updated = [...prev];
+            const updated = [...cleaned];
             updated[existingIdx] = { ...updated[existingIdx], steps: [...(updated[existingIdx].steps ?? []), newStep] };
             return updated;
           }
           const msgId = `msg-tool-steps-${ev.eventId}`;
           toolStepsMsgIdRef.current = msgId;
-          return [...prev, { id: msgId, role: 'tool_steps', content: '', steps: [newStep], stepsLive: true }];
+          return [...cleaned, { id: msgId, role: 'tool_steps', content: '', steps: [newStep], stepsLive: true }];
         });
         break;
       }
@@ -253,6 +258,7 @@ export function ChatShell() {
     unsubRef.current = null;
     allEventsRef.current = [];
     toolStepsMsgIdRef.current = null;
+    toolStepsActiveRef.current = false;
     streamRef.current = '';
     setStreamingText('');
     setResult(null);
