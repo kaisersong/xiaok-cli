@@ -197,8 +197,9 @@ export function ChatShell() {
   }, [taskId]);
 
   // Replay events from a single snapshot into messages
-  const replaySnapshot = useCallback((snapshot: { events?: DesktopTaskEvent[]; prompt?: string }, addPromptAsUser: boolean): ChatMessage[] => {
+  const replaySnapshot = useCallback((snapshot: { events?: DesktopTaskEvent[]; prompt?: string }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null } => {
     const msgs: ChatMessage[] = [];
+    let lastResult: TaskResult | null = null;
     if (addPromptAsUser && snapshot?.prompt) {
       msgs.push({
         id: `msg-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -264,6 +265,7 @@ export function ChatShell() {
             });
             accumulated = '';
           }
+          lastResult = r;
           toolStepsMsgId = null;
         }
       }
@@ -275,7 +277,7 @@ export function ChatShell() {
         setStreamingText(accumulated);
       }
     }
-    return msgs;
+    return { msgs, result: lastResult };
   }, []);
 
   useEffect(() => {
@@ -323,8 +325,13 @@ export function ChatShell() {
               const isFirst = tid === allTaskIds[0];
               // Add prompt for every task (not just first)
               const addPrompt = snapshot.prompt && (!isFirst || !initialPrompt);
-              const msgs = replaySnapshot(snapshot, addPrompt);
-              allMessages.push(...msgs);
+              const { msgs: replayMsgs, result: replayResult } = replaySnapshot(snapshot, addPrompt);
+              allMessages.push(...replayMsgs);
+
+              // Set result from last completed task so generatedFiles can extract from summary
+              if (replayResult && tid === allTaskIds[allTaskIds.length - 1] && snapshot.status === 'completed') {
+                setResult(replayResult);
+              }
 
               // Check last task status for live subscription
               if (tid === allTaskIds[allTaskIds.length - 1]) {
@@ -467,12 +474,16 @@ export function ChatShell() {
       }
     }
 
-    // Source 2: result summary (extract file paths from text)
-    if (result) {
-      const summary = result.summary || '';
-      const fileExtMatch = /([^\s<`]+?\.(?:md|html|txt|csv|json|pdf|png|jpg|svg))\b/g;
+    // Source 2: result summary and assistant messages (extract file paths from text)
+    const textsToScan: string[] = [];
+    if (result?.summary) textsToScan.push(result.summary);
+    for (const msg of messages) {
+      if (msg.role === 'assistant' && msg.content) textsToScan.push(msg.content);
+    }
+    for (const text of textsToScan) {
+      const fileExtMatch = /([^\s<`"']+?\.(?:md|html|txt|csv|json|pdf|png|jpg|svg|pptx|docx|xlsx))\b/g;
       let m;
-      while ((m = fileExtMatch.exec(summary)) !== null) {
+      while ((m = fileExtMatch.exec(text)) !== null) {
         const candidate = m[1];
         if (candidate.startsWith('/')) addFile(candidate);
       }
