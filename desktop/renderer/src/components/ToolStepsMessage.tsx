@@ -93,7 +93,7 @@ function StepRow({
             className="ml-auto text-xs"
             style={{ opacity: 0.35, flexShrink: 0 }}
           >
-            {expanded ? '∧' : '>'}
+            {expanded ? '∨' : '>'}
           </span>
         )}
       </button>
@@ -155,7 +155,7 @@ export function ToolStepsMessage({ steps, live }: Props) {
             ? `${doneCount} step${doneCount !== 1 ? 's' : ''} completed, running ${activeStep?.toolName ?? ''}...`
             : `${steps.length} step${steps.length !== 1 ? 's' : ''} completed`}
         </span>
-        <span style={{ fontSize: 11, opacity: 0.5 }}>{expanded ? '∧' : '∨'}</span>
+        <span style={{ fontSize: 11, opacity: 0.5 }}>{expanded ? '∨' : '>'}</span>
       </button>
 
       {/* Step list — CSS max-height transition */}

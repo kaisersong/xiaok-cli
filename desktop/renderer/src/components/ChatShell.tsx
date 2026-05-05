@@ -45,6 +45,10 @@ export function ChatShell() {
       }
       case 'progress': {
         const prog = (event as { type: 'progress'; message: string; stage?: string; eventId: string });
+        // Suppress progress messages for tool stages when tool_steps is active
+        if ((prog.stage === 'tool' || prog.stage === 'completed' || prog.stage === 'failed') && toolStepsMsgIdRef.current) {
+          break;
+        }
         setMessages(prev => {
           const filtered = prev.filter(m => m.role !== 'progress');
           return [...filtered, {
@@ -202,12 +206,17 @@ export function ChatShell() {
         }
         if (ev.type === 'progress') {
           const prog = (ev as { type: 'progress'; message: string; stage?: string; eventId: string });
-          lastProgress = {
-            id: `msg-progress-${prog.eventId}`,
-            role: 'progress',
-            content: prog.message,
-            stage: prog.stage,
-          };
+          // Suppress tool progress when tool_steps group is active
+          if ((prog.stage === 'tool' || prog.stage === 'completed' || prog.stage === 'failed') && toolStepsMsgId) {
+            // keep lastProgress but don't overwrite if tool_steps is showing
+          } else {
+            lastProgress = {
+              id: `msg-progress-${prog.eventId}`,
+              role: 'progress',
+              content: prog.message,
+              stage: prog.stage,
+            };
+          }
         } else if (ev.type === 'assistant_delta') {
           accumulated += (ev as { delta: string }).delta;
           lastProgress = null;
