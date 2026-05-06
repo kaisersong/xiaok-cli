@@ -226,9 +226,11 @@ export function ChatShell() {
   }, [taskId]);
 
   // Replay events from a single snapshot into messages
-  const replaySnapshot = useCallback((snapshot: { events?: DesktopTaskEvent[]; prompt?: string }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null } => {
+  // Returns { msgs, result, events } where events is for Canvas (not pushed to ref during replay)
+  const replaySnapshot = useCallback((snapshot: { events?: DesktopTaskEvent[]; prompt?: string }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[] } => {
     const msgs: ChatMessage[] = [];
     let lastResult: TaskResult | null = null;
+    const replayEvents: DesktopTaskEvent[] = []; // Local array for Canvas, not ref
     if (addPromptAsUser && snapshot?.prompt) {
       msgs.push({
         id: `msg-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -266,18 +268,18 @@ export function ChatShell() {
           continue;
         }
         if (ev.type === 'canvas_file_changed') {
-          allEventsRef.current.push(ev);
+          replayEvents.push(ev); // Collect locally
           continue;
         }
         if (ev.type === 'canvas_tool_call') {
-          allEventsRef.current.push(ev);
+          replayEvents.push(ev); // Collect locally
           const evC = ev as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string };
           replayToolSteps.push({ toolUseId: evC.toolUseId, toolName: evC.toolName, input: evC.input, status: 'done' });
           if (!replayToolMsgId) replayToolMsgId = `msg-tool-steps-${evC.eventId}`;
           continue;
         }
         if (ev.type === 'canvas_tool_result') {
-          allEventsRef.current.push(ev);
+          replayEvents.push(ev); // Collect locally
           const evR = ev as { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string };
           replayToolSteps = replayToolSteps.map(s =>
             s.toolUseId === evR.toolUseId ? { ...s, status: evR.ok ? 'done' : 'error', response: evR.response } : s
@@ -320,7 +322,7 @@ export function ChatShell() {
         setStreamingText(accumulated);
       }
     }
-    return { msgs, result: lastResult };
+    return { msgs, result: lastResult, events: replayEvents };
   }, []);
 
   useEffect(() => {
@@ -376,8 +378,10 @@ export function ChatShell() {
               const isFirst = tid === allTaskIds[0];
               // Add prompt for every task (not just first)
               const addPrompt = snapshot.prompt && (!isFirst || !initialPrompt);
-              const { msgs: replayMsgs, result: replayResult } = replaySnapshot(snapshot, addPrompt);
+              const { msgs: replayMsgs, result: replayResult, events: replayEvents } = replaySnapshot(snapshot, addPrompt);
               allMessages.push(...replayMsgs);
+              // Collect events for Canvas panel (merge into ref after all tasks processed)
+              allEventsRef.current.push(...replayEvents);
 
               // Collect result from last completed task (don't set yet - defer until after final check)
               if (replayResult && tid === allTaskIds[allTaskIds.length - 1] && snapshot.status === 'completed') {
@@ -460,6 +464,14 @@ export function ChatShell() {
     streamRef.current = '';
 
     try {
+      // Cancel any existing active task before creating new one
+      const activeTask = await api.getActiveTask();
+      if (activeTask && activeTask.taskId !== thread?.currentTaskId) {
+        try {
+          await api.cancelTask(activeTask.taskId);
+        } catch { /* ignore */ }
+      }
+
       let newTaskId: string;
       if (files && files.length > 0) {
         const filePaths = files.map(f => f.filePath);

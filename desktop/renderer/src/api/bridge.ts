@@ -256,9 +256,26 @@ export const api = {
     filePaths: string[];
   }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
     log.info('createTaskWithFiles', JSON.stringify({ prompt: input.prompt, filesCount: input.filePaths.length }));
-    const result = await window.xiaokDesktop.createTaskWithFiles(input);
-    log.info('createTaskWithFiles ok', JSON.stringify({ taskId: result.taskId }));
-    return result;
+    try {
+      const result = await window.xiaokDesktop.createTaskWithFiles(input);
+      log.info('createTaskWithFiles ok', JSON.stringify({ taskId: result.taskId }));
+      return result;
+    } catch (e) {
+      const msg = (e as Error).message || '';
+      if (msg.includes('active task already exists')) {
+        log.info('createTaskWithFiles: stale active task, cancelling and retrying');
+        try {
+          const active = await window.xiaokDesktop.getActiveTask();
+          if (active?.taskId) {
+            await window.xiaokDesktop.cancelTask(active.taskId);
+          }
+        } catch { /* ignore */ }
+        const result = await window.xiaokDesktop.createTaskWithFiles(input);
+        log.info('createTaskWithFiles retry ok', JSON.stringify({ taskId: result.taskId }));
+        return result;
+      }
+      throw e;
+    }
   },
 
   subscribeTask(
