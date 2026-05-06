@@ -203,7 +203,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
     snapshotStore,
-    runner: options.runner ?? createDesktopModelRunnerWithRegistry(registry, tools),
+    runner: options.runner ?? createDesktopModelRunnerWithRegistry(registry, tools, options.dataRoot),
     now: options.now,
   });
 
@@ -1348,7 +1348,7 @@ function createDesktopModelRunner(): TaskRunner {
   };
 }
 
-function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Tool[]): TaskRunner {
+function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Tool[], dataRoot: string): TaskRunner {
   const history: Message[] = [];
   const cwd = process.cwd();
   let skillCatalog = createSkillCatalog(undefined, cwd);
@@ -1358,6 +1358,12 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
+    // Skill stats tracking
+    const taskStartTime = Date.now();
+    let skillNamesDetected: string[] = [];
+    let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
     if (!skillsLoaded) {
       try {
         const skills = await skillCatalog.reload();
@@ -1378,6 +1384,8 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
     if (slashMatch) {
       const skill = findSkillByCommandName(currentSkills, slashMatch.skillName);
       if (skill) {
+        skillNamesDetected = [skill.name];
+        skillTriggerType = 'slash_command';
         effectivePrompt = slashMatch.rest
           ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
           : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
