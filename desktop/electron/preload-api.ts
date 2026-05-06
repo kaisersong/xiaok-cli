@@ -39,7 +39,10 @@ export const PRELOAD_API_KEYS = [
   'openArtifact',
   'readFileContent',
   'listSkills',
+  'installSkill',
+  'uninstallSkill',
   'listChannels',
+  'testChannel',
   'createChannel',
   'updateChannel',
   'deleteChannel',
@@ -206,7 +209,10 @@ export interface DesktopApi {
   openArtifact(artifactId: string): Promise<void>;
   readFileContent(filePath: string): Promise<{ content: string; error?: string }>;
   listSkills(): Promise<Array<{ name: string; aliases: string[]; description: string; source: string; tier: string }>>;
+  installSkill(skillName: string): Promise<{ success: boolean; message: string }>;
+  uninstallSkill(skillName: string): Promise<{ success: boolean; message: string }>;
   listChannels(): Promise<DesktopChannelView[]>;
+  testChannel(channelId: string): Promise<{ success: boolean; latencyMs?: number; error?: string }>;
   createChannel(input: DesktopChannelInput): Promise<DesktopChannelView>;
   updateChannel(id: string, input: Partial<DesktopChannelInput>): Promise<DesktopChannelView>;
   deleteChannel(id: string): Promise<void>;
@@ -263,7 +269,10 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }) as Promise<void>,
     readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }) as Promise<{ content: string; error?: string }>,
     listSkills: () => ipcRenderer.invoke('desktop:listSkills') as ReturnType<DesktopApi['listSkills']>,
+    installSkill: (skillName) => ipcRenderer.invoke('desktop:installSkill', skillName) as Promise<{ success: boolean; message: string }>,
+    uninstallSkill: (skillName) => ipcRenderer.invoke('desktop:uninstallSkill', skillName) as Promise<{ success: boolean; message: string }>,
     listChannels: () => ipcRenderer.invoke('desktop:listChannels') as Promise<DesktopChannelView[]>,
+    testChannel: (channelId) => ipcRenderer.invoke('desktop:testChannel', channelId) as Promise<{ success: boolean; latencyMs?: number; error?: string }>,
     createChannel: (input) => ipcRenderer.invoke('desktop:createChannel', input) as Promise<DesktopChannelView>,
     updateChannel: (id, input) => ipcRenderer.invoke('desktop:updateChannel', id, input) as Promise<DesktopChannelView>,
     deleteChannel: (id) => ipcRenderer.invoke('desktop:deleteChannel', id) as Promise<void>,

@@ -129,8 +129,26 @@ export function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow, serv
     log('info', 'listSkills', { count: r.length });
     return r;
   });
+  ipcMain.handle('desktop:installSkill', async (_event, skillName) => {
+    log('info', 'installSkill', { skillName });
+    const r = await services.installSkill(skillName);
+    log('info', 'installSkill result', { success: r.success });
+    return r;
+  });
+  ipcMain.handle('desktop:uninstallSkill', async (_event, skillName) => {
+    log('info', 'uninstallSkill', { skillName });
+    const r = await services.uninstallSkill(skillName);
+    log('info', 'uninstallSkill result', { success: r.success });
+    return r;
+  });
   // Channel IPC
   ipcMain.handle('desktop:listChannels', async () => services.listChannels());
+  ipcMain.handle('desktop:testChannel', async (_event, channelId) => {
+    log('info', 'testChannel', { channelId });
+    const r = await services.testChannel(channelId);
+    log('info', 'testChannel result', { success: r.success });
+    return r;
+  });
   ipcMain.handle('desktop:createChannel', async (_event, input) => services.createChannel(input));
   ipcMain.handle('desktop:updateChannel', async (_event, id, input) => services.updateChannel(id, input));
   ipcMain.handle('desktop:deleteChannel', async (_event, id) => services.deleteChannel(id));

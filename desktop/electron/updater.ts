@@ -106,10 +106,27 @@ function sendUpdateStatus(): void {
 }
 
 export function getUpdateStatus(): UpdateStatus {
+  // In development mode, return a special status
+  if (process.env.NODE_ENV === 'development' || !process.resourcesPath) {
+    return {
+      ...updateStatus,
+      error: '开发模式下无法检查更新',
+    };
+  }
   return updateStatus;
 }
 
 export async function checkForUpdates(): Promise<void> {
+  // Skip in development mode - app-update.yml doesn't exist
+  if (process.env.NODE_ENV === 'development' || !process.resourcesPath) {
+    updateStatus = {
+      ...updateStatus,
+      checking: false,
+      error: '开发模式下无法检查更新',
+    };
+    sendUpdateStatus();
+    return;
+  }
   try {
     await autoUpdater.checkForUpdates();
   } catch (e) {

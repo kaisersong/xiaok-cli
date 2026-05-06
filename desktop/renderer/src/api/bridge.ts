@@ -391,6 +391,12 @@ export const api = {
   async deleteChannel(id: string) {
     await window.xiaokDesktop.deleteChannel(id);
   },
+  async testChannel(channelId: string): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
+    if (!window.xiaokDesktop?.testChannel) {
+      return { success: false, error: 'testChannel API not available' };
+    }
+    return await window.xiaokDesktop.testChannel(channelId);
+  },
 
   // ---------------------
   // MCP API (IPC)
@@ -513,6 +519,18 @@ export const api = {
     } catch {
       return [];
     }
+  },
+  async installSkill(skillName: string): Promise<{ success: boolean; message: string }> {
+    if (!window.xiaokDesktop?.installSkill) {
+      return { success: false, message: 'installSkill API not available' };
+    }
+    return await window.xiaokDesktop.installSkill(skillName);
+  },
+  async uninstallSkill(skillName: string): Promise<{ success: boolean; message: string }> {
+    if (!window.xiaokDesktop?.uninstallSkill) {
+      return { success: false, message: 'uninstallSkill API not available' };
+    }
+    return await window.xiaokDesktop.uninstallSkill(skillName);
   },
 
   // ---------------------

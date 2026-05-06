@@ -96,7 +96,7 @@ export function DesktopSettings({ onClose }: Props) {
         <div className="px-8 py-6 max-w-[700px]">
           {activeTab === 'model' && <ModelPane />}
           {activeTab === 'skills' && <SkillsPane />}
-          {activeTab === 'channels' && <ChannelsPane />}
+          {activeTab === 'channels' && <ChannelsPane setSuccess={setSuccess} setError={setError} />}
           {activeTab === 'mcp' && <McpPane />}
           {activeTab === 'general' && <GeneralPane />}
           {activeTab === 'appearance' && <AppearancePane />}
@@ -512,14 +512,21 @@ function SkillsPane() {
   const handleInstall = async () => {
     if (!installName.trim()) return;
     setInstalling(true);
+    setError('');
     try {
-      // Call install skill API (clawhub)
-      // This would require an IPC call to the skill installer
-      alert(`技能安装功能需要在终端执行: clawhub install ${installName}`);
-      setShowInstall(false);
-      setInstallName('');
+      const result = await api.installSkill(installName.trim());
+      if (result.success) {
+        setSuccess(result.message);
+        setShowInstall(false);
+        setInstallName('');
+        // Refresh skill list
+        const updated = await api.listSkills();
+        setSkills(updated);
+      } else {
+        setError(result.message);
+      }
     } catch (e) {
-      alert((e as Error).message);
+      setError((e as Error).message);
     } finally {
       setInstalling(false);
     }
@@ -527,10 +534,22 @@ function SkillsPane() {
 
   const handleUninstall = async (skillName: string) => {
     if (!confirm(`确定卸载技能 "${skillName}"？`)) return;
+    setInstalling(true);
+    setError('');
     try {
-      alert(`技能卸载功能需要在终端执行: clawhub uninstall ${skillName}`);
+      const result = await api.uninstallSkill(skillName);
+      if (result.success) {
+        setSuccess(result.message);
+        // Refresh skill list
+        const updated = await api.listSkills();
+        setSkills(updated);
+      } else {
+        setError(result.message);
+      }
     } catch (e) {
-      alert((e as Error).message);
+      setError((e as Error).message);
+    } finally {
+      setInstalling(false);
     }
   };
 
@@ -548,7 +567,6 @@ function SkillsPane() {
         <SectionHeader icon={Puzzle}>已安装技能 ({skills.length})</SectionHeader>
         <p className="text-xs text-[var(--c-text-secondary)] mb-4">
           技能扩展了 xiaok 的能力，可以通过输入 /技能名 来使用。
-          技能安装/卸载需要通过 clawhub 命令行工具执行。
         </p>
 
         {/* Install button */}
@@ -721,13 +739,14 @@ const CHANNEL_TYPE_CONFIG: Record<string, { label: string; fields: Array<{ key: 
   },
 };
 
-function ChannelsPane() {
+function ChannelsPane({ setSuccess, setError }: { setSuccess: (msg: string) => void; setError: (msg: string) => void }) {
   const [channels, setChannels] = useState<ChannelConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [newType, setNewType] = useState('yunzhijia');
   const [newName, setNewName] = useState('');
   const [newFields, setNewFields] = useState<Record<string, string>>({});
+  const [testingChannel, setTestingChannel] = useState<string | null>(null);
 
   const load = () => {
     api.listChannels()
@@ -883,7 +902,29 @@ function ChannelsPane() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={async () => {
+                        setTestingChannel(ch.id);
+                        try {
+                          const result = await api.testChannel(ch.id);
+                          if (result.success) {
+                            setSuccess(`连接成功，延迟 ${result.latencyMs}ms`);
+                          } else {
+                            setError(result.error || '连接失败');
+                          }
+                        } catch (e) {
+                          setError((e as Error).message);
+                        } finally {
+                          setTestingChannel(null);
+                        }
+                      }}
+                      disabled={testingChannel === ch.id}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors disabled:opacity-50"
+                    >
+                      {testingChannel === ch.id ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                      测试
+                    </button>
                     <button
                       onClick={() => handleToggle(ch)}
                       className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${

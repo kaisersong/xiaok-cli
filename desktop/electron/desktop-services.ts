@@ -109,6 +109,36 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         tier: s.tier,
       }));
     },
+    async installSkill(skillName: string): Promise<{ success: boolean; message: string }> {
+      const result = spawnSync('clawhub', ['install', skillName], {
+        encoding: 'utf-8',
+        timeout: 60000,
+        cwd: process.cwd(),
+      });
+      if (result.error) {
+        return { success: false, message: `执行失败: ${result.error.message}` };
+      }
+      if (result.status !== 0) {
+        const stderr = result.stderr?.trim() || result.stdout?.trim() || '未知错误';
+        return { success: false, message: stderr.slice(0, 500) };
+      }
+      return { success: true, message: `技能 ${skillName} 已安装` };
+    },
+    async uninstallSkill(skillName: string): Promise<{ success: boolean; message: string }> {
+      const result = spawnSync('clawhub', ['uninstall', skillName], {
+        encoding: 'utf-8',
+        timeout: 30000,
+        cwd: process.cwd(),
+      });
+      if (result.error) {
+        return { success: false, message: `执行失败: ${result.error.message}` };
+      }
+      if (result.status !== 0) {
+        const stderr = result.stderr?.trim() || result.stdout?.trim() || '未知错误';
+        return { success: false, message: stderr.slice(0, 500) };
+      }
+      return { success: true, message: `技能 ${skillName} 已卸载` };
+    },
     async createTaskWithFiles(input: {
       prompt: string;
       filePaths: string[];
@@ -269,6 +299,31 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           updatedAt: 0,
         };
       });
+    },
+    async testChannel(channelId: string): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
+      const config = await loadConfig();
+      const channels = (config as unknown as Record<string, unknown>).channels ?? {};
+      const ch = (channels as Record<string, unknown>)[channelId] as { sendMsgUrl?: string; webhookUrl?: string } | undefined;
+      const url = ch?.sendMsgUrl || ch?.webhookUrl;
+      if (!url) {
+        return { success: false, error: '未配置 webhook URL' };
+      }
+      try {
+        const start = Date.now();
+        // Send a test ping message
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ msgtype: 'text', text: { content: 'xiaok 测试连接 ✅' } }),
+        });
+        const latencyMs = Date.now() - start;
+        if (!response.ok) {
+          return { success: false, latencyMs, error: `HTTP ${response.status}` };
+        }
+        return { success: true, latencyMs };
+      } catch (e) {
+        return { success: false, error: (e as Error).message };
+      }
     },
     async createChannel(input: { type: string; name: string; webhookUrl?: string }): Promise<{ id: string; type: string; name: string; webhookUrl?: string; enabled: boolean; createdAt: number; updatedAt: number }> {
       const config = await loadConfig();
