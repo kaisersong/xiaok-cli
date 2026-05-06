@@ -723,6 +723,153 @@ export const api = {
   },
 };
 
+// Skill management functions — bridge between Arkloop-style API and desktop local skill system
+// These are standalone exports (not on `api` object) because SkillsSettingsContent imports them directly.
+
+export interface InstalledSkill {
+  skill_key: string;
+  display_name: string;
+  description?: string;
+  version: string;
+  source: string;
+  is_platform: boolean;
+  platform_status?: string;
+  registry_slug?: string;
+  registry_provider?: string;
+  registry_source_url?: string;
+  registry_detail_url?: string;
+  registry_owner_handle?: string;
+  updated_at?: string;
+  scan_status?: string;
+  scan_has_warnings?: boolean;
+  scan_summary?: string;
+  moderation_verdict?: string;
+}
+
+export interface MarketSkill {
+  skill_key: string;
+  display_name: string;
+  description?: string;
+  version: string;
+  registry_slug?: string;
+  detail_url?: string;
+  repository_url?: string;
+  installed: boolean;
+  enabled_by_default: boolean;
+  scan_status?: string;
+  scan_has_warnings?: boolean;
+  scan_summary?: string;
+  moderation_verdict?: string;
+}
+
+export interface SkillPackageResponse extends InstalledSkill {}
+
+export interface SkillReference {
+  skill_key: string;
+  version: string;
+}
+
+export interface SkillImportCandidate {
+  skill_key: string;
+  display_name: string;
+  description?: string;
+  version: string;
+  source: string;
+}
+
+export interface PlatformSkillItem {
+  skill_key: string;
+  display_name: string;
+  description?: string;
+  version: string;
+  platform_status: string;
+}
+
+export async function listInstalledSkills(_accessToken: string): Promise<InstalledSkill[]> {
+  try {
+    const skills = await api.listSkills();
+    return skills.map((s: { name: string; aliases?: string[]; description?: string; source?: string; tier?: string }) => ({
+      skill_key: s.name,
+      display_name: s.name,
+      description: s.description,
+      version: '1.0.0',
+      source: s.source || 'builtin',
+      is_platform: false,
+      updated_at: new Date().toISOString(),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function listDefaultSkills(_accessToken: string): Promise<InstalledSkill[]> {
+  return [];
+}
+
+export async function listPlatformSkills(_accessToken: string): Promise<PlatformSkillItem[]> {
+  try {
+    const skills = await api.listSkills();
+    return skills
+      .filter((s: { source?: string }) => s.source === 'builtin' || s.source === 'platform')
+      .map((s: { name: string; description?: string }) => ({
+        skill_key: s.name,
+        display_name: s.name,
+        description: s.description,
+        version: '1.0.0',
+        platform_status: 'auto',
+      }));
+  } catch {
+    return [];
+  }
+}
+
+export async function searchMarketSkills(_accessToken: string, _query: string, _officialOnly: boolean): Promise<MarketSkill[]> {
+  return [];
+}
+
+export async function installSkill(_accessToken: string, ref: SkillReference): Promise<{ success: boolean; message: string }> {
+  return api.installSkill(ref.skill_key);
+}
+
+export async function deleteSkill(_accessToken: string, ref: SkillReference): Promise<void> {
+  const result = await api.uninstallSkill(ref.skill_key);
+  if (!result.success) throw new Error(result.message);
+}
+
+export async function importRegistrySkill(_accessToken: string, _input: { slug: string; version?: string; skill_key?: string; detail_url?: string; repository_url?: string }): Promise<SkillPackageResponse> {
+  throw new Error('Marketplace not available in desktop mode');
+}
+
+export async function importSkillFromGitHub(_accessToken: string, _input: { repositoryUrl: string }): Promise<{ candidates: SkillImportCandidate[] }> {
+  throw new Error('GitHub import not available in desktop mode');
+}
+
+export async function importSkillFromUpload(_input: { fileName: string; content: string }): Promise<{ candidates: SkillImportCandidate[] }> {
+  throw new Error('Upload import not available in desktop mode');
+}
+
+export async function replaceDefaultSkills(_accessToken: string, _refs: SkillReference[]): Promise<InstalledSkill[]> {
+  return listInstalledSkills(_accessToken);
+}
+
+export async function setPlatformSkillOverride(_accessToken: string, _skillKey: string, _version: string, _status: string): Promise<void> {
+  // No-op in desktop mode
+}
+
+export type ExternalSkillDir = { path: string; skills: Array<{ name: string; instruction_path: string }> };
+
+export function discoverExternalSkills(_accessToken: string): Promise<{ dirs: ExternalSkillDir[] }> {
+  return Promise.resolve({ dirs: [] });
+}
+
+export function getExternalDirs(_accessToken: string): Promise<string[]> {
+  return Promise.resolve([]);
+}
+
+export function setExternalDirs(_accessToken: string, _dirs: string[]): Promise<string[]> {
+  return Promise.resolve(_dirs);
+}
+
 export function isApiError(error: unknown): boolean {
   if (error instanceof Error) {
     const msg = error.message.toLowerCase();

@@ -118,7 +118,8 @@ export function ChatShell() {
           }
           setResult(r);
           setStatus('completed');
-          if (taskId) {
+          // Only set title if thread has no title yet (preserve user's prompt as title)
+          if (taskId && !thread?.title) {
             api.updateThreadTitle(taskId, r.summary.slice(0, 40)).catch(() => {});
           }
         } else {
@@ -361,8 +362,10 @@ export function ChatShell() {
       if (currentLoadIdRef.current !== thisLoadId) return;
 
       if (t) {
-        // Load ALL tasks' events, not just currentTaskId
-        const allTaskIds = (t.taskIds && t.taskIds.length > 0) ? t.taskIds : (t.currentTaskId ? [t.currentTaskId] : []);
+        // Only replay the latest task (currentTaskId) to avoid cross-thread contamination
+        // where stale taskIds may contain tasks belonging to other threads
+        const allTaskIds = t.currentTaskId ? [t.currentTaskId] : [];
+        console.log(`[ChatShell] Loading thread=${taskId.slice(0,8)} title="${t.title}" currentTaskId=${t.currentTaskId ?? 'none'}`);
         const allMessages: ChatMessage[] = [];
         let lastResult: TaskResult | null = null;
         let lastStatus: 'idle' | 'running' | 'waiting_user' = 'idle';
@@ -375,10 +378,22 @@ export function ChatShell() {
           try {
             const { snapshot } = await api.recoverTask(tid);
             if (snapshot) {
+              console.log(`[ChatShell] Replaying task=${tid} prompt="${snapshot.prompt?.slice(0, 40)}" status=${snapshot.status} events=${snapshot.events?.length}`);
+              // Verify task belongs to this thread: prompt should match thread title
+              // (title is set from user prompt at thread creation)
+              const threadTitle = t.title || '';
+              const taskPrompt = snapshot.prompt || '';
+              const titleMatchesPrompt = threadTitle && (
+                taskPrompt.startsWith(threadTitle) || threadTitle.startsWith(taskPrompt.slice(0, 40))
+              );
+              if (threadTitle && taskPrompt && !titleMatchesPrompt) {
+                console.log(`[ChatShell] Skipping task=${tid} — prompt "${taskPrompt.slice(0, 40)}" doesn't match thread title "${threadTitle}"`);
+                continue;
+              }
               const isFirst = tid === allTaskIds[0];
-              // Add prompt for every task (not just first)
               const addPrompt = snapshot.prompt && (!isFirst || !initialPrompt);
               const { msgs: replayMsgs, result: replayResult, events: replayEvents } = replaySnapshot(snapshot, addPrompt);
+              console.log(`[ChatShell] Replayed task=${tid} → ${replayMsgs.length} msgs, addPrompt=${addPrompt}`);
               allMessages.push(...replayMsgs);
               // Collect events for Canvas panel (merge into ref after all tasks processed)
               allEventsRef.current.push(...replayEvents);
@@ -462,6 +477,11 @@ export function ChatShell() {
     setStreamingText('');
     setResult(null);
     streamRef.current = '';
+
+    // Update thread title to match user's latest prompt
+    if (taskId) {
+      api.updateThreadTitle(taskId, text.slice(0, 40)).catch(() => {});
+    }
 
     try {
       // Cancel any existing active task before creating new one

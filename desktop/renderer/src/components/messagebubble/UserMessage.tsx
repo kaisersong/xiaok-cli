@@ -167,7 +167,7 @@ export function UserMessage({ message, onRetry, onEdit, accessToken, animateEnte
 
   if (editing) {
     return (
-      <div style={{ display: 'flex', justifyContent: isWorkMode ? 'flex-start' : 'flex-end' }}>
+      <div data-role="user" style={{ display: 'flex', justifyContent: isWorkMode ? 'flex-start' : 'flex-end' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%', maxWidth: '663px' }}>
           {fileNames.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: isWorkMode ? 'flex-start' : 'flex-end' }}>
