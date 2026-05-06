@@ -27,7 +27,7 @@ export function ChatShell() {
   const [canvasPreviewContent, setCanvasPreviewContent] = useState<string | undefined>();
   const unsubRef = useRef<(() => void) | null>(null);
   const streamRef = useRef('');
-  const loadingRef = useRef(false);
+  const currentLoadIdRef = useRef<string | null>(null);
   const allEventsRef = useRef<DesktopTaskEvent[]>([]);
   const toolStepsMsgIdRef = useRef<string | null>(null);
   const toolStepsActiveRef = useRef(false);
@@ -39,6 +39,12 @@ export function ChatShell() {
   const handleEvent = useCallback((rawEvent: { type: string }) => {
     const event = rawEvent as DesktopTaskEvent;
     console.log('[ChatShell] event:', event.type);
+
+    // Check if this event belongs to current task (prevent race condition from stale subscriptions)
+    if (currentLoadIdRef.current !== taskId) {
+      console.log('[ChatShell] ignoring stale event for', taskId, 'current is', currentLoadIdRef.current);
+      return;
+    }
 
     // Collect all events for Canvas
     allEventsRef.current = [...allEventsRef.current, event];
@@ -307,7 +313,10 @@ export function ChatShell() {
 
   useEffect(() => {
     if (!taskId) return;
-    if (loadingRef.current) return;
+
+    // Mark this as the current load
+    const thisLoadId = taskId;
+    currentLoadIdRef.current = thisLoadId;
 
     // Cleanup previous subscription
     unsubRef.current?.();
@@ -323,8 +332,6 @@ export function ChatShell() {
     setThread(null);
     setStatus('idle');
 
-    loadingRef.current = true;
-
     // If we have an initialPrompt from WelcomePage, pre-populate
     if (initialPrompt) {
       setMessages([{
@@ -336,14 +343,21 @@ export function ChatShell() {
     }
 
     api.getThread(taskId).then(async (t) => {
-      if (t) {
-        setThread(t);
+      // Check if this is still the current load (prevent race condition)
+      if (currentLoadIdRef.current !== thisLoadId) return;
 
+      if (t) {
         // Load ALL tasks' events, not just currentTaskId
         const allTaskIds = (t.taskIds && t.taskIds.length > 0) ? t.taskIds : (t.currentTaskId ? [t.currentTaskId] : []);
         const allMessages: ChatMessage[] = [];
+        let lastResult: TaskResult | null = null;
+        let lastStatus: 'idle' | 'running' | 'waiting_user' = 'idle';
+        let lastTaskIdForSub: string | null = null;
 
         for (const tid of allTaskIds) {
+          // Check again after each async operation
+          if (currentLoadIdRef.current !== thisLoadId) return;
+
           try {
             const { snapshot } = await api.recoverTask(tid);
             if (snapshot) {
@@ -353,26 +367,38 @@ export function ChatShell() {
               const { msgs: replayMsgs, result: replayResult } = replaySnapshot(snapshot, addPrompt);
               allMessages.push(...replayMsgs);
 
-              // Set result from last completed task so generatedFiles can extract from summary
+              // Collect result from last completed task (don't set yet - defer until after final check)
               if (replayResult && tid === allTaskIds[allTaskIds.length - 1] && snapshot.status === 'completed') {
-                setResult(replayResult);
+                lastResult = replayResult;
               }
 
-              // Check last task status for live subscription
+              // Collect last task status for live subscription
               if (tid === allTaskIds[allTaskIds.length - 1]) {
+                lastTaskIdForSub = tid;
                 if (snapshot.status === 'running' || snapshot.status === 'waiting_user') {
-                  setStatus(snapshot.status);
-                  unsubRef.current = api.subscribeTask(tid, handleEvent);
+                  lastStatus = snapshot.status;
                 } else if (snapshot.status === 'completed') {
-                  setStatus('idle');
+                  lastStatus = 'idle';
                 }
               }
             }
           } catch { /* skip failed task */ }
         }
 
+        // Final check before setting any state
+        if (currentLoadIdRef.current !== thisLoadId) return;
+
+        // Now set all state atomically after final check
+        setThread(t);
         if (allMessages.length > 0) {
           setMessages(allMessages);
+        }
+        if (lastResult) {
+          setResult(lastResult);
+        }
+        setStatus(lastStatus);
+        if (lastTaskIdForSub && (lastStatus === 'running' || lastStatus === 'waiting_user')) {
+          unsubRef.current = api.subscribeTask(lastTaskIdForSub, handleEvent);
         }
       } else {
         setThread({
@@ -389,13 +415,13 @@ export function ChatShell() {
           taskIds: [],
         });
       }
-      loadingRef.current = false;
-    }).catch(() => {
-      loadingRef.current = false;
-    });
+    }).catch(() => {});
 
     return () => {
-      loadingRef.current = false;
+      // Mark that this load is cancelled
+      currentLoadIdRef.current = null;
+      unsubRef.current?.();
+      unsubRef.current = null;
     };
   }, [taskId, initialPrompt, handleEvent, replaySnapshot]);
 

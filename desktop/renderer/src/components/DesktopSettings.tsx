@@ -95,8 +95,8 @@ export function DesktopSettings({ onClose }: Props) {
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         <div className="px-8 py-6 max-w-[700px]">
           {activeTab === 'model' && <ModelPane />}
-          {activeTab === 'skills' && <SkillsPane setSuccess={setSuccess} setError={setError} />}
-          {activeTab === 'channels' && <ChannelsPane setSuccess={setSuccess} setError={setError} />}
+          {activeTab === 'skills' && <SkillsPane />}
+          {activeTab === 'channels' && <ChannelsPane />}
           {activeTab === 'mcp' && <McpPane />}
           {activeTab === 'general' && <GeneralPane />}
           {activeTab === 'appearance' && <AppearancePane />}
@@ -495,12 +495,14 @@ function ModelPane() {
 
 // ---- Skills ----
 
-function SkillsPane({ setSuccess, setError }: { setSuccess: (msg: string) => void; setError: (msg: string) => void }) {
+function SkillsPane() {
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState(false);
   const [installName, setInstallName] = useState('');
   const [showInstall, setShowInstall] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   useEffect(() => {
     api.listSkills()
@@ -565,6 +567,25 @@ function SkillsPane({ setSuccess, setError }: { setSuccess: (msg: string) => voi
     <>
       <Section>
         <SectionHeader icon={Puzzle}>已安装技能 ({skills.length})</SectionHeader>
+        {/* Status messages */}
+        {success && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-600">
+            <Check size={16} />
+            {success}
+            <button onClick={() => setSuccess('')} className="ml-auto text-green-600 hover:text-green-700">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+        {error && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+            <AlertCircle size={16} />
+            {error}
+            <button onClick={() => setError('')} className="ml-auto text-red-600 hover:text-red-700">
+              <X size={14} />
+            </button>
+          </div>
+        )}
         <p className="text-xs text-[var(--c-text-secondary)] mb-4">
           技能扩展了 xiaok 的能力，可以通过输入 /技能名 来使用。
         </p>
@@ -739,7 +760,7 @@ const CHANNEL_TYPE_CONFIG: Record<string, { label: string; fields: Array<{ key: 
   },
 };
 
-function ChannelsPane({ setSuccess, setError }: { setSuccess: (msg: string) => void; setError: (msg: string) => void }) {
+function ChannelsPane() {
   const [channels, setChannels] = useState<ChannelConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -747,6 +768,8 @@ function ChannelsPane({ setSuccess, setError }: { setSuccess: (msg: string) => v
   const [newName, setNewName] = useState('');
   const [newFields, setNewFields] = useState<Record<string, string>>({});
   const [testingChannel, setTestingChannel] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   const load = () => {
     api.listChannels()
@@ -818,6 +841,25 @@ function ChannelsPane({ setSuccess, setError }: { setSuccess: (msg: string) => v
     <>
       <Section>
         <SectionHeader icon={Globe}>消息通道</SectionHeader>
+        {/* Status messages */}
+        {success && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-600">
+            <Check size={16} />
+            {success}
+            <button onClick={() => setSuccess('')} className="ml-auto text-green-600 hover:text-green-700">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+        {error && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+            <AlertCircle size={16} />
+            {error}
+            <button onClick={() => setError('')} className="ml-auto text-red-600 hover:text-red-700">
+              <X size={14} />
+            </button>
+          </div>
+        )}
         <p className="text-xs text-[var(--c-text-secondary)] mb-4">
           配置第三方平台接入，让 xiaok 可以在这些平台上提供服务
         </p>

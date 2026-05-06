@@ -119,7 +119,43 @@ export function compactMessages(
     };
   }
 
-  const compactedMessages = messages.slice(0, -keepRecent);
+  // Find tool_use_ids in the recent messages that need corresponding tool_use messages
+  const recentMessages = messages.slice(-keepRecent);
+  const toolResultIds = new Set<string>();
+
+  for (const msg of recentMessages) {
+    // tool_result blocks are inside user messages (not separate 'tool' role messages)
+    if (msg.role === 'user') {
+      for (const block of msg.content) {
+        if (block.type === 'tool_result') {
+          toolResultIds.add(block.tool_use_id);
+        }
+      }
+    }
+  }
+
+  // Find the earliest assistant message containing these tool_use_ids
+  let additionalKeep = 0;
+  if (toolResultIds.size > 0) {
+    // Scan backwards from the cutoff point to find tool_use messages
+    const cutoffIndex = messages.length - keepRecent;
+    for (let i = cutoffIndex - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === 'assistant') {
+        for (const block of msg.content) {
+          if (block.type === 'tool_use' && toolResultIds.has(block.id)) {
+            // Need to keep from this message onwards
+            additionalKeep = cutoffIndex - i;
+            break;
+          }
+        }
+        if (additionalKeep > 0) break;
+      }
+    }
+  }
+
+  const actualKeepRecent = keepRecent + additionalKeep;
+  const compactedMessages = messages.slice(0, -actualKeepRecent);
   const summary = summarizeMessagesForCompaction(compactedMessages);
 
   return {
@@ -128,7 +164,7 @@ export function compactMessages(
         role: 'user',
         content: [{ type: 'text', text: summary.text || placeholder }],
       },
-      ...messages.slice(-keepRecent),
+      ...messages.slice(-actualKeepRecent),
     ],
     summary,
   };

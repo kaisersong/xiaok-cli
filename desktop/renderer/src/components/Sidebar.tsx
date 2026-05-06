@@ -263,17 +263,19 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
           {/* Thread list */}
           <div className="flex-1 overflow-y-auto px-3 py-1">
             <div className="py-1 text-xs font-medium text-[var(--c-text-secondary)]">
-              历史任务
+              最近
             </div>
             {filteredThreads.length === 0 && (
               <p className="py-3 text-center text-xs text-[var(--c-text-secondary)]">
-                {searchQuery ? '无结果' : '暂无历史任务'}
+                {searchQuery ? '无结果' : '暂无最近任务'}
               </p>
             )}
-            {filteredThreads.map(thread => (
+            {filteredThreads.map(thread => {
+              const isSelected = location.pathname === `/t/${thread.id}`;
+              return (
               <div
                 key={thread.id}
-                className="group flex cursor-pointer items-center rounded-lg px-2 py-1.5 text-sm hover:bg-[var(--c-bg-card)]"
+                className={`group flex cursor-pointer items-center rounded-lg px-2 py-1.5 text-sm hover:bg-[var(--c-bg-card)] ${isSelected ? 'bg-[var(--c-bg-card)] font-semibold' : ''}`}
                 onClick={() => navigate(`/t/${thread.id}`)}
                 onKeyDown={e => { if (e.key === 'Enter') navigate(`/t/${thread.id}`); }}
                 role="button"
@@ -313,7 +315,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                   <X className="size-3" />
                 </button>
               </div>
-            ))}
+            );})}
           </div>
         </>
       )}

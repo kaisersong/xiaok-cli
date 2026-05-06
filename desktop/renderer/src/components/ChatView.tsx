@@ -152,7 +152,7 @@ export function ChatView({
                 {result && (
                   <>
                     <h3 className="mb-2 text-sm font-medium text-[var(--c-text-primary)]">Result</h3>
-                    <p className="text-sm text-[var(--c-text-secondary)]">{result.summary}</p>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} className="text-sm text-[var(--c-text-secondary)]">{result.summary}</ReactMarkdown>
                   </>
                 )}
                 {result?.artifacts && result.artifacts.length > 0 && (

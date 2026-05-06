@@ -10,14 +10,21 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 
 ## Live Demo
 
-**Benchmark Results (v0.5.2):**
+**Benchmark Results (v0.7.0):**
 
-| Metric | xiaok v0.5.2 | Claude Code | Improvement |
+| Metric | xiaok v0.7.0 | Claude Code | Improvement |
 |--------|-------------|-------------|-------------|
 | **Autonomy Score** | 100% | 100% | — |
 | **Simple Q&A Latency** | 3.8s | 7.5s | **-49%** |
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
+
+**What's New in v0.7.0:**
+
+- **Scheduled Tasks**: Create recurring tasks with flexible frequency (hourly, daily, weekly, cron)
+- **Desktop App v0.5.0**: Native macOS app with sidebar, canvas preview, auto-update support
+- **Compact Fix**: `/compact` now correctly preserves tool_use/tool_result pairs
+- **UI Improvements**: "Recent tasks" label, selection highlighting, fixed race condition on task switching
 
 **Typical Use Cases:**
 
