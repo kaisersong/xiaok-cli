@@ -13,19 +13,25 @@ export function WelcomePage() {
     api.listThreads({ limit: 5 }).then(setRecentThreads);
   }, [location.key]);
 
-  const handleSubmit = async (text: string, _files: Array<{ filePath: string; name: string }>) => {
+  const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
     // Always create the thread first so it appears in sidebar regardless of task outcome
     const thread = await api.createThread({ title: text.slice(0, 40) });
 
     try {
-      const { taskId } = await api.createTask({ prompt: text, materials: [] });
+      let taskId: string;
+      if (files && files.length > 0) {
+        const filePaths = files.map(f => f.filePath);
+        const result = await api.createTaskWithFiles({ prompt: text, filePaths });
+        taskId = result.taskId;
+      } else {
+        const result = await api.createTask({ prompt: text, materials: [] });
+        taskId = result.taskId;
+      }
       await api.updateThreadTaskId(thread.id, taskId);
     } catch (e) {
-      // Task creation failed (e.g., active task exists). Thread still exists, user can retry from chat.
       console.error('[WelcomePage] createTask failed:', (e as Error).message);
     }
 
-    // Always navigate so user can see their thread
     navigate(`/t/${thread.id}`, { state: { initialPrompt: text } });
   };
 

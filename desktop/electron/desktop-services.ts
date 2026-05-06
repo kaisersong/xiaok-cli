@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, extname, basename } from 'node:path';
 import { homedir, platform, arch, type } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createAdapter } from '../../src/ai/models.js';
@@ -410,13 +410,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const taskId = `task_${Date.now().toString(36)}`;
       const materials: Array<{ materialId: string; role?: MaterialRole }> = [];
       for (const filePath of input.filePaths) {
-        const record = await materialRegistry.importMaterial({
-          taskId,
-          sourcePath: filePath,
-          role: 'customer_material',
-          roleSource: 'user',
-        });
-        materials.push({ materialId: record.materialId, role: record.role });
+        try {
+          const record = await materialRegistry.importMaterial({
+            taskId,
+            sourcePath: filePath,
+            role: 'customer_material',
+            roleSource: 'user',
+          });
+          materials.push({ materialId: record.materialId, role: record.role });
+        } catch (e) {
+        }
       }
       return host.createTask({ prompt: input.prompt, materials });
     },
@@ -1054,15 +1057,33 @@ function createDesktopModelRunner(): TaskRunner {
       }
     }
 
-    // Build prompt with materials context
+    // Build prompt with materials context - include file contents directly
     let materialsContext = '';
+    let fileContentBlocks: MessageBlock[] = [];
     if (materials && materials.length > 0) {
-      materialsContext = '\n\n## 用户上传的文件\n\n用户上传了以下文件，你需要读取并处理它们：\n';
+      materialsContext = '\n\n## 用户上传的文件\n\n';
       for (const m of materials) {
-        // MaterialRecord contains originalName and workspacePath
-        materialsContext += `- 文件: ${m.originalName}\n  路径: ${m.workspacePath}\n  类型: ${m.mimeType || '未知'}\n`;
+        // Read file content directly and include in message
+        try {
+          const content = readFileSync(m.workspacePath, 'utf-8');
+          const ext = extname(m.workspacePath).toLowerCase();
+
+          // Truncate very large files
+          const maxLen = 50000;
+          const truncated = content.length > maxLen
+            ? content.slice(0, maxLen) + `\n...[截断，原文件 ${content.length} 字符]`
+            : content;
+
+          materialsContext += `- 文件: ${m.originalName} (${ext}, ${content.length} 字符)\n`;
+          fileContentBlocks.push({
+            type: 'text',
+            text: `\n### ${m.originalName}\n\n${truncated}`,
+          });
+        } catch (e) {
+          materialsContext += `- 文件: ${m.originalName} (读取失败)\n`;
+        }
       }
-      materialsContext += '\n请先使用 Read 工具读取这些文件的内容，然后根据内容回答用户的问题。\n';
+      materialsContext += '\n以下是各文件的具体内容：\n';
     }
 
     const config = await loadConfig();
@@ -1088,9 +1109,14 @@ function createDesktopModelRunner(): TaskRunner {
       ? `${effectivePrompt}${materialsContext}`
       : effectivePrompt;
     const allToolDefs = registry.getToolDefinitions();
+    // Include file content blocks directly in user message
+    const userContent: MessageBlock[] = [
+      { type: 'text', text: userText },
+      ...fileContentBlocks,
+    ];
     const messages: Message[] = [...history, {
       role: 'user',
-      content: [{ type: 'text', text: userText }],
+      content: userContent,
     }];
     let reply = '';
     let iteration = 0;
@@ -1205,14 +1231,33 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       }
     }
 
-    // Build prompt with materials context
+    // Build prompt with materials context - include file contents directly
     let materialsContext = '';
+    let fileContentBlocks: MessageBlock[] = [];
     if (materials && materials.length > 0) {
-      materialsContext = '\n\n## 用户上传的文件\n\n用户上传了以下文件，你需要读取并处理它们：\n';
+      materialsContext = '\n\n## 用户上传的文件\n\n';
       for (const m of materials) {
-        materialsContext += `- 文件: ${m.originalName}\n  路径: ${m.workspacePath}\n  类型: ${m.mimeType || '未知'}\n`;
+        // Read file content directly and include in message
+        try {
+          const content = readFileSync(m.workspacePath, 'utf-8');
+          const ext = extname(m.workspacePath).toLowerCase();
+
+          // Truncate very large files
+          const maxLen = 50000;
+          const truncated = content.length > maxLen
+            ? content.slice(0, maxLen) + `\n...[截断，原文件 ${content.length} 字符]`
+            : content;
+
+          materialsContext += `- 文件: ${m.originalName} (${ext}, ${content.length} 字符)\n`;
+          fileContentBlocks.push({
+            type: 'text',
+            text: `\n### ${m.originalName}\n\n${truncated}`,
+          });
+        } catch (e) {
+          materialsContext += `- 文件: ${m.originalName} (读取失败)\n`;
+        }
       }
-      materialsContext += '\n请先使用 Read 工具读取这些文件的内容，然后根据内容回答用户的问题。\n';
+      materialsContext += '\n以下是各文件的具体内容：\n';
     }
 
     const config = await loadConfig();
@@ -1238,9 +1283,14 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       ? `${effectivePrompt}${materialsContext}`
       : effectivePrompt;
     const allToolDefs = registry.getToolDefinitions();
+    // Include file content blocks directly in user message
+    const userContent: MessageBlock[] = [
+      { type: 'text', text: userText },
+      ...fileContentBlocks,
+    ];
     const messages: Message[] = [...history, {
       role: 'user',
-      content: [{ type: 'text', text: userText }],
+      content: userContent,
     }];
     let reply = '';
     let iteration = 0;
