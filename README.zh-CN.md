@@ -194,6 +194,38 @@ xiaok config get models
 
 ---
 
+## 桌面版
+
+xiaok Desktop 是一个原生 macOS 应用，为 xiaok 运行时提供图形界面。它与 CLI 共享同一套后端，但提供侧边栏浏览任务历史、Canvas 预览生成的文件、以及设置管理界面。
+
+### 下载
+
+从 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases) 下载：
+
+- **xiaok-0.5.0-arm64.dmg** — macOS DMG 安装包（Apple Silicon）
+- **xiaok-0.5.0-arm64-mac.zip** — macOS ZIP 包（Apple Silicon）
+
+### 功能特性
+
+- **任务侧边栏**：浏览最近任务，切换时显示选中高亮
+- **Canvas 预览**：自动打开生成的文件（HTML、MD、PDF）在侧边面板
+- **定时任务**：创建周期任务（每小时、每天、每周、cron）
+- **设置界面**：配置模型提供商、技能、消息通道、MCP 服务器
+- **自动更新**：新版本发布时自动通知更新
+
+### 开发构建
+
+本地构建桌面版：
+
+```bash
+cd desktop
+npm install
+npm run build
+npx electron-builder --mac --arm64
+```
+
+---
+
 ## 使用方式
 
 ### 基本命令

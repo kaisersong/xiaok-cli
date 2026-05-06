@@ -194,6 +194,38 @@ xiaok config get models
 
 ---
 
+## Desktop App
+
+xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. It shares the same backend as the CLI, but offers a sidebar for task history, canvas preview for generated files, and settings management.
+
+### Download
+
+Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
+
+- **xiaok-0.5.0-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-0.5.0-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+
+### Features
+
+- **Task Sidebar**: Browse recent tasks, switch between them with selection highlighting
+- **Canvas Preview**: Auto-open generated files (HTML, MD, PDF) in a side panel
+- **Scheduled Tasks**: Create recurring tasks (hourly, daily, weekly, cron)
+- **Settings UI**: Configure model providers, skills, channels, MCP servers
+- **Auto-Update**: Automatic update notifications when new versions are released
+
+### Development
+
+To build the desktop app locally:
+
+```bash
+cd desktop
+npm install
+npm run build
+npx electron-builder --mac --arm64
+```
+
+---
+
 ## Usage
 
 ### Commands
