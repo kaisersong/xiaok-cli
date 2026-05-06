@@ -65,6 +65,10 @@ export class ReminderScheduler {
         const result = await this.options.notifier.deliver(reminder);
         this.options.store.markDeliverySent(attempt.attemptId, this.now(), result.providerMessageId);
         this.options.store.markReminderSent(reminder.reminderId, this.now());
+
+        if (reminder.recurrence) {
+          this.options.store.cloneNextOccurrence(reminder.reminderId, this.now());
+        }
       } catch (error) {
         const message = getReminderErrorMessage(error);
         const retryable = isRetryableReminderError(error);

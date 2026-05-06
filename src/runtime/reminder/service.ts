@@ -28,6 +28,16 @@ export interface CreateStructuredReminderInput {
   scheduleAt: string;
   timezone?: string;
   deliveryTarget?: Record<string, unknown>;
+  taskType?: 'reminder' | 'scheduled_task';
+  recurrence?: {
+    type: 'interval';
+    intervalMs: number;
+    maxOccurrences?: number;
+    occurrenceCount: number;
+  };
+  execution?: {
+    prompt: string;
+  };
 }
 
 export type ReminderCreateResult =
@@ -41,7 +51,9 @@ export interface ReminderApi {
   createFromRequest(input: CreateReminderFromRequestInput): ReminderCreateResult | Promise<ReminderCreateResult>;
   createStructured(input: CreateStructuredReminderInput): ReminderCreateResult | Promise<ReminderCreateResult>;
   listForCreator(sessionId: string, creatorUserId: string): ReminderRecord[] | Promise<ReminderRecord[]>;
+  listTasksForCreator(sessionId: string, creatorUserId: string): ReminderRecord[] | Promise<ReminderRecord[]>;
   cancelForCreator(reminderId: string, creatorUserId: string): ReminderRecord | undefined | Promise<ReminderRecord | undefined>;
+  cancelTaskChain(taskId: string, creatorUserId: string): number | Promise<number>;
   dispose(): Promise<void>;
 }
 
@@ -139,6 +151,9 @@ export class ReminderService {
         channel: 'in_chat',
         deliveryPolicy: 'bound_session',
         deliveryTarget: input.deliveryTarget ?? { targetSessionId: input.sessionId },
+        taskType: input.taskType ?? 'reminder',
+        recurrence: input.recurrence,
+        execution: input.execution,
       }),
     };
   }
@@ -147,8 +162,16 @@ export class ReminderService {
     return this.store.listRemindersForCreator(sessionId, creatorUserId);
   }
 
+  listTasksForCreator(sessionId: string, creatorUserId: string): ReminderRecord[] {
+    return this.store.listTasksForCreator(sessionId, creatorUserId);
+  }
+
   cancelForCreator(reminderId: string, creatorUserId: string): ReminderRecord | undefined {
     return this.store.cancelReminder(reminderId, creatorUserId, this.now());
+  }
+
+  cancelTaskChain(taskId: string, creatorUserId: string): number {
+    return this.store.cancelTaskChain(taskId, creatorUserId, this.now());
   }
 
   async dispose(): Promise<void> {

@@ -8,9 +8,12 @@ import type {
   ReminderDeliveryRecord,
   ReminderRecord,
   ReminderStatus,
+  ReminderTaskType,
+  RecurrenceConfig,
+  TaskExecution,
 } from './types.js';
 
-const REMINDER_SCHEMA_VERSION = 2;
+const REMINDER_SCHEMA_VERSION = 3;
 
 interface ReminderRow {
   reminder_id: string;
@@ -22,6 +25,9 @@ interface ReminderRow {
   channel: string;
   delivery_policy: ReminderDeliveryPolicy;
   delivery_target: string;
+  task_type: string;
+  recurrence: string | null;
+  execution: string | null;
   status: ReminderStatus;
   idempotency_key: string;
   retry_count: number;
@@ -128,8 +134,9 @@ export class SQLiteReminderStore {
     this.db.prepare(`
       INSERT INTO reminders (
         reminder_id, session_id, creator_user_id, content, schedule_at, timezone, channel, delivery_policy, delivery_target,
+        task_type, recurrence, execution,
         status, idempotency_key, retry_count, max_retry, next_attempt_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?)
     `).run(
       reminderId,
       input.sessionId,
@@ -140,6 +147,9 @@ export class SQLiteReminderStore {
       input.channel,
       input.deliveryPolicy ?? 'bound_session',
       JSON.stringify(input.deliveryTarget),
+      input.taskType ?? 'reminder',
+      input.recurrence ? JSON.stringify(input.recurrence) : null,
+      input.execution ? JSON.stringify(input.execution) : null,
       idempotencyKey,
       input.maxRetry ?? 5,
       input.scheduleAt,
@@ -164,6 +174,16 @@ export class SQLiteReminderStore {
     return rows.map(mapReminder);
   }
 
+  listTasksForCreator(sessionId: string, creatorUserId: string, limit = 50): ReminderRecord[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM reminders
+      WHERE session_id = ? AND creator_user_id = ? AND task_type = 'scheduled_task'
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(sessionId, creatorUserId, limit) as ReminderRow[];
+    return rows.map(mapReminder);
+  }
+
   cancelReminder(reminderId: string, creatorUserId: string, now: number): ReminderRecord | undefined {
     const result = this.db.prepare(`
       UPDATE reminders
@@ -176,6 +196,31 @@ export class SQLiteReminderStore {
       return undefined;
     }
     return this.getReminder(reminderId);
+  }
+
+  cancelTaskChain(reminderId: string, creatorUserId: string, now: number): number {
+    const source = this.getReminder(reminderId);
+    if (!source || source.creatorUserId !== creatorUserId) return 0;
+
+    let count = 0;
+    const selfResult = this.db.prepare(`
+      UPDATE reminders
+      SET status = 'cancelled', cancelled_at = ?, updated_at = ?
+      WHERE reminder_id = ? AND status IN ('pending', 'retry_wait')
+    `).run(now, now, reminderId);
+    count += selfResult.changes;
+
+    if (source.recurrence) {
+      const chainResult = this.db.prepare(`
+        UPDATE reminders
+        SET status = 'cancelled', cancelled_at = ?, updated_at = ?
+        WHERE session_id = ? AND creator_user_id = ?
+          AND content = ? AND task_type = 'scheduled_task'
+          AND schedule_at > ? AND status IN ('pending', 'retry_wait')
+      `).run(now, now, source.sessionId, source.creatorUserId, source.content, source.scheduleAt);
+      count += chainResult.changes;
+    }
+    return count;
   }
 
   claimDueReminders(now: number, limit: number): ReminderRecord[] {
@@ -268,6 +313,66 @@ export class SQLiteReminderStore {
     `).run(now, now, reminderId);
   }
 
+  cloneNextOccurrence(reminderId: string, now: number): ReminderRecord | undefined {
+    const source = this.getReminder(reminderId);
+    if (!source?.recurrence) return undefined;
+
+    const rec = source.recurrence;
+    const nextOccurrence = rec.occurrenceCount + 1;
+    if (rec.maxOccurrences && nextOccurrence >= rec.maxOccurrences) return undefined;
+    if (rec.endAt && source.scheduleAt + rec.intervalMs > rec.endAt) return undefined;
+
+    const nextScheduleAt = source.scheduleAt + rec.intervalMs;
+    const cloneId = randomUUID();
+    const idempotencyKey = `reminder:${cloneId}`;
+
+    const newRecurrence: typeof rec = {
+      ...rec,
+      occurrenceCount: nextOccurrence,
+    };
+
+    this.db.prepare(`
+      INSERT INTO reminders (
+        reminder_id, session_id, creator_user_id, content, schedule_at, timezone, channel, delivery_policy, delivery_target,
+        task_type, recurrence, execution,
+        status, idempotency_key, retry_count, max_retry, next_attempt_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?)
+    `).run(
+      cloneId,
+      source.sessionId,
+      source.creatorUserId,
+      source.content,
+      nextScheduleAt,
+      source.timezone,
+      source.channel,
+      source.deliveryPolicy,
+      JSON.stringify(source.deliveryTarget),
+      source.taskType,
+      JSON.stringify(newRecurrence),
+      source.execution ? JSON.stringify(source.execution) : null,
+      idempotencyKey,
+      source.maxRetry,
+      nextScheduleAt,
+      now,
+      now,
+    );
+    return this.getReminder(cloneId)!;
+  }
+
+  updateExecution(reminderId: string, now: number, status: 'success' | 'failed', resultSummary?: string): void {
+    const reminder = this.getReminder(reminderId);
+    if (!reminder?.execution) return;
+    const updated = {
+      ...reminder.execution,
+      lastExecutedAt: now,
+      lastStatus: status,
+      resultSummary: resultSummary ?? reminder.execution.resultSummary,
+    };
+    this.db.prepare(`
+      UPDATE reminders SET execution = ?, updated_at = ? WHERE reminder_id = ?
+    `).run(JSON.stringify(updated), now, reminderId);
+  }
+
   markReminderRetry(reminderId: string, now: number, nextAttemptAt: number, error: string): void {
     this.db.prepare(`
       UPDATE reminders
@@ -335,6 +440,16 @@ export class SQLiteReminderStore {
       `);
     }
 
+    if (!columns.has('task_type')) {
+      this.db.exec(`ALTER TABLE reminders ADD COLUMN task_type TEXT NOT NULL DEFAULT 'reminder'`);
+    }
+    if (!columns.has('recurrence')) {
+      this.db.exec(`ALTER TABLE reminders ADD COLUMN recurrence TEXT`);
+    }
+    if (!columns.has('execution')) {
+      this.db.exec(`ALTER TABLE reminders ADD COLUMN execution TEXT`);
+    }
+
     this.db.prepare(`
       INSERT INTO reminder_meta(key, value)
       VALUES ('schema_version', ?)
@@ -354,6 +469,9 @@ function mapReminder(row: ReminderRow): ReminderRecord {
     channel: row.channel as 'in_chat',
     deliveryPolicy: row.delivery_policy ?? 'bound_session',
     deliveryTarget: JSON.parse(row.delivery_target) as Record<string, unknown>,
+    taskType: (row.task_type as ReminderTaskType) || 'reminder',
+    recurrence: row.recurrence ? JSON.parse(row.recurrence) as RecurrenceConfig : undefined,
+    execution: row.execution ? JSON.parse(row.execution) as TaskExecution : undefined,
     status: row.status,
     idempotencyKey: row.idempotency_key,
     retryCount: row.retry_count,

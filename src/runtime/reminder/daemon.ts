@@ -3,7 +3,7 @@ import { XiaokDaemonHost, type XiaokDaemonRpcContext, type XiaokDaemonService, t
 import { ReminderDaemonRegistry } from './daemon-registry.js';
 import { ReminderDeliveryError, getReminderErrorMessage } from './errors.js';
 import { ReminderService } from './service.js';
-import type { ReminderNotifier, ReminderNotifierResult, ReminderRecord } from './types.js';
+import type { ReminderNotifier, ReminderNotifierResult, ReminderRecord, RecurrenceConfig } from './types.js';
 
 export interface ReminderDaemonServiceOptions {
   now?: () => number;
@@ -31,6 +31,8 @@ class RegistryReminderNotifier implements ReminderNotifier {
       reminderId: reminder.reminderId,
       content: reminder.content,
       createdAt: reminder.createdAt,
+      taskType: reminder.taskType,
+      execution: reminder.execution,
     });
     return {};
   }
@@ -72,8 +74,10 @@ export class ReminderDaemonService implements XiaokDaemonService {
           sessionId: delivery.sessionId,
           reminderId: delivery.reminderId,
           content: delivery.content,
-          message: `提醒：${delivery.content}`,
+          message: delivery.taskType === 'scheduled_task' ? delivery.content : `提醒：${delivery.content}`,
           createdAt: delivery.createdAt,
+          taskType: delivery.taskType,
+          execution: delivery.execution,
         });
       } catch {
         this.registry.unregisterClient(client.clientInstanceId);
@@ -115,16 +119,27 @@ export class ReminderDaemonService implements XiaokDaemonService {
           sessionId: context.client.sessionId,
           creatorUserId: context.client.creatorUserId,
           content: String(context.params.content ?? ''),
-          scheduleAt: String(context.params.scheduleAt ?? ''),
+          scheduleAt: String(context.params.schedule_at ?? ''),
           timezone: typeof context.params.timezone === 'string'
             ? context.params.timezone
             : context.client.defaultTimeZone,
           deliveryTarget: { targetSessionId: context.client.sessionId },
+          taskType: context.params.task_type === 'scheduled_task' ? 'scheduled_task' : 'reminder',
+          recurrence: typeof context.params.recurrence === 'object' && context.params.recurrence !== null
+            ? normalizeRecurrence(context.params.recurrence as Record<string, unknown>)
+            : undefined,
+          execution: typeof context.params.execution_prompt === 'string'
+            ? { prompt: String(context.params.execution_prompt) }
+            : undefined,
         });
       case 'list_for_creator':
         return service.listForCreator(context.client.sessionId, context.client.creatorUserId);
       case 'cancel_for_creator':
         return service.cancelForCreator(String(context.params.reminderId ?? ''), context.client.creatorUserId);
+      case 'list_tasks':
+        return service.listTasksForCreator(context.client.sessionId, context.client.creatorUserId);
+      case 'cancel_task':
+        return { cancelledCount: service.cancelTaskChain(String(context.params.task_id ?? ''), context.client.creatorUserId) };
       case 'status':
         return {
           activeSessions: this.registry.listActiveSessions().length,
@@ -209,4 +224,16 @@ export class ReminderDaemonServer {
 
 export function getReminderDaemonErrorMessage(error: unknown): string {
   return getReminderErrorMessage(error);
+}
+
+function normalizeRecurrence(input: Record<string, unknown>): RecurrenceConfig | undefined {
+  if (input.type !== 'interval') return undefined;
+  const intervalMs = typeof input.interval_ms === 'number' ? input.interval_ms : typeof input.intervalMs === 'number' ? input.intervalMs : 0;
+  if (intervalMs <= 0) return undefined;
+  return {
+    type: 'interval',
+    intervalMs,
+    maxOccurrences: typeof input.max_occurrences === 'number' ? input.max_occurrences : typeof input.maxOccurrences === 'number' ? input.maxOccurrences : undefined,
+    occurrenceCount: 0,
+  };
 }

@@ -5,6 +5,7 @@ import type {
   XiaokDaemonServerMessage,
   XiaokDaemonServiceEventMessage,
 } from '../daemon/protocol.js';
+import type { ReminderTaskType, RecurrenceConfig, TaskExecution } from './types.js';
 export {
   createXiaokDaemonRpcId as createReminderRpcId,
   resolveXiaokDaemonSocketPath,
@@ -19,6 +20,8 @@ export type ReminderRpcMethod =
   | 'create_structured'
   | 'list_for_creator'
   | 'cancel_for_creator'
+  | 'list_tasks'
+  | 'cancel_task'
   | 'status';
 
 export interface ReminderEventPayload {
@@ -27,6 +30,9 @@ export interface ReminderEventPayload {
   content: string;
   message: string;
   createdAt: number;
+  taskType: ReminderTaskType;
+  recurrence?: RecurrenceConfig;
+  execution?: TaskExecution;
 }
 
 export type ReminderClientMessage = XiaokDaemonClientMessage;

@@ -1,4 +1,5 @@
 import { ReminderDeliveryError } from './errors.js';
+import type { TaskExecution, ReminderTaskType } from './types.js';
 
 export interface ReminderDaemonSessionRegistration {
   clientInstanceId: string;
@@ -15,6 +16,8 @@ export interface ReminderDaemonDelivery {
   reminderId: string;
   content: string;
   createdAt: number;
+  taskType: ReminderTaskType;
+  execution?: TaskExecution;
 }
 
 export type ReminderDaemonSink = (

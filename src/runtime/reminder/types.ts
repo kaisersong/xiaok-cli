@@ -1,9 +1,25 @@
 export type ReminderChannel = 'in_chat';
 export type ReminderDeliveryPolicy = 'bound_session';
+export type ReminderTaskType = 'reminder' | 'scheduled_task';
 
 export type ReminderStatus = 'pending' | 'delivering' | 'retry_wait' | 'sent' | 'failed' | 'cancelled';
 
 export type ReminderDeliveryStatus = 'sending' | 'sent' | 'failed';
+
+export interface RecurrenceConfig {
+  type: 'interval';
+  intervalMs: number;
+  maxOccurrences?: number;
+  endAt?: number;
+  occurrenceCount: number;
+}
+
+export interface TaskExecution {
+  prompt: string;
+  resultSummary?: string;
+  lastExecutedAt?: number;
+  lastStatus?: 'success' | 'failed';
+}
 
 export interface ReminderRecord {
   reminderId: string;
@@ -15,6 +31,9 @@ export interface ReminderRecord {
   channel: ReminderChannel;
   deliveryPolicy: ReminderDeliveryPolicy;
   deliveryTarget: Record<string, unknown>;
+  taskType: ReminderTaskType;
+  recurrence?: RecurrenceConfig;
+  execution?: TaskExecution;
   status: ReminderStatus;
   idempotencyKey: string;
   retryCount: number;
@@ -51,6 +70,9 @@ export interface CreateReminderInput {
   deliveryPolicy?: ReminderDeliveryPolicy;
   deliveryTarget: Record<string, unknown>;
   maxRetry?: number;
+  taskType?: ReminderTaskType;
+  recurrence?: RecurrenceConfig;
+  execution?: TaskExecution;
 }
 
 export type ReminderParseResult =

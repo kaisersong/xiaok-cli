@@ -165,4 +165,56 @@ describe('reminder scheduler', () => {
       }
     }
   });
+
+  it('clones next occurrence for recurring tasks after successful delivery', async () => {
+    const root = join(tmpdir(), `xiaok-scheduler-recur-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const dbPath = join(root, 'reminders.sqlite');
+    let store: SQLiteReminderStore | undefined;
+
+    try {
+      store = new SQLiteReminderStore(dbPath);
+      const task = store.createReminder({
+        sessionId: 'sess_1',
+        creatorUserId: 'user_1',
+        content: '定时检查',
+        scheduleAt: 1_000,
+        timezone: 'Asia/Shanghai',
+        channel: 'in_chat',
+        deliveryTarget: { targetSessionId: 'sess_1' },
+        taskType: 'scheduled_task',
+        recurrence: {
+          type: 'interval',
+          intervalMs: 60_000,
+          maxOccurrences: 5,
+          occurrenceCount: 0,
+        },
+      });
+      const scheduler = new ReminderScheduler({
+        store,
+        now: () => 2_000,
+        notifier: {
+          async deliver() {
+            return {};
+          },
+        },
+      });
+
+      await scheduler.runOnce();
+
+      expect(store.getReminder(task.reminderId)?.status).toBe('sent');
+
+      const allTasks = store.listTasksForCreator('sess_1', 'user_1');
+      const clone = allTasks.find((t) => t.status === 'pending');
+      expect(clone).toBeDefined();
+      expect(clone?.scheduleAt).toBe(1_000 + 60_000);
+      expect(clone?.recurrence?.occurrenceCount).toBe(1);
+      expect(clone?.status).toBe('pending');
+    } finally {
+      store?.dispose();
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch {}
+    }
+  });
 });

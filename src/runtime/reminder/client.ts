@@ -99,8 +99,11 @@ export class ReminderClientService implements ReminderApi {
   async createStructured(input: CreateStructuredReminderInput): Promise<ReminderCreateResult> {
     return this.callRpc('create_structured', {
       content: input.content,
-      scheduleAt: input.scheduleAt,
+      schedule_at: input.scheduleAt,
       timezone: input.timezone,
+      task_type: input.taskType,
+      recurrence: input.recurrence,
+      execution_prompt: input.execution?.prompt,
     }) as Promise<ReminderCreateResult>;
   }
 
@@ -108,8 +111,17 @@ export class ReminderClientService implements ReminderApi {
     return this.callRpc('list_for_creator', {}) as Promise<ReminderRecord[]>;
   }
 
+  async listTasksForCreator(_sessionId: string, _creatorUserId: string): Promise<ReminderRecord[]> {
+    return this.callRpc('list_tasks', {}) as Promise<ReminderRecord[]>;
+  }
+
   async cancelForCreator(reminderId: string, _creatorUserId: string): Promise<ReminderRecord | undefined> {
     return this.callRpc('cancel_for_creator', { reminderId }) as Promise<ReminderRecord | undefined>;
+  }
+
+  async cancelTaskChain(taskId: string, _creatorUserId: string): Promise<number> {
+    const result = await this.callRpc('cancel_task', { task_id: taskId }) as { cancelledCount: number };
+    return result.cancelledCount ?? 0;
   }
 
   async dispose(): Promise<void> {
@@ -314,6 +326,9 @@ export class ReminderClientService implements ReminderApi {
       channel: 'in_chat',
       deliveryPolicy: 'bound_session',
       deliveryTarget: { targetSessionId: event.payload.sessionId },
+      taskType: event.payload.taskType ?? 'reminder',
+      recurrence: event.payload.recurrence,
+      execution: event.payload.execution,
       status: 'sent',
       idempotencyKey: `reminder:${event.payload.reminderId}`,
       retryCount: 0,
