@@ -1120,7 +1120,7 @@ xiaok 支持从 ClawHub 安装技能。当用户说"安装XX技能"时：
 
 const BASE_SYSTEM_PROMPT = buildSystemPrompt();
 
-function createDesktopModelRunner(): TaskRunner {
+function createDesktopModelRunner(dataRoot: string): TaskRunner {
   const history: Message[] = [];
   const cwd = process.cwd();
   let skillCatalog = createSkillCatalog(undefined, cwd);
@@ -1149,7 +1149,6 @@ function createDesktopModelRunner(): TaskRunner {
     let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
-    const dataRoot = options.dataRoot;
     if (!skillsLoaded) {
       try {
         const skills = await skillCatalog.reload();
