@@ -1,7 +1,6 @@
-import React, { useMemo, useContext } from 'react'
+import React, { useMemo } from 'react'
 import { PatchDiff } from '@pierre/diffs/react'
 import type { FileDiffOptions } from '@pierre/diffs/react'
-import { AppearanceContext } from '../contexts/AppearanceContext'
 
 const MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace'
 
@@ -17,6 +16,29 @@ interface DiffViewProps {
 
 const MAX_DIFF_BYTES = 50000
 const MAX_DIFF_LINES = 500
+
+/** Extract the unified diff portion from a mixed string (diff + trailing message) */
+function extractDiffPatch(text: string): string {
+  const startIdx = text.indexOf('diff --git')
+  if (startIdx === -1) return text
+  const fromDiff = text.substring(startIdx)
+  // Find the last line that looks like diff content
+  const lines = fromDiff.split('\n')
+  let lastDiffLine = lines.length - 1
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]
+    if (line === '') continue
+    if (line.startsWith('diff --git') || line.startsWith('---') || line.startsWith('+++') ||
+        line.startsWith('@@') || line.startsWith('-') || line.startsWith('+') || line.startsWith(' ')) {
+      lastDiffLine = i
+      break
+    }
+    // Non-diff content — truncate here
+    lastDiffLine = i - 1
+    break
+  }
+  return lines.slice(0, lastDiffLine + 1).join('\n')
+}
 
 function isValidPatch(text: string): boolean {
   if (!text.includes('diff --git')) return false
@@ -45,19 +67,17 @@ export function DiffView({
   hideHeader = true,
   fallbackText,
 }: DiffViewProps) {
-  const appearance = useContext(AppearanceContext)
-  const isDark =
-    appearance?.theme === 'dark' ||
-    (appearance?.theme === 'system' &&
-      typeof window !== 'undefined' &&
-      window.matchMedia?.('(prefers-color-scheme: dark)').matches)
+  const isDark = typeof window !== 'undefined' &&
+    window.matchMedia?.('(prefers-color-scheme: dark)').matches
 
   const analysis = useMemo(() => {
-    if (!diff || !isValidPatch(diff)) return { valid: false, fileCount: 0 }
-    const bytes = new Blob([diff]).size
-    const lines = diff.split('\n').length
-    if (bytes > MAX_DIFF_BYTES || lines > MAX_DIFF_LINES) return { valid: false, fileCount: 0 }
-    return { valid: true, fileCount: countFileDiffs(diff) }
+    if (!diff) return { valid: false, fileCount: 0, patch: '' }
+    const patch = extractDiffPatch(diff)
+    if (!isValidPatch(patch)) return { valid: false, fileCount: 0, patch }
+    const bytes = new Blob([patch]).size
+    const lines = patch.split('\n').length
+    if (bytes > MAX_DIFF_BYTES || lines > MAX_DIFF_LINES) return { valid: false, fileCount: 0, patch }
+    return { valid: true, fileCount: countFileDiffs(patch), patch }
   }, [diff])
 
   if (!analysis.valid) {
@@ -92,7 +112,7 @@ export function DiffView({
 
   // Multi-file: render first file with PatchDiff, note additional files
   if (analysis.fileCount > 1) {
-    const firstFile = extractFirstFile(diff)
+    const firstFile = extractFirstFile(analysis.patch)
     return (
       <div>
         <PatchDiff patch={firstFile} options={options} style={style} />
@@ -103,5 +123,5 @@ export function DiffView({
     )
   }
 
-  return <PatchDiff patch={diff} options={options} style={style} />
+  return <PatchDiff patch={analysis.patch} options={options} style={style} />
 }

@@ -52,3 +52,4 @@ __pycache__/
 /*.eval.json
 /source.md
 /generate_*.py
+docs/skill-observability-design.md

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { ToolStep } from './ChatView';
+import { DiffView } from './DiffView';
 
 interface Props {
   steps: ToolStep[];
@@ -97,19 +98,30 @@ function StepRow({
           </span>
         )}
       </button>
-      {expanded && hasResponse && (
-        <div
-          className="mt-0.5 mb-1 ml-5 rounded font-mono text-xs whitespace-pre-wrap break-all overflow-y-auto"
-          style={{
-            background: 'var(--c-bg-deep)',
-            padding: '6px 10px',
-            color: 'var(--c-text-secondary)',
-            maxHeight: 160,
-          }}
-        >
-          {step.response}
-        </div>
-      )}
+      {expanded && hasResponse && (() => {
+        const isEdit = step.toolName === 'edit' || step.toolName === 'Edit' || step.toolName === 'edit_file'
+        const isDiff = isEdit && step.response?.includes('diff --git')
+        if (isDiff) {
+          return (
+            <div className="mt-0.5 mb-1 ml-5 rounded overflow-y-auto" style={{ background: 'var(--c-bg-deep)', maxHeight: 300 }}>
+              <DiffView diff={step.response} maxHeight={300} fallbackText={step.response} />
+            </div>
+          )
+        }
+        return (
+          <div
+            className="mt-0.5 mb-1 ml-5 rounded font-mono text-xs whitespace-pre-wrap break-all overflow-y-auto"
+            style={{
+              background: 'var(--c-bg-deep)',
+              padding: '6px 10px',
+              color: 'var(--c-text-secondary)',
+              maxHeight: 160,
+            }}
+          >
+            {step.response}
+          </div>
+        )
+      })()}
     </div>
   );
 }

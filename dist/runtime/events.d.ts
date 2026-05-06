@@ -48,6 +48,7 @@ export type RuntimeEvent = {
     label: string;
     kind: string;
     path?: string;
+    creator?: string;
 } | {
     type: 'breadcrumb_emitted';
     sessionId: string;
