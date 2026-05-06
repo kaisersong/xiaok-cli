@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react'
 import { PatchDiff } from '@pierre/diffs/react'
+// @ts-expect-error FileDiffOptions is exported from @pierre/diffs internal but not react
 import type { FileDiffOptions } from '@pierre/diffs/react'
 
 const MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace'
@@ -98,7 +99,7 @@ export function DiffView({
     return null
   }
 
-  const options: FileDiffOptions<undefined> = {
+  const options: any = {
     diffStyle: layout,
     diffIndicators: 'classic',
     disableLineNumbers: !enableLineNumbers,

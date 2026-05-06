@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { ToolStep } from './ChatView';
 import { DiffView } from './DiffView';
+import { ChangedFilesTree } from './ChangedFilesTree';
 
 interface Props {
   steps: ToolStep[];
@@ -104,7 +105,7 @@ function StepRow({
         if (isDiff) {
           return (
             <div className="mt-0.5 mb-1 ml-5 rounded overflow-y-auto" style={{ background: 'var(--c-bg-deep)', maxHeight: 300 }}>
-              <DiffView diff={step.response} maxHeight={300} fallbackText={step.response} />
+              <DiffView diff={step.response!} maxHeight={300} fallbackText={step.response!} />
             </div>
           )
         }
@@ -174,10 +175,24 @@ export function ToolStepsMessage({ steps, live }: Props) {
       <div
         style={{
           overflow: 'hidden',
-          maxHeight: expanded ? `${steps.length * 120 + 20}px` : '0px',
+          maxHeight: expanded ? `${steps.length * 120 + 240}px` : '0px',
           transition: 'max-height 0.2s ease',
         }}
       >
+        {!live && (
+          <ChangedFilesTree
+            steps={steps}
+            onFileSelect={(filePath) => {
+              const matchingStep = steps.find(
+                (s) => {
+                  const fp = s.input && typeof s.input === 'object' ? (s.input as Record<string, unknown>).file_path : null
+                  return typeof fp === 'string' && fp.endsWith(filePath.split('/').pop() || '')
+                }
+              )
+              if (matchingStep) toggleStep(matchingStep.toolUseId)
+            }}
+          />
+        )}
         <div
           className="mt-1.5 space-y-0.5 pl-3"
           style={{ borderLeft: '1.5px solid var(--c-border, #e0e0e0)' }}
