@@ -1,7 +1,6 @@
-// electron-updater is a CommonJS module, use default import
-import pkg from 'electron-updater';
-const { autoUpdater } = pkg;
 import type { BrowserWindow } from 'electron';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 export interface UpdateStatus {
   checking: boolean;
@@ -22,23 +21,59 @@ let updateStatus: UpdateStatus = {
 };
 
 let mainWindow: BrowserWindow | null = null;
+let isDevMode = false;
+let autoUpdater: any = null;
 
-export function setupAutoUpdater(window: BrowserWindow): void {
+function isDevelopmentMode(): boolean {
+  // Check multiple indicators for development mode
+  if (process.env.NODE_ENV === 'development') return true;
+  if (process.env.XIAOK_DESKTOP_DEV_SERVER) return true;
+  // Check if app-update.yml exists in resources
+  if (process.resourcesPath) {
+    const updateYml = join(process.resourcesPath, 'app-update.yml');
+    if (!existsSync(updateYml)) return true;
+  } else {
+    // No resourcesPath means development mode
+    return true;
+  }
+  return false;
+}
+
+async function loadAutoUpdater(): Promise<void> {
+  if (autoUpdater) return;
+  try {
+    const pkg = await import('electron-updater');
+    autoUpdater = pkg.autoUpdater;
+  } catch (e) {
+    updateStatus.error = `无法加载更新器: ${(e as Error).message}`;
+  }
+}
+
+export async function setupAutoUpdater(window: BrowserWindow): Promise<void> {
   mainWindow = window;
+  isDevMode = isDevelopmentMode();
+
+  // Skip in development mode
+  if (isDevMode) {
+    updateStatus.error = '开发模式下无法检查更新';
+    return;
+  }
+
+  // Load autoUpdater dynamically
+  await loadAutoUpdater();
+  if (!autoUpdater) return;
 
   // Configure autoUpdater
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = false;
 
-  // Check for updates immediately on startup (production only)
-  if (process.env.NODE_ENV !== 'development') {
-    autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-  }
+  // Check for updates immediately on startup
+  autoUpdater.checkForUpdatesAndNotify().catch(() => {});
 
   // Also check periodically (every 4 hours)
   setInterval(() => {
-    if (process.env.NODE_ENV !== 'development') {
+    if (autoUpdater) {
       autoUpdater.checkForUpdates().catch(() => {});
     }
   }, 4 * 60 * 60 * 1000);
@@ -49,7 +84,7 @@ export function setupAutoUpdater(window: BrowserWindow): void {
     sendUpdateStatus();
   });
 
-  autoUpdater.on('update-available', (info) => {
+  autoUpdater.on('update-available', (info: { version: string }) => {
     updateStatus = {
       ...updateStatus,
       checking: false,
@@ -68,7 +103,7 @@ export function setupAutoUpdater(window: BrowserWindow): void {
     sendUpdateStatus();
   });
 
-  autoUpdater.on('download-progress', (progress) => {
+  autoUpdater.on('download-progress', (progress: { percent: number }) => {
     updateStatus = {
       ...updateStatus,
       downloading: true,
@@ -77,7 +112,7 @@ export function setupAutoUpdater(window: BrowserWindow): void {
     sendUpdateStatus();
   });
 
-  autoUpdater.on('update-downloaded', (info) => {
+  autoUpdater.on('update-downloaded', (info: { version: string }) => {
     updateStatus = {
       ...updateStatus,
       downloading: false,
@@ -88,7 +123,7 @@ export function setupAutoUpdater(window: BrowserWindow): void {
     sendUpdateStatus();
   });
 
-  autoUpdater.on('error', (error) => {
+  autoUpdater.on('error', (error: Error) => {
     updateStatus = {
       ...updateStatus,
       checking: false,
@@ -106,10 +141,14 @@ function sendUpdateStatus(): void {
 }
 
 export function getUpdateStatus(): UpdateStatus {
-  // In development mode, return a special status
-  if (process.env.NODE_ENV === 'development' || !process.resourcesPath) {
+  // In development mode, return a special status without touching autoUpdater
+  if (isDevMode || isDevelopmentMode()) {
     return {
-      ...updateStatus,
+      checking: false,
+      available: false,
+      downloading: false,
+      downloaded: false,
+      progress: 0,
       error: '开发模式下无法检查更新',
     };
   }
@@ -118,7 +157,7 @@ export function getUpdateStatus(): UpdateStatus {
 
 export async function checkForUpdates(): Promise<void> {
   // Skip in development mode - app-update.yml doesn't exist
-  if (process.env.NODE_ENV === 'development' || !process.resourcesPath) {
+  if (isDevMode || isDevelopmentMode()) {
     updateStatus = {
       ...updateStatus,
       checking: false,
@@ -127,6 +166,10 @@ export async function checkForUpdates(): Promise<void> {
     sendUpdateStatus();
     return;
   }
+
+  await loadAutoUpdater();
+  if (!autoUpdater) return;
+
   try {
     await autoUpdater.checkForUpdates();
   } catch (e) {
@@ -136,5 +179,7 @@ export async function checkForUpdates(): Promise<void> {
 }
 
 export function quitAndInstall(): void {
-  autoUpdater.quitAndInstall();
+  if (autoUpdater) {
+    autoUpdater.quitAndInstall();
+  }
 }

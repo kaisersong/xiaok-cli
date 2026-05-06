@@ -95,7 +95,7 @@ export function DesktopSettings({ onClose }: Props) {
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         <div className="px-8 py-6 max-w-[700px]">
           {activeTab === 'model' && <ModelPane />}
-          {activeTab === 'skills' && <SkillsPane />}
+          {activeTab === 'skills' && <SkillsPane setSuccess={setSuccess} setError={setError} />}
           {activeTab === 'channels' && <ChannelsPane setSuccess={setSuccess} setError={setError} />}
           {activeTab === 'mcp' && <McpPane />}
           {activeTab === 'general' && <GeneralPane />}
@@ -495,7 +495,7 @@ function ModelPane() {
 
 // ---- Skills ----
 
-function SkillsPane() {
+function SkillsPane({ setSuccess, setError }: { setSuccess: (msg: string) => void; setError: (msg: string) => void }) {
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState(false);

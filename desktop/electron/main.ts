@@ -25,9 +25,27 @@ async function createWindow(): Promise<BrowserWindow> {
   registerDesktopIpc(ipcMain, window, services);
 
   // Register update IPC handlers
-  ipcMain.handle('desktop:getUpdateStatus', () => getUpdateStatus());
-  ipcMain.handle('desktop:checkForUpdates', async () => { await checkForUpdates(); });
-  ipcMain.handle('desktop:quitAndInstall', () => quitAndInstall());
+  ipcMain.handle('desktop:getUpdateStatus', () => {
+    try {
+      return getUpdateStatus();
+    } catch (e) {
+      return { checking: false, available: false, downloading: false, downloaded: false, progress: 0, error: (e as Error).message };
+    }
+  });
+  ipcMain.handle('desktop:checkForUpdates', async () => {
+    try {
+      await checkForUpdates();
+    } catch (e) {
+      // Error already handled in checkForUpdates
+    }
+  });
+  ipcMain.handle('desktop:quitAndInstall', () => {
+    try {
+      quitAndInstall();
+    } catch (e) {
+      // Ignore
+    }
+  });
 
   // Initialize reminder scheduler
   const reminderDataDir = join(app.getPath('home'), '.xiaok', 'desktop');
@@ -57,7 +75,7 @@ async function createWindow(): Promise<BrowserWindow> {
 
   // Setup auto-updater (production only)
   if (process.env.NODE_ENV !== 'development' && !process.env.XIAOK_DESKTOP_DEV_SERVER) {
-    setupAutoUpdater(window);
+    setupAutoUpdater(window).catch(() => {});
   }
 
   window.on('closed', () => {
