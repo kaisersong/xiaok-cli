@@ -170,11 +170,22 @@ export function ChatView({
                     ))}
                   </div>
                 )}
-                {generatedFiles.length > 0 && (
-                  <div className={result ? 'mt-3' : ''}>
-                    {!result && <h3 className="mb-2 text-sm font-medium text-[var(--c-text-primary)]">生成物</h3>}
+                {((result?.artifacts && result.artifacts.length > 0) || generatedFiles.length > 0) && (
+                  <div className={result && !(result?.artifacts && result.artifacts.length > 0) && generatedFiles.length > 0 ? 'mt-3' : ''}>
                     <div className="space-y-1" data-testid="generated-files-list">
-                      {generatedFiles.map(f => (
+                      {result?.artifacts && result.artifacts.map(a => (
+                        <button
+                          key={a.artifactId}
+                          type="button"
+                          onClick={() => onArtifactClick?.({ artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath })}
+                          className="flex items-center gap-1.5 text-sm text-[var(--c-accent)] hover:underline cursor-pointer"
+                          data-testid={`generated-file-${a.title}`}
+                        >
+                          <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="currentColor"><path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zm5 0v4h4M7 9h4M7 12h4M5 9h1M5 12h1"/></svg>
+                          {a.title}
+                        </button>
+                      ))}
+                      {(!result?.artifacts || result.artifacts.length === 0) && generatedFiles.map(f => (
                         <button
                           key={f.filePath}
                           type="button"

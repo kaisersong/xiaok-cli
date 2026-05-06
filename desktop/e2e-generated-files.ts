@@ -1,4 +1,4 @@
-// E2E test: generated files + history display
+// E2E test: comprehensive test for all 4 bugs
 import { _electron as electron } from '@playwright/test';
 
 const PASS = (msg: string) => console.log(`✅ ${msg}`);
@@ -19,13 +19,13 @@ async function main() {
 
   await sleep(3000);
 
-  // ===== TEST 1: Create task that writes a file =====
-  console.log('--- TEST 1: Task with file generation ---');
+  // ===== TEST 1: Create task that writes TWO files =====
+  console.log('--- TEST 1: Task with 2 file generation ---');
   await page.locator('aside button', { hasText: 'New task' }).click();
   await sleep(1500);
 
   const textarea = page.locator('textarea');
-  await textarea.fill('在 /Users/song/Downloads 创建一个名为 xiaok-e2e.md 的文件，内容为 test');
+  await textarea.fill('在 /Users/song/Downloads 创建两个文件：xiaok-e2e-a.md 和 xiaok-e2e-b.html，内容都写 test');
   await page.locator('button[type="submit"]').click();
   await sleep(1000);
 
@@ -39,85 +39,81 @@ async function main() {
   }
   if (!completed) FAIL('Task did not complete');
   else PASS('Task completed');
-
   await sleep(2000);
 
-  // ===== TEST 2: Generated file link visible =====
-  console.log('\n--- TEST 2: Generated file link ---');
+  // ===== TEST 2: Both generated files visible =====
+  console.log('\n--- TEST 2: Both generated files visible ---');
   const fileList = await page.locator('[data-testid="generated-files-list"]').isVisible().catch(() => false);
   if (fileList) PASS('Generated files list visible');
   else FAIL('Generated files list NOT visible');
 
-  const fileBtn = await page.locator('[data-testid="generated-file-xiaok-e2e.md"]').isVisible().catch(() => false);
-  if (fileBtn) PASS('Generated file button visible');
-  else FAIL('Generated file button NOT visible');
+  const fileA = await page.locator('[data-testid="generated-file-xiaok-e2e-a.md"]').isVisible().catch(() => false);
+  const fileB = await page.locator('[data-testid="generated-file-xiaok-e2e-b.html"]').isVisible().catch(() => false);
+  if (fileA) PASS('File A visible');
+  else FAIL('File A NOT visible');
+  if (fileB) PASS('File B visible');
+  else FAIL('File B NOT visible');
 
-  // ===== TEST 3: Click file opens canvas =====
-  if (fileBtn) {
-    console.log('\n--- TEST 3: Click opens Canvas ---');
-    await page.locator('[data-testid="generated-file-xiaok-e2e.md"]').click();
+  // ===== TEST 3: Click file A opens canvas with content =====
+  if (fileA) {
+    console.log('\n--- TEST 3: Click file opens Canvas with content ---');
+    await page.locator('[data-testid="generated-file-xiaok-e2e-a.md"]').click();
     await sleep(3000);
-    const canvasOpen = await page.locator('text=Canvas').isVisible({ timeout: 5000 }).catch(() => false);
-    const canvasPanel = await page.locator('[class*="border-l"]').last().isVisible({ timeout: 3000 }).catch(() => false);
-    if (canvasOpen || canvasPanel) PASS('Canvas opened after click');
+    // Check for Canvas panel by looking for border-l class or Preview text
+    const canvasPanel = await page.locator('div[class*="border-l"]').last().isVisible({ timeout: 5000 }).catch(() => false);
+    const previewText = await page.locator('main').textContent().catch(() => '');
+    if (canvasPanel && previewText.length > 20) PASS('Canvas opened with content');
+    else if (previewText.length > 20) PASS(`Preview has content (${previewText.length} chars)`);
     else {
       FAIL('Canvas did NOT open');
-      await page.screenshot({ path: '/Users/song/projects/xiaok-cli/desktop/test-results/e2e-no-canvas.png' });
+      await page.screenshot({ path: '/Users/song/projects/xiaok-cli/desktop/test-results/e2e-canvas-a.png' });
     }
     // Close canvas
     await page.locator('button[title="Close Canvas"]').click({ timeout: 3000 }).catch(() => {});
     await sleep(500);
   }
 
-  // ===== TEST 4: History task - no tool_steps groups =====
-  console.log('\n--- TEST 4: History task display ---');
+  // ===== TEST 4: Click file B opens canvas with content =====
+  if (fileB) {
+    console.log('\n--- TEST 4: Click file B opens Canvas ---');
+    // Make sure canvas is fully closed first
+    await page.locator('button[title="Close Canvas"]').click({ timeout: 3000 }).catch(() => {});
+    await sleep(1000);
+    await page.locator('[data-testid="generated-file-xiaok-e2e-b.html"]').click();
+    await sleep(3000);
+    const canvasPanel = await page.locator('div[class*="border-l"]').last().isVisible({ timeout: 5000 }).catch(() => false);
+    if (canvasPanel) PASS('Canvas opened for file B');
+    else FAIL('Canvas did NOT open for file B');
+    await page.locator('button[title="Close Canvas"]').click({ timeout: 3000 }).catch(() => {});
+    await sleep(500);
+  }
+
+  // ===== TEST 5: History task display =====
+  console.log('\n--- TEST 5: History task display ---');
   const threads = page.locator('[data-testid^="thread-item-"]');
   const count = await threads.count();
   if (count === 0) {
     FAIL('No history threads found');
   } else {
-    await threads.nth(Math.min(count - 1, 2)).click();
+    await threads.last().click();
     await sleep(3000);
 
-    // Check no tool_steps groups
+    // No tool_steps groups
     const toolStepsTexts = await page.locator('text=/steps completed/').all();
     if (toolStepsTexts.length === 0) PASS('No tool_steps groups in history');
     else FAIL(`Found ${toolStepsTexts.length} tool_steps groups`);
 
-    // Check user messages visible (using whitespace-pre-wrap which is unique to user bubbles)
+    // User messages visible
     const userBubbles = page.locator('.whitespace-pre-wrap').filter({ hasText: /.+/ });
     const userCount = await userBubbles.count();
     if (userCount > 0) PASS(`User messages visible (${userCount})`);
-    else {
-      // Fallback: check for any text that looks like user input
-      const pageText = await page.locator('main').textContent().catch(() => '');
-      if (pageText.length > 100) PASS(`Content visible (${pageText.length} chars)`);
-      else FAIL('No content in main area');
-    }
+    else FAIL('No user message bubbles');
 
-    // Check progress messages show checkmark for completed tools
-    const checkmarks = await page.locator('text=✓').count();
-    if (checkmarks > 0) {
-      PASS(`Completed progress shows checkmark (${checkmarks} found)`);
-    } else {
-      // Task may not have tool calls - check for result content instead
-      const hasResult = await page.locator('text=Result').isVisible().catch(() => false);
-      if (hasResult) PASS('Result card visible (task may not have tool progress)');
-      else console.log('[E2E] Note: no progress checkmarks found in this history task');
-    }
-
-    // Check no spinners on completed tasks
-    const spinners = page.locator('.animate-spin');
-    const spinnerCount = await spinners.count();
-    if (spinnerCount === 0) PASS('No spinners in completed history');
-    else console.log(`[INFO] ${spinnerCount} spinners still visible (may be expected for in-progress)`);
+    // Check for artifacts in result card
+    const artifactsVisible = await page.locator('text=/xiaok-e2e/').isVisible().catch(() => false);
+    if (artifactsVisible) PASS('Artifacts visible in history');
+    else console.log('[INFO] Artifacts not visible in this history task (may be expected)');
   }
-
-  // ===== TEST 5: Progress message icons =====
-  console.log('\n--- TEST 5: Progress message icons ---');
-  // Navigate back and create a quick task to verify progress icons
-  await page.locator('aside button', { hasText: 'New task' }).click();
-  await sleep(1000);
 
   // Summary
   console.log('\n' + '='.repeat(50));

@@ -716,12 +716,15 @@ function createDesktopModelRunner(): TaskRunner {
     }
 
     const systemPrompt = skillsContext
-      ? `${BASE_SYSTEM_PROMPT}\n\nAvailable skills:\n${skillsContext}${materialsContext}`
-      : `${BASE_SYSTEM_PROMPT}${materialsContext}`;
+      ? `${BASE_SYSTEM_PROMPT}\n\nAvailable skills:\n${skillsContext}`
+      : BASE_SYSTEM_PROMPT;
+    const userText = materialsContext
+      ? `${effectivePrompt}${materialsContext}`
+      : effectivePrompt;
     const allToolDefs = registry.getToolDefinitions();
     const messages: Message[] = [...history, {
       role: 'user',
-      content: [{ type: 'text', text: effectivePrompt }],
+      content: [{ type: 'text', text: userText }],
     }];
     let reply = '';
     let iteration = 0;
@@ -768,7 +771,23 @@ function createDesktopModelRunner(): TaskRunner {
         }
         // Emit file_changed for Write tool so canvas can track generated files
         if (ok && toolCall.name === 'Write' && toolCall.input?.file_path) {
-          emitRuntimeEvent({ type: 'file_changed', sessionId, filePath: toolCall.input.file_path as string, event: 'add' });
+          const filePath = toolCall.input.file_path as string;
+          emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
+          // Emit artifact_recorded so result.artifacts is populated
+          const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
+          const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
+          const fileName = filePath.split('/').pop() || filePath;
+          emitRuntimeEvent({
+            type: 'artifact_recorded',
+            sessionId,
+            turnId,
+            intentId,
+            stageId: stepId,
+            artifactId: `artifact_${toolCall.id}`,
+            label: fileName,
+            kind,
+            path: filePath,
+          });
         }
         toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: result.slice(0, 50000), is_error: !ok });
       }

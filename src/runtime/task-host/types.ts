@@ -111,6 +111,7 @@ export type DesktopTaskEvent =
   | { type: 'assistant_delta'; delta: string; eventId: string }
   | { type: 'needs_user'; question: NeedsUserQuestion }
   | { type: 'result'; result: TaskResult }
+  | { type: 'artifact_recorded'; artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string }
   | { type: 'salvage'; salvage: SalvageSummary }
   | { type: 'error'; message: string }
   // Canvas events (appended, do not replace existing progress events)

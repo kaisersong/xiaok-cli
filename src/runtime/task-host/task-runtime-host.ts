@@ -5,6 +5,8 @@ import { NeedsUserQuestionCorrelator } from './question-correlator.js';
 import type { FileTaskSnapshotStore } from './snapshot-store.js';
 import { buildTaskUnderstanding } from './task-understanding.js';
 import type {
+  ArtifactKind,
+  ArtifactSummary,
   DesktopTaskEvent,
   MaterialRecord,
   MaterialRole,
@@ -268,10 +270,28 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private async appendEvent(taskId: string, event: DesktopTaskEvent): Promise<void> {
     await this.enqueueMutation(taskId, async () => {
       const snapshot = await this.requireSnapshot(taskId);
+      // Merge artifacts when appending artifact_recorded events
+      let nextResult = snapshot.result;
+      if (event.type === 'result') {
+        nextResult = event.result;
+      } else if (event.type === 'artifact_recorded' && snapshot.result) {
+        const artifact: ArtifactSummary = {
+          artifactId: event.artifactId,
+          kind: event.kind as ArtifactKind,
+          title: event.label,
+          createdAt: event.turnId,
+          previewAvailable: event.previewAvailable,
+          filePath: event.filePath,
+        };
+        nextResult = {
+          ...snapshot.result,
+          artifacts: [...(snapshot.result.artifacts || []), artifact],
+        };
+      }
       const next: TaskSnapshot = {
         ...snapshot,
         events: [...snapshot.events, event],
-        result: event.type === 'result' ? event.result : snapshot.result,
+        result: nextResult,
         salvage: event.type === 'salvage' ? event.salvage : snapshot.salvage,
         updatedAt: this.now(),
       };

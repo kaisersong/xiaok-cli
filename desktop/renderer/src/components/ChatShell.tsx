@@ -72,6 +72,28 @@ export function ChatShell() {
         setStatus('running');
         break;
       }
+      case 'artifact_recorded': {
+        // Merge artifact into result
+        const ar = event as { artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string };
+        setResult(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            artifacts: [
+              ...(prev.artifacts || []),
+              {
+                artifactId: ar.artifactId,
+                kind: ar.kind,
+                title: ar.label,
+                createdAt: ar.turnId,
+                previewAvailable: ar.previewAvailable,
+                filePath: ar.filePath,
+              },
+            ],
+          };
+        });
+        break;
+      }
       case 'result': {
         const r = (event as { type: 'result'; result: TaskResult }).result;
         const hasGeneratedFiles = allEventsRef.current.some(
@@ -215,6 +237,26 @@ export function ChatShell() {
       // Note: During replay we do NOT create tool_steps groups.
       // Tool_steps is only for live streaming. Replay preserves original progress messages.
       for (const ev of snapshot.events) {
+        if (ev.type === 'artifact_recorded') {
+          const ar = ev as { artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string };
+          if (lastResult) {
+            lastResult = {
+              ...lastResult,
+              artifacts: [
+                ...(lastResult.artifacts || []),
+                {
+                  artifactId: ar.artifactId,
+                  kind: ar.kind,
+                  title: ar.label,
+                  createdAt: ar.turnId,
+                  previewAvailable: ar.previewAvailable,
+                  filePath: ar.filePath,
+                },
+              ],
+            };
+          }
+          continue;
+        }
         if (ev.type === 'canvas_file_changed') {
           allEventsRef.current.push(ev);
           continue;

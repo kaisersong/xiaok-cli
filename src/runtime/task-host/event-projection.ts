@@ -80,18 +80,13 @@ export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInpu
     const kind = normalizeArtifactKind(event.kind);
     const previewAvailable = kind === 'html' || kind === 'image' || kind === 'text';
     return {
-      type: 'result',
-      result: {
-        summary: `已记录产物：${event.label}`,
-        artifacts: [{
-          artifactId: event.artifactId,
-          kind,
-          title: event.label,
-          createdAt: event.turnId,
-          previewAvailable,
-          filePath: event.path,
-        }],
-      },
+      type: 'artifact_recorded',
+      artifactId: event.artifactId,
+      kind,
+      label: event.label,
+      filePath: event.path ?? '',
+      previewAvailable,
+      turnId: event.turnId,
     };
   }
   if (event.type === 'receipt_emitted') {

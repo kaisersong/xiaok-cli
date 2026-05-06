@@ -1,9 +1,10 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { X, FolderTree, Code, Wrench, Maximize2, Minimize2 } from 'lucide-react';
 import { WorkspaceTree } from './WorkspaceTree';
 import { CanvasPreview } from './CanvasPreview';
 import { ToolsPanel } from './ToolsPanel';
 import { CanvasEmptyState } from './CanvasEmptyState';
+import { api } from '../api';
 import type { DesktopTaskEvent } from '../../../../src/runtime/task-host/types';
 
 interface CanvasPanelProps {
@@ -75,10 +76,17 @@ export function CanvasPanel({ events, onClose, initialPreviewFile, initialPrevie
 
   const hasContent = fileChanges.length > 0 || toolCalls.length > 0;
 
-  const handleFileSelect = (path: string) => {
+  const handleFileSelect = useCallback(async (path: string) => {
     setSelectedFile(path);
     setActiveTab('preview');
-  };
+    setPreviewContent('');
+    try {
+      const r = await api.readFileContent(path);
+      setPreviewContent(r.content);
+    } catch {
+      setPreviewContent('');
+    }
+  }, []);
 
   return (
     <div
