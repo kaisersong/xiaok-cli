@@ -58,6 +58,15 @@ async function createWindow(): Promise<BrowserWindow> {
   });
   reminderScheduler.start();
 
+  // Register reminder tools with AI runner
+  services.registerReminderScheduler(reminderScheduler);
+
+  // Register channel tools with AI runner (for sending messages to yunzhijia, discord, etc.)
+  services.registerChannelTools();
+
+  // Register skill tools with AI runner (for installing/uninstalling skills)
+  services.registerSkillTools();
+
   // Reminder IPC handlers
   ipcMain.handle('desktop:createReminder', (_event, input: { content: string; scheduleAt: number; timezone?: string }) => {
     return reminderScheduler.createReminder(input.content, input.scheduleAt, input.timezone);

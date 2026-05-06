@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   selectMaterials: () => ipcRenderer.invoke('desktop:selectMaterials'),
   importMaterial: (input) => ipcRenderer.invoke('desktop:importMaterial', input),
   listSkills: () => ipcRenderer.invoke('desktop:listSkills'),
+  installSkill: (skillName) => ipcRenderer.invoke('desktop:installSkill', skillName),
+  uninstallSkill: (skillName) => ipcRenderer.invoke('desktop:uninstallSkill', skillName),
   createTaskWithFiles: (input) => ipcRenderer.invoke('desktop:createTaskWithFiles', input),
   createTask: (input) => ipcRenderer.invoke('desktop:createTask', input),
   subscribeTask(taskId, handler) {
@@ -29,6 +31,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   recoverTask: (taskId) => ipcRenderer.invoke('desktop:recoverTask', { taskId }),
   openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }),
   listChannels: () => ipcRenderer.invoke('desktop:listChannels'),
+  testChannel: (channelId) => ipcRenderer.invoke('desktop:testChannel', channelId),
   createChannel: (input) => ipcRenderer.invoke('desktop:createChannel', input),
   updateChannel: (id, input) => ipcRenderer.invoke('desktop:updateChannel', id, input),
   deleteChannel: (id) => ipcRenderer.invoke('desktop:deleteChannel', id),

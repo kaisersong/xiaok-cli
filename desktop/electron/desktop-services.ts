@@ -18,6 +18,8 @@ import { createIntentDelegationTools } from '../../src/ai/tools/intent-delegatio
 import { analyzeIntent as analyzeStageIntent } from '../../src/runtime/stage/executor.js';
 import { createEmptySessionIntentLedger, cloneSessionIntentLedger, createIntentLedgerRecord, type SessionIntentLedger, type IntentPlanDraft, type IntentLedgerRecord } from '../../src/runtime/intent-delegation/types.js';
 import { DELEGATION_TEMPLATES } from '../../src/ai/intent-delegation/templates.js';
+import type { ReminderScheduler } from './reminder-scheduler.js';
+import type { Tool } from '../../src/types.js';
 
 export interface DesktopServicesOptions {
   dataRoot: string;
@@ -80,14 +82,275 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     now: options.now,
   });
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
+  const tools = buildToolList();
+  const registry = new ToolRegistry({ autoMode: true }, tools);
+  const intentStore = new InMemoryIntentLedgerStore();
+
+  // Register intent delegation tools
+  const intentTools = createIntentDelegationTools({
+    ledgerStore: intentStore as never,
+    sessionId: 'desktop-session',
+    instanceId: 'desktop-instance',
+  });
+  for (const tool of intentTools) {
+    registry.registerTool(tool);
+  }
+
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
     snapshotStore,
-    runner: options.runner ?? createDesktopModelRunner(),
+    runner: options.runner ?? createDesktopModelRunnerWithRegistry(registry, tools),
     now: options.now,
   });
 
   return {
+    registerReminderScheduler(scheduler: ReminderScheduler) {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const reminderTools: Tool[] = [
+        {
+          permission: 'safe',
+          definition: {
+            name: 'reminder_create',
+            description: '创建一个定时提醒。当用户说"定时任务"、"提醒我"、"过X分钟提醒"等时使用此工具。',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                content: { type: 'string', description: '提醒内容' },
+                schedule_at: { type: 'number', description: '提醒时间戳（毫秒）' },
+                timezone: { type: 'string', description: '时区，默认使用系统时区' },
+              },
+              required: ['content', 'schedule_at'],
+            },
+          },
+          async execute(input) {
+            const content = String(input.content ?? '').trim();
+            const scheduleAt = Number(input.schedule_at ?? 0);
+            if (!content || scheduleAt <= 0) {
+              return 'Error: content 和 schedule_at 不能为空';
+            }
+            const tz = String(input.timezone ?? timezone);
+            const record = scheduler.createReminder(content, scheduleAt, tz);
+            return JSON.stringify({
+              reminderId: record.reminderId,
+              status: record.status,
+              content: record.content,
+              scheduleAt: record.scheduleAt,
+              timezone: record.timezone,
+              createdAt: record.createdAt,
+            }, null, 2);
+          },
+        },
+        {
+          permission: 'safe',
+          definition: {
+            name: 'reminder_list',
+            description: '列出所有活跃的提醒',
+            inputSchema: { type: 'object', properties: {} },
+          },
+          async execute() {
+            const reminders = scheduler.listReminders();
+            return JSON.stringify(reminders.map(r => ({
+              reminderId: r.reminderId,
+              status: r.status,
+              content: r.content,
+              scheduleAt: r.scheduleAt,
+              timezone: r.timezone,
+              createdAt: r.createdAt,
+            })), null, 2);
+          },
+        },
+        {
+          permission: 'safe',
+          definition: {
+            name: 'reminder_cancel',
+            description: '取消一个提醒',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                reminder_id: { type: 'string', description: '提醒 ID' },
+              },
+              required: ['reminder_id'],
+            },
+          },
+          async execute(input) {
+            const id = String(input.reminder_id ?? '').trim();
+            if (!id) return 'Error: reminder_id 不能为空';
+            const ok = scheduler.cancelReminder(id);
+            return ok ? `已取消提醒 ${id}` : `未找到提醒 ${id}`;
+          },
+        },
+      ];
+      for (const tool of reminderTools) {
+        registry.registerTool(tool);
+      }
+    },
+    registerChannelTools() {
+      const channelTools: Tool[] = [
+        {
+          permission: 'safe',
+          definition: {
+            name: 'channel_list',
+            description: '列出所有配置的消息通道（云之家、Discord、飞书等）。当用户想知道有哪些通道可用时使用。',
+            inputSchema: { type: 'object', properties: {} },
+          },
+          async execute() {
+            const config = await loadConfig();
+            const raw = config as unknown as Record<string, unknown>;
+            const channels = (raw.channels ?? {}) as Record<string, unknown>;
+            const list = Object.entries(channels).map(([key, ch]) => {
+              const c = ch as { name?: string; sendMsgUrl?: string; webhookUrl?: string; enabled?: boolean };
+              return {
+                id: key,
+                name: c.name || key,
+                webhookUrl: c.webhookUrl || c.sendMsgUrl,
+                enabled: c.enabled !== false,
+              };
+            });
+            return JSON.stringify(list, null, 2);
+          },
+        },
+        {
+          permission: 'safe',
+          definition: {
+            name: 'channel_send',
+            description: '向指定通道发送消息。当用户说"发消息到云之家"、"通知团队"、"发送到飞书"等时使用此工具。',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                channel_id: { type: 'string', description: '通道 ID（如 yunzhijia、discord、feishu）' },
+                message: { type: 'string', description: '要发送的消息内容' },
+              },
+              required: ['channel_id', 'message'],
+            },
+          },
+          async execute(input) {
+            const channelId = String(input.channel_id ?? '').trim();
+            const message = String(input.message ?? '').trim();
+            if (!channelId || !message) {
+              return 'Error: channel_id 和 message 不能为空';
+            }
+
+            const config = await loadConfig();
+            const raw = config as unknown as Record<string, unknown>;
+            const channels = (raw.channels ?? {}) as Record<string, unknown>;
+            const ch = channels[channelId] as { sendMsgUrl?: string; webhookUrl?: string } | undefined;
+            const url = ch?.sendMsgUrl || ch?.webhookUrl;
+            if (!url) {
+              return `Error: 通道 ${channelId} 未配置 webhook URL`;
+            }
+
+            try {
+              const start = Date.now();
+              const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ msgtype: 'text', text: { content: message } }),
+              });
+              const latencyMs = Date.now() - start;
+              if (!response.ok) {
+                return `Error: 发送失败，HTTP ${response.status}`;
+              }
+              return JSON.stringify({ success: true, latencyMs, channelId, messageLength: message.length }, null, 2);
+            } catch (e) {
+              return `Error: 发送失败 - ${(e as Error).message}`;
+            }
+          },
+        },
+      ];
+      for (const tool of channelTools) {
+        registry.registerTool(tool);
+      }
+    },
+    registerSkillTools() {
+      const skillTools: Tool[] = [
+        {
+          permission: 'safe',
+          definition: {
+            name: 'skill_install',
+            description: '安装一个技能。当用户说"安装XX技能"、"添加XX功能"、"帮我安装 clawhub 上的技能"时使用此工具。',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                skill_name: { type: 'string', description: '技能名称（clawhub 上的 slug）' },
+              },
+              required: ['skill_name'],
+            },
+          },
+          async execute(input) {
+            const skillName = String(input.skill_name ?? '').trim();
+            if (!skillName) return 'Error: skill_name 不能为空';
+
+            const result = spawnSync('clawhub', ['install', skillName], {
+              encoding: 'utf-8',
+              timeout: 60000,
+              cwd: process.cwd(),
+            });
+            if (result.error) {
+              return `Error: 执行失败 - ${result.error.message}`;
+            }
+            if (result.status !== 0) {
+              const stderr = result.stderr?.trim() || result.stdout?.trim() || '未知错误';
+              return `Error: ${stderr.slice(0, 500)}`;
+            }
+            return JSON.stringify({ success: true, skillName, message: `技能 ${skillName} 已安装` }, null, 2);
+          },
+        },
+        {
+          permission: 'safe',
+          definition: {
+            name: 'skill_uninstall',
+            description: '卸载一个技能。当用户说"卸载XX技能"、"删除XX功能"时使用此工具。',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                skill_name: { type: 'string', description: '技能名称' },
+              },
+              required: ['skill_name'],
+            },
+          },
+          async execute(input) {
+            const skillName = String(input.skill_name ?? '').trim();
+            if (!skillName) return 'Error: skill_name 不能为空';
+
+            const result = spawnSync('clawhub', ['uninstall', skillName], {
+              encoding: 'utf-8',
+              timeout: 30000,
+              cwd: process.cwd(),
+            });
+            if (result.error) {
+              return `Error: 执行失败 - ${result.error.message}`;
+            }
+            if (result.status !== 0) {
+              const stderr = result.stderr?.trim() || result.stdout?.trim() || '未知错误';
+              return `Error: ${stderr.slice(0, 500)}`;
+            }
+            return JSON.stringify({ success: true, skillName, message: `技能 ${skillName} 已卸载` }, null, 2);
+          },
+        },
+        {
+          permission: 'safe',
+          definition: {
+            name: 'skill_list',
+            description: '列出已安装的技能。当用户问"有哪些技能"、"我安装了什么技能"时使用。',
+            inputSchema: { type: 'object', properties: {} },
+          },
+          async execute() {
+            const catalog = createSkillCatalog(undefined, process.cwd());
+            const skills = await catalog.reload();
+            return JSON.stringify(skills.map(s => ({
+              name: s.name,
+              aliases: s.aliases ?? [],
+              description: s.description,
+              source: s.source,
+              tier: s.tier,
+            })), null, 2);
+          },
+        },
+      ];
+      for (const tool of skillTools) {
+        registry.registerTool(tool);
+      }
+    },
     async importMaterial(input: { taskId: string; filePath: string; role: MaterialRole }) {
       mkdirSync(options.dataRoot, { recursive: true });
       const record = await materialRegistry.importMaterial({
@@ -408,6 +671,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const installs = await loadJsonFile<MCPRecord[]>(path, []);
       await saveJsonFile(path, installs.filter(c => c.id !== id));
     },
+
+    // Test helpers for AI runner tool registration
+    getToolDefinitions() {
+      return registry.getToolDefinitions();
+    },
+    async executeTool(name: string, input: Record<string, unknown>) {
+      return registry.executeTool(name, input);
+    },
   };
 }
 
@@ -663,6 +934,45 @@ function buildSystemPrompt(): string {
 - skill: 调用已安装的 skill
 - intent_create: 分析用户意图，生成有序的执行计划
 - intent_step_update: 更新当前执行步骤的状态
+- reminder_create: 创建定时提醒（当用户说"定时任务"、"提醒我"、"过X分钟提醒"时使用）
+- reminder_list: 列出所有活跃的提醒
+- reminder_cancel: 取消一个提醒
+- channel_list: 列出所有配置的消息通道（云之家、Discord、飞书等）
+- channel_send: 向指定通道发送消息（当用户说"发消息到云之家"、"通知团队"时使用）
+- skill_install: 安装一个技能（当用户说"安装XX技能"时使用）
+- skill_uninstall: 卸载一个技能（当用户说"卸载XX技能"时使用）
+- skill_list: 列出已安装的技能
+
+## 定时提醒功能
+
+当用户说"帮我创建定时任务"、"提醒我XX"、"过X分钟提醒我"等时，使用 reminder_create 工具。
+不要写脚本或使用 cron 命令，xiaok desktop 有内置的提醒功能。
+
+示例：
+- "30分钟后提醒我发日报" → reminder_create(content="发日报", schedule_at=<当前时间+30分钟>)
+- "明天早上9点提醒我开会" → reminder_create(content="开会", schedule_at=<明天9点的时间戳>)
+
+时间戳使用毫秒级 UNIX timestamp。
+
+## 消息通道功能
+
+xiaok desktop 支持向外部消息通道发送消息。当用户说"发消息到云之家"、"通知飞书群"等时：
+
+1. 先用 channel_list 查看可用的通道
+2. 用 channel_send 发送消息到指定通道
+
+示例：
+- "发消息到云之家通知团队开会" → channel_list 确认通道 → channel_send(channel_id="yunzhijia", message="开会通知")
+
+## 技能管理功能
+
+xiaok 支持从 ClawHub 安装技能。当用户说"安装XX技能"时：
+
+1. 用 skill_install 安装技能
+2. 安装后可以用斜杠命令调用（如 /skill-name）
+
+示例：
+- "帮我安装 kai-slide-creator 技能" → skill_install(skill_name="kai-slide-creator")
 
 ## 关于用户上传的附件
 
@@ -830,6 +1140,154 @@ function createDesktopModelRunner(): TaskRunner {
           const filePath = toolCall.input.file_path as string;
           emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
           // Emit artifact_recorded so result.artifacts is populated
+          const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
+          const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
+          const fileName = filePath.split('/').pop() || filePath;
+          emitRuntimeEvent({
+            type: 'artifact_recorded',
+            sessionId,
+            turnId,
+            intentId,
+            stageId: stepId,
+            artifactId: `artifact_${toolCall.id}`,
+            label: fileName,
+            kind,
+            path: filePath,
+            creator: 'agent',
+          });
+        }
+        toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: result.slice(0, 50000), is_error: !ok });
+      }
+      messages.push({ role: 'user', content: toolResults });
+    }
+    const note = reply.trim() || '模型没有返回内容。';
+    history.push(
+      { role: 'user', content: [{ type: 'text', text: effectivePrompt }] },
+      { role: 'assistant', content: [{ type: 'text', text: note }] },
+    );
+    emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note });
+  };
+}
+
+function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Tool[]): TaskRunner {
+  const history: Message[] = [];
+  const cwd = process.cwd();
+  let skillCatalog = createSkillCatalog(undefined, cwd);
+  let skillsLoaded = false;
+
+  return async ({ sessionId, prompt, materials, signal, emitRuntimeEvent }) => {
+    const turnId = `turn_${Date.now().toString(36)}`;
+    const intentId = `intent_${Date.now().toString(36)}`;
+    const stepId = `${intentId}:step:reply`;
+    if (!skillsLoaded) {
+      try {
+        const skills = await skillCatalog.reload();
+        if (skills.length > 0) {
+          const skillTool = createSkillTool(skillCatalog);
+          registry.registerTool(skillTool);
+          tools.push(skillTool);
+        }
+        skillsLoaded = true;
+      } catch {
+        skillsLoaded = true;
+      }
+    }
+    const currentSkills = skillCatalog.list();
+    const skillsContext = currentSkills.length > 0 ? formatSkillsContext(currentSkills) : '';
+    const slashMatch = parseSlashCommand(prompt);
+    let effectivePrompt = prompt;
+    if (slashMatch) {
+      const skill = findSkillByCommandName(currentSkills, slashMatch.skillName);
+      if (skill) {
+        effectivePrompt = slashMatch.rest
+          ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
+          : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
+      }
+    }
+
+    // Build prompt with materials context
+    let materialsContext = '';
+    if (materials && materials.length > 0) {
+      materialsContext = '\n\n## 用户上传的文件\n\n用户上传了以下文件，你需要读取并处理它们：\n';
+      for (const m of materials) {
+        materialsContext += `- 文件: ${m.originalName}\n  路径: ${m.workspacePath}\n  类型: ${m.mimeType || '未知'}\n`;
+      }
+      materialsContext += '\n请先使用 Read 工具读取这些文件的内容，然后根据内容回答用户的问题。\n';
+    }
+
+    const config = await loadConfig();
+    const adapter = createAdapter(config);
+    const skillDebugEnabled = config.skillDebug ?? false;
+
+    // Stage analysis for debug mode
+    if (skillDebugEnabled && currentSkills.length > 0) {
+      try {
+        const stages = analyzeStageIntent(prompt, currentSkills, process.cwd());
+        const stageSummary = stages.map(s => `  ${s.id}. ${s.title} (${s.skill})`).join('\n');
+        const debugText = `[stage:plan] Detected ${stages.length} stages:\n${stageSummary}`;
+        emitRuntimeEvent({ type: 'assistant_delta', sessionId, turnId, intentId, stepId, delta: `${debugText}\n\n` });
+      } catch {
+        // Stage analysis is optional, don't block execution
+      }
+    }
+
+    const systemPrompt = skillsContext
+      ? `${BASE_SYSTEM_PROMPT}\n\nAvailable skills:\n${skillsContext}`
+      : BASE_SYSTEM_PROMPT;
+    const userText = materialsContext
+      ? `${effectivePrompt}${materialsContext}`
+      : effectivePrompt;
+    const allToolDefs = registry.getToolDefinitions();
+    const messages: Message[] = [...history, {
+      role: 'user',
+      content: [{ type: 'text', text: userText }],
+    }];
+    let reply = '';
+    let iteration = 0;
+    const MAX_ITERATIONS = 20;
+    while (iteration < MAX_ITERATIONS) {
+      if (signal.aborted) throw new Error('task cancelled');
+      iteration++;
+      const assistantBlocks: MessageBlock[] = [];
+      for await (const chunk of adapter.stream(messages, allToolDefs, systemPrompt)) {
+        if (signal.aborted) throw new Error('task cancelled');
+        if (chunk.type === 'text') {
+          const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+          if (lastBlock?.type === 'text') {
+            lastBlock.text += chunk.delta;
+          } else {
+            assistantBlocks.push({ type: 'text', text: chunk.delta });
+          }
+          reply += chunk.delta;
+          emitRuntimeEvent({ type: 'assistant_delta', sessionId, turnId, intentId, stepId, delta: chunk.delta });
+        } else if (chunk.type === 'tool_use') {
+          assistantBlocks.push({ type: 'tool_use', id: chunk.id, name: chunk.name, input: chunk.input });
+        } else if (chunk.type === 'thinking') {
+          const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+          if (lastBlock?.type === 'thinking') {
+            lastBlock.thinking += chunk.delta;
+          } else {
+            assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
+          }
+        }
+      }
+      messages.push({ role: 'assistant', content: assistantBlocks });
+      const toolCalls = assistantBlocks.filter((b): b is ToolCall => b.type === 'tool_use');
+      if (toolCalls.length === 0) break;
+      const toolResults: MessageBlock[] = [];
+      for (const toolCall of toolCalls) {
+        if (signal.aborted) throw new Error('task cancelled');
+        emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id });
+        const result = await registry.executeTool(toolCall.name, toolCall.input);
+        const ok = !result.startsWith('Error');
+        if (ok) {
+          emitRuntimeEvent({ type: 'post_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
+        } else {
+          emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id, error: result.slice(0, 10000) });
+        }
+        if (ok && toolCall.name === 'Write' && toolCall.input?.file_path) {
+          const filePath = toolCall.input.file_path as string;
+          emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
           const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
           const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
           const fileName = filePath.split('/').pop() || filePath;

@@ -20,8 +20,12 @@ describe('preload API contract', () => {
       'getActiveTask',
       'recoverTask',
       'openArtifact',
+      'readFileContent',
       'listSkills',
+      'installSkill',
+      'uninstallSkill',
       'listChannels',
+      'testChannel',
       'createChannel',
       'updateChannel',
       'deleteChannel',
@@ -33,6 +37,13 @@ describe('preload API contract', () => {
       'checkForUpdates',
       'quitAndInstall',
       'onUpdateStatus',
+      'createReminder',
+      'listReminders',
+      'cancelReminder',
+      'getReminderStatus',
+      'onReminder',
+      'getSkillDebugConfig',
+      'saveSkillDebugConfig',
     ]);
   });
 
