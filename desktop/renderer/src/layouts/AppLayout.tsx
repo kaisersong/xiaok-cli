@@ -29,26 +29,26 @@ export function AppLayout() {
 
   return (
     <SidebarContext.Provider value={{ collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed }}>
-      <div className="relative flex h-screen overflow-hidden bg-[var(--c-bg-page)]">
-        {/* Draggable title bar — absolute overlay on top of sidebar + content */}
+      <div className="flex h-screen flex-col overflow-hidden bg-[var(--c-bg-page)]">
+        {/* Draggable title bar — frosted glass style */}
         <div
-          className="absolute inset-x-0 top-0"
           style={{
             height: 52,
             WebkitAppRegion: 'drag',
-            zIndex: 200,
+            flexShrink: 0,
+            position: 'relative',
             backdropFilter: 'blur(12px) saturate(180%)',
             WebkitBackdropFilter: 'blur(12px) saturate(180%)',
             background: 'rgba(247,245,241,0.72)',
           } as React.CSSProperties}
         >
-          {/* Collapse button (when sidebar visible) — horizontally aligned with traffic lights */}
+          {/* Collapse button (when sidebar visible) */}
           {!sidebarCollapsed && (
             <button
               type="button"
               onClick={() => setSidebarCollapsed(true)}
               style={{ WebkitAppRegion: 'no-drag', position: 'absolute', top: 16, left: 212 } as React.CSSProperties}
-              className="flex h-[20px] w-[20px] items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
+              className="flex h-[20px] w-[20px] items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors z-50"
               title="收起侧边栏"
             >
               <PanelLeftClose size={14} />
@@ -60,20 +60,24 @@ export function AppLayout() {
               type="button"
               onClick={() => setSidebarCollapsed(false)}
               style={{ WebkitAppRegion: 'no-drag', position: 'absolute', top: 16, left: 84 } as React.CSSProperties}
-              className="flex h-[20px] w-[20px] items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
+              className="flex h-[20px] w-[20px] items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors z-50"
               title="展开侧边栏"
             >
               <Sidebar size={14} />
             </button>
           )}
         </div>
-        <div className="relative flex min-h-0 flex-1 w-full">
+        <div className="flex min-h-0 flex-1">
           {!sidebarCollapsed && (
-            <div style={{ paddingTop: 52 }}>
-              <SidebarComponent onOpenSettings={() => setSettingsOpen(true)} />
-            </div>
+            <SidebarComponent onOpenSettings={() => setSettingsOpen(true)} />
           )}
-          <main className="relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--c-bg-page)]" style={{ scrollbarGutter: 'stable', paddingTop: 52 }}>
+          <main className="relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--c-bg-page)]" style={{ scrollbarGutter: 'stable' }}>
+            {/* Frosted glass fade at top of content */}
+            <div className="pointer-events-none sticky top-0 z-10 h-8 shrink-0" style={{
+              background: 'linear-gradient(to bottom, rgba(247,245,241,0.95) 0%, rgba(247,245,241,0.5) 60%, transparent 100%)',
+              backdropFilter: 'blur(4px)',
+              WebkitBackdropFilter: 'blur(4px)',
+            }} />
             <Outlet />
           </main>
         </div>
