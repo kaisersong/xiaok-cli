@@ -175,7 +175,7 @@ export function ToolStepsMessage({ steps, live }: Props) {
       <div
         style={{
           overflow: 'hidden',
-          maxHeight: expanded ? `${steps.length * 120 + 80}px` : '0px',
+          maxHeight: expanded ? `${steps.length * 120 + 200}px` : '0px',
           transition: 'max-height 0.2s ease',
         }}
       >

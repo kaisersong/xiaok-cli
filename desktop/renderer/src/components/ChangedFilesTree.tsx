@@ -63,11 +63,12 @@ export function ChangedFilesTree({ steps, onFileSelect }: Props) {
   return (
     <div
       style={{
-        height: Math.max(40, Math.min(paths.length * 24 + 16, 160)),
+        height: Math.max(50, Math.min(paths.length * 24 + 32, 200)),
         background: 'var(--c-bg-deep)',
         borderRadius: 4,
         marginTop: 2,
         marginBottom: 4,
+        marginLeft: -16,
       }}
     >
       <FileTree model={model} style={{ height: '100%' }} />
