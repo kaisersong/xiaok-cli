@@ -1,44 +1,50 @@
-import { useMemo, useContext } from 'react'
+import React, { useMemo, useContext } from 'react'
 import { PatchDiff } from '@pierre/diffs/react'
+import type { FileDiffOptions } from '@pierre/diffs/react'
 import { AppearanceContext } from '../contexts/AppearanceContext'
 
 const MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace'
 
 interface DiffViewProps {
-  diff: string // 原始 unified diff，不截断不过滤
+  diff: string
   maxHeight?: number
-  layout?: 'stacked' | 'split'
+  layout?: 'unified' | 'split'
   enableLineNumbers?: boolean
   compact?: boolean
-  hideHeader?: boolean // Pierre 控制 header 显示
-  fallbackText?: string // 解析失败或大 diff 时显示
+  hideHeader?: boolean
+  fallbackText?: string
 }
 
-// 大 diff 保护：超过此字节数 fallback 到纯文本
 const MAX_DIFF_BYTES = 50000
 const MAX_DIFF_LINES = 500
 
-/**
- * Wrapper for @pierre/diffs PatchDiff component adapted to xiaok styling.
- * Renders unified diff with syntax highlighting via Shiki.
- *
- * Key fixes from Codex review:
- * - Uses PatchDiff (correct API) not DiffRenderer
- * - Does NOT filter headers - Pierre needs them for parsing
- * - Gets theme from AppearanceContext, not just matchMedia
- * - Has fallback for large diffs and parse failures
- * - Enables word wrap for narrow timeline width
- */
+function isValidPatch(text: string): boolean {
+  if (!text.includes('diff --git')) return false
+  if (!text.includes('@@')) return false
+  return true
+}
+
+function countFileDiffs(text: string): number {
+  const matches = text.match(/^diff --git /gm)
+  return matches ? matches.length : 0
+}
+
+/** Extract the first file's diff from a multi-file patch */
+function extractFirstFile(patch: string): string {
+  const secondIdx = patch.indexOf('\ndiff --git ', 1)
+  if (secondIdx === -1) return patch
+  return patch.substring(0, secondIdx)
+}
+
 export function DiffView({
   diff,
   maxHeight = 280,
-  layout = 'stacked', // 默认 stacked，split 需足够宽度
+  layout = 'unified',
   enableLineNumbers = true,
   compact = false,
-  hideHeader = true, // xiaok 卡片已有自己的 header
+  hideHeader = true,
   fallbackText,
 }: DiffViewProps) {
-  // 从 AppearanceContext 获取主题（而非只用 matchMedia）
   const appearance = useContext(AppearanceContext)
   const isDark =
     appearance?.theme === 'dark' ||
@@ -46,54 +52,56 @@ export function DiffView({
       typeof window !== 'undefined' &&
       window.matchMedia?.('(prefers-color-scheme: dark)').matches)
 
-  // 大 diff 保护：检查尺寸
-  const shouldFallback = useMemo(() => {
-    if (!diff) return true
+  const analysis = useMemo(() => {
+    if (!diff || !isValidPatch(diff)) return { valid: false, fileCount: 0 }
     const bytes = new Blob([diff]).size
     const lines = diff.split('\n').length
-    return bytes > MAX_DIFF_BYTES || lines > MAX_DIFF_LINES
+    if (bytes > MAX_DIFF_BYTES || lines > MAX_DIFF_LINES) return { valid: false, fileCount: 0 }
+    return { valid: true, fileCount: countFileDiffs(diff) }
   }, [diff])
 
-  // 尺寸过大时 fallback 到纯文本
-  if (shouldFallback && fallbackText) {
-    return (
-      <pre
-        style={{
-          margin: 0,
-          padding: '9px 10px',
-          maxHeight,
-          overflow: 'auto',
-          fontFamily: MONO,
-          fontSize: compact ? 11 : 12,
-          lineHeight: compact ? '16px' : '18px',
-          color: 'var(--c-text-secondary)',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-        }}
-      >
-        {fallbackText}
-      </pre>
-    )
-  }
-
-  if (!diff?.trim()) {
+  if (!analysis.valid) {
+    if (fallbackText) {
+      return (
+        <pre
+          style={{
+            margin: 0, padding: '9px 10px', maxHeight, overflow: 'auto',
+            fontFamily: MONO, fontSize: compact ? 11 : 12,
+            lineHeight: compact ? '16px' : '18px',
+            color: 'var(--c-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          }}
+        >
+          {fallbackText}
+        </pre>
+      )
+    }
     return null
   }
 
-  // 不再过滤 headers，直接传给 Pierre
-  // headerStyle 控制是否显示 Pierre 内置 header
+  const options: FileDiffOptions<undefined> = {
+    diffStyle: layout,
+    diffIndicators: 'classic',
+    disableLineNumbers: !enableLineNumbers,
+    disableFileHeader: hideHeader,
+    disableBackground: false,
+    overflow: 'wrap',
+    themeType: isDark ? 'dark' : 'light',
+  }
 
-  return (
-    <div style={{ maxHeight, overflow: 'auto', fontFamily: MONO }}>
-      <PatchDiff
-        diff={diff}
-        layout={layout}
-        enableLineNumbers={enableLineNumbers}
-        changeStyle="backgrounds"
-        enableDarkMode={isDark}
-        enableWordWrap={true} // 启用换行以适应狭窄宽度
-        headerStyle={hideHeader ? 'none' : 'metadata'}
-      />
-    </div>
-  )
+  const style: React.CSSProperties = { maxHeight, overflow: 'auto', fontFamily: MONO }
+
+  // Multi-file: render first file with PatchDiff, note additional files
+  if (analysis.fileCount > 1) {
+    const firstFile = extractFirstFile(diff)
+    return (
+      <div>
+        <PatchDiff patch={firstFile} options={options} style={style} />
+        <div style={{ padding: '4px 10px', fontSize: 11, color: 'var(--c-text-muted)', borderTop: '0.5px solid var(--c-border-subtle)' }}>
+          +{analysis.fileCount - 1} more file{analysis.fileCount > 2 ? 's' : ''}
+        </div>
+      </div>
+    )
+  }
+
+  return <PatchDiff patch={diff} options={options} style={style} />
 }
