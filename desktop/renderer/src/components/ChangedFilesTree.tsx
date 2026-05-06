@@ -53,8 +53,9 @@ export function ChangedFilesTree({ steps, onFileSelect }: Props) {
     gitStatus: gitStatusEntries,
     icons: 'minimal',
     density: 'compact',
+    flattenEmptyDirectories: true,
     onSelectionChange: handleSelectionChange,
-    initialExpansion: 'closed',
+    initialExpansion: 1,
   })
 
   if (paths.length === 0) return null
@@ -62,14 +63,14 @@ export function ChangedFilesTree({ steps, onFileSelect }: Props) {
   return (
     <div
       style={{
-        maxHeight: 200,
-        overflow: 'auto',
+        height: Math.max(40, Math.min(paths.length * 24 + 16, 160)),
         background: 'var(--c-bg-deep)',
-        borderRadius: 6,
-        marginTop: 4,
+        borderRadius: 4,
+        marginTop: 2,
+        marginBottom: 4,
       }}
     >
-      <FileTree model={model} />
+      <FileTree model={model} style={{ height: '100%' }} />
     </div>
   )
 }

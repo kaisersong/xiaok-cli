@@ -175,24 +175,21 @@ export function ToolStepsMessage({ steps, live }: Props) {
       <div
         style={{
           overflow: 'hidden',
-          maxHeight: expanded ? `${steps.length * 120 + 240}px` : '0px',
+          maxHeight: expanded ? `${steps.length * 120 + 80}px` : '0px',
           transition: 'max-height 0.2s ease',
         }}
       >
-        {!live && (
-          <ChangedFilesTree
-            steps={steps}
-            onFileSelect={(filePath) => {
-              const matchingStep = steps.find(
-                (s) => {
-                  const fp = s.input && typeof s.input === 'object' ? (s.input as Record<string, unknown>).file_path : null
-                  return typeof fp === 'string' && fp.endsWith(filePath.split('/').pop() || '')
-                }
-              )
-              if (matchingStep) toggleStep(matchingStep.toolUseId)
-            }}
-          />
-        )}
+        {!live && (() => {
+          try {
+            return <ChangedFilesTree steps={steps} onFileSelect={(fp) => {
+              const s = steps.find(s => {
+                const p = s.input && typeof s.input === 'object' ? (s.input as Record<string, unknown>).file_path : null
+                return typeof p === 'string' && p.endsWith(fp.split('/').pop() || '')
+              })
+              if (s) toggleStep(s.toolUseId)
+            }} />
+          } catch { return null }
+        })()}
         <div
           className="mt-1.5 space-y-0.5 pl-3"
           style={{ borderLeft: '1.5px solid var(--c-border, #e0e0e0)' }}
