@@ -113,6 +113,12 @@ Via Intent Broker lifecycle hooks:
 npm install -g xiaokcode
 ```
 
+Update to latest version:
+
+```bash
+npm update -g xiaokcode
+```
+
 After installation, run:
 
 ```bash

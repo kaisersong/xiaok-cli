@@ -113,6 +113,12 @@ System Prompt 采用 CC 风格的 7 层设计，显式静态/动态分界：
 npm install -g xiaokcode
 ```
 
+更新到最新版本：
+
+```bash
+npm update -g xiaokcode
+```
+
 安装后直接运行：
 
 ```bash
