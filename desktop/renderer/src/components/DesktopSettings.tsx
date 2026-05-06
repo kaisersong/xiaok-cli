@@ -1203,7 +1203,7 @@ function GeneralPane() {
         <SectionHeader icon={Info}>应用信息</SectionHeader>
         <Card>
           <div className="text-xs text-[var(--c-text-secondary)] space-y-1">
-            <div>版本: {__APP_VERSION__}</div>
+            <div>版本: v{__APP_VERSION__} ({__APP_BUILD__})</div>
             <div>构建: Electron + React</div>
             <div>数据路径: ~/.xiaok/config.json</div>
           </div>
@@ -1542,7 +1542,7 @@ function AboutPane() {
         <SectionHeader>版本信息</SectionHeader>
         <Card>
           <div className="text-xs text-[var(--c-text-secondary)]">
-            <div>版本: {__APP_VERSION__}</div>
+            <div>版本: v{__APP_VERSION__} ({__APP_BUILD__})</div>
             <div className="mt-1">构建: Electron + React</div>
           </div>
         </Card>
