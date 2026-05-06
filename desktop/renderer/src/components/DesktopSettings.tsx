@@ -305,20 +305,20 @@ function ModelPane() {
                       协议: {provider.protocol}
                       {provider.baseUrl && ` · ${provider.baseUrl}`}
                     </div>
-                    <div className="mt-1.5 flex items-center gap-2">
+                    <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                       <button
                         onClick={() => {
                           setSelectedProvider(provider.id);
                           handleTest();
                         }}
                         disabled={testing[provider.id]}
-                        className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors disabled:opacity-50"
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors disabled:opacity-50"
                       >
                         {testing[provider.id] ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
                         测试连接
                       </button>
                       {testResult && (
-                        <span className={`text-xs ${testResult.success ? 'text-green-600' : 'text-red-500'}`}>
+                        <span className={`text-xs truncate max-w-[200px] ${testResult.success ? 'text-green-600' : 'text-red-500'}`}>
                           {testResult.success
                             ? `延迟 ${testResult.latencyMs}ms`
                             : testResult.error}
@@ -327,7 +327,7 @@ function ModelPane() {
                       {provider.type === 'custom' && (
                         <button
                           onClick={() => handleDeleteProvider(provider.id)}
-                          className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs text-red-500 hover:bg-red-50 transition-colors"
+                          className="inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1 text-xs text-red-500 hover:bg-red-50 transition-colors"
                         >
                           <Trash2 size={12} /> 删除
                         </button>

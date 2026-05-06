@@ -73,8 +73,7 @@ export function ChatShell() {
         break;
       }
       case 'artifact_recorded': {
-        // Merge artifact into result
-        const ar = event as { artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string };
+        const ar = event as { artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string; creator?: string };
         setResult(prev => {
           if (!prev) return prev;
           return {
@@ -88,6 +87,7 @@ export function ChatShell() {
                 createdAt: ar.turnId,
                 previewAvailable: ar.previewAvailable,
                 filePath: ar.filePath,
+                creator: ar.creator ?? 'agent',
               },
             ],
           };
@@ -238,7 +238,7 @@ export function ChatShell() {
       // Tool_steps is only for live streaming. Replay preserves original progress messages.
       for (const ev of snapshot.events) {
         if (ev.type === 'artifact_recorded') {
-          const ar = ev as { artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string };
+          const ar = ev as { artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string; creator?: string };
           if (lastResult) {
             lastResult = {
               ...lastResult,
@@ -251,6 +251,7 @@ export function ChatShell() {
                   createdAt: ar.turnId,
                   previewAvailable: ar.previewAvailable,
                   filePath: ar.filePath,
+                  creator: ar.creator ?? 'agent',
                 },
               ],
             };

@@ -134,7 +134,7 @@ export function CanvasPreview({ filePath, content }: CanvasPreviewProps) {
 
         {viewMode === 'preview' && isMarkdown && (
           <div className="h-full overflow-auto bg-[var(--c-bg-card)] p-4">
-            <MarkdownRenderer markdown={content} />
+            <MarkdownRenderer content={content} />
           </div>
         )}
 

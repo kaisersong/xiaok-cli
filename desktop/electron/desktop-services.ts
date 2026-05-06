@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, platform, arch, type } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { createAdapter } from '../../src/ai/models.js';
 import { getProviderProfile, listProviderProfiles } from '../../src/ai/providers/registry.js';
 import type { ProtocolId } from '../../src/ai/providers/types.js';
@@ -179,7 +180,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         // Simple test: create a minimal request to verify connection
         const testMessages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }];
         // Use a minimal tools array to reduce overhead
-        const testTools = [{ name: 'ping', description: 'Test tool', inputSchema: {} }];
+        const testTools = [{ name: 'ping', description: 'Test tool', inputSchema: { type: 'object' } }];
         const systemPrompt = 'Reply with "ok" to verify connection.';
         // Stream just one chunk then cancel
         for await (const _chunk of adapter.stream(testMessages, testTools, systemPrompt)) {
@@ -787,6 +788,7 @@ function createDesktopModelRunner(): TaskRunner {
             label: fileName,
             kind,
             path: filePath,
+            creator: 'agent',
           });
         }
         toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: result.slice(0, 50000), is_error: !ok });

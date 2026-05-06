@@ -87,6 +87,7 @@ export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInpu
       filePath: event.path ?? '',
       previewAvailable,
       turnId: event.turnId,
+      creator: event.creator ?? 'agent',
     };
   }
   if (event.type === 'receipt_emitted') {

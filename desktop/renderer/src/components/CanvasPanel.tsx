@@ -49,10 +49,30 @@ export function CanvasPanel({ events, onClose, initialPreviewFile, initialPrevie
     [events]
   );
 
-  const fileChanges = useMemo(() =>
-    events.filter((e): e is Extract<DesktopTaskEvent, { type: 'canvas_file_changed' }> => e.type === 'canvas_file_changed'),
-    [events]
-  );
+  const fileChanges = useMemo(() => {
+    // Primary source: canvas_file_changed events
+    const changes: Extract<DesktopTaskEvent, { type: 'canvas_file_changed' }>[] = events.filter(
+      (e): e is Extract<DesktopTaskEvent, { type: 'canvas_file_changed' }> => e.type === 'canvas_file_changed'
+    );
+    // Fallback: extract files from canvas_tool_call Write events for backward compatibility
+    if (changes.length === 0) {
+      for (const e of events) {
+        if (e.type === 'canvas_tool_call') {
+          const call = e as { toolName: string; input: Record<string, unknown> };
+          const toolName = call.toolName.toLowerCase();
+          if ((toolName === 'write' || toolName === 'bash') && call.input?.file_path) {
+            changes.push({
+              type: 'canvas_file_changed',
+              filePath: call.input.file_path as string,
+              change: 'add',
+              eventId: (e as { eventId: string }).eventId,
+            } as Extract<DesktopTaskEvent, { type: 'canvas_file_changed' }>);
+          }
+        }
+      }
+    }
+    return changes;
+  }, [events]);
 
   // Extract file content from tool results (Write tool)
   const fileContents = useMemo(() => {

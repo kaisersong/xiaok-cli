@@ -6,7 +6,7 @@ export type RuntimeEvent =
   | { type: 'intent_created'; sessionId: string; turnId: string; intentId: string; templateId: string; deliverable: string; riskTier: 'low' | 'medium' | 'high' }
   | { type: 'stage_activated'; sessionId: string; turnId: string; intentId: string; stageId: string; label: string; order: number; totalStages: number }
   | { type: 'step_activated'; sessionId: string; turnId: string; intentId: string; stepId: string }
-  | { type: 'artifact_recorded'; sessionId: string; turnId: string; intentId: string; stageId: string; artifactId: string; label: string; kind: string; path?: string }
+  | { type: 'artifact_recorded'; sessionId: string; turnId: string; intentId: string; stageId: string; artifactId: string; label: string; kind: string; path?: string; creator?: string }
   | { type: 'breadcrumb_emitted'; sessionId: string; turnId: string; intentId: string; stepId: string; status: 'running' | 'blocked' | 'completed' | 'failed'; message: string }
   | { type: 'assistant_delta'; sessionId: string; turnId: string; intentId: string; stepId: string; delta: string }
   | { type: 'receipt_emitted'; sessionId: string; turnId: string; intentId: string; stepId: string; note: string }

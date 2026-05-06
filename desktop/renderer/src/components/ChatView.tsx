@@ -156,34 +156,46 @@ export function ChatView({
                   </>
                 )}
                 {result?.artifacts && result.artifacts.length > 0 && (
-                  <div className="mt-3 space-y-1">
+                  <div className="mt-3 space-y-2">
                     {result.artifacts.map(a => (
-                      <button
-                        key={a.artifactId}
-                        type="button"
-                        onClick={() => onArtifactClick?.(a)}
-                        className="flex items-center gap-1.5 text-sm text-[var(--c-accent)] hover:underline cursor-pointer"
-                      >
-                        <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="currentColor"><path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zm5 0v4h4M7 9h4M7 12h4M5 9h1M5 12h1"/></svg>
-                        {a.title}
-                      </button>
+                      <div key={a.artifactId}>
+                        <button
+                          type="button"
+                          onClick={() => onArtifactClick?.({ artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath })}
+                          className="flex items-center gap-1.5 text-sm text-[var(--c-accent)] hover:underline cursor-pointer"
+                        >
+                          <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="currentColor"><path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zm5 0v4h4M7 9h4M7 12h4M5 9h1M5 12h1"/></svg>
+                          {a.title}
+                        </button>
+                        {a.creator && (
+                          <div className="ml-5 mt-0.5 text-[11px] text-[var(--c-text-tertiary)]">
+                            由 {a.creator === 'agent' ? 'Agent' : a.creator} 创建
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
                 )}
                 {((result?.artifacts && result.artifacts.length > 0) || generatedFiles.length > 0) && (
                   <div className={result && !(result?.artifacts && result.artifacts.length > 0) && generatedFiles.length > 0 ? 'mt-3' : ''}>
-                    <div className="space-y-1" data-testid="generated-files-list">
+                    <div className="space-y-2" data-testid="generated-files-list">
                       {result?.artifacts && result.artifacts.map(a => (
-                        <button
-                          key={a.artifactId}
-                          type="button"
-                          onClick={() => onArtifactClick?.({ artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath })}
-                          className="flex items-center gap-1.5 text-sm text-[var(--c-accent)] hover:underline cursor-pointer"
-                          data-testid={`generated-file-${a.title}`}
-                        >
-                          <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="currentColor"><path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zm5 0v4h4M7 9h4M7 12h4M5 9h1M5 12h1"/></svg>
-                          {a.title}
-                        </button>
+                        <div key={a.artifactId}>
+                          <button
+                            type="button"
+                            onClick={() => onArtifactClick?.({ artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath })}
+                            className="flex items-center gap-1.5 text-sm text-[var(--c-accent)] hover:underline cursor-pointer"
+                            data-testid={`generated-file-${a.title}`}
+                          >
+                            <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="currentColor"><path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zm5 0v4h4M7 9h4M7 12h4M5 9h1M5 12h1"/></svg>
+                            {a.title}
+                          </button>
+                          {a.creator && (
+                            <div className="ml-5 mt-0.5 text-[11px] text-[var(--c-text-tertiary)]">
+                              由 {a.creator === 'agent' ? 'Agent' : a.creator} 创建
+                            </div>
+                          )}
+                        </div>
                       ))}
                       {(!result?.artifacts || result.artifacts.length === 0) && generatedFiles.map(f => (
                         <button

@@ -282,6 +282,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
           createdAt: event.turnId,
           previewAvailable: event.previewAvailable,
           filePath: event.filePath,
+          creator: event.creator ?? 'agent',
         };
         nextResult = {
           ...snapshot.result,
