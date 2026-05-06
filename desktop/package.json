@@ -9,7 +9,7 @@
   "scripts": {
     "build:icon": "node ../scripts/desktop-icon.mjs",
     "build": "npm run build:main && npm run build:renderer",
-    "build:main": "tsc -p tsconfig.electron.json && node -e \"const fs=require('fs'); fs.copyFileSync('electron/preload.cjs','dist/main/desktop/electron/preload.cjs');\"",
+    "build:main": "tsc -p tsconfig.electron.json && node -e \"const fs=require('fs'); fs.copyFileSync('electron/preload.cjs','dist/main/desktop/electron/preload.cjs'); if(fs.existsSync('build/tray-icon.png')){ fs.mkdirSync('dist/main/desktop/electron',{recursive:true}); fs.copyFileSync('build/tray-icon.png','dist/main/desktop/electron/tray-icon.png'); fs.mkdirSync('dist/main/desktop/build',{recursive:true}); fs.copyFileSync('build/tray-icon.png','dist/main/desktop/build/tray-icon.png'); }\"",
     "build:renderer": "vite build",
     "dev": "vite --host 127.0.0.1",
     "test": "vitest run",

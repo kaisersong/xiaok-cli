@@ -240,8 +240,9 @@ export function ChatShell() {
     if (snapshot?.events && snapshot.events.length > 0) {
       let accumulated = '';
       let lastProgress: ChatMessage | null = null;
-      // Note: During replay we do NOT create tool_steps groups.
-      // Tool_steps is only for live streaming. Replay preserves original progress messages.
+      // For replay, also collect tool_steps so past tasks show tool execution
+      let replayToolSteps: ToolStep[] = [];
+      let replayToolMsgId: string | null = null;
       for (const ev of snapshot.events) {
         if (ev.type === 'artifact_recorded') {
           const ar = ev as { artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string; creator?: string };
@@ -270,14 +271,22 @@ export function ChatShell() {
         }
         if (ev.type === 'canvas_tool_call') {
           allEventsRef.current.push(ev);
+          const evC = ev as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string };
+          replayToolSteps.push({ toolUseId: evC.toolUseId, toolName: evC.toolName, input: evC.input, status: 'done' });
+          if (!replayToolMsgId) replayToolMsgId = `msg-tool-steps-${evC.eventId}`;
           continue;
         }
         if (ev.type === 'canvas_tool_result') {
           allEventsRef.current.push(ev);
+          const evR = ev as { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string };
+          replayToolSteps = replayToolSteps.map(s =>
+            s.toolUseId === evR.toolUseId ? { ...s, status: evR.ok ? 'done' : 'error', response: evR.response } : s
+          );
           continue;
         }
         if (ev.type === 'progress') {
           const prog = (ev as { type: 'progress'; message: string; stage?: string; eventId: string });
+          if ((prog.stage === 'tool' || prog.stage === 'completed' || prog.stage === 'failed') && replayToolSteps.length > 0) { continue; }
           lastProgress = {
             id: `msg-progress-${prog.eventId}`,
             role: 'progress',
@@ -300,6 +309,9 @@ export function ChatShell() {
           lastResult = r;
         }
       }
+      if (replayToolSteps.length > 0 && replayToolMsgId) {
+        msgs.push({ id: replayToolMsgId, role: 'tool_steps', content: '', steps: replayToolSteps, stepsLive: false });
+      }
       if (lastProgress) {
         msgs.push(lastProgress);
       }
@@ -317,13 +329,13 @@ export function ChatShell() {
     // Mark this as the current load
     const thisLoadId = taskId;
     currentLoadIdRef.current = thisLoadId;
+    allEventsRef.current = [];
+    toolStepsMsgIdRef.current = null;
+    toolStepsActiveRef.current = false;
 
     // Cleanup previous subscription
     unsubRef.current?.();
     unsubRef.current = null;
-    allEventsRef.current = [];
-    toolStepsMsgIdRef.current = null;
-    toolStepsActiveRef.current = false;
     streamRef.current = '';
     setStreamingText('');
     setResult(null);
