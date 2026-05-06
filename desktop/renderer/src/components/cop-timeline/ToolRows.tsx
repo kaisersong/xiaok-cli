@@ -3,6 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import hljs from 'highlight.js/lib/common'
 import type { FileOpRef } from '../../storage'
+import { DiffView } from '../DiffView'
 import { CopThoughtSummaryRow } from './ThinkingBlock'
 import type { ExploreGroupRef } from '../../toolPresentation'
 import { COP_TIMELINE_CONTENT_PADDING_LEFT_PX, TypewriterText } from './utils'
@@ -41,6 +42,18 @@ export function summarizeDiff(text: string | undefined): { added: number; remove
     else if (line.startsWith('-')) removed += 1
   }
   return added > 0 || removed > 0 ? { added, removed } : null
+}
+
+/**
+ * Detect if tool output is a unified diff (not just any write output).
+ * Uses structured diff fields if available, falls back to output content check.
+ */
+function isDiffOutput(op: FileOpRef): boolean {
+  // Check for structured diff fields (CopTimelineSegment already has this)
+  if (op.diff || op.patch || op.unified_diff) return true
+  // Check if output starts with unified diff header
+  if (op.output?.trim().startsWith('diff --git')) return true
+  return false
 }
 
 
@@ -117,7 +130,9 @@ function ToolTitle({ title, live, status: _status, highlightedSuffix }: { title:
 export function FileOpToolCard({ op }: { op: FileOpRef }) {
   const title = op.displayDescription || op.label || op.toolName
   const filePath = op.filePath || op.displayDetail || ''
-  const lines = previewLines(op.output || op.errorMessage)
+  const diffText = op.diff || op.patch || op.unified_diff || op.output || op.errorMessage
+  const isDiff = isDiffOutput(op)
+  const lines = previewLines(diffText)
   const cardTitle = op.pattern || op.displaySubject || (filePath ? basename(filePath) : title)
   const cardSubtitle = filePath && cardTitle !== filePath ? filePath : op.displayDetail || ''
 
@@ -129,27 +144,15 @@ export function FileOpToolCard({ op }: { op: FileOpRef }) {
           {cardSubtitle && <span style={{ color: 'var(--c-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {cardSubtitle}</span>}
         </div>
       )}
-      {lines.length > 0 ? (
-        <pre style={{ margin: 0, padding: '9px 0', maxHeight: 280, overflow: 'auto', fontFamily: MONO, fontSize: 12, lineHeight: '18px', color: 'var(--c-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {lines
-            .filter((line) => {
-              const t = line.trim()
-              if (!t) return false
-              if (t.startsWith('--- ') || t.startsWith('+++ ') || t === '---' || t === '+++') return false
-              if (t.startsWith('@@') && t.includes('@@')) return false
-              if (t.startsWith('diff --git') || t.startsWith('index ')) return false
-              return true
-            })
-            .map((line, lineIndex) => {
-              let bg: string | undefined
-              if (line.startsWith('+')) bg = 'rgba(34,197,94,0.12)'
-              else if (line.startsWith('-')) bg = 'rgba(239,68,68,0.12)'
-              return (
-                <div key={lineIndex} style={{ padding: '0 10px', background: bg }}>
-                  {`${String(lineIndex + 1).padStart(3, ' ')}  ${line}`}
-                </div>
-              )
-            })}
+      {isDiff && diffText ? (
+        <DiffView
+          diff={diffText}
+          maxHeight={280}
+          fallbackText={lines.join('\n')}
+        />
+      ) : lines.length > 0 ? (
+        <pre style={{ margin: 0, padding: '9px 10px', maxHeight: 280, overflow: 'auto', fontFamily: MONO, fontSize: 12, lineHeight: '18px', color: 'var(--c-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {lines.join('\n')}
         </pre>
       ) : (
         <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--c-text-muted)' }}>

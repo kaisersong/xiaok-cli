@@ -216,7 +216,27 @@ export type ThinkingSegmentRef = { segmentId: string; type?: string }
 export type MessageThinkingRef = { segments: ThinkingSegmentRef[] }
 export type MessageSearchStepRef = { stepId: string; query?: string }
 export type MemoryActionRef = { actionId: string; type?: string }
-export type FileOpRef = { opId: string; path?: string; type?: string }
+export type FileOpStatus = 'pending' | 'running' | 'completed' | 'failed'
+export type FileOpRef = {
+  opId: string
+  path?: string
+  type?: string
+  // Extended fields used in ToolRows.tsx and CopTimelineSegment.tsx
+  toolName?: string
+  status?: FileOpStatus
+  output?: string
+  errorMessage?: string
+  diff?: string
+  patch?: string
+  unified_diff?: string
+  filePath?: string
+  displayDescription?: string
+  displayDetail?: string
+  displaySubject?: string
+  label?: string
+  pattern?: string
+  operation?: string
+}
 export type CopBlockRef = { blockId: string; type?: string }
 export type CopBlockItem = { blockId: string; type?: string }
 export type SubAgentStatus = 'spawning' | 'active' | 'completed' | 'failed' | 'closed'
