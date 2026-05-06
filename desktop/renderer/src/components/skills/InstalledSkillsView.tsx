@@ -1,9 +1,23 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, FolderOpen, Loader2, Plus, Trash2 } from 'lucide-react'
 import { discoverExternalSkills, getExternalDirs, setExternalDirs, type ExternalSkillDir } from '../../api'
+import { api } from '../../api/bridge'
 import type { ViewSkill } from './types'
 import { SkillList } from './SkillList'
 import { secondaryButtonBorderStyle, secondaryButtonXsCls } from '../buttonStyles'
+
+interface SkillStats {
+  skillName: string
+  totalCalls: number
+  successCount: number
+  errorCount: number
+  avgDurationMs: number
+  p95DurationMs: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  lastCalledAt: number
+  firstCalledAt: number
+}
 
 type SkillTextSubset = {
   searchResults: (count: number) => string
@@ -30,6 +44,10 @@ type SkillTextSubset = {
   externalLoadFailed: string
   externalSaveFailed: string
   externalRemoveFailed: string
+  statsWeekSummary: (calls: number, avgSec: string, successRate: string) => string
+  statsCardLine: (calls: number, avgSec: string, successRate: string) => string
+  statsDetailDurationValue: (ms: number) => string
+  statsDetailSuccessValue: (success: number, total: number) => string
 }
 
 type Props = {
@@ -68,6 +86,16 @@ export function InstalledSkillsView(props: Props) {
   const [newDir, setNewDir] = useState('')
   const [saving, setSaving] = useState(false)
   const [externalOpen, setExternalOpen] = useState(false)
+  const [statsMap, setStatsMap] = useState<Map<string, SkillStats>>(new Map())
+
+  useEffect(() => {
+    api.getSkillStats()
+      .then(stats => {
+        const map = new Map(stats.map(s => [s.skillName, s]))
+        setStatsMap(map)
+      })
+      .catch(() => {})
+  }, [items])
 
   const refreshExternal = useCallback(async () => {
     setExternalLoading(true)
@@ -121,11 +149,31 @@ export function InstalledSkillsView(props: Props) {
     setExpanded((prev) => ({ ...prev, [path]: !prev[path] }))
   }
 
+  // Compute weekly stats summary
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000
+  const weekRecords = Array.from(statsMap.values()).filter(s => s.lastCalledAt > weekAgo)
+  const weekSummary = weekRecords.length >= 1
+    ? (() => {
+        const totalCalls = weekRecords.reduce((a, s) => a + s.totalCalls, 0)
+        const totalSuccess = weekRecords.reduce((a, s) => a + s.successCount, 0)
+        const avgMs = totalCalls > 0 ? Math.round(weekRecords.reduce((a, s) => a + s.avgDurationMs * s.totalCalls, 0) / totalCalls) : 0
+        const rate = totalCalls > 0 ? Math.round(totalSuccess / totalCalls * 100) + '%' : '--'
+        if (totalCalls < 5) return null
+        return skillText.statsWeekSummary(totalCalls, skillText.statsDetailDurationValue(avgMs), rate)
+      })()
+    : null
+
   return (
     <div className="flex flex-col gap-2">
       <span className="text-xs font-medium text-[var(--c-text-tertiary)]">
         {skillText.searchResults(items.length)}
       </span>
+
+      {weekSummary && (
+        <div className="rounded-lg px-3 py-2 text-xs text-[var(--c-text-tertiary)]" style={{ background: 'var(--c-bg-deep)' }}>
+          {weekSummary}
+        </div>
+      )}
 
       <SkillList
         items={items}
@@ -146,6 +194,7 @@ export function InstalledSkillsView(props: Props) {
         scanStatusBadge={scanStatusBadge}
         active={active}
         cardMenuRef={cardMenuRef}
+        statsMap={statsMap}
       />
 
       {/* external skills collapsible section */}

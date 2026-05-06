@@ -38,6 +38,7 @@ import { MarketplaceView } from './skills/MarketplaceView'
 import { BuiltinSkillsView } from './skills/BuiltinSkillsView'
 import { SkillDetailModal } from './skills/SkillDetailModal'
 import { primaryButtonSmCls, secondaryButtonBorderStyle, secondaryButtonSmCls } from './buttonStyles'
+import { api } from '../api/bridge'
 
 type Props = {
   accessToken: string
@@ -74,6 +75,13 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
   const cardMenuRef = useRef<HTMLDivElement>(null)
+  const [statsMap, setStatsMap] = useState<Map<string, { totalCalls: number; successCount: number; avgDurationMs: number; totalInputTokens: number; totalOutputTokens: number }>>(new Map())
+
+  useEffect(() => {
+    api.getSkillStats()
+      .then(stats => { setStatsMap(new Map(stats.map(s => [s.skillName, s]))) })
+      .catch(() => {})
+  }, [])
 
   const refreshBuiltin = useCallback(async () => {
     try {
@@ -651,6 +659,7 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
           platformAvailabilityLabel={platformAvailabilityLabel}
           platformAvailabilityStyle={platformAvailabilityStyle}
           scanStatusBadge={scanStatusBadge}
+          stats={detailSkill.skill_key ? statsMap.get(detailSkill.skill_key) : undefined}
         />
       )}
     </div>

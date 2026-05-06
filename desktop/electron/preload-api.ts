@@ -61,6 +61,7 @@ export const PRELOAD_API_KEYS = [
   'onReminder',
   'getSkillDebugConfig',
   'saveSkillDebugConfig',
+  'getSkillStats',
 ] as const;
 
 export interface DesktopModelProviderView {
@@ -231,6 +232,18 @@ export interface DesktopApi {
   onReminder(handler: (event: { reminderId: string; content: string; createdAt: number }) => void): () => void;
   getSkillDebugConfig(): Promise<{ enabled: boolean }>;
   saveSkillDebugConfig(input: { enabled: boolean }): Promise<{ enabled: boolean }>;
+  getSkillStats(): Promise<Array<{
+    skillName: string;
+    totalCalls: number;
+    successCount: number;
+    errorCount: number;
+    avgDurationMs: number;
+    p95DurationMs: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    lastCalledAt: number;
+    firstCalledAt: number;
+  }>>;
 }
 
 interface IpcRendererLike {
@@ -309,6 +322,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     },
     getSkillDebugConfig: () => ipcRenderer.invoke('desktop:getSkillDebugConfig') as Promise<{ enabled: boolean }>,
     saveSkillDebugConfig: (input) => ipcRenderer.invoke('desktop:saveSkillDebugConfig', input) as Promise<{ enabled: boolean }>,
+    getSkillStats: () => ipcRenderer.invoke('desktop:getSkillStats') as ReturnType<DesktopApi['getSkillStats']>,
   };
 }
 

@@ -23,6 +23,14 @@ type SkillTextSubset = {
   detailSource: string
   detailUpdatedAt: string
   scanStatusLabel: (status: string) => string
+  statsDetailCalls?: string
+  statsDetailAvgDuration?: string
+  statsDetailSuccessRate?: string
+  statsDetailTokens?: string
+  statsDetailCallsValue?: (n: number) => string
+  statsDetailDurationValue?: (ms: number) => string
+  statsDetailSuccessValue?: (success: number, total: number) => string
+  statsDetailTokensValue?: (tokens: number) => string
 }
 
 type Props = {
@@ -38,6 +46,7 @@ type Props = {
   platformAvailabilityLabel: (status?: ViewSkill['platform_status']) => string
   platformAvailabilityStyle: (status?: ViewSkill['platform_status']) => React.CSSProperties | null
   scanStatusBadge: (item: ViewSkill) => { label: string; style: React.CSSProperties } | null
+  stats?: { totalCalls: number; successCount: number; avgDurationMs: number; totalInputTokens: number; totalOutputTokens: number } | undefined
 }
 
 export function SkillDetailModal({
@@ -53,6 +62,7 @@ export function SkillDetailModal({
   platformAvailabilityLabel,
   platformAvailabilityStyle,
   scanStatusBadge,
+  stats,
 }: Props) {
   const enabled = active(item)
   const platformBadgeLabel = item.is_platform ? platformAvailabilityLabel(item.platform_status) : ''
@@ -144,6 +154,27 @@ export function SkillDetailModal({
                 {item.description || skillText.noDescription}
               </p>
             </div>
+
+            {stats && stats.totalCalls > 0 && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1 rounded-lg p-3" style={{ background: 'var(--c-bg-deep)' }}>
+                  <span className="text-[10px] font-medium text-[var(--c-text-muted)]">{skillText.statsDetailCalls}</span>
+                  <span className="text-sm text-[var(--c-text-heading)]">{skillText.statsDetailCallsValue?.(stats.totalCalls) ?? stats.totalCalls}</span>
+                </div>
+                <div className="flex flex-col gap-1 rounded-lg p-3" style={{ background: 'var(--c-bg-deep)' }}>
+                  <span className="text-[10px] font-medium text-[var(--c-text-muted)]">{skillText.statsDetailAvgDuration}</span>
+                  <span className="text-sm text-[var(--c-text-heading)]">{skillText.statsDetailDurationValue?.(stats.avgDurationMs) ?? `${stats.avgDurationMs}ms`}</span>
+                </div>
+                <div className="flex flex-col gap-1 rounded-lg p-3" style={{ background: 'var(--c-bg-deep)' }}>
+                  <span className="text-[10px] font-medium text-[var(--c-text-muted)]">{skillText.statsDetailSuccessRate}</span>
+                  <span className="text-sm text-[var(--c-text-heading)]">{skillText.statsDetailSuccessValue?.(stats.successCount, stats.totalCalls) ?? '--'}</span>
+                </div>
+                <div className="flex flex-col gap-1 rounded-lg p-3" style={{ background: 'var(--c-bg-deep)' }}>
+                  <span className="text-[10px] font-medium text-[var(--c-text-muted)]">{skillText.statsDetailTokens}</span>
+                  <span className="text-sm text-[var(--c-text-heading)]">{skillText.statsDetailTokensValue?.(stats.totalInputTokens + stats.totalOutputTokens) ?? '--'}</span>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1 rounded-lg p-3" style={{ background: 'var(--c-bg-deep)' }}>

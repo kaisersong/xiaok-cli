@@ -1,5 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, extname, basename } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { join, extname, basename, dirname } from 'node:path';
+import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
 import { homedir, platform, arch, type } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createAdapter } from '../../src/ai/models.js';
@@ -20,6 +21,109 @@ import { createEmptySessionIntentLedger, cloneSessionIntentLedger, createIntentL
 import { DELEGATION_TEMPLATES } from '../../src/ai/intent-delegation/templates.js';
 import type { ReminderScheduler } from './reminder-scheduler.js';
 import type { Tool } from '../../src/types.js';
+
+// ---- Skill stats types ----
+
+interface SkillExecRecord {
+  id: string;
+  skillNames: string[];
+  taskId: string;
+  startTime: number;
+  endTime: number;
+  durationMs: number;
+  status: 'success' | 'error' | 'cancelled';
+  inputTokens: number;
+  outputTokens: number;
+  prompt: string;
+  triggerType: 'slash_command' | 'tool_call' | 'auto';
+}
+
+export interface SkillStats {
+  skillName: string;
+  totalCalls: number;
+  successCount: number;
+  errorCount: number;
+  avgDurationMs: number;
+  p95DurationMs: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  lastCalledAt: number;
+  firstCalledAt: number;
+}
+
+const EXEC_FILE = 'skill-exec.json';
+const MAX_EXEC_RECORDS = 500;
+
+async function appendExecRecord(dataRoot: string, record: SkillExecRecord): Promise<void> {
+  try {
+    const filePath = join(dataRoot, EXEC_FILE);
+    let records: SkillExecRecord[] = [];
+    try {
+      const raw = await readFileAsync(filePath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) records = parsed;
+    } catch { /* file doesn't exist yet */ }
+    records.push(record);
+    if (records.length > MAX_EXEC_RECORDS) records.splice(0, records.length - MAX_EXEC_RECORDS);
+    mkdirSync(dirname(filePath), { recursive: true });
+    await writeFileAsync(filePath, JSON.stringify(records));
+  } catch { /* silent */ }
+}
+
+async function loadExecRecords(dataRoot: string): Promise<SkillExecRecord[]> {
+  try {
+    const raw = await readFileAsync(join(dataRoot, EXEC_FILE), 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed;
+  } catch { return []; }
+}
+
+function aggregateStats(records: SkillExecRecord[]): SkillStats[] {
+  const bySkill = new Map<string, { durations: number[]; successes: number; errors: number; calls: number; inputTokens: number; outputTokens: number; firstAt: number; lastAt: number }>();
+  for (const r of records) {
+    const names = r.skillNames.length > 0 ? r.skillNames : ['unknown'];
+    for (const name of names) {
+      const entry = bySkill.get(name) ?? { durations: [], successes: 0, errors: 0, calls: 0, inputTokens: 0, outputTokens: 0, firstAt: r.startTime, lastAt: r.endTime };
+      entry.calls++;
+      if (r.status === 'success') entry.successes++;
+      if (r.status === 'error') entry.errors++;
+      entry.durations.push(r.durationMs);
+      entry.inputTokens += r.inputTokens;
+      entry.outputTokens += r.outputTokens;
+      if (r.startTime < entry.firstAt) entry.firstAt = r.startTime;
+      if (r.endTime > entry.lastAt) entry.lastAt = r.endTime;
+      bySkill.set(name, entry);
+    }
+  }
+  return Array.from(bySkill.entries()).map(([skillName, e]) => {
+    const sorted = [...e.durations].sort((a, b) => a - b);
+    const p95Idx = Math.min(Math.floor(sorted.length * 0.95), sorted.length - 1);
+    return {
+      skillName,
+      totalCalls: e.calls,
+      successCount: e.successes,
+      errorCount: e.errors,
+      avgDurationMs: e.calls > 0 ? Math.round(e.durations.reduce((a, b) => a + b, 0) / e.calls) : 0,
+      p95DurationMs: sorted[p95Idx] ?? 0,
+      totalInputTokens: e.inputTokens,
+      totalOutputTokens: e.outputTokens,
+      lastCalledAt: e.lastAt,
+      firstCalledAt: e.firstAt,
+    };
+  });
+}
+
+function extractSkillNames(input: Record<string, unknown>): string[] {
+  const names: string[] = [];
+  if (typeof input.name === 'string' && input.name.trim()) names.push(input.name.trim());
+  if (Array.isArray(input.names)) {
+    for (const n of input.names) {
+      if (typeof n === 'string' && n.trim() && !names.includes(n.trim())) names.push(n.trim());
+    }
+  }
+  return names.length > 0 ? names : ['unknown'];
+}
 
 export interface DesktopServicesOptions {
   dataRoot: string;
@@ -463,6 +567,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       config.skillDebug = input.enabled;
       await saveConfig(config);
       return { enabled: config.skillDebug };
+    },
+    async getSkillStats(): Promise<SkillStats[]> {
+      try {
+        const records = await loadExecRecords(options.dataRoot);
+        const stats = aggregateStats(records);
+        const timeout = new Promise<SkillStats[]>(resolve => setTimeout(() => resolve([]), 2000));
+        return await Promise.race([Promise.resolve(stats), timeout]);
+      } catch { return []; }
     },
     async testProviderConnection(input: { providerId: string; modelId?: string }): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
       const config = await loadConfig();
@@ -1031,6 +1143,13 @@ function createDesktopModelRunner(): TaskRunner {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
+    // Skill stats tracking
+    const taskStartTime = Date.now();
+    let skillNamesDetected: string[] = [];
+    let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    const dataRoot = options.dataRoot;
     if (!skillsLoaded) {
       try {
         const skills = await skillCatalog.reload();
@@ -1145,6 +1264,11 @@ function createDesktopModelRunner(): TaskRunner {
           } else {
             assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
           }
+        } else if (chunk.type === 'usage') {
+          try {
+            totalInputTokens += chunk.usage?.inputTokens ?? 0;
+            totalOutputTokens += chunk.usage?.outputTokens ?? 0;
+          } catch { /* usage capture failure is non-critical */ }
         }
       }
       messages.push({ role: 'assistant', content: assistantBlocks });
@@ -1154,6 +1278,16 @@ function createDesktopModelRunner(): TaskRunner {
       for (const toolCall of toolCalls) {
         if (signal.aborted) throw new Error('task cancelled');
         emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id });
+        // Track skill tool calls for stats
+        if (toolCall.name === 'skill') {
+          try {
+            const extracted = extractSkillNames(toolCall.input as Record<string, unknown>);
+            if (skillNamesDetected.length === 0 || skillTriggerType === 'auto') {
+              skillNamesDetected = extracted;
+              if (skillTriggerType === 'auto') skillTriggerType = 'tool_call';
+            }
+          } catch { /* non-critical */ }
+        }
         const result = await registry.executeTool(toolCall.name, toolCall.input);
         const ok = !result.startsWith('Error');
         if (ok) {
@@ -1192,6 +1326,25 @@ function createDesktopModelRunner(): TaskRunner {
       { role: 'assistant', content: [{ type: 'text', text: note }] },
     );
     emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note });
+    // Record skill execution stats
+    if (skillNamesDetected.length > 0) {
+      try {
+        const taskId = sessionId;
+        await appendExecRecord(dataRoot, {
+          id: `exec_${taskStartTime.toString(36)}`,
+          skillNames: skillNamesDetected,
+          taskId,
+          startTime: taskStartTime,
+          endTime: Date.now(),
+          durationMs: Date.now() - taskStartTime,
+          status: 'success',
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          prompt: prompt.slice(0, 80),
+          triggerType: skillTriggerType,
+        });
+      } catch { /* stats recording failure is non-critical */ }
+    }
   };
 }
 
@@ -1319,6 +1472,11 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
           } else {
             assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
           }
+        } else if (chunk.type === 'usage') {
+          try {
+            totalInputTokens += chunk.usage?.inputTokens ?? 0;
+            totalOutputTokens += chunk.usage?.outputTokens ?? 0;
+          } catch { /* usage capture failure is non-critical */ }
         }
       }
       messages.push({ role: 'assistant', content: assistantBlocks });
@@ -1328,6 +1486,16 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       for (const toolCall of toolCalls) {
         if (signal.aborted) throw new Error('task cancelled');
         emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id });
+        // Track skill tool calls for stats
+        if (toolCall.name === 'skill') {
+          try {
+            const extracted = extractSkillNames(toolCall.input as Record<string, unknown>);
+            if (skillNamesDetected.length === 0 || skillTriggerType === 'auto') {
+              skillNamesDetected = extracted;
+              if (skillTriggerType === 'auto') skillTriggerType = 'tool_call';
+            }
+          } catch { /* non-critical */ }
+        }
         const result = await registry.executeTool(toolCall.name, toolCall.input);
         const ok = !result.startsWith('Error');
         if (ok) {
@@ -1364,6 +1532,25 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       { role: 'assistant', content: [{ type: 'text', text: note }] },
     );
     emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note });
+    // Record skill execution stats
+    if (skillNamesDetected.length > 0) {
+      try {
+        const taskId = sessionId;
+        await appendExecRecord(dataRoot, {
+          id: `exec_${taskStartTime.toString(36)}`,
+          skillNames: skillNamesDetected,
+          taskId,
+          startTime: taskStartTime,
+          endTime: Date.now(),
+          durationMs: Date.now() - taskStartTime,
+          status: 'success',
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          prompt: prompt.slice(0, 80),
+          triggerType: skillTriggerType,
+        });
+      } catch { /* stats recording failure is non-critical */ }
+    }
   };
 }
 

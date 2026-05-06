@@ -34,6 +34,9 @@ type Props = {
     remove: string
     manualAvailable: string
     scanStatusLabel: (status: string) => string
+    statsCardLine?: (calls: number, avgSec: string, successRate: string) => string
+    statsDetailDurationValue?: (ms: number) => string
+    statsDetailSuccessValue?: (success: number, total: number) => string
   }
   locale: string
   platformAvailabilityLabel: (status?: ViewSkill['platform_status']) => string
@@ -41,6 +44,7 @@ type Props = {
   scanStatusBadge: (item: ViewSkill) => { label: string; style: React.CSSProperties } | null
   active: (item: ViewSkill) => boolean
   cardMenuRef: React.RefObject<HTMLDivElement | null>
+  statsMap?: Map<string, { totalCalls: number; successCount: number; avgDurationMs: number; totalInputTokens: number; totalOutputTokens: number }>
 }
 
 export function SkillList({
@@ -62,6 +66,7 @@ export function SkillList({
   scanStatusBadge,
   active,
   cardMenuRef,
+  statsMap,
 }: Props) {
   if (loading) {
     return (
@@ -166,6 +171,17 @@ export function SkillList({
               {metaParts && (
                 <span className="text-[10px] text-[var(--c-text-muted)]">{metaParts}</span>
               )}
+              {statsMap && item.skill_key && (() => {
+                const stat = statsMap.get(item.skill_key)
+                if (!stat || stat.totalCalls < 1) return null
+                const avgStr = skillText.statsDetailDurationValue?.(stat.avgDurationMs) ?? `${stat.avgDurationMs}ms`
+                const rateStr = skillText.statsDetailSuccessValue?.(stat.successCount, stat.totalCalls) ?? `${stat.successCount}/${stat.totalCalls}`
+                return (
+                  <span className="text-[10px] text-[var(--c-text-muted)]">
+                    {skillText.statsCardLine?.(stat.totalCalls, avgStr, rateStr)}
+                  </span>
+                )
+              })()}
               {(item.scan_summary || item.updated_at) && (
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-[var(--c-text-muted)]">
                   {item.scan_summary && <span className="line-clamp-2">{item.scan_summary}</span>}

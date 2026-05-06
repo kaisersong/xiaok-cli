@@ -696,6 +696,14 @@ export const api = {
   async saveSkillDebugConfig(input: { enabled: boolean }) {
     return window.xiaokDesktop.saveSkillDebugConfig(input);
   },
+
+  async getSkillStats() {
+    try {
+      return await window.xiaokDesktop.getSkillStats();
+    } catch {
+      return [];
+    }
+  },
 };
 
 export function isApiError(error: unknown): boolean {

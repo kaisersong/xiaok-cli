@@ -163,6 +163,11 @@ export function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow, serv
     log('info', 'createTaskWithFiles ok', { taskId: r?.taskId });
     return r;
   });
+  ipcMain.handle('desktop:getSkillStats', async () => {
+    try {
+      return await services.getSkillStats();
+    } catch { return []; }
+  });
 }
 
 async function expandSelectedMaterialPaths(paths: string[]): Promise<string[]> {
