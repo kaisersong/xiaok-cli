@@ -15,10 +15,7 @@ import { buildToolList, ToolRegistry } from '../../src/ai/tools/index.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
 import { getConfigPath, loadConfig, saveConfig } from '../../src/utils/config.js';
-import { createIntentDelegationTools } from '../../src/ai/tools/intent-delegation.js';
 import { analyzeIntent as analyzeStageIntent } from '../../src/runtime/stage/executor.js';
-import { createEmptySessionIntentLedger, cloneSessionIntentLedger, createIntentLedgerRecord, type SessionIntentLedger, type IntentPlanDraft, type IntentLedgerRecord } from '../../src/runtime/intent-delegation/types.js';
-import { DELEGATION_TEMPLATES } from '../../src/ai/intent-delegation/templates.js';
 import type { ReminderScheduler } from './reminder-scheduler.js';
 import type { Tool } from '../../src/types.js';
 
@@ -188,18 +185,6 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
-  const intentStore = new InMemoryIntentLedgerStore();
-  intentStore.seedEmpty('desktop-session');
-
-  // Register intent delegation tools
-  const intentTools = createIntentDelegationTools({
-    ledgerStore: intentStore as never,
-    sessionId: 'desktop-session',
-    instanceId: 'desktop-instance',
-  });
-  for (const tool of intentTools) {
-    registry.registerTool(tool);
-  }
 
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
@@ -948,87 +933,6 @@ function createModelConfigSnapshot(config: Config): DesktopModelConfigSnapshot {
   };
 }
 
-// Simplified in-memory intent ledger store for Desktop
-class InMemoryIntentLedgerStore {
-  private ledgers = new Map<string, SessionIntentLedger>();
-
-  seedEmpty(sessionId: string): void {
-    if (this.ledgers.has(sessionId)) return;
-    this.ledgers.set(sessionId, createEmptySessionIntentLedger(sessionId));
-  }
-
-  async load(sessionId: string): Promise<SessionIntentLedger | null> {
-    return this.ledgers.get(sessionId) ?? null;
-  }
-
-  async appendIntent(sessionId: string, plan: IntentPlanDraft): Promise<SessionIntentLedger> {
-    const intent = createIntentLedgerRecord(plan);
-    const ledger: SessionIntentLedger = {
-      sessionId,
-      instanceId: 'desktop-instance',
-      activeIntentId: intent.intentId,
-      intents: [intent],
-      latestPlan: intent,
-      breadcrumbs: [],
-      receipt: null,
-      salvage: null,
-      ownership: { state: 'owned', ownerInstanceId: 'desktop-instance', updatedAt: Date.now() },
-      updatedAt: Date.now(),
-    };
-    this.ledgers.set(sessionId, ledger);
-    return cloneSessionIntentLedger(ledger);
-  }
-
-  async updateIntent(sessionId: string, intentId: string, patch: Record<string, unknown>): Promise<SessionIntentLedger> {
-    const ledger = this.ledgers.get(sessionId);
-    if (!ledger) throw new Error(`session not found: ${sessionId}`);
-    const intent = ledger.intents.find(i => i.intentId === intentId);
-    if (!intent) throw new Error(`intent not found: ${intentId}`);
-    Object.assign(intent, patch, { updatedAt: Date.now() });
-    ledger.updatedAt = Date.now();
-    return cloneSessionIntentLedger(ledger);
-  }
-
-  async recordBreadcrumb(sessionId: string, input: { intentId: string; stepId: string; status: string; message: string }): Promise<SessionIntentLedger> {
-    const ledger = this.ledgers.get(sessionId);
-    if (!ledger) throw new Error(`session not found: ${sessionId}`);
-    ledger.breadcrumbs.push({
-      intentId: input.intentId,
-      stepId: input.stepId,
-      status: input.status as 'running' | 'blocked' | 'completed' | 'failed',
-      message: input.message,
-      createdAt: Date.now(),
-    });
-    ledger.updatedAt = Date.now();
-    return cloneSessionIntentLedger(ledger);
-  }
-
-  async recordReceipt(sessionId: string, input: { intentId: string; stepId: string; note: string }): Promise<SessionIntentLedger> {
-    const ledger = this.ledgers.get(sessionId);
-    if (!ledger) throw new Error(`session not found: ${sessionId}`);
-    ledger.receipt = { ...input, createdAt: Date.now() };
-    ledger.updatedAt = Date.now();
-    return cloneSessionIntentLedger(ledger);
-  }
-
-  async recordSalvage(sessionId: string, input: { intentId: string; summary: string[]; reason?: string }): Promise<SessionIntentLedger> {
-    const ledger = this.ledgers.get(sessionId);
-    if (!ledger) throw new Error(`session not found: ${sessionId}`);
-    ledger.salvage = { ...input, createdAt: Date.now() };
-    ledger.updatedAt = Date.now();
-    return cloneSessionIntentLedger(ledger);
-  }
-
-  async saveDispatchedIntent(sessionId: string, intent: IntentLedgerRecord): Promise<SessionIntentLedger> {
-    const ledger = this.ledgers.get(sessionId);
-    if (!ledger) throw new Error(`session not found: ${sessionId}`);
-    const idx = ledger.intents.findIndex(i => i.intentId === intent.intentId);
-    if (idx >= 0) ledger.intents[idx] = intent;
-    ledger.updatedAt = Date.now();
-    return cloneSessionIntentLedger(ledger);
-  }
-}
-
 function buildSystemPrompt(): string {
   const home = homedir();
   const cwd = process.cwd();
@@ -1056,8 +960,6 @@ function buildSystemPrompt(): string {
 - Grep: 搜索文件内容
 - Glob: 按模式匹配查找文件
 - skill: 调用已安装的 skill
-- intent_create: 分析用户意图，生成有序的执行计划
-- intent_step_update: 更新当前执行步骤的状态
 - reminder_create: 创建定时提醒（当用户说"定时任务"、"提醒我"、"过X分钟提醒"时使用）
 - reminder_list: 列出所有活跃的提醒
 - reminder_cancel: 取消一个提醒
@@ -1111,18 +1013,6 @@ xiaok 支持从 ClawHub 安装技能。当用户说"安装XX技能"时：
 2. 读取附件内容进行分析
 3. 基于附件内容回答问题或执行任务
 
-## 意图识别规则
-
-收到用户请求时，先用 intent_create 工具分析意图：
-- raw_intent: 用户原始请求
-- normalized_intent: 规范化后的意图描述
-- intent_type: generate(生成新内容) / revise(修改已有内容) / summarize(总结) / analyze(分析)
-- deliverable: 期望交付物描述
-- risk_tier: low/medium/high
-- template_id: generate_v1 / revise_v1 / summarize_v1 / analyze_v1
-
-然后用 intent_step_update 跟踪执行进度。
-
 当用户要求执行操作时，直接使用工具完成，不要说"我没有权限"。用户已经授权你使用所有工具。
 保持简洁、准确。`;
 }
@@ -1136,18 +1026,6 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
   let skillsLoaded = false;
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
-  const intentStore = new InMemoryIntentLedgerStore();
-  intentStore.seedEmpty('desktop-session');
-
-  // Register intent delegation tools
-  const intentTools = createIntentDelegationTools({
-    ledgerStore: intentStore as never,
-    sessionId: 'desktop-session',
-    instanceId: 'desktop-instance',
-  });
-  for (const tool of intentTools) {
-    registry.registerTool(tool);
-  }
 
   return async ({ sessionId, prompt, materials, signal, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
