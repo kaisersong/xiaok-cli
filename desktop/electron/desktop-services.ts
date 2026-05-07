@@ -19,6 +19,8 @@ import { createIntentDelegationTools } from '../../src/ai/tools/intent-delegatio
 import { analyzeIntent as analyzeStageIntent } from '../../src/runtime/stage/executor.js';
 import { createEmptySessionIntentLedger, cloneSessionIntentLedger, createIntentLedgerRecord, type SessionIntentLedger, type IntentPlanDraft, type IntentLedgerRecord } from '../../src/runtime/intent-delegation/types.js';
 import { DELEGATION_TEMPLATES } from '../../src/ai/intent-delegation/templates.js';
+import { buildSkillInvocation, createSkillBundleRefsTool, checkStagePolicyViolation, checkBudget, appendTrace, getStagePolicy } from './skill-runtime.js';
+import type { SkillInvocation } from './skill-runtime.js';
 import type { ReminderScheduler } from './reminder-scheduler.js';
 import type { Tool } from '../../src/types.js';
 
@@ -1191,16 +1193,29 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
     const skillsContext = currentSkills.length > 0 ? formatSkillsContext(currentSkills) : '';
     const slashMatch = parseSlashCommand(prompt);
     let effectivePrompt = prompt;
+    let skillInvocation: SkillInvocation | null = null;
+
     if (slashMatch) {
       const skill = findSkillByCommandName(currentSkills, slashMatch.skillName);
       if (skill) {
         skillNamesDetected = [skill.name];
         skillTriggerType = 'slash_command';
+        skillInvocation = buildSkillInvocation(skill.name, skillCatalog, sessionId);
+        if (skillInvocation) {
+          appendTrace(dataRoot, {
+            ts: Date.now(), taskId: sessionId, skillName: skill.name,
+            event: 'skill_invoked', details: `slash: ${slashMatch.rest || '(no args)'}`,
+          });
+        }
         effectivePrompt = slashMatch.rest
           ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
           : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
       }
     }
+
+    // Register skill_bundle_refs tool for skill executions
+    const bundleTool = createSkillBundleRefsTool(skillCatalog);
+    registry.registerTool(bundleTool);
 
     // Build prompt with materials context - include file contents directly
     let materialsContext = '';
@@ -1270,10 +1285,43 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
     }];
     let reply = '';
     let iteration = 0;
-    const MAX_ITERATIONS = 20;
+    const MAX_ITERATIONS = skillInvocation ? 12 : 20; // Budget guard: fewer iterations for skill executions
+    let totalToolCalls = 0;
+    let referenceReads = 0;
+
+    // Trace: first model turn start
+    if (skillInvocation) {
+      appendTrace(dataRoot, {
+        ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+        stageId: skillInvocation.stageId, iteration: 1, event: 'model_turn_start',
+      });
+    }
+
     while (iteration < MAX_ITERATIONS) {
       if (signal.aborted) throw new Error('task cancelled');
       iteration++;
+
+      // Budget check
+      if (skillInvocation) {
+        const budgetResult = checkBudget(skillInvocation, iteration, totalToolCalls, referenceReads, totalInputTokens, dataRoot);
+        if (!budgetResult.ok) {
+          appendTrace(dataRoot, {
+            ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+            stageId: skillInvocation.stageId, iteration, event: 'model_turn_end',
+            durationMs: Date.now() - taskStartTime, details: `stopped: ${budgetResult.reason}`,
+          });
+          break;
+        }
+      }
+
+      // Trace: subsequent model turn start
+      if (skillInvocation && iteration > 1) {
+        appendTrace(dataRoot, {
+          ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+          stageId: skillInvocation.stageId, iteration, event: 'model_turn_start',
+        });
+      }
+
       const assistantBlocks: MessageBlock[] = [];
       for await (const chunk of adapter.stream(messages, activeToolDefs, systemPrompt)) {
         if (signal.aborted) throw new Error('task cancelled');
@@ -1308,7 +1356,46 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
       const toolResults: MessageBlock[] = [];
       for (const toolCall of toolCalls) {
         if (signal.aborted) throw new Error('task cancelled');
+        totalToolCalls++;
         emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id });
+
+        // Trace: tool start
+        if (skillInvocation) {
+          appendTrace(dataRoot, {
+            ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+            stageId: skillInvocation.stageId, iteration, event: 'tool_start',
+            toolName: toolCall.name,
+          });
+        }
+
+        // Stage policy check: block forbidden reference reads
+        if (skillInvocation && toolCall.name === 'Read') {
+          const violation = checkStagePolicyViolation(toolCall.name, toolCall.input as Record<string, unknown>, skillInvocation);
+          if (violation.violation) {
+            toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: `Error: ${violation.message}`, is_error: true });
+            if (skillInvocation) {
+              appendTrace(dataRoot, {
+                ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+                stageId: skillInvocation.stageId, iteration, event: 'tool_end',
+                toolName: toolCall.name, details: `blocked: ${violation.message}`,
+              });
+            }
+            continue;
+          }
+        }
+
+        // Evidence tracking: count reference reads
+        if (toolCall.name === 'Read') {
+          referenceReads++;
+          if (skillInvocation) {
+            appendTrace(dataRoot, {
+              ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+              stageId: skillInvocation.stageId, iteration, event: 'tool_end',
+              toolName: 'read_reference', details: String((toolCall.input as Record<string, unknown>).file_path || ''),
+            });
+          }
+        }
+
         // Track skill tool calls for stats
         if (toolCall.name === 'skill') {
           try {
@@ -1326,6 +1413,16 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
         } else {
           emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id, error: result.slice(0, 10000) });
         }
+
+        // Trace: tool end
+        if (skillInvocation) {
+          appendTrace(dataRoot, {
+            ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+            stageId: skillInvocation.stageId, iteration, event: 'tool_end',
+            toolName: toolCall.name, outputBytes: result.length,
+          });
+        }
+
         // Emit file_changed for Write tool so canvas can track generated files
         if (ok && toolCall.name === 'Write' && toolCall.input?.file_path) {
           const filePath = toolCall.input.file_path as string;
@@ -1346,10 +1443,26 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
             path: filePath,
             creator: 'agent',
           });
+          // Evidence: stage artifact
+          if (skillInvocation) {
+            appendTrace(dataRoot, {
+              ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+              stageId: skillInvocation.stageId, iteration, event: 'tool_end',
+              toolName: 'artifact_written', details: filePath,
+            });
+          }
         }
         toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: result.slice(0, 50000), is_error: !ok });
       }
       messages.push({ role: 'user', content: toolResults });
+
+      // Trace: model turn end
+      if (skillInvocation) {
+        appendTrace(dataRoot, {
+          ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+          stageId: skillInvocation.stageId, iteration, event: 'model_turn_end',
+        });
+      }
     }
     const note = reply.trim() || '模型没有返回内容。';
     history.push(
@@ -1375,6 +1488,15 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
           triggerType: skillTriggerType,
         });
       } catch { /* stats recording failure is non-critical */ }
+    }
+    // Trace: skill execution complete
+    if (skillInvocation) {
+      appendTrace(dataRoot, {
+        ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+        stageId: skillInvocation.stageId, event: 'stage_end',
+        durationMs: Date.now() - taskStartTime,
+        details: `tool_calls=${totalToolCalls} refs_read=${referenceReads} tokens=${totalInputTokens}`,
+      });
     }
   };
 }
@@ -1412,16 +1534,29 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
     const skillsContext = currentSkills.length > 0 ? formatSkillsContext(currentSkills) : '';
     const slashMatch = parseSlashCommand(prompt);
     let effectivePrompt = prompt;
+    let skillInvocation: SkillInvocation | null = null;
+
     if (slashMatch) {
       const skill = findSkillByCommandName(currentSkills, slashMatch.skillName);
       if (skill) {
         skillNamesDetected = [skill.name];
         skillTriggerType = 'slash_command';
+        skillInvocation = buildSkillInvocation(skill.name, skillCatalog, sessionId);
+        if (skillInvocation) {
+          appendTrace(dataRoot, {
+            ts: Date.now(), taskId: sessionId, skillName: skill.name,
+            event: 'skill_invoked', details: `slash: ${slashMatch.rest || '(no args)'}`,
+          });
+        }
         effectivePrompt = slashMatch.rest
           ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
           : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
       }
     }
+
+    // Register skill_bundle_refs tool for skill executions
+    const bundleTool = createSkillBundleRefsTool(skillCatalog);
+    registry.registerTool(bundleTool);
 
     // Build prompt with materials context - include file contents directly
     let materialsContext = '';
@@ -1491,10 +1626,43 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
     }];
     let reply = '';
     let iteration = 0;
-    const MAX_ITERATIONS = 20;
+    const MAX_ITERATIONS = skillInvocation ? 12 : 20; // Budget guard: fewer iterations for skill executions
+    let totalToolCalls = 0;
+    let referenceReads = 0;
+
+    // Trace: first model turn start
+    if (skillInvocation) {
+      appendTrace(dataRoot, {
+        ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+        stageId: skillInvocation.stageId, iteration: 1, event: 'model_turn_start',
+      });
+    }
+
     while (iteration < MAX_ITERATIONS) {
       if (signal.aborted) throw new Error('task cancelled');
       iteration++;
+
+      // Budget check
+      if (skillInvocation) {
+        const budgetResult = checkBudget(skillInvocation, iteration, totalToolCalls, referenceReads, totalInputTokens, dataRoot);
+        if (!budgetResult.ok) {
+          appendTrace(dataRoot, {
+            ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+            stageId: skillInvocation.stageId, iteration, event: 'model_turn_end',
+            durationMs: Date.now() - taskStartTime, details: `stopped: ${budgetResult.reason}`,
+          });
+          break;
+        }
+      }
+
+      // Trace: subsequent model turn start
+      if (skillInvocation && iteration > 1) {
+        appendTrace(dataRoot, {
+          ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+          stageId: skillInvocation.stageId, iteration, event: 'model_turn_start',
+        });
+      }
+
       const assistantBlocks: MessageBlock[] = [];
       for await (const chunk of adapter.stream(messages, activeToolDefs, systemPrompt)) {
         if (signal.aborted) throw new Error('task cancelled');
@@ -1594,6 +1762,15 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
           triggerType: skillTriggerType,
         });
       } catch { /* stats recording failure is non-critical */ }
+    }
+    // Trace: skill execution complete
+    if (skillInvocation) {
+      appendTrace(dataRoot, {
+        ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
+        stageId: skillInvocation.stageId, event: 'stage_end',
+        durationMs: Date.now() - taskStartTime,
+        details: `tool_calls=${totalToolCalls} refs_read=${referenceReads} tokens=${totalInputTokens}`,
+      });
     }
   };
 }
