@@ -117,6 +117,133 @@ describe('MarkdownRenderer', () => {
     expect(lines[2]).toBe('  Third line.');
   });
 
+  describe('mermaid rendering', () => {
+    it('renders a flowchart mermaid block as ASCII art', () => {
+      const renderer = new MarkdownRenderer();
+
+      renderer.write('```mermaid\ngraph LR\n  A --> B --> C\n```\n');
+
+      expect(output).toContain('─');   // box-drawing chars present
+      expect(output).not.toContain('graph LR');  // raw syntax not leaked
+      expect(output).not.toContain('```');
+    });
+
+    it('renders a sequence diagram mermaid block as ASCII art', () => {
+      const renderer = new MarkdownRenderer();
+
+      renderer.write('```mermaid\nsequenceDiagram\n  Alice->>Bob: Hello\n  Bob-->>Alice: Hi\n```\n');
+
+      expect(output).toContain('Alice');
+      expect(output).toContain('Bob');
+      expect(output).not.toContain('sequenceDiagram');
+      expect(output).not.toContain('```');
+    });
+
+    it('falls back to raw source when mermaid syntax is invalid', () => {
+      const renderer = new MarkdownRenderer();
+
+      renderer.write('```mermaid\nnot valid mermaid at all\n```\n');
+
+      expect(output).toContain('not valid mermaid at all');
+    });
+
+    it('renders non-mermaid code blocks normally with fence decorations', () => {
+      const renderer = new MarkdownRenderer();
+
+      renderer.write('```ts\nconst x = 1;\n```\n');
+
+      // Should have fence decorations (not mermaid path)
+      expect(output).toContain('╭─');
+      expect(output).toContain('╰─');
+      expect(output).not.toContain('graph');
+    });
+  });
+
+  describe('horizontal rule', () => {
+    it('adds blank lines above and below the rule', () => {
+      const renderer = new MarkdownRenderer();
+
+      renderer.write('before\n---\nafter\n');
+
+      const idx = output.indexOf('─');
+      expect(idx).toBeGreaterThan(-1);
+      // char before the rule line should be a newline
+      expect(output[idx - 1]).toBe('\n');
+      // char after the rule line should be a newline
+      const ruleEnd = output.indexOf('\n', idx);
+      expect(output[ruleEnd + 1]).toBe('\n');
+    });
+  });
+
+  describe('mermaid rendering', () => {
+    it('renders a flowchart mermaid block as ASCII instead of raw syntax', () => {
+      const renderer = new MarkdownRenderer();
+
+      renderer.write('```mermaid\n');
+      renderer.write('graph LR\n');
+      renderer.write('  A --> B --> C\n');
+      renderer.write('```\n');
+
+      // Should contain box-drawing characters, not raw mermaid syntax
+      expect(output).toContain('─');
+      expect(output).not.toContain('graph LR');
+      expect(output).not.toContain('```mermaid');
+    });
+
+    it('renders a sequence diagram as ASCII', () => {
+      const renderer = new MarkdownRenderer();
+
+      renderer.write('```mermaid\n');
+      renderer.write('sequenceDiagram\n');
+      renderer.write('  Alice->>Bob: Hello\n');
+      renderer.write('  Bob-->>Alice: Hi\n');
+      renderer.write('```\n');
+
+      expect(output).toContain('Alice');
+      expect(output).toContain('Bob');
+      expect(output).not.toContain('sequenceDiagram');
+      expect(output).not.toContain('```');
+    });
+
+    it('renders a state diagram as ASCII', () => {
+      const renderer = new MarkdownRenderer();
+
+      renderer.write('```mermaid\n');
+      renderer.write('stateDiagram-v2\n');
+      renderer.write('  [*] --> Idle\n');
+      renderer.write('  Idle --> Running: start\n');
+      renderer.write('  Running --> [*]: stop\n');
+      renderer.write('```\n');
+
+      expect(output).toContain('Idle');
+      expect(output).not.toContain('stateDiagram-v2');
+    });
+
+    it('falls back to raw source when mermaid diagram is invalid', () => {
+      const renderer = new MarkdownRenderer();
+
+      renderer.write('```mermaid\n');
+      renderer.write('this is not valid mermaid\n');
+      renderer.write('```\n');
+
+      // Should not throw, should output something
+      expect(output.length).toBeGreaterThan(0);
+    });
+
+    it('does not output opening or closing fence for mermaid blocks', () => {
+      const renderer = new MarkdownRenderer();
+
+      renderer.write('```mermaid\n');
+      renderer.write('graph TD\n');
+      renderer.write('  A --> B\n');
+      renderer.write('```\n');
+
+      expect(output).not.toContain('```');
+      expect(output).not.toContain('╭─');
+      expect(output).not.toContain('╰─');
+    });
+  });
+
   it('clears every visual row of a soft-wrapped pending line before flushing it formatted', () => {
     const renderer = new MarkdownRenderer();
     process.stdout.columns = 20;
