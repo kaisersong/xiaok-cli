@@ -16,172 +16,113 @@ function formatDuration(ms: number): string {
   return `${m}m${s}s`;
 }
 
-function formatParams(input: unknown): string {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return '';
-  const entries = Object.entries(input as Record<string, unknown>).slice(0, 3);
-  return entries
-    .map(([k, v]) => {
-      const val =
-        typeof v === 'string'
-          ? v.slice(0, 40)
-          : JSON.stringify(v).slice(0, 40);
-      return `${k}=${val}`;
-    })
-    .join(' ');
+function toolLabel(name: string): string {
+  switch (name) {
+    case 'read': case 'read_file': return 'read';
+    case 'write': case 'write_file': return 'write';
+    case 'edit': case 'edit_file': return 'edit';
+    case 'bash': return 'shell';
+    case 'glob': return 'glob';
+    case 'grep': return 'grep';
+    default: return name;
+  }
+}
+
+function stepPreview(step: ToolStep): string {
+  const input = step.input as Record<string, unknown> | null;
+  if (!input) return '';
+  if (step.toolName === 'bash' && input.command) return String(input.command).split('\n')[0].slice(0, 80);
+  if (step.toolName === 'read' && input.file_path) return String(input.file_path).split('/').pop() || '';
+  if (step.toolName === 'write' && input.file_path) return String(input.file_path).split('/').pop() || '';
+  if (step.toolName === 'edit' && input.file_path) return String(input.file_path).split('/').pop() || '';
+  if (step.toolName === 'glob' && input.pattern) return String(input.pattern);
+  if (step.toolName === 'grep' && input.pattern) return String(input.pattern);
+  const vals = Object.values(input).slice(0, 2).map(v => typeof v === 'string' ? v.slice(0, 30) : '');
+  return vals.filter(Boolean).join(' · ');
 }
 
 function Spinner({ size = 12 }: { size?: number }) {
   return (
-    <svg
-      className="animate-spin"
-      style={{ width: size, height: size, flexShrink: 0 }}
-      viewBox="0 0 24 24"
-    >
-      <circle
-        className="opacity-20"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="2"
-        fill="none"
-        style={{ color: 'var(--c-accent)' }}
-      />
-      <path
-        className="opacity-80"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        d="M4 12a8 8 0 0 1 8-8"
-        style={{ color: 'var(--c-accent)' }}
-      />
+    <svg className="animate-spin" style={{ width: size, height: size, flexShrink: 0 }} viewBox="0 0 24 24">
+      <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" style={{ color: 'var(--c-accent)' }} />
+      <path className="opacity-80" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="M4 12a8 8 0 0 1 8-8" style={{ color: 'var(--c-accent)' }} />
     </svg>
   );
 }
 
-// Group consecutive same-tool calls
-interface StepGroup {
-  toolName: string;
-  steps: ToolStep[];
+function ElapsedTimer({ startedAt }: { startedAt: number }) {
+  const [elapsed, setElapsed] = useState(() => Date.now() - startedAt);
+  const rafRef = useRef<number>(0);
+  useEffect(() => {
+    const tick = () => { setElapsed(Date.now() - startedAt); rafRef.current = requestAnimationFrame(tick); };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [startedAt]);
+  return <span className="font-mono" style={{ fontSize: 11, color: 'var(--c-accent)' }}>{formatDuration(elapsed)}</span>;
 }
 
-function groupSteps(steps: ToolStep[]): StepGroup[] {
-  const groups: StepGroup[] = [];
-  for (const step of steps) {
-    const last = groups[groups.length - 1];
-    if (last && last.toolName === step.toolName) {
-      last.steps.push(step);
-    } else {
-      groups.push({ toolName: step.toolName, steps: [step] });
-    }
-  }
-  return groups;
-}
-
-function StepRow({
-  step,
-  expanded,
-  onToggle,
-  elapsed,
-}: {
-  step: ToolStep;
-  expanded: boolean;
-  onToggle: () => void;
-  elapsed?: number;
-}) {
-  const params = formatParams(step.input);
+function StepCard({ step, elapsed }: { step: ToolStep; elapsed?: number }) {
+  const [expanded, setExpanded] = useState(false);
   const hasResponse = !!step.response;
   const duration = step.finishedAt && step.startedAt ? step.finishedAt - step.startedAt : undefined;
+  const preview = stepPreview(step);
 
   return (
-    <div>
-      <button
-        type="button"
-        onClick={hasResponse ? onToggle : undefined}
-        className="flex items-center gap-1.5 w-full text-left py-0.5 text-[var(--c-text-secondary)] transition-colors"
-        style={{ cursor: hasResponse ? 'pointer' : 'default' }}
+    <div style={{ padding: '2px 0' }}>
+      {/* Trigger row */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => { if (hasResponse) setExpanded(v => !v); }}
+        onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && hasResponse) { e.preventDefault(); setExpanded(v => !v); } }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 5,
+          cursor: hasResponse ? 'pointer' : 'default',
+          userSelect: 'none', WebkitUserSelect: 'none',
+        }}
       >
+        {/* Status icon */}
         <span style={{ width: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          {step.status === 'running' ? (
-            <Spinner size={11} />
-          ) : step.status === 'error' ? (
-            <span style={{ color: '#ef4444', fontSize: 11 }}>✕</span>
-          ) : (
-            <span style={{ color: '#22c55e', fontSize: 11 }}>✓</span>
-          )}
+          {step.status === 'running' ? <Spinner size={11} />
+            : step.status === 'error' ? <span style={{ color: '#ef4444', fontSize: 11 }}>✕</span>
+            : <span style={{ color: '#22c55e', fontSize: 11 }}>✓</span>}
         </span>
-        <span className="font-mono text-xs">{step.toolName}</span>
-        {params && (
-          <span
-            className="text-xs truncate"
-            style={{ opacity: 0.45, maxWidth: 300 }}
-          >
-            {params}
-          </span>
+        {/* Tool label */}
+        <span className="font-mono" style={{ fontSize: 11, opacity: 0.7 }}>{toolLabel(step.toolName)}</span>
+        {/* Preview */}
+        {preview && (
+          <span className="truncate" style={{ fontSize: 12, maxWidth: 320, opacity: 0.55 }}>{preview}</span>
         )}
-        <span className="ml-auto text-xs shrink-0" style={{ opacity: 0.5 }}>
-          {step.status === 'running' && elapsed != null
-            ? formatDuration(elapsed)
-            : duration != null
-              ? formatDuration(duration)
-              : ''}
+        {/* Timing */}
+        <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.4, flexShrink: 0 }}>
+          {step.status === 'running' && elapsed != null ? formatDuration(elapsed)
+            : duration != null ? formatDuration(duration) : ''}
         </span>
+        {/* Expand arrow */}
         {hasResponse && (
-          <span
-            className="text-xs"
-            style={{ opacity: 0.35, flexShrink: 0 }}
-          >
-            {expanded ? '∨' : '>'}
-          </span>
+          <span style={{ fontSize: 10, opacity: 0.35, flexShrink: 0 }}>{expanded ? '∨' : '>'}</span>
         )}
-      </button>
+      </div>
+
+      {/* Expanded body */}
       {expanded && hasResponse && (() => {
-        const isEdit = step.toolName === 'edit' || step.toolName === 'Edit' || step.toolName === 'edit_file'
-        const isDiff = isEdit && step.response?.includes('diff --git')
+        const isEdit = step.toolName === 'edit' || step.toolName === 'edit_file';
+        const isDiff = isEdit && step.response?.includes('diff --git');
         if (isDiff) {
           return (
             <div className="mt-0.5 mb-1 ml-5 rounded overflow-y-auto" style={{ background: 'var(--c-bg-deep)', maxHeight: 300 }}>
               <DiffView diff={step.response!} maxHeight={300} fallbackText={step.response!} />
             </div>
-          )
+          );
         }
         return (
-          <div
-            className="mt-0.5 mb-1 ml-5 rounded font-mono text-xs whitespace-pre-wrap break-all overflow-y-auto"
-            style={{
-              background: 'var(--c-bg-deep)',
-              padding: '6px 10px',
-              color: 'var(--c-text-secondary)',
-              maxHeight: 160,
-            }}
-          >
+          <div className="mt-0.5 mb-1 ml-5 rounded font-mono text-xs whitespace-pre-wrap break-all overflow-y-auto"
+            style={{ background: 'var(--c-bg-deep)', padding: '6px 10px', color: 'var(--c-text-secondary)', maxHeight: 160 }}>
             {step.response}
           </div>
-        )
+        );
       })()}
     </div>
-  );
-}
-
-// Live elapsed timer for running step
-function ElapsedTimer({ startedAt }: { startedAt: number }) {
-  const [elapsed, setElapsed] = useState(() => Date.now() - startedAt);
-  const rafRef = useRef<number>(0);
-
-  useEffect(() => {
-    const tick = () => {
-      setElapsed(Date.now() - startedAt);
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [startedAt]);
-
-  return (
-    <span className="font-mono text-xs" style={{ color: 'var(--c-accent)' }}>
-      {formatDuration(elapsed)}
-    </span>
   );
 }
 
@@ -189,128 +130,60 @@ export function ToolStepsMessage({ steps, live }: Props) {
   const [expanded, setExpanded] = useState(live);
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    if (!live) setExpanded(false);
-  }, [live]);
+  useEffect(() => { if (!live) setExpanded(false); }, [live]);
 
-  const doneCount = steps.filter((s) => s.status !== 'running').length;
-  const activeStep = steps.find((s) => s.status === 'running');
+  const doneCount = steps.filter(s => s.status !== 'running').length;
+  const activeStep = steps.find(s => s.status === 'running');
 
-  // Compute total elapsed time
-  const firstStart = steps.reduce((min, s) => {
-    if (s.startedAt && (!min || s.startedAt < min)) return s.startedAt;
-    return min;
-  }, 0 as number | null);
-  const lastFinish = steps.reduce((max, s) => {
-    if (s.finishedAt && (!max || s.finishedAt > max)) return s.finishedAt;
-    return max;
-  }, 0 as number | null);
+  const firstStart = steps.reduce<number>((min, s) => s.startedAt && (!min || s.startedAt < min) ? s.startedAt : min, 0);
+  const lastFinish = steps.reduce<number>((max, s) => s.finishedAt && (!max || s.finishedAt > max) ? s.finishedAt : max, 0);
   const totalMs = firstStart && lastFinish ? lastFinish - firstStart : undefined;
-
-  const toggleStep = (id: string) => {
-    setExpandedSteps((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  const groups = groupSteps(steps);
 
   return (
     <div className="py-1 text-sm" style={{ maxWidth: 663 }}>
-      {/* Header row */}
+      {/* Summary header */}
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded(v => !v)}
         className="flex items-center gap-1.5 text-[var(--c-text-secondary)] hover:text-[var(--c-text-primary)] transition-colors"
         style={{ background: 'none', border: 'none', padding: '2px 0', cursor: 'pointer' }}
       >
-        {live && activeStep ? (
-          <Spinner size={12} />
-        ) : null}
+        {live && activeStep && <Spinner size={12} />}
         <span style={{ fontSize: 13 }}>
           {live
-            ? `${doneCount}/${steps.length} step${steps.length !== 1 ? 's' : ''} · running ${activeStep?.toolName ?? ''}...`
-            : `${steps.length} step${steps.length !== 1 ? 's' : ''} completed`}
+            ? `${doneCount}/${steps.length} steps · running ${activeStep?.toolName ?? ''}...`
+            : `${steps.length} steps completed`}
         </span>
         {!live && totalMs != null && (
           <span className="text-xs" style={{ opacity: 0.5 }}>{formatDuration(totalMs)}</span>
         )}
-        {live && activeStep?.startedAt && (
-          <ElapsedTimer startedAt={activeStep.startedAt} />
-        )}
+        {live && activeStep?.startedAt && <ElapsedTimer startedAt={activeStep.startedAt} />}
         <span style={{ fontSize: 11, opacity: 0.5 }}>{expanded ? '∨' : '>'}</span>
       </button>
 
-      {/* Step list */}
-      <div
-        style={{
-          overflow: 'hidden',
-          maxHeight: expanded ? `${steps.length * 120 + 200}px` : '0px',
-          transition: 'max-height 0.2s ease',
-        }}
-      >
+      {/* Step cards */}
+      <div style={{
+        overflow: 'hidden',
+        maxHeight: expanded ? `${steps.length * 80 + 200}px` : '0px',
+        transition: 'max-height 0.2s ease',
+      }}>
         {!live && (() => {
-          try {
-            return <ChangedFilesTree steps={steps} onFileSelect={(fp) => {
-              const s = steps.find(s => {
-                const p = s.input && typeof s.input === 'object' ? (s.input as Record<string, unknown>).file_path : null
-                return typeof p === 'string' && p.endsWith(fp.split('/').pop() || '')
-              })
-              if (s) toggleStep(s.toolUseId)
-            }} />
-          } catch { return null }
+          try { return <ChangedFilesTree steps={steps} onFileSelect={(fp) => {
+            const s = steps.find(s => {
+              const p = s.input && typeof s.input === 'object' ? (s.input as Record<string, unknown>).file_path : null;
+              return typeof p === 'string' && p.endsWith(fp.split('/').pop() || '');
+            });
+            if (s) setExpandedSteps(prev => { const next = new Set(prev); next.add(s.toolUseId); return next; });
+          }} />; } catch { return null; }
         })()}
-        <div
-          className="mt-1.5 space-y-0.5 pl-3"
-          style={{ borderLeft: '1.5px solid var(--c-border, #e0e0e0)' }}
-        >
-          {groups.map((group) => {
-            if (group.steps.length === 1) {
-              const step = group.steps[0];
-              return (
-                <StepRow
-                  key={step.toolUseId}
-                  step={step}
-                  expanded={expandedSteps.has(step.toolUseId)}
-                  onToggle={() => toggleStep(step.toolUseId)}
-                  elapsed={live && step.status === 'running' && step.startedAt ? Date.now() - step.startedAt : undefined}
-                />
-              );
-            }
-            // Group header + individual steps
-            const groupDuration = group.steps.reduce((sum, s) => {
-              if (s.startedAt && s.finishedAt) return sum + (s.finishedAt - s.startedAt);
-              return sum;
-            }, 0);
-            return (
-              <div key={group.steps[0].toolUseId + '-group'}>
-                <div className="flex items-center gap-1 py-0.5">
-                  <span className="text-xs font-medium" style={{ opacity: 0.6 }}>{group.toolName}</span>
-                  <span className="text-xs" style={{ opacity: 0.4 }}>×{group.steps.length}</span>
-                  {groupDuration > 0 && (
-                    <span className="text-xs ml-1" style={{ opacity: 0.4 }}>{formatDuration(groupDuration)}</span>
-                  )}
-                </div>
-                <div className="pl-4 space-y-0.5">
-                  {group.steps.map((step) => (
-                    <StepRow
-                      key={step.toolUseId}
-                      step={step}
-                      expanded={expandedSteps.has(step.toolUseId)}
-                      onToggle={() => toggleStep(step.toolUseId)}
-                      elapsed={live && step.status === 'running' && step.startedAt ? Date.now() - step.startedAt : undefined}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+        <div className="mt-1.5 pl-3 space-y-px" style={{ borderLeft: '1.5px solid var(--c-border, #e0e0e0)' }}>
+          {steps.map(step => (
+            <StepCard
+              key={step.toolUseId}
+              step={step}
+              elapsed={live && step.status === 'running' && step.startedAt ? Date.now() - step.startedAt : undefined}
+            />
+          ))}
         </div>
       </div>
     </div>
