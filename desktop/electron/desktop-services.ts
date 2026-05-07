@@ -191,15 +191,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const intentStore = new InMemoryIntentLedgerStore();
   intentStore.seedEmpty('desktop-session');
 
-  // Register intent delegation tools
+  // Register only intent_create (lightweight intent classification)
+  // Skip intent_step_update, intent_stage_artifact, intent_salvage (pure tracking overhead)
   const intentTools = createIntentDelegationTools({
     ledgerStore: intentStore as never,
     sessionId: 'desktop-session',
     instanceId: 'desktop-instance',
   });
-  for (const tool of intentTools) {
-    registry.registerTool(tool);
-  }
+  registry.registerTool(intentTools[0]); // only intent_create
 
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
@@ -1056,8 +1055,7 @@ function buildSystemPrompt(): string {
 - Grep: 搜索文件内容
 - Glob: 按模式匹配查找文件
 - skill: 调用已安装的 skill
-- intent_create: 分析用户意图，生成有序的执行计划
-- intent_step_update: 更新当前执行步骤的状态
+- intent_create: 分析用户意图，确定任务类型和执行方向
 - reminder_create: 创建定时提醒（当用户说"定时任务"、"提醒我"、"过X分钟提醒"时使用）
 - reminder_list: 列出所有活跃的提醒
 - reminder_cancel: 取消一个提醒
@@ -1113,15 +1111,14 @@ xiaok 支持从 ClawHub 安装技能。当用户说"安装XX技能"时：
 
 ## 意图识别规则
 
-收到用户请求时，先用 intent_create 工具分析意图：
+收到用户请求时，用 intent_create 工具快速识别意图类型：
 - raw_intent: 用户原始请求
-- normalized_intent: 规范化后的意图描述
-- intent_type: generate(生成新内容) / revise(修改已有内容) / summarize(总结) / analyze(分析)
+- intent_type: generate(生成) / revise(修改) / summarize(总结) / analyze(分析)
 - deliverable: 期望交付物描述
 - risk_tier: low/medium/high
 - template_id: generate_v1 / revise_v1 / summarize_v1 / analyze_v1
 
-然后用 intent_step_update 跟踪执行进度。
+识别后直接执行，不要等待额外确认。
 
 当用户要求执行操作时，直接使用工具完成，不要说"我没有权限"。用户已经授权你使用所有工具。
 保持简洁、准确。`;
@@ -1139,15 +1136,14 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
   const intentStore = new InMemoryIntentLedgerStore();
   intentStore.seedEmpty('desktop-session');
 
-  // Register intent delegation tools
+  // Register only intent_create (lightweight intent classification)
+  // Skip intent_step_update, intent_stage_artifact, intent_salvage (pure tracking overhead)
   const intentTools = createIntentDelegationTools({
     ledgerStore: intentStore as never,
     sessionId: 'desktop-session',
     instanceId: 'desktop-instance',
   });
-  for (const tool of intentTools) {
-    registry.registerTool(tool);
-  }
+  registry.registerTool(intentTools[0]); // only intent_create
 
   return async ({ sessionId, prompt, materials, signal, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
@@ -1239,6 +1235,11 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
       ? `${effectivePrompt}${materialsContext}`
       : effectivePrompt;
     const allToolDefs = registry.getToolDefinitions();
+    // When slash command matches a skill, skip the skill tool — content is already injected
+    const slashSkill = slashMatch ? findSkillByCommandName(currentSkills, slashMatch.skillName) : null;
+    const activeToolDefs = slashSkill
+      ? allToolDefs.filter(t => t.name !== 'skill')
+      : allToolDefs;
     // Include file content blocks directly in user message
     const userContent: MessageBlock[] = [
       { type: 'text', text: userText },
@@ -1255,7 +1256,7 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
       if (signal.aborted) throw new Error('task cancelled');
       iteration++;
       const assistantBlocks: MessageBlock[] = [];
-      for await (const chunk of adapter.stream(messages, allToolDefs, systemPrompt)) {
+      for await (const chunk of adapter.stream(messages, activeToolDefs, systemPrompt)) {
         if (signal.aborted) throw new Error('task cancelled');
         if (chunk.type === 'text') {
           const lastBlock = assistantBlocks[assistantBlocks.length - 1];
@@ -1455,6 +1456,11 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       ? `${effectivePrompt}${materialsContext}`
       : effectivePrompt;
     const allToolDefs = registry.getToolDefinitions();
+    // When slash command matches a skill, skip the skill tool — content is already injected
+    const slashSkill = slashMatch ? findSkillByCommandName(currentSkills, slashMatch.skillName) : null;
+    const activeToolDefs = slashSkill
+      ? allToolDefs.filter(t => t.name !== 'skill')
+      : allToolDefs;
     // Include file content blocks directly in user message
     const userContent: MessageBlock[] = [
       { type: 'text', text: userText },
@@ -1471,7 +1477,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       if (signal.aborted) throw new Error('task cancelled');
       iteration++;
       const assistantBlocks: MessageBlock[] = [];
-      for await (const chunk of adapter.stream(messages, allToolDefs, systemPrompt)) {
+      for await (const chunk of adapter.stream(messages, activeToolDefs, systemPrompt)) {
         if (signal.aborted) throw new Error('task cancelled');
         if (chunk.type === 'text') {
           const lastBlock = assistantBlocks[assistantBlocks.length - 1];
