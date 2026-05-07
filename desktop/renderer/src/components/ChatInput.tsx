@@ -193,7 +193,7 @@ export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...'
                 border: '0.5px solid var(--c-border-subtle)',
               }}
             >
-              <span className="text-sm text-[var(--c-text-primary)] max-w-[120px] truncate">{f.name}</span>
+              <span className="text-sm text-[var(--c-text-primary)] max-w-[360px] truncate" title={f.filePath}>{f.filePath}</span>
               <button
                 type="button"
                 onClick={() => removeFile(i)}
