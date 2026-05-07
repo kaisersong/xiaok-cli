@@ -171,10 +171,9 @@ export function ChatShell() {
       }
       case 'canvas_tool_call': {
         const ev = event as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string };
-        const newStep: ToolStep = { toolUseId: ev.toolUseId, toolName: ev.toolName, input: ev.input, status: 'running' };
+        const newStep: ToolStep = { toolUseId: ev.toolUseId, toolName: ev.toolName, input: ev.input, status: 'running', startedAt: Date.now() };
         toolStepsActiveRef.current = true;
         setMessages(prev => {
-          // Remove stale progress messages with tool stage
           const cleaned = prev.filter(m => m.role !== 'progress' || (m.stage !== 'tool' && m.stage !== 'completed' && m.stage !== 'failed'));
           const existingIdx = cleaned.findIndex(m => m.id === toolStepsMsgIdRef.current);
           if (existingIdx !== -1) {
@@ -192,6 +191,7 @@ export function ChatShell() {
         const ev = event as { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string };
         const sealId = toolStepsMsgIdRef.current;
         if (!sealId) break;
+        const now = Date.now();
         setMessages(prev => {
           const existingIdx = prev.findIndex(m => m.id === sealId);
           if (existingIdx === -1) return prev;
@@ -199,7 +199,7 @@ export function ChatShell() {
           updated[existingIdx] = {
             ...updated[existingIdx],
             steps: (updated[existingIdx].steps ?? []).map(s =>
-              s.toolUseId === ev.toolUseId ? { ...s, status: ev.ok ? 'done' : 'error', response: ev.response } : s
+              s.toolUseId === ev.toolUseId ? { ...s, status: ev.ok ? 'done' : 'error', response: ev.response, finishedAt: now } : s
             ),
           };
           return updated;

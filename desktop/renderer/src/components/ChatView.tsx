@@ -13,6 +13,8 @@ export interface ToolStep {
   input: unknown;
   status: 'running' | 'done' | 'error';
   response?: string;
+  startedAt?: number;
+  finishedAt?: number;
 }
 
 export interface ChatMessage {
