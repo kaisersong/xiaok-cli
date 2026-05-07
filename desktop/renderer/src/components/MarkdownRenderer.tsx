@@ -1,24 +1,50 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { memo } from 'react';
+import { MermaidBlock } from './MermaidBlock';
 
 interface MarkdownRendererProps {
   content: string;
+  streaming?: boolean;
 }
 
-export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: MarkdownRendererProps) {
+function stripUnclosedMermaid(text: string): string {
+  let out = text;
+  let searchFrom = 0;
+  while (true) {
+    const openIdx = out.indexOf('```mermaid', searchFrom);
+    if (openIdx < 0) break;
+    const afterOpen = openIdx + '```mermaid'.length;
+    const closeIdx = out.indexOf('```', afterOpen);
+    if (closeIdx < 0) {
+      out = out.slice(0, openIdx).replace(/\n+$/, '');
+      break;
+    }
+    searchFrom = closeIdx + 3;
+  }
+  return out;
+}
+
+export const MarkdownRenderer = memo(function MarkdownRenderer({ content, streaming }: MarkdownRendererProps) {
+  const displayContent = streaming ? stripUnclosedMermaid(content) : content;
+
   return (
     <div className="prose prose-sm max-w-none">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
           code({ inline, className, children, ...props }) {
+            const lang = className?.replace('language-', '') || '';
             if (inline) {
               return (
                 <code className="rounded bg-gray-100 px-1.5 py-0.5 text-sm font-mono" {...props}>
                   {children}
                 </code>
               );
+            }
+            if (lang === 'mermaid') {
+              const content = String(children).replace(/\n$/, '');
+              return <MermaidBlock content={content} />;
             }
             return (
               <div className="relative my-3">
@@ -84,7 +110,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: Mark
           },
           th({ children }) {
             return (
-              <th className="border border-[var(--c-border)] bg-gray-50 px-3 py-2 text-left font-medium">
+              <th className="border border-[var(--c-border)] bg-[var(--c-bg-deep)] px-3 py-2 text-left font-medium">
                 {children}
               </th>
             );
@@ -94,9 +120,14 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: Mark
               <td className="border border-[var(--c-border)] px-3 py-2">{children}</td>
             );
           },
+          hr() {
+            return (
+              <hr className="my-6 border-[var(--c-border)]" />
+            );
+          },
         }}
       >
-        {content}
+        {displayContent}
       </ReactMarkdown>
     </div>
   );

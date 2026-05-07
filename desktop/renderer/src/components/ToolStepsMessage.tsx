@@ -154,9 +154,13 @@ export function ToolStepsMessage({ steps, live }: Props) {
             ? `${doneCount}/${steps.length} steps · running ${activeStep?.toolName ?? ''}...`
             : `${steps.length} steps completed`}
         </span>
-        {!live && totalMs != null && (
-          <span className="text-xs" style={{ opacity: 0.5 }}>{formatDuration(totalMs)}</span>
-        )}
+        {((live && firstStart != null) || (!live && totalMs != null)) ? (
+          <span className="text-xs" style={{ opacity: 0.5 }}>
+            {live
+              ? formatDuration(Date.now() - firstStart!)
+              : formatDuration(totalMs!)}
+          </span>
+        ) : null}
         {live && activeStep?.startedAt && <ElapsedTimer startedAt={activeStep.startedAt} />}
         <span style={{ fontSize: 11, opacity: 0.5 }}>{expanded ? '∨' : '>'}</span>
       </button>

@@ -47,13 +47,14 @@ interface ChatViewProps {
   canvasOpen: boolean;
   onToggleCanvas: () => void;
   onArtifactClick?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
+  onArtifactOpenExternal?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
 }
 
 export function ChatView({
   thread, messages, streamingText, status, currentQuestion, result,
   generatedFiles,
   prompt, onPromptChange, onSubmit, onAnswer, onCancel,
-  canvasOpen, onToggleCanvas, onArtifactClick,
+  canvasOpen, onToggleCanvas, onArtifactClick, onArtifactOpenExternal,
 }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -152,10 +153,7 @@ export function ChatView({
             {(result && (status === 'completed' || status === 'idle')) || generatedFiles.length > 0 ? (
               <div className="rounded-xl border border-[var(--c-accent)]/30 bg-[var(--c-bg-card)] p-4">
                 {result && (
-                  <>
-                    <h3 className="mb-2 text-sm font-medium text-[var(--c-text-primary)]">Result</h3>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} className="text-sm text-[var(--c-text-secondary)]">{result.summary}</ReactMarkdown>
-                  </>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} className="text-sm text-[var(--c-text-secondary)]">{result.summary}</ReactMarkdown>
                 )}
                 {result?.artifacts && result.artifacts.length > 0 && (
                   <div className="mt-3 space-y-2">
@@ -163,7 +161,11 @@ export function ChatView({
                       <div key={a.artifactId}>
                         <button
                           type="button"
-                          onClick={() => onArtifactClick?.({ artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath })}
+                          onClick={(e) => {
+                            const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
+                            if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
+                            else onArtifactClick?.(info);
+                          }}
                           className="flex items-center gap-1.5 text-sm text-[var(--c-accent)] hover:underline cursor-pointer"
                         >
                           <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="currentColor"><path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zm5 0v4h4M7 9h4M7 12h4M5 9h1M5 12h1"/></svg>
@@ -185,7 +187,11 @@ export function ChatView({
                         <div key={a.artifactId}>
                           <button
                             type="button"
-                            onClick={() => onArtifactClick?.({ artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath })}
+                            onClick={(e) => {
+                              const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
+                              if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
+                              else onArtifactClick?.(info);
+                            }}
                             className="flex items-center gap-1.5 text-sm text-[var(--c-accent)] hover:underline cursor-pointer"
                             data-testid={`generated-file-${a.title}`}
                           >
@@ -203,7 +209,11 @@ export function ChatView({
                         <button
                           key={f.filePath}
                           type="button"
-                          onClick={() => onArtifactClick?.({ artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath })}
+                          onClick={(e) => {
+                            const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
+                            if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
+                            else onArtifactClick?.(info);
+                          }}
                           className="flex items-center gap-1.5 text-sm text-[var(--c-accent)] hover:underline cursor-pointer"
                           data-testid={`generated-file-${f.name}`}
                         >
