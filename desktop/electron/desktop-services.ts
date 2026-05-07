@@ -1207,9 +1207,10 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
             event: 'skill_invoked', details: `slash: ${slashMatch.rest || '(no args)'}`,
           });
         }
+        // Only inject skill name and description, not full content — let model load refs on-demand via tools
         effectivePrompt = slashMatch.rest
-          ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
-          : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
+          ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSteps:\n1. First use skill_bundle_refs to read SKILL.md and stages/plan.md to understand the skill structure\n2. Follow the skill's execution plan\n3. Use skill_bundle_refs to load reference files as needed`
+          : `Execute skill "${skill.name}": ${skill.description}\n\nSteps:\n1. First use skill_bundle_refs to read SKILL.md and stages/plan.md to understand the skill structure\n2. Follow the skill's execution plan\n3. Use skill_bundle_refs to load reference files as needed`;
       }
     }
 
@@ -1396,13 +1397,23 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
           }
         }
 
-        // Track skill tool calls for stats
+        // Track skill tool calls for stats and create invocation if missing
         if (toolCall.name === 'skill') {
           try {
             const extracted = extractSkillNames(toolCall.input as Record<string, unknown>);
             if (skillNamesDetected.length === 0 || skillTriggerType === 'auto') {
               skillNamesDetected = extracted;
               if (skillTriggerType === 'auto') skillTriggerType = 'tool_call';
+              // Create invocation for tool-called skills too
+              if (!skillInvocation) {
+                skillInvocation = buildSkillInvocation(extracted[0], skillCatalog, sessionId);
+                if (skillInvocation) {
+                  appendTrace(dataRoot, {
+                    ts: Date.now(), taskId: sessionId, skillName: extracted[0],
+                    event: 'skill_invoked', details: 'tool_call',
+                  });
+                }
+              }
             }
           } catch { /* non-critical */ }
         }
@@ -1548,9 +1559,10 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
             event: 'skill_invoked', details: `slash: ${slashMatch.rest || '(no args)'}`,
           });
         }
+        // Only inject skill name and description, not full content — let model load refs on-demand via tools
         effectivePrompt = slashMatch.rest
-          ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
-          : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
+          ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSteps:\n1. First use skill_bundle_refs to read SKILL.md and stages/plan.md to understand the skill structure\n2. Follow the skill's execution plan\n3. Use skill_bundle_refs to load reference files as needed`
+          : `Execute skill "${skill.name}": ${skill.description}\n\nSteps:\n1. First use skill_bundle_refs to read SKILL.md and stages/plan.md to understand the skill structure\n2. Follow the skill's execution plan\n3. Use skill_bundle_refs to load reference files as needed`;
       }
     }
 
@@ -1698,13 +1710,23 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       for (const toolCall of toolCalls) {
         if (signal.aborted) throw new Error('task cancelled');
         emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id });
-        // Track skill tool calls for stats
+        // Track skill tool calls for stats and create invocation if missing
         if (toolCall.name === 'skill') {
           try {
             const extracted = extractSkillNames(toolCall.input as Record<string, unknown>);
             if (skillNamesDetected.length === 0 || skillTriggerType === 'auto') {
               skillNamesDetected = extracted;
               if (skillTriggerType === 'auto') skillTriggerType = 'tool_call';
+              // Create invocation for tool-called skills too
+              if (!skillInvocation) {
+                skillInvocation = buildSkillInvocation(extracted[0], skillCatalog, sessionId);
+                if (skillInvocation) {
+                  appendTrace(dataRoot, {
+                    ts: Date.now(), taskId: sessionId, skillName: extracted[0],
+                    event: 'skill_invoked', details: 'tool_call',
+                  });
+                }
+              }
             }
           } catch { /* non-critical */ }
         }

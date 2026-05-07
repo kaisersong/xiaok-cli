@@ -76,6 +76,10 @@ const STAGE_POLICIES: SkillStagePolicy[] = [
         id: 'plan_ir',
         goal: 'Create .report.md IR only',
         allowedReferenceGlobs: [
+          'SKILL.md',
+          'SKILL_HEAD.md',
+          'SKILL_TAIL.md',
+          'stages/*',
           'references/spec-loading-matrix.md',
           'references/design-quality.md',
           'references/regular-report-content-rules.md',
@@ -224,7 +228,7 @@ const DEFAULT_BUDGET: SkillBudget = {
   maxToolCalls: 16,
   maxReferenceReads: 8,
   maxRepairAttempts: 1,
-  maxTotalInputTokens: 180_000,
+  maxTotalInputTokens: 60_000, // Tight budget: plan_ir should complete within 60k tokens
 };
 
 function getBudget(policy?: SkillStagePolicy): SkillBudget {
@@ -280,12 +284,12 @@ export function createSkillBundleRefsTool(skillCatalog: SkillCatalog) {
     permission: 'safe' as const,
     definition: {
       name: 'skill_bundle_refs',
-      description: 'Bundle multiple skill reference files into one response. Use this instead of individual Read calls for skill references. Only paths listed in the skill\'s referencesManifest are allowed.',
+      description: 'Bundle multiple skill files into one response. Use instead of individual Read calls. Paths must be within the skill root directory (e.g., "SKILL.md", "stages/plan.md", "references/html-template.md").',
       inputSchema: {
         type: 'object',
         properties: {
           skillName: { type: 'string', description: 'Skill name (e.g., "kai-report-creator")' },
-          paths: { type: 'array', items: { type: 'string' }, description: 'Reference file paths relative to skill root (from referencesManifest)' },
+          paths: { type: 'array', items: { type: 'string' }, description: 'File paths relative to skill root (e.g., "SKILL.md", "stages/plan.md", "references/template.md")' },
           maxBytes: { type: 'number', description: 'Maximum total bytes (default 80000)' },
         },
         required: ['skillName', 'paths'],
@@ -303,16 +307,17 @@ export function createSkillBundleRefsTool(skillCatalog: SkillCatalog) {
       const skill = skills.find(s => s.name === skillName);
       if (!skill) return `Error: skill "${skillName}" not found`;
 
-      // Validate all paths are in referencesManifest
-      const allowedPaths = new Set(skill.referencesManifest.map(e => e.relativePath));
+      // Validate all paths are within skill root directory (not outside)
+      // Allow: references/*, stages/*, SKILL.md, scripts/* etc.
       const validPaths: string[] = [];
       const errors: string[] = [];
 
       for (const p of paths) {
-        if (allowedPaths.has(p)) {
-          validPaths.push(p);
+        // Reject paths that escape skill root
+        if (p.startsWith('../') || p.startsWith('/') || p.includes('..\\')) {
+          errors.push(`"${p}" escapes skill root directory`);
         } else {
-          errors.push(`"${p}" not in ${skillName} referencesManifest`);
+          validPaths.push(p);
         }
       }
 
