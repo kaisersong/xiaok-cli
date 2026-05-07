@@ -33,26 +33,27 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, stream
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          code({ inline, className, children, ...props }) {
+          code({ className, children, ...props }) {
             const lang = className?.replace('language-', '') || '';
-            if (inline) {
+            const text = String(children).replace(/\n$/, '');
+            const isBlock = text.includes('\n') || lang.length > 0;
+            if (!isBlock) {
               return (
-                <code className="rounded bg-gray-100 px-1.5 py-0.5 text-sm font-mono" {...props}>
+                <code className="rounded bg-[var(--c-bg-deep)] px-1.5 py-0.5 text-sm font-mono" {...props}>
                   {children}
                 </code>
               );
             }
             if (lang === 'mermaid') {
-              const content = String(children).replace(/\n$/, '');
-              return <MermaidBlock content={content} />;
+              return <MermaidBlock content={text} />;
             }
             return (
               <div className="relative my-3">
                 <div className="flex items-center justify-between rounded-t-lg bg-gray-800 px-4 py-2 text-xs text-gray-300">
-                  <span>{className?.replace('language-', '') || 'code'}</span>
+                  <span>{lang || 'code'}</span>
                   <button
                     type="button"
-                    onClick={() => navigator.clipboard.writeText(String(children))}
+                    onClick={() => navigator.clipboard.writeText(text)}
                     className="hover:text-white"
                   >
                     Copy

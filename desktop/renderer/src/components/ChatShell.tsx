@@ -278,17 +278,17 @@ export function ChatShell() {
           continue;
         }
         if (ev.type === 'canvas_tool_call') {
-          replayEvents.push(ev); // Collect locally
-          const evC = ev as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string };
-          replayToolSteps.push({ toolUseId: evC.toolUseId, toolName: evC.toolName, input: evC.input, status: 'done' });
+          replayEvents.push(ev);
+          const evC = ev as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string; ts?: number };
+          replayToolSteps.push({ toolUseId: evC.toolUseId, toolName: evC.toolName, input: evC.input, status: 'done', startedAt: evC.ts });
           if (!replayToolMsgId) replayToolMsgId = `msg-tool-steps-${evC.eventId}`;
           continue;
         }
         if (ev.type === 'canvas_tool_result') {
-          replayEvents.push(ev); // Collect locally
-          const evR = ev as { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string };
+          replayEvents.push(ev);
+          const evR = ev as { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string; ts?: number };
           replayToolSteps = replayToolSteps.map(s =>
-            s.toolUseId === evR.toolUseId ? { ...s, status: evR.ok ? 'done' : 'error', response: evR.response } : s
+            s.toolUseId === evR.toolUseId ? { ...s, status: evR.ok ? 'done' : 'error', response: evR.response, finishedAt: evR.ts } : s
           );
           continue;
         }

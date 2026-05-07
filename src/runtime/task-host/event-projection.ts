@@ -175,6 +175,7 @@ function projectRuntimeEventToCanvasEvents(event: RuntimeEvent): DesktopTaskEven
       input: event.toolInput,
       toolUseId: event.toolUseId,
       eventId: `${event.turnId}:canvas:${event.toolUseId}:call`,
+      ts: Date.now(),
     }];
   }
   if (event.type === 'post_tool_use') {
@@ -188,6 +189,7 @@ function projectRuntimeEventToCanvasEvents(event: RuntimeEvent): DesktopTaskEven
       ok: true,
       response: responseStr,
       eventId: `${event.turnId}:canvas:${event.toolUseId}:result`,
+      ts: Date.now(),
     }];
   }
   if (event.type === 'post_tool_use_failure') {
@@ -198,6 +200,7 @@ function projectRuntimeEventToCanvasEvents(event: RuntimeEvent): DesktopTaskEven
       ok: false,
       response: event.error.slice(0, 10000),
       eventId: `${event.turnId}:canvas:${event.toolUseId}:failure`,
+      ts: Date.now(),
     }];
   }
   if (event.type === 'file_changed') {
