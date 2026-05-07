@@ -189,6 +189,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
   const intentStore = new InMemoryIntentLedgerStore();
+  void intentStore.seedEmpty('desktop-session');
 
   // Register intent delegation tools
   const intentTools = createIntentDelegationTools({
@@ -951,6 +952,11 @@ function createModelConfigSnapshot(config: Config): DesktopModelConfigSnapshot {
 class InMemoryIntentLedgerStore {
   private ledgers = new Map<string, SessionIntentLedger>();
 
+  async seedEmpty(sessionId: string): Promise<void> {
+    if (this.ledgers.has(sessionId)) return;
+    this.ledgers.set(sessionId, createEmptySessionIntentLedger(sessionId));
+  }
+
   async load(sessionId: string): Promise<SessionIntentLedger | null> {
     return this.ledgers.get(sessionId) ?? null;
   }
@@ -1131,6 +1137,7 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
   const intentStore = new InMemoryIntentLedgerStore();
+  void intentStore.seedEmpty('desktop-session');
 
   // Register intent delegation tools
   const intentTools = createIntentDelegationTools({
