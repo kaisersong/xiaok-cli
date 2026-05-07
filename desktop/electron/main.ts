@@ -97,10 +97,15 @@ async function createWindow(): Promise<BrowserWindow> {
   attachWindowRepaintHandlers(window);
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    if (url.startsWith('file://')) {
+      void shell.openPath(decodeURIComponent(url.replace('file://', '')));
+    } else {
+      void shell.openExternal(url);
+    }
     return { action: 'deny' };
   });
   window.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('file://')) return;
     if (!isAllowedNavigationUrl(url)) {
       event.preventDefault();
       void shell.openExternal(url);

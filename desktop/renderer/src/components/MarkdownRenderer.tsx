@@ -102,7 +102,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, stream
           table({ children }) {
             return (
               <div className="overflow-x-auto my-3">
-                <table className="min-w-full border border-[var(--c-border)] text-sm">
+                <table className="min-w-full border-collapse border border-[var(--c-border)] text-sm not-prose" style={{ width: '100%' }}>
                   {children}
                 </table>
               </div>
@@ -110,7 +110,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, stream
           },
           th({ children }) {
             return (
-              <th className="border border-[var(--c-border)] bg-[var(--c-bg-deep)] px-3 py-2 text-left font-medium">
+              <th className="border border-[var(--c-border)] bg-[var(--c-bg-deep)] px-3 py-2 text-left font-medium" style={{ borderBottomWidth: '2px' }}>
                 {children}
               </th>
             );

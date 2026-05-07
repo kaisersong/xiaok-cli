@@ -367,9 +367,9 @@ export function ChatShell() {
       if (currentLoadIdRef.current !== thisLoadId) return;
 
       if (t) {
-        // Only replay the latest task (currentTaskId) to avoid cross-thread contamination
-        // where stale taskIds may contain tasks belonging to other threads
-        const allTaskIds = t.currentTaskId ? [t.currentTaskId] : [];
+        // Replay all tasks in the thread to show full conversation history
+        const allTaskIds = (t.taskIds && t.taskIds.length > 0) ? t.taskIds
+          : t.currentTaskId ? [t.currentTaskId] : [];
         console.log(`[ChatShell] Loading thread=${taskId.slice(0,8)} title="${t.title}" currentTaskId=${t.currentTaskId ?? 'none'}`);
         const allMessages: ChatMessage[] = [];
         let lastResult: TaskResult | null = null;
