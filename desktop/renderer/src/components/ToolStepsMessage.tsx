@@ -91,7 +91,7 @@ function StepCard({ step, elapsed }: { step: ToolStep; elapsed?: number }) {
         <span className="font-mono" style={{ fontSize: 11, opacity: 0.7 }}>{toolLabel(step.toolName)}</span>
         {/* Preview */}
         {preview && (
-          <span className="truncate" style={{ fontSize: 12, maxWidth: 320, opacity: 0.55 }}>{preview}</span>
+          <span className="truncate" style={{ fontSize: 12, maxWidth: 640, opacity: 0.55 }}>{preview}</span>
         )}
         {/* Timing */}
         <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.4, flexShrink: 0 }}>

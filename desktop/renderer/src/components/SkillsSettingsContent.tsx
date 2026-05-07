@@ -79,7 +79,11 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
 
   useEffect(() => {
     api.getSkillStats()
-      .then(stats => { setStatsMap(new Map(stats.map(s => [s.skillName, s]))) })
+      .then(stats => {
+        console.log('[SkillsSettings] stats returned:', stats.length, 'skills');
+        stats.forEach(s => console.log('  -', s.skillName, ':', s.totalCalls, 'calls'));
+        setStatsMap(new Map(stats.map(s => [s.skillName, s])));
+      })
       .catch(() => {})
   }, [])
 

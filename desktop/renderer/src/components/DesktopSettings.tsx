@@ -503,12 +503,21 @@ function SkillsPane() {
   const [showInstall, setShowInstall] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [statsMap, setStatsMap] = useState<Map<string, { totalCalls: number; successCount: number; avgDurationMs: number; totalInputTokens: number; totalOutputTokens: number }>>(new Map());
 
   useEffect(() => {
     api.listSkills()
       .then(setSkills)
       .catch(() => {})
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    api.getSkillStats()
+      .then(stats => {
+        setStatsMap(new Map(stats.map(s => [s.skillName, s])));
+      })
+      .catch(() => {});
   }, []);
 
   const handleInstall = async () => {
@@ -635,42 +644,59 @@ function SkillsPane() {
               </div>
             </Card>
           ) : (
-            skills.map(skill => (
-              <Card key={skill.name}>
-                <div className="flex items-start gap-3">
-                  <div className="shrink-0 mt-0.5">
-                    <Package size={16} className="text-[var(--c-accent)]" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <code className="text-sm font-mono text-[var(--c-accent)]">/{skill.name}</code>
-                      <span className="text-xs text-[var(--c-text-tertiary)]">[{skill.tier}]</span>
+            skills
+              .slice()
+              .sort((a, b) => {
+                const sa = statsMap.get(a.name);
+                const sb = statsMap.get(b.name);
+                const ca = sa?.totalCalls ?? 0;
+                const cb = sb?.totalCalls ?? 0;
+                return cb - ca;
+              })
+              .map(skill => {
+              const stats = statsMap.get(skill.name);
+              return (
+                <Card key={skill.name}>
+                  <div className="flex items-start gap-3">
+                    <div className="shrink-0 mt-0.5">
+                      <Package size={16} className="text-[var(--c-accent)]" />
                     </div>
-                    {skill.description && (
-                      <p className="mt-1 text-sm text-[var(--c-text-secondary)] line-clamp-2">
-                        {skill.description}
-                      </p>
-                    )}
-                    {skill.aliases && skill.aliases.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {skill.aliases.map(a => (
-                          <span key={a} className="rounded px-1.5 py-0.5 text-xs bg-[var(--c-bg-deep)] text-[var(--c-text-tertiary)]">
-                            {a}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <code className="text-sm font-mono text-[var(--c-accent)]">/{skill.name}</code>
+                        <span className="text-xs text-[var(--c-text-tertiary)]">[{skill.tier}]</span>
+                        {stats && stats.totalCalls > 0 && (
+                          <span className="ml-auto text-xs text-[var(--c-text-tertiary)]">
+                            {stats.totalCalls} 次调用 · 平均 {Math.round(stats.avgDurationMs / 1000)}s
                           </span>
-                        ))}
+                        )}
                       </div>
-                    )}
+                      {skill.description && (
+                        <p className="mt-1 text-sm text-[var(--c-text-secondary)] line-clamp-2">
+                          {skill.description}
+                        </p>
+                      )}
+                      {skill.aliases && skill.aliases.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {skill.aliases.map(a => (
+                            <span key={a} className="rounded px-1.5 py-0.5 text-xs bg-[var(--c-bg-deep)] text-[var(--c-text-tertiary)]">
+                              {a}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleUninstall(skill.name)}
+                      className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 transition-colors"
+                      title="卸载"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleUninstall(skill.name)}
-                    className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 transition-colors"
-                    title="卸载"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </Card>
-            ))
+                </Card>
+              );
+            })
           )}
         </div>
       </Section>

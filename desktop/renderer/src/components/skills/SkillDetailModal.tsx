@@ -155,7 +155,7 @@ export function SkillDetailModal({
               </p>
             </div>
 
-            {stats && stats.totalCalls > 0 && (
+            {stats && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1 rounded-lg p-3" style={{ background: 'var(--c-bg-deep)' }}>
                   <span className="text-[10px] font-medium text-[var(--c-text-muted)]">{skillText.statsDetailCalls}</span>

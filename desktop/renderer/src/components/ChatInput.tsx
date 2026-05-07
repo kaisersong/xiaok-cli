@@ -242,6 +242,23 @@ export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...'
               value={internalValue}
               onChange={handleChange}
               onKeyDown={handleKeyDown}
+              onPaste={async (e) => {
+                const items = e.clipboardData?.items;
+                if (!items) return;
+                for (const item of items) {
+                  if (item.type === 'text/plain') {
+                    const text = await new Promise<string>(r => item.getAsString(r));
+                    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+                    const paths = lines.filter(l => l.startsWith('/'));
+                    if (paths.length > 0) {
+                      e.preventDefault();
+                      const newFiles = paths.map(p => ({ filePath: p, name: p.split('/').pop() || p }));
+                      setFiles(prev => [...prev, ...newFiles]);
+                      return;
+                    }
+                  }
+                }
+              }}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
               placeholder={placeholder}
