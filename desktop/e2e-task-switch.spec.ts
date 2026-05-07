@@ -57,7 +57,7 @@ test.describe('Task switching', () => {
     expect(errors.length).toBe(0);
   });
 
-  test('task content first message matches sidebar title', async () => {
+  test('task content loads correctly for threads with real tasks', async () => {
     const app = await electron.launch({ executablePath: APP_PATH });
     const page = await app.firstWindow();
     await page.waitForTimeout(5000);
@@ -67,43 +67,42 @@ test.describe('Task switching', () => {
 
     const threadItems = page.locator('[data-testid^="thread-item-"]');
     const itemCount = await threadItems.count();
+    const testCount = Math.min(itemCount, 10);
 
-    if (itemCount >= 2) {
-      // Test each of the first few threads
-      for (let i = 0; i < Math.min(itemCount, 3); i++) {
+    let threadsWithContent = 0;
+    let matchCount = 0;
+
+    if (testCount >= 2) {
+      for (let i = 0; i < testCount; i++) {
         const thread = threadItems.nth(i);
         const sidebarTitle = await thread.locator('span').first().innerText();
 
-        // Click to load the thread
         await thread.click();
         await page.waitForTimeout(2000);
 
-        // Find the first user message in the chat area
         const userBubbles = page.locator('[data-role="user"]');
         const bubbleCount = await userBubbles.count();
 
         if (bubbleCount > 0) {
+          threadsWithContent++;
           const firstMsg = await userBubbles.first().innerText();
-          // The first message content should contain the sidebar title text
-          // (or vice versa, since title is truncated to 40 chars)
           const titleMatch = firstMsg.includes(sidebarTitle) || sidebarTitle.includes(firstMsg.slice(0, 40));
-
-          console.log(`[THREAD ${i}] sidebar="${sidebarTitle}" firstMsg="${firstMsg.slice(0, 60)}" match=${titleMatch}`);
-
-          if (!titleMatch) {
-            await page.screenshot({ path: `test-results/task-mismatch-thread-${i}.png` });
-          }
-
-          expect(titleMatch).toBe(true);
+          if (titleMatch) matchCount++;
+          console.log(`[THREAD ${i}] sidebar="${sidebarTitle}" firstMsg="${firstMsg.slice(0, 50)}" match=${titleMatch}`);
         } else {
-          console.log(`[THREAD ${i}] No user messages found (sidebar="${sidebarTitle}")`);
+          console.log(`[THREAD ${i}] EMPTY — sidebar="${sidebarTitle}"`);
         }
       }
-    } else {
-      console.log(`[SKIP] Only ${itemCount} threads, need at least 2`);
     }
 
-    await page.screenshot({ path: 'test-results/task-content-match.png' });
+    console.log(`\n[SUMMARY] ${testCount} tested, ${threadsWithContent} with content, ${matchCount} matching`);
+
+    // All threads with content must match their sidebar title (no 串)
+    if (threadsWithContent > 0) {
+      expect(matchCount).toBe(threadsWithContent);
+    }
+
+    await page.screenshot({ path: 'test-results/task-content-10-threads.png' });
     await app.close();
     expect(errors.length).toBe(0);
   });

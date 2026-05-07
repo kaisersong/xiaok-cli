@@ -59,11 +59,11 @@ export function AppLayout() {
             <button
               type="button"
               onClick={() => setSidebarCollapsed(false)}
-              style={{ WebkitAppRegion: 'no-drag', position: 'absolute', top: 16, left: 78 } as React.CSSProperties}
+              style={{ WebkitAppRegion: 'no-drag', position: 'absolute', top: 12, left: 78 } as React.CSSProperties}
               className="flex items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors z-50"
               title="展开侧边栏"
             >
-              <Sidebar size={14} />
+              <Sidebar size={16} />
             </button>
           )}
         </div>

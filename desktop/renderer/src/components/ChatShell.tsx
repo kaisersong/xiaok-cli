@@ -379,17 +379,7 @@ export function ChatShell() {
             const { snapshot } = await api.recoverTask(tid);
             if (snapshot) {
               console.log(`[ChatShell] Replaying task=${tid} prompt="${snapshot.prompt?.slice(0, 40)}" status=${snapshot.status} events=${snapshot.events?.length}`);
-              // Verify task belongs to this thread: prompt should match thread title
-              // (title is set from user prompt at thread creation)
-              const threadTitle = t.title || '';
-              const taskPrompt = snapshot.prompt || '';
-              const titleMatchesPrompt = threadTitle && (
-                taskPrompt.startsWith(threadTitle) || threadTitle.startsWith(taskPrompt.slice(0, 40))
-              );
-              if (threadTitle && taskPrompt && !titleMatchesPrompt) {
-                console.log(`[ChatShell] Skipping task=${tid} — prompt "${taskPrompt.slice(0, 40)}" doesn't match thread title "${threadTitle}"`);
-                continue;
-              }
+              const isFirst = tid === allTaskIds[0];
               const isFirst = tid === allTaskIds[0];
               const addPrompt = snapshot.prompt && (!isFirst || !initialPrompt);
               const { msgs: replayMsgs, result: replayResult, events: replayEvents } = replaySnapshot(snapshot, addPrompt);
