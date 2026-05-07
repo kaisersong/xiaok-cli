@@ -189,7 +189,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
   const intentStore = new InMemoryIntentLedgerStore();
-  void intentStore.seedEmpty('desktop-session');
+  intentStore.seedEmpty('desktop-session');
 
   // Register intent delegation tools
   const intentTools = createIntentDelegationTools({
@@ -952,7 +952,7 @@ function createModelConfigSnapshot(config: Config): DesktopModelConfigSnapshot {
 class InMemoryIntentLedgerStore {
   private ledgers = new Map<string, SessionIntentLedger>();
 
-  async seedEmpty(sessionId: string): Promise<void> {
+  seedEmpty(sessionId: string): void {
     if (this.ledgers.has(sessionId)) return;
     this.ledgers.set(sessionId, createEmptySessionIntentLedger(sessionId));
   }
@@ -1137,7 +1137,7 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
   const intentStore = new InMemoryIntentLedgerStore();
-  void intentStore.seedEmpty('desktop-session');
+  intentStore.seedEmpty('desktop-session');
 
   // Register intent delegation tools
   const intentTools = createIntentDelegationTools({
@@ -1179,6 +1179,8 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
     if (slashMatch) {
       const skill = findSkillByCommandName(currentSkills, slashMatch.skillName);
       if (skill) {
+        skillNamesDetected = [skill.name];
+        skillTriggerType = 'slash_command';
         effectivePrompt = slashMatch.rest
           ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
           : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
