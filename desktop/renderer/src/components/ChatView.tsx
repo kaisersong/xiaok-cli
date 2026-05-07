@@ -1,9 +1,9 @@
 import { useRef, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { LayoutPanelLeft } from 'lucide-react';
 import { ChatInput } from './ChatInput';
 import { ToolStepsMessage } from './ToolStepsMessage';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import type { ThreadRecord } from '../api/types';
 import type { NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
 
@@ -117,26 +117,7 @@ export function ChatView({
                   <ToolStepsMessage steps={msg.steps ?? []} live={msg.stepsLive ?? false} />
                 ) : (
                   <div className="max-w-[663px] text-sm text-[var(--c-text-primary)] leading-relaxed select-text">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        pre: ({ children }) => <pre className="bg-[var(--c-bg-deep)] rounded-lg p-4 overflow-x-auto max-w-full select-text">{children}</pre>,
-                        code: ({ className, children, ...props }) => {
-                          const isInline = !className;
-                          if (isInline) {
-                            return <code className="bg-[var(--c-bg-deep)] rounded px-1.5 py-0.5 text-sm select-text" {...props}>{children}</code>;
-                          }
-                          return <code className={className} {...props}>{children}</code>;
-                        },
-                        a: ({ href, children }) => (
-                          <a href={href} target="_blank" rel="noopener noreferrer" className="text-[var(--c-accent)] hover:underline cursor-pointer">
-                            {children}
-                          </a>
-                        ),
-                      }}
-                    >
-                      {msg.content}
-                    </ReactMarkdown>
+                    <MarkdownRenderer content={msg.content} />
                   </div>
                 )}
               </div>
@@ -145,7 +126,7 @@ export function ChatView({
             {/* Streaming assistant text */}
             {streamingText && (
               <div className="max-w-[663px] text-sm text-[var(--c-text-primary)] leading-relaxed">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingText}</ReactMarkdown>
+                <MarkdownRenderer content={streamingText} streaming />
               </div>
             )}
 
@@ -153,7 +134,7 @@ export function ChatView({
             {(result && (status === 'completed' || status === 'idle')) || generatedFiles.length > 0 ? (
               <div className="rounded-xl border border-[var(--c-accent)]/30 bg-[var(--c-bg-card)] p-4">
                 {result && (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} className="text-sm text-[var(--c-text-secondary)]">{result.summary}</ReactMarkdown>
+                  <MarkdownRenderer content={result.summary} />
                 )}
                 {result?.artifacts && result.artifacts.length > 0 && (
                   <div className="mt-3 space-y-2">
