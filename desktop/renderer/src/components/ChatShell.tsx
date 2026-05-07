@@ -14,6 +14,7 @@ export function ChatShell() {
   const { taskId } = useParams<{ taskId: string }>();
   const location = useLocation();
   const sidebarCollapse = useSidebarCollapse();
+  const sidebarWasCollapsedRef = useRef(false);
   const [thread, setThread] = useState<ThreadRecord | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streamingText, setStreamingText] = useState('');
@@ -148,6 +149,7 @@ export function ChatShell() {
         }
         // Auto-open canvas when generated files exist, preview first file
         if (hasGeneratedFiles && !canvasOpen) {
+          sidebarWasCollapsedRef.current = sidebarCollapse.collapsed;
           const writeCall = allEventsRef.current.find(
             e => e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
               && (e as { input: Record<string, unknown> }).input?.file_path
@@ -155,7 +157,8 @@ export function ChatShell() {
           if (writeCall) {
             const fp = (writeCall as { input: Record<string, unknown> }).input.file_path as string;
             setCanvasPreviewFile(fp);
-            // Try to read file content for preview
+            setCanvasExpanded(true);
+            sidebarCollapse.setCollapsed(true);
             api.readFileContent(fp).then(r => {
               setCanvasPreviewContent(r.content);
               setCanvasOpen(true);
@@ -164,6 +167,8 @@ export function ChatShell() {
               setCanvasOpen(true);
             });
           } else {
+            setCanvasExpanded(true);
+            sidebarCollapse.setCollapsed(true);
             setCanvasOpen(true);
           }
         }
@@ -601,16 +606,24 @@ export function ChatShell() {
               const r = await api.readFileContent(artifact.filePath);
               content = r.content;
             }
+            sidebarWasCollapsedRef.current = sidebarCollapse.collapsed;
             setCanvasPreviewFile(artifact.filePath ?? artifact.title);
             setCanvasPreviewContent(content);
+            setCanvasExpanded(true);
+            sidebarCollapse.setCollapsed(true);
             setCanvasOpen(true);
+          }}
+          onArtifactOpenExternal={(artifact) => {
+            if (artifact.filePath) {
+              window.open(`file://${artifact.filePath}`, '_blank');
+            }
           }}
         />
       </div>
       {canvasOpen && (
         <CanvasPanel
           events={allEventsRef.current}
-          onClose={() => { setCanvasOpen(false); setCanvasExpanded(false); }}
+          onClose={() => { setCanvasOpen(false); setCanvasExpanded(false); sidebarCollapse.setCollapsed(sidebarWasCollapsedRef.current); }}
           initialPreviewFile={canvasPreviewFile}
           initialPreviewContent={canvasPreviewContent}
           expanded={canvasExpanded}
