@@ -380,7 +380,6 @@ export function ChatShell() {
             if (snapshot) {
               console.log(`[ChatShell] Replaying task=${tid} prompt="${snapshot.prompt?.slice(0, 40)}" status=${snapshot.status} events=${snapshot.events?.length}`);
               const isFirst = tid === allTaskIds[0];
-              const isFirst = tid === allTaskIds[0];
               const addPrompt = snapshot.prompt && (!isFirst || !initialPrompt);
               const { msgs: replayMsgs, result: replayResult, events: replayEvents } = replaySnapshot(snapshot, addPrompt);
               console.log(`[ChatShell] Replayed task=${tid} → ${replayMsgs.length} msgs, addPrompt=${addPrompt}`);

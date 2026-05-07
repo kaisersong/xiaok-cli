@@ -205,6 +205,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     snapshotStore,
     runner: options.runner ?? createDesktopModelRunnerWithRegistry(registry, tools, options.dataRoot),
     now: options.now,
+    // Use timestamp + random suffix to ensure unique taskId/sessionId across app restarts
+    createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    createSessionId: () => `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
   });
 
   return {

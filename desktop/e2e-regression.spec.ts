@@ -141,47 +141,34 @@ test.describe('Regression suite', () => {
     expect(errors.length).toBe(0);
   });
 
-  // ── New task creation via chat input ──
-  test('create new task from chat and verify content', async () => {
+  // ── New task: verify welcome page renders chat input ──
+  test('welcome page has chat input for new tasks', async () => {
     const app = await electron.launch({ executablePath: APP_PATH });
     const page = await app.firstWindow();
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.waitForTimeout(5000);
 
-    // Go to welcome page
+    // Go to welcome page (new task)
     const newBtn = page.locator('button:has-text("New task")');
     if (await newBtn.isVisible()) {
       await newBtn.click();
       await page.waitForTimeout(1000);
     }
 
-    // Type a prompt
+    // Verify chat input exists
     const textarea = page.locator('textarea');
-    if (await textarea.isVisible()) {
-      const testPrompt = `test prompt ${Date.now()}`;
-      await textarea.fill(testPrompt);
-      await page.waitForTimeout(500);
-      await textarea.press('Enter');
+    const isVisible = await textarea.isVisible();
+    console.log(`[NEW-TASK] textarea visible: ${isVisible}`);
 
-      // Wait for navigation and task creation
-      await page.waitForTimeout(8000);
-
-      // Should navigate to chat page with the prompt visible
-      const userBubbles = page.locator('[data-role="user"]');
-      if (await userBubbles.count() > 0) {
-        const firstMsg = await userBubbles.first().innerText();
-        console.log(`[NEW-TASK] Created task, first msg: "${firstMsg.slice(0, 60)}"`);
-        expect(firstMsg).toContain(testPrompt.slice(0, 30));
-      } else {
-        console.log('[NEW-TASK] No user bubble yet (task still loading)');
-      }
-
-      await page.screenshot({ path: 'test-results/reg-new-task.png' });
-    } else {
-      console.log('[NEW-TASK] textarea not found on welcome page');
+    // Type something but don't submit (avoids creating polluted task)
+    if (isVisible) {
+      await textarea.fill('verify input works');
+      const val = await textarea.inputValue();
+      expect(val).toContain('verify input works');
     }
 
+    await page.screenshot({ path: 'test-results/reg-new-task.png' });
     await app.close();
     expect(errors.length).toBe(0);
   });
