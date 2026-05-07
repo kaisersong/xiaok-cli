@@ -52,167 +52,6 @@ export interface SkillInvocation {
   traceId: string;
 }
 
-// ---- Stage Policy ----
-
-interface SkillStageDef {
-  id: string;
-  goal: string;
-  allowedReferenceGlobs: string[];
-  forbiddenReferenceGlobs: string[];
-  exitArtifacts: string[];
-  maxModelTurns: number;
-}
-
-export interface SkillStagePolicy {
-  skillName: string;
-  stages: SkillStageDef[];
-}
-
-const STAGE_POLICIES: SkillStagePolicy[] = [
-  {
-    skillName: 'kai-report-creator',
-    stages: [
-      {
-        id: 'plan_ir',
-        goal: 'Create .report.md IR only',
-        allowedReferenceGlobs: [
-          'SKILL.md',
-          'SKILL_HEAD.md',
-          'SKILL_TAIL.md',
-          'stages/*',
-          'references/spec-loading-matrix.md',
-          'references/design-quality.md',
-          'references/regular-report-content-rules.md',
-          'references/regular-report-template.md',
-        ],
-        forbiddenReferenceGlobs: [
-          'references/html-shell/**',
-          'references/rendering/**',
-          'references/theme-css.md',
-          'themes/**',
-          'references/html-shell-template.md',
-          'references/review-checklist.md',
-          'references/anti-patterns.md',
-          'references/rendering-rules.md',
-        ],
-        exitArtifacts: ['*.report.md'],
-        maxModelTurns: 5,
-      },
-      {
-        id: 'generate_html',
-        goal: 'Render HTML from the .report.md IR',
-        allowedReferenceGlobs: [
-          'references/html-shell-template.md',
-          'references/html-shell/**',
-          'references/theme-css.md',
-          'references/rendering-rules.md',
-          'references/rendering/**',
-          'references/review-checklist.md',
-          'references/anti-patterns.md',
-          'references/design-quality.md',
-        ],
-        forbiddenReferenceGlobs: [],
-        exitArtifacts: ['*.html'],
-        maxModelTurns: 10,
-      },
-      {
-        id: 'validate',
-        goal: 'Run validation and at most one targeted repair',
-        allowedReferenceGlobs: ['references/review-checklist.md'],
-        forbiddenReferenceGlobs: [],
-        exitArtifacts: [],
-        maxModelTurns: 3,
-      },
-    ],
-  },
-  {
-    skillName: 'kai-slide-creator',
-    stages: [
-      {
-        id: 'plan_outline',
-        goal: 'Create slide outline in markdown',
-        allowedReferenceGlobs: ['references/**'],
-        forbiddenReferenceGlobs: [],
-        exitArtifacts: ['*.md'],
-        maxModelTurns: 4,
-      },
-      {
-        id: 'generate_pptx',
-        goal: 'Generate PPTX from outline',
-        allowedReferenceGlobs: ['references/**'],
-        forbiddenReferenceGlobs: [],
-        exitArtifacts: ['*.pptx'],
-        maxModelTurns: 8,
-      },
-    ],
-  },
-];
-
-function getStagePolicy(skillName: string): SkillStagePolicy | undefined {
-  return STAGE_POLICIES.find(p => p.skillName === skillName);
-}
-
-function matchesGlob(filePath: string, glob: string): boolean {
-  // Simple glob matching: * = any chars except /, ** = any path
-  const pattern = glob
-    .replace(/\./g, '\\.')
-    .replace(/\*\*/g, '__DOUBLESTAR__')
-    .replace(/\*/g, '[^/]*')
-    .replace(/__DOUBLESTAR__/g, '.*');
-  const re = new RegExp(`^${pattern}$`);
-  return re.test(filePath);
-}
-
-function isPathInSkillRefs(filePath: string, planStep: SkillPlanStep): boolean {
-  const skillRoot = planStep.rootDir;
-  return filePath.startsWith(skillRoot);
-}
-
-function getRefPathInSkill(filePath: string, planStep: SkillPlanStep): string {
-  if (!filePath.startsWith(planStep.rootDir)) return filePath;
-  return filePath.slice(planStep.rootDir.length + 1); // relative path within skill root
-}
-
-export function checkStagePolicyViolation(
-  toolName: string,
-  toolInput: Record<string, unknown>,
-  invocation: SkillInvocation,
-): { violation: true; message: string } | { violation: false } {
-  if (toolName !== 'Read') return { violation: false };
-  const filePath = toolInput.file_path as string | undefined;
-  if (!filePath) return { violation: false };
-
-  const policy = getStagePolicy(invocation.primarySkill);
-  if (!policy) return { violation: false };
-
-  const stage = policy.stages.find(s => s.id === invocation.stageId);
-  if (!stage) return { violation: false };
-
-  // Check if the file is within the primary skill's references
-  const primaryStep = invocation.plan.resolved.find(s => s.name === invocation.primarySkill);
-  if (!primaryStep) return { violation: false };
-
-  const relPath = getRefPathInSkill(filePath, primaryStep);
-  if (!isPathInSkillRefs(filePath, primaryStep)) return { violation: false };
-
-  // Check forbidden globs first
-  for (const glob of stage.forbiddenReferenceGlobs) {
-    if (matchesGlob(relPath, glob)) {
-      return { violation: true, message: `Stage "${invocation.stageId}": forbidden reference "${relPath}"` };
-    }
-  }
-
-  // Check allowed globs (if any are specified, file must match at least one)
-  if (stage.allowedReferenceGlobs.length > 0) {
-    const isAllowed = stage.allowedReferenceGlobs.some(g => matchesGlob(relPath, g));
-    if (!isAllowed) {
-      return { violation: true, message: `Stage "${invocation.stageId}": reference "${relPath}" not in allowed list` };
-    }
-  }
-
-  return { violation: false };
-}
-
 // ---- Budget Guard ----
 
 export interface SkillBudget {
@@ -228,12 +67,11 @@ const DEFAULT_BUDGET: SkillBudget = {
   maxToolCalls: 16,
   maxReferenceReads: 8,
   maxRepairAttempts: 1,
-  maxTotalInputTokens: 60_000, // Tight budget: plan_ir should complete within 60k tokens
+  maxTotalInputTokens: 300_000,
 };
 
-function getBudget(policy?: SkillStagePolicy): SkillBudget {
-  if (!policy) return DEFAULT_BUDGET;
-  return { ...DEFAULT_BUDGET }; // Can customize per-policy later
+function getBudget(): SkillBudget {
+  return DEFAULT_BUDGET;
 }
 
 export function checkBudget(
@@ -244,7 +82,7 @@ export function checkBudget(
   totalInputTokens: number,
   dataRoot: string,
 ): { ok: true } | { ok: false; reason: string } {
-  const budget = getBudget(getStagePolicy(invocation.primarySkill));
+  const budget = getBudget();
 
   if (currentIteration >= budget.maxIterations) {
     appendTrace(dataRoot, {
@@ -364,7 +202,7 @@ export function buildSkillInvocation(
     return {
       plan,
       primarySkill: plan.primarySkill,
-      stageId: plan.resolved[0]?.name ? 'plan_ir' : 'default',
+      stageId: 'default',
       stageStartIteration: 1,
       traceId: taskId,
     };
@@ -373,5 +211,5 @@ export function buildSkillInvocation(
   }
 }
 
-export { getStagePolicy, STAGE_POLICIES, DEFAULT_BUDGET, appendTrace, getSkillTracePath };
+export { DEFAULT_BUDGET, appendTrace, getSkillTracePath };
 export type { SkillTraceEvent };

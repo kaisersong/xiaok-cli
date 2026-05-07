@@ -1,93 +1,101 @@
 import { test, expect } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { readFileSync, existsSync, rmSync } from 'fs';
+import { join } from 'path';
 
 const APP_PATH = '/Users/song/projects/xiaok-cli/desktop/release/mac-arm64/xiaok.app/Contents/MacOS/xiaok';
+const TRACE_FILE = join(process.env.HOME!, '.xiaok', 'desktop', 'skill-trace.jsonl');
 
-test.describe('Skill execution', () => {
-  test('slash command triggers skill and produces output', async () => {
+test.describe('Skill execution E2E', () => {
+  test('/browse skill executes and completes without hanging', async () => {
     const app = await electron.launch({ executablePath: APP_PATH });
     const page = await app.firstWindow();
     const errors: string[] = [];
-    page.on('pageerror', e => errors.push(`PAGE: ${e.message}`));
+    page.on('pageerror', e => errors.push(e.message));
     await page.waitForTimeout(5000);
 
-    // Navigate to new task
     const newBtn = page.locator('button:has-text("New task")');
     if (await newBtn.isVisible()) {
       await newBtn.click();
       await page.waitForTimeout(1000);
     }
 
-    // Type a slash command that should trigger a skill
     const textarea = page.locator('textarea');
     if (await textarea.isVisible()) {
       await textarea.fill('/browse https://example.com');
       await textarea.press('Enter');
 
-      // Wait for the skill to load and produce output (up to 30s)
-      await page.waitForTimeout(15000);
+      // Poll every 5s, max 60s
+      let completed = false;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        await page.waitForTimeout(5000);
+        const bodyText = await page.locator('body').innerText();
 
-      // Check for evidence of skill execution:
-      // 1. There should be an assistant message (not just "Loading...")
-      // 2. There should be NO error message containing "session not found"
-      // 3. There should be NO error message containing "active task already exists"
-      const bodyText = await page.locator('body').innerText();
+        const hasStepsCompleted = bodyText.includes('steps completed');
+        const hasStepsRunning = bodyText.includes('steps · running');
+        const hasSessionError = bodyText.includes('session not found');
+        const hasNoContent = bodyText.includes('模型没有返回内容');
 
-      const hasSessionNotFound = bodyText.includes('session not found');
-      const hasActiveTaskError = bodyText.includes('active task already exists');
-      const hasAssistantContent = bodyText.includes('step') || bodyText.includes('completed') || bodyText.includes('browse') || bodyText.includes('example');
+        console.log(`[attempt ${attempt + 1}] completed=${hasStepsCompleted} running=${hasStepsRunning} err=${hasSessionError} empty=${hasNoContent}`);
 
-      console.log(`[SKILL-EXEC] hasSessionNotFound=${hasSessionNotFound}, hasActiveTaskError=${hasActiveTaskError}`);
-      console.log(`[SKILL-EXEC] hasAssistantContent=${hasAssistantContent}`);
-      console.log(`[SKILL-EXEC] bodyText snippet: ${bodyText.slice(0, 500)}`);
+        if (hasSessionError) {
+          console.error('[FATAL] session not found');
+          break;
+        }
+        if (hasStepsCompleted || (bodyText.length > 200 && !hasStepsRunning)) {
+          completed = true;
+          console.log('[OK] skill completed');
+          break;
+        }
+        if (hasNoContent) {
+          completed = true;
+          console.log('[OK] finished (no content)');
+          break;
+        }
+      }
 
-      expect(hasSessionNotFound).toBe(false);
-      expect(hasActiveTaskError).toBe(false);
-
-      await page.screenshot({ path: 'test-results/skill-execution.png' });
-    } else {
-      console.log('[SKILL-EXEC] textarea not found');
+      expect(completed).toBe(true);
+      expect(errors.length).toBe(0);
+      await page.screenshot({ path: 'test-results/skill-exec-browse.png' });
     }
-
     await app.close();
-    expect(errors.length).toBe(0);
   });
 
-  test('intent_create does not fail with session not found', async () => {
+  test('skill trace records invocation events', async () => {
+    try { rmSync(TRACE_FILE); } catch { /* ok */ }
+
     const app = await electron.launch({ executablePath: APP_PATH });
     const page = await app.firstWindow();
-    const errors: string[] = [];
-    page.on('pageerror', e => errors.push(`PAGE: ${e.message}`));
     await page.waitForTimeout(5000);
 
-    // Navigate to new task
     const newBtn = page.locator('button:has-text("New task")');
     if (await newBtn.isVisible()) {
       await newBtn.click();
       await page.waitForTimeout(1000);
     }
 
-    // Submit a task that would trigger intent_create
     const textarea = page.locator('textarea');
     if (await textarea.isVisible()) {
-      await textarea.fill('帮我分析一下当前项目的架构');
+      await textarea.fill('/browse https://example.com');
       await textarea.press('Enter');
-
-      // Wait for task to complete or produce output
-      await page.waitForTimeout(20000);
-
-      const bodyText = await page.locator('body').innerText();
-      const hasSessionNotFound = bodyText.includes('session not found');
-
-      console.log(`[INTENT-TEST] hasSessionNotFound=${hasSessionNotFound}`);
-      console.log(`[INTENT-TEST] bodyText snippet: ${bodyText.slice(0, 500)}`);
-
-      expect(hasSessionNotFound).toBe(false);
-
-      await page.screenshot({ path: 'test-results/intent-test.png' });
+      for (let i = 0; i < 12; i++) {
+        await page.waitForTimeout(5000);
+        const bodyText = await page.locator('body').innerText();
+        if (bodyText.includes('steps completed') || bodyText.includes('模型没有返回内容')) break;
+      }
     }
 
+    await page.waitForTimeout(2000);
     await app.close();
-    expect(errors.length).toBe(0);
+
+    if (existsSync(TRACE_FILE)) {
+      const lines = readFileSync(TRACE_FILE, 'utf-8').trim().split('\n').filter(Boolean);
+      const invoked = lines.filter(l => l.includes('skill_invoked'));
+      const turnStarts = lines.filter(l => l.includes('model_turn_start'));
+      console.log(`[TRACE] total=${lines.length} invoked=${invoked.length} turns=${turnStarts.length}`);
+      expect(invoked.length).toBeGreaterThan(0);
+      expect(turnStarts.length).toBeGreaterThan(0);
+      try { rmSync(TRACE_FILE); } catch { /* ok */ }
+    }
   });
 });

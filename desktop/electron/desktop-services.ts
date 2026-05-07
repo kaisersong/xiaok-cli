@@ -19,7 +19,7 @@ import { createIntentDelegationTools } from '../../src/ai/tools/intent-delegatio
 import { analyzeIntent as analyzeStageIntent } from '../../src/runtime/stage/executor.js';
 import { createEmptySessionIntentLedger, cloneSessionIntentLedger, createIntentLedgerRecord, type SessionIntentLedger, type IntentPlanDraft, type IntentLedgerRecord } from '../../src/runtime/intent-delegation/types.js';
 import { DELEGATION_TEMPLATES } from '../../src/ai/intent-delegation/templates.js';
-import { buildSkillInvocation, createSkillBundleRefsTool, checkStagePolicyViolation, checkBudget, appendTrace, getStagePolicy } from './skill-runtime.js';
+import { buildSkillInvocation, createSkillBundleRefsTool, checkBudget, appendTrace } from './skill-runtime.js';
 import type { SkillInvocation } from './skill-runtime.js';
 import type { ReminderScheduler } from './reminder-scheduler.js';
 import type { Tool } from '../../src/types.js';
@@ -1207,10 +1207,10 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
             event: 'skill_invoked', details: `slash: ${slashMatch.rest || '(no args)'}`,
           });
         }
-        // Only inject skill name and description, not full content — let model load refs on-demand via tools
+        // Inject skill content directly — skill execution works best when model has full instructions
         effectivePrompt = slashMatch.rest
-          ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSteps:\n1. First use skill_bundle_refs to read SKILL.md and stages/plan.md to understand the skill structure\n2. Follow the skill's execution plan\n3. Use skill_bundle_refs to load reference files as needed`
-          : `Execute skill "${skill.name}": ${skill.description}\n\nSteps:\n1. First use skill_bundle_refs to read SKILL.md and stages/plan.md to understand the skill structure\n2. Follow the skill's execution plan\n3. Use skill_bundle_refs to load reference files as needed`;
+          ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
+          : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
       }
     }
 
@@ -1270,11 +1270,6 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
       ? `${effectivePrompt}${materialsContext}`
       : effectivePrompt;
     const allToolDefs = registry.getToolDefinitions();
-    // When slash command matches a skill, skip the skill tool — content is already injected
-    const slashSkill = slashMatch ? findSkillByCommandName(currentSkills, slashMatch.skillName) : null;
-    const activeToolDefs = slashSkill
-      ? allToolDefs.filter(t => t.name !== 'skill')
-      : allToolDefs;
     // Include file content blocks directly in user message
     const userContent: MessageBlock[] = [
       { type: 'text', text: userText },
@@ -1286,7 +1281,7 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
     }];
     let reply = '';
     let iteration = 0;
-    const MAX_ITERATIONS = skillInvocation ? 12 : 20; // Budget guard: fewer iterations for skill executions
+    const MAX_ITERATIONS = 20;
     let totalToolCalls = 0;
     let referenceReads = 0;
 
@@ -1324,7 +1319,7 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
       }
 
       const assistantBlocks: MessageBlock[] = [];
-      for await (const chunk of adapter.stream(messages, activeToolDefs, systemPrompt)) {
+      for await (const chunk of adapter.stream(messages, allToolDefs, systemPrompt)) {
         if (signal.aborted) throw new Error('task cancelled');
         if (chunk.type === 'text') {
           const lastBlock = assistantBlocks[assistantBlocks.length - 1];
@@ -1367,22 +1362,6 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
             stageId: skillInvocation.stageId, iteration, event: 'tool_start',
             toolName: toolCall.name,
           });
-        }
-
-        // Stage policy check: block forbidden reference reads
-        if (skillInvocation && toolCall.name === 'Read') {
-          const violation = checkStagePolicyViolation(toolCall.name, toolCall.input as Record<string, unknown>, skillInvocation);
-          if (violation.violation) {
-            toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: `Error: ${violation.message}`, is_error: true });
-            if (skillInvocation) {
-              appendTrace(dataRoot, {
-                ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
-                stageId: skillInvocation.stageId, iteration, event: 'tool_end',
-                toolName: toolCall.name, details: `blocked: ${violation.message}`,
-              });
-            }
-            continue;
-          }
         }
 
         // Evidence tracking: count reference reads
@@ -1559,10 +1538,10 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
             event: 'skill_invoked', details: `slash: ${slashMatch.rest || '(no args)'}`,
           });
         }
-        // Only inject skill name and description, not full content — let model load refs on-demand via tools
+        // Inject skill content directly — skill execution works best when model has full instructions
         effectivePrompt = slashMatch.rest
-          ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSteps:\n1. First use skill_bundle_refs to read SKILL.md and stages/plan.md to understand the skill structure\n2. Follow the skill's execution plan\n3. Use skill_bundle_refs to load reference files as needed`
-          : `Execute skill "${skill.name}": ${skill.description}\n\nSteps:\n1. First use skill_bundle_refs to read SKILL.md and stages/plan.md to understand the skill structure\n2. Follow the skill's execution plan\n3. Use skill_bundle_refs to load reference files as needed`;
+          ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
+          : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
       }
     }
 
@@ -1622,11 +1601,6 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       ? `${effectivePrompt}${materialsContext}`
       : effectivePrompt;
     const allToolDefs = registry.getToolDefinitions();
-    // When slash command matches a skill, skip the skill tool — content is already injected
-    const slashSkill = slashMatch ? findSkillByCommandName(currentSkills, slashMatch.skillName) : null;
-    const activeToolDefs = slashSkill
-      ? allToolDefs.filter(t => t.name !== 'skill')
-      : allToolDefs;
     // Include file content blocks directly in user message
     const userContent: MessageBlock[] = [
       { type: 'text', text: userText },
@@ -1638,7 +1612,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
     }];
     let reply = '';
     let iteration = 0;
-    const MAX_ITERATIONS = skillInvocation ? 12 : 20; // Budget guard: fewer iterations for skill executions
+    const MAX_ITERATIONS = 20;
     let totalToolCalls = 0;
     let referenceReads = 0;
 
@@ -1676,7 +1650,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       }
 
       const assistantBlocks: MessageBlock[] = [];
-      for await (const chunk of adapter.stream(messages, activeToolDefs, systemPrompt)) {
+      for await (const chunk of adapter.stream(messages, allToolDefs, systemPrompt)) {
         if (signal.aborted) throw new Error('task cancelled');
         if (chunk.type === 'text') {
           const lastBlock = assistantBlocks[assistantBlocks.length - 1];
