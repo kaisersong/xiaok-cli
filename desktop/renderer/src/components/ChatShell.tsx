@@ -21,6 +21,7 @@ export function ChatShell() {
   const [status, setStatus] = useState<'idle' | 'running' | 'waiting_user' | 'completed' | 'failed'>('idle');
   const [currentQuestion, setCurrentQuestion] = useState<NeedsUserQuestion | null>(null);
   const [result, setResult] = useState<TaskResult | null>(null);
+  const [previousResults, setPreviousResults] = useState<TaskResult[]>([]);
   const [prompt, setPrompt] = useState('');
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [canvasExpanded, setCanvasExpanded] = useState(false);
@@ -347,6 +348,7 @@ export function ChatShell() {
     streamRef.current = '';
     setStreamingText('');
     setResult(null);
+    setPreviousResults([]);
     setMessages([]);
     setCurrentQuestion(null);
     setThread(null);
@@ -469,8 +471,12 @@ export function ChatShell() {
     setPrompt('');
     setStatus('running');
     setStreamingText('');
-    setResult(null);
     streamRef.current = '';
+    // Preserve current result in previous results before clearing
+    if (result) {
+      setPreviousResults(prev => [...prev, result]);
+    }
+    setResult(null);
 
     // Update thread title to match user's latest prompt
     if (taskId) {
@@ -566,6 +572,9 @@ export function ChatShell() {
     // Source 2: result summary and assistant messages (extract file paths from text)
     const textsToScan: string[] = [];
     if (result?.summary) textsToScan.push(result.summary);
+    for (const prev of previousResults) {
+      if (prev.summary) textsToScan.push(prev.summary);
+    }
     for (const msg of messages) {
       if (msg.role === 'assistant' && msg.content) textsToScan.push(msg.content);
     }
