@@ -56,3 +56,14 @@
 - Treat `docs/design/**` and related design/spec docs under `docs/**` as normal in-scope project files for this repo's work.
 - Do not ask for extra confirmation just because a design-doc edit crosses that symlink boundary; update the smallest relevant doc set directly when the task requires it.
 - Remember that `git status` in `/Users/song/projects/xiaok-cli` will not show those doc edits, because the actual files live in the `mydocs` repo.
+
+## Desktop Packaging
+
+- `desktop/package.json` 的 `dependencies` 只保留 **main 进程运行时需要** 的包（当前：`electron-updater`、`fast-glob`、`openai`）。
+- 所有纯前端依赖（react、framer-motion、mermaid、lucide-react 等）放在 `devDependencies`——Vite 打包 renderer 时不区分 deps/devDeps，不影响开发和构建。
+- `electron-builder.json` 的 `files` 不需要手动加 `node_modules/**/*`，electron-builder 默认会根据 `dependencies` 自动打包需要的模块。
+- 优化效果：DMG 从 152MB 降到 110MB（节约 42MB / 27.6%）。
+- 打包前务必确认 `dist/main/` 中所有外部 import 都在 `dependencies` 中声明，验证命令：
+  ```bash
+  find dist/main -name "*.js" -exec grep -h "from ['\"]" {} \; | sed "s/.*from ['\"]//;s/['\"].*//" | grep -v "^\." | grep -v "^node:" | sort -u
+  ```
