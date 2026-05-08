@@ -1,6 +1,5 @@
 import { useRef, useEffect } from 'react';
 import remarkGfm from 'remark-gfm';
-import { LayoutPanelLeft } from 'lucide-react';
 import { ChatInput } from './ChatInput';
 import { ToolStepsMessage } from './ToolStepsMessage';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -208,8 +207,8 @@ export function ChatView({
               </div>
             ) : null}
 
-            {/* Thinking indicator */}
-            {status === 'running' && !streamingText && (
+            {/* Running indicator – always visible while task is running */}
+            {status === 'running' && (
               <div className="flex items-center gap-2 py-2">
                 <div className="relative size-4 shrink-0">
                   <svg className="size-4 animate-spin" viewBox="0 0 24 24">
@@ -217,7 +216,9 @@ export function ChatView({
                     <path className="opacity-80" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="M12 2a10 10 0 0 1 10 10" style={{ color: 'var(--c-accent)' }} />
                   </svg>
                 </div>
-                <span className="text-sm text-[var(--c-text-secondary)]">Thinking...</span>
+                <span className="text-sm text-[var(--c-text-secondary)]">
+                  {streamingText ? 'Working...' : 'Thinking...'}
+                </span>
               </div>
             )}
 
@@ -265,22 +266,6 @@ export function ChatView({
           background: 'linear-gradient(to bottom, transparent 0%, var(--c-bg-page) 24px)',
         }}
       >
-        {/* Canvas toggle */}
-        <div className="flex w-full items-center gap-2">
-          <button
-            type="button"
-            onClick={onToggleCanvas}
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition-colors ${
-              canvasOpen
-                ? 'bg-[var(--c-accent)] text-white'
-                : 'bg-[var(--c-bg-card)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'
-            } border border-[var(--c-border-subtle)]`}
-            title="Toggle Canvas (Ctrl+Shift+C)"
-          >
-            <LayoutPanelLeft size={14} />
-            <span>Canvas</span>
-          </button>
-        </div>
         <ChatInput
           value={prompt}
           onChange={onPromptChange}

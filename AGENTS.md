@@ -1,5 +1,9 @@
 # Repo Notes
 
+## Language
+
+- Always reply in Chinese (中文回复).
+
 ## Worktrees
 
 - The CLI runtime layer refactor has been integrated back into the main workspace.
