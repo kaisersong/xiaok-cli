@@ -1,9 +1,8 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
-import { existsSync, copyFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { deflateSync } from 'node:zlib';
+import { deflateSync, inflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -13,9 +12,11 @@ const outputRoot = resolve(repoRoot, outArgIndex >= 0 ? args[outArgIndex + 1] ??
 const skipIcns = args.includes('--skip-icns');
 
 const srcPngPath = join(repoRoot, 'data', 'xiaok.png');
+const logoPath = join(repoRoot, 'data', 'logo.txt');
 const iconsetPath = join(outputRoot, 'icon.iconset');
 const pngPath = join(outputRoot, 'icon.png');
 const icnsPath = join(outputRoot, 'icon.icns');
+const icoPath = join(outputRoot, 'icon.ico');
 
 // Use PNG source if available, fall back to text logo
 const usePng = existsSync(srcPngPath);
@@ -26,7 +27,6 @@ await mkdir(iconsetPath, { recursive: true });
 if (usePng) {
   await writeFile(join(outputRoot, 'icon-source.txt'), 'xiaok.png\n', 'utf8');
 } else {
-  const logoPath = join(repoRoot, 'data', 'logo.txt');
   const logo = (await readFile(logoPath, 'utf8')).replace(/\s+$/u, '');
   await writeFile(join(outputRoot, 'icon-source.txt'), logo + '\n', 'utf8');
 }
@@ -44,41 +44,30 @@ const iconSizes = [
   ['icon_512x512@2x.png', 1024],
 ];
 
+let sourceImage = null;
 if (usePng) {
-  // Resize PNG source for each icon size using sips
-  for (const [name, size] of iconSizes) {
-    const outPath = join(iconsetPath, name);
-    const result = spawnSync('sips', ['-z', String(size), String(size), srcPngPath, '--out', outPath], { encoding: 'utf8' });
-    if (result.status !== 0) {
-      console.error('sips failed:', result.stderr);
-    }
-    if (size === 1024) {
-      const { copyFileSync } = await import('node:fs');
-      copyFileSync(outPath, pngPath);
-    }
-  }
-} else {
-  const logoPath = join(repoRoot, 'data', 'logo.txt');
-  const logo = (await readFile(logoPath, 'utf8')).replace(/\s+$/u, '');
-  for (const [name, size] of iconSizes) {
-    const png = renderLogoPng(size, logo);
-    await writeFile(join(iconsetPath, name), png);
-    if (size === 1024) {
-      await writeFile(pngPath, png);
-    }
+  sourceImage = decodePng(await readFile(srcPngPath));
+}
+
+const logo = sourceImage ? null : (await readFile(logoPath, 'utf8')).replace(/\s+$/u, '');
+for (const [name, size] of iconSizes) {
+  const png = sourceImage
+    ? encodePng(size, size, resizeRgba(sourceImage, size, size))
+    : renderLogoPng(size, logo);
+  await writeFile(join(iconsetPath, name), png);
+  if (size === 1024) {
+    await writeFile(pngPath, png);
   }
 }
 
+await writeIco(iconsetPath, icoPath);
+
 if (!skipIcns) {
   await writeIcns(iconsetPath, icnsPath);
+}
 
-  const checked = spawnSync('file', [pngPath], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-  });
-  if (checked.status !== 0 || !existsSync(pngPath)) {
-    process.exit(checked.status ?? 1);
-  }
+if (!existsSync(pngPath) || !existsSync(icoPath) || (!skipIcns && !existsSync(icnsPath))) {
+  process.exit(1);
 }
 
 function renderLogoPng(size, logoText) {
@@ -187,6 +176,150 @@ function pngChunk(type, data) {
   return Buffer.concat([length, typeBuffer, data, crc]);
 }
 
+function decodePng(png) {
+  if (png.subarray(0, 8).compare(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) !== 0) {
+    throw new Error('Unsupported PNG signature');
+  }
+
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let compression = 0;
+  let filterMethod = 0;
+  let interlace = 0;
+  const idatChunks = [];
+
+  while (offset < png.length) {
+    const length = png.readUInt32BE(offset);
+    const type = png.subarray(offset + 4, offset + 8).toString('ascii');
+    const data = png.subarray(offset + 8, offset + 8 + length);
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+      compression = data[10];
+      filterMethod = data[11];
+      interlace = data[12];
+    } else if (type === 'IDAT') {
+      idatChunks.push(data);
+    } else if (type === 'IEND') {
+      break;
+    }
+    offset += length + 12;
+  }
+
+  if (bitDepth !== 8 || colorType !== 6 || compression !== 0 || filterMethod !== 0 || interlace !== 0) {
+    throw new Error(`Unsupported PNG format: bitDepth=${bitDepth} colorType=${colorType} compression=${compression} filter=${filterMethod} interlace=${interlace}`);
+  }
+
+  const inflated = inflateSync(Buffer.concat(idatChunks));
+  const stride = width * 4;
+  const scanlineLength = stride + 1;
+  const rgba = Buffer.alloc(width * height * 4);
+  let readOffset = 0;
+  let prev = Buffer.alloc(stride, 0);
+
+  for (let y = 0; y < height; y += 1) {
+    const filter = inflated[readOffset];
+    const current = Buffer.from(inflated.subarray(readOffset + 1, readOffset + scanlineLength));
+    unfilterScanline(current, prev, filter);
+    current.copy(rgba, y * stride);
+    prev = current;
+    readOffset += scanlineLength;
+  }
+
+  return { width, height, rgba };
+}
+
+function unfilterScanline(current, prev, filter) {
+  switch (filter) {
+    case 0:
+      return;
+    case 1:
+      for (let i = 0; i < current.length; i += 1) {
+        const left = i >= 4 ? current[i - 4] : 0;
+        current[i] = (current[i] + left) & 0xff;
+      }
+      return;
+    case 2:
+      for (let i = 0; i < current.length; i += 1) {
+        current[i] = (current[i] + prev[i]) & 0xff;
+      }
+      return;
+    case 3:
+      for (let i = 0; i < current.length; i += 1) {
+        const left = i >= 4 ? current[i - 4] : 0;
+        const up = prev[i];
+        current[i] = (current[i] + Math.floor((left + up) / 2)) & 0xff;
+      }
+      return;
+    case 4:
+      for (let i = 0; i < current.length; i += 1) {
+        const left = i >= 4 ? current[i - 4] : 0;
+        const up = prev[i];
+        const upLeft = i >= 4 ? prev[i - 4] : 0;
+        current[i] = (current[i] + paethPredictor(left, up, upLeft)) & 0xff;
+      }
+      return;
+    default:
+      throw new Error(`Unsupported PNG filter type: ${filter}`);
+  }
+}
+
+function paethPredictor(left, up, upLeft) {
+  const p = left + up - upLeft;
+  const pa = Math.abs(p - left);
+  const pb = Math.abs(p - up);
+  const pc = Math.abs(p - upLeft);
+  if (pa <= pb && pa <= pc) return left;
+  if (pb <= pc) return up;
+  return upLeft;
+}
+
+function resizeRgba(image, targetWidth, targetHeight) {
+  if (image.width === targetWidth && image.height === targetHeight) {
+    return Buffer.from(image.rgba);
+  }
+
+  const output = Buffer.alloc(targetWidth * targetHeight * 4);
+  const xScale = image.width / targetWidth;
+  const yScale = image.height / targetHeight;
+
+  for (let y = 0; y < targetHeight; y += 1) {
+    const srcY = clamp((y + 0.5) * yScale - 0.5, 0, image.height - 1);
+    const y0 = Math.floor(srcY);
+    const y1 = Math.min(image.height - 1, y0 + 1);
+    const yWeight = srcY - y0;
+
+    for (let x = 0; x < targetWidth; x += 1) {
+      const srcX = clamp((x + 0.5) * xScale - 0.5, 0, image.width - 1);
+      const x0 = Math.floor(srcX);
+      const x1 = Math.min(image.width - 1, x0 + 1);
+      const xWeight = srcX - x0;
+      const destOffset = (y * targetWidth + x) * 4;
+
+      for (let channel = 0; channel < 4; channel += 1) {
+        const p00 = image.rgba[(y0 * image.width + x0) * 4 + channel];
+        const p10 = image.rgba[(y0 * image.width + x1) * 4 + channel];
+        const p01 = image.rgba[(y1 * image.width + x0) * 4 + channel];
+        const p11 = image.rgba[(y1 * image.width + x1) * 4 + channel];
+        const top = p00 + (p10 - p00) * xWeight;
+        const bottom = p01 + (p11 - p01) * xWeight;
+        output[destOffset + channel] = Math.round(top + (bottom - top) * yWeight);
+      }
+    }
+  }
+
+  return output;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
 async function writeIcns(sourceIconsetPath, outputPath) {
   const entries = [
     ['icp4', 'icon_16x16.png'],
@@ -211,6 +344,46 @@ async function writeIcns(sourceIconsetPath, outputPath) {
   fileHeader.write('icns', 0, 'ascii');
   fileHeader.writeUInt32BE(totalLength, 4);
   await writeFile(outputPath, Buffer.concat([fileHeader, ...chunks], totalLength));
+}
+
+async function writeIco(sourceIconsetPath, outputPath) {
+  const entries = [
+    ['icon_16x16.png', 16],
+    ['icon_32x32.png', 32],
+    ['icon_32x32@2x.png', 64],
+    ['icon_128x128.png', 128],
+    ['icon_256x256.png', 256],
+  ];
+
+  const images = await Promise.all(entries.map(async ([name, size]) => ({
+    size,
+    data: await readFile(join(sourceIconsetPath, name)),
+  })));
+
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(images.length, 4);
+
+  const directory = Buffer.alloc(images.length * 16);
+  let dataOffset = header.length + directory.length;
+  const imageBuffers = [];
+
+  images.forEach((image, index) => {
+    const entryOffset = index * 16;
+    directory[entryOffset] = image.size >= 256 ? 0 : image.size;
+    directory[entryOffset + 1] = image.size >= 256 ? 0 : image.size;
+    directory[entryOffset + 2] = 0;
+    directory[entryOffset + 3] = 0;
+    directory.writeUInt16LE(1, entryOffset + 4);
+    directory.writeUInt16LE(32, entryOffset + 6);
+    directory.writeUInt32LE(image.data.length, entryOffset + 8);
+    directory.writeUInt32LE(dataOffset, entryOffset + 12);
+    dataOffset += image.data.length;
+    imageBuffers.push(image.data);
+  });
+
+  await writeFile(outputPath, Buffer.concat([header, directory, ...imageBuffers]));
 }
 
 function crc32(buffer) {

@@ -23,6 +23,10 @@ export interface CloseMinimizeDesktopWindow {
   minimize(): void;
 }
 
+export interface WindowsMenuDesktopWindow {
+  removeMenu(): void;
+}
+
 const restoreRepaintDelayMs = 75;
 
 export function restoreExistingWindow(window: RestorableDesktopWindow): void {
@@ -48,17 +52,25 @@ export function attachWindowRepaintHandlers(window: RepaintObservableDesktopWind
   window.webContents.on('did-finish-load', () => repaintRenderer(window));
 }
 
-export function attachMacCloseToMinimize(
+export function attachCloseToMinimize(
   window: CloseMinimizeDesktopWindow,
   platform: NodeJS.Platform = process.platform,
   shouldMinimize: () => boolean = () => true,
 ): void {
-  if (platform !== 'darwin') return;
+  if (platform !== 'darwin' && platform !== 'win32') return;
   window.on('close', (event) => {
     if (!shouldMinimize()) return;
     event.preventDefault();
     window.minimize();
   });
+}
+
+export function removeWindowsWindowMenu(
+  window: WindowsMenuDesktopWindow,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform !== 'win32') return;
+  window.removeMenu();
 }
 
 function invalidateRenderer(window: RestorableDesktopWindow): void {

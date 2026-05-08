@@ -4,7 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { createDesktopServices } from './desktop-services.js';
 import { registerDesktopIpc } from './ipc.js';
 import { buildBrowserWindowOptions, isAllowedNavigationUrl } from './security.js';
-import { attachMacCloseToMinimize, attachWindowRepaintHandlers, restoreExistingWindow } from './window-lifecycle.js';
+import { resolveDesktopWindowIconPath } from './window-icon.js';
+import {
+  attachCloseToMinimize,
+  attachWindowRepaintHandlers,
+  removeWindowsWindowMenu,
+  restoreExistingWindow,
+} from './window-lifecycle.js';
 import { setupMenuBar, destroyMenuBar } from './menubar.js';
 import { setupAutoUpdater, checkForUpdates, quitAndInstall, getUpdateStatus } from './updater.js';
 import { JsonReminderStore } from './reminder-store.js';
@@ -17,7 +23,11 @@ const singleInstanceLock = app.requestSingleInstanceLock();
 
 async function createWindow(): Promise<BrowserWindow> {
   const preloadPath = join(__dirname, 'preload.cjs');
-  const window = new BrowserWindow(buildBrowserWindowOptions(preloadPath));
+  const window = new BrowserWindow(buildBrowserWindowOptions(preloadPath, {
+    platform: process.platform,
+    iconPath: resolveDesktopWindowIconPath(__dirname, process.platform),
+  }));
+  removeWindowsWindowMenu(window, process.platform);
   mainWindow = window;
   const services = createDesktopServices({
     dataRoot: join(app.getPath('home'), '.xiaok', 'desktop'),
@@ -93,7 +103,7 @@ async function createWindow(): Promise<BrowserWindow> {
       mainWindow = null;
     }
   });
-  attachMacCloseToMinimize(window, process.platform, () => !isQuitting);
+  attachCloseToMinimize(window, process.platform, () => !isQuitting);
   attachWindowRepaintHandlers(window);
 
   window.webContents.setWindowOpenHandler(({ url }) => {

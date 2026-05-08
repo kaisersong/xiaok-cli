@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { attachMacCloseToMinimize, attachWindowRepaintHandlers, restoreExistingWindow } from '../../electron/window-lifecycle.js';
+import {
+  attachCloseToMinimize,
+  attachWindowRepaintHandlers,
+  removeWindowsWindowMenu,
+  restoreExistingWindow,
+} from '../../electron/window-lifecycle.js';
 
 function createWindowDouble(options: { minimized?: boolean; visible?: boolean; destroyed?: boolean } = {}) {
   const calls: string[] = [];
@@ -92,7 +97,24 @@ describe('desktop window lifecycle', () => {
       minimize: () => calls.push('minimize'),
     };
 
-    attachMacCloseToMinimize(window, 'darwin');
+    attachCloseToMinimize(window, 'darwin');
+    handlers.get('close')?.(closeEvent);
+
+    expect(calls).toEqual(['preventDefault', 'minimize']);
+  });
+
+  it('minimizes to the taskbar when the Windows close button is clicked', () => {
+    const calls: string[] = [];
+    const closeEvent = { preventDefault: () => calls.push('preventDefault') };
+    const handlers = new Map<string, (event: typeof closeEvent) => void>();
+    const window = {
+      on: (event: string, listener: (event: typeof closeEvent) => void) => {
+        handlers.set(event, listener);
+      },
+      minimize: () => calls.push('minimize'),
+    };
+
+    attachCloseToMinimize(window, 'win32');
     handlers.get('close')?.(closeEvent);
 
     expect(calls).toEqual(['preventDefault', 'minimize']);
@@ -109,7 +131,7 @@ describe('desktop window lifecycle', () => {
       minimize: () => calls.push('minimize'),
     };
 
-    attachMacCloseToMinimize(window, 'darwin', () => false);
+    attachCloseToMinimize(window, 'darwin', () => false);
     handlers.get('close')?.(closeEvent);
 
     expect(calls).toEqual([]);
@@ -124,8 +146,20 @@ describe('desktop window lifecycle', () => {
       minimize: () => undefined,
     };
 
-    attachMacCloseToMinimize(window, 'linux');
+    attachCloseToMinimize(window, 'linux');
 
     expect(handlers.has('close')).toBe(false);
+  });
+
+  it('removes the BrowserWindow menu on Windows only', () => {
+    const calls: string[] = [];
+    const window = {
+      removeMenu: () => calls.push('removeMenu'),
+    };
+
+    removeWindowsWindowMenu(window, 'win32');
+    removeWindowsWindowMenu(window, 'darwin');
+
+    expect(calls).toEqual(['removeMenu']);
   });
 });

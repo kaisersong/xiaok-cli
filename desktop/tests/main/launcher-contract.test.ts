@@ -10,7 +10,8 @@ describe('desktop launch contract', () => {
       scripts: Record<string, string>;
     };
 
-    expect(pkg.scripts['desktop:pack']).toBe('npm run pack:dir --prefix desktop');
+    expect(pkg.scripts['desktop:pack:dir']).toBe('npm run pack:dir --prefix desktop');
+    expect(pkg.scripts['desktop:pack']).toBe('npm run pack:release --prefix desktop');
     expect(pkg.scripts['desktop:launch']).toBe('node scripts/desktop-launch.mjs');
     expect(pkg.scripts['desktop:install']).toBe('npm run desktop:pack && node scripts/desktop-install.mjs');
   });
@@ -22,13 +23,23 @@ describe('desktop launch contract', () => {
 
     expect(launcher).toContain('npm run desktop:launch');
     expect(launcher).toContain('cd "$REPO_ROOT"');
-    expect(mode & 0o111).not.toBe(0);
+    if (process.platform !== 'win32') {
+      expect(mode & 0o111).not.toBe(0);
+    }
   });
 
   it('launches the bundle executable so repeated opens route through the app single-instance handler', async () => {
     const launcher = await readFile(join(repoRoot, 'scripts', 'desktop-launch.mjs'), 'utf8');
+    const readme = await readFile(join(repoRoot, 'desktop', 'README.md'), 'utf8');
 
     expect(launcher).toContain("'Contents', 'MacOS', 'xiaok'");
+    expect(launcher).toContain("'win-unpacked'");
+    expect(launcher).toContain("'xiaok.exe'");
+    expect(launcher).toContain("'desktop:pack:dir'");
     expect(launcher).toContain('detached: true');
+
+    expect(readme).toContain('npm run desktop:pack');
+    expect(readme).toContain('xiaok-setup-');
+    expect(readme).toContain('xiaok-portable-');
   });
 });

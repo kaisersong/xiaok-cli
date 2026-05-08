@@ -1,6 +1,16 @@
 import type { BrowserWindowConstructorOptions } from 'electron';
 
-export function buildBrowserWindowOptions(preloadPath: string): BrowserWindowConstructorOptions {
+interface BrowserWindowBuildOptions {
+  platform?: NodeJS.Platform;
+  iconPath?: string;
+}
+
+export function buildBrowserWindowOptions(
+  preloadPath: string,
+  options: BrowserWindowBuildOptions = {},
+): BrowserWindowConstructorOptions {
+  const { platform = process.platform, iconPath } = options;
+
   return {
     width: 1280,
     height: 820,
@@ -9,6 +19,7 @@ export function buildBrowserWindowOptions(preloadPath: string): BrowserWindowCon
     backgroundColor: '#f7f7f2',
     title: 'xiaok',
     titleBarStyle: 'hiddenInset',
+    ...(platform === 'win32' && iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

@@ -28,16 +28,42 @@ Build main process and renderer:
 npm run build --prefix desktop
 ```
 
-Build a local macOS app directory:
+Build a local unpacked app directory for local launch:
 
 ```bash
 npm run pack:dir --prefix desktop
 ```
 
-The packaged app is written to:
+The unpacked outputs are written to:
 
 ```text
 desktop/release/mac-arm64/xiaok.app
+desktop/release/win-unpacked/xiaok.exe
 ```
 
 The first `pack:dir` run may download the Electron runtime.
+
+Build customer-facing desktop artifacts from the repo root:
+
+```bash
+npm run desktop:pack
+```
+
+On Windows this produces:
+
+```text
+desktop/release/xiaok-setup-<version>.exe
+desktop/release/xiaok-portable-<version>.exe
+```
+
+On Windows, run the root launcher to pack on demand and start the unpacked app:
+
+```bash
+npm run desktop:launch
+```
+
+On Windows, run the root install command to build and install the current-user desktop app:
+
+```bash
+npm run desktop:install
+```

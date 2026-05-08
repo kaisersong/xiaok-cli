@@ -44,6 +44,7 @@ describe('preload API contract', () => {
       'onReminder',
       'getSkillDebugConfig',
       'saveSkillDebugConfig',
+      'getSkillStats',
     ]);
   });
 

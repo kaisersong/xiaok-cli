@@ -5,22 +5,63 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const localAppPath = join(repoRoot, 'desktop', 'release', 'mac-arm64', 'xiaok.app');
-const installedAppPath = join(process.env.HOME ?? '', 'Applications', 'xiaok.app');
-const appPath = existsSync(installedAppPath) ? installedAppPath : localAppPath;
+const platform = process.platform;
 
-if (!existsSync(appPath)) {
-  const pack = spawnSync('npm', ['run', 'desktop:pack'], {
+function getLocalBundlePath(currentPlatform) {
+  if (currentPlatform === 'darwin') {
+    return join(repoRoot, 'desktop', 'release', 'mac-arm64', 'xiaok.app');
+  }
+  if (currentPlatform === 'win32') {
+    return join(repoRoot, 'desktop', 'release', 'win-unpacked');
+  }
+  if (currentPlatform === 'linux') {
+    return join(repoRoot, 'desktop', 'release', 'linux-unpacked');
+  }
+  throw new Error(`Unsupported desktop platform: ${currentPlatform}`);
+}
+
+function getInstalledBundlePath(currentPlatform) {
+  if (currentPlatform === 'darwin') {
+    return join(process.env.HOME ?? '', 'Applications', 'xiaok.app');
+  }
+  return null;
+}
+
+function getExecutablePath(bundlePath, currentPlatform) {
+  if (currentPlatform === 'darwin') {
+    return join(bundlePath, 'Contents', 'MacOS', 'xiaok');
+  }
+  if (currentPlatform === 'win32') {
+    return join(bundlePath, 'xiaok.exe');
+  }
+  if (currentPlatform === 'linux') {
+    return join(bundlePath, 'xiaok');
+  }
+  throw new Error(`Unsupported desktop platform: ${currentPlatform}`);
+}
+
+function resolveLaunchBundlePath(currentPlatform) {
+  const installedPath = getInstalledBundlePath(currentPlatform);
+  if (installedPath && existsSync(installedPath)) {
+    return installedPath;
+  }
+  return getLocalBundlePath(currentPlatform);
+}
+
+let launchTarget = resolveLaunchBundlePath(platform);
+let executablePath = getExecutablePath(launchTarget, platform);
+
+if (!existsSync(executablePath)) {
+  const pack = spawnSync('npm', ['run', 'desktop:pack:dir'], {
     cwd: repoRoot,
     stdio: 'inherit',
   });
   if (pack.status !== 0) {
     process.exit(pack.status ?? 1);
   }
+  launchTarget = getLocalBundlePath(platform);
+  executablePath = getExecutablePath(launchTarget, platform);
 }
-
-const launchTarget = existsSync(installedAppPath) ? installedAppPath : localAppPath;
-const executablePath = join(launchTarget, 'Contents', 'MacOS', 'xiaok');
 
 if (!existsSync(executablePath)) {
   console.error(`xiaok desktop executable not found: ${executablePath}`);

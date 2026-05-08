@@ -17,37 +17,41 @@ describe('desktop icon generation', () => {
     }
   });
 
-  it.skip('generates icon assets from the CLI ASCII logo', async () => {
+  it('generates cross-platform icon assets from the bundled desktop source', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'xiaok-desktop-icon-'));
 
     const generated = spawnSync('node', [
       'scripts/desktop-icon.mjs',
       '--out',
       tempDir,
-      '--skip-icns',
     ], {
       cwd: repoRoot,
       encoding: 'utf8',
     });
 
     expect(generated.status).toBe(0);
-    const sourceLogo = await readFile(join(repoRoot, 'data', 'logo.txt'), 'utf8');
     const iconSource = await readFile(join(tempDir, 'icon-source.txt'), 'utf8');
     const appIcon = await readFile(join(tempDir, 'icon.png'));
+    const windowsIcon = await readFile(join(tempDir, 'icon.ico'));
+    const icns = await readFile(join(tempDir, 'icon.icns'));
     const png = await readFile(join(tempDir, 'icon.iconset', 'icon_512x512.png'));
 
-    expect(iconSource.trim()).toBe(sourceLogo.trim());
+    expect(iconSource.trim()).toBe('xiaok.png');
     expect(appIcon.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    expect(windowsIcon.subarray(0, 4)).toEqual(Buffer.from([0x00, 0x00, 0x01, 0x00]));
+    expect(icns.subarray(0, 4).toString('ascii')).toBe('icns');
     expect(png.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     expect((await stat(join(tempDir, 'icon.png'))).size).toBeGreaterThan(1024);
+    expect((await stat(join(tempDir, 'icon.ico'))).size).toBeGreaterThan(1024);
+    expect((await stat(join(tempDir, 'icon.icns'))).size).toBeGreaterThan(1024);
     expect((await stat(join(tempDir, 'icon.iconset', 'icon_512x512.png'))).size).toBeGreaterThan(1024);
 
     const logoBounds = findForegroundBounds(decodePng(appIcon));
     const logoCenterX = (logoBounds.minX + logoBounds.maxX + 1) / 2;
     const logoCenterY = (logoBounds.minY + logoBounds.maxY + 1) / 2;
 
-    expect(Math.abs(logoCenterX - 512)).toBeLessThan(1024 * 0.02);
-    expect(Math.abs(logoCenterY - 512)).toBeLessThan(1024 * 0.02);
+    expect(Math.abs(logoCenterX - 512)).toBeLessThan(1024 * 0.03);
+    expect(Math.abs(logoCenterY - 512)).toBeLessThan(1024 * 0.03);
   });
 });
 

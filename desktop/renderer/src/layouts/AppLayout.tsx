@@ -1,4 +1,4 @@
-import { useState, createContext, useContext } from 'react';
+import React, { useState, createContext, useContext } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar, PanelLeftClose } from 'lucide-react';
 import { SidebarComponent } from '../components/Sidebar';
@@ -30,18 +30,25 @@ export function AppLayout() {
   return (
     <SidebarContext.Provider value={{ collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed }}>
       <div className="flex h-screen flex-col overflow-hidden bg-[var(--c-bg-page)]">
-        {/* Draggable title bar — frosted glass style */}
+        {/* Draggable title bar */}
         <div
+          data-testid="desktop-titlebar"
           style={{
             height: 52,
             WebkitAppRegion: 'drag',
             flexShrink: 0,
             position: 'relative',
-            backdropFilter: 'blur(12px) saturate(180%)',
-            WebkitBackdropFilter: 'blur(12px) saturate(180%)',
-            background: 'rgba(247,245,241,0.72)',
+            background: 'var(--c-bg-page)',
+            borderBottom: '1px solid var(--c-border-subtle)',
           } as React.CSSProperties}
         >
+          {!sidebarCollapsed && (
+            <div
+              data-testid="sidebar-titlebar-fill"
+              aria-hidden="true"
+              className="absolute inset-y-0 left-0 w-60 border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)]"
+            />
+          )}
           {/* Collapse button (when sidebar visible) */}
           {!sidebarCollapsed && (
             <button

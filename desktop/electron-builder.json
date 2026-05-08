@@ -20,11 +20,21 @@
   },
   "win": {
     "target": ["nsis", "portable"],
+    "icon": "build/icon.ico",
     "publish": {
       "provider": "github",
       "owner": "kaisersong",
       "repo": "xiaok-cli"
     }
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "artifactName": "${productName}-setup-${version}.${ext}"
+  },
+  "portable": {
+    "artifactName": "${productName}-portable-${version}.${ext}"
   },
   "linux": {
     "target": ["AppImage", "deb"],
