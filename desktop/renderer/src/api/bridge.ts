@@ -723,7 +723,7 @@ export const api = {
   },
 };
 
-// Skill management functions — bridge between the shared marketplace-facing API and the local desktop skill system
+// Skill management functions — bridge between skill API and desktop local skill system
 // These are standalone exports (not on `api` object) because SkillsSettingsContent imports them directly.
 
 export interface InstalledSkill {

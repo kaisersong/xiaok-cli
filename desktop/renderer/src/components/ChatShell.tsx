@@ -4,6 +4,7 @@ import { useParams, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import { ChatView, type ChatMessage, type ToolStep } from './ChatView';
 import { CanvasPanel } from './CanvasPanel';
+import { TaskPanel } from './TaskPanel';
 import type { ThreadRecord } from '../api/types';
 import type { DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
 import { useSidebarCollapse } from '../layouts/AppLayout';
@@ -27,6 +28,7 @@ export function ChatShell() {
   const [canvasExpanded, setCanvasExpanded] = useState(false);
   const [canvasPreviewFile, setCanvasPreviewFile] = useState<string | undefined>();
   const [canvasPreviewContent, setCanvasPreviewContent] = useState<string | undefined>();
+  const [planSteps, setPlanSteps] = useState<Array<{ id: string; label: string; status: string }>>([]);
   const unsubRef = useRef<(() => void) | null>(null);
   const streamRef = useRef('');
   const currentLoadIdRef = useRef<string | null>(null);
@@ -53,6 +55,12 @@ export function ChatShell() {
 
     switch (event.type) {
       case 'task_started': {
+        setPlanSteps([]);
+        break;
+      }
+      case 'progress_plan_reported': {
+        const ev = event as { type: 'progress_plan_reported'; steps: Array<{ id: string; label: string; status: string }> };
+        setPlanSteps(ev.steps);
         break;
       }
       case 'progress': {
@@ -177,6 +185,8 @@ export function ChatShell() {
       }
       case 'canvas_tool_call': {
         const ev = event as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string };
+        // report_progress is handled by TaskPanel, don't show in ToolStepsMessage
+        if (ev.toolName === 'report_progress') break;
         const newStep: ToolStep = { toolUseId: ev.toolUseId, toolName: ev.toolName, input: ev.input, status: 'running', startedAt: Date.now() };
         toolStepsActiveRef.current = true;
         setMessages(prev => {
@@ -274,6 +284,11 @@ export function ChatShell() {
           }
           continue;
         }
+        if (ev.type === 'progress_plan_reported') {
+          const planEv = ev as { type: 'progress_plan_reported'; steps: Array<{ id: string; label: string; status: string }> };
+          setPlanSteps(planEv.steps);
+          continue;
+        }
         if (ev.type === 'canvas_file_changed') {
           replayEvents.push(ev); // Collect locally
           continue;
@@ -281,6 +296,8 @@ export function ChatShell() {
         if (ev.type === 'canvas_tool_call') {
           replayEvents.push(ev);
           const evC = ev as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string; ts?: number };
+          // Skip report_progress from ToolSteps display (handled by TaskPanel)
+          if (evC.toolName === 'report_progress') continue;
           replayToolSteps.push({ toolUseId: evC.toolUseId, toolName: evC.toolName, input: evC.input, status: 'done', startedAt: evC.ts });
           if (!replayToolMsgId) replayToolMsgId = `msg-tool-steps-${evC.eventId}`;
           continue;
@@ -492,13 +509,30 @@ export function ChatShell() {
         } catch { /* ignore */ }
       }
 
+      // Build conversation context from prior messages for multi-turn continuity
+      let enrichedPrompt = text;
+      const priorMessages = messages.filter(m => m.role === 'user' || m.role === 'assistant');
+      if (priorMessages.length > 0) {
+        const contextLines: string[] = [];
+        let totalLen = 0;
+        const MAX_CONTEXT_LEN = 6000;
+        for (const msg of priorMessages.slice(-10)) {
+          const label = msg.role === 'user' ? '用户' : '助手';
+          const content = msg.content.length > 500 ? msg.content.slice(0, 500) + '...' : msg.content;
+          if (totalLen + content.length > MAX_CONTEXT_LEN) break;
+          totalLen += content.length;
+          contextLines.push(`${label}: ${content}`);
+        }
+        enrichedPrompt = `[上下文：之前的对话]\n${contextLines.join('\n')}\n\n[当前问题]\n${text}`;
+      }
+
       let newTaskId: string;
       if (files && files.length > 0) {
         const filePaths = files.map(f => f.filePath);
-        const result = await api.createTaskWithFiles({ prompt: text, filePaths });
+        const result = await api.createTaskWithFiles({ prompt: enrichedPrompt, filePaths });
         newTaskId = result.taskId;
       } else {
-        const result = await api.createTask({ prompt: text, materials: [] });
+        const result = await api.createTask({ prompt: enrichedPrompt, materials: [] });
         newTaskId = result.taskId;
       }
 
@@ -591,6 +625,8 @@ export function ChatShell() {
     return files;
   })();
 
+  const showTaskPanel = planSteps.length > 0 && !canvasOpen;
+
   return (
     <div className="flex h-full overflow-hidden">
       <div className="flex flex-1 min-w-0">
@@ -629,6 +665,40 @@ export function ChatShell() {
           }}
         />
       </div>
+      {showTaskPanel && (
+        <TaskPanel
+          planSteps={planSteps}
+          status={status}
+          result={result}
+          generatedFiles={generatedFiles}
+          onFileClick={async (file) => {
+            let content = '';
+            try {
+              const r = await api.readFileContent(file.filePath);
+              content = r.content;
+            } catch { /* ignore */ }
+            sidebarWasCollapsedRef.current = sidebarCollapse.collapsed;
+            setCanvasPreviewFile(file.filePath);
+            setCanvasPreviewContent(content);
+            setCanvasExpanded(true);
+            sidebarCollapse.setCollapsed(true);
+            setCanvasOpen(true);
+          }}
+          onArtifactClick={async (artifact) => {
+            let content = '';
+            if (artifact.filePath) {
+              const r = await api.readFileContent(artifact.filePath);
+              content = r.content;
+            }
+            sidebarWasCollapsedRef.current = sidebarCollapse.collapsed;
+            setCanvasPreviewFile(artifact.filePath ?? artifact.title);
+            setCanvasPreviewContent(content);
+            setCanvasExpanded(true);
+            sidebarCollapse.setCollapsed(true);
+            setCanvasOpen(true);
+          }}
+        />
+      )}
       {canvasOpen && (
         <CanvasPanel
           events={allEventsRef.current}

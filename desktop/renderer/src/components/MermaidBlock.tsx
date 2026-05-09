@@ -44,14 +44,21 @@ export function MermaidBlock({ content }: Props) {
     if (!containerRef.current || !code.trim()) return
     ensureMermaidInit()
 
+    const id = `mermaid-${++renderCounter}`
     try {
-      const id = `mermaid-${++renderCounter}`
       const { svg } = await mermaid.render(id, code.trim())
       if (containerRef.current) {
         containerRef.current.innerHTML = svg
         setError(null)
       }
     } catch (e) {
+      // mermaid may inject error SVG into document body before throwing — clean it up
+      const orphan = document.getElementById(id)
+      if (orphan) orphan.remove()
+      // Also remove the temp container mermaid uses (d + id pattern)
+      const tempContainer = document.querySelector(`#d${id}`)
+      if (tempContainer) tempContainer.remove()
+      if (containerRef.current) containerRef.current.innerHTML = ''
       setError(e instanceof Error ? e.message : String(e))
     }
   }, [])

@@ -34,4 +34,5 @@ export type RuntimeEvent =
   | { type: 'setup'; sessionId: string; trigger: 'init' | 'maintenance' }
   | { type: 'worktree_create'; sessionId: string; name: string }
   | { type: 'worktree_remove'; sessionId: string; worktreePath: string }
+  | { type: 'progress_plan_reported'; sessionId: string; steps: Array<{ id: string; label: string; status: string }> }
   | { type: 'file_changed'; sessionId: string; filePath: string; event: 'change' | 'add' | 'unlink' };

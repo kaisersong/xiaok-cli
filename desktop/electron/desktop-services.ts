@@ -23,6 +23,7 @@ import { buildSkillInvocation, createSkillBundleRefsTool, checkBudget, appendTra
 import type { SkillInvocation } from './skill-runtime.js';
 import type { ReminderScheduler } from './reminder-scheduler.js';
 import type { Tool } from '../../src/types.js';
+import { maybePersistToolResult, buildViewForAPI, shouldAutoCompact, compactConversation, getContextLimit } from './context-manager.js';
 
 // ---- Skill stats types ----
 
@@ -1066,6 +1067,7 @@ function buildSystemPrompt(): string {
 - skill_install: 安装一个技能（当用户说"安装XX技能"时使用）
 - skill_uninstall: 卸载一个技能（当用户说"卸载XX技能"时使用）
 - skill_list: 列出已安装的技能
+- report_progress: 向用户报告任务执行计划和进度
 
 ## 定时提醒功能
 
@@ -1142,7 +1144,20 @@ xiaok 支持从 ClawHub 安装技能。当用户说"安装XX技能"时：
 - **表格**：直接用 Markdown table 语法（| col | col |），不要生成 HTML 文件
 - **图表/数据可视化**：用 mermaid xychart，不要生成 HTML 文件
 - 只在用户明确要求"生成网页"、"导出 HTML"等场景下才生成 HTML 文件
-- 需要画图时直接在回复中嵌入 mermaid 代码块，渲染器会自动渲染为图形`;
+- 需要画图时直接在回复中嵌入 mermaid 代码块，渲染器会自动渲染为图形
+
+## 任务进度报告
+
+当用户请求涉及多个步骤的非trivial任务时，使用 report_progress 工具向用户报告执行计划和进度：
+
+1. **何时调用**：接到需要多步完成的任务时（如"帮我写方案"、"分析这些文件"、"生成报告"等），先规划 3-6 个步骤，然后调用 report_progress 上报计划
+2. **何时不调用**：简单问答（如"今天天气"、"解释一下XX"）、单步操作（如"读取某文件"）不需要调用
+3. **更新时机**：每完成一个步骤后，再次调用 report_progress 更新所有步骤的状态
+4. **label 要求**：使用面向用户的自然语言描述，不要使用技术术语
+
+示例：
+- 用户说"帮我基于这些材料写一版方案" → 调用 report_progress，steps 包含：收集材料、分析需求、起草方案、校验完整性
+- 每完成一步，更新对应 step 的 status 为 completed，下一步为 running`;
 }
 
 const BASE_SYSTEM_PROMPT = buildSystemPrompt();
@@ -1165,6 +1180,51 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
     instanceId: 'desktop-instance',
   });
   registry.registerTool(intentTools[0]); // only intent_create
+
+  // Register report_progress tool (TaskPanel progress reporting)
+  const reportProgressTool: Tool = {
+    permission: 'safe',
+    definition: {
+      name: 'report_progress',
+      description: '向用户报告任务计划和进度。在开始非trivial任务时调用此工具上报计划，每完成一步更新状态。简单问答不要调用。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', description: '步骤稳定标识，如 step-1' },
+                label: { type: 'string', description: '面向用户的步骤描述，使用自然语言' },
+                status: { type: 'string', enum: ['planned', 'running', 'completed', 'blocked', 'failed'] },
+              },
+              required: ['id', 'label', 'status'],
+            },
+          },
+        },
+        required: ['steps'],
+      },
+    },
+    async execute(input) {
+      const { steps } = input as { steps: unknown };
+      if (!Array.isArray(steps)) {
+        return JSON.stringify({ ok: false, error: 'steps must be an array' });
+      }
+      const validStatuses = new Set(['planned', 'running', 'completed', 'blocked', 'failed']);
+      const validated: Array<{ id: string; label: string; status: string }> = [];
+      for (const s of steps) {
+        if (!s || !s.id || !s.label) continue;
+        validated.push({
+          id: String(s.id),
+          label: String(s.label),
+          status: validStatuses.has(s.status) ? s.status : 'planned',
+        });
+      }
+      return JSON.stringify({ ok: true, displayed_steps: validated.length, _validated: validated });
+    },
+  };
+  registry.registerTool(reportProgressTool);
 
   return async ({ sessionId, prompt, materials, signal, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
@@ -1284,6 +1344,9 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
     const MAX_ITERATIONS = 20;
     let totalToolCalls = 0;
     let referenceReads = 0;
+    let lastRequestInputTokens = 0;
+    const contextLimit = getContextLimit(adapter.getModelName());
+    const sessionDir = join(dataRoot, 'sessions', sessionId);
 
     // Trace: first model turn start
     if (skillInvocation) {
@@ -1319,7 +1382,16 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
       }
 
       const assistantBlocks: MessageBlock[] = [];
-      for await (const chunk of adapter.stream(messages, allToolDefs, systemPrompt)) {
+
+      // Auto-compact: compress context if approaching limit
+      if (iteration > 1 && shouldAutoCompact(lastRequestInputTokens, contextLimit)) {
+        await compactConversation(messages, adapter, systemPrompt);
+      }
+
+      // Build API view: slice from last boundary + strip old thinking
+      const apiMessages = buildViewForAPI(messages, 2);
+      lastRequestInputTokens = 0;
+      for await (const chunk of adapter.stream(apiMessages, allToolDefs, systemPrompt)) {
         if (signal.aborted) throw new Error('task cancelled');
         if (chunk.type === 'text') {
           const lastBlock = assistantBlocks[assistantBlocks.length - 1];
@@ -1341,7 +1413,9 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
           }
         } else if (chunk.type === 'usage') {
           try {
-            totalInputTokens += chunk.usage?.inputTokens ?? 0;
+            const inputTkns = chunk.usage?.inputTokens ?? 0;
+            lastRequestInputTokens = inputTkns;
+            totalInputTokens += inputTkns;
             totalOutputTokens += chunk.usage?.outputTokens ?? 0;
           } catch { /* usage capture failure is non-critical */ }
         }
@@ -1396,7 +1470,7 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
             }
           } catch { /* non-critical */ }
         }
-        const result = await registry.executeTool(toolCall.name, toolCall.input);
+        let result = await registry.executeTool(toolCall.name, toolCall.input);
         const ok = !result.startsWith('Error');
         if (ok) {
           emitRuntimeEvent({ type: 'post_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
@@ -1442,7 +1516,19 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
             });
           }
         }
-        toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: result.slice(0, 50000), is_error: !ok });
+        // Emit progress_plan_reported for TaskPanel
+        if (ok && toolCall.name === 'report_progress') {
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed._validated) {
+              emitRuntimeEvent({ type: 'progress_plan_reported', sessionId, steps: parsed._validated });
+              // Clean internal field from LLM-visible result
+              result = JSON.stringify({ ok: true, displayed_steps: parsed.displayed_steps });
+            }
+          } catch { /* non-critical */ }
+        }
+        const { content: resultContent } = maybePersistToolResult(result, toolCall.name, toolCall.id, sessionDir);
+        toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: resultContent, is_error: !ok });
       }
       messages.push({ role: 'user', content: toolResults });
 
@@ -1496,6 +1582,52 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
   const cwd = process.cwd();
   let skillCatalog = createSkillCatalog(undefined, cwd);
   let skillsLoaded = false;
+
+  // Register report_progress tool (TaskPanel progress reporting)
+  const reportProgressTool: Tool = {
+    permission: 'safe',
+    definition: {
+      name: 'report_progress',
+      description: '向用户报告任务计划和进度。在开始非trivial任务时调用此工具上报计划，每完成一步更新状态。简单问答不要调用。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', description: '步骤稳定标识，如 step-1' },
+                label: { type: 'string', description: '面向用户的步骤描述，使用自然语言' },
+                status: { type: 'string', enum: ['planned', 'running', 'completed', 'blocked', 'failed'] },
+              },
+              required: ['id', 'label', 'status'],
+            },
+          },
+        },
+        required: ['steps'],
+      },
+    },
+    async execute(input) {
+      const { steps } = input as { steps: unknown };
+      if (!Array.isArray(steps)) {
+        return JSON.stringify({ ok: false, error: 'steps must be an array' });
+      }
+      const validStatuses = new Set(['planned', 'running', 'completed', 'blocked', 'failed']);
+      const validated: Array<{ id: string; label: string; status: string }> = [];
+      for (const s of steps) {
+        if (!s || !s.id || !s.label) continue;
+        validated.push({
+          id: String(s.id),
+          label: String(s.label),
+          status: validStatuses.has(s.status) ? s.status : 'planned',
+        });
+      }
+      // Result is stored; event emission happens in the tool loop via emitRuntimeEvent
+      return JSON.stringify({ ok: true, displayed_steps: validated.length, _validated: validated });
+    },
+  };
+  registry.registerTool(reportProgressTool);
 
   return async ({ sessionId, prompt, materials, signal, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
@@ -1650,6 +1782,8 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       }
 
       const assistantBlocks: MessageBlock[] = [];
+
+      // Pass full messages to API (no compact in skill runner)
       for await (const chunk of adapter.stream(messages, allToolDefs, systemPrompt)) {
         if (signal.aborted) throw new Error('task cancelled');
         if (chunk.type === 'text') {
@@ -1672,7 +1806,8 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
           }
         } else if (chunk.type === 'usage') {
           try {
-            totalInputTokens += chunk.usage?.inputTokens ?? 0;
+            const inputTkns = chunk.usage?.inputTokens ?? 0;
+            totalInputTokens += inputTkns;
             totalOutputTokens += chunk.usage?.outputTokens ?? 0;
           } catch { /* usage capture failure is non-critical */ }
         }
@@ -1683,6 +1818,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       const toolResults: MessageBlock[] = [];
       for (const toolCall of toolCalls) {
         if (signal.aborted) throw new Error('task cancelled');
+        totalToolCalls++;
         emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id });
         // Track skill tool calls for stats and create invocation if missing
         if (toolCall.name === 'skill') {
@@ -1704,7 +1840,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
             }
           } catch { /* non-critical */ }
         }
-        const result = await registry.executeTool(toolCall.name, toolCall.input);
+        let result = await registry.executeTool(toolCall.name, toolCall.input);
         const ok = !result.startsWith('Error');
         if (ok) {
           emitRuntimeEvent({ type: 'post_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
@@ -1729,6 +1865,17 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
             path: filePath,
             creator: 'agent',
           });
+        }
+        // Emit progress_plan_reported for TaskPanel
+        if (ok && toolCall.name === 'report_progress') {
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed._validated) {
+              emitRuntimeEvent({ type: 'progress_plan_reported', sessionId, steps: parsed._validated });
+              // Clean internal field from LLM-visible result
+              result = JSON.stringify({ ok: true, displayed_steps: parsed.displayed_steps });
+            }
+          } catch { /* non-critical */ }
         }
         toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: result.slice(0, 50000), is_error: !ok });
       }

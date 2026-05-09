@@ -118,7 +118,9 @@ export type DesktopTaskEvent =
   // Canvas events (appended, do not replace existing progress events)
   | { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string; ts?: number }
   | { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string; eventId: string; ts?: number }
-  | { type: 'canvas_file_changed'; filePath: string; change: 'add' | 'change' | 'unlink'; eventId: string };
+  | { type: 'canvas_file_changed'; filePath: string; change: 'add' | 'change' | 'unlink'; eventId: string }
+  // TaskPanel progress (from report_progress tool)
+  | { type: 'progress_plan_reported'; steps: PlanStep[] };
 
 export type TaskSnapshotStatus = 'understanding' | 'running' | 'waiting_user' | 'completed' | 'failed' | 'cancelled';
 

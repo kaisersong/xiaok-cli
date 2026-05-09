@@ -136,6 +136,12 @@ export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInpu
       stage: 'failed',
     };
   }
+  if (event.type === 'progress_plan_reported') {
+    return {
+      type: 'progress_plan_reported',
+      steps: event.steps as PlanStep[],
+    };
+  }
   if (event.type === 'turn_failed') {
     return {
       type: 'error',

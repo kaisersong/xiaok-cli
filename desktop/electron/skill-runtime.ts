@@ -63,11 +63,11 @@ export interface SkillBudget {
 }
 
 const DEFAULT_BUDGET: SkillBudget = {
-  maxIterations: 12,
-  maxToolCalls: 16,
+  maxIterations: 25,
+  maxToolCalls: 40,
   maxReferenceReads: 8,
   maxRepairAttempts: 1,
-  maxTotalInputTokens: 300_000,
+  maxTotalInputTokens: 1_000_000,
 };
 
 function getBudget(): SkillBudget {

@@ -34,3 +34,144 @@ body {
   background-color: var(--c-bg-page);
   color: var(--c-text-primary);
 }
+
+/* TaskPanel */
+.task-panel {
+  width: 260px;
+  min-width: 260px;
+  height: calc(100% - 24px);
+  margin: 12px 12px 12px 0;
+  border-radius: 12px;
+  background: var(--c-bg-card);
+  box-shadow: 0 2px 16px -4px rgba(0,0,0,0.08), 0 0 1px rgba(0,0,0,0.05);
+  padding: 16px;
+  overflow-y: auto;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.task-panel__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-panel__heading {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.task-panel__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.task-panel__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.task-panel__step-label {
+  color: var(--c-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.task-panel__step--running .task-panel__step-label {
+  color: var(--c-accent);
+  font-weight: 500;
+}
+
+.task-panel__step--completed .task-panel__step-label {
+  color: var(--c-text-tertiary);
+}
+
+.step-icon {
+  flex-shrink: 0;
+  display: inline-block;
+  width: 16px;
+  text-align: center;
+  margin-top: 1px;
+}
+
+.step-icon--planned {
+  color: var(--c-text-tertiary);
+}
+
+.step-icon--running {
+  color: var(--c-accent);
+  animation: pulse-opacity 2s ease-in-out infinite;
+}
+
+.step-icon--completed {
+  color: var(--c-text-secondary);
+}
+
+.step-icon--blocked {
+  color: #e67e22;
+}
+
+.step-icon--failed {
+  color: #e74c3c;
+}
+
+@keyframes pulse-opacity {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.task-panel__results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-panel__result-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.task-panel__result-item:hover {
+  background: var(--c-bg-deep);
+}
+
+.task-panel__result-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.task-panel__result-name {
+  color: var(--c-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Responsive: hide TaskPanel on narrow windows */
+@media (max-width: 1099px) {
+  .task-panel {
+    display: none;
+  }
+}

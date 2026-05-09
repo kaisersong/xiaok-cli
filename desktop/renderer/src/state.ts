@@ -57,6 +57,9 @@ export function reduceAppEvent(state: AppState, event: DesktopTaskEvent): AppSta
   if (event.type === 'plan_updated') {
     return { ...state, plan: event.plan };
   }
+  if (event.type === 'progress_plan_reported') {
+    return { ...state, plan: event.steps };
+  }
   if (event.type === 'needs_user') {
     return { ...state, status: 'waiting_user', currentQuestion: event.question };
   }
