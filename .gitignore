@@ -49,6 +49,7 @@ __pycache__/
 /salesforce-ai-evolution*.html
 /salesforce-ai-evolution*.report.md
 /slides-*.html
+/openai-*.html
 /*.eval.json
 /source.md
 /generate_*.py
