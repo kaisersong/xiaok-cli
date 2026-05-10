@@ -1,6 +1,7 @@
 import { bold, dim, cyan, green, magenta, getTheme } from "./render.js";
 import { highlightLine } from "./highlight.js";
 import { getDisplayWidth, stripAnsi } from "./text-metrics.js";
+import { renderMermaidASCII } from "beautiful-mermaid";
 const BODY_GUTTER = "";
 const LEAD_BULLET = '●';
 const LEAD_PREFIX_TEXT = `${LEAD_BULLET} `;
@@ -14,6 +15,7 @@ export class MarkdownRenderer {
     buffer = "";
     inCodeBlock = false;
     codeLang = "";
+    mermaidBuffer = [];
     pendingLen = 0;
     pendingPrefix = "";
     lineCount = 0;
@@ -130,6 +132,7 @@ export class MarkdownRenderer {
         this.buffer = "";
         this.inCodeBlock = false;
         this.codeLang = "";
+        this.mermaidBuffer = [];
         this.pendingLen = 0;
         this.pendingPrefix = "";
         this.lineCount = 0;
@@ -158,15 +161,38 @@ export class MarkdownRenderer {
         if (line.trimStart().startsWith("```")) {
             if (this.inCodeBlock) {
                 this.inCodeBlock = false;
+                if (this.codeLang === "mermaid") {
+                    // Render buffered mermaid diagram as ASCII
+                    const diagram = this.mermaidBuffer.join("\n");
+                    this.mermaidBuffer = [];
+                    this.codeLang = "";
+                    try {
+                        const ascii = renderMermaidASCII(diagram);
+                        return ascii;
+                    }
+                    catch {
+                        // Fall back to raw source on render error
+                        return diagram;
+                    }
+                }
                 this.codeLang = "";
                 return theme === "default" ? `${BODY_GUTTER}${dim("╰─")}` : BODY_GUTTER;
             }
             this.inCodeBlock = true;
             const lang = line.trimStart().slice(3).trim();
             this.codeLang = lang.toLowerCase();
+            if (this.codeLang === "mermaid") {
+                this.mermaidBuffer = [];
+                return "";
+            }
             return theme === "default"
                 ? `${BODY_GUTTER}${dim(`╭─ ${lang ? magenta(lang) : ""}`)}`
                 : BODY_GUTTER;
+        }
+        // Inside mermaid block — buffer lines, output nothing until closing fence
+        if (this.inCodeBlock && this.codeLang === "mermaid") {
+            this.mermaidBuffer.push(line);
+            return "";
         }
         // Inside code block
         if (this.inCodeBlock) {
@@ -186,7 +212,7 @@ export class MarkdownRenderer {
         }
         // Horizontal rule
         if (/^[-*_]{3,}\s*$/.test(line)) {
-            return `${BODY_GUTTER}${dim("─".repeat(40))}`;
+            return `\n${BODY_GUTTER}${dim("─".repeat(40))}\n`;
         }
         // List items
         const ulMatch = line.match(/^(\s*)[-*+]\s+(.*)/);

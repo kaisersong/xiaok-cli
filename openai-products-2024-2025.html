@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenAI 2024-2025 新产品全景</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;900&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  /* ===== Base & Reset ===== */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background-color: #050510;
+    color: #f0f0f5;
+    font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+  }
+
+  /* ===== Scroll Engine ===== */
+  .SlidePresentation {
+    height: 100vh;
+    overflow-y: scroll;
+    scroll-snap-type: y mandatory;
+    scroll-behavior: smooth;
+  }
+  .SlidePresentation.PresentMode { cursor: none; }
+
+  /* ===== Slide Base ===== */
+  .slide {
+    height: 100vh;
+    width: 100vw;
+    scroll-snap-align: start;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 4rem 5vw;
+  }
+
+  /* ===== Aurora Mesh Background Signature ===== */
+  .aurora-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background:
+      radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%),
+      radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%),
+      radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);
+    background-size: 200% 200%;
+    animation: auroraMove 20s ease infinite;
+  }
+  .aurora-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(at 0% 100%, hsla(253,16%,7%,1) 0, transparent 50%),
+      radial-gradient(at 50% 100%, hsla(225,39%,30%,1) 0, transparent 50%),
+      radial-gradient(at 100% 100%, hsla(339,49%,30%,1) 0, transparent 50%);
+    opacity: 0.6;
+    animation: auroraMove 15s ease infinite reverse;
+  }
+  .mesh-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 60px 60px;
+    mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
+  }
+  @keyframes auroraMove {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+
+  /* ===== Glass Card Signature ===== */
+  .glass {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1.25rem;
+  }
+
+  /* ===== Typography ===== */
+  h1 { font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 900; line-height: 1.1; letter-spacing: -0.02em; }
+  h2 { font-size: clamp(1.8rem, 3.5vw, 3rem); font-weight: 700; line-height: 1.2; }
+  h3 { font-size: clamp(1.1rem, 1.8vw, 1.5rem); font-weight: 600; }
+  p { font-size: clamp(1rem, 1.2vw, 1.25rem); line-height: 1.7; opacity: 0.85; }
+  .eyebrow {
+    font-size: 0.875rem; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: #a78bfa; margin-bottom: 1rem;
+  }
+  .text-gradient {
+    background: linear-gradient(135deg, #c084fc, #6366f1, #38bdf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* ===== Layout Utilities ===== */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; }
+  .flex-col { display: flex; flex-direction: column; }
+  .items-center { align-items: center; }
+  .justify-center { justify-content: center; }
+  .text-center { text-align: center; }
+  .relative { position: relative; z-index: 2; }
+  .mt-1 { margin-top: 0.25rem; }
+  .mt-2 { margin-top: 0.5rem; }
+  .mt-4 { margin-top: 1rem; }
+  .mt-6 { margin-top: 1.5rem; }
+  .mt-8 { margin-top: 2rem; }
+  .max-w-600 { max-width: 600px; }
+  .max-w-700 { max-width: 700px; }
+  .mx-auto { margin-left: auto; margin-right: auto; }
+
+  /* ===== Components ===== */
+  .stat-card { padding: 1.5rem; text-align: center; }
+  .stat-num { font-size: 2.5rem; font-weight: 900; color: #38bdf8; line-height: 1; }
+  .stat-label { font-size: 0.875rem; opacity: 0.7; margin-top: 0.5rem; }
+  .feature-pill {
+    display: inline-block; padding: 0.5rem 1rem;
+    background: rgba(255,255,255,0.08); border-radius: 999px;
+    font-size: 0.875rem; margin: 0.25rem;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .cta-btn {
+    display: inline-block; padding: 0.875rem 2rem;
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    color: white; font-weight: 600; border-radius: 0.75rem;
+    text-decoration: none; border: none; cursor: pointer;
+    font-size: 1rem; margin-top: 1.5rem;
+  }
+  .feature-card { padding: 2rem; }
+  .feature-icon {
+    width: 48px; height: 48px; border-radius: 12px;
+    background: linear-gradient(135deg, rgba(99,102,241,0.3), rgba(168,85,247,0.3));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.25rem; margin-bottom: 1rem;
+  }
+  .tl-card { flex: 1; padding: 1.5rem; border-top: 3px solid #38bdf8; border-radius: 0 0 1rem 1rem; }
+  .note { display: none; }
+  body.editing .note { display: block; background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 0.5rem; margin-top: 1rem; font-size: 0.9rem; color: #ccc; }
+
+  /* ===== Slide 1: Hero ===== */
+  #slide-1 { text-align: center; }
+  #slide-1 h1 { max-width: 900px; margin: 0 auto; }
+  #slide-1 .hero-sub { font-size: 1.25rem; opacity: 0.7; max-width: 600px; margin: 1.5rem auto 0; }
+  #slide-1 .hero-stats { display: flex; justify-content: center; gap: 3rem; margin-top: 3rem; }
+
+  /* ===== Slide 2: GPT-4o Split ===== */
+  #slide-2 .grid-2 { direction: rtl; }
+  #slide-2 .grid-2 > * { direction: ltr; }
+  #slide-2 .visual-box {
+    height: 320px; display: flex; align-items: center; justify-content: center;
+    font-size: 3rem; font-weight: 900; color: rgba(255,255,255,0.15);
+    letter-spacing: 0.2em;
+  }
+
+  /* ===== Slide 3: o-Series Big Number ===== */
+  #slide-3 { text-align: center; }
+  #slide-3 .big-num {
+    font-size: clamp(5rem, 12vw, 10rem); font-weight: 900; line-height: 1;
+    color: transparent; -webkit-text-stroke: 2px rgba(255,255,255,0.25);
+  }
+  #slide-3 .reason-stats { display: flex; justify-content: center; gap: 2rem; margin-top: 2rem; }
+
+  /* ===== Slide 4: Sora Full Bleed ===== */
+  #slide-4 .full-bleed {
+    position: absolute; inset: 0; z-index: 0;
+    background: linear-gradient(105deg, #1a103c 30%, #0f172a 70%);
+  }
+  #slide-4 .content-overlay { position: relative; z-index: 2; max-width: 640px; }
+
+  /* ===== Slide 5: Canvas Feature Grid ===== */
+  #slide-5 .grid-3 { margin-top: 2rem; }
+
+  /* ===== Slide 6: Operator Bento ===== */
+  #slide-6 .bento-grid {
+    display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 1.5rem; align-items: stretch;
+  }
+  #slide-6 .bento-main {
+    min-height: 340px; border-radius: 1.25rem;
+    background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.12);
+    display: flex; flex-direction: column; justify-content: center; padding: 2rem;
+  }
+  #slide-6 .bento-side { display: flex; flex-direction: column; gap: 1.5rem; }
+  #slide-6 .bento-tile { flex: 1; border-radius: 1rem; padding: 1.5rem; }
+
+  /* ===== Slide 7: Ecosystem Timeline ===== */
+  #slide-7 .timeline { display: flex; gap: 1.5rem; margin-top: 2rem; }
+
+  /* ===== Slide 8: Closer CTA ===== */
+  #slide-8 { text-align: center; }
+  #slide-8 h2 { max-width: 800px; margin: 0 auto; }
+
+  /* ===== Navigation UI (5 Mandatory Elements) ===== */
+  #brand-mark {
+    position: fixed; top: 1.5rem; left: 1.5rem; z-index: 100;
+    font-weight: 700; font-size: 1rem; letter-spacing: -0.02em; opacity: 0.9;
+  }
+  .slide-num-label {
+    position: fixed; bottom: 1.5rem; left: 1.5rem; z-index: 100;
+    font-size: 0.75rem; opacity: 0.5; font-variant-numeric: tabular-nums;
+  }
+  .slide-num-label.light { opacity: 0.35; }
+  .nav-dots {
+    position: fixed; right: 1.5rem; top: 50%; transform: translateY(-50%); z-index: 100;
+    display: flex; flex-direction: column; gap: 0.75rem;
+  }
+  .nav-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: rgba(255,255,255,0.25); cursor: pointer;
+    transition: all 0.3s; border: none;
+  }
+  .nav-dot.active { background: #38bdf8; transform: scale(1.3); }
+  .progress-bar {
+    position: fixed; top: 0; left: 0; height: 3px;
+    background: linear-gradient(90deg, #6366f1, #38bdf8);
+    z-index: 100;
+  }
+
+  /* ===== Present Mode ===== */
+  body.presenting #brand-mark,
+  body.presenting .slide-num-label,
+  body.presenting .nav-dots,
+  body.presenting .progress-bar,
+  body.presenting .edit-toggle { opacity: 0; pointer-events: none; transition: opacity 0.5s; }
+  body.presenting .slide-credit { display: none; }
+
+  /* ===== Edit Mode ===== */
+  .edit-toggle {
+    position: fixed; top: 1.5rem; right: 1.5rem; z-index: 100;
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+    color: #fff; padding: 0.5rem 1rem; border-radius: 0.5rem;
+    cursor: pointer; font-size: 0.875rem;
+  }
+  body.editing .slide { outline: 2px dashed rgba(255,255,255,0.15); }
+  body.editing [contenteditable="true"]:focus { outline: 2px solid #38bdf8; background: rgba(255,255,255,0.05); }
+
+  /* ===== Watermark (JS injected) ===== */
+  .slide-credit { position: absolute; bottom: 1.5rem; right: 1.5rem; font-size: 0.75rem; opacity: 0.35; z-index: 10; }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 768px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .timeline { flex-direction: column; }
+    .bento-grid { grid-template-columns: 1fr; }
+    .slide { padding: 2rem 1.5rem; }
+    #slide-2 .grid-2 { direction: ltr; }
+  }
+</style>
+</head>
+<body>
+<div class="progress-bar" id="progressBar"></div>
+<div id="brand-mark">OpenAI 新品全景</div>
+<button class="edit-toggle" id="editBtn">✎ Edit</button>
+<div class="nav-dots" id="navDots"></div>
+<div class="slide-num-label light" id="slideNum">01 / 08</div>
+
+<div class="SlidePresentation" id="presentation">
+
+  <!-- Slide 1: Hero -->
+  <section class="slide" id="slide-1">
+    <div class="aurora-bg"></div>
+    <div class="mesh-overlay"></div>
+    <div class="relative">
+      <div class="eyebrow">2024 — 2025 Product Suite</div>
+      <h1>OpenAI 正在重新定义<br><span class="text-gradient">人机协作的边界</span></h1>
+      <p class="hero-sub">从实时多模态对话到自主任务执行，OpenAI 在过去一年推出的新产品不仅是工具升级，更是向通用人工智能迈出的坚实一步。</p>
+      <div class="hero-stats">
+        <div class="stat-card glass">
+          <div class="stat-num">6+</div>
+          <div class="stat-label">重磅新品发布</div>
+        </div>
+        <div class="stat-card glass">
+          <div class="stat-num">3</div>
+          <div class="stat-label">全新产品类别</div>
+        </div>
+        <div class="stat-card glass">
+          <div class="stat-num">1</div>
+          <div class="stat-label">统一智能愿景</div>
+        </div>
+      </div>
+      <div class="note">演讲者备注：开场强调这不是简单的产品更新，而是范式的转变。停顿2秒让标题沉淀。</div>
+    </div>
+  </section>
+
+  <!-- Slide 2: GPT-4o -->
+  <section class="slide" id="slide-2">
+    <div class="aurora-bg"></div>
+    <div class="mesh-overlay"></div>
+    <div class="relative grid-2">
+      <div class="visual-box glass">GPT-4o</div>
+      <div>
+        <div class="eyebrow">Flagship Model · May 2024</div>
+        <h2>GPT-4o 打破模态壁垒<br><span class="text-gradient">视听言文，实时一体</span></h2>
+        <p class="mt-4">"o" 代表 Omni。GPT-4o 是 OpenAI 首个原生多模态大模型，能够跨文本、音频、图像进行实时推理，延迟低至 232 毫秒，接近人类对话响应速度。</p>
+        <div class="mt-6">
+          <span class="feature-pill">端到端音频</span>
+          <span class="feature-pill">视觉理解</span>
+          <span class="feature-pill">50 种语言优化</span>
+          <span class="feature-pill">免费 tier 可用</span>
+        </div>
+        <div class="note">演讲者备注：强调 232ms 这个数字。对比上一代需要语音→文本→语音的三步 pipeline。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 3: o1 / o3 -->
+  <section class="slide" id="slide-3">
+    <div class="aurora-bg"></div>
+    <div class="mesh-overlay"></div>
+    <div class="relative">
+      <div class="eyebrow">Reasoning Series · Sept 2024 — Present</div>
+      <div class="big-num">o3</div>
+      <h2 class="mt-4">推理即服务：从快思考到深度洞察</h2>
+      <p class="mt-4 max-w-700 mx-auto">o1 与 o3 系列引入了"思维链"强化学习范式。模型在回答前会进行内部推演，在数学、编程和科学领域达到博士级水平。o3 在 Codeforces 竞赛编程中达到全球前 200 名水准。</p>
+      <div class="reason-stats">
+        <div class="stat-card glass">
+          <div class="stat-num">25%</div>
+          <div class="stat-label">SWE-bench 提升</div>
+        </div>
+        <div class="stat-card glass">
+          <div class="stat-num">Top 200</div>
+          <div class="stat-label">Codeforces 排名</div>
+        </div>
+      </div>
+      <div class="note">演讲者备注：解释"推理"对普通用户的意义——不仅是答案，更是可验证的思考过程。</div>
+    </div>
+  </section>
+
+  <!-- Slide 4: Sora -->
+  <section class="slide" id="slide-4">
+    <div class="full-bleed"></div>
+    <div class="mesh-overlay"></div>
+    <div class="content-overlay relative">
+      <div class="eyebrow">Video Generation · Dec 2024</div>
+      <h2>Sora 让想象力<br>拥有<span class="text-gradient">电影级画质</span></h2>
+      <p class="mt-4">经过 10 个月的安全测试与艺术家共创，Sora 正式向公众开放。支持最高 1080p、20 秒、多画幅视频生成，并提供 Remix、Blend、Loop 等专业创作工具。</p>
+      <div class="mt-6">
+        <span class="feature-pill">1080p 高清输出</span>
+        <span class="feature-pill">20 秒时长</span>
+        <span class="feature-pill">故事板控制</span>
+      </div>
+      <button class="cta-btn">探索 sora.com</button>
+      <div class="note">演讲者备注：提及 Sora 不仅是玩具，而是已有电影制作人将其用于预演(Pre-viz)。</div>
+    </div>
+  </section>
+
+  <!-- Slide 5: Canvas -->
+  <section class="slide" id="slide-5">
+    <div class="aurora-bg"></div>
+    <div class="mesh-overlay"></div>
+    <div class="relative">
+      <div class="eyebrow">Collaboration Interface · Oct 2024</div>
+      <h2 class="text-center">Canvas 开启<span class="text-gradient">并肩创作</span>新范式</h2>
+      <p class="text-center mt-4 max-w-600 mx-auto">告别线性对话。Canvas 是一个独立的并行工作区，让人与 AI 像同事一样共同编辑文档、审阅代码、迭代创意。</p>
+      <div class="grid-3 mt-8">
+        <div class="feature-card glass">
+          <div class="feature-icon">文</div>
+          <h3>文档协作</h3>
+          <p class="mt-2" style="font-size:0.95rem">边写边改，支持全文润色、段落重写与风格调整。</p>
+        </div>
+        <div class="feature-card glass">
+          <div class="feature-icon">码</div>
+          <h3>代码审阅</h3>
+          <p class="mt-2" style="font-size:0.95rem">代码 diff 高亮、Bug 修复建议、多语言移植。</p>
+        </div>
+        <div class="feature-card glass">
+          <div class="feature-icon">创</div>
+          <h3>创意迭代</h3>
+          <p class="mt-2" style="font-size:0.95rem">视觉化头脑风暴，支持情绪板与结构化大纲。</p>
+        </div>
+      </div>
+      <div class="note">演讲者备注：对比传统聊天框的局限性。Canvas 是 UI 层面的重大突破。</div>
+    </div>
+  </section>
+
+  <!-- Slide 6: Operator -->
+  <section class="slide" id="slide-6">
+    <div class="aurora-bg"></div>
+    <div class="mesh-overlay"></div>
+    <div class="relative">
+      <div class="eyebrow">AI Agent · Jan 2025</div>
+      <h2 class="text-center">Operator 让 AI <span class="text-gradient">真正操控电脑</span></h2>
+      <div class="bento-grid mt-6">
+        <div class="bento-main">
+          <p>基于 Computer-Using Agent (CUA) 模型，Operator 能够像人类一样浏览网页、填写表单、预订服务、执行复杂多步骤任务，全程无需 API 集成。</p>
+          <div class="mt-6">
+            <span class="feature-pill">自主浏览器操控</span>
+            <span class="feature-pill">多步骤任务规划</span>
+            <span class="feature-pill">用户确认安全层</span>
+          </div>
+        </div>
+        <div class="bento-side">
+          <div class="bento-tile glass">
+            <div class="stat-num">CUA</div>
+            <div class="stat-label">底层模型架构</div>
+          </div>
+          <div class="bento-tile glass">
+            <div class="stat-num">Pro</div>
+            <div class="stat-label">首批开放订阅</div>
+          </div>
+        </div>
+      </div>
+      <div class="note">演讲者备注：强调安全层——关键操作会请求用户确认。这是 agent 落地的关键设计。</div>
+    </div>
+  </section>
+
+  <!-- Slide 7: Ecosystem -->
+  <section class="slide" id="slide-7">
+    <div class="aurora-bg"></div>
+    <div class="mesh-overlay"></div>
+    <div class="relative">
+      <div class="eyebrow">Ecosystem Expansion</div>
+      <h2 class="text-center">从单点工具到<span class="text-gradient">完整创意生态</span></h2>
+      <div class="timeline">
+        <div class="tl-card glass">
+          <h3>Projects</h3>
+          <p class="mt-2">项目级知识库，支持多线程对话、文件上传与长期上下文管理。</p>
+        </div>
+        <div class="tl-card glass">
+          <h3>Tasks</h3>
+          <p class="mt-2">定时任务与提醒，让 ChatGPT 在后台持续跟踪进度并主动汇报。</p>
+        </div>
+        <div class="tl-card glass">
+          <h3>Store</h3>
+          <p class="mt-2">GPTs 商店持续扩张，数百万自定义助手覆盖从编程到教育的全场景。</p>
+        </div>
+      </div>
+      <div class="note">演讲者备注：OpenAI 正在从模型提供商转向平台提供商。生态壁垒是 2025 年的关键战役。</div>
+    </div>
+  </section>
+
+  <!-- Slide 8: Closer -->
+  <section class="slide" id="slide-8">
+    <div class="aurora-bg"></div>
+    <div class="mesh-overlay"></div>
+    <div class="relative">
+      <h2>通用人工智能的下一站<br><span class="text-gradient">不再是预测，而是创造</span></h2>
+      <p class="mt-4 max-w-600 mx-auto">OpenAI 2024-2025 年的产品矩阵揭示了一个清晰轨迹：AI 正在从"回答问题"进化为"完成任务"，从"辅助工具"进化为"协作伙伴"。</p>
+      <button class="cta-btn">开始体验</button>
+      <div class="note">演讲者备注：以愿景收尾，激励听众立即行动。留下 10 秒静默。</div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  /* ===== Navigation & Progress ===== */
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  const dotsContainer = document.getElementById('navDots');
+  const progressBar = document.getElementById('progressBar');
+  const slideNum = document.getElementById('slideNum');
+  const presentation = document.getElementById('presentation');
+  let current = 0;
+
+  slides.forEach((_, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'nav-dot' + (i === 0 ? ' active' : '');
+    btn.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+    btn.onclick = () => goTo(i);
+    dotsContainer.appendChild(btn);
+  });
+
+  function updateUI(idx) {
+    current = idx;
+    progressBar.style.width = ((idx + 1) / total * 100) + '%';
+    slideNum.textContent = String(idx + 1).padStart(2, '0') + ' / ' + String(total).padStart(2, '0');
+    document.querySelectorAll('.nav-dot').forEach((d, i) => d.classList.toggle('active', i === idx));
+  }
+
+  function goTo(idx) {
+    if (idx >= 0 && idx < total) {
+      slides[idx].scrollIntoView({ behavior: 'smooth' });
+    }
+  }
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const idx = Array.from(slides).indexOf(entry.target);
+        updateUI(idx);
+      }
+    });
+  }, { threshold: 0.5 });
+
+  slides.forEach(s => observer.observe(s));
+
+  /* ===== Keyboard Controls ===== */
+  document.addEventListener('keydown', (e) => {
+    const target = e.target;
+    const isEditable = target && (target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+      if (!isEditable) { e.preventDefault(); goTo(Math.min(current + 1, total - 1)); }
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      if (!isEditable) { e.preventDefault(); goTo(Math.max(current - 1, 0)); }
+    } else if (e.key === 'Home') {
+      e.preventDefault(); goTo(0);
+    } else if (e.key === 'End') {
+      e.preventDefault(); goTo(total - 1);
+    } else if (e.key === 'F5') {
+      e.preventDefault();
+      document.body.classList.toggle('presenting');
+      presentation.classList.toggle('PresentMode');
+    } else if ((e.key === 'p' || e.key === 'P') && !isEditable) {
+      e.preventDefault(); openSpeakerWindow();
+    } else if ((e.key === 'e' || e.key === 'E') && !isEditable) {
+      e.preventDefault(); toggleEdit();
+    }
+  });
+
+  /* ===== Edit Mode ===== */
+  let editing = false;
+  const editBtn = document.getElementById('editBtn');
+  function toggleEdit() {
+    editing = !editing;
+    document.body.classList.toggle('editing', editing);
+    document.querySelectorAll('.slide h1, .slide h2, .slide h3, .slide p, .slide .stat-num, .slide .stat-label').forEach(el => {
+      el.contentEditable = editing;
+    });
+    editBtn.textContent = editing ? '✓ Done' : '✎ Edit';
+  }
+  editBtn.addEventListener('click', toggleEdit);
+
+  /* ===== Speaker Mode ===== */
+  function openSpeakerWindow() {
+    const w = window.open('', 'speaker', 'width=900,height=600,noopener,noreferrer');
+    if (!w || w.closed) { alert('请允许弹出窗口以使用演讲者模式'); return; }
+    const notes = Array.from(slides).map(s => {
+      const n = s.querySelector('.note');
+      return n ? n.innerHTML : '无备注';
+    });
+    const doc = [
+      '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>演讲者模式</title>',
+      '<style>',
+      'body { background: #0a0a12; color: #e2e2ea; font-family: Inter, Noto Sans SC, sans-serif; padding: 2rem; margin: 0; }',
+      '.timer { font-size: 3.5rem; font-variant-numeric: tabular-nums; margin-bottom: 1.5rem; color: #38bdf8; }',
+      '.slide-info { font-size: 1.25rem; margin-bottom: 1rem; opacity: 0.8; }',
+      '.notes { background: #141420; padding: 1.5rem; border-radius: 0.75rem; min-height: 240px; line-height: 1.6; border: 1px solid rgba(255,255,255,0.08); }',
+      '.next { margin-top: 1.5rem; opacity: 0.5; font-size: 0.9rem; }',
+      '</style></head><body>',
+      '<div class="timer" id="timer">00:00</div>',
+      '<div class="slide-info"><span id="spage">1</span> / ' + total + '</div>',
+      '<div class="notes" id="snotes">' + notes[0] + '</div>',
+      '<div class="next" id="snext"></div>',
+      '<script>',
+      'var start = Date.now();',
+      'setInterval(function() {',
+      '  var diff = Math.floor((Date.now() - start) / 1000);',
+      '  var m = String(Math.floor(diff / 60)).padStart(2, "0");',
+      '  var s = String(diff % 60).padStart(2, "0");',
+      '  document.getElementById("timer").textContent = m + ":" + s;',
+      '}, 1000);',
+      'window.addEventListener("message", function(e) {',
+      '  if (e.data && e.data.type === "slide") {',
+      '    document.getElementById("spage").textContent = e.data.idx + 1;',
+      '    document.getElementById("snotes").innerHTML = e.data.notes;',
+      '    document.getElementById("snext").textContent = e.data.nextNotes ? "下页备注：" + e.data.nextNotes : "";',
+      '  }',
+      '});',
+      '<\/script></body></html>'
+    ].join('');
+    w.document.write(doc);
+    w.document.close();
+  }
+
+  /* Sync speaker window via postMessage */
+  let speakerWin = null;
+  setInterval(() => {
+    const notes = slides[current].querySelector('.note');
+    const nextNotes = current < total - 1 ? slides[current + 1].querySelector('.note') : null;
+    const payload = {
+      type: 'slide',
+      idx: current,
+      notes: notes ? notes.innerHTML : '无备注',
+      nextNotes: nextNotes ? nextNotes.textContent.substring(0, 60) + '...' : ''
+    };
+    if (speakerWin && !speakerWin.closed) {
+      speakerWin.postMessage(payload, '*');
+    }
+  }, 600);
+
+  /* ===== Watermark Injection (last slide only) ===== */
+  function injectWatermark() {
+    const lastSlide = slides[slides.length - 1];
+    if (lastSlide && !lastSlide.querySelector('.slide-credit')) {
+      const credit = document.createElement('div');
+      credit.className = 'slide-credit';
+      credit.textContent = 'Generated by kai-slide-creator';
+      lastSlide.appendChild(credit);
+    }
+  }
+  injectWatermark();
+
+  /* ===== Wheel / Touch with axis guard & editable filter ===== */
+  let wheelLock = false;
+  presentation.addEventListener('wheel', (e) => {
+    if (wheelLock) return;
+    const active = document.activeElement;
+    if (active && (active.isContentEditable || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+    e.preventDefault();
+    wheelLock = true;
+    if (e.deltaY > 0) goTo(Math.min(current + 1, total - 1));
+    else goTo(Math.max(current - 1, 0));
+    setTimeout(() => wheelLock = false, 700);
+  }, { passive: false });
+
+  /* ===== Touch support ===== */
+  let touchStartY = 0;
+  presentation.addEventListener('touchstart', (e) => { touchStartY = e.touches[0].clientY; }, { passive: true });
+  presentation.addEventListener('touchend', (e) => {
+    const diff = touchStartY - e.changedTouches[0].clientY;
+    if (Math.abs(diff) > 50) {
+      if (diff > 0) goTo(Math.min(current + 1, total - 1));
+      else goTo(Math.max(current - 1, 0));
+    }
+  }, { passive: true });
+
+  /* Init */
+  updateUI(0);
+</script>
+</body>
+</html>

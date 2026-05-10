@@ -2,12 +2,16 @@ import * as readline from 'readline';
 import { stdin, stdout } from 'process';
 import { boldCyan, dim } from './render.js';
 import { getSkillCommandNames } from '../ai/skills/loader.js';
-import { appendFileSync } from 'fs';
+import { appendFileSync, writeFileSync } from 'fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildSlashMenuOverlayLines, MAX_MENU_DESCRIPTION_WIDTH } from './repl-state.js';
 import { getChatSlashCommands } from '../commands/registry.js';
 import { getDisplayWidth } from './display-width.js';
 import { sliceByDisplayColumns } from './text-metrics.js';
 import { identifyKey, loadKeybindingsSync, resolveAction } from './keybindings.js';
+import { clearPastedImagePaths, setPastedImagePath } from './image-input.js';
+import { saveClipboardImageToTemp } from '../utils/clipboard.js';
 const DEBUG_LOG = '/tmp/xiaok-debug.log';
 const MAX_MENU_VISIBLE_ITEMS = 8;
 const SAVE_CURSOR = '\x1b[s';
@@ -185,6 +189,7 @@ export class InputReader {
     statusLineProvider;
     scrollPromptRenderer;
     forcePlainMode = false;
+    clipboardImageSaver = saveClipboardImageToTemp;
     constructor(renderer) {
         this.renderer = renderer;
     }
@@ -206,6 +211,9 @@ export class InputReader {
     setForcePlainMode(enabled) {
         this.forcePlainMode = enabled;
     }
+    setClipboardImageSaver(saver) {
+        this.clipboardImageSaver = saver ?? saveClipboardImageToTemp;
+    }
     async read(prompt, options) {
         if (!stdin.isTTY) {
             const rl = readline.createInterface({ input: stdin, output: stdout });
@@ -218,6 +226,7 @@ export class InputReader {
         }
         loadKeybindingsSync();
         return new Promise((resolve) => {
+            clearPastedImagePaths();
             let input = '';
             let cursor = 0;
             let resolved = false;
@@ -228,6 +237,7 @@ export class InputReader {
             let historyDraft = null;
             let lastRecalledHistoryInput = null;
             let editedRecalledDraft = false;
+            let pastedImageCount = 0;
             const degradeUi = (context, error) => {
                 richUiEnabled = false;
                 this.menuOpen = false;
@@ -392,6 +402,58 @@ export class InputReader {
                 historyDraft = null;
                 lastRecalledHistoryInput = null;
             };
+            const registerPastedImage = (imagePath) => {
+                const index = pastedImageCount;
+                pastedImageCount += 1;
+                setPastedImagePath(index, imagePath);
+                const placeholder = `[image ${index}]`;
+                return placeholder;
+            };
+            const insertPastedImagePlaceholder = (imagePath, redrawAfter = true) => {
+                const placeholder = registerPastedImage(imagePath);
+                clearMenuIfLegacy();
+                input = input.slice(0, cursor) + placeholder + input.slice(cursor);
+                cursor += placeholder.length;
+                markInputEdited();
+                historyState = pushInputHistory(historyState, input, cursor);
+                if (redrawAfter) {
+                    redraw();
+                }
+            };
+            const tryHandleSpecialPasteSequence = (raw) => {
+                // Windows terminals commonly consume image clipboard paste before the
+                // CLI sees a Ctrl+V event. Alt+V arrives as ESC + v and gives us a
+                // reliable explicit import gesture on this platform.
+                if (process.platform === 'win32' && raw === '\x1bv') {
+                    const imagePath = this.clipboardImageSaver();
+                    if (imagePath) {
+                        insertPastedImagePlaceholder(imagePath);
+                    }
+                    return true;
+                }
+                // OSC 1337: paste image (iTerm2, Terminal.app, some embedded terminals)
+                // Format: \x1b]1337;File=name=...;inline=1:<base64>\x07
+                if (raw.startsWith('\x1b]1337;File=')) {
+                    const endMarker = raw.indexOf('\x07');
+                    if (endMarker !== -1) {
+                        const oscContent = raw.slice(7, endMarker); // skip \x1b]
+                        const base64Start = oscContent.indexOf(':');
+                        if (base64Start !== -1) {
+                            const base64Data = oscContent.slice(base64Start + 1);
+                            const tempPath = join(tmpdir(), `xiaok-pasted-${Date.now()}.png`);
+                            writeFileSync(tempPath, Buffer.from(base64Data, 'base64'));
+                            insertPastedImagePlaceholder(tempPath);
+                            return true;
+                        }
+                    }
+                }
+                // Kitty protocol is more complex; swallow the sequence for now so it
+                // does not render as garbage text while the dedicated parser is missing.
+                if (raw.startsWith('\x1b_G')) {
+                    return true;
+                }
+                return false;
+            };
             const moveMenuSelection = (direction) => {
                 if (!this.menuOpen || this.menuItems.length === 0) {
                     return false;
@@ -503,6 +565,9 @@ export class InputReader {
                 const key = data.toString('utf8');
                 log(`RAW KEY pressed: ${JSON.stringify(key)} bytes=${data.length} hex=${data.toString('hex')} input=${JSON.stringify(input)} cursor=${cursor}`);
                 this.transcriptLogger?.record({ type: 'input_key', key, timestamp: Date.now() });
+                if (tryHandleSpecialPasteSequence(key)) {
+                    return;
+                }
                 // Handle batch input (multiple characters/keys in one data event)
                 // This happens in automated testing (expect/pexpect) and pasted text
                 if (key.length > 1) {
@@ -579,6 +644,15 @@ export class InputReader {
                                     handleHistoryNext();
                                     skipSyncMenuAfterBatch = true;
                                 }
+                                else if (action === 'paste-image') {
+                                    if (process.platform === 'win32') {
+                                        const imagePath = this.clipboardImageSaver();
+                                        if (imagePath) {
+                                            insertPastedImagePlaceholder(imagePath, false);
+                                            needsFinalRedraw = true;
+                                        }
+                                    }
+                                }
                                 // Skip other actions in batch mode for simplicity
                             }
                             i += identified.consumed;
@@ -606,36 +680,6 @@ export class InputReader {
                     if (input.startsWith('/') && !skipSyncMenuAfterBatch) {
                         syncMenu(input);
                     }
-                    return;
-                }
-                // OSC 1337: paste image (iTerm2, Terminal.app, etc.)
-                // Format: \x1b]1337;File=name=...;inline=1:<base64>\x07
-                if (key.startsWith('\x1b]1337;File=')) {
-                    const endMarker = key.indexOf('\x07');
-                    if (endMarker !== -1) {
-                        const oscContent = key.slice(7, endMarker); // skip \x1b]
-                        const base64Start = oscContent.indexOf(':');
-                        if (base64Start !== -1) {
-                            const base64Data = oscContent.slice(base64Start + 1);
-                            // Extract filename if available
-                            const nameMatch = oscContent.match(/name=([^;]+)/);
-                            const filename = nameMatch ? Buffer.from(nameMatch[1], 'base64').toString('utf8') : 'pasted-image.png';
-                            // Store as file reference for image-input.ts to handle
-                            const tempPath = `/tmp/xiaok-pasted-${Date.now()}.png`;
-                            require('fs').writeFileSync(tempPath, Buffer.from(base64Data, 'base64'));
-                            input = input.slice(0, cursor) + tempPath + input.slice(cursor);
-                            cursor += tempPath.length;
-                            markInputEdited();
-                            historyState = pushInputHistory(historyState, input, cursor);
-                            redraw();
-                            return;
-                        }
-                    }
-                }
-                // Kitty graphics protocol: \x1b_G...;\x1b\\
-                if (key.startsWith('\x1b_G')) {
-                    // Kitty protocol is more complex, for now just note it
-                    // Full implementation would need to parse the transmission
                     return;
                 }
                 const submitInput = () => {
@@ -787,6 +831,16 @@ export class InputReader {
                         cursor = redone.cursor;
                         markInputEdited();
                         redraw();
+                        return true;
+                    }
+                    if (action === 'paste-image') {
+                        if (process.platform !== 'win32') {
+                            return false;
+                        }
+                        const imagePath = this.clipboardImageSaver();
+                        if (imagePath) {
+                            insertPastedImagePlaceholder(imagePath);
+                        }
                         return true;
                     }
                     if (action === 'delete-word-back') {

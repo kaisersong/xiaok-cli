@@ -7,6 +7,7 @@ export declare class MarkdownRenderer {
     private buffer;
     private inCodeBlock;
     private codeLang;
+    private mermaidBuffer;
     private pendingLen;
     private pendingPrefix;
     private lineCount;

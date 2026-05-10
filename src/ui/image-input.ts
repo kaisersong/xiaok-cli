@@ -15,12 +15,12 @@ function normalizeInputPath(input: string): string {
 }
 
 /**
- * Parse [Image #x] references from input text and extract image paths.
+ * Parse pasted image placeholders from input text and extract image paths.
  * Returns a map of image reference to file path.
  */
 function parseImageReferences(input: string): Map<number, string> {
   const imageRefs = new Map<number, string>();
-  const imagePattern = /\[Image #(\d+)\]/g;
+  const imagePattern = /\[image(?:\s*#)?\s*(\d+)\]/gi;
   let match: RegExpExecArray | null;
 
   while ((match = imagePattern.exec(input)) !== null) {
@@ -73,8 +73,8 @@ export async function parseInputBlocks(input: string, supportsImages: boolean): 
     }];
   }
 
-  // Parse [Image #x] references
-  const imagePattern = /\[Image #(\d+)\]/g;
+  // Parse pasted image placeholders such as [image 0] or [Image #1]
+  const imagePattern = /\[image(?:\s*#)?\s*(\d+)\]/gi;
   let match: RegExpExecArray | null;
   let lastIndex = 0;
   let hasText = false;

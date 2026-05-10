@@ -9,6 +9,7 @@ export type Action =
   | 'word-left' | 'word-right'
   | 'delete-back' | 'delete-word-back' | 'delete-to-start' | 'delete-to-end'
   | 'yank' | 'undo' | 'redo'
+  | 'paste-image'
   | 'search-history' | 'clear-screen'
   | 'cancel' | 'eof' | 'escape'
   | 'tab' | 'shift-tab';
@@ -39,6 +40,7 @@ const DEFAULT_BINDINGS: KeyBindingEntry[] = [
   { key: 'ctrl+y', action: 'yank' },
   { key: 'ctrl+z', action: 'undo' },
   { key: 'ctrl+shift+z', action: 'redo' },
+  { key: 'ctrl+v', action: 'paste-image' },
   { key: 'ctrl+r', action: 'search-history' },
   { key: 'ctrl+l', action: 'clear-screen' },
   { key: 'ctrl+c', action: 'cancel' },
@@ -182,6 +184,7 @@ export function identifyKey(data: string, offset: number): { key: string; consum
     0x0c: 'ctrl+l',
     0x0d: 'enter',
     0x12: 'ctrl+r',
+    0x16: 'ctrl+v',
     0x15: 'ctrl+u',
     0x17: 'ctrl+w',
     0x19: 'ctrl+y',

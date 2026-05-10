@@ -27,6 +27,7 @@ export interface InputReadOptions {
     overlayLines?: string[];
     overlayKind?: ScrollPromptRenderFrame['overlayKind'];
 }
+type ClipboardImageSaver = () => string | null;
 /** 向左找词边界（Ctrl+W / Alt+Left 用） */
 export declare function wordBoundaryLeft(text: string, cursor: number): number;
 /** 向右找词边界（Alt+Right 用） */
@@ -74,6 +75,7 @@ export declare class InputReader {
     private statusLineProvider?;
     private scrollPromptRenderer?;
     private forcePlainMode;
+    private clipboardImageSaver;
     constructor(renderer?: ReplRenderer | undefined);
     setSkills(skills: SkillMeta[]): void;
     setModeCycleHandler(handler: () => PermissionMode): void;
@@ -81,6 +83,7 @@ export declare class InputReader {
     setStatusLineProvider(provider: (() => string[]) | undefined): void;
     setScrollPromptRenderer(renderer: ((frame: ScrollPromptRenderFrame) => boolean | void) | undefined): void;
     setForcePlainMode(enabled: boolean): void;
+    setClipboardImageSaver(saver: ClipboardImageSaver | undefined): void;
     read(prompt: string, options?: InputReadOptions): Promise<string | null>;
 }
 export {};

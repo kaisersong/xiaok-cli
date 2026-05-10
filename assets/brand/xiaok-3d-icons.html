@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xiaok 3D Icon Studies</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f8fbff;
+      --muted: rgba(248, 251, 255, .66);
+      --line: rgba(255, 255, 255, .13);
+      --panel: rgba(7, 11, 22, .82);
+      --panel-strong: rgba(9, 14, 28, .96);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Space Grotesk", "Aptos Display", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 18% 12%, rgba(95, 230, 255, .18), transparent 30%),
+        radial-gradient(circle at 82% 22%, rgba(179, 104, 255, .20), transparent 34%),
+        radial-gradient(circle at 50% 100%, rgba(60, 255, 203, .12), transparent 36%),
+        #03050d;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, .035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, .035) 1px, transparent 1px);
+      background-size: 42px 42px;
+      mask-image: radial-gradient(circle at 50% 20%, black, transparent 72%);
+    }
+
+    main {
+      width: min(1380px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 44px 0 56px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 86px minmax(0, 1fr);
+      gap: 22px;
+      align-items: center;
+      margin-bottom: 30px;
+    }
+
+    header img {
+      width: 86px;
+      height: 86px;
+      border-radius: 24px;
+      border: 1px solid var(--line);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, .36);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(34px, 5vw, 74px);
+      line-height: .92;
+      letter-spacing: -.06em;
+    }
+
+    .intro {
+      margin: 12px 0 0;
+      max-width: 840px;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.65;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 30px;
+      background: var(--panel);
+      box-shadow: 0 28px 80px rgba(0, 0, 0, .34);
+    }
+
+    .card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(135deg, rgba(255, 255, 255, .16), transparent 26%, transparent 72%, rgba(255, 255, 255, .08));
+      opacity: .75;
+      z-index: 2;
+    }
+
+    .viewport {
+      position: relative;
+      aspect-ratio: 1;
+      min-height: 340px;
+      background: #050814;
+    }
+
+    .viewport canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .copy {
+      position: relative;
+      z-index: 3;
+      padding: 22px;
+      background: linear-gradient(180deg, rgba(5, 8, 20, .28), var(--panel-strong));
+      border-top: 1px solid rgba(255, 255, 255, .09);
+    }
+
+    .eyebrow {
+      margin: 0 0 9px;
+      color: rgba(255, 255, 255, .52);
+      font-size: 12px;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: -.03em;
+    }
+
+    .copy p {
+      margin: 10px 0 18px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid rgba(255, 255, 255, .18);
+      border-radius: 999px;
+      padding: 10px 14px;
+      color: var(--ink);
+      background: rgba(255, 255, 255, .08);
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      transition: transform .18s ease, border-color .18s ease, background .18s ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      border-color: rgba(255, 255, 255, .38);
+      background: rgba(255, 255, 255, .14);
+    }
+
+    .note {
+      margin-top: 20px;
+      color: rgba(248, 251, 255, .52);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    @media (max-width: 1080px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .viewport {
+        min-height: 420px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      main {
+        width: min(100vw - 24px, 1380px);
+        padding-top: 26px;
+      }
+
+      header {
+        grid-template-columns: 62px minmax(0, 1fr);
+      }
+
+      header img {
+        width: 62px;
+        height: 62px;
+        border-radius: 18px;
+      }
+
+      .viewport {
+        min-height: 330px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <img src="./xiaokicon-source.png" alt="Original xiaok dotted K icon">
+      <div>
+        <h1>xiaok 3D icon studies</h1>
+        <p class="intro">Three static-exportable directions built from the original dotted K geometry. Each scene uses Three.js spheres, volumetric glow sprites, particles, and a rendered background so the exported image keeps the dream-light look.</p>
+      </div>
+    </header>
+
+    <section class="grid" aria-label="3D icon variants">
+      <article class="card">
+        <div class="viewport" id="scene-aurora-glass"></div>
+        <div class="copy">
+          <p class="eyebrow">A / formal brand</p>
+          <h2>Aurora Glass</h2>
+          <p>Cool glass pearls, cyan bloom, and a warm rim light. This is the cleanest option for a primary app icon or release artwork.</p>
+          <div class="actions">
+            <button data-export="aurora-glass" data-type="image/png">Export PNG</button>
+            <button data-export="aurora-glass" data-type="image/webp">Export WebP</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="viewport" id="scene-dream-orbit"></div>
+        <div class="copy">
+          <p class="eyebrow">B / dream-light</p>
+          <h2>Dream Orbit</h2>
+          <p>Violet-blue nebula light, orbiting dust, and crystal beads. This is the most fantasy-forward direction for an AI assistant identity.</p>
+          <div class="actions">
+            <button data-export="dream-orbit" data-type="image/png">Export PNG</button>
+            <button data-export="dream-orbit" data-type="image/webp">Export WebP</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="viewport" id="scene-terminal-nebula"></div>
+        <div class="copy">
+          <p class="eyebrow">C / CLI identity</p>
+          <h2>Terminal Nebula</h2>
+          <p>Green terminal glow, subtle grid energy, and white-hot centers. This keeps the strongest technical link to xiaok as a CLI.</p>
+          <div class="actions">
+            <button data-export="terminal-nebula" data-type="image/png">Export PNG</button>
+            <button data-export="terminal-nebula" data-type="image/webp">Export WebP</button>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <p class="note">Exports are square 1024px images. If the page is opened directly from disk, the Three.js module is loaded from jsDelivr; keep an internet connection for the preview/export page.</p>
+  </main>
+
+  <script type="module">
+    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js";
+
+    const DOTS = [
+      [-2.45, 3.0], [-2.45, 2.0], [-2.45, 1.0], [-2.45, 0.0], [-2.45, -1.0], [-2.45, -2.0], [-2.45, -3.0],
+      [-1.45, 3.0], [-1.45, 2.0], [-1.45, 1.0], [-1.45, 0.0], [-1.45, -1.0], [-1.45, -2.0], [-1.45, -3.0],
+      [-.45, 0.0],
+      [.25, .65], [.95, 1.3], [1.65, 1.95], [2.35, 2.6],
+      [.25, -.65], [.95, -1.3], [1.65, -1.95], [2.35, -2.6],
+      [.75, 0.0]
+    ];
+
+    const CONFIGS = {
+      "aurora-glass": {
+        element: "scene-aurora-glass",
+        file: "xiaok-3d-aurora-glass",
+        bg: ["#050a16", "#0a1730", "#07111f"],
+        bead: ["#ffffff", "#dffaff", "#77dfff"],
+        glow: ["#61e6ff", "#ffc46b", "#ffffff"],
+        lights: [
+          { color: 0x7ee9ff, intensity: 4.2, position: [-4, 5, 6] },
+          { color: 0xffc15d, intensity: 2.4, position: [5, -3, 4] },
+          { color: 0xffffff, intensity: 1.2, position: [0, 0, 7] }
+        ],
+        particleColor: 0xbcefff,
+        grid: false,
+        tilt: [-.55, -.22, .10]
+      },
+      "dream-orbit": {
+        element: "scene-dream-orbit",
+        file: "xiaok-3d-dream-orbit",
+        bg: ["#080313", "#19123a", "#05030c"],
+        bead: ["#ffffff", "#efe7ff", "#a877ff"],
+        glow: ["#bd7cff", "#69f4ff", "#ffffff"],
+        lights: [
+          { color: 0xb46cff, intensity: 4.8, position: [-5, 3, 5] },
+          { color: 0x5ef1ff, intensity: 3.2, position: [4, -4, 5] },
+          { color: 0xffffff, intensity: 1.1, position: [0, 4, 6] }
+        ],
+        particleColor: 0xd4bdff,
+        grid: false,
+        tilt: [-.62, -.10, -.02]
+      },
+      "terminal-nebula": {
+        element: "scene-terminal-nebula",
+        file: "xiaok-3d-terminal-nebula",
+        bg: ["#04120f", "#05261e", "#020806"],
+        bead: ["#ffffff", "#ddfff7", "#42ffd1"],
+        glow: ["#43ffd0", "#dfffee", "#8fffe3"],
+        lights: [
+          { color: 0x48ffd1, intensity: 4.4, position: [-4, 4, 5] },
+          { color: 0xffffff, intensity: 1.9, position: [3, 2, 6] },
+          { color: 0x77ffb7, intensity: 1.4, position: [5, -4, 3] }
+        ],
+        particleColor: 0x8fffe3,
+        grid: true,
+        tilt: [-.58, -.24, .08]
+      }
+    };
+
+    const studies = new Map();
+
+    function makeGradientTexture(config, size = 1024) {
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      const base = ctx.createLinearGradient(0, 0, size, size);
+      base.addColorStop(0, config.bg[0]);
+      base.addColorStop(.54, config.bg[1]);
+      base.addColorStop(1, config.bg[2]);
+      ctx.fillStyle = base;
+      ctx.fillRect(0, 0, size, size);
+
+      addRadial(ctx, size * .34, size * .30, size * .45, config.glow[0], .32);
+      addRadial(ctx, size * .72, size * .72, size * .36, config.glow[1], .20);
+      addRadial(ctx, size * .50, size * .46, size * .24, config.glow[2], .13);
+
+      if (config.grid) {
+        ctx.save();
+        ctx.globalAlpha = .12;
+        ctx.strokeStyle = "#cafff1";
+        ctx.lineWidth = 1;
+        for (let i = -size; i < size * 2; i += 54) {
+          ctx.beginPath();
+          ctx.moveTo(i, 0);
+          ctx.lineTo(i + size * .72, size);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      return texture;
+    }
+
+    function addRadial(ctx, x, y, radius, color, alpha) {
+      const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+      gradient.addColorStop(0, hexToRgba(color, alpha));
+      gradient.addColorStop(.42, hexToRgba(color, alpha * .38));
+      gradient.addColorStop(1, hexToRgba(color, 0));
+      ctx.fillStyle = gradient;
+      ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    }
+
+    function makeGlowTexture(color) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 256;
+      canvas.height = 256;
+      const ctx = canvas.getContext("2d");
+      addRadial(ctx, 128, 128, 128, color, .88);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      return texture;
+    }
+
+    function buildStudy(key, config) {
+      const container = document.getElementById(config.element);
+      const scene = new THREE.Scene();
+      scene.background = makeGradientTexture(config);
+
+      const camera = new THREE.PerspectiveCamera(30, 1, .1, 100);
+      camera.position.set(0, 0, 13.5);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: false });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.18;
+      container.appendChild(renderer.domElement);
+
+      scene.add(new THREE.AmbientLight(0xffffff, .42));
+      for (const light of config.lights) {
+        const point = new THREE.PointLight(light.color, light.intensity, 18);
+        point.position.set(...light.position);
+        scene.add(point);
+      }
+
+      const group = new THREE.Group();
+      group.rotation.set(...config.tilt);
+      scene.add(group);
+
+      const sphereGeometry = new THREE.SphereGeometry(.34, 48, 32);
+      const material = new THREE.MeshPhysicalMaterial({
+        color: config.bead[1],
+        roughness: .18,
+        metalness: .05,
+        transmission: .34,
+        thickness: .8,
+        ior: 1.42,
+        clearcoat: 1,
+        clearcoatRoughness: .08,
+        emissive: config.bead[2],
+        emissiveIntensity: .08
+      });
+
+      DOTS.forEach(([x, y], index) => {
+        const z = Math.sin(index * 1.7) * .12;
+        const bead = new THREE.Mesh(sphereGeometry, material.clone());
+        bead.position.set(x * .78, y * .76, z);
+        bead.scale.setScalar(index === DOTS.length - 1 ? .90 : 1);
+        bead.material.emissiveIntensity = .06 + (index % 5) * .012;
+        group.add(bead);
+
+        const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: makeGlowTexture(config.glow[index % 2]),
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          opacity: .16
+        }));
+        halo.position.copy(bead.position);
+        halo.scale.set(1.75, 1.75, 1);
+        group.add(halo);
+      });
+
+      addLightRibbons(scene, config);
+      addParticles(scene, config);
+
+      function render(time = 0) {
+        group.rotation.x = config.tilt[0] + Math.sin(time * .00035) * .035;
+        group.rotation.y = config.tilt[1] + Math.cos(time * .00032) * .045;
+        group.rotation.z = config.tilt[2] + Math.sin(time * .00025) * .018;
+        renderer.render(scene, camera);
+        requestAnimationFrame(render);
+      }
+
+      function resize() {
+        const size = container.clientWidth;
+        renderer.setSize(size, container.clientHeight);
+        camera.aspect = size / container.clientHeight;
+        camera.updateProjectionMatrix();
+      }
+
+      window.addEventListener("resize", resize);
+      requestAnimationFrame(render);
+
+      studies.set(key, { config, scene, camera, renderer, container, resize });
+    }
+
+    function addLightRibbons(scene, config) {
+      const glowTexture = makeGlowTexture(config.glow[0]);
+      const material = new THREE.SpriteMaterial({
+        map: glowTexture,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        opacity: .22
+      });
+
+      const positions = [
+        [-3.6, 3.4, -1.5, 4.8],
+        [3.8, -3.2, -1.2, 3.4],
+        [.4, .2, -2.1, 2.8]
+      ];
+
+      positions.forEach(([x, y, z, scale], index) => {
+        const sprite = new THREE.Sprite(material.clone());
+        sprite.material.map = makeGlowTexture(config.glow[index % config.glow.length]);
+        sprite.position.set(x, y, z);
+        sprite.scale.set(scale, scale, 1);
+        scene.add(sprite);
+      });
+    }
+
+    function addParticles(scene, config) {
+      const geometry = new THREE.BufferGeometry();
+      const count = 120;
+      const positions = new Float32Array(count * 3);
+
+      for (let i = 0; i < count; i += 1) {
+        const radius = 2.2 + Math.random() * 4.6;
+        const angle = Math.random() * Math.PI * 2;
+        positions[i * 3] = Math.cos(angle) * radius;
+        positions[i * 3 + 1] = Math.sin(angle) * radius * .72;
+        positions[i * 3 + 2] = -2.4 + Math.random() * 2.2;
+      }
+
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      const material = new THREE.PointsMaterial({
+        color: config.particleColor,
+        size: .035,
+        transparent: true,
+        opacity: .66,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      scene.add(new THREE.Points(geometry, material));
+    }
+
+    function exportStudy(key, type) {
+      const study = studies.get(key);
+      const { renderer, scene, camera, container, config } = study;
+      const previousPixelRatio = renderer.getPixelRatio();
+      const previousSize = renderer.getSize(new THREE.Vector2());
+
+      renderer.setPixelRatio(1);
+      renderer.setSize(1024, 1024, false);
+      camera.aspect = 1;
+      camera.updateProjectionMatrix();
+      renderer.render(scene, camera);
+
+      renderer.domElement.toBlob((blob) => {
+        const extension = type === "image/webp" ? "webp" : "png";
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${config.file}.${extension}`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        renderer.setPixelRatio(previousPixelRatio);
+        renderer.setSize(previousSize.x, previousSize.y, false);
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+      }, type, .96);
+    }
+
+    function hexToRgba(hex, alpha) {
+      const value = hex.replace("#", "");
+      const red = parseInt(value.slice(0, 2), 16);
+      const green = parseInt(value.slice(2, 4), 16);
+      const blue = parseInt(value.slice(4, 6), 16);
+      return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+    }
+
+    Object.entries(CONFIGS).forEach(([key, config]) => buildStudy(key, config));
+
+    document.querySelectorAll("[data-export]").forEach((button) => {
+      button.addEventListener("click", () => exportStudy(button.dataset.export, button.dataset.type));
+    });
+  </script>
+</body>
+</html>

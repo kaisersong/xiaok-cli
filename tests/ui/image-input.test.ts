@@ -2,11 +2,12 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseInputBlocks } from '../../src/ui/image-input.js';
+import { clearPastedImagePaths, parseInputBlocks, setPastedImagePath } from '../../src/ui/image-input.js';
 
 const tempDirs: string[] = [];
 
 afterEach(() => {
+  clearPastedImagePaths();
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -44,5 +45,26 @@ describe('image input parsing', () => {
     writeFileSync(imagePath, Buffer.from('jpg-bytes'));
 
     await expect(parseInputBlocks(imagePath, false)).rejects.toThrow(/不支持图片输入/);
+  });
+
+  it('converts pasted image placeholders mixed with text into text and image blocks', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'xiaok-image-input-'));
+    tempDirs.push(dir);
+    const imagePath = join(dir, 'clipboard.png');
+    writeFileSync(imagePath, Buffer.from('png-bytes'));
+    setPastedImagePath(0, imagePath);
+
+    const blocks = await parseInputBlocks('please inspect [image 0] carefully', true);
+
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0]).toEqual({ type: 'text', text: 'please inspect' });
+    expect(blocks[1]).toMatchObject({
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: 'image/png',
+      },
+    });
+    expect(blocks[2]).toEqual({ type: 'text', text: 'carefully' });
   });
 });

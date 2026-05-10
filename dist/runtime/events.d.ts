@@ -204,6 +204,14 @@ export type RuntimeEvent = {
     sessionId: string;
     worktreePath: string;
 } | {
+    type: 'progress_plan_reported';
+    sessionId: string;
+    steps: Array<{
+        id: string;
+        label: string;
+        status: string;
+    }>;
+} | {
     type: 'file_changed';
     sessionId: string;
     filePath: string;
