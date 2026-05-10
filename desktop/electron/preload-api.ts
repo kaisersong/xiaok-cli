@@ -50,6 +50,8 @@ export const PRELOAD_API_KEYS = [
   'createMCPInstall',
   'updateMCPInstall',
   'deleteMCPInstall',
+  'listPluginMcpServers',
+  'setPluginMcpServerEnabled',
   'getUpdateStatus',
   'checkForUpdates',
   'quitAndInstall',
@@ -160,6 +162,14 @@ export interface DesktopMCPInput {
   args?: string[];
 }
 
+export interface PluginMcpServerView {
+  name: string;
+  pluginName: string;
+  toolCount: number;
+  connected: boolean;
+  enabled: boolean;
+}
+
 export interface UpdateStatus {
   checking: boolean;
   available: boolean;
@@ -221,6 +231,8 @@ export interface DesktopApi {
   createMCPInstall(input: DesktopMCPInput): Promise<DesktopMCPInstallView>;
   updateMCPInstall(id: string, input: Partial<DesktopMCPInput>): Promise<DesktopMCPInstallView>;
   deleteMCPInstall(id: string): Promise<void>;
+  listPluginMcpServers(): Promise<PluginMcpServerView[]>;
+  setPluginMcpServerEnabled(input: { name: string; enabled: boolean }): Promise<PluginMcpServerView[]>;
   getUpdateStatus(): Promise<UpdateStatus>;
   checkForUpdates(): Promise<void>;
   quitAndInstall(): Promise<void>;
@@ -293,6 +305,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     createMCPInstall: (input) => ipcRenderer.invoke('desktop:createMCPInstall', input) as Promise<DesktopMCPInstallView>,
     updateMCPInstall: (id, input) => ipcRenderer.invoke('desktop:updateMCPInstall', id, input) as Promise<DesktopMCPInstallView>,
     deleteMCPInstall: (id) => ipcRenderer.invoke('desktop:deleteMCPInstall', id) as Promise<void>,
+    listPluginMcpServers: () => ipcRenderer.invoke('desktop:listPluginMcpServers') as Promise<PluginMcpServerView[]>,
+    setPluginMcpServerEnabled: (input) => ipcRenderer.invoke('desktop:setPluginMcpServerEnabled', input) as Promise<PluginMcpServerView[]>,
     getUpdateStatus: () => ipcRenderer.invoke('desktop:getUpdateStatus') as Promise<UpdateStatus>,
     checkForUpdates: () => ipcRenderer.invoke('desktop:checkForUpdates') as Promise<void>,
     quitAndInstall: () => ipcRenderer.invoke('desktop:quitAndInstall') as Promise<void>,

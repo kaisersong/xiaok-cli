@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   createMCPInstall: (input) => ipcRenderer.invoke('desktop:createMCPInstall', input),
   updateMCPInstall: (id, input) => ipcRenderer.invoke('desktop:updateMCPInstall', id, input),
   deleteMCPInstall: (id) => ipcRenderer.invoke('desktop:deleteMCPInstall', id),
+  listPluginMcpServers: () => ipcRenderer.invoke('desktop:listPluginMcpServers'),
+  setPluginMcpServerEnabled: (input) => ipcRenderer.invoke('desktop:setPluginMcpServerEnabled', input),
   getUpdateStatus: () => ipcRenderer.invoke('desktop:getUpdateStatus'),
   checkForUpdates: () => ipcRenderer.invoke('desktop:checkForUpdates'),
   quitAndInstall: () => ipcRenderer.invoke('desktop:quitAndInstall'),

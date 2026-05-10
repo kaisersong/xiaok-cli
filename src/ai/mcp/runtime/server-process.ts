@@ -6,9 +6,16 @@ export interface McpServerProcess {
   dispose(): void;
 }
 
-export function startMcpServerProcess(command: string, args: string[] = []): McpServerProcess {
+export interface McpServerProcessOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+}
+
+export function startMcpServerProcess(command: string, args: string[] = [], opts?: McpServerProcessOptions): McpServerProcess {
   const child = spawn(command, args, {
     stdio: 'pipe',
+    cwd: opts?.cwd,
+    env: opts?.env ? { ...process.env, ...opts.env } : undefined,
     windowsVerbatimArguments: process.platform === 'win32' && command.toLowerCase() === 'cmd.exe',
   });
   return {
@@ -56,7 +63,7 @@ export function decodeMcpFrames(input: string): McpRuntimeResponse[] {
 
 export function createStdioMcpTransport(
   child: Pick<ChildProcessWithoutNullStreams, 'stdin' | 'stdout' | 'on' | 'off'>,
-): McpRuntimeTransport & { dispose(): void } {
+): McpRuntimeTransport & { notify(message: { jsonrpc: '2.0'; method: string; params?: Record<string, unknown> }): void; dispose(): void } {
   let buffer = '';
   const pending = new Map<number, {
     resolve: (message: McpRuntimeResponse) => void;
@@ -65,22 +72,23 @@ export function createStdioMcpTransport(
 
   const handleStdout = (chunk: Buffer | string) => {
     buffer += chunk.toString();
-    const messages = decodeMcpFrames(buffer);
-    if (messages.length === 0) {
-      return;
-    }
-
-    let consumed = 0;
-    for (const message of messages) {
-      consumed += Buffer.byteLength(encodeMcpMessage(message), 'utf8');
-      if (typeof message.id === 'number' && pending.has(message.id)) {
-        const request = pending.get(message.id)!;
-        pending.delete(message.id);
-        request.resolve(message);
+    // NDJSON: split on newlines
+    const lines = buffer.split('\n');
+    buffer = lines.pop()!; // keep incomplete last line in buffer
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const message = JSON.parse(trimmed) as McpRuntimeResponse;
+        if (typeof message.id === 'number' && pending.has(message.id)) {
+          const request = pending.get(message.id)!;
+          pending.delete(message.id);
+          request.resolve(message);
+        }
+      } catch {
+        // Skip non-JSON lines (e.g. server logs)
       }
     }
-
-    buffer = buffer.slice(consumed);
   };
 
   const failPending = (error: Error) => {
@@ -106,8 +114,11 @@ export function createStdioMcpTransport(
     send(message) {
       return new Promise((resolve, reject) => {
         pending.set(message.id, { resolve, reject });
-        child.stdin.write(encodeMcpMessage(message));
+        child.stdin.write(JSON.stringify(message) + '\n');
       });
+    },
+    notify(message: { jsonrpc: '2.0'; method: string; params?: Record<string, unknown> }) {
+      child.stdin.write(JSON.stringify(message) + '\n');
     },
     dispose() {
       failPending(new Error('MCP server transport disposed before responding'));

@@ -57,6 +57,12 @@ function drawFallbackK(): Electron.NativeImage {
 }
 
 export function setupMenuBar(window: BrowserWindow): void {
+  // Guard: destroy existing tray to prevent duplicates
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
+
   let trayImage = tryReadIcon();
 
   if (trayImage.isEmpty()) {

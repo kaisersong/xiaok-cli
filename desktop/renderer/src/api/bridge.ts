@@ -430,6 +430,12 @@ export const api = {
   async deleteMCPInstall(id: string) {
     await window.xiaokDesktop.deleteMCPInstall(id);
   },
+  async listPluginMcpServers() {
+    return window.xiaokDesktop.listPluginMcpServers();
+  },
+  async setPluginMcpServerEnabled(input: { name: string; enabled: boolean }) {
+    return window.xiaokDesktop.setPluginMcpServerEnabled(input);
+  },
 
   // ---------------------
   // Persona API (mock)

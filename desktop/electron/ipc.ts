@@ -157,6 +157,9 @@ export function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow, serv
   ipcMain.handle('desktop:createMCPInstall', async (_event, input) => services.createMCPInstall(input));
   ipcMain.handle('desktop:updateMCPInstall', async (_event, id, input) => services.updateMCPInstall(id, input));
   ipcMain.handle('desktop:deleteMCPInstall', async (_event, id) => services.deleteMCPInstall(id));
+  // Plugin MCP servers
+  ipcMain.handle('desktop:listPluginMcpServers', () => services.listPluginMcpServers());
+  ipcMain.handle('desktop:setPluginMcpServerEnabled', (_event, input) => services.setPluginMcpServerEnabled(input));
   ipcMain.handle('desktop:createTaskWithFiles', async (_event, input) => {
     log('info', 'createTaskWithFiles', { prompt: input?.prompt?.slice(0, 50), files: input?.filePaths?.length });
     const r = await services.createTaskWithFiles(input);

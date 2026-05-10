@@ -113,8 +113,9 @@ export function ChatShell() {
       case 'result': {
         const r = (event as { type: 'result'; result: TaskResult }).result;
         const hasGeneratedFiles = allEventsRef.current.some(
-          e => e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
-            && (e as { input: Record<string, unknown> }).input?.file_path
+          e => (e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
+            && (e as { input: Record<string, unknown> }).input?.file_path)
+          || (e.type === 'artifact_recorded' && (e as { kind?: string }).kind === 'html')
         );
         if (r.artifacts && r.artifacts.length > 0) {
           if (streamRef.current.trim()) {
@@ -163,8 +164,16 @@ export function ChatShell() {
             e => e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
               && (e as { input: Record<string, unknown> }).input?.file_path
           );
+          let fp: string | undefined;
           if (writeCall) {
-            const fp = (writeCall as { input: Record<string, unknown> }).input.file_path as string;
+            fp = (writeCall as { input: Record<string, unknown> }).input.file_path as string;
+          } else {
+            const artifactEvent = allEventsRef.current.find(
+              e => e.type === 'artifact_recorded' && (e as { kind?: string }).kind === 'html'
+            );
+            if (artifactEvent) fp = (artifactEvent as { filePath?: string }).filePath;
+          }
+          if (fp) {
             setCanvasPreviewFile(fp);
             setCanvasExpanded(true);
             sidebarCollapse.setCollapsed(true);
@@ -495,8 +504,8 @@ export function ChatShell() {
     }
     setResult(null);
 
-    // Update thread title to match user's latest prompt
-    if (taskId) {
+    // Update thread title only on first user message (keep original topic as title)
+    if (taskId && messages.filter(m => m.role === 'user').length === 0) {
       api.updateThreadTitle(taskId, text.slice(0, 40)).catch(() => {});
     }
 
@@ -509,30 +518,14 @@ export function ChatShell() {
         } catch { /* ignore */ }
       }
 
-      // Build conversation context from prior messages for multi-turn continuity
-      let enrichedPrompt = text;
-      const priorMessages = messages.filter(m => m.role === 'user' || m.role === 'assistant');
-      if (priorMessages.length > 0) {
-        const contextLines: string[] = [];
-        let totalLen = 0;
-        const MAX_CONTEXT_LEN = 6000;
-        for (const msg of priorMessages.slice(-10)) {
-          const label = msg.role === 'user' ? '用户' : '助手';
-          const content = msg.content.length > 500 ? msg.content.slice(0, 500) + '...' : msg.content;
-          if (totalLen + content.length > MAX_CONTEXT_LEN) break;
-          totalLen += content.length;
-          contextLines.push(`${label}: ${content}`);
-        }
-        enrichedPrompt = `[上下文：之前的对话]\n${contextLines.join('\n')}\n\n[当前问题]\n${text}`;
-      }
-
+      // Send raw prompt — backend runner maintains history for multi-turn context
       let newTaskId: string;
       if (files && files.length > 0) {
         const filePaths = files.map(f => f.filePath);
-        const result = await api.createTaskWithFiles({ prompt: enrichedPrompt, filePaths });
+        const result = await api.createTaskWithFiles({ prompt: text, filePaths });
         newTaskId = result.taskId;
       } else {
-        const result = await api.createTask({ prompt: enrichedPrompt, materials: [] });
+        const result = await api.createTask({ prompt: text, materials: [] });
         newTaskId = result.taskId;
       }
 

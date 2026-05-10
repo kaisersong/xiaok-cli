@@ -77,6 +77,16 @@ async function createWindow(): Promise<BrowserWindow> {
   // Register skill tools with AI runner (for installing/uninstalling skills)
   services.registerSkillTools();
 
+  // Register MCP plugin tools (connects to MCP servers declared in ~/.xiaok/plugins)
+  let mcpDispose: (() => void) | undefined;
+  services.registerMcpTools().then(({ dispose }) => {
+    mcpDispose = dispose;
+  }).catch(() => {});
+
+  app.on('before-quit', () => {
+    mcpDispose?.();
+  });
+
   // Reminder IPC handlers
   ipcMain.handle('desktop:createReminder', (_event, input: { content: string; scheduleAt: number; timezone?: string }) => {
     return reminderScheduler.createReminder(input.content, input.scheduleAt, input.timezone);

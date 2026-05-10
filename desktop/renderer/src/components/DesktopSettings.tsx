@@ -1032,6 +1032,7 @@ interface MCPInstallConfig {
 
 function McpPane() {
   const [installs, setInstalls] = useState<MCPInstallConfig[]>([]);
+  const [pluginServers, setPluginServers] = useState<Array<{ name: string; pluginName: string; toolCount: number; connected: boolean; enabled: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState('');
@@ -1039,10 +1040,13 @@ function McpPane() {
   const [newArgs, setNewArgs] = useState('');
 
   const load = () => {
-    api.listMCPInstalls()
-      .then(setInstalls)
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    Promise.all([
+      api.listMCPInstalls().catch(() => []),
+      api.listPluginMcpServers().catch(() => []),
+    ]).then(([mcpInstalls, plugins]) => {
+      setInstalls(mcpInstalls);
+      setPluginServers(plugins);
+    }).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);
@@ -1085,6 +1089,35 @@ function McpPane() {
 
   return (
     <>
+      {pluginServers.length > 0 && (
+        <Section>
+          <SectionHeader icon={Plug}>插件 MCP 服务</SectionHeader>
+          <p className="text-xs text-[var(--c-text-secondary)] mb-4">
+            从 ~/.xiaok/plugins/ 自动发现的 MCP 服务器
+          </p>
+          <div className="flex flex-col gap-2">
+            {pluginServers.map(server => (
+              <Card key={server.name}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ${server.connected ? 'bg-green-500' : server.enabled ? 'bg-yellow-500' : 'bg-gray-300'}`} />
+                    <div>
+                      <div className="text-sm font-medium">{server.name}</div>
+                      <div className="text-xs text-[var(--c-text-secondary)]">
+                        {server.pluginName} · {server.toolCount} tools
+                      </div>
+                    </div>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded ${server.connected ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                    {server.connected ? '已连接' : '未连接'}
+                  </span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </Section>
+      )}
+
       <Section>
         <SectionHeader icon={Plug}>MCP 服务器</SectionHeader>
         <p className="text-xs text-[var(--c-text-secondary)] mb-4">

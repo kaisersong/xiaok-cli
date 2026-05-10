@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, extname, basename, dirname } from 'node:path';
 import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
 import { homedir, platform, arch, type } from 'node:os';
@@ -12,7 +12,7 @@ import { InProcessTaskRuntimeHost, type TaskRunner } from '../../src/runtime/tas
 import type { MaterialRecord, MaterialRole, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
 import type { Config, Message, MessageBlock, StreamChunk, ToolCall } from '../../src/types.js';
 import { buildToolList, ToolRegistry } from '../../src/ai/tools/index.js';
-import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName } from '../../src/ai/skills/loader.js';
+import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
 import { getConfigPath, loadConfig, saveConfig } from '../../src/utils/config.js';
 import { createIntentDelegationTools } from '../../src/ai/tools/intent-delegation.js';
@@ -24,6 +24,10 @@ import type { SkillInvocation } from './skill-runtime.js';
 import type { ReminderScheduler } from './reminder-scheduler.js';
 import type { Tool } from '../../src/types.js';
 import { maybePersistToolResult, buildViewForAPI, shouldAutoCompact, compactConversation, getContextLimit } from './context-manager.js';
+import { startMcpServerProcess, createStdioMcpTransport } from '../../src/ai/mcp/runtime/server-process.js';
+import { createMcpRuntimeClient } from '../../src/ai/mcp/runtime/client.js';
+import { buildMcpRuntimeTools } from '../../src/ai/mcp/runtime/tools.js';
+import { loadPlugins } from '../../src/platform/plugins/loader.js';
 
 // ---- Skill stats types ----
 
@@ -193,6 +197,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const registry = new ToolRegistry({ autoMode: true }, tools);
   const intentStore = new InMemoryIntentLedgerStore();
   intentStore.seedEmpty('desktop-session');
+
+  // Track plugin MCP server runtime state for settings UI
+  interface PluginMcpServerState {
+    name: string;
+    pluginName: string;
+    toolCount: number;
+    connected: boolean;
+    enabled: boolean;
+  }
+  const pluginMcpServers: PluginMcpServerState[] = [];
 
   // Register only intent_create (lightweight intent classification)
   // Skip intent_step_update, intent_stage_artifact, intent_salvage (pure tracking overhead)
@@ -460,6 +474,65 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       for (const tool of skillTools) {
         registry.registerTool(tool);
       }
+    },
+    async registerMcpTools(): Promise<{ dispose: () => void }> {
+      const disposers: Array<() => void> = [];
+      try {
+        const pluginsDir = join(homedir(), '.xiaok', 'plugins');
+        const plugins = await loadPlugins([pluginsDir]);
+        for (const plugin of plugins) {
+          if (!plugin.mcpServers?.length) continue;
+          for (const server of plugin.mcpServers) {
+            if (server.type !== 'stdio') continue;
+            try {
+              const proc = startMcpServerProcess(server.command, server.args ?? [], {
+                cwd: plugin.rootDir,
+                env: 'env' in server ? (server as { env?: Record<string, string> }).env : undefined,
+              });
+              const transport = createStdioMcpTransport(proc.child);
+              const client = createMcpRuntimeClient(transport);
+              await client.initialize();
+              const schemas = await client.listTools();
+              const mcpTools = buildMcpRuntimeTools(
+                { name: server.name, command: server.command },
+                { listTools: () => Promise.resolve(schemas), callTool: (name, input) => client.callTool(name, input), dispose: () => { transport.dispose(); proc.dispose(); } },
+                schemas,
+              );
+              for (const tool of mcpTools) {
+                registry.registerTool(tool);
+              }
+              disposers.push(() => { transport.dispose(); proc.dispose(); });
+              pluginMcpServers.push({
+                name: server.name,
+                pluginName: plugin.name,
+                toolCount: schemas.length,
+                connected: true,
+                enabled: true,
+              });
+            } catch (e) {
+              // MCP server failed to start/connect — record as disconnected
+              pluginMcpServers.push({
+                name: server.name,
+                pluginName: plugin.name,
+                toolCount: 0,
+                connected: false,
+                enabled: true,
+              });
+            }
+          }
+        }
+      } catch (e) {
+        // Plugin loading failed — non-fatal
+      }
+      return { dispose: () => { for (const d of disposers) { try { d(); } catch {} } } };
+    },
+    listPluginMcpServers(): PluginMcpServerState[] {
+      return pluginMcpServers;
+    },
+    setPluginMcpServerEnabled(input: { name: string; enabled: boolean }): PluginMcpServerState[] {
+      const server = pluginMcpServers.find(s => s.name === input.name);
+      if (server) server.enabled = input.enabled;
+      return pluginMcpServers;
     },
     async importMaterial(input: { taskId: string; filePath: string; role: MaterialRole }) {
       mkdirSync(options.dataRoot, { recursive: true });
@@ -1162,10 +1235,79 @@ xiaok 支持从 ClawHub 安装技能。当用户说"安装XX技能"时：
 
 const BASE_SYSTEM_PROMPT = buildSystemPrompt();
 
+/**
+ * Intent keyword mapping for auto skill matching.
+ * Maps Chinese/English intent keywords to skill names.
+ * Keywords are checked against the user prompt (case-insensitive).
+ */
+const INTENT_KEYWORD_MAP: Record<string, string[]> = {
+  'kai-report-creator': [
+    // Chinese
+    '生成报告', '写报告', '周报', '月报', '季报', '年报', '报告生成', '生成周报', '生成月报', '制作报告', '做报告', '写周报',
+    // English
+    'create report', 'generate report', 'weekly report', 'monthly report', 'report generation', 'business summary', 'data dashboard',
+  ],
+};
+
+/**
+ * 自动 skill 匹配：根据用户 prompt 中的关键词匹配 user-invocable skill。
+ * 优先使用显式 intent 关键词映射（支持中英文），fallback 到 description 关键词匹配。
+ */
+function matchSkillByIntent(prompt: string, skills: SkillMeta[]): SkillMeta | null {
+  const lowerPrompt = prompt.toLowerCase();
+
+  // Phase 1: Check explicit intent keyword map
+  for (const [skillName, keywords] of Object.entries(INTENT_KEYWORD_MAP)) {
+    const match = keywords.some(kw => lowerPrompt.includes(kw));
+    if (match) {
+      const skill = skills.find(s => s.name === skillName && s.userInvocable);
+      if (skill) return skill;
+    }
+  }
+
+  // Phase 2: Fallback to description keyword matching (English only)
+  for (const skill of skills) {
+    if (!skill.userInvocable) continue;
+    const keywords = extractKeywords(skill.description);
+    if (keywords.length === 0) continue;
+    if (keywords.some(kw => lowerPrompt.includes(kw))) return skill;
+  }
+  return null;
+}
+
+/**
+ * 从 skill description 中提取可用于 intent 匹配的关键词。
+ * 保留大写动词/名词，过滤停用词，转小写。
+ */
+function extractKeywords(description: string): string[] {
+  const stopWords = new Set(['use', 'when', 'the', 'user', 'wants', 'to', 'and', 'or', 'a', 'an', 'is', 'in', 'for', 'of', 'with', 'on', 'that', 'this', 'which', 'from', 'be', 'are', 'it', 'not', 'if', 'do', 'does', 'want', 'wants', 'should', 'would', 'could', 'can', 'may', 'might', 'will']);
+  const words = description.toLowerCase().split(/[\s,./]+/).filter(w => w.length > 3 && !stopWords.has(w));
+  // Deduplicate while preserving order
+  return [...new Set(words)];
+}
+
+/**
+ * Collect plugin skill directories as extraRoots for skill catalog.
+ * Scans each plugin under ~/.xiaok/plugins for a skills subdirectory.
+ */
+function getPluginSkillRoots(): string[] {
+  const pluginsDir = join(homedir(), '.xiaok', 'plugins');
+  if (!existsSync(pluginsDir)) return [];
+  const roots: string[] = [];
+  try {
+    for (const pluginName of readdirSync(pluginsDir)) {
+      const skillsDir = join(pluginsDir, pluginName, 'skills');
+      if (existsSync(skillsDir)) roots.push(skillsDir);
+    }
+  } catch { /* ignore */ }
+  return roots;
+}
+
 function createDesktopModelRunner(dataRoot: string): TaskRunner {
   const history: Message[] = [];
   const cwd = process.cwd();
-  let skillCatalog = createSkillCatalog(undefined, cwd);
+  const pluginSkillRoots = getPluginSkillRoots();
+  let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
   let skillsLoaded = false;
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
@@ -1271,6 +1413,21 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
         effectivePrompt = slashMatch.rest
           ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
           : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
+      }
+    } else {
+      // Auto-match: if user prompt matches a user-invocable skill, inject it automatically
+      const autoSkill = matchSkillByIntent(prompt, currentSkills);
+      if (autoSkill) {
+        skillNamesDetected = [autoSkill.name];
+        skillTriggerType = 'auto';
+        skillInvocation = buildSkillInvocation(autoSkill.name, skillCatalog, sessionId);
+        if (skillInvocation) {
+          appendTrace(dataRoot, {
+            ts: Date.now(), taskId: sessionId, skillName: autoSkill.name,
+            event: 'skill_invoked', details: `auto-match: ${prompt.slice(0, 80)}`,
+          });
+        }
+        effectivePrompt = `Execute skill "${autoSkill.name}": ${autoSkill.description}\n\nUser input: ${prompt}\n\nSkill content:\n${autoSkill.content}`;
       }
     }
 
@@ -1580,7 +1737,8 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
 function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Tool[], dataRoot: string): TaskRunner {
   const history: Message[] = [];
   const cwd = process.cwd();
-  let skillCatalog = createSkillCatalog(undefined, cwd);
+  const pluginSkillRoots = getPluginSkillRoots();
+  let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
   let skillsLoaded = false;
 
   // Register report_progress tool (TaskPanel progress reporting)
@@ -1674,6 +1832,21 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
         effectivePrompt = slashMatch.rest
           ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
           : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
+      }
+    } else {
+      // Auto-match: if user prompt matches a user-invocable skill, inject it automatically
+      const autoSkill = matchSkillByIntent(prompt, currentSkills);
+      if (autoSkill) {
+        skillNamesDetected = [autoSkill.name];
+        skillTriggerType = 'auto';
+        skillInvocation = buildSkillInvocation(autoSkill.name, skillCatalog, sessionId);
+        if (skillInvocation) {
+          appendTrace(dataRoot, {
+            ts: Date.now(), taskId: sessionId, skillName: autoSkill.name,
+            event: 'skill_invoked', details: `auto-match: ${prompt.slice(0, 80)}`,
+          });
+        }
+        effectivePrompt = `Execute skill "${autoSkill.name}": ${autoSkill.description}\n\nUser input: ${prompt}\n\nSkill content:\n${autoSkill.content}`;
       }
     }
 

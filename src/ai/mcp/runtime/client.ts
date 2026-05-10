@@ -16,6 +16,7 @@ export interface McpRuntimeResponse {
 
 export interface McpRuntimeTransport {
   send(message: McpRuntimeRequest): Promise<McpRuntimeResponse>;
+  notify?(message: { jsonrpc: '2.0'; method: string; params?: Record<string, unknown> }): void;
 }
 
 export function createMcpRuntimeClient(transport: McpRuntimeTransport) {
@@ -36,7 +37,13 @@ export function createMcpRuntimeClient(transport: McpRuntimeTransport) {
 
   return {
     async initialize(): Promise<unknown> {
-      return request('initialize', {});
+      const result = await request('initialize', {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'xiaok-desktop', version: '1.0.0' },
+      });
+      transport.notify?.({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} });
+      return result;
     },
 
     async listTools(): Promise<McpToolSchema[]> {
@@ -45,7 +52,7 @@ export function createMcpRuntimeClient(transport: McpRuntimeTransport) {
     },
 
     async callTool(name: string, input: Record<string, unknown>): Promise<string> {
-      const result = await request('tools/call', { name, input }) as {
+      const result = await request('tools/call', { name, arguments: input }) as {
         content?: Array<{ type: string; text?: string }>;
       };
       const text = result.content?.find((entry) => entry.type === 'text')?.text;
