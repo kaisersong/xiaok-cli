@@ -651,6 +651,13 @@ export class ScrollRegionManager {
       footerOutput += this.padBackgroundRow(cols);
     }
 
+    // Safety: clear any rows beyond statusBarRow that leaked from soft-wrapped
+    // content in narrow terminals (e.g. 40 columns with Chinese CJK characters).
+    const rows = this.config.rows;
+    for (let row = statusBarRow + 1; row <= rows + 2; row += 1) {
+      footerOutput += `\x1b[${row};1H${CLEAR_LINE}`;
+    }
+
     const summaryStartRow = this.getSummaryStartRow(inputStartRow, summaryLine);
     if (summaryStartRow >= 1 && summaryLine) {
       footerOutput += `\x1b[${summaryStartRow};1H`;
