@@ -103,7 +103,8 @@ async function runInstall(name: string, opts: { registry?: string; force?: boole
   const pluginsDir = getPluginsDir();
   const targetDir = join(pluginsDir, name);
 
-  if (existsSync(targetDir) && !opts.force) {
+  // Check if already installed (plugin.json must exist)
+  if (existsSync(targetDir) && existsSync(join(targetDir, 'plugin.json')) && !opts.force) {
     console.log(`Plugin "${name}" already installed. Use --force to reinstall.`);
     return;
   }
@@ -132,9 +133,14 @@ async function runInstall(name: string, opts: { registry?: string; force?: boole
   const tmpDir = join(pluginsDir, `.tmp-${name}-${Date.now()}`);
 
   try {
-    console.log(`  Cloning ${plugin.repo}...`);
+    // Normalize repo URL: short form → HTTPS URL
+    const cloneUrl = plugin.repo.startsWith('http')
+      ? plugin.repo
+      : `https://github.com/${plugin.repo}`;
+
+    console.log(`  Cloning ${cloneUrl}...`);
     exec(
-      `git clone --depth 1 --sparse ${plugin.repo} "${tmpDir}"`,
+      `git clone --depth 1 --sparse ${cloneUrl} "${tmpDir}"`,
       { stdio: 'pipe', timeout: 60_000 },
     );
 
