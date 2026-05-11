@@ -90,7 +90,7 @@ deleted file mode 100644
     expect(container.firstChild).toBeNull()
   })
 
-  it('falls back to plain text when diff exceeds byte limit', () => {
+  it('renders oversized diff with "Load more" button instead of fallback', () => {
     const hugeLines = Array(600).fill('+some very long line of code here with lots of content')
     const hugeDiff = `diff --git a/x b/x
 --- a/x
@@ -98,9 +98,39 @@ deleted file mode 100644
 @@ -1 +600 @@
 ${hugeLines.join('\n')}`
 
+    // New behavior: renders partial content + Load more button, NOT fallback
     const fallbackText = 'Diff too large - showing preview only'
-    render(<DiffView diff={hugeDiff} fallbackText={fallbackText} />)
-    expect(screen.getByText(fallbackText)).toBeInTheDocument()
+    const { container } = render(<DiffView diff={hugeDiff} fallbackText={fallbackText} />)
+    // No fallback text should appear
+    expect(screen.queryByText(fallbackText)).not.toBeInTheDocument()
+    // Should have rendered something (diffs-container)
+    expect(container.querySelector('diffs-container')).toBeTruthy()
+    // Load more button should exist
+    expect(screen.getByRole('button', { name: /load more/i })).toBeInTheDocument()
+  })
+
+  it('shows "Load more" when diff exceeds byte limit', () => {
+    // Create a diff just over MAX_DIFF_BYTES (50000)
+    const padding = '+'.repeat(500)
+    const lines = Array(110).fill(padding).join('\n')
+    const bigDiff = `diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +110 @@\n-old\n${lines}`
+    render(<DiffView diff={bigDiff} />)
+    // Should have at least one "Load more" button
+    const buttons = screen.queryAllByText(/load more/i)
+    expect(buttons.length).toBeGreaterThan(0)
+  })
+
+  it('renders all files in multi-file oversized diff', () => {
+    const fileContent = '+'.repeat(200)
+    const file1 = `diff --git a/f1 b/f1\n--- a/f1\n+++ b/f1\n@@ -1 +1 @@\n-old\n${fileContent}`
+    const file2 = `diff --git a/f2 b/f2\n--- a/f2\n+++ b/f2\n@@ -1 +1 @@\n-old\n${fileContent}`
+    const file3 = `diff --git a/f3 b/f3\n--- a/f3\n+++ b/f3\n@@ -1 +1 @@\n-old\n${fileContent}`
+    const multiDiff = `${file1}\n${file2}\n${file3}`
+
+    render(<DiffView diff={multiDiff} />)
+    // Should render all 3 files (each has a diffs-container)
+    const containers = document.querySelectorAll('diffs-container')
+    expect(containers.length).toBeGreaterThanOrEqual(2)
   })
 
   it('handles CRLF line endings without crashing', () => {

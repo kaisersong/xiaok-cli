@@ -1,9 +1,11 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState, useCallback } from 'react'
 import { PatchDiff } from '@pierre/diffs/react'
-// @ts-expect-error FileDiffOptions is exported from @pierre/diffs internal but not react
-import type { FileDiffOptions } from '@pierre/diffs/react'
 
 const MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace'
+
+const MAX_DIFF_BYTES = 50000
+const MAX_DIFF_LINES = 500
+const INITIAL_RENDER_BYTES = 30000
 
 interface DiffViewProps {
   diff: string
@@ -15,15 +17,11 @@ interface DiffViewProps {
   fallbackText?: string
 }
 
-const MAX_DIFF_BYTES = 50000
-const MAX_DIFF_LINES = 500
-
-/** Extract the unified diff portion from a mixed string (diff + trailing message) */
+/** Extract the unified diff portion from a mixed string */
 function extractDiffPatch(text: string): string {
   const startIdx = text.indexOf('diff --git')
   if (startIdx === -1) return text
   const fromDiff = text.substring(startIdx)
-  // Find the last line that looks like diff content
   const lines = fromDiff.split('\n')
   let lastDiffLine = lines.length - 1
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -34,7 +32,6 @@ function extractDiffPatch(text: string): string {
       lastDiffLine = i
       break
     }
-    // Non-diff content — truncate here
     lastDiffLine = i - 1
     break
   }
@@ -52,11 +49,21 @@ function countFileDiffs(text: string): number {
   return matches ? matches.length : 0
 }
 
-/** Extract the first file's diff from a multi-file patch */
-function extractFirstFile(patch: string): string {
-  const secondIdx = patch.indexOf('\ndiff --git ', 1)
-  if (secondIdx === -1) return patch
-  return patch.substring(0, secondIdx)
+function splitFiles(patch: string): string[] {
+  const parts: string[] = []
+  let idx = 0
+  while (idx < patch.length) {
+    const nextIdx = idx === 0
+      ? patch.indexOf('\ndiff --git ', idx)
+      : patch.indexOf('\ndiff --git ', idx + 1)
+    if (nextIdx === -1) {
+      parts.push(patch.substring(idx))
+      break
+    }
+    parts.push(patch.substring(idx, nextIdx + 1))
+    idx = nextIdx + 1
+  }
+  return parts.filter(p => p.trim())
 }
 
 export function DiffView({
@@ -71,27 +78,40 @@ export function DiffView({
   const isDark = typeof window !== 'undefined' &&
     window.matchMedia?.('(prefers-color-scheme: dark)').matches
 
+  const [showAll, setShowAll] = useState(false)
+
   const analysis = useMemo(() => {
-    if (!diff) return { valid: false, fileCount: 0, patch: '' }
+    if (!diff) return { valid: false, fileCount: 0, patch: '', oversized: false }
     const patch = extractDiffPatch(diff)
-    if (!isValidPatch(patch)) return { valid: false, fileCount: 0, patch }
+    if (!isValidPatch(patch)) return { valid: false, fileCount: 0, patch, oversized: false }
     const bytes = new Blob([patch]).size
     const lines = patch.split('\n').length
-    if (bytes > MAX_DIFF_BYTES || lines > MAX_DIFF_LINES) return { valid: false, fileCount: 0, patch }
-    return { valid: true, fileCount: countFileDiffs(patch), patch }
-  }, [diff])
+    const oversized = bytes > MAX_DIFF_BYTES || lines > MAX_DIFF_LINES
+
+    // When oversized, take initial portion for rendering
+    const renderPatch = oversized && !showAll
+      ? patch.substring(0, INITIAL_RENDER_BYTES)
+      : patch
+
+    return {
+      valid: true,
+      fileCount: countFileDiffs(patch),
+      patch: renderPatch,
+      fullPatch: patch,
+      oversized,
+      hasMore: oversized && !showAll,
+    }
+  }, [diff, showAll])
 
   if (!analysis.valid) {
     if (fallbackText) {
       return (
-        <pre
-          style={{
-            margin: 0, padding: '9px 10px', maxHeight, overflow: 'auto',
-            fontFamily: MONO, fontSize: compact ? 11 : 12,
-            lineHeight: compact ? '16px' : '18px',
-            color: 'var(--c-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-          }}
-        >
+        <pre style={{
+          margin: 0, padding: '9px 10px', maxHeight, overflow: 'auto',
+          fontFamily: MONO, fontSize: compact ? 11 : 12,
+          lineHeight: compact ? '16px' : '18px',
+          color: 'var(--c-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        }}>
           {fallbackText}
         </pre>
       )
@@ -111,18 +131,54 @@ export function DiffView({
 
   const style: React.CSSProperties = { maxHeight, overflow: 'auto', fontFamily: MONO }
 
-  // Multi-file: render first file with PatchDiff, note additional files
-  if (analysis.fileCount > 1) {
-    const firstFile = extractFirstFile(analysis.patch)
+  const handleLoadMore = useCallback(() => setShowAll(true), [])
+
+  // Render all files (multi-file support)
+  const files = splitFiles(analysis.patch)
+  if (files.length > 1) {
     return (
       <div>
-        <PatchDiff patch={firstFile} options={options} style={style} />
-        <div style={{ padding: '4px 10px', fontSize: 11, color: 'var(--c-text-muted)', borderTop: '0.5px solid var(--c-border-subtle)' }}>
-          +{analysis.fileCount - 1} more file{analysis.fileCount > 2 ? 's' : ''}
-        </div>
+        {files.map((file, i) => (
+          <PatchDiff key={i} patch={file} options={options} style={style} />
+        ))}
+        {analysis.hasMore && (
+          <div style={{ textAlign: 'center', padding: '8px 0' }}>
+            <button
+              onClick={handleLoadMore}
+              style={{
+                padding: '4px 16px', cursor: 'pointer',
+                border: '1px solid var(--c-border-subtle)',
+                background: 'var(--c-bg)', color: 'var(--c-text-primary)',
+                borderRadius: '4px', fontSize: '12px',
+              }}
+            >
+              Load remaining {Math.max(0, analysis.fileCount - files.length)} more file(s)…
+            </button>
+          </div>
+        )}
       </div>
     )
   }
 
-  return <PatchDiff patch={analysis.patch} options={options} style={style} />
+  // Single file
+  return (
+    <div>
+      <PatchDiff patch={analysis.patch} options={options} style={style} />
+      {analysis.hasMore && (
+        <div style={{ textAlign: 'center', padding: '8px 0' }}>
+          <button
+            onClick={handleLoadMore}
+            style={{
+              padding: '4px 16px', cursor: 'pointer',
+              border: '1px solid var(--c-border-subtle)',
+              background: 'var(--c-bg)', color: 'var(--c-text-primary)',
+              borderRadius: '4px', fontSize: '12px',
+            }}
+          >
+            Load more…
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
