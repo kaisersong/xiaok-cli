@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { estimateTokens, mergeUsage, shouldCompact, truncateToolResult } from '../../../src/ai/runtime/usage.js';
+import { estimateTokens, mergeUsage, shouldCompact, truncateToolResult, compactMessages } from '../../../src/ai/runtime/usage.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
@@ -178,5 +178,69 @@ describe('truncateToolResult with spill', () => {
     expect(result.content.length).toBeLessThan(20000);
     expect(result.content).toContain('truncated');
     expect(result.spillPath).toBeUndefined();
+  });
+});
+
+describe('compactMessages', () => {
+  it('uses LLM summary when provided', () => {
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: [{ type: 'text', text: `msg-${i}` }],
+    }));
+
+    const result = compactMessages(messages, '[fallback]', 2, 'LLM_SUMMARY');
+
+    expect(result.summary.text).toBe('LLM_SUMMARY');
+    expect(result.summary.replacedMessages).toBe(18);
+    // First message should be the compact marker with LLM summary
+    expect(result.messages[0].content[0]).toEqual({ type: 'text', text: 'LLM_SUMMARY' });
+    // Last 2 messages should be preserved
+    expect(result.messages.length).toBe(3);
+    expect(result.messages[2].content[0]).toEqual({ type: 'text', text: 'msg-19' });
+  });
+
+  it('falls back to local summary when llmSummary is not provided', () => {
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: [{ type: 'text', text: `msg-${i}` }],
+    }));
+
+    const result = compactMessages(messages, '[fallback]', 2);
+
+    // Local summary should contain some content
+    expect(result.summary.text.length).toBeGreaterThan(0);
+    // First message should be user role with local summary
+    expect(result.messages[0].role).toBe('user');
+    expect(result.messages[0].content[0].type).toBe('text');
+  });
+
+  it('preserves tool_use/result pairing across compact', () => {
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'list files' }] },
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'tu1', name: 'bash', input: { command: 'ls' } }],
+      },
+      {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'f1\nf2' }],
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+    ];
+
+    const result = compactMessages(messages, '[summary]', 2);
+
+    // With keepRecent=2, the last 2 messages are preserved
+    // tool_use and tool_result are both in the preserved portion
+    const toolUses = result.messages.flatMap(m =>
+      m.content.filter((c: any) => c.type === 'tool_use')
+    );
+    const toolResults = result.messages.flatMap(m =>
+      m.content.filter((c: any) => c.type === 'tool_result')
+    );
+    for (const tu of toolUses) {
+      const match = toolResults.some((tr: any) => tr.tool_use_id === tu.id);
+      expect(match).toBe(true);
+    }
   });
 });
