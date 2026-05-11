@@ -134,7 +134,7 @@ export async function compactConversation(
 
   if (!summary.trim()) return;
 
-  // Insert compact_boundary — ensure strict user/assistant alternation
+  // Insert compact_boundary with version marker — ensure strict user/assistant alternation
   const lastRole = messages[messages.length - 1]?.role;
   if (lastRole === 'user') {
     messages.push({
@@ -144,7 +144,7 @@ export async function compactConversation(
   }
   messages.push({
     role: 'user',
-    content: [{ type: 'text', text: `[compact_boundary]\n\n${summary}` }],
+    content: [{ type: 'text', text: `[compact_boundary v1 source:llm]\n\n${summary}` }],
   });
   messages.push({
     role: 'assistant',
