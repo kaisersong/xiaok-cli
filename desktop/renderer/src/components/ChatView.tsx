@@ -57,9 +57,28 @@ export function ChatView({
 }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+  const lastScrollTimeRef = useRef(0);
 
+  // Track whether user manually scrolled away from bottom
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = el;
+      isAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 50;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Throttled auto-scroll: only when at bottom, max once per 100ms
+  useEffect(() => {
+    if (!isAtBottomRef.current) return;
+    const now = Date.now();
+    if (now - lastScrollTimeRef.current < 100) return;
+    lastScrollTimeRef.current = now;
+    bottomRef.current?.scrollIntoView({ behavior: 'instant' as ScrollBehavior });
   }, [messages, streamingText, status]);
 
   // Keyboard shortcut: Ctrl+Shift+C to toggle canvas

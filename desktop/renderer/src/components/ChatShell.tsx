@@ -24,6 +24,7 @@ export function ChatShell() {
   const [result, setResult] = useState<TaskResult | null>(null);
   const [previousResults, setPreviousResults] = useState<TaskResult[]>([]);
   const [prompt, setPrompt] = useState('');
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [canvasExpanded, setCanvasExpanded] = useState(false);
   const [canvasPreviewFile, setCanvasPreviewFile] = useState<string | undefined>();
@@ -382,6 +383,7 @@ export function ChatShell() {
     setCurrentQuestion(null);
     setThread(null);
     setStatus('idle');
+    setLoadError(null);
 
     // If we have an initialPrompt from WelcomePage, pre-populate
     if (initialPrompt) {
@@ -471,7 +473,12 @@ export function ChatShell() {
           taskIds: [],
         });
       }
-    }).catch(() => {});
+    }).catch((err) => {
+      if (currentLoadIdRef.current === thisLoadId) {
+        setLoadError(err instanceof Error ? err.message : String(err));
+        setStatus('failed');
+      }
+    });
 
     return () => {
       // Mark that this load is cancelled
@@ -567,6 +574,27 @@ export function ChatShell() {
   useEffect(() => {
     return () => { unsubRef.current?.(); };
   }, []);
+
+  if (loadError) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 text-[var(--c-text-secondary)]">
+        <div className="text-red-500">
+          Failed to load thread: {loadError}
+        </div>
+        <button
+          type="button"
+          className="rounded bg-[var(--c-primary)] px-4 py-2 text-white hover:opacity-90"
+          onClick={() => {
+            setLoadError(null);
+            setStatus('idle');
+            setThread(null);
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   if (!thread) {
     return <div className="flex h-full items-center justify-center text-[var(--c-text-secondary)]">Loading...</div>;
