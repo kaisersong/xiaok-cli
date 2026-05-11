@@ -29,17 +29,10 @@ jobs:
       - name: Build desktop
         run: cd desktop && npm run build
 
-      - name: Package DMG & ZIP
-        run: cd desktop && npx electron-builder --config electron-builder.json --mac dmg zip --publish never
-
-      - name: Upload artifacts to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            desktop/release/*.dmg
-            desktop/release/*-mac.zip
+      - name: Package & Publish DMG + ZIP
+        run: cd desktop && npx electron-builder --config electron-builder.json --mac dmg zip --publish always
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
     runs-on: windows-latest
@@ -61,13 +54,7 @@ jobs:
       - name: Build desktop
         run: cd desktop && npm run build
 
-      - name: Package Windows installer
-        run: cd desktop && npx electron-builder --config electron-builder.json --win nsis --publish never
-
-      - name: Upload artifacts to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            desktop/release/*.exe
+      - name: Package & Publish Windows installer
+        run: cd desktop && npx electron-builder --config electron-builder.json --win nsis --publish always
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

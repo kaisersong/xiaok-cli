@@ -37,9 +37,9 @@ async function createWindow(): Promise<BrowserWindow> {
   // Register update IPC handlers
   ipcMain.handle('desktop:getUpdateStatus', () => {
     try {
-      return getUpdateStatus();
+      return { ...getUpdateStatus(), currentVersion: app.getVersion() };
     } catch (e) {
-      return { checking: false, available: false, downloading: false, downloaded: false, progress: 0, error: (e as Error).message };
+      return { checking: false, available: false, downloading: false, downloaded: false, progress: 0, error: (e as Error).message, currentVersion: app.getVersion() };
     }
   });
   ipcMain.handle('desktop:checkForUpdates', async () => {
