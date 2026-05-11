@@ -88,8 +88,8 @@ export class AgentSessionState {
     this.graph.recordBackgroundJob(jobId);
   }
 
-  forceCompact(placeholder = '[context compacted]'): CompactionRecord | null {
-    const compacted = compactMessages(this.graph.getMessages(), placeholder);
+  forceCompact(llmSummary: string, placeholder = '[context compacted]'): CompactionRecord | null {
+    const compacted = compactMessages(this.graph.getMessages(), placeholder, 2, llmSummary);
     this.graph.replaceMessages(compacted.messages);
 
     if (compacted.summary.replacedMessages <= 0) {

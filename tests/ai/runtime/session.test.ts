@@ -29,12 +29,27 @@ describe('AgentSessionState', () => {
     state.appendUserToolResults([{ type: 'tool_result', tool_use_id: 'tu_1', content: 'ok' }]);
     const compaction = state.forceCompact('[compacted]');
 
-    expect(compaction?.summary).toContain('[context compacted summary]');
+    expect(compaction?.summary).toContain('[compacted]');
     expect(compaction?.replacedMessages).toBe(1);
     expect(state.getCompactions()).toHaveLength(1);
     expect(state.getMessages()[0]?.role).toBe('user');
-    expect((state.getMessages()[0]?.content[0] as { text: string }).text).toContain('[context compacted summary]');
+    expect((state.getMessages()[0]?.content[0] as { text: string }).text).toContain('[compacted]');
     expect(state.getMessages()).toHaveLength(3);
+  });
+
+  it('forceCompact uses LLM summary over local fallback', () => {
+    const state = new AgentSessionState();
+
+    for (let i = 0; i < 5; i++) {
+      state.appendUserText(`Q${i}: ${'x'.repeat(100)}`);
+      state.appendAssistantBlocks([{ type: 'text', text: `A${i}: ${'y'.repeat(100)}` }]);
+    }
+
+    const compaction = state.forceCompact('LLM_GENERATED_SUMMARY');
+
+    expect(compaction?.summary).toBe('LLM_GENERATED_SUMMARY');
+    const firstMsg = state.getMessages()[0];
+    expect((firstMsg?.content[0] as { text: string }).text).toBe('LLM_GENERATED_SUMMARY');
   });
 
   it('exports prompt snapshot and approval metadata with the session snapshot', () => {

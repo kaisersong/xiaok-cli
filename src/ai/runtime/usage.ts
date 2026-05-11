@@ -110,6 +110,7 @@ export function compactMessages(
   messages: Message[],
   placeholder = '[context compacted]',
   keepRecent = 2,
+  llmSummary?: string,
 ): { messages: Message[]; summary: CompactionSummary } {
   if (messages.length <= keepRecent) {
     return {
@@ -158,7 +159,11 @@ export function compactMessages(
 
   const actualKeepRecent = keepRecent + additionalKeep;
   const compactedMessages = messages.slice(0, -actualKeepRecent);
-  const summary = summarizeMessagesForCompaction(compactedMessages);
+
+  // Use LLM summary if provided, otherwise generate local summary
+  const summary: CompactionSummary = llmSummary
+    ? { text: llmSummary, replacedMessages: compactedMessages.length }
+    : summarizeMessagesForCompaction(compactedMessages);
 
   return {
     messages: [
