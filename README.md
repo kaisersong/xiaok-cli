@@ -10,21 +10,21 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 
 ## Live Demo
 
-**Benchmark Results (v0.7.0):**
+**Benchmark Results (v0.7.3):**
 
-| Metric | xiaok v0.7.0 | Claude Code | Improvement |
+| Metric | xiaok v0.7.3 | Claude Code | Improvement |
 |--------|-------------|-------------|-------------|
 | **Autonomy Score** | 100% | 100% | — |
 | **Simple Q&A Latency** | 3.8s | 7.5s | **-49%** |
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
-**What's New in v0.7.0:**
+**What's New in v0.7.3:**
 
-- **Scheduled Tasks**: Create recurring tasks with flexible frequency (hourly, daily, weekly, cron)
-- **Desktop App v0.5.0**: Native macOS app with sidebar, canvas preview, auto-update support
-- **Compact Fix**: `/compact` now correctly preserves tool_use/tool_result pairs
-- **UI Improvements**: "Recent tasks" label, selection highlighting, fixed race condition on task switching
+- **Parallel Task Execution**: Multiple tasks run concurrently across threads without interference
+- **Desktop App v0.5.5**: MCP plugin integration, skill auto-match, multi-turn context, parallel tasks
+- **Report Renderer**: Fixed HTML escaping and date formatting in generated reports
+- **Windows Support**: Improved build with win release via GitHub Actions
 
 **Typical Use Cases:**
 
@@ -208,8 +208,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-0.5.0-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-0.5.0-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-0.5.5-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-0.5.5-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-0.5.5-setup.exe** — Windows installer (x64)
 
 ### Features
 
