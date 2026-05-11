@@ -9,7 +9,17 @@ permissions:
   contents: write
 
 jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub Release
+        run: gh release create "${{ github.ref_name }}" --title "Desktop ${{ github.ref_name }}" --generate-notes || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-mac:
+    needs: create-release
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -29,12 +39,16 @@ jobs:
       - name: Build desktop
         run: cd desktop && npm run build
 
-      - name: Package & Publish DMG + ZIP
-        run: cd desktop && npx electron-builder --config electron-builder.json --mac dmg zip --publish always
+      - name: Package DMG + ZIP
+        run: cd desktop && npx electron-builder --config electron-builder.json --mac dmg zip --publish never
+
+      - name: Upload to GitHub Release
+        run: gh release upload "${{ github.ref_name }}" desktop/release/*.dmg desktop/release/*-mac.zip desktop/release/latest-mac.yml --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
+    needs: create-release
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +68,10 @@ jobs:
       - name: Build desktop
         run: cd desktop && npm run build
 
-      - name: Package & Publish Windows installer
-        run: cd desktop && npx electron-builder --config electron-builder.json --win nsis --publish always
+      - name: Package Windows installer
+        run: cd desktop && npx electron-builder --config electron-builder.json --win nsis --publish never
+
+      - name: Upload to GitHub Release
+        run: gh release upload "${{ github.ref_name }}" desktop/release/*.exe desktop/release/latest.yml --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
