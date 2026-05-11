@@ -4,6 +4,7 @@ import { ChevronRight, ChevronDown, Loader2 } from 'lucide-react'
 import { useLocale } from '../contexts/LocaleContext'
 import { useTypewriter } from '../hooks/useTypewriter'
 import { CopyIconButton } from './CopyIconButton'
+import { stripAnsi } from '../lib/ansi'
 
 type Status = 'running' | 'success' | 'failed' | 'completed'
 
@@ -141,9 +142,9 @@ export function ExecutionCard({ variant, toolName, label, displayDescription, co
     ? (status === 'running' ? t.shellRunning : t.shellRanShort)
     : ''
   const displayOutput = output?.trim()
-    ? output
+    ? stripAnsi(output)
     : errorMessage?.trim()
-      ? errorMessage
+      ? stripAnsi(errorMessage)
       : undefined
   const previewTw = useTypewriter(preview, !smooth)
   const shellCodeTw = useTypewriter(variant === 'shell' && code ? code.trim() : '', !smooth)

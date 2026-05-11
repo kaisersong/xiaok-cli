@@ -54,3 +54,4 @@ __pycache__/
 /source.md
 /generate_*.py
 docs/skill-observability-design.md
+.qoder/
