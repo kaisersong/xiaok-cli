@@ -5,6 +5,9 @@ on:
     tags:
       - 'desktop-v*'
 
+permissions:
+  contents: write
+
 jobs:
   build-mac:
     runs-on: macos-14
@@ -27,9 +30,7 @@ jobs:
         run: cd desktop && npm run build
 
       - name: Package DMG & ZIP
-        run: cd desktop && npx electron-builder --config electron-builder.json --mac dmg zip
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: cd desktop && npx electron-builder --config electron-builder.json --mac dmg zip --publish never
 
       - name: Upload artifacts to release
         uses: softprops/action-gh-release@v2
@@ -61,9 +62,7 @@ jobs:
         run: cd desktop && npm run build
 
       - name: Package Windows installer
-        run: cd desktop && npx electron-builder --config electron-builder.json --win nsis
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: cd desktop && npx electron-builder --config electron-builder.json --win nsis --publish never
 
       - name: Upload artifacts to release
         uses: softprops/action-gh-release@v2
