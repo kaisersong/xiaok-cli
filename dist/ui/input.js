@@ -956,6 +956,9 @@ export class InputReader {
                 }
             };
             stdin.on('data', onData);
+            // Disable mouse tracking sequences before entering raw mode
+            // Ghostty and other terminals may have mouse tracking enabled
+            stdout.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l');
             if (this.renderer) {
                 stdin.setRawMode(true);
                 stdin.resume();
@@ -963,6 +966,7 @@ export class InputReader {
             }
             else {
                 stdout.write(prompt);
+                stdout.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l');
                 stdin.setRawMode(true);
                 stdin.resume();
             }

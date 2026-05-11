@@ -141,17 +141,51 @@ describe('InProcessTaskRuntimeHost', () => {
     await subscription.return?.();
   });
 
-  it('rejects creating a second active task', async () => {
-    const host = createHost(async () => undefined);
-    await host.createTask({
-      prompt: '生成 A 客户方案 PPT',
-      materials: [{ materialId: material.materialId }],
+  it('executes multiple tasks in parallel', async () => {
+    let resolveTask1: (() => void) | undefined;
+    let task2Ran = false;
+    const runner: TaskRunner = async ({ taskId, emitRuntimeEvent }) => {
+      if (taskId === 'task_1') {
+        await new Promise<void>((resolve) => { resolveTask1 = resolve; });
+      }
+      task2Ran = task2Ran || taskId === 'task_2';
+      emitRuntimeEvent({
+        type: 'receipt_emitted',
+        sessionId: `sess_${taskId.slice(-1)}`,
+        turnId: `turn_${taskId.slice(-1)}`,
+        intentId: `intent_${taskId.slice(-1)}`,
+        stepId: `step_${taskId.slice(-1)}`,
+        note: `${taskId} 完成`,
+      });
+    };
+    let taskOrd = 0;
+    const host = new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner,
+      now: () => 200,
+      createTaskId: () => `task_${++taskOrd}`,
+      createSessionId: () => `sess_${taskOrd}`,
     });
 
-    await expect(host.createTask({
-      prompt: '生成 B 客户方案 PPT',
-      materials: [{ materialId: material.materialId }],
-    })).rejects.toThrow(/active task/i);
+    await host.createTask({ prompt: '第一个任务', materials: [{ materialId: material.materialId }] });
+    await waitFor(() => host.isExecutingForTest('task_1'));
+
+    // Submit second task — should NOT cancel first, both run in parallel
+    await host.createTask({ prompt: '第二个任务', materials: [{ materialId: material.materialId }] });
+    await waitFor(async () => (await host.recoverTask('task_2')).snapshot.status === 'completed', 5000);
+
+    // task_1 should still be running
+    expect(host.isExecutingForTest('task_1')).toBe(true);
+    expect(task2Ran).toBe(true);
+
+    // Finish task_1
+    resolveTask1?.();
+    await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed', 5000);
+
+    // Both active tasks should now be cleared
+    const activeTasks = await host.getActiveTasks();
+    expect(activeTasks).toEqual([]);
   });
 
   it('can recover an in-flight auto-started task after restart without a confirmation question', async () => {
@@ -272,6 +306,93 @@ describe('InProcessTaskRuntimeHost', () => {
     expect(await host.getActiveTask()).toBeNull();
   });
 
+  it('passes history from completed task to the next runner call', async () => {
+    let callCount = 0;
+    let historyOnSecondCall: Array<{ role: string; content: string }> = [];
+    const runner: TaskRunner = async ({ history, emitRuntimeEvent }) => {
+      callCount++;
+      if (callCount === 2) {
+        historyOnSecondCall = history;
+      }
+      emitRuntimeEvent({
+        type: 'receipt_emitted',
+        sessionId: 'sess_1',
+        turnId: `turn_${callCount}`,
+        intentId: `intent_${callCount}`,
+        stepId: `step_${callCount}`,
+        note: `完成任务${callCount}`,
+      });
+    };
+    let taskOrd = 0;
+    const host = new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner,
+      now: () => 200,
+      createTaskId: () => `task_${++taskOrd}`,
+      createSessionId: () => `sess_${taskOrd}`,
+    });
+
+    await host.createTask({ prompt: '第一个任务', materials: [{ materialId: material.materialId }] });
+    await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed');
+
+    await host.createTask({ prompt: '第二个任务', materials: [{ materialId: material.materialId }] });
+    await waitFor(async () => callCount === 2);
+    await waitFor(async () => (await host.recoverTask('task_2')).snapshot.status === 'completed');
+
+    expect(historyOnSecondCall.length).toBe(2);
+    expect(historyOnSecondCall[0]).toEqual({ role: 'user', content: '第一个任务' });
+    expect(historyOnSecondCall[1].role).toBe('assistant');
+    expect(historyOnSecondCall[1].content).toContain('完成任务1');
+  });
+
+  it('passes history from cancelled task to the next runner call', async () => {
+    let callCount = 0;
+    let historyOnSecondCall: Array<{ role: string; content: string }> = [];
+    const runner: TaskRunner = async ({ signal, history, emitRuntimeEvent }) => {
+      callCount++;
+      if (callCount === 1) {
+        await new Promise<void>((resolve) => {
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        throw new Error('task cancelled');
+      }
+      historyOnSecondCall = history;
+      emitRuntimeEvent({
+        type: 'receipt_emitted',
+        sessionId: 'sess_2',
+        turnId: 'turn_2',
+        intentId: 'intent_2',
+        stepId: 'step_2',
+        note: '完成',
+      });
+    };
+    let taskOrd = 0;
+    const host = new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner,
+      now: () => 200,
+      createTaskId: () => `task_${++taskOrd}`,
+      createSessionId: () => `sess_${taskOrd}`,
+    });
+
+    await host.createTask({ prompt: '每天晚上11点同步mydocs', materials: [{ materialId: material.materialId }] });
+    await waitFor(() => host.isExecutingForTest('task_1'));
+    await host.cancelTask('task_1');
+    await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'cancelled');
+    // Let finally block complete
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    await host.createTask({ prompt: '不是mac定时任务，是xiaok定时任务', materials: [{ materialId: material.materialId }] });
+    await waitFor(async () => callCount === 2, 5000);
+    await waitFor(async () => (await host.recoverTask('task_2')).snapshot.status === 'completed', 5000);
+
+    expect(historyOnSecondCall.length).toBe(2);
+    expect(historyOnSecondCall[0]).toEqual({ role: 'user', content: '每天晚上11点同步mydocs' });
+    expect(historyOnSecondCall[1].role).toBe('assistant');
+  });
+
   function createHost(runner: TaskRunner): InProcessTaskRuntimeHost {
     return new InProcessTaskRuntimeHost({
       materialRegistry,
@@ -295,10 +416,10 @@ async function takeEvents(iterable: AsyncIterable<DesktopTaskEvent>, count: numb
   return events;
 }
 
-async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
+async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 1000): Promise<void> {
   const startedAt = Date.now();
   while (!await predicate()) {
-    if (Date.now() - startedAt > 1000) {
+    if (Date.now() - startedAt > timeoutMs) {
       throw new Error('timed out waiting for predicate');
     }
     await new Promise((resolve) => setTimeout(resolve, 5));

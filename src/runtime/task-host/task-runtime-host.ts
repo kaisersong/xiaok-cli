@@ -18,6 +18,11 @@ import type {
   UserAnswer,
 } from './types.js';
 
+export interface HistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface TaskRunnerInput {
   taskId: string;
   sessionId: string;
@@ -25,6 +30,7 @@ export interface TaskRunnerInput {
   materials: MaterialRecord[];
   understanding: TaskUnderstanding;
   signal: AbortSignal;
+  history: HistoryMessage[];
   emitRuntimeEvent(event: RuntimeEvent): void;
 }
 
@@ -56,7 +62,9 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private readonly subscribers = new Map<string, Set<LiveSubscription>>();
   private readonly mutationChains = new Map<string, Promise<void>>();
   private readonly cancellingTaskIds = new Set<string>();
-  private activeExecution: ActiveExecution | null = null;
+  private readonly history: HistoryMessage[] = [];
+  private readonly activeExecutions = new Map<string, ActiveExecution>();
+  private readonly executionPromises = new Map<string, Promise<void>>();
   private taskOrdinal = 0;
   private sessionOrdinal = 0;
 
@@ -66,11 +74,6 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
   }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
-    const activeTask = await this.options.snapshotStore.getActiveTask();
-    if (activeTask) {
-      throw new Error(`active task already exists: ${activeTask.taskId}`);
-    }
-
     const taskId = this.createTaskId();
     const sessionId = this.createSessionId();
     const materials = input.materials.map((item) => {
@@ -96,7 +99,8 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     await this.saveSnapshot(snapshot);
     await this.appendEvent(taskId, { type: 'task_started', taskId });
     await this.appendEvent(taskId, { type: 'understanding_updated', understanding });
-    void this.executeTask(taskId).catch(() => undefined);
+    const execPromise = this.executeTask(taskId).catch(() => undefined);
+    this.executionPromises.set(taskId, execPromise);
 
     return { taskId, understanding };
   }
@@ -164,9 +168,10 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     if (TERMINAL_STATUSES.has(snapshot.status)) {
       return;
     }
-    if (this.activeExecution?.taskId === taskId) {
+    const execution = this.activeExecutions.get(taskId);
+    if (execution) {
       this.cancellingTaskIds.add(taskId);
-      this.activeExecution.controller.abort();
+      execution.controller.abort();
     }
 
     const salvage: SalvageSummary = {
@@ -182,8 +187,13 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     this.closeSubscribers(taskId);
   }
 
+  async getActiveTasks(): Promise<{ taskId: string }[]> {
+    return this.options.snapshotStore.getActiveTasks();
+  }
+
   async getActiveTask(): Promise<{ taskId: string } | null> {
-    return this.options.snapshotStore.getActiveTask();
+    const tasks = await this.getActiveTasks();
+    return tasks[0] ?? null;
   }
 
   async recoverTask(taskId: string): Promise<{ snapshot: TaskSnapshot }> {
@@ -193,16 +203,13 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   }
 
   isExecutingForTest(taskId: string): boolean {
-    return this.activeExecution?.taskId === taskId;
+    return this.activeExecutions.has(taskId);
   }
 
   private async executeTask(taskId: string): Promise<void> {
     const snapshot = await this.requireSnapshot(taskId);
     if (!snapshot.understanding) {
       throw new Error(`task has no understanding: ${taskId}`);
-    }
-    if (this.activeExecution) {
-      throw new Error(`active execution already exists: ${this.activeExecution.taskId}`);
     }
 
     const materials = snapshot.materials.map((material) => {
@@ -213,7 +220,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       return record;
     });
     const controller = new AbortController();
-    this.activeExecution = { taskId, controller };
+    this.activeExecutions.set(taskId, { taskId, controller });
     await this.updateSnapshot(taskId, { status: 'running' });
 
     try {
@@ -224,6 +231,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         materials,
         understanding: snapshot.understanding,
         signal: controller.signal,
+        history: [...this.history],
         emitRuntimeEvent: (event) => {
           void this.appendRuntimeEvent(taskId, event);
         },
@@ -236,7 +244,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         this.closeSubscribers(taskId);
       }
     } catch (error) {
-      if ((await this.requireSnapshot(taskId)).status === 'cancelled') {
+      if (this.cancellingTaskIds.has(taskId)) {
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
@@ -253,9 +261,16 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       this.closeSubscribers(taskId);
       throw error;
     } finally {
-      if (this.activeExecution?.taskId === taskId) {
-        this.activeExecution = null;
-      }
+      // Always record history so subsequent tasks see prior context
+      const latest = await this.options.snapshotStore.recoverTask(taskId).catch(() => null);
+      const assistantNote = latest?.result?.summary
+        ?? (this.cancellingTaskIds.has(taskId) ? '任务已取消。' : '模型没有返回内容。');
+      this.history.push(
+        { role: 'user', content: snapshot.prompt },
+        { role: 'assistant', content: assistantNote },
+      );
+      this.activeExecutions.delete(taskId);
+      this.executionPromises.delete(taskId);
       this.cancellingTaskIds.delete(taskId);
     }
   }

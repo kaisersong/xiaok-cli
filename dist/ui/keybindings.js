@@ -133,7 +133,9 @@ export function identifyKey(data, offset) {
             if (key) {
                 return { key, consumed: i - offset + 1 };
             }
-            return { key: 'escape', consumed: 1 };
+            // Unknown CSI sequence - consume fully to prevent text pollution
+            // This handles mouse tracking sequences like ESC[<34;92;21M
+            return { key: 'unknown-csi', consumed: i - offset + 1 };
         }
         // Bare escape
         return { key: 'escape', consumed: 1 };

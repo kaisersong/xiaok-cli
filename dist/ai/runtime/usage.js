@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 export function estimateTokens(messages) {
     let chars = 0;
     for (const message of messages) {
@@ -141,10 +143,37 @@ export function compactMessages(messages, placeholder = '[context compacted]', k
     };
 }
 const DEFAULT_TOOL_RESULT_LIMIT = 8000;
-export function truncateToolResult(content, limit = DEFAULT_TOOL_RESULT_LIMIT) {
+export function truncateToolResult(content, limit = DEFAULT_TOOL_RESULT_LIMIT, options) {
     if (content.length <= limit)
-        return content;
+        return { content };
+    // Try to spill to disk first
+    if (options?.spillDir && options?.sessionId && options?.toolCallId) {
+        // Sanitize: remove path traversal chars, keep only alphanumeric, dash, underscore
+        const safeId = (s) => s.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+        const safeSessionId = safeId(options.sessionId) || 'unknown';
+        const safeToolCallId = safeId(options.toolCallId) || 'unknown';
+        const spillPath = join(options.spillDir, safeSessionId, `${safeToolCallId}.txt`);
+        const relativeHint = `.xiaok/spill/${safeSessionId}/${safeToolCallId}.txt`;
+        try {
+            mkdirSync(dirname(spillPath), { recursive: true });
+            writeFileSync(spillPath, content, 'utf-8');
+            const kept = content.slice(0, limit);
+            const omitted = content.length - limit;
+            return {
+                content: `${kept}\n...[truncated ${omitted} chars, 完整输出见 file://${relativeHint}]`,
+                spillPath,
+                hint: relativeHint,
+            };
+        }
+        catch {
+            // Fall back to pure truncation if spill fails
+            const kept = content.slice(0, limit);
+            const omitted = content.length - limit;
+            return { content: `${kept}\n...[truncated ${omitted} chars]` };
+        }
+    }
+    // Legacy behavior: pure truncation (no spill)
     const kept = content.slice(0, limit);
     const omitted = content.length - limit;
-    return `${kept}\n...[truncated ${omitted} chars]`;
+    return { content: `${kept}\n...[truncated ${omitted} chars]` };
 }

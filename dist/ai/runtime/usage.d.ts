@@ -17,4 +17,13 @@ export declare function compactMessages(messages: Message[], placeholder?: strin
     messages: Message[];
     summary: CompactionSummary;
 };
-export declare function truncateToolResult(content: string, limit?: number): string;
+export interface TruncatedResult {
+    content: string;
+    spillPath?: string;
+    hint?: string;
+}
+export declare function truncateToolResult(content: string, limit?: number, options?: {
+    sessionId?: string;
+    toolCallId?: string;
+    spillDir?: string;
+}): TruncatedResult;

@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { estimateTokens, mergeUsage, shouldCompact, truncateToolResult } from '../../../src/ai/runtime/usage.js';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 
 describe('runtime usage helpers', () => {
   it('estimates tokens from block content', () => {
@@ -28,8 +31,6 @@ describe('runtime usage helpers', () => {
   });
 
   it('preserves base values when next has zero tokens (message_delta scenario)', () => {
-    // message_start: { inputTokens: 5000, outputTokens: 0 }
-    // message_delta: { inputTokens: 0, outputTokens: 300 }
     const afterStart = mergeUsage(
       { inputTokens: 0, outputTokens: 0 },
       { inputTokens: 5000, outputTokens: 100 },
@@ -40,7 +41,6 @@ describe('runtime usage helpers', () => {
       afterStart,
       { inputTokens: 0, outputTokens: 300 },
     );
-    // inputTokens should be preserved from message_start
     expect(afterDelta.inputTokens).toBe(5000);
     expect(afterDelta.outputTokens).toBe(300);
   });
@@ -61,20 +61,122 @@ describe('runtime usage helpers', () => {
 describe('truncateToolResult', () => {
   it('returns content unchanged when under threshold', () => {
     const short = 'a'.repeat(7999);
-    expect(truncateToolResult(short)).toBe(short);
+    const result = truncateToolResult(short);
+    expect(result.content).toBe(short);
+    expect(result.spillPath).toBeUndefined();
+    expect(result.hint).toBeUndefined();
   });
 
-  it('truncates content exceeding threshold and appends notice', () => {
+  it('truncates content exceeding threshold (legacy: no spill)', () => {
     const long = 'a'.repeat(12000);
     const result = truncateToolResult(long);
-    expect(result.length).toBeLessThan(long.length);
-    expect(result).toContain('truncated');
+    expect(result.content.length).toBeLessThan(long.length);
+    expect(result.content).toContain('truncated');
+    expect(result.spillPath).toBeUndefined();
   });
 
   it('respects custom threshold', () => {
     const content = 'x'.repeat(200);
     const result = truncateToolResult(content, 100);
-    expect(result.length).toBeLessThan(200);
-    expect(result).toContain('truncated');
+    expect(result.content.length).toBeLessThan(200);
+    expect(result.content).toContain('truncated');
+  });
+
+  it('truncation boundary: content over threshold is truncated + notice appended', () => {
+    const threshold = 8000;
+    const text = 'x'.repeat(threshold);
+    const result = truncateToolResult(text, threshold);
+    expect(result.spillPath).toBeUndefined(); // no spill without options
+    expect(result.content.length).toBe(threshold); // exact threshold since content == threshold, not >
+
+    const overText = 'x'.repeat(threshold + 1000);
+    const overResult = truncateToolResult(overText, threshold);
+    expect(overResult.spillPath).toBeUndefined();
+    expect(overResult.content.length).toBeLessThan(overText.length);
+    expect(overResult.content.length).toBeGreaterThan(threshold); // includes notice
+    expect(overResult.content).toContain('truncated');
+  });
+});
+
+describe('truncateToolResult with spill', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = join(tmpdir(), `spill-test-${Date.now()}`);
+  });
+
+  afterEach(() => {
+    if (existsSync(tmpDir)) {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('small result: no spill, content unchanged', () => {
+    const result = truncateToolResult('short text', 8000, {
+      sessionId: 's1',
+      toolCallId: 'tc1',
+      spillDir: tmpDir,
+    });
+    expect(result.content).toBe('short text');
+    expect(result.spillPath).toBeUndefined();
+    expect(result.hint).toBeUndefined();
+  });
+
+  it('large result: truncated + spill file + hint', () => {
+    const longText = 'A'.repeat(20000);
+    const result = truncateToolResult(longText, 8000, {
+      sessionId: 's1',
+      toolCallId: 'tc1',
+      spillDir: tmpDir,
+    });
+
+    expect(result.content.length).toBeLessThan(longText.length);
+    expect(result.content).toContain('.xiaok/spill/s1/tc1');
+    expect(result.spillPath).toBeDefined();
+    expect(result.spillPath).toContain('s1');
+    expect(result.spillPath).toContain('tc1');
+    expect(existsSync(result.spillPath!)).toBe(true);
+    expect(readFileSync(result.spillPath!, 'utf-8')).toBe(longText);
+  });
+
+  it('toolCallId with traversal: sanitized, safe filename', () => {
+    const result = truncateToolResult('A'.repeat(20000), 8000, {
+      sessionId: 's1',
+      toolCallId: '../../../etc/passwd',
+      spillDir: tmpDir,
+    });
+    // Sanitized ID should not contain path traversal patterns
+    expect(result.spillPath).not.toContain('../');
+    // Session dir should be 's1'
+    expect(result.spillPath).toContain('s1/');
+    // Tool call ID should be sanitized (no path components)
+    expect(result.spillPath).toContain('etc_passwd.txt');
+    expect(existsSync(result.spillPath!)).toBe(true);
+    // Verify the actual file content
+    expect(readFileSync(result.spillPath!, 'utf-8')).toBe('A'.repeat(20000));
+  });
+
+  it('sessionId with traversal: also sanitized', () => {
+    const result = truncateToolResult('A'.repeat(20000), 8000, {
+      sessionId: '../other-session',
+      toolCallId: 'tc1',
+      spillDir: tmpDir,
+    });
+    // Should not have path traversal
+    expect(result.spillPath).not.toContain('../');
+    // File should exist at a safe location
+    expect(existsSync(result.spillPath!)).toBe(true);
+  });
+
+  it('write failure: fallback to truncation, no crash', () => {
+    const readOnlyDir = '/nonexistent/path/cannot/be/created';
+    const result = truncateToolResult('A'.repeat(20000), 8000, {
+      sessionId: 's1',
+      toolCallId: 'tc1',
+      spillDir: readOnlyDir,
+    });
+    expect(result.content.length).toBeLessThan(20000);
+    expect(result.content).toContain('truncated');
+    expect(result.spillPath).toBeUndefined();
   });
 });

@@ -84,25 +84,7 @@ async function createTaskWithRetry(input: {
   materials: Array<{ materialId: string; role?: MaterialRole }>;
   retries?: number;
 }): Promise<{ taskId: string; understanding: TaskUnderstanding }> {
-  try {
-    return await window.xiaokDesktop.createTask(input);
-  } catch (e) {
-    const msg = (e as Error).message || '';
-    if (msg.includes('active task already exists') && (input.retries ?? 0) < 2) {
-      log.info('createTask: stale active task detected, cancelling and retrying');
-      try {
-        const active = await window.xiaokDesktop.getActiveTask();
-        if (active?.taskId) {
-          await window.xiaokDesktop.cancelTask(active.taskId);
-          log.info('createTask: cancelled stale task', active.taskId);
-        }
-      } catch (cancelErr) {
-        log.warn('createTask: failed to cancel stale task', (cancelErr as Error).message);
-      }
-      return createTaskWithRetry({ ...input, retries: (input.retries ?? 0) + 1 });
-    }
-    throw e;
-  }
+  return await window.xiaokDesktop.createTask(input);
 }
 
 const log = createLogger('api-bridge');
@@ -256,26 +238,9 @@ export const api = {
     filePaths: string[];
   }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
     log.info('createTaskWithFiles', JSON.stringify({ prompt: input.prompt, filesCount: input.filePaths.length }));
-    try {
-      const result = await window.xiaokDesktop.createTaskWithFiles(input);
-      log.info('createTaskWithFiles ok', JSON.stringify({ taskId: result.taskId }));
-      return result;
-    } catch (e) {
-      const msg = (e as Error).message || '';
-      if (msg.includes('active task already exists')) {
-        log.info('createTaskWithFiles: stale active task, cancelling and retrying');
-        try {
-          const active = await window.xiaokDesktop.getActiveTask();
-          if (active?.taskId) {
-            await window.xiaokDesktop.cancelTask(active.taskId);
-          }
-        } catch { /* ignore */ }
-        const result = await window.xiaokDesktop.createTaskWithFiles(input);
-        log.info('createTaskWithFiles retry ok', JSON.stringify({ taskId: result.taskId }));
-        return result;
-      }
-      throw e;
-    }
+    const result = await window.xiaokDesktop.createTaskWithFiles(input);
+    log.info('createTaskWithFiles ok', JSON.stringify({ taskId: result.taskId }));
+    return result;
   },
 
   subscribeTask(

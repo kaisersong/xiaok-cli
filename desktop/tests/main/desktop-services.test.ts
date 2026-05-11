@@ -440,6 +440,71 @@ describe('desktop services', () => {
     const installs = await services.listMCPInstalls();
     expect(installs).toHaveLength(2);
   });
+  it('system prompt defaults to reminder_create for scheduled tasks', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join: pathJoin } = await import('node:path');
+    const sourceFile = readFileSync(pathJoin(__dirname, '../../electron/desktop-services.ts'), 'utf-8');
+
+    // System prompt should guide to reminder_create by default
+    expect(sourceFile).toContain('默认使用 reminder_create 工具');
+    expect(sourceFile).toContain('如果用户明确要求写脚本或使用系统定时，则遵循用户要求');
+    expect(sourceFile).toContain('reminder_create(content=');
+  });
+
+  it('preserves history for cancelled tasks so subsequent tasks see prior context', async () => {
+    let runCount = 0;
+    let historySeenOnSecondRun: Array<{ role: string; content: string }> = [];
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+      runner: async ({ signal, history, emitRuntimeEvent, sessionId }) => {
+        runCount++;
+        if (runCount === 1) {
+          // Simulate cancelled task: wait for abort
+          await new Promise<void>((resolve) => {
+            signal.addEventListener('abort', () => resolve(), { once: true });
+          });
+          throw new Error('task cancelled');
+        }
+        // Second run: capture the history the host passed in
+        historySeenOnSecondRun = history;
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_2',
+          intentId: 'intent_2',
+          stepId: 'step_2',
+          note: 'ok',
+        });
+      },
+    });
+
+    // First task - will be cancelled
+    const task1 = await services.createTask({
+      prompt: '创建定时任务，每天晚上11点同步mydocs',
+      materials: [],
+    });
+    await waitFor(async () => runCount === 1);
+    await services.cancelTask(task1.taskId);
+    await waitFor(async () => (await services.recoverTask(task1.taskId)).snapshot.status === 'cancelled', 5000);
+
+    // Let executeTask finally block finish recording history
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Second task
+    const task2 = await services.createTask({
+      prompt: '不是创建mac定时任务，是xiaok定时任务',
+      materials: [],
+    });
+    await waitFor(async () => runCount === 2, 5000);
+    await waitFor(async () => (await services.recoverTask(task2.taskId)).snapshot.status === 'completed', 5000);
+
+    // Core assertion: the runner received history from the cancelled first task
+    expect(historySeenOnSecondRun.length).toBe(2);
+    expect(historySeenOnSecondRun[0].role).toBe('user');
+    expect(historySeenOnSecondRun[0].content).toContain('每天晚上11点同步mydocs');
+    expect(historySeenOnSecondRun[1].role).toBe('assistant');
+  });
 });
 
 async function collectFirst<T>(events: AsyncIterable<T>, count: number): Promise<T[]> {
@@ -453,10 +518,10 @@ async function collectFirst<T>(events: AsyncIterable<T>, count: number): Promise
   return collected;
 }
 
-async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
+async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 1000): Promise<void> {
   const startedAt = Date.now();
   while (!await predicate()) {
-    if (Date.now() - startedAt > 1000) {
+    if (Date.now() - startedAt > timeoutMs) {
       throw new Error('timed out waiting for predicate');
     }
     await new Promise((resolve) => setTimeout(resolve, 5));

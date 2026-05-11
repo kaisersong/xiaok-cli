@@ -1,4 +1,5 @@
 import type { MessageBlock, ModelAdapter, ToolCall, ToolExecutionContext } from '../../types.js';
+import { join } from 'node:path';
 import type { ToolRegistry } from '../tools/index.js';
 import type { PromptSnapshot } from '../prompts/types.js';
 import { AgentRunController } from './controller.js';
@@ -221,10 +222,16 @@ export class AgentRuntime {
             toolName: toolCall.name,
             ok,
           });
+          const sessionSnapshot = this.session.exportSnapshot();
+          const truncated = truncateToolResult(result, undefined, {
+            sessionId: sessionSnapshot.sessionId,
+            toolCallId: toolCall.id,
+            spillDir: join(sessionSnapshot.cwd, '.xiaok', 'spill'),
+          });
           toolResults.push({
             type: 'tool_result',
             tool_use_id: toolCall.id,
-            content: truncateToolResult(result),
+            content: truncated.content,
             is_error: !ok,
           });
         }

@@ -1,9 +1,9 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ActiveTaskRef, TaskSnapshot } from './types.js';
 
 interface SnapshotIndex {
-  activeTaskId: string | null;
+  activeTaskIds: string[];
 }
 
 const TERMINAL_STATUSES = new Set<TaskSnapshot['status']>(['completed', 'failed', 'cancelled']);
@@ -13,15 +13,30 @@ export class FileTaskSnapshotStore {
 
   async save(snapshot: TaskSnapshot): Promise<void> {
     await mkdir(this.snapshotDir(), { recursive: true });
-    await writeFile(this.snapshotPath(snapshot.taskId), JSON.stringify(snapshot, null, 2), 'utf8');
+    const target = this.snapshotPath(snapshot.taskId);
+    const tmp = `${target}.tmp`;
+    await writeFile(tmp, JSON.stringify(snapshot, null, 2), 'utf8');
+    await rename(tmp, target);
 
-    const activeTaskId = TERMINAL_STATUSES.has(snapshot.status) ? null : snapshot.taskId;
-    await this.saveIndex({ activeTaskId });
+    const index = await this.loadIndex();
+    const ids = new Set(index.activeTaskIds);
+    if (TERMINAL_STATUSES.has(snapshot.status)) {
+      ids.delete(snapshot.taskId);
+    } else {
+      ids.add(snapshot.taskId);
+    }
+    await this.saveIndex({ activeTaskIds: [...ids] });
   }
 
-  async getActiveTask(): Promise<ActiveTaskRef | null> {
+  async getActiveTasks(): Promise<ActiveTaskRef[]> {
     const index = await this.loadIndex();
-    return index.activeTaskId ? { taskId: index.activeTaskId } : null;
+    return index.activeTaskIds.map(taskId => ({ taskId }));
+  }
+
+  /** @deprecated Use getActiveTasks() — kept for backward compat */
+  async getActiveTask(): Promise<ActiveTaskRef | null> {
+    const tasks = await this.getActiveTasks();
+    return tasks[0] ?? null;
   }
 
   async recoverTask(taskId: string): Promise<TaskSnapshot | null> {
@@ -38,25 +53,35 @@ export class FileTaskSnapshotStore {
 
   async clearActiveTask(taskId: string): Promise<void> {
     const index = await this.loadIndex();
-    if (index.activeTaskId === taskId) {
-      await this.saveIndex({ activeTaskId: null });
+    const ids = new Set(index.activeTaskIds);
+    if (ids.has(taskId)) {
+      ids.delete(taskId);
+      await this.saveIndex({ activeTaskIds: [...ids] });
     }
   }
 
   private async loadIndex(): Promise<SnapshotIndex> {
     try {
       const raw = await readFile(this.indexPath(), 'utf8');
-      const parsed = JSON.parse(raw) as Partial<SnapshotIndex>;
-      return { activeTaskId: parsed.activeTaskId ?? null };
-    } catch (error) {
-      // Handle both missing file (ENOENT) and corrupted/empty file (SyntaxError)
-      return { activeTaskId: null };
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      // Migrate old format { activeTaskId: "xxx" } → { activeTaskIds: ["xxx"] }
+      if ('activeTaskId' in parsed && !('activeTaskIds' in parsed)) {
+        const old = parsed.activeTaskId as string | null;
+        return { activeTaskIds: old ? [old] : [] };
+      }
+      const ids = parsed.activeTaskIds;
+      return { activeTaskIds: Array.isArray(ids) ? ids as string[] : [] };
+    } catch {
+      return { activeTaskIds: [] };
     }
   }
 
   private async saveIndex(index: SnapshotIndex): Promise<void> {
     await mkdir(this.rootDir, { recursive: true });
-    await writeFile(this.indexPath(), JSON.stringify(index, null, 2), 'utf8');
+    const target = this.indexPath();
+    const tmp = `${target}.tmp`;
+    await writeFile(tmp, JSON.stringify(index, null, 2), 'utf8');
+    await rename(tmp, target);
   }
 
   private snapshotDir(): string {

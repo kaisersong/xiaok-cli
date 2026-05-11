@@ -150,6 +150,8 @@ export interface TaskRuntimeHost {
   subscribeTask(taskId: string): AsyncIterable<DesktopTaskEvent>;
   answerQuestion(input: { taskId: string; answer: UserAnswer }): Promise<void>;
   cancelTask(taskId: string): Promise<void>;
+  getActiveTasks(): Promise<ActiveTaskRef[]>;
+  /** @deprecated Use getActiveTasks() */
   getActiveTask(): Promise<ActiveTaskRef | null>;
   recoverTask(taskId: string): Promise<{ snapshot: TaskSnapshot }>;
 }

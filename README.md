@@ -12,19 +12,20 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 
 **Benchmark Results (v0.7.3):**
 
-| Metric | xiaok v0.7.3 | Claude Code | Improvement |
+| Metric | xiaok v0.7.4 | Claude Code | Improvement |
 |--------|-------------|-------------|-------------|
 | **Autonomy Score** | 100% | 100% | — |
+
 | **Simple Q&A Latency** | 3.8s | 7.5s | **-49%** |
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
-**What's New in v0.7.3:**
+**What's New in v0.7.4:**
 
-- **Parallel Task Execution**: Multiple tasks run concurrently across threads without interference
-- **Desktop App v0.5.5**: MCP plugin integration, skill auto-match, multi-turn context, parallel tasks
-- **Report Renderer**: Fixed HTML escaping and date formatting in generated reports
-- **Windows Support**: Improved build with win release via GitHub Actions
+- **Mouse Tracking Fix**: Prevent terminal mouse tracking sequences from polluting the input bar (Ghostty, iTerm2)
+- **Unknown CSI Handling**: Unrecognized ANSI escape sequences are now fully consumed instead of leaking as text
+- **Tool Result Spill**: Large tool results are spilled to disk instead of silently truncated
+- **Desktop Reminder Improvements**: Better daily/weekly reminder creation, removed unused intent delegation overhead
 
 **Typical Use Cases:**
 
@@ -465,6 +466,10 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v0.7.4** — Terminal mouse tracking fix and tool result spill: disabled mouse tracking sequences on raw mode entry to prevent Ghostty/iTerm2 from polluting the input bar, fully consume unrecognized CSI escape sequences, spill large tool results to disk instead of silently truncating, and improve desktop reminder handling.
+
+**v0.7.3** — Parallel task execution and desktop v0.5.5: multiple tasks run concurrently across threads, desktop MCP plugin integration, skill auto-match, multi-turn context, and Windows release via GitHub Actions.
 
 **v0.6.21** — Terminal stdout EPIPE recovery and second-turn footer preservation: reproduced the installed-package failure from the user's transcript, where `[xiaok] UI 输出已停用：stdout_stream_error (Error: write EPIPE)` ended the scroll region and left follow-up `Thinking` frames without the input/status footer; stdout EPIPE now falls back to the original stderr stream instead of suspending the TUI, with a red/green injected-EPIPE chat runtime regression, a short-viewport `file:///... report-creator` follow-up test, the 26-scenario tmux E2E suite, and updated bugfix documentation covering the incorrect test approaches that missed this path.
 

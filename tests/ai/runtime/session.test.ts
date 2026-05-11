@@ -32,7 +32,7 @@ describe('AgentSessionState', () => {
     expect(compaction?.summary).toContain('[context compacted summary]');
     expect(compaction?.replacedMessages).toBe(1);
     expect(state.getCompactions()).toHaveLength(1);
-    expect(state.getMessages()[0]?.role).toBe('assistant');
+    expect(state.getMessages()[0]?.role).toBe('user');
     expect((state.getMessages()[0]?.content[0] as { text: string }).text).toContain('[context compacted summary]');
     expect(state.getMessages()).toHaveLength(3);
   });

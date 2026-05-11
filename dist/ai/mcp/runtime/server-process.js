@@ -1,7 +1,9 @@
 import { spawn } from 'child_process';
-export function startMcpServerProcess(command, args = []) {
+export function startMcpServerProcess(command, args = [], opts) {
     const child = spawn(command, args, {
         stdio: 'pipe',
+        cwd: opts?.cwd,
+        env: opts?.env ? { ...process.env, ...opts.env } : undefined,
         windowsVerbatimArguments: process.platform === 'win32' && command.toLowerCase() === 'cmd.exe',
     });
     return {
@@ -44,20 +46,25 @@ export function createStdioMcpTransport(child) {
     const pending = new Map();
     const handleStdout = (chunk) => {
         buffer += chunk.toString();
-        const messages = decodeMcpFrames(buffer);
-        if (messages.length === 0) {
-            return;
-        }
-        let consumed = 0;
-        for (const message of messages) {
-            consumed += Buffer.byteLength(encodeMcpMessage(message), 'utf8');
-            if (typeof message.id === 'number' && pending.has(message.id)) {
-                const request = pending.get(message.id);
-                pending.delete(message.id);
-                request.resolve(message);
+        // NDJSON: split on newlines
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep incomplete last line in buffer
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed)
+                continue;
+            try {
+                const message = JSON.parse(trimmed);
+                if (typeof message.id === 'number' && pending.has(message.id)) {
+                    const request = pending.get(message.id);
+                    pending.delete(message.id);
+                    request.resolve(message);
+                }
+            }
+            catch {
+                // Skip non-JSON lines (e.g. server logs)
             }
         }
-        buffer = buffer.slice(consumed);
     };
     const failPending = (error) => {
         for (const request of pending.values()) {
@@ -78,8 +85,11 @@ export function createStdioMcpTransport(child) {
         send(message) {
             return new Promise((resolve, reject) => {
                 pending.set(message.id, { resolve, reject });
-                child.stdin.write(encodeMcpMessage(message));
+                child.stdin.write(JSON.stringify(message) + '\n');
             });
+        },
+        notify(message) {
+            child.stdin.write(JSON.stringify(message) + '\n');
         },
         dispose() {
             failPending(new Error('MCP server transport disposed before responding'));

@@ -49,7 +49,7 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.cmd === '/remind')).toBe(false);
     expect(commands.some((command) => command.cmd === '/reminders')).toBe(false);
     expect(commands.some((command) => command.cmd === '/reminder-cancel')).toBe(false);
-    expect(commands.length).toBe(14);
+    expect(commands.length).toBe(15);
   });
 
   it('should include skills in command list', () => {
@@ -65,7 +65,7 @@ describe('getSlashCommands', () => {
     const commands = getSlashCommands(skills);
 
     expect(commands).toContainEqual({ cmd: '/test-skill', desc: 'A test skill' });
-    expect(commands.length).toBe(15); // 14 base + 1 skill
+    expect(commands.length).toBe(16); // 15 base + 1 skill
   });
 
   it('should sort commands alphabetically', () => {
@@ -103,7 +103,7 @@ describe('getSlashCommands', () => {
 
     const commands = getSlashCommands(skills);
 
-    expect(commands.length).toBe(17); // 14 base + 3 skills
+    expect(commands.length).toBe(18); // 15 base + 3 skills
   });
 
   it('builds base slash commands from shared chat command metadata rather than a local constant table', () => {
@@ -735,6 +735,41 @@ describe('InputReader', () => {
 
       harness.restore();
     });
+
+    it('emits mouse tracking disable sequences before entering raw mode', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+
+      const pending = reader.read('> ');
+      // Check that mouse tracking disable sequences were emitted
+      expect(harness.output.raw).toContain('\x1b[?1000l');
+      expect(harness.output.raw).toContain('\x1b[?1002l');
+      expect(harness.output.raw).toContain('\x1b[?1003l');
+      expect(harness.output.raw).toContain('\x1b[?1006l');
+
+      harness.send('\x03');
+      await expect(pending).resolves.toBeNull();
+
+      harness.restore();
+    });
+
+    it('does not pollute input text when mouse tracking sequences arrive as input', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+
+      const pending = reader.read('> ');
+      // SGR mouse tracking format: ESC[<button;x;yM (e.g., mouse move)
+      harness.send('\x1b[<34;92;21M');
+      harness.send('hello');
+      harness.send('\r');
+
+      await expect(pending).resolves.toBe('hello');
+      // Mouse sequence should not appear in screen text
+      expect(harness.screen.text()).not.toContain('[<');
+      expect(harness.screen.text()).not.toContain('34;92');
+
+      harness.restore();
+    });
   });
 
   describe('slash command menu', () => {
@@ -804,8 +839,8 @@ describe('InputReader', () => {
 
       const commands = getSlashCommands(skills);
 
-      // 14 base commands + 20 skills = 34 total
-      expect(commands.length).toBe(34);
+      // 15 base commands + 20 skills = 35 total
+      expect(commands.length).toBe(35);
     });
 
     it('should preserve command descriptions', () => {

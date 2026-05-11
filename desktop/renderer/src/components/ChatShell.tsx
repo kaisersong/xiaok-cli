@@ -118,14 +118,16 @@ export function ChatShell() {
           || (e.type === 'artifact_recorded' && (e as { kind?: string }).kind === 'html')
         );
         if (r.artifacts && r.artifacts.length > 0) {
-          if (streamRef.current.trim()) {
+          const finalContent = streamRef.current.trim();
+          // Clear streaming FIRST to prevent one-frame duplicate display
+          streamRef.current = '';
+          setStreamingText('');
+          if (finalContent) {
             setMessages(prev => [...prev, {
               id: `msg-${Date.now()}-assistant`,
               role: 'assistant',
-              content: streamRef.current,
+              content: finalContent,
             }]);
-            streamRef.current = '';
-            setStreamingText('');
           }
           setResult(r);
           setStatus('completed');
@@ -135,8 +137,11 @@ export function ChatShell() {
           }
         } else {
           // Desktop tasks: artifacts is [], but still set result for generatedFiles extraction
-          setResult(r);
           const finalText = streamRef.current || r.summary;
+          // Clear streaming FIRST to prevent one-frame duplicate display
+          streamRef.current = '';
+          setStreamingText('');
+          setResult(r);
           if (finalText.trim()) {
             setMessages(prev => [...prev, {
               id: `msg-${Date.now()}-assistant`,
@@ -144,8 +149,6 @@ export function ChatShell() {
               content: finalText,
             }]);
           }
-          streamRef.current = '';
-          setStreamingText('');
           setStatus('idle');
         }
         // Seal tool-steps group
@@ -510,14 +513,6 @@ export function ChatShell() {
     }
 
     try {
-      // Cancel any existing active task before creating new one
-      const activeTask = await api.getActiveTask();
-      if (activeTask && activeTask.taskId !== thread?.currentTaskId) {
-        try {
-          await api.cancelTask(activeTask.taskId);
-        } catch { /* ignore */ }
-      }
-
       // Send raw prompt — backend runner maintains history for multi-turn context
       let newTaskId: string;
       if (files && files.length > 0) {

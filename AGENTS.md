@@ -22,6 +22,13 @@
 - Run an adversarial review against that design before implementation.
 - Write the test cases after the review and before production code.
 - Only write or edit production code after the docs, adversarial review, and tests are in place.
+- **核心/高风险改动强制执行**：涉及以下场景时，方案+对抗性评审不可跳过：
+  - 跨层架构变更（如数据流、生命周期管理、状态归属变更）
+  - 影响多文件的接口/协议变更
+  - 并发、竞态、信号传递相关逻辑
+  - 会话上下文、历史记录等影响用户体验连续性的机制
+  - Bug 修复涉及根因不明确或曾经回归过的问题
+- 对抗性评审要点：审查边界条件、并发竞态、取消/异常路径、测试是否真正覆盖核心行为（而非只覆盖表面流程）。
 
 ## Current Release Notes
 

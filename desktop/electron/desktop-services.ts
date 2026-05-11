@@ -195,8 +195,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
-  const intentStore = new InMemoryIntentLedgerStore();
-  intentStore.seedEmpty('desktop-session');
+  // [2026-05-10] Intent delegation disabled — passive tracking only, no functional value.
+  // See docs/2026-05-10-desktop-intent-delegation-removal.md
+  // const intentStore = new InMemoryIntentLedgerStore();
+  // intentStore.seedEmpty('desktop-session');
+  // const intentTools = createIntentDelegationTools({
+  //   ledgerStore: intentStore as never,
+  //   sessionId: 'desktop-session',
+  //   instanceId: 'desktop-instance',
+  // });
+  // registry.registerTool(intentTools[0]);
 
   // Track plugin MCP server runtime state for settings UI
   interface PluginMcpServerState {
@@ -207,15 +215,6 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     enabled: boolean;
   }
   const pluginMcpServers: PluginMcpServerState[] = [];
-
-  // Register only intent_create (lightweight intent classification)
-  // Skip intent_step_update, intent_stage_artifact, intent_salvage (pure tracking overhead)
-  const intentTools = createIntentDelegationTools({
-    ledgerStore: intentStore as never,
-    sessionId: 'desktop-session',
-    instanceId: 'desktop-instance',
-  });
-  registry.registerTool(intentTools[0]); // only intent_create
 
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
@@ -1131,7 +1130,6 @@ function buildSystemPrompt(): string {
 - Grep: 搜索文件内容
 - Glob: 按模式匹配查找文件
 - skill: 调用已安装的 skill
-- intent_create: 分析用户意图，确定任务类型和执行方向
 - reminder_create: 创建定时提醒（当用户说"定时任务"、"提醒我"、"过X分钟提醒"时使用）
 - reminder_list: 列出所有活跃的提醒
 - reminder_cancel: 取消一个提醒
@@ -1144,12 +1142,13 @@ function buildSystemPrompt(): string {
 
 ## 定时提醒功能
 
-当用户说"帮我创建定时任务"、"提醒我XX"、"过X分钟提醒我"等时，使用 reminder_create 工具。
-不要写脚本或使用 cron 命令，xiaok desktop 有内置的提醒功能。
+xiaok desktop 内置了提醒系统。涉及"定时"、"提醒"、"每天"、"每周"、"定期"的需求，默认使用 reminder_create 工具，不需要写 shell 脚本、cron、launchd 等系统级定时机制。
+如果用户明确要求写脚本或使用系统定时，则遵循用户要求。
 
 示例：
 - "30分钟后提醒我发日报" → reminder_create(content="发日报", schedule_at=<当前时间+30分钟>)
 - "明天早上9点提醒我开会" → reminder_create(content="开会", schedule_at=<明天9点的时间戳>)
+- "每天晚上11点同步代码" → reminder_create(content="同步代码到GitHub", schedule_at=<今天23:00的时间戳>)
 
 时间戳使用毫秒级 UNIX timestamp。
 
@@ -1185,17 +1184,6 @@ xiaok 支持从 ClawHub 安装技能。当用户说"安装XX技能"时：
 1. 确认收到附件
 2. 读取附件内容进行分析
 3. 基于附件内容回答问题或执行任务
-
-## 意图识别规则
-
-收到用户请求时，用 intent_create 工具快速识别意图类型：
-- raw_intent: 用户原始请求
-- intent_type: generate(生成) / revise(修改) / summarize(总结) / analyze(分析)
-- deliverable: 期望交付物描述
-- risk_tier: low/medium/high
-- template_id: generate_v1 / revise_v1 / summarize_v1 / analyze_v1
-
-识别后直接执行，不要等待额外确认。
 
 ## Slash 命令（技能调用）注意事项
 
@@ -1253,6 +1241,37 @@ const INTENT_KEYWORD_MAP: Record<string, string[]> = {
  * 自动 skill 匹配：根据用户 prompt 中的关键词匹配 user-invocable skill。
  * 优先使用显式 intent 关键词映射（支持中英文），fallback 到 description 关键词匹配。
  */
+/** Convert tool name to user-friendly label for TaskPanel auto-progress */
+function toolNameToLabel(name: string, input?: Record<string, unknown>): string {
+  // MCP tools: extract server and action from mcp__server__action pattern
+  const mcpMatch = name.match(/^mcp__([^_]+(?:-[^_]+)*)__(.+)$/);
+  if (mcpMatch) {
+    const action = mcpMatch[2].replace(/_/g, ' ');
+    return action.charAt(0).toUpperCase() + action.slice(1);
+  }
+  // Built-in tools
+  switch (name) {
+    case 'Write': {
+      const fp = input?.file_path as string | undefined;
+      const fname = fp?.split('/').pop() || '';
+      return fname ? `写入 ${fname}` : '写入文件';
+    }
+    case 'Read': {
+      const fp = input?.file_path as string | undefined;
+      const fname = fp?.split('/').pop() || '';
+      return fname ? `读取 ${fname}` : '读取文件';
+    }
+    case 'Edit': return '编辑文件';
+    case 'bash': return '执行命令';
+    case 'Glob': return '搜索文件';
+    case 'Grep': return '搜索内容';
+    case 'reminder_create': return '创建提醒';
+    case 'reminder_list': return '查看提醒';
+    case 'channel_send': return '发送消息';
+    default: return name.replace(/_/g, ' ');
+  }
+}
+
 function matchSkillByIntent(prompt: string, skills: SkillMeta[]): SkillMeta | null {
   const lowerPrompt = prompt.toLowerCase();
 
@@ -1304,24 +1323,21 @@ function getPluginSkillRoots(): string[] {
 }
 
 function createDesktopModelRunner(dataRoot: string): TaskRunner {
-  const history: Message[] = [];
   const cwd = process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
   let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
   let skillsLoaded = false;
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
-  const intentStore = new InMemoryIntentLedgerStore();
-  intentStore.seedEmpty('desktop-session');
-
-  // Register only intent_create (lightweight intent classification)
-  // Skip intent_step_update, intent_stage_artifact, intent_salvage (pure tracking overhead)
-  const intentTools = createIntentDelegationTools({
-    ledgerStore: intentStore as never,
-    sessionId: 'desktop-session',
-    instanceId: 'desktop-instance',
-  });
-  registry.registerTool(intentTools[0]); // only intent_create
+  // [2026-05-10] Intent delegation disabled — see docs/2026-05-10-desktop-intent-delegation-removal.md
+  // const intentStore = new InMemoryIntentLedgerStore();
+  // intentStore.seedEmpty('desktop-session');
+  // const intentTools = createIntentDelegationTools({
+  //   ledgerStore: intentStore as never,
+  //   sessionId: 'desktop-session',
+  //   instanceId: 'desktop-instance',
+  // });
+  // registry.registerTool(intentTools[0]);
 
   // Register report_progress tool (TaskPanel progress reporting)
   const reportProgressTool: Tool = {
@@ -1368,7 +1384,7 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
   };
   registry.registerTool(reportProgressTool);
 
-  return async ({ sessionId, prompt, materials, signal, emitRuntimeEvent }) => {
+  return async ({ sessionId, prompt, materials, signal, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
@@ -1492,7 +1508,9 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
       { type: 'text', text: userText },
       ...fileContentBlocks,
     ];
-    const messages: Message[] = [...history, {
+    const messages: Message[] = [
+      ...hostHistory.map((h): Message => ({ role: h.role, content: [{ type: 'text', text: h.content }] })),
+      {
       role: 'user',
       content: userContent,
     }];
@@ -1500,6 +1518,8 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
     let iteration = 0;
     const MAX_ITERATIONS = 20;
     let totalToolCalls = 0;
+    let planEmitted = false;
+    const autoSteps: Array<{id: string; label: string; status: string}> = [];
     let referenceReads = 0;
     let lastRequestInputTokens = 0;
     const contextLimit = getContextLimit(adapter.getModelName());
@@ -1584,6 +1604,11 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
       for (const toolCall of toolCalls) {
         if (signal.aborted) throw new Error('task cancelled');
         totalToolCalls++;
+        // Dynamic TaskPanel: auto-track progress from tool calls (skip internal tools)
+        const isInternalTool = toolCall.name === 'report_progress' || toolCall.name === 'skill' || toolCall.name === 'skill_bundle_refs' || toolCall.name === 'skill_list';
+        if (!isInternalTool && !planEmitted) {
+          planEmitted = true;
+        }
         emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id });
 
         // Trace: tool start
@@ -1634,6 +1659,12 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
         } else {
           emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id, error: result.slice(0, 10000) });
         }
+        // Dynamic TaskPanel: emit auto-progress from tool calls (skip internal tools)
+        if (!isInternalTool) {
+          const label = toolNameToLabel(toolCall.name, toolCall.input as Record<string, unknown>);
+          autoSteps.push({ id: `auto-${totalToolCalls}`, label, status: ok ? 'completed' : 'failed' });
+          emitRuntimeEvent({ type: 'progress_plan_reported', sessionId, steps: autoSteps });
+        }
 
         // Trace: tool end
         if (skillInvocation) {
@@ -1673,6 +1704,31 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
             });
           }
         }
+        // Detect MCP tools that return output_path in JSON result (e.g. render_report)
+        if (ok && toolCall.name !== 'Write') {
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed.output_path && typeof parsed.output_path === 'string') {
+              const filePath = parsed.output_path;
+              emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
+              const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
+              const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
+              const fileName = filePath.split('/').pop() || filePath;
+              emitRuntimeEvent({
+                type: 'artifact_recorded',
+                sessionId,
+                turnId,
+                intentId,
+                stageId: stepId,
+                artifactId: `artifact_${toolCall.id}`,
+                label: fileName,
+                kind,
+                path: filePath,
+                creator: 'agent',
+              });
+            }
+          } catch { /* result not JSON, skip */ }
+        }
         // Emit progress_plan_reported for TaskPanel
         if (ok && toolCall.name === 'report_progress') {
           try {
@@ -1697,12 +1753,7 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
         });
       }
     }
-    const note = reply.trim() || '模型没有返回内容。';
-    history.push(
-      { role: 'user', content: [{ type: 'text', text: effectivePrompt }] },
-      { role: 'assistant', content: [{ type: 'text', text: note }] },
-    );
-    emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note });
+    emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note: reply.trim() || '模型没有返回内容。' });
     // Record skill execution stats
     if (skillNamesDetected.length > 0) {
       try {
@@ -1735,7 +1786,6 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
 }
 
 function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Tool[], dataRoot: string): TaskRunner {
-  const history: Message[] = [];
   const cwd = process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
   let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
@@ -1787,7 +1837,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
   };
   registry.registerTool(reportProgressTool);
 
-  return async ({ sessionId, prompt, materials, signal, emitRuntimeEvent }) => {
+  return async ({ sessionId, prompt, materials, signal, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
@@ -1911,7 +1961,9 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       { type: 'text', text: userText },
       ...fileContentBlocks,
     ];
-    const messages: Message[] = [...history, {
+    const messages: Message[] = [
+      ...hostHistory.map((h): Message => ({ role: h.role, content: [{ type: 'text', text: h.content }] })),
+      {
       role: 'user',
       content: userContent,
     }];
@@ -1919,6 +1971,8 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
     let iteration = 0;
     const MAX_ITERATIONS = 20;
     let totalToolCalls = 0;
+    let planEmitted = false;
+    const autoSteps: Array<{id: string; label: string; status: string}> = [];
     let referenceReads = 0;
 
     // Trace: first model turn start
@@ -1992,6 +2046,11 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       for (const toolCall of toolCalls) {
         if (signal.aborted) throw new Error('task cancelled');
         totalToolCalls++;
+        // Dynamic TaskPanel: auto-track progress from tool calls (skip internal tools)
+        const isInternalTool = toolCall.name === 'report_progress' || toolCall.name === 'skill' || toolCall.name === 'skill_bundle_refs' || toolCall.name === 'skill_list';
+        if (!isInternalTool && !planEmitted) {
+          planEmitted = true;
+        }
         emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id });
         // Track skill tool calls for stats and create invocation if missing
         if (toolCall.name === 'skill') {
@@ -2039,6 +2098,31 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
             creator: 'agent',
           });
         }
+        // Detect MCP tools that return output_path in JSON result (e.g. render_report)
+        if (ok && toolCall.name !== 'Write') {
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed.output_path && typeof parsed.output_path === 'string') {
+              const filePath = parsed.output_path;
+              emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
+              const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
+              const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
+              const fileName = filePath.split('/').pop() || filePath;
+              emitRuntimeEvent({
+                type: 'artifact_recorded',
+                sessionId,
+                turnId,
+                intentId,
+                stageId: stepId,
+                artifactId: `artifact_${toolCall.id}`,
+                label: fileName,
+                kind,
+                path: filePath,
+                creator: 'agent',
+              });
+            }
+          } catch { /* result not JSON, skip */ }
+        }
         // Emit progress_plan_reported for TaskPanel
         if (ok && toolCall.name === 'report_progress') {
           try {
@@ -2054,12 +2138,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       }
       messages.push({ role: 'user', content: toolResults });
     }
-    const note = reply.trim() || '模型没有返回内容。';
-    history.push(
-      { role: 'user', content: [{ type: 'text', text: effectivePrompt }] },
-      { role: 'assistant', content: [{ type: 'text', text: note }] },
-    );
-    emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note });
+    emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note: reply.trim() || '模型没有返回内容。' });
     // Record skill execution stats
     if (skillNamesDetected.length > 0) {
       try {

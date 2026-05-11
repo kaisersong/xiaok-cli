@@ -15,6 +15,11 @@ export interface McpRuntimeResponse {
 }
 export interface McpRuntimeTransport {
     send(message: McpRuntimeRequest): Promise<McpRuntimeResponse>;
+    notify?(message: {
+        jsonrpc: '2.0';
+        method: string;
+        params?: Record<string, unknown>;
+    }): void;
 }
 export declare function createMcpRuntimeClient(transport: McpRuntimeTransport): {
     initialize(): Promise<unknown>;
