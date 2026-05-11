@@ -99,7 +99,7 @@ function execCmd(cmd: string, cwd?: string): void {
   execSync(cmd, { cwd, stdio: 'inherit', timeout: 120_000 });
 }
 
-async function runInstall(name: string, opts: { registry?: string; force?: boolean }): Promise<void> {
+export async function runInstall(name: string, opts: { registry?: string; force?: boolean }): Promise<void> {
   const pluginsDir = getPluginsDir();
   const targetDir = join(pluginsDir, name);
 
@@ -191,7 +191,7 @@ async function runInstall(name: string, opts: { registry?: string; force?: boole
   }
 }
 
-function runList(): void {
+export function runList(): void {
   const pluginsDir = getPluginsDir();
   if (!existsSync(pluginsDir)) {
     console.log('No plugins installed.');
@@ -224,7 +224,7 @@ function runList(): void {
   }
 }
 
-async function runSearch(query?: string, opts?: { registry?: string }): Promise<void> {
+export async function runSearch(query?: string, opts?: { registry?: string }): Promise<void> {
   console.log('Fetching plugin registry...');
   const registry = await fetchRegistry(opts?.registry);
 
@@ -254,7 +254,7 @@ async function runSearch(query?: string, opts?: { registry?: string }): Promise<
   }
 }
 
-function runUninstall(name: string): void {
+export function runUninstall(name: string): void {
   const pluginsDir = getPluginsDir();
   const targetDir = join(pluginsDir, name);
 
