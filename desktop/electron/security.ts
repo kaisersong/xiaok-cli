@@ -19,7 +19,7 @@ export function buildBrowserWindowOptions(
     backgroundColor: '#f7f7f2',
     title: 'xiaok',
     titleBarStyle: 'hiddenInset',
-    ...(platform === 'win32' && iconPath ? { icon: iconPath } : {}),
+    ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

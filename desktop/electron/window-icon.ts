@@ -6,8 +6,17 @@ export function resolveDesktopWindowIconPath(
   platform: NodeJS.Platform = process.platform,
   fileExists: (path: string) => boolean = existsSync,
 ): string | undefined {
-  if (platform !== 'win32') return undefined;
+  // Try multiple icon paths based on platform
+  const candidates = [
+    // PNG works for all platforms in BrowserWindow
+    join(moduleDir, '..', 'build', 'icon.png'),
+    join(moduleDir, '..', 'build', 'tray-icon.png'),
+    // Fallback to dist location
+    join(moduleDir, 'electron', 'tray-icon.png'),
+  ];
 
-  const candidate = join(moduleDir, '..', 'build', 'icon.png');
-  return fileExists(candidate) ? candidate : undefined;
+  for (const candidate of candidates) {
+    if (fileExists(candidate)) return candidate;
+  }
+  return undefined;
 }

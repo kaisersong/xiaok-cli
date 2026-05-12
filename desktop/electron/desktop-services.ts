@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 
 import { join, extname, basename, dirname } from 'node:path';
 import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
 import { homedir, platform, arch, type } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, exec } from 'node:child_process';
 import { createAdapter } from '../../src/ai/models.js';
 import { getProviderProfile, listProviderProfiles } from '../../src/ai/providers/registry.js';
 import type { ProtocolId } from '../../src/ai/providers/types.js';
@@ -532,6 +532,34 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const server = pluginMcpServers.find(s => s.name === input.name);
       if (server) server.enabled = input.enabled;
       return pluginMcpServers;
+    },
+    async installPlugin(name: string): Promise<{ success: boolean; error?: string }> {
+      const xiaokPath = process.execPath.replace(/node$/, 'xiaok');
+      // Fallback: use npx xiaok
+      const cmd = `xiaok plugin install ${name}`;
+      return new Promise((resolve) => {
+        exec(cmd, { timeout: 120_000 }, (error, stdout, stderr) => {
+          if (error) {
+            resolve({ success: false, error: stderr || error.message });
+            return;
+          }
+          resolve({ success: true });
+        });
+      });
+    },
+    async listAvailablePlugins(): Promise<Array<{ name: string; display_name: string; description: string; version: string; installed: boolean }>> {
+      const pluginsDir = join(homedir(), '.xiaok', 'plugins');
+      try {
+        const res = await fetch('https://raw.githubusercontent.com/kaisersong/kai-xiaok-plugins/main/registry.json');
+        if (!res.ok) return [];
+        const data = await res.json() as { plugins: Array<{ name: string; display_name: string; description: string; version: string }> };
+        return (data.plugins || []).map(p => ({
+          ...p,
+          installed: existsSync(join(pluginsDir, p.name, 'plugin.json')),
+        }));
+      } catch {
+        return [];
+      }
     },
     async importMaterial(input: { taskId: string; filePath: string; role: MaterialRole }) {
       mkdirSync(options.dataRoot, { recursive: true });

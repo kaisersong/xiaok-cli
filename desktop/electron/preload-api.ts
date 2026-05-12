@@ -52,6 +52,8 @@ export const PRELOAD_API_KEYS = [
   'deleteMCPInstall',
   'listPluginMcpServers',
   'setPluginMcpServerEnabled',
+  'installPlugin',
+  'listAvailablePlugins',
   'getUpdateStatus',
   'checkForUpdates',
   'quitAndInstall',
@@ -233,6 +235,8 @@ export interface DesktopApi {
   deleteMCPInstall(id: string): Promise<void>;
   listPluginMcpServers(): Promise<PluginMcpServerView[]>;
   setPluginMcpServerEnabled(input: { name: string; enabled: boolean }): Promise<PluginMcpServerView[]>;
+  installPlugin(name: string): Promise<{ success: boolean; error?: string }>;
+  listAvailablePlugins(): Promise<Array<{ name: string; display_name: string; description: string; version: string; installed: boolean }>>;
   getUpdateStatus(): Promise<UpdateStatus>;
   checkForUpdates(): Promise<void>;
   quitAndInstall(): Promise<void>;
@@ -307,6 +311,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     deleteMCPInstall: (id) => ipcRenderer.invoke('desktop:deleteMCPInstall', id) as Promise<void>,
     listPluginMcpServers: () => ipcRenderer.invoke('desktop:listPluginMcpServers') as Promise<PluginMcpServerView[]>,
     setPluginMcpServerEnabled: (input) => ipcRenderer.invoke('desktop:setPluginMcpServerEnabled', input) as Promise<PluginMcpServerView[]>,
+    installPlugin: (name) => ipcRenderer.invoke('desktop:installPlugin', name) as Promise<{ success: boolean; error?: string }>,
+    listAvailablePlugins: () => ipcRenderer.invoke('desktop:listAvailablePlugins') as Promise<Array<{ name: string; display_name: string; description: string; version: string; installed: boolean }>>,
     getUpdateStatus: () => ipcRenderer.invoke('desktop:getUpdateStatus') as Promise<UpdateStatus>,
     checkForUpdates: () => ipcRenderer.invoke('desktop:checkForUpdates') as Promise<void>,
     quitAndInstall: () => ipcRenderer.invoke('desktop:quitAndInstall') as Promise<void>,

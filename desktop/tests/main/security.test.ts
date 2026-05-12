@@ -13,18 +13,18 @@ describe('desktop security baseline', () => {
     });
   });
 
-  it('uses the generated build icon for Windows runtime windows only', () => {
+  it('uses the generated build icon for all platforms', () => {
     const windowsOptions = buildBrowserWindowOptions('/app/preload.js', {
       platform: 'win32',
       iconPath: 'C:/repo/desktop/build/icon.png',
     });
     const macOptions = buildBrowserWindowOptions('/app/preload.js', {
       platform: 'darwin',
-      iconPath: 'C:/repo/desktop/build/icon.png',
+      iconPath: '/repo/desktop/build/icon.png',
     });
 
     expect(windowsOptions.icon).toBe('C:/repo/desktop/build/icon.png');
-    expect(macOptions.icon).toBeUndefined();
+    expect(macOptions.icon).toBe('/repo/desktop/build/icon.png');
   });
 
   it('allows only local app navigation', () => {
