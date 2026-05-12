@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, nativeImage } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDesktopServices } from './desktop-services.js';
@@ -153,7 +153,16 @@ function restoreOrCreateWindow(): void {
 if (!singleInstanceLock) {
   app.quit();
 } else {
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    // Set app name for macOS dock (icon requires packaged .app bundle)
+    if (process.platform === 'darwin') {
+      app.setName('xiaok');
+      const { existsSync } = await import('node:fs');
+      const iconPath = join(__dirname, '..', 'build', 'icon.png');
+      if (existsSync(iconPath) && app.dock) {
+        app.dock.setIcon(nativeImage.createFromPath(iconPath));
+      }
+    }
     void createWindow();
   });
   app.on('second-instance', () => {
