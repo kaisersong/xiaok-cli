@@ -484,7 +484,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           for (const server of plugin.mcpServers) {
             if (server.type !== 'stdio') continue;
             try {
-              const proc = startMcpServerProcess(server.command, server.args ?? [], {
+              // Use managed venv python if available for Python MCP servers
+              const command = (server.command === 'python3' || server.command === 'python')
+                ? (process.env.XIAOK_PYTHON_CMD || server.command)
+                : server.command;
+              const proc = startMcpServerProcess(command, server.args ?? [], {
                 cwd: plugin.rootDir,
                 env: 'env' in server ? (server as { env?: Record<string, string> }).env : undefined,
               });

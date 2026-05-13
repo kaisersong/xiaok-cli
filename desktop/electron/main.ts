@@ -17,6 +17,7 @@ import { JsonReminderStore } from './reminder-store.js';
 import { ReminderScheduler } from './reminder-scheduler.js';
 import { createKSwarmService } from './kswarm-service.js';
 import { ScheduledTaskScheduler } from './scheduled-task-scheduler.js';
+import { deployBundledPlugins } from './deploy-bundled-plugins.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -84,6 +85,15 @@ async function createWindow(): Promise<BrowserWindow> {
 
   // Register skill tools with AI runner (for installing/uninstalling skills)
   services.registerSkillTools();
+
+  // Deploy bundled plugins (report-creator, slide-creator) to ~/.xiaok/plugins/
+  const deployResult = await deployBundledPlugins();
+  if (deployResult.venvReady) {
+    const venvDir = join(app.getPath('home'), '.xiaok', 'runtime', 'python-env');
+    process.env.XIAOK_PYTHON_CMD = process.platform === 'win32'
+      ? join(venvDir, 'Scripts', 'python.exe')
+      : join(venvDir, 'bin', 'python3');
+  }
 
   // Register MCP plugin tools (connects to MCP servers declared in ~/.xiaok/plugins)
   let mcpDispose: (() => void) | undefined;

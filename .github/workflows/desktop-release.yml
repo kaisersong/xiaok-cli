@@ -36,11 +36,32 @@ jobs:
       - name: Install desktop dependencies
         run: cd desktop && npm ci
 
+      - name: Checkout plugins repo
+        uses: actions/checkout@v4
+        with:
+          repository: kaisersong/kai-xiaok-plugins
+          path: kai-xiaok-plugins
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build report-renderer bundle
+        run: |
+          cd kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
+          npm ci
+          npm run build
+          npm run build:bundle
+
+      - name: Download Python wheels (macOS)
+        run: |
+          pip3 download mcp pydantic jsonschema \
+            -d kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels/ \
+            --only-binary=:all:
+
+      - name: Smoke test report-renderer
+        run: |
+          echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | timeout 5 node kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.bundle.js || true
+
       - name: Build desktop
         run: cd desktop && npm run build
-
-      - name: Package DMG + ZIP
-        run: cd desktop && npx electron-builder --config electron-builder.json --mac dmg zip --publish never
 
       - name: Upload to GitHub Release
         run: gh release upload "${{ github.ref_name }}" desktop/release/*.dmg desktop/release/*-mac.zip desktop/release/latest-mac.yml --clobber
@@ -64,6 +85,24 @@ jobs:
 
       - name: Install desktop dependencies
         run: cd desktop && npm ci
+
+      - name: Checkout plugins repo
+        uses: actions/checkout@v4
+        with:
+          repository: kaisersong/kai-xiaok-plugins
+          path: kai-xiaok-plugins
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build report-renderer bundle
+        run: |
+          cd kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
+          npm ci
+          npm run build
+          npm run build:bundle
+
+      - name: Download Python wheels (Windows)
+        run: |
+          pip download mcp pydantic jsonschema -d kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels/ --only-binary=:all:
 
       - name: Build desktop
         run: cd desktop && npm run build
