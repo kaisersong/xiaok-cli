@@ -1,0 +1,143 @@
+/**
+ * ProjectCard — project summary card in the project list grid.
+ * Shows name, goal, status, task progress, PO, last updated, and delete button.
+ */
+
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { FolderKanban, CheckCircle2, Clock, Loader2, Trash2, AlertTriangle } from 'lucide-react';
+import { useKSwarm } from '../../contexts/KSwarmContext';
+import { useLocale } from '../../contexts/LocaleContext';
+
+interface ProjectCardProps {
+  project: {
+    id: string;
+    name: string;
+    goal?: string;
+    status: string;
+    taskCount?: number;
+    doneCount?: number;
+    plan?: { version: number };
+    poAgent?: string;
+    updatedAt?: number;
+    createdAt?: number;
+  };
+}
+
+export function ProjectCard({ project }: ProjectCardProps) {
+  const navigate = useNavigate();
+  const { closeProject } = useKSwarm();
+  const { t } = useLocale();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof Clock }> = {
+    draft: { label: t.projectsStatusDraft, color: 'text-[var(--c-text-muted)]', icon: Clock },
+    planning: { label: t.projectsStatusPlanning, color: 'text-[var(--c-status-warning-text)]', icon: Loader2 },
+    created: { label: t.projectsStatusPlanning, color: 'text-[var(--c-text-secondary)]', icon: Clock },
+    active: { label: t.projectsStatusActive, color: 'text-[var(--c-status-success-text)]', icon: Loader2 },
+    review: { label: t.projectsStatusReview, color: 'text-[var(--c-text-secondary)]', icon: Clock },
+    delivered: { label: t.projectsStatusDelivered, color: 'text-[var(--c-status-success-text)]', icon: CheckCircle2 },
+    closed: { label: t.projectsStatusClosed, color: 'text-[var(--c-text-muted)]', icon: CheckCircle2 },
+  };
+
+  const statusConf = STATUS_CONFIG[project.status] || STATUS_CONFIG.draft;
+  const StatusIcon = statusConf.icon;
+  const totalTasks = project.taskCount || 0;
+  const doneTasks = project.doneCount || 0;
+  const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+
+  const formatTime = (ts?: number) => {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const now = new Date();
+    const diff = now.getTime() - d.getTime();
+    if (diff < 60000) return t.projectsCardJustNow;
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}${t.projectsCardMinutesAgo}`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}${t.projectsCardHoursAgo}`;
+    return d.toLocaleDateString('zh-CN');
+  };
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeleting(true);
+    try {
+      await closeProject(project.id);
+      setConfirmDelete(false);
+      // Trigger a page refresh to update the list
+      setTimeout(() => { window.location.reload(); }, 300);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="group relative rounded-xl border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-4 transition-colors hover:bg-[var(--c-bg-deep)]">
+      {/* Delete button */}
+      <div className={`absolute top-3 right-3 z-10 ${confirmDelete || deleting ? '' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+        {confirmDelete ? (
+          <div className="flex items-center gap-1 bg-[var(--c-bg-page)] rounded-lg border-[0.5px] border-[var(--c-status-error-text)]/30 shadow-lg px-2 py-1.5">
+            <AlertTriangle size={12} className="text-[var(--c-status-error-text)]" />
+            <span className="text-[10px] text-[var(--c-text-tertiary)] whitespace-nowrap">{t.projectsCardDeleteConfirm}</span>
+            <button onClick={handleDelete} disabled={deleting}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-status-error-text)] text-white hover:brightness-110 disabled:opacity-50">
+              {deleting ? '...' : t.commonConfirm}
+            </button>
+            <button onClick={() => setConfirmDelete(false)} disabled={deleting}
+              className="text-[10px] px-1.5 py-0.5 rounded text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50">{t.commonCancel}</button>
+          </div>
+        ) : (
+          <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
+            className="rounded-md p-1 text-[var(--c-text-muted)] hover:text-[var(--c-status-error-text)] hover:bg-[var(--c-bg-page)]" title="删除项目">
+            <Trash2 size={14} />
+          </button>
+        )}
+      </div>
+
+      {/* Clickable area */}
+      <button type="button" onClick={() => navigate(`/projects/${project.id}`)}
+        className="text-left w-full pr-16"
+      >
+        <div className="flex items-start gap-2.5">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
+            <FolderKanban size={16} className="text-[var(--c-text-icon)]" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h3 className="text-[13px] font-medium text-[var(--c-text-primary)] truncate">{project.name}</h3>
+              <span className={`shrink-0 text-[10px] ${statusConf.color}`}>
+                <StatusIcon size={10} className="inline" /> {statusConf.label}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {project.goal && <p className="text-xs text-[var(--c-text-tertiary)] mt-2 line-clamp-2">{project.goal}</p>}
+
+        {totalTasks > 0 && (
+          <div className="flex flex-col gap-1.5 mt-3">
+            <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--c-bg-deep)]">
+              <div className="h-full rounded-full bg-[var(--c-status-success-text)] transition-all" style={{ width: `${progress}%` }} />
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-[var(--c-text-muted)]">
+              <span>{doneTasks}/{totalTasks} 任务</span>
+              <span>{progress}%</span>
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between mt-3 text-[10px] text-[var(--c-text-muted)]">
+          <div className="flex items-center gap-2">
+            {project.poAgent && <span>PO: {project.poAgent}</span>}
+            {project.plan && (
+              <span className="rounded bg-[var(--c-bg-deep)] px-1.5 py-0.5 text-[9px]">
+                Plan v{project.plan.version}
+              </span>
+            )}
+          </div>
+          {(project.updatedAt || project.createdAt) && <span>{formatTime(project.updatedAt || project.createdAt)}</span>}
+        </div>
+      </button>
+    </div>
+  );
+}

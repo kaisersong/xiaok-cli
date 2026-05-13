@@ -10,6 +10,7 @@ describe('preload API contract', () => {
       'listAvailableModelsForProvider',
       'deleteProvider',
       'deleteModel',
+      'readClipboardFilePaths',
       'selectMaterials',
       'importMaterial',
       'createTask',
@@ -49,6 +50,13 @@ describe('preload API contract', () => {
       'getSkillDebugConfig',
       'saveSkillDebugConfig',
       'getSkillStats',
+      'kswarmGetStatus',
+      'kswarmStart',
+      'kswarmStop',
+      'kswarmRestart',
+      'onKSwarmStatus',
+      'syncScheduledTasks',
+      'onScheduledTaskDue',
     ]);
   });
 

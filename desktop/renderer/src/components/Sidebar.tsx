@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Search, X, Bolt, Pencil, Download, RefreshCw, Clock } from 'lucide-react';
+import { Plus, Search, X, Bolt, Pencil, Download, RefreshCw, Clock, FolderKanban } from 'lucide-react';
 import { api, type ThreadRecord } from '../api';
+import { useKSwarm } from '../contexts/KSwarmContext';
+import { useLocale } from '../contexts/LocaleContext';
 
 const log = createLogger('Sidebar');
 
@@ -23,7 +25,7 @@ interface SidebarScheduledTask {
   threadId?: string;
 }
 
-type NavSection = 'new' | 'scheduled';
+type NavSection = 'new' | 'scheduled' | 'projects';
 
 interface SidebarProps {
   onOpenSettings?: () => void;
@@ -42,11 +44,15 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const [sidebarTasks, setSidebarTasks] = useState<SidebarScheduledTask[]>([]);
   const [scheduledThreadIds, setScheduledThreadIds] = useState<Set<string>>(new Set());
 
+  const { projects } = useKSwarm();
+  const { t } = useLocale();
+  const activeProjects = projects.filter(p => p.status !== 'closed');
+
   // Load threads
   useEffect(() => {
     const load = () => api.listThreads({ limit: 50 }).then(setThreads);
     load();
-    const interval = setInterval(load, 2000);
+    const interval = setInterval(load, 10_000);
     return () => clearInterval(interval);
   }, []);
 
@@ -114,6 +120,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   useEffect(() => {
     if (location.pathname === '/scheduled') {
       setActiveNav('scheduled');
+    } else if (location.pathname.startsWith('/projects')) {
+      setActiveNav('projects');
     } else {
       setActiveNav('new');
     }
@@ -170,6 +178,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   };
 
   const isOnScheduled = activeNav === 'scheduled';
+  const hideThreadList = activeNav === 'scheduled' || activeNav === 'projects';
 
   return (
     <aside
@@ -187,10 +196,10 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                 ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]'
                 : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]'
             }`}
-            title="New task"
+            title={t.sidebarNewTask}
           >
             <Plus size={16} className="shrink-0" />
-            <span>New task</span>
+            <span>{t.sidebarNewTask}</span>
           </button>
           <button
             type="button"
@@ -200,10 +209,23 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                 ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]'
                 : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]'
             }`}
-            title="Scheduled"
+            title={t.sidebarScheduled}
           >
             <Clock size={16} className="shrink-0" />
-            <span>Scheduled</span>
+            <span>{t.sidebarScheduled}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/projects')}
+            className={`flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-colors ${
+              activeNav === 'projects'
+                ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]'
+                : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]'
+            }`}
+            title={t.sidebarProjects}
+          >
+            <FolderKanban size={16} className="shrink-0" />
+            <span>{t.sidebarProjects}</span>
           </button>
         </div>
       </div>
@@ -214,12 +236,12 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       </div>
 
       {/* Scheduled tasks list (Claude-style) */}
-      {sidebarTasks.length > 0 && (
+      {sidebarTasks.length > 0 && (activeNav === 'new' || activeNav === 'scheduled') && (
         <div className="px-3 py-2">
           <div className="px-1 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
-            Scheduled
+            {t.sidebarScheduled}
           </div>
-          <div className="flex flex-col gap-0">
+          <div className="flex flex-col gap-0 max-h-[90px] overflow-y-auto">
             {sidebarTasks.map(task => (
               <button
                 key={task.id}
@@ -238,8 +260,37 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
         </div>
       )}
 
+      {/* Active projects list */}
+      {activeProjects.length > 0 && (activeNav === 'new' || activeNav === 'projects') && (
+        <div className="px-3 py-2">
+          <div className="px-1 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
+            {t.sidebarProjects}
+          </div>
+          <div className="flex flex-col gap-0 max-h-[150px] overflow-y-auto">
+            {activeProjects.map(project => (
+              <button
+                key={project.id}
+                type="button"
+                onClick={() => navigate(`/projects/${project.id}`)}
+                className="flex items-center justify-between rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-card)] transition-colors"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                    project.status === 'active' ? 'bg-green-500' :
+                    project.status === 'delivered' ? 'bg-blue-500' :
+                    'bg-yellow-500'
+                  }`} />
+                  <span className="truncate">{project.name}</span>
+                </div>
+                <span className="shrink-0 text-[10px] text-[var(--c-text-tertiary)] ml-2">{project.status}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Divider before thread list */}
-      {!isOnScheduled && (
+      {!hideThreadList && (
         <>
           {/* Search */}
           <div className="px-3 py-2">
@@ -249,7 +300,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder="搜索..."
+                placeholder={t.sidebarSearch}
                 className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--c-text-secondary)]"
               />
               {searchQuery && (
@@ -263,11 +314,11 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
           {/* Thread list */}
           <div className="flex-1 overflow-y-auto px-3 py-1">
             <div className="py-1 text-xs font-medium text-[var(--c-text-secondary)]">
-              最近
+              {t.sidebarRecent}
             </div>
             {filteredThreads.length === 0 && (
               <p className="py-3 text-center text-xs text-[var(--c-text-secondary)]">
-                {searchQuery ? '无结果' : '暂无最近任务'}
+                {searchQuery ? t.sidebarNoResults : t.sidebarNoRecent}
               </p>
             )}
             {filteredThreads.map(thread => {
@@ -294,7 +345,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                     onClick={e => e.stopPropagation()}
                   />
                 ) : (
-                  <span className="flex-1 truncate">{thread.title || '未命名'}</span>
+                  <span className="flex-1 truncate">{thread.title || t.untitled}</span>
                 )}
                 <button
                   type="button"
@@ -303,7 +354,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                     handleDoubleClick(thread);
                   }}
                   className="ml-1 hidden shrink-0 p-0.5 text-[var(--c-text-secondary)] hover:text-[var(--c-accent)] group-hover:block"
-                  title="重命名"
+                  title={t.sidebarRename}
                 >
                   <Pencil className="size-3" />
                 </button>
@@ -320,8 +371,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
         </>
       )}
 
-      {/* Spacer for scheduled page view */}
-      {isOnScheduled && <div className="flex-1" />}
+      {/* Spacer for scheduled/projects page view */}
+      {hideThreadList && <div className="flex-1" />}
 
       {/* Footer with settings button */}
       <div className="border-t border-[var(--c-border)] p-3">

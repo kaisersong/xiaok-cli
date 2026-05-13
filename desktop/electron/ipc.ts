@@ -1,4 +1,4 @@
-import { dialog, type BrowserWindow, type IpcMain } from 'electron';
+import { clipboard, dialog, type BrowserWindow, type IpcMain } from 'electron';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
@@ -45,6 +45,19 @@ export function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow, serv
     log('info', 'deleteModel', { modelId });
     await services.deleteModel(modelId);
     log('info', 'deleteModel ok');
+  });
+  ipcMain.handle('desktop:readClipboardFilePaths', async () => {
+    // macOS Finder copy puts file URLs in 'public.file-url' pasteboard type
+    // Electron clipboard.read('NSFilenamesPboardType') returns newline-separated paths
+    try {
+      const raw = clipboard.read('NSFilenamesPboardType');
+      if (raw) {
+        // NSFilenamesPboardType returns a plist XML string; extract paths from it
+        const paths = raw.match(/<string>(.*?)<\/string>/g)?.map(m => m.replace(/<\/?string>/g, '')) ?? [];
+        return paths.filter(p => p.startsWith('/'));
+      }
+    } catch { /* not available on this platform */ }
+    return [];
   });
   ipcMain.handle('desktop:selectMaterials', async () => {
     log('info', 'selectMaterials');
@@ -107,20 +120,38 @@ export function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow, serv
       return { content: '', error: String(e) };
     }
   });
+  const activeTaskSubs = new Map<string, AbortController>();
   ipcMain.handle('desktop:subscribeTask', async (_event, input) => {
     const taskId = input.taskId as string;
     log('info', 'subscribeTask', { taskId });
+
+    // Cancel any existing subscription for this taskId to prevent duplicate streams
+    const prev = activeTaskSubs.get(taskId);
+    if (prev) {
+      prev.abort();
+      activeTaskSubs.delete(taskId);
+    }
+
+    const controller = new AbortController();
+    activeTaskSubs.set(taskId, controller);
+
     void (async () => {
       try {
         for await (const event of services.subscribeTask(taskId)) {
-          if (window.isDestroyed()) {
+          if (controller.signal.aborted || window.isDestroyed()) {
             break;
           }
           window.webContents.send(`desktop:taskEvent:${taskId}`, event);
         }
         log('info', 'subscribeTask stream ended', { taskId });
       } catch (e) {
-        log('error', 'subscribeTask error', { taskId, message: String(e) });
+        if (!controller.signal.aborted) {
+          log('error', 'subscribeTask error', { taskId, message: String(e) });
+        }
+      } finally {
+        if (activeTaskSubs.get(taskId) === controller) {
+          activeTaskSubs.delete(taskId);
+        }
       }
     })();
   });

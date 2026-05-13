@@ -27,6 +27,7 @@ export const PRELOAD_API_KEYS = [
   'listAvailableModelsForProvider',
   'deleteProvider',
   'deleteModel',
+  'readClipboardFilePaths',
   'selectMaterials',
   'importMaterial',
   'createTask',
@@ -66,6 +67,13 @@ export const PRELOAD_API_KEYS = [
   'getSkillDebugConfig',
   'saveSkillDebugConfig',
   'getSkillStats',
+  'kswarmGetStatus',
+  'kswarmStart',
+  'kswarmStop',
+  'kswarmRestart',
+  'onKSwarmStatus',
+  'syncScheduledTasks',
+  'onScheduledTaskDue',
 ] as const;
 
 export interface DesktopModelProviderView {
@@ -197,6 +205,14 @@ export interface ReminderRecord {
   sentAt?: number;
 }
 
+export interface KSwarmServiceStatus {
+  running: boolean;
+  port: number;
+  pid: number | null;
+  restartCount: number;
+  lastError: string | null;
+}
+
 export interface DesktopApi {
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
@@ -204,6 +220,7 @@ export interface DesktopApi {
   listAvailableModelsForProvider(providerId: string): Promise<AvailableModelView[]>;
   deleteProvider(providerId: string): Promise<void>;
   deleteModel(modelId: string): Promise<void>;
+  readClipboardFilePaths(): Promise<string[]>;
   selectMaterials(): Promise<{ filePaths: string[] }>;
   importMaterial(input: { taskId: string; filePath: string; role: MaterialRole }): Promise<MaterialView>;
   createTask(input: {
@@ -260,6 +277,13 @@ export interface DesktopApi {
     lastCalledAt: number;
     firstCalledAt: number;
   }>>;
+  kswarmGetStatus(): Promise<KSwarmServiceStatus>;
+  kswarmStart(): Promise<void>;
+  kswarmStop(): Promise<void>;
+  kswarmRestart(): Promise<void>;
+  onKSwarmStatus(handler: (status: KSwarmServiceStatus) => void): () => void;
+  syncScheduledTasks(tasks: Array<{ id: string; cronExpr: string; enabled: boolean }>): Promise<void>;
+  onScheduledTaskDue(handler: (event: { taskId: string }) => void): () => void;
 }
 
 interface IpcRendererLike {
@@ -276,6 +300,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     listAvailableModelsForProvider: (providerId) => ipcRenderer.invoke('desktop:listAvailableModelsForProvider', providerId) as ReturnType<DesktopApi['listAvailableModelsForProvider']>,
     deleteProvider: (providerId) => ipcRenderer.invoke('desktop:deleteProvider', providerId) as Promise<void>,
     deleteModel: (modelId) => ipcRenderer.invoke('desktop:deleteModel', modelId) as Promise<void>,
+    readClipboardFilePaths: () => ipcRenderer.invoke('desktop:readClipboardFilePaths') as Promise<string[]>,
     selectMaterials: () => ipcRenderer.invoke('desktop:selectMaterials') as ReturnType<DesktopApi['selectMaterials']>,
     importMaterial: (input) => ipcRenderer.invoke('desktop:importMaterial', input) as ReturnType<DesktopApi['importMaterial']>,
     createTask: (input) => ipcRenderer.invoke('desktop:createTask', input) as ReturnType<DesktopApi['createTask']>,
@@ -343,6 +368,31 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     getSkillDebugConfig: () => ipcRenderer.invoke('desktop:getSkillDebugConfig') as Promise<{ enabled: boolean }>,
     saveSkillDebugConfig: (input) => ipcRenderer.invoke('desktop:saveSkillDebugConfig', input) as Promise<{ enabled: boolean }>,
     getSkillStats: () => ipcRenderer.invoke('desktop:getSkillStats') as ReturnType<DesktopApi['getSkillStats']>,
+    kswarmGetStatus: () => ipcRenderer.invoke('desktop:kswarm:getStatus') as Promise<KSwarmServiceStatus>,
+    kswarmStart: () => ipcRenderer.invoke('desktop:kswarm:start') as Promise<void>,
+    kswarmStop: () => ipcRenderer.invoke('desktop:kswarm:stop') as Promise<void>,
+    kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart') as Promise<void>,
+    onKSwarmStatus(handler) {
+      const channel = 'desktop:kswarm:statusChange';
+      const listener = (_event: unknown, payload: unknown) => {
+        handler(payload as KSwarmServiceStatus);
+      };
+      ipcRenderer.on(channel, listener);
+      return () => {
+        ipcRenderer.off(channel, listener);
+      };
+    },
+    syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks) as Promise<void>,
+    onScheduledTaskDue(handler) {
+      const channel = 'desktop:scheduledTaskDue';
+      const listener = (_event: unknown, payload: unknown) => {
+        handler(payload as { taskId: string });
+      };
+      ipcRenderer.on(channel, listener);
+      return () => {
+        ipcRenderer.off(channel, listener);
+      };
+    },
   };
 }
 

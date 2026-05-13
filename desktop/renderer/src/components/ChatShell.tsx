@@ -33,6 +33,7 @@ export function ChatShell() {
   const unsubRef = useRef<(() => void) | null>(null);
   const streamRef = useRef('');
   const currentLoadIdRef = useRef<string | null>(null);
+  const mountGenRef = useRef(0);
   const allEventsRef = useRef<DesktopTaskEvent[]>([]);
   const toolStepsMsgIdRef = useRef<string | null>(null);
   const toolStepsActiveRef = useRef(false);
@@ -365,6 +366,9 @@ export function ChatShell() {
   useEffect(() => {
     if (!taskId) return;
 
+    // Increment mount generation to cancel any in-flight async from prior effect run
+    const gen = ++mountGenRef.current;
+
     // Mark this as the current load
     const thisLoadId = taskId;
     currentLoadIdRef.current = thisLoadId;
@@ -397,7 +401,7 @@ export function ChatShell() {
 
     api.getThread(taskId).then(async (t) => {
       // Check if this is still the current load (prevent race condition)
-      if (currentLoadIdRef.current !== thisLoadId) return;
+      if (mountGenRef.current !== gen) return;
 
       if (t) {
         // Replay all tasks in the thread to show full conversation history
@@ -411,7 +415,7 @@ export function ChatShell() {
 
         for (const tid of allTaskIds) {
           // Check again after each async operation
-          if (currentLoadIdRef.current !== thisLoadId) return;
+          if (mountGenRef.current !== gen) return;
 
           try {
             const { snapshot } = await api.recoverTask(tid);
@@ -444,7 +448,7 @@ export function ChatShell() {
         }
 
         // Final check before setting any state
-        if (currentLoadIdRef.current !== thisLoadId) return;
+        if (mountGenRef.current !== gen) return;
 
         // Now set all state atomically after final check
         setThread(t);
@@ -456,6 +460,8 @@ export function ChatShell() {
         }
         setStatus(lastStatus);
         if (lastTaskIdForSub && (lastStatus === 'running' || lastStatus === 'waiting_user')) {
+          // Guard: if effect was cleaned up during async gap (StrictMode), don't subscribe
+          if (mountGenRef.current !== gen) return;
           unsubRef.current = api.subscribeTask(lastTaskIdForSub, handleEvent);
         }
       } else {
@@ -474,14 +480,15 @@ export function ChatShell() {
         });
       }
     }).catch((err) => {
-      if (currentLoadIdRef.current === thisLoadId) {
+      if (mountGenRef.current === gen) {
         setLoadError(err instanceof Error ? err.message : String(err));
         setStatus('failed');
       }
     });
 
     return () => {
-      // Mark that this load is cancelled
+      // Invalidate in-flight async operations from this effect run
+      mountGenRef.current++;
       currentLoadIdRef.current = null;
       unsubRef.current?.();
       unsubRef.current = null;

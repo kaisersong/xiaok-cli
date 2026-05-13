@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import type { DesktopModelConfigSnapshot, DesktopSaveModelConfigInput, TestProviderConnectionResult } from '../../../electron/preload-api';
-import { useLanguage } from '../contexts/LanguageContext';
+import { useLocale } from '../contexts/LocaleContext';
 
 type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'general' | 'appearance' | 'data' | 'about';
 
@@ -1216,7 +1216,7 @@ function McpPane() {
 // ---- General ----
 
 function GeneralPane() {
-  const { language, setLanguage, t } = useLanguage();
+  const { locale, setLocale, t } = useLocale();
   const [skillDebug, setSkillDebug] = useState(false);
   const [savingSkillDebug, setSavingSkillDebug] = useState(false);
 
@@ -1246,9 +1246,9 @@ function GeneralPane() {
           </p>
           <div className="flex gap-3">
             <button
-              onClick={() => setLanguage('zh')}
+              onClick={() => setLocale('zh')}
               className={`flex-1 rounded-lg px-4 py-3 text-sm transition-colors border ${
-                language === 'zh'
+                locale === 'zh'
                   ? 'bg-[var(--c-accent)]/10 text-[var(--c-accent)] border-[var(--c-accent)]/30'
                   : 'border-[var(--c-border)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'
               }`}
@@ -1257,9 +1257,9 @@ function GeneralPane() {
               <div className="text-xs text-[var(--c-text-tertiary)] mt-0.5">Chinese</div>
             </button>
             <button
-              onClick={() => setLanguage('en')}
+              onClick={() => setLocale('en')}
               className={`flex-1 rounded-lg px-4 py-3 text-sm transition-colors border ${
-                language === 'en'
+                locale === 'en'
                   ? 'bg-[var(--c-accent)]/10 text-[var(--c-accent)] border-[var(--c-accent)]/30'
                   : 'border-[var(--c-border)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'
               }`}

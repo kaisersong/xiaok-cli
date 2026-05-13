@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   listAvailableModelsForProvider: (providerId) => ipcRenderer.invoke('desktop:listAvailableModelsForProvider', providerId),
   deleteProvider: (providerId) => ipcRenderer.invoke('desktop:deleteProvider', providerId),
   deleteModel: (modelId) => ipcRenderer.invoke('desktop:deleteModel', modelId),
+  readClipboardFilePaths: () => ipcRenderer.invoke('desktop:readClipboardFilePaths'),
   selectMaterials: () => ipcRenderer.invoke('desktop:selectMaterials'),
   importMaterial: (input) => ipcRenderer.invoke('desktop:importMaterial', input),
   listSkills: () => ipcRenderer.invoke('desktop:listSkills'),
@@ -72,4 +73,29 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   saveSkillDebugConfig: (input) => ipcRenderer.invoke('desktop:saveSkillDebugConfig', input),
   readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }),
   getSkillStats: () => ipcRenderer.invoke('desktop:getSkillStats'),
+  kswarmGetStatus: () => ipcRenderer.invoke('desktop:kswarm:getStatus'),
+  kswarmStart: () => ipcRenderer.invoke('desktop:kswarm:start'),
+  kswarmStop: () => ipcRenderer.invoke('desktop:kswarm:stop'),
+  kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart'),
+  onKSwarmStatus(handler) {
+    const channel = 'desktop:kswarm:statusChange';
+    const listener = (_event, payload) => {
+      handler(payload);
+    };
+    ipcRenderer.on(channel, listener);
+    return () => {
+      ipcRenderer.off(channel, listener);
+    };
+  },
+  syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks),
+  onScheduledTaskDue(handler) {
+    const channel = 'desktop:scheduledTaskDue';
+    const listener = (_event, payload) => {
+      handler(payload);
+    };
+    ipcRenderer.on(channel, listener);
+    return () => {
+      ipcRenderer.off(channel, listener);
+    };
+  },
 });

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, X, Clock, Edit3, Trash2, Play, ChevronLeft, Settings as SettingsIcon } from 'lucide-react';
 import { api, type ThreadRecord } from '../api';
 import { useNavigate } from 'react-router-dom';
+import { useLocale } from '../contexts/LocaleContext';
 
 interface ScheduledTask {
   id: string;
@@ -15,16 +16,22 @@ interface ScheduledTask {
   threadId?: string;       // Latest thread for this task
   lastRunAt?: number;
   nextRunAt?: number;
+  scheduleConfig?: {
+    intervalMinutes?: number;  // hourly: interval in minutes (30/60/120/...)
+    hour?: number;             // daily/weekdays/weekly: 0-23
+    minute?: number;           // daily/weekdays/weekly: 0-59
+    dayOfWeek?: number;        // weekly: 0=Sun, 1=Mon, ...6=Sat
+  };
 }
 
 type ModalMode = 'create' | 'edit' | null;
 
 const FREQUENCY_OPTIONS = [
-  { value: 'manual' as const, label: 'Manual' },
-  { value: 'hourly' as const, label: 'Hourly' },
-  { value: 'daily' as const, label: 'Daily' },
-  { value: 'weekdays' as const, label: 'Weekdays' },
-  { value: 'weekly' as const, label: 'Weekly' },
+  { value: 'manual' as const },
+  { value: 'hourly' as const },
+  { value: 'daily' as const },
+  { value: 'weekdays' as const },
+  { value: 'weekly' as const },
 ];
 
 // Scheduled task context prefix — placed at the START of prompt so LLM sees it first
@@ -32,8 +39,81 @@ const SCHEDULED_CONTEXT_PREFIX = `[SYSTEM: This is a scheduled/automated task. `
   `The user set this up to run automatically. ` +
   `Please provide a friendly, concise reminder response.]\n\n`;
 
+const INTERVAL_OPTIONS = [
+  { value: 30 },
+  { value: 60 },
+  { value: 120 },
+  { value: 180 },
+  { value: 240 },
+  { value: 360 },
+  { value: 480 },
+  { value: 720 },
+];
+
+const DAY_OPTIONS = [
+  { value: 0 },
+  { value: 1 },
+  { value: 2 },
+  { value: 3 },
+  { value: 4 },
+  { value: 5 },
+  { value: 6 },
+];
+
+function computeNextRunAt(
+  frequency: ScheduledTask['frequency'],
+  config: ScheduledTask['scheduleConfig'],
+  fromTime = Date.now()
+): number | undefined {
+  if (frequency === 'manual' || !config) return undefined;
+
+  if (frequency === 'hourly') {
+    const interval = (config.intervalMinutes || 60) * 60_000;
+    return fromTime + interval;
+  }
+
+  const hour = config.hour ?? 9;
+  const minute = config.minute ?? 0;
+  const now = new Date(fromTime);
+
+  if (frequency === 'daily') {
+    const target = new Date(now);
+    target.setHours(hour, minute, 0, 0);
+    if (target.getTime() <= fromTime) target.setDate(target.getDate() + 1);
+    return target.getTime();
+  }
+
+  if (frequency === 'weekdays') {
+    const target = new Date(now);
+    target.setHours(hour, minute, 0, 0);
+    if (target.getTime() <= fromTime) target.setDate(target.getDate() + 1);
+    // Skip to next weekday
+    while (target.getDay() === 0 || target.getDay() === 6) {
+      target.setDate(target.getDate() + 1);
+    }
+    return target.getTime();
+  }
+
+  if (frequency === 'weekly') {
+    const dayOfWeek = config.dayOfWeek ?? 1; // default Monday
+    const target = new Date(now);
+    target.setHours(hour, minute, 0, 0);
+    // Find next occurrence of dayOfWeek
+    const diff = (dayOfWeek - target.getDay() + 7) % 7;
+    if (diff === 0 && target.getTime() <= fromTime) {
+      target.setDate(target.getDate() + 7);
+    } else {
+      target.setDate(target.getDate() + diff);
+    }
+    return target.getTime();
+  }
+
+  return undefined;
+}
+
 export function ScheduledPage() {
   const navigate = useNavigate();
+  const { t } = useLocale();
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalMode, setModalMode] = useState<ModalMode>(null);
@@ -45,7 +125,37 @@ export function ScheduledPage() {
   const [formDesc, setFormDesc] = useState('');
   const [formPrompt, setFormPrompt] = useState('');
   const [formFrequency, setFormFrequency] = useState<'manual' | 'hourly' | 'daily' | 'weekdays' | 'weekly'>('manual');
+  const [formScheduleConfig, setFormScheduleConfig] = useState<ScheduledTask['scheduleConfig']>({});
   const [saving, setSaving] = useState(false);
+
+  const frequencyLabels: Record<string, string> = {
+    manual: t.scheduledManual,
+    hourly: t.scheduledHourly,
+    daily: t.scheduledDaily,
+    weekdays: t.scheduledWeekdays,
+    weekly: t.scheduledWeekly,
+  };
+
+  const intervalLabels: Record<number, string> = {
+    30: t.scheduledEvery30Min,
+    60: t.scheduledEveryHour,
+    120: t.scheduledEvery2Hours,
+    180: t.scheduledEvery3Hours,
+    240: t.scheduledEvery4Hours,
+    360: t.scheduledEvery6Hours,
+    480: t.scheduledEvery8Hours,
+    720: t.scheduledEvery12Hours,
+  };
+
+  const dayLabels: Record<number, string> = {
+    0: t.scheduledSun,
+    1: t.scheduledMon,
+    2: t.scheduledTue,
+    3: t.scheduledWed,
+    4: t.scheduledThu,
+    5: t.scheduledFri,
+    6: t.scheduledSat,
+  };
 
   useEffect(() => {
     loadTasks();
@@ -54,6 +164,76 @@ export function ScheduledPage() {
     const handler = () => loadTasks();
     window.addEventListener('desktop:reminder', handler);
     return () => window.removeEventListener('desktop:reminder', handler);
+  }, []);
+
+  // Sync tasks to main on mount + listen for auto-execution triggers
+  useEffect(() => {
+    const desktop = (window as any).xiaokDesktop;
+    if (!desktop) return;
+
+    // Initial sync to main
+    const raw = localStorage.getItem('xiaok:scheduled-tasks');
+    const items = raw ? JSON.parse(raw) : [];
+    if (items.length > 0 && desktop.syncScheduledTasks) {
+      desktop.syncScheduledTasks(items).catch(() => {});
+    }
+
+    // Listen for task due events from scheduler
+    if (!desktop.onScheduledTaskDue) return;
+    const unsub = desktop.onScheduledTaskDue((payload: { taskId: string; name: string; prompt: string }) => {
+      // Auto-execute: find the task and run it without navigation
+      const raw = localStorage.getItem('xiaok:scheduled-tasks');
+      const currentTasks: ScheduledTask[] = raw ? JSON.parse(raw) : [];
+      const task = currentTasks.find(t => t.id === payload.taskId);
+      if (!task || task.status !== 'active') return;
+
+      // Execute in background (no navigate)
+      (async () => {
+        try {
+          let threadId = task.threadId;
+          if (threadId) {
+            try {
+              const { taskId } = await api.createTask({
+                prompt: SCHEDULED_CONTEXT_PREFIX + task.prompt,
+                materials: [],
+              });
+              await api.updateThreadTaskId(threadId, taskId);
+            } catch {
+              threadId = undefined;
+            }
+          }
+          if (!threadId) {
+            const thread = await api.createThread({ title: task.name.slice(0, 40) });
+            const { taskId } = await api.createTask({
+              prompt: SCHEDULED_CONTEXT_PREFIX + task.prompt,
+              materials: [],
+            });
+            await api.updateThreadTaskId(thread.id, taskId);
+            threadId = thread.id;
+          }
+
+          // Update task: lastRunAt, nextRunAt, threadId
+          const now = Date.now();
+          const nextRunAt = computeNextRunAt(task.frequency, task.scheduleConfig, now);
+          const updatedTasks = currentTasks.map(t =>
+            t.id === task.id
+              ? { ...t, lastRunAt: now, updatedAt: now, threadId, nextRunAt }
+              : t
+          );
+          localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify(updatedTasks));
+          setTasks(updatedTasks);
+          window.dispatchEvent(new CustomEvent('xiaok:scheduled-tasks-updated'));
+          if (desktop.syncScheduledTasks) {
+            desktop.syncScheduledTasks(updatedTasks).catch(() => {});
+          }
+          console.log(`[Scheduled] Auto-executed: "${task.name}"`);
+        } catch (e) {
+          console.error(`[Scheduled] Auto-execution failed for "${task.name}":`, e);
+        }
+      })();
+    });
+
+    return unsub;
   }, []);
 
   const loadTasks = async () => {
@@ -91,6 +271,11 @@ export function ScheduledPage() {
     setTasks(newTasks);
     // Dispatch event so sidebar can update
     window.dispatchEvent(new CustomEvent('xiaok:scheduled-tasks-updated'));
+    // Sync to main process scheduler
+    const desktop = (window as any).xiaokDesktop;
+    if (desktop?.syncScheduledTasks) {
+      desktop.syncScheduledTasks(newTasks).catch(() => {});
+    }
   };
 
   const openCreate = () => {
@@ -98,6 +283,7 @@ export function ScheduledPage() {
     setFormDesc('');
     setFormPrompt('');
     setFormFrequency('manual');
+    setFormScheduleConfig({});
     setEditingTask(null);
     setModalMode('create');
   };
@@ -107,6 +293,7 @@ export function ScheduledPage() {
     setFormDesc(task.description);
     setFormPrompt(task.prompt);
     setFormFrequency(task.frequency);
+    setFormScheduleConfig(task.scheduleConfig || {});
     setEditingTask(task);
     setModalMode('edit');
   };
@@ -121,6 +308,8 @@ export function ScheduledPage() {
     setSaving(true);
 
     const now = Date.now();
+    const nextRunAt = computeNextRunAt(formFrequency, formScheduleConfig, now);
+
     if (modalMode === 'create') {
       const newTask: ScheduledTask = {
         id: crypto.randomUUID(),
@@ -128,6 +317,8 @@ export function ScheduledPage() {
         description: formDesc.trim(),
         prompt: formPrompt.trim(),
         frequency: formFrequency,
+        scheduleConfig: formFrequency !== 'manual' ? formScheduleConfig : undefined,
+        nextRunAt,
         status: 'active',
         createdAt: now,
         updatedAt: now,
@@ -136,7 +327,7 @@ export function ScheduledPage() {
     } else if (editingTask) {
       const updated = tasks.map(t =>
         t.id === editingTask.id
-          ? { ...t, name: formName.trim(), description: formDesc.trim(), prompt: formPrompt.trim(), frequency: formFrequency, updatedAt: now }
+          ? { ...t, name: formName.trim(), description: formDesc.trim(), prompt: formPrompt.trim(), frequency: formFrequency, scheduleConfig: formFrequency !== 'manual' ? formScheduleConfig : undefined, nextRunAt, updatedAt: now }
           : t
       );
       saveTasks(updated);
@@ -147,8 +338,8 @@ export function ScheduledPage() {
   };
 
   const handleDelete = (id: string) => {
-    if (!confirm('Delete this scheduled task?')) return;
-    saveTasks(tasks.filter(t => t.id !== id));
+    if (!confirm(t.scheduledDeleteConfirm)) return;
+    saveTasks(tasks.filter(task => task.id !== id));
   };
 
   const handleToggle = (task: ScheduledTask) => {
@@ -230,7 +421,7 @@ export function ScheduledPage() {
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center bg-[var(--c-bg-page)]">
-        <div className="text-sm text-[var(--c-text-secondary)]">Loading...</div>
+        <div className="text-sm text-[var(--c-text-secondary)]">{t.commonLoading}</div>
       </div>
     );
   }
@@ -247,18 +438,18 @@ export function ScheduledPage() {
             <ChevronLeft size={20} />
           </button>
           <div>
-            <h2 className="text-lg font-medium text-[var(--c-text-primary)]">Scheduled Tasks</h2>
+            <h2 className="text-lg font-medium text-[var(--c-text-primary)]">{t.scheduledTitle}</h2>
             <p className="text-xs text-[var(--c-text-secondary)] mt-0.5">
-              Manage automated tasks that run on a schedule
+              {t.scheduledSubtitle}
             </p>
           </div>
         </div>
         <button
           onClick={openCreate}
-          className="flex items-center gap-2 rounded-lg bg-[var(--c-accent)] px-4 py-2 text-sm text-white hover:opacity-90 transition-opacity"
+          className="flex items-center gap-1.5 rounded-lg bg-[var(--c-btn-bg)] px-3.5 py-1.5 text-sm font-medium text-[var(--c-btn-text)] transition-[filter] duration-150 hover:brightness-[1.12] active:brightness-[0.95]"
         >
-          <Plus size={16} />
-          New task
+          <Plus size={15} />
+          {t.scheduledNew}
         </button>
       </div>
 
@@ -267,16 +458,16 @@ export function ScheduledPage() {
         {tasks.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <Clock size={48} className="mb-4 text-[var(--c-text-tertiary)] opacity-50" />
-            <p className="text-sm text-[var(--c-text-secondary)]">No scheduled tasks</p>
+            <p className="text-sm text-[var(--c-text-secondary)]">{t.scheduledEmpty}</p>
             <p className="mt-2 text-xs text-[var(--c-text-tertiary)]">
-              Create a task to automate repetitive work
+              {t.scheduledEmptyDesc}
             </p>
             <button
               onClick={openCreate}
               className="mt-4 flex items-center gap-2 rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
             >
               <Plus size={16} />
-              Create your first task
+              {t.scheduledCreateFirst}
             </button>
           </div>
         ) : (
@@ -295,17 +486,18 @@ export function ScheduledPage() {
                           ? 'bg-green-50 text-green-600'
                           : 'bg-[var(--c-bg-deep)] text-[var(--c-text-tertiary)]'
                       }`}>
-                        {task.status === 'active' ? 'Active' : 'Paused'}
+                        {task.status === 'active' ? t.scheduledActive : t.scheduledPaused}
                       </span>
                       <span className="text-xs text-[var(--c-text-tertiary)]">
-                        {FREQUENCY_OPTIONS.find(f => f.value === task.frequency)?.label || task.frequency}
+                        {frequencyLabels[task.frequency] || task.frequency}
                       </span>
                     </div>
                     {task.description && (
                       <p className="mt-1 text-xs text-[var(--c-text-secondary)] line-clamp-1">{task.description}</p>
                     )}
-                    <div className="mt-2 text-xs text-[var(--c-text-tertiary)]">
-                      Last run: {formatTime(task.lastRunAt)}
+                    <div className="mt-2 flex gap-4 text-xs text-[var(--c-text-tertiary)]">
+                      <span>Last run: {formatTime(task.lastRunAt)}</span>
+                      {task.nextRunAt && <span>Next: {formatTime(task.nextRunAt)}</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
@@ -317,18 +509,18 @@ export function ScheduledPage() {
                           ? 'text-[var(--c-text-tertiary)] cursor-wait'
                           : 'text-[var(--c-accent)] hover:bg-[var(--c-accent)]/10'
                       }`}
-                      title="Run now"
+                      title={t.scheduledRun}
                     >
                       <Play size={12} />
-                      Run
+                      {t.scheduledRun}
                     </button>
                     {task.threadId && (
                       <button
                         onClick={() => handleClickTask(task)}
                         className="rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
-                        title="View last run"
+                        title={t.scheduledView}
                       >
-                        View
+                        {t.scheduledView}
                       </button>
                     )}
                     <button
@@ -339,19 +531,19 @@ export function ScheduledPage() {
                           : 'text-green-600 hover:bg-green-50'
                       }`}
                     >
-                      {task.status === 'active' ? 'Pause' : 'Resume'}
+                      {task.status === 'active' ? t.scheduledPause : t.scheduledResume}
                     </button>
                     <button
                       onClick={() => openEdit(task)}
                       className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-[var(--c-text-primary)] hover:bg-[var(--c-bg-deep)] transition-colors"
-                      title="Edit"
+                      title={t.commonEdit}
                     >
                       <Edit3 size={14} />
                     </button>
                     <button
                       onClick={() => handleDelete(task.id)}
                       className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 hover:bg-red-50 transition-colors"
-                      title="Delete"
+                      title={t.commonDelete}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -373,7 +565,7 @@ export function ScheduledPage() {
             {/* Modal header */}
             <div className="flex items-center justify-between border-b border-[var(--c-border)] px-6 py-4">
               <h3 className="text-base font-medium text-[var(--c-text-primary)]">
-                {modalMode === 'create' ? 'Create scheduled task' : 'Edit scheduled task'}
+                {modalMode === 'create' ? t.scheduledCreateTitle : t.scheduledEditTitle}
               </h3>
               <button
                 onClick={closeModal}
@@ -389,25 +581,25 @@ export function ScheduledPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">
-                    Name <span className="text-red-500">*</span>
+                    {t.scheduledName} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     value={formName}
                     onChange={e => setFormName(e.target.value)}
-                    placeholder="daily-briefing"
+                    placeholder="每日简报"
                     className="w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
                   />
                 </div>
                 <div>
                   <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">
-                    Description <span className="text-red-500">*</span>
+                    {t.scheduledDescription} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     value={formDesc}
                     onChange={e => setFormDesc(e.target.value)}
-                    placeholder="Summarize my calendar and inbox"
+                    placeholder="汇总日历和收件箱"
                     className="w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
                   />
                 </div>
@@ -416,12 +608,12 @@ export function ScheduledPage() {
               {/* Prompt textarea */}
               <div>
                 <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">
-                  Instructions <span className="text-red-500">*</span>
+                  {t.scheduledInstructions} <span className="text-red-500">*</span>
                 </label>
                 <textarea
                   value={formPrompt}
                   onChange={e => setFormPrompt(e.target.value)}
-                  placeholder="Check my calendar for today's meetings and summarize my unread emails. Highlight anything urgent."
+                  placeholder="查看今天的日历会议并汇总未读邮件，标记紧急事项。"
                   rows={4}
                   className="w-full resize-none rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
                 />
@@ -429,15 +621,18 @@ export function ScheduledPage() {
 
               {/* Frequency */}
               <div>
-                <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">Frequency</label>
+                <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">{t.scheduledFrequency}</label>
                 <div className="relative">
                   <select
                     value={formFrequency}
-                    onChange={e => setFormFrequency(e.target.value as never)}
+                    onChange={e => {
+                      setFormFrequency(e.target.value as never);
+                      setFormScheduleConfig({});
+                    }}
                     className="w-full appearance-none rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)] pr-8"
                   >
                     {FREQUENCY_OPTIONS.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      <option key={opt.value} value={opt.value}>{frequencyLabels[opt.value] || opt.value}</option>
                     ))}
                   </select>
                   <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center">
@@ -447,6 +642,80 @@ export function ScheduledPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Schedule config - conditional time picker */}
+              {formFrequency === 'hourly' && (
+                <div>
+                  <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">{t.scheduledInterval}</label>
+                  <div className="relative">
+                    <select
+                      value={formScheduleConfig?.intervalMinutes || 60}
+                      onChange={e => setFormScheduleConfig({ ...formScheduleConfig, intervalMinutes: Number(e.target.value) })}
+                      className="w-full appearance-none rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)] pr-8"
+                    >
+                      {INTERVAL_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>{intervalLabels[opt.value] || String(opt.value)}</option>
+                      ))}
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center">
+                      <svg className="h-4 w-4 text-[var(--c-text-tertiary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(formFrequency === 'daily' || formFrequency === 'weekdays') && (
+                <div>
+                  <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">{t.scheduledRunAt}</label>
+                  <input
+                    type="time"
+                    value={`${String(formScheduleConfig?.hour ?? 9).padStart(2, '0')}:${String(formScheduleConfig?.minute ?? 0).padStart(2, '0')}`}
+                    onChange={e => {
+                      const [h, m] = e.target.value.split(':').map(Number);
+                      setFormScheduleConfig({ ...formScheduleConfig, hour: h, minute: m });
+                    }}
+                    className="w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
+                  />
+                </div>
+              )}
+
+              {formFrequency === 'weekly' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">{t.scheduledDayOfWeek}</label>
+                    <div className="flex gap-1">
+                      {DAY_OPTIONS.map(day => (
+                        <button
+                          key={day.value}
+                          type="button"
+                          onClick={() => setFormScheduleConfig({ ...formScheduleConfig, dayOfWeek: day.value })}
+                          className={`flex-1 rounded-lg py-1.5 text-xs transition-colors ${
+                            (formScheduleConfig?.dayOfWeek ?? 1) === day.value
+                              ? 'bg-[var(--c-accent)] text-white'
+                              : 'border border-[var(--c-border)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'
+                          }`}
+                        >
+                          {dayLabels[day.value] || String(day.value)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">{t.scheduledRunAt}</label>
+                    <input
+                      type="time"
+                      value={`${String(formScheduleConfig?.hour ?? 9).padStart(2, '0')}:${String(formScheduleConfig?.minute ?? 0).padStart(2, '0')}`}
+                      onChange={e => {
+                        const [h, m] = e.target.value.split(':').map(Number);
+                        setFormScheduleConfig({ ...formScheduleConfig, hour: h, minute: m });
+                      }}
+                      className="w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Modal footer */}
@@ -455,14 +724,14 @@ export function ScheduledPage() {
                 onClick={closeModal}
                 className="rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
               >
-                Cancel
+                {t.scheduledCancel}
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving || !formName.trim() || !formPrompt.trim()}
                 className="rounded-lg bg-[var(--c-accent)] px-5 py-2 text-sm text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
               >
-                {saving ? 'Saving...' : 'Save'}
+                {saving ? t.scheduledSaving : t.scheduledSave}
               </button>
             </div>
           </div>

@@ -1,0 +1,160 @@
+/**
+ * ActivityTimeline — full event timeline from server-side activity log,
+ * with artifact links, human actions, and agent name resolution.
+ */
+
+import { useEffect, useState, useRef } from 'react';
+import { CheckCircle2, AlertCircle, Play, FileText, Users, Plus, Send, Eye, Archive } from 'lucide-react';
+import type { KSwarmProject, KSwarmActivityEvent, KSwarmHumanAction, KSwarmArtifact } from '../../hooks/useKSwarmClient';
+import { useKSwarm } from '../../contexts/KSwarmContext';
+import { useLocale } from '../../contexts/LocaleContext';
+import { ArtifactPreviewModal } from './ArtifactPreviewModal';
+
+interface ActivityTimelineProps {
+  project: KSwarmProject;
+  activities?: KSwarmActivityEvent[];
+  humanActions?: KSwarmHumanAction[];
+}
+
+function formatTime(ts?: number | string): string {
+  if (!ts) return '';
+  try {
+    const d = typeof ts === 'number' ? new Date(ts) : new Date(ts);
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch { return ''; }
+}
+
+export function ActivityTimeline({ project, activities: propActivities, humanActions: propHumanActions }: ActivityTimelineProps) {
+  const { lastEvent, agents } = useKSwarm();
+  const { t } = useLocale();
+  const [previewArtifact, setPreviewArtifact] = useState<KSwarmArtifact | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const EVENT_META: Record<string, { icon: typeof FileText; label: string; color: string }> = {
+    'project.created': { icon: Plus, label: t.projectsActivityCreated, color: 'text-[var(--c-text-secondary)]' },
+    'po.assigned': { icon: Users, label: t.projectsActivityPoAssigned, color: 'text-[var(--c-text-secondary)]' },
+    'tasks.created': { icon: FileText, label: 'PO 创建任务', color: 'text-[var(--c-text-secondary)]' },
+    'tasks.added_by_human': { icon: Plus, label: '人工添加任务', color: 'text-[var(--c-text-primary)]' },
+    'project.approved': { icon: CheckCircle2, label: t.projectsActivityApproved, color: 'text-[var(--c-status-success-text)]' },
+    'task.assigned': { icon: Users, label: t.projectsActivityDispatched, color: 'text-[var(--c-text-secondary)]' },
+    'task.dispatched': { icon: Send, label: t.projectsActivityDispatched, color: 'text-[var(--c-text-secondary)]' },
+    'task.accepted': { icon: Play, label: '接受任务', color: 'text-[var(--c-status-warning-text)]' },
+    'task.progress': { icon: Play, label: t.projectsActivityInProgress, color: 'text-[var(--c-status-warning-text)]' },
+    'task.submitted': { icon: Eye, label: t.projectsActivitySubmitted, color: 'text-[var(--c-status-success-text)]' },
+    'task.done': { icon: CheckCircle2, label: t.projectsActivityDone, color: 'text-[var(--c-status-success-text)]' },
+    'task.rework': { icon: AlertCircle, label: t.projectsActivityRework, color: 'text-[var(--c-status-error-text)]' },
+    'task.failed': { icon: AlertCircle, label: t.projectsActivityFailed, color: 'text-[var(--c-status-error-text)]' },
+    'task.cancelled': { icon: AlertCircle, label: t.projectsActivityCancelled, color: 'text-[var(--c-text-muted)]' },
+    'project.delivered': { icon: Archive, label: 'PO 提交交付', color: 'text-[var(--c-status-success-text)]' },
+    'project.closed': { icon: CheckCircle2, label: '项目关闭', color: 'text-[var(--c-text-muted)]' },
+    'approval.pending': { icon: Eye, label: '等待审批', color: 'text-[var(--c-status-warning-text)]' },
+    'plan.submitted': { icon: FileText, label: '提交计划', color: 'text-[var(--c-text-secondary)]' },
+    'plan.revised': { icon: FileText, label: '修订计划', color: 'text-[var(--c-status-warning-text)]' },
+    'task.reviewed': { icon: Eye, label: 'PO 质量验收', color: 'text-[var(--c-status-success-text)]' },
+  };
+
+  const agentName = (id?: string) => {
+    if (!id) return '';
+    const a = agents.find(a => a.id === id);
+    return a?.name || id;
+  };
+
+  const activities = propActivities || [];
+  const humanActions = propHumanActions || [];
+
+  if (activities.length === 0 && humanActions.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <p className="text-sm text-[var(--c-text-tertiary)]">{t.projectsActivityEmpty}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6">
+      {/* Activity events */}
+      <div className="flex flex-col gap-0">
+        {activities.map((event, idx) => {
+          const meta = EVENT_META[event.type] || { icon: FileText, label: event.type, color: 'text-[var(--c-text-muted)]' };
+          const Icon = meta.icon;
+          const agent = event.agent || event.by || event.target || '';
+          const taskTitle = event.taskTitle || '';
+          const artifacts = event.output?.artifacts || [];
+
+          return (
+            <div key={idx} className="flex gap-3 group">
+              {/* Timeline line + dot */}
+              <div className="flex flex-col items-center">
+                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--c-bg-deep)]">
+                  <Icon size={13} className={meta.color} />
+                </div>
+                {idx < activities.length - 1 && <div className="w-px flex-1 bg-[var(--c-border-subtle)]" />}
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 pb-4">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[12px] font-medium text-[var(--c-text-primary)]">{meta.label}</span>
+                  {agent && <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]">@{agentName(agent)}</span>}
+                  {taskTitle && <span className="text-[10px] text-[var(--c-text-tertiary)]">"{taskTitle}"</span>}
+                </div>
+
+                {/* Task assignments detail */}
+                {event.tasks && event.tasks.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {event.tasks.map((t, j) => (
+                      <span key={j} className="text-[10px] text-[var(--c-text-muted)]">
+                        {t.title}{t.assignedAgent ? ` → @${agentName(t.assignedAgent)}` : ''}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Artifact links */}
+                {artifacts.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {artifacts.map((art, j) => {
+                      const artifact = typeof art === 'string' ? { name: art, mimeType: 'text/plain' } : art;
+                      return (
+                        <button key={j} type="button" onClick={() => setPreviewArtifact(artifact)}
+                          className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] border-[0.5px] border-[var(--c-border-subtle)] hover:bg-[var(--c-bg-page)]">
+                          {artifact.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {event.count && <span className="text-[10px] text-[var(--c-text-muted)] ml-1">{event.count} tasks</span>}
+              </div>
+
+              <span className="text-[10px] text-[var(--c-text-muted)] shrink-0 font-mono pt-1">{formatTime(event.ts)}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Human actions */}
+      {humanActions.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-[var(--c-border-subtle)]">
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)] mb-3">你的操作记录</h4>
+          <div className="flex flex-col gap-1">
+            {humanActions.map((action, i) => (
+              <div key={i} className="flex items-center gap-2 py-1">
+                <div className="flex h-4 w-4 items-center justify-center rounded-full bg-[var(--c-btn-bg)]">
+                  <span className="text-[7px] font-bold text-[var(--c-btn-text)]">H</span>
+                </div>
+                <span className="text-[12px] text-[var(--c-text-primary)]">{action.action}</span>
+                {action.projectName && <span className="text-[11px] text-[var(--c-text-tertiary)]">— {action.projectName}</span>}
+                <span className="text-[10px] text-[var(--c-text-muted)] font-mono ml-auto">{formatTime(action.ts)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div ref={bottomRef} />
+      {previewArtifact && <ArtifactPreviewModal artifact={previewArtifact} onClose={() => setPreviewArtifact(null)} />}
+    </div>
+  );
+}

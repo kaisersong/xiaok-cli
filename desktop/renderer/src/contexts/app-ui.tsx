@@ -22,7 +22,6 @@ import {
   endPerfTrace,
   isPerfDebugEnabled,
   recordPerfDuration,
-  recordPerfValue,
   type PerfSample,
 } from '../perfDebug'
 import { useAuth } from './auth'
@@ -534,17 +533,6 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
     return () => cancelAnimationFrame(frameId)
   }, [desktop, settingsOpen, desktopSettingsSection, location.pathname])
 
-  useEffect(() => {
-    recordPerfValue('app_ui_render_count', 1, 'count', {
-      sidebarCollapsed,
-      settingsOpen,
-      searchOverlayOpen,
-      notificationsOpen,
-      isSearchMode,
-      appMode,
-      pathname: location.pathname,
-    })
-  })
 
   useEffect(() => {
     const onPopState = () => {

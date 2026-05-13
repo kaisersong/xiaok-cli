@@ -1138,7 +1138,6 @@ function buildSystemPrompt(): string {
   const archStr = arch();
   const ostype = type();
   const defaultDownloads = join(home, 'Downloads');
-
   return `你是 xiaok desktop 的助手。你可以使用工具来帮助用户完成各种任务。
 
 ## 系统信息
@@ -1147,6 +1146,7 @@ function buildSystemPrompt(): string {
 - 用户主目录: ${home}
 - 默认下载目录: ${defaultDownloads}
 - 当前工作目录: ${cwd}
+- 当前日期: <currentDate>${new Date().toISOString().slice(0, 10)}</currentDate>
 
 **重要**: 写入文件时使用上述路径，不要猜测用户名或路径。
 
@@ -1243,32 +1243,16 @@ xiaok 支持从 ClawHub 安装技能。当用户说"安装XX技能"时：
 2. **何时不调用**：简单问答（如"今天天气"、"解释一下XX"）、单步操作（如"读取某文件"）不需要调用
 3. **更新时机**：每完成一个步骤后，再次调用 report_progress 更新所有步骤的状态
 4. **label 要求**：使用面向用户的自然语言描述，不要使用技术术语
+5. **多产物规则**：如果用户请求包含多个交付物（如"报告+演示文稿"、"文档+代码"），必须为每个交付物规划独立的步骤。不可在完成一个产物后就停止。
 
 示例：
 - 用户说"帮我基于这些材料写一版方案" → 调用 report_progress，steps 包含：收集材料、分析需求、起草方案、校验完整性
+- 用户说"做一份报告写一份演示文稿" → steps 必须同时包含"生成报告"和"生成演示文稿"两个独立步骤
 - 每完成一步，更新对应 step 的 status 为 completed，下一步为 running`;
 }
 
 const BASE_SYSTEM_PROMPT = buildSystemPrompt();
 
-/**
- * Intent keyword mapping for auto skill matching.
- * Maps Chinese/English intent keywords to skill names.
- * Keywords are checked against the user prompt (case-insensitive).
- */
-const INTENT_KEYWORD_MAP: Record<string, string[]> = {
-  'kai-report-creator': [
-    // Chinese
-    '生成报告', '写报告', '周报', '月报', '季报', '年报', '报告生成', '生成周报', '生成月报', '制作报告', '做报告', '写周报',
-    // English
-    'create report', 'generate report', 'weekly report', 'monthly report', 'report generation', 'business summary', 'data dashboard',
-  ],
-};
-
-/**
- * 自动 skill 匹配：根据用户 prompt 中的关键词匹配 user-invocable skill。
- * 优先使用显式 intent 关键词映射（支持中英文），fallback 到 description 关键词匹配。
- */
 /** Convert tool name to user-friendly label for TaskPanel auto-progress */
 function toolNameToLabel(name: string, input?: Record<string, unknown>): string {
   // MCP tools: extract server and action from mcp__server__action pattern
@@ -1298,39 +1282,6 @@ function toolNameToLabel(name: string, input?: Record<string, unknown>): string 
     case 'channel_send': return '发送消息';
     default: return name.replace(/_/g, ' ');
   }
-}
-
-function matchSkillByIntent(prompt: string, skills: SkillMeta[]): SkillMeta | null {
-  const lowerPrompt = prompt.toLowerCase();
-
-  // Phase 1: Check explicit intent keyword map
-  for (const [skillName, keywords] of Object.entries(INTENT_KEYWORD_MAP)) {
-    const match = keywords.some(kw => lowerPrompt.includes(kw));
-    if (match) {
-      const skill = skills.find(s => s.name === skillName && s.userInvocable);
-      if (skill) return skill;
-    }
-  }
-
-  // Phase 2: Fallback to description keyword matching (English only)
-  for (const skill of skills) {
-    if (!skill.userInvocable) continue;
-    const keywords = extractKeywords(skill.description);
-    if (keywords.length === 0) continue;
-    if (keywords.some(kw => lowerPrompt.includes(kw))) return skill;
-  }
-  return null;
-}
-
-/**
- * 从 skill description 中提取可用于 intent 匹配的关键词。
- * 保留大写动词/名词，过滤停用词，转小写。
- */
-function extractKeywords(description: string): string[] {
-  const stopWords = new Set(['use', 'when', 'the', 'user', 'wants', 'to', 'and', 'or', 'a', 'an', 'is', 'in', 'for', 'of', 'with', 'on', 'that', 'this', 'which', 'from', 'be', 'are', 'it', 'not', 'if', 'do', 'does', 'want', 'wants', 'should', 'would', 'could', 'can', 'may', 'might', 'will']);
-  const words = description.toLowerCase().split(/[\s,./]+/).filter(w => w.length > 3 && !stopWords.has(w));
-  // Deduplicate while preserving order
-  return [...new Set(words)];
 }
 
 /**
@@ -1407,7 +1358,12 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
           status: validStatuses.has(s.status) ? s.status : 'planned',
         });
       }
-      return JSON.stringify({ ok: true, displayed_steps: validated.length, _validated: validated });
+      const base = JSON.stringify({ ok: true, displayed_steps: validated.length, _validated: validated });
+      const allCompleted = validated.length > 0 && validated.every(s => s.status === 'completed');
+      if (allCompleted) {
+        return base + '\n\n⚠️ 所有步骤已标记完成。请回顾用户原始请求，确认是否所有要求的交付物都已生成。如果有遗漏，请追加新步骤继续执行，不要结束任务。';
+      }
+      return base;
     },
   };
   registry.registerTool(reportProgressTool);
@@ -1457,21 +1413,6 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
         effectivePrompt = slashMatch.rest
           ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
           : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
-      }
-    } else {
-      // Auto-match: if user prompt matches a user-invocable skill, inject it automatically
-      const autoSkill = matchSkillByIntent(prompt, currentSkills);
-      if (autoSkill) {
-        skillNamesDetected = [autoSkill.name];
-        skillTriggerType = 'auto';
-        skillInvocation = buildSkillInvocation(autoSkill.name, skillCatalog, sessionId);
-        if (skillInvocation) {
-          appendTrace(dataRoot, {
-            ts: Date.now(), taskId: sessionId, skillName: autoSkill.name,
-            event: 'skill_invoked', details: `auto-match: ${prompt.slice(0, 80)}`,
-          });
-        }
-        effectivePrompt = `Execute skill "${autoSkill.name}": ${autoSkill.description}\n\nUser input: ${prompt}\n\nSkill content:\n${autoSkill.content}`;
       }
     }
 
@@ -1545,6 +1486,8 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
     let reply = '';
     let iteration = 0;
     const MAX_ITERATIONS = 20;
+    const TASK_TIMEOUT_MS = 30 * 60_000;
+    const taskDeadline = Date.now() + TASK_TIMEOUT_MS;
     let totalToolCalls = 0;
     let planEmitted = false;
     const autoSteps: Array<{id: string; label: string; status: string}> = [];
@@ -1563,6 +1506,7 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
 
     while (iteration < MAX_ITERATIONS) {
       if (signal.aborted) throw new Error('task cancelled');
+      if (Date.now() > taskDeadline) throw new Error('任务超时（30分钟），可能是网络不稳定或模型响应过慢。请检查网络后重试。');
       iteration++;
 
       // Budget check
@@ -1819,6 +1763,48 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
   let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
   let skillsLoaded = false;
 
+  // Register kswarm create_project tool (allows AI to create multi-agent projects from chat)
+  const kswarmCreateProjectTool: Tool = {
+    permission: 'safe',
+    definition: {
+      name: 'create_project',
+      description: '创建一个多 agent 协作项目。当用户表达了需要多步骤协作完成的复杂任务时（如"帮我做个竞品分析"、"写一份报告"），调用此工具创建项目并由 AI 团队执行。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '项目名称，简短明确' },
+          goal: { type: 'string', description: '项目目标，描述最终要交付什么' },
+          requirements: { type: 'string', description: '补充要求或约束条件（可选）' },
+        },
+        required: ['name', 'goal'],
+      },
+    },
+    async execute(input) {
+      const { name, goal, requirements } = input as { name: string; goal: string; requirements?: string };
+      try {
+        // Auto-pick a PO agent (required by kswarm API)
+        const agentsRes = await fetch('http://127.0.0.1:4400/agents');
+        if (!agentsRes.ok) return JSON.stringify({ error: 'Cannot fetch agents from kswarm' });
+        const { agents } = await agentsRes.json() as { agents: Array<{ id: string; roles?: string[] }> };
+        const poAgent = agents.find(a => a.roles?.includes('project_owner'))?.id || agents[0]?.id;
+        if (!poAgent) return JSON.stringify({ error: 'No agents available. Create an agent in kswarm first.' });
+
+        const members = agents.filter(a => a.id !== poAgent).map(a => a.id);
+        const res = await fetch('http://127.0.0.1:4400/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, goal, requirements, poAgent, members }),
+        });
+        if (!res.ok) return JSON.stringify({ error: `Failed to create project: ${res.status}` });
+        const project = await res.json();
+        return JSON.stringify({ ok: true, projectId: project.id, name: project.name, status: project.status });
+      } catch (err) {
+        return JSON.stringify({ error: `KSwarm service unavailable: ${(err as Error).message}` });
+      }
+    },
+  };
+  registry.registerTool(kswarmCreateProjectTool);
+
   // Register report_progress tool (TaskPanel progress reporting)
   const reportProgressTool: Tool = {
     permission: 'safe',
@@ -1860,7 +1846,12 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
         });
       }
       // Result is stored; event emission happens in the tool loop via emitRuntimeEvent
-      return JSON.stringify({ ok: true, displayed_steps: validated.length, _validated: validated });
+      const base = JSON.stringify({ ok: true, displayed_steps: validated.length, _validated: validated });
+      const allCompleted = validated.length > 0 && validated.every(s => s.status === 'completed');
+      if (allCompleted) {
+        return base + '\n\n⚠️ 所有步骤已标记完成。请回顾用户原始请求，确认是否所有要求的交付物都已生成。如果有遗漏，请追加新步骤继续执行，不要结束任务。';
+      }
+      return base;
     },
   };
   registry.registerTool(reportProgressTool);
@@ -1910,21 +1901,6 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
         effectivePrompt = slashMatch.rest
           ? `Execute skill "${skill.name}": ${skill.description}\n\nUser input: ${slashMatch.rest}\n\nSkill content:\n${skill.content}`
           : `Execute skill "${skill.name}": ${skill.description}\n\nSkill content:\n${skill.content}`;
-      }
-    } else {
-      // Auto-match: if user prompt matches a user-invocable skill, inject it automatically
-      const autoSkill = matchSkillByIntent(prompt, currentSkills);
-      if (autoSkill) {
-        skillNamesDetected = [autoSkill.name];
-        skillTriggerType = 'auto';
-        skillInvocation = buildSkillInvocation(autoSkill.name, skillCatalog, sessionId);
-        if (skillInvocation) {
-          appendTrace(dataRoot, {
-            ts: Date.now(), taskId: sessionId, skillName: autoSkill.name,
-            event: 'skill_invoked', details: `auto-match: ${prompt.slice(0, 80)}`,
-          });
-        }
-        effectivePrompt = `Execute skill "${autoSkill.name}": ${autoSkill.description}\n\nUser input: ${prompt}\n\nSkill content:\n${autoSkill.content}`;
       }
     }
 
@@ -1998,6 +1974,8 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
     let reply = '';
     let iteration = 0;
     const MAX_ITERATIONS = 20;
+    const TASK_TIMEOUT_MS = 30 * 60_000;
+    const taskDeadline = Date.now() + TASK_TIMEOUT_MS;
     let totalToolCalls = 0;
     let planEmitted = false;
     const autoSteps: Array<{id: string; label: string; status: string}> = [];
@@ -2013,6 +1991,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
 
     while (iteration < MAX_ITERATIONS) {
       if (signal.aborted) throw new Error('task cancelled');
+      if (Date.now() > taskDeadline) throw new Error('任务超时（30分钟），可能是网络不稳定或模型响应过慢。请检查网络后重试。');
       iteration++;
 
       // Budget check

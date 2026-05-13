@@ -1612,6 +1612,191 @@ export interface LocaleStrings {
     appearanceDesc: string;
     languageLabel: string;
   };
+
+  // projects - kanban
+  projectsKanbanPending: string;
+  projectsKanbanActive: string;
+  projectsKanbanReview: string;
+  projectsKanbanDone: string;
+  projectsKanbanNoTasks: string;
+  projectsKanbanAddRequirement: string;
+  projectsKanbanRequirementPlaceholder: string;
+  projectsKanbanAutoAssign: string;
+  projectsKanbanAddRow: string;
+  projectsKanbanMarkDone: string;
+  projectsKanbanCancel: string;
+  projectsKanbanSave: string;
+
+  // projects - detail page
+  projectsDetailPlan: string;
+  projectsDetailKanban: string;
+  projectsDetailActivity: string;
+  projectsDetailDeliverables: string;
+  projectsDetailApprove: string;
+  projectsDetailDispatch: string;
+  projectsDetailDeliver: string;
+  projectsDetailConfirmDone: string;
+
+  // projects - page
+  projectsPageTitle: string;
+  projectsPageAgents: string;
+  projectsPageNewProject: string;
+  projectsPageNewAgent: string;
+  projectsPageEmpty: string;
+  projectsPageEmptyDesc: string;
+  projectsPageCreateFirst: string;
+  projectsPageOffline: string;
+
+  // projects - create project modal
+  projectsCreateTitle: string;
+  projectsCreateName: string;
+  projectsCreateGoal: string;
+  projectsCreateRequirements: string;
+  projectsCreatePoAgent: string;
+  projectsCreateWorkerAgent: string;
+  projectsCreateWorkDir: string;
+  projectsCreateCancel: string;
+  projectsCreateCreating: string;
+  projectsCreateSubmit: string;
+
+  // projects - create agent modal
+  projectsAgentTypeTitle: string;
+  projectsAgentTypeWorker: string;
+  projectsAgentTypePo: string;
+  projectsAgentTypeAll: string;
+  projectsAgentName: string;
+  projectsAgentCreating: string;
+  projectsAgentCreate: string;
+
+  // projects - edit agent modal
+  projectsEditAgentTitle: string;
+  projectsEditAgentName: string;
+  projectsEditAgentModel: string;
+  projectsEditAgentModelHint: string;
+  projectsEditAgentInstructions: string;
+  projectsEditAgentClose: string;
+  projectsEditAgentSaving: string;
+  projectsEditAgentSave: string;
+
+  // projects - agents tab
+  projectsAgentStatusIdle: string;
+  projectsAgentStatusWorking: string;
+  projectsAgentStatusBlocked: string;
+  projectsAgentStatusError: string;
+  projectsAgentStatusOffline: string;
+  projectsAgentRoleAll: string;
+  projectsAgentRolePo: string;
+  projectsAgentRoleWorker: string;
+  projectsAgentNoAgents: string;
+  projectsAgentStart: string;
+  projectsAgentStop: string;
+  projectsAgentConfig: string;
+  projectsAgentConfirm: string;
+  projectsAgentArchive: string;
+
+  // projects - activity timeline
+  projectsActivityCreated: string;
+  projectsActivityPoAssigned: string;
+  projectsActivityApproved: string;
+  projectsActivityDispatched: string;
+  projectsActivityInProgress: string;
+  projectsActivitySubmitted: string;
+  projectsActivityDone: string;
+  projectsActivityRework: string;
+  projectsActivityFailed: string;
+  projectsActivityCancelled: string;
+  projectsActivityEmpty: string;
+
+  // projects - card status
+  projectsStatusDraft: string;
+  projectsStatusPlanning: string;
+  projectsStatusCreated: string;
+  projectsStatusActive: string;
+  projectsStatusReview: string;
+  projectsStatusDelivered: string;
+  projectsStatusClosed: string;
+
+  // projects - card
+  projectsCardJustNow: string;
+  projectsCardMinutesAgo: string;
+  projectsCardHoursAgo: string;
+  projectsCardDeleteConfirm: string;
+
+  // projects - deliverables
+  projectsDeliverableTitle: string;
+  projectsDeliverableEmpty: string;
+  projectsDeliverablePreview: string;
+  projectsDeliverableDownload: string;
+  projectsDeliverableDeliveredAt: string;
+  projectsDeliverableUnknownType: string;
+
+  // projects - plan view
+  projectsPlanEmpty: string;
+  projectsPlanNoTasks: string;
+  projectsPlanAnalysis: string;
+  projectsPlanCriteria: string;
+
+  // projects - artifact preview
+  projectsArtifactNoPath: string;
+  projectsArtifactLoadFailed: string;
+  projectsArtifactUnsupported: string;
+  projectsArtifactEmpty: string;
+
+  // sidebar - desktop
+  sidebarSearch: string;
+  sidebarScheduled: string;
+  sidebarProjects: string;
+  sidebarNewTask: string;
+  sidebarRecent: string;
+  sidebarNoResults: string;
+  sidebarNoRecent: string;
+  sidebarRename: string;
+
+  // scheduled page
+  scheduledTitle: string;
+  scheduledSubtitle: string;
+  scheduledNew: string;
+  scheduledEmpty: string;
+  scheduledEmptyDesc: string;
+  scheduledCreateFirst: string;
+  scheduledCreateTitle: string;
+  scheduledEditTitle: string;
+  scheduledName: string;
+  scheduledDescription: string;
+  scheduledInstructions: string;
+  scheduledFrequency: string;
+  scheduledInterval: string;
+  scheduledRunAt: string;
+  scheduledDayOfWeek: string;
+  scheduledManual: string;
+  scheduledHourly: string;
+  scheduledDaily: string;
+  scheduledWeekdays: string;
+  scheduledWeekly: string;
+  scheduledActive: string;
+  scheduledPaused: string;
+  scheduledRun: string;
+  scheduledView: string;
+  scheduledPause: string;
+  scheduledResume: string;
+  scheduledDeleteConfirm: string;
+  scheduledLastRun: string;
+  scheduledNextRun: string;
+  scheduledSave: string;
+  scheduledSaving: string;
+  scheduledCancel: string;
+
+  // common
+  commonConfirm: string;
+  commonCancel: string;
+  commonSave: string;
+  commonDelete: string;
+  commonEdit: string;
+  commonClose: string;
+  commonLoading: string;
+  commonBaseUrl: string;
+  commonApiKey: string;
+  commonNoConfig: string;
 }
 
 export const locales: Record<Locale, LocaleStrings> = { zh, en };

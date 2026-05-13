@@ -15,10 +15,18 @@ import { setupMenuBar, destroyMenuBar } from './menubar.js';
 import { setupAutoUpdater, checkForUpdates, quitAndInstall, getUpdateStatus } from './updater.js';
 import { JsonReminderStore } from './reminder-store.js';
 import { ReminderScheduler } from './reminder-scheduler.js';
+import { createKSwarmService } from './kswarm-service.js';
+import { ScheduledTaskScheduler } from './scheduled-task-scheduler.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
+
+// Suppress EPIPE errors from console.log after stdout pipe closes
+process.on('uncaughtException', (err) => {
+  if ((err as NodeJS.ErrnoException).code === 'EPIPE') return;
+  console.error('[main] uncaughtException:', err);
+});
 const singleInstanceLock = app.requestSingleInstanceLock();
 
 async function createWindow(): Promise<BrowserWindow> {
@@ -83,7 +91,30 @@ async function createWindow(): Promise<BrowserWindow> {
     mcpDispose = dispose;
   }).catch(() => {});
 
+  // KSwarm service — manages kswarm server as a child process
+  const kswarmService = createKSwarmService();
+  kswarmService.start().catch((err) => {
+    console.error('[main] Failed to start kswarm service:', err);
+  });
+  ipcMain.handle('desktop:kswarm:getStatus', () => kswarmService.getStatus());
+  ipcMain.handle('desktop:kswarm:start', () => kswarmService.start());
+  ipcMain.handle('desktop:kswarm:stop', () => kswarmService.stop());
+  ipcMain.handle('desktop:kswarm:restart', () => kswarmService.restart());
+  kswarmService.onStatusChange((status) => {
+    window.webContents.send('desktop:kswarm:statusChange', status);
+  });
+
+  // Scheduled task auto-execution scheduler
+  const taskScheduler = new ScheduledTaskScheduler();
+  taskScheduler.setMainWindow(window);
+  taskScheduler.start();
+  ipcMain.handle('desktop:syncScheduledTasks', (_event, tasks) => {
+    taskScheduler.syncTasks(tasks);
+  });
+
   app.on('before-quit', () => {
+    kswarmService.stop().catch(() => {});
+    taskScheduler.stop();
     mcpDispose?.();
   });
 
@@ -154,11 +185,13 @@ if (!singleInstanceLock) {
   app.quit();
 } else {
   app.whenReady().then(async () => {
-    // Set app name for macOS dock (icon requires packaged .app bundle)
     if (process.platform === 'darwin') {
       app.setName('xiaok');
+      // Use .icns for proper macOS dock icon (auto-sizes + rounds corners)
+      const icnsPath = join(__dirname, '..', 'build', 'icon.icns');
+      const pngPath = join(__dirname, '..', 'build', 'icon.png');
       const { existsSync } = await import('node:fs');
-      const iconPath = join(__dirname, '..', 'build', 'icon.png');
+      const iconPath = existsSync(icnsPath) ? icnsPath : pngPath;
       if (existsSync(iconPath) && app.dock) {
         app.dock.setIcon(nativeImage.createFromPath(iconPath));
       }

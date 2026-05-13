@@ -10,9 +10,9 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 
 ## Live Demo
 
-**Benchmark Results (v0.7.3):**
+**Benchmark Results:**
 
-| Metric | xiaok v0.7.4 | Claude Code | Improvement |
+| Metric | xiaok v1.0.0 | Claude Code | Improvement |
 |--------|-------------|-------------|-------------|
 | **Autonomy Score** | 100% | 100% | — |
 
@@ -20,12 +20,14 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
-**What's New in v0.7.4:**
+**What's New in v1.0.0:**
 
-- **Mouse Tracking Fix**: Prevent terminal mouse tracking sequences from polluting the input bar (Ghostty, iTerm2)
-- **Unknown CSI Handling**: Unrecognized ANSI escape sequences are now fully consumed instead of leaking as text
-- **Tool Result Spill**: Large tool results are spilled to disk instead of silently truncated
-- **Desktop Reminder Improvements**: Better daily/weekly reminder creation, removed unused intent delegation overhead
+- **Full i18n Support**: Complete Chinese/English internationalization across all desktop UI components with runtime locale switching
+- **KSwarm Multi-Agent**: Orchestrate multiple AI agents collaboratively on complex tasks with status monitoring
+- **Project Management**: Kanban board, requirement tracking, agent assignment, activity timeline, and deliverable views
+- **Scheduled Tasks**: Create recurring tasks with cron expressions, pause/resume, and automatic execution
+- **Plugin System**: Install, manage, and configure MCP server plugins from GitHub or local sources
+- **Desktop v1.0.0**: Native macOS/Windows app with sidebar, canvas preview, settings UI, and auto-update
 
 **Typical Use Cases:**
 
@@ -209,15 +211,19 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-0.5.5-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-0.5.5-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-0.5.5-setup.exe** — Windows installer (x64)
+- **xiaok-1.0.0-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.0.0-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-1.0.0-setup.exe** — Windows installer (x64)
 
 ### Features
 
 - **Task Sidebar**: Browse recent tasks, switch between them with selection highlighting
 - **Canvas Preview**: Auto-open generated files (HTML, MD, PDF) in a side panel
+- **Project Management**: Kanban board with drag-and-drop, agent assignment, activity timeline
+- **KSwarm Multi-Agent**: Start/stop/monitor multi-agent swarm from the UI
 - **Scheduled Tasks**: Create recurring tasks (hourly, daily, weekly, cron)
+- **Plugin System**: Install and manage MCP server plugins with enable/disable controls
+- **i18n**: Full Chinese/English support with runtime locale switching
 - **Settings UI**: Configure model providers, skills, channels, MCP servers
 - **Auto-Update**: Automatic update notifications when new versions are released
 
@@ -466,6 +472,8 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.0.0** — First major release: full i18n (Chinese/English) across all desktop UI with runtime locale switching, KSwarm multi-agent orchestration with status monitoring, project management with Kanban board and agent assignment, scheduled tasks with cron expressions, MCP plugin system with install/uninstall/enable/disable, desktop app v1.0.0 with all features integrated.
 
 **v0.7.4** — Terminal mouse tracking fix and tool result spill: disabled mouse tracking sequences on raw mode entry to prevent Ghostty/iTerm2 from polluting the input bar, fully consume unrecognized CSI escape sequences, spill large tool results to disk instead of silently truncating, and improve desktop reminder handling.
 

@@ -393,6 +393,152 @@ describe('InProcessTaskRuntimeHost', () => {
     expect(historyOnSecondCall[1].role).toBe('assistant');
   });
 
+  describe('deliverable gate integration', () => {
+    it('retries runner when built-in plan check detects incomplete steps', async () => {
+      let callCount = 0;
+      const runner = vi.fn<TaskRunner>(async ({ prompt, emitRuntimeEvent }) => {
+        callCount++;
+        if (callCount === 1) {
+          // First run: report plan with incomplete steps, produce only report
+          emitRuntimeEvent({
+            type: 'progress_plan_reported',
+            steps: [
+              { id: 'step-1', label: '搜索信息', status: 'completed' },
+              { id: 'step-2', label: '生成报告', status: 'completed' },
+              { id: 'step-3', label: '生成演示文稿', status: 'running' },
+            ],
+          } as any);
+          emitRuntimeEvent({
+            type: 'artifact_recorded',
+            sessionId: 'sess_1',
+            turnId: 'turn_1',
+            intentId: 'intent_1',
+            stepId: 'step_1',
+            artifactId: 'art_1',
+            kind: 'report',
+            label: 'Claude月度更新报告',
+            filePath: '/tmp/report.md',
+          } as any);
+        } else {
+          // Second run (retry): produce the presentation
+          emitRuntimeEvent({
+            type: 'artifact_recorded',
+            sessionId: 'sess_1',
+            turnId: 'turn_2',
+            intentId: 'intent_2',
+            stepId: 'step_2',
+            artifactId: 'art_2',
+            kind: 'presentation',
+            label: '演示文稿',
+            filePath: '/tmp/slides.pptx',
+          } as any);
+        }
+      });
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        // No completionGate — relies on built-in plan check
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: '根据claude本月的更新生成报告和演示文档',
+        materials: [{ materialId: material.materialId }],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed', 3000);
+
+      // Runner called twice: initial + retry
+      expect(runner).toHaveBeenCalledTimes(2);
+      expect(runner.mock.calls[1][0].prompt).toContain('遗漏了部分交付物');
+    });
+
+    it('does not retry when all plan steps are completed', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'progress_plan_reported',
+          steps: [
+            { id: 's1', label: '生成报告', status: 'completed' },
+            { id: 's2', label: '生成演示文稿', status: 'completed' },
+          ],
+        } as any);
+        emitRuntimeEvent({
+          type: 'artifact_recorded',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          artifactId: 'art_1',
+          kind: 'report',
+          label: '报告',
+          filePath: '/tmp/report.md',
+        } as any);
+        emitRuntimeEvent({
+          type: 'artifact_recorded',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_2',
+          artifactId: 'art_2',
+          kind: 'presentation',
+          label: '演示文稿',
+          filePath: '/tmp/slides.pptx',
+        } as any);
+      });
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: '做一份报告和一份演示文稿',
+        materials: [{ materialId: material.materialId }],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed', 3000);
+
+      expect(runner).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips gate for single-deliverable prompts', async () => {
+      const runner = vi.fn<TaskRunner>(async () => undefined);
+      const gate = vi.fn(async () => ({ complete: false, missing: ['something'] }));
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        completionGate: gate,
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: '帮我做一份报告',
+        materials: [{ materialId: material.materialId }],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed', 3000);
+
+      // Gate not called for single-deliverable prompt
+      expect(runner).toHaveBeenCalledTimes(1);
+      expect(gate).not.toHaveBeenCalled();
+    });
+  });
+
   function createHost(runner: TaskRunner): InProcessTaskRuntimeHost {
     return new InProcessTaskRuntimeHost({
       materialRegistry,

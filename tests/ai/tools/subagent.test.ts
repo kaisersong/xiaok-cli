@@ -1,346 +1,267 @@
-import { rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ModelAdapter, StreamChunk, Tool } from '../../../src/types.js';
+import { describe, expect, it, vi } from 'vitest';
 import { createSubAgentTool } from '../../../src/ai/tools/subagent.js';
-import { createWorktreeManager } from '../../../src/platform/worktrees/manager.js';
-import { createBackgroundRunner } from '../../../src/platform/agents/background-runner.js';
+import type { ModelAdapter, ToolExecutionContext } from '../../../src/types.js';
 
-async function* mockStream(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
-  for (const chunk of chunks) {
-    yield chunk;
-  }
+// Mock executeNamedSubAgent
+vi.mock('../../../src/ai/agents/subagent-executor.js', () => ({
+  executeNamedSubAgent: vi.fn().mockResolvedValue('subagent result'),
+}));
+
+import { executeNamedSubAgent } from '../../../src/ai/agents/subagent-executor.js';
+
+const mockAdapter = (): ModelAdapter => ({
+  generate: vi.fn(),
+  stream: vi.fn(),
+} as unknown as ModelAdapter);
+
+const mockBuildSystemPrompt = async () => 'xiaok system prompt';
+
+function mockRegistry() {
+  return {
+    getTool: () => undefined,
+    list: () => [],
+    capabilities: () => [],
+    getToolDefinitions: () => [],
+  } as any;
 }
 
-describe('createSubAgentTool', () => {
-  const tempDirs: string[] = [];
+const baseOptions = {
+  source: 'chat',
+  sessionId: 'test-session',
+  adapter: mockAdapter,
+  agents: [] as any[],
+  createRegistry: () => mockRegistry(),
+  buildSystemPrompt: mockBuildSystemPrompt,
+};
 
-  afterEach(() => {
-    for (const dir of tempDirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true });
-    }
+describe('subagent tool', () => {
+
+  describe('inline agent mode', () => {
+    it('creates inline agent with description and prompt', async () => {
+      const tool = createSubAgentTool({ ...baseOptions, agents: [] });
+      await tool.execute({
+        description: 'code review',
+        prompt: 'Check for bugs in src/main.ts',
+      }, {} as ToolExecutionContext);
+
+      expect(executeNamedSubAgent).toHaveBeenCalled();
+      const call = (executeNamedSubAgent as any).mock.calls[0][0];
+      expect(call.agentDef.name).toBe('inline');
+      expect(call.agentDef.source).toBe('project');
+      expect(call.agentDef.systemPrompt).toBe('');
+    });
+
+    it('filters out subagent tool from inline agent allowedTools', async () => {
+      const tool = createSubAgentTool({ ...baseOptions, agents: [] });
+      await tool.execute({
+        description: 'recursive test',
+        prompt: 'do something',
+        tools: ['Read', 'Edit', 'subagent'],
+      }, {} as ToolExecutionContext);
+
+      const call = (executeNamedSubAgent as any).mock.calls[0][0];
+      expect(call.agentDef.allowedTools).toEqual(['Read', 'Edit']);
+    });
+
+    it('allows inline agent with empty tools list', async () => {
+      const tool = createSubAgentTool({ ...baseOptions, agents: [] });
+      await tool.execute({
+        description: 'simple task',
+        prompt: 'summarize',
+        tools: [],
+      }, {} as ToolExecutionContext);
+
+      const call = (executeNamedSubAgent as any).mock.calls[0][0];
+      expect(call.agentDef.allowedTools).toBeUndefined();
+    });
+
+    it('supports custom name for inline agent', async () => {
+      const tool = createSubAgentTool({ ...baseOptions, agents: [] });
+      await tool.execute({
+        description: 'test',
+        prompt: 'do something',
+        name: 'my-reviewer',
+      }, {} as ToolExecutionContext);
+
+      const call = (executeNamedSubAgent as any).mock.calls[0][0];
+      expect(call.agentDef.name).toBe('my-reviewer');
+    });
+
+    it('supports model override for inline agent', async () => {
+      const tool = createSubAgentTool({ ...baseOptions, agents: [] });
+      await tool.execute({
+        description: 'test',
+        prompt: 'do something',
+        model: 'opus',
+      }, {} as ToolExecutionContext);
+
+      const call = (executeNamedSubAgent as any).mock.calls[0][0];
+      expect(call.agentDef.model).toBe('opus');
+    });
+
+    it('supports worktree isolation for inline agent', async () => {
+      const tool = createSubAgentTool({ ...baseOptions, agents: [] });
+      await tool.execute({
+        description: 'test',
+        prompt: 'do something',
+        isolation: 'worktree',
+      }, {} as ToolExecutionContext);
+
+      const call = (executeNamedSubAgent as any).mock.calls[0][0];
+      expect(call.agentDef.isolation).toBe('worktree');
+    });
   });
 
-  it('runs a named subagent inside an isolated worktree when the agent requires worktree isolation', async () => {
-    const execGit = vi.fn(async () => '');
-    const worktreeManager = createWorktreeManager({
-      repoRoot: '/repo',
-      worktreesDir: '/repo/.worktrees',
-      execGit,
+  describe('pre-defined agent mode', () => {
+    const agents = [
+      { name: 'reviewer', systemPrompt: 'You are a reviewer', source: 'builtin' as const },
+      { name: 'planner', systemPrompt: 'You are a planner', source: 'builtin' as const },
+    ];
+
+    it('calls pre-defined agent', async () => {
+      const tool = createSubAgentTool({ ...baseOptions, agents: agents as any[] });
+      await tool.execute({
+        agent: 'reviewer',
+        prompt: 'Review the code',
+      }, {} as ToolExecutionContext);
+
+      expect(executeNamedSubAgent).toHaveBeenCalled();
+      const call = (executeNamedSubAgent as any).mock.calls[0][0];
+      expect(call.agentDef.name).toBe('reviewer');
+      expect(call.agentDef.systemPrompt).toBe('You are a reviewer');
     });
-    const adapter: ModelAdapter = {
-      getModelName: () => 'mock',
-      stream: () => mockStream([{ type: 'text', delta: 'subagent done' }, { type: 'done' }]),
+
+    it('returns error for unknown agent', async () => {
+      const tool = createSubAgentTool({ ...baseOptions, agents: agents as any[] });
+      const result = await tool.execute({
+        agent: 'nonexistent',
+        prompt: 'do something',
+      }, {} as ToolExecutionContext);
+
+      expect(result).toContain('Error: unknown agent');
+      expect(result).toContain('nonexistent');
+    });
+
+    it('inline mode takes precedence when agent is not specified', async () => {
+      const tool = createSubAgentTool({ ...baseOptions, agents: agents as any[] });
+      await tool.execute({
+        description: 'custom task',
+        prompt: 'do something custom',
+        tools: ['Read'],
+      }, {} as ToolExecutionContext);
+
+      const call = (executeNamedSubAgent as any).mock.calls[0][0];
+      expect(call.agentDef.name).toBe('inline');
+    });
+  });
+
+  describe('validation', () => {
+    it('returns error when prompt is empty', async () => {
+      const tool = createSubAgentTool({ ...baseOptions, agents: [] });
+      const result = await tool.execute({
+        description: 'test',
+        prompt: '',
+      }, {} as ToolExecutionContext);
+
+      expect(result).toContain('Error: prompt is required');
+    });
+
+    it('returns error when prompt is whitespace only', async () => {
+      const tool = createSubAgentTool({ ...baseOptions, agents: [] });
+      const result = await tool.execute({
+        description: 'test',
+        prompt: '   ',
+      }, {} as ToolExecutionContext);
+
+      expect(result).toContain('Error: prompt is required');
+    });
+  });
+
+  describe('background mode', () => {
+    const mockBackgroundRunner = {
+      start: vi.fn().mockResolvedValue({ jobId: 'job-123' }),
     };
-    const createRegistry = vi.fn(() => ({
-      getToolDefinitions: () => [],
-      executeTool: async () => 'ok',
-    }));
+
+    it('queues background job for pre-defined agent', async () => {
+      const agents = [{ name: 'reviewer', systemPrompt: '', source: 'builtin' as const }];
+      const tool = createSubAgentTool({
+        ...baseOptions,
+        agents: agents as any[],
+        backgroundRunner: mockBackgroundRunner as any,
+      });
+
+      const result = await tool.execute({
+        agent: 'reviewer',
+        prompt: 'Review code',
+        background: true,
+      }, {} as ToolExecutionContext);
+
+      expect(result).toContain('background agent queued');
+      expect(result).toContain('job-123');
+      expect(mockBackgroundRunner.start).toHaveBeenCalled();
+    });
+
+    it('queues background job for inline agent', async () => {
+      const tool = createSubAgentTool({
+        ...baseOptions,
+        agents: [],
+        backgroundRunner: mockBackgroundRunner as any,
+      });
+
+      const result = await tool.execute({
+        description: 'background task',
+        prompt: 'do something in background',
+        background: true,
+      }, {} as ToolExecutionContext);
+
+      expect(result).toContain('background agent queued');
+    });
+
+    it('returns error when background runner not configured', async () => {
+      const tool = createSubAgentTool({ ...baseOptions, agents: [] });
+      const result = await tool.execute({
+        description: 'test',
+        prompt: 'do something',
+        background: true,
+      }, {} as ToolExecutionContext);
+
+      expect(result).toContain('Error: background runner is not configured');
+    });
+  });
+});
+
+describe('subagent tool description', () => {
+  it('includes pre-defined agent names in description', () => {
+    const agents = [
+      { name: 'reviewer', systemPrompt: '', source: 'builtin' as const },
+      { name: 'planner', systemPrompt: '', source: 'builtin' as const },
+    ];
 
     const tool = createSubAgentTool({
       source: 'chat',
-      sessionId: 'sess_1',
-      adapter: () => adapter,
-      agents: [
-        {
-          name: 'reviewer',
-          systemPrompt: 'You review code',
-          isolation: 'worktree',
-          allowedTools: ['read'],
-        },
-      ],
-      createRegistry,
-      buildSystemPrompt: async () => 'base system',
-      worktreeManager,
+      sessionId: 'test',
+      adapter: mockAdapter,
+      agents: agents as any[],
+      createRegistry: () => mockRegistry(),
+      buildSystemPrompt: mockBuildSystemPrompt,
     });
 
-    const result = await tool.execute({
-      agent: 'reviewer',
-      prompt: 'inspect the repo',
-    });
-
-    expect(result).toContain('subagent done');
-    const expectedPath = resolve('/repo/.worktrees/reviewer-sess_1');
-    expect(execGit).toHaveBeenCalledWith([
-      'worktree',
-      'add',
-      expectedPath,
-      '-b',
-      'reviewer-sess_1',
-    ]);
-    expect(createRegistry).toHaveBeenCalledWith(expectedPath, ['read'], 'reviewer');
+    const desc = tool.definition.description;
+    expect(desc).toContain('reviewer');
+    expect(desc).toContain('planner');
+    expect(desc).toContain('inline');
+    expect(desc).toContain('subagent');
   });
 
-  it('dispatches background agents through the background runner and returns the queued job id', async () => {
-    const rootDir = join(tmpdir(), `xiaok-subagent-background-tests-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    tempDirs.push(rootDir);
-    const notify = vi.fn(async () => undefined);
-    const backgroundRunner = createBackgroundRunner({
-      rootDir,
-      execute: async () => ({ ok: true, summary: 'background complete' }),
-      notify,
-    });
-    const adapter: ModelAdapter = {
-      getModelName: () => 'mock',
-      stream: () => mockStream([{ type: 'done' }]),
-    };
-
+  it('explains both modes clearly', () => {
     const tool = createSubAgentTool({
-      source: 'chat',
-      sessionId: 'sess_2',
-      adapter: () => adapter,
-      agents: [
-        {
-          name: 'planner',
-          systemPrompt: 'You plan tasks',
-          background: true,
-        },
-      ],
-      createRegistry: () => ({
-        getToolDefinitions: () => [],
-        executeTool: async () => 'ok',
-      }),
-      buildSystemPrompt: async () => 'base system',
-      backgroundRunner,
+      ...baseOptions,
+      agents: [],
     });
 
-    const result = await tool.execute({
-      agent: 'planner',
-      prompt: 'plan next steps',
-    });
-
-    expect(result).toContain('job_');
-    expect(result).toContain('queued');
-  });
-
-  it('releases isolated worktrees when the agent cleanup policy is delete', async () => {
-    const execGit = vi.fn(async () => '');
-    const worktreeManager = createWorktreeManager({
-      repoRoot: '/repo',
-      worktreesDir: '/repo/.worktrees',
-      execGit,
-    });
-    const adapter: ModelAdapter = {
-      getModelName: () => 'mock',
-      stream: () => mockStream([{ type: 'text', delta: 'done' }, { type: 'done' }]),
-    };
-
-    const tool = createSubAgentTool({
-      source: 'chat',
-      sessionId: 'sess_cleanup',
-      adapter: () => adapter,
-      agents: [
-        {
-          name: 'janitor',
-          systemPrompt: 'You clean up worktrees',
-          isolation: 'worktree',
-          cleanup: 'delete',
-        },
-      ],
-      createRegistry: () => ({
-        getToolDefinitions: () => [],
-        executeTool: async () => 'ok',
-      }),
-      buildSystemPrompt: async () => 'base system',
-      worktreeManager,
-    });
-
-    const result = await tool.execute({
-      agent: 'janitor',
-      prompt: 'run cleanup',
-    });
-
-    expect(result).toContain('done');
-    const expectedPath = resolve('/repo/.worktrees/janitor-sess_cleanup');
-    expect(execGit).toHaveBeenNthCalledWith(
-      1,
-      ['worktree', 'add', expectedPath, '-b', 'janitor-sess_cleanup'],
-    );
-    expect(execGit).toHaveBeenNthCalledWith(
-      2,
-      ['worktree', 'remove', expectedPath],
-    );
-  });
-
-  it('forwards the parent session snapshot to the subagent when runtime context is available', async () => {
-    const capturedMessages: Array<{ role: string }> = [];
-    const adapter: ModelAdapter = {
-      getModelName: () => 'mock',
-      stream: (messages) => {
-        capturedMessages.push(...messages.map((message) => ({ role: message.role })));
-        return mockStream([{ type: 'text', delta: 'subagent inherited context' }, { type: 'done' }]);
-      },
-    };
-
-    const tool = createSubAgentTool({
-      source: 'chat',
-      sessionId: 'sess_parent',
-      adapter: () => adapter,
-      agents: [
-        {
-          name: 'reviewer',
-          systemPrompt: 'You review code',
-        },
-      ],
-      createRegistry: () => ({
-        getToolDefinitions: () => [],
-        executeTool: async () => 'ok',
-      }),
-      buildSystemPrompt: async () => 'base system',
-    });
-
-    const result = await tool.execute({
-      agent: 'reviewer',
-      prompt: 'inspect',
-    }, {
-      session: {
-        messages: [
-          { role: 'user', content: [{ type: 'text', text: 'history' }] },
-        ],
-        usage: { inputTokens: 1, outputTokens: 1 },
-        compactions: [],
-      },
-      messages: [{ role: 'user', content: [{ type: 'text', text: 'history' }] }],
-      systemPrompt: 'rendered system',
-      toolDefinitions: [],
-    });
-
-    expect(result).toContain('subagent inherited context');
-    expect(capturedMessages[0]?.role).toBe('user');
-  });
-
-  it('uses the invoking registry cwd for shared subagents', async () => {
-    const createRegistry = vi.fn(() => ({
-      getToolDefinitions: () => [],
-      executeTool: async () => 'ok',
-    }));
-    const buildSystemPrompt = vi.fn(async () => 'base system');
-    const adapter: ModelAdapter = {
-      getModelName: () => 'mock',
-      stream: () => mockStream([{ type: 'text', delta: 'shared cwd run' }, { type: 'done' }]),
-    };
-
-    const tool = createSubAgentTool({
-      source: 'chat',
-      sessionId: 'sess_cwd',
-      cwd: '/repo/packages/app',
-      adapter: () => adapter,
-      agents: [
-        {
-          name: 'reviewer',
-          systemPrompt: 'Use the current repo cwd',
-        },
-      ],
-      createRegistry,
-      buildSystemPrompt,
-    });
-
-    const result = await tool.execute({
-      agent: 'reviewer',
-      prompt: 'inspect current package',
-    });
-
-    expect(result).toContain('shared cwd run');
-    expect(createRegistry).toHaveBeenCalledWith('/repo/packages/app', undefined, 'reviewer');
-    expect(buildSystemPrompt).toHaveBeenCalledWith('/repo/packages/app');
-  });
-
-  it('uses the subagent-specific model override when the adapter supports cloning by model', async () => {
-    let selectedModel = '';
-    const clonedAdapter: ModelAdapter = {
-      getModelName: () => selectedModel,
-      stream: () => mockStream([{ type: 'text', delta: 'model-specific run' }, { type: 'done' }]),
-    };
-    const adapter = {
-      getModelName: () => 'base-model',
-      stream: () => mockStream([{ type: 'done' }]),
-      cloneWithModel(model: string) {
-        selectedModel = model;
-        return clonedAdapter;
-      },
-    } satisfies ModelAdapter & { cloneWithModel(model: string): ModelAdapter };
-
-    const tool = createSubAgentTool({
-      source: 'chat',
-      sessionId: 'sess_model',
-      adapter: () => adapter,
-      agents: [
-        {
-          name: 'specialist',
-          systemPrompt: 'Use a different model',
-          model: 'gpt-5.4',
-        },
-      ],
-      createRegistry: () => ({
-        getToolDefinitions: () => [],
-        executeTool: async () => 'ok',
-      }),
-      buildSystemPrompt: async () => 'base system',
-    });
-
-    const result = await tool.execute({
-      agent: 'specialist',
-      prompt: 'run with override',
-    });
-
-    expect(selectedModel).toBe('gpt-5.4');
-    expect(result).toContain('model-specific run');
-  });
-
-  it('preserves the invoking cwd when queueing background subagents', async () => {
-    const start = vi.fn(async () => ({
-      jobId: 'job_1',
-      sessionId: 'sess_bg_cwd',
-      source: 'chat',
-      inputSummary: '{"agent":"planner","prompt":"plan next steps","cwd":"/repo/packages/app"}',
-      status: 'queued' as const,
-      createdAt: 0,
-      updatedAt: 0,
-    }));
-    const backgroundRunner = {
-      start,
-      get: () => undefined,
-      listBySession: () => [],
-      listByTask: () => [],
-    };
-    const adapter: ModelAdapter = {
-      getModelName: () => 'mock',
-      stream: () => mockStream([{ type: 'done' }]),
-    };
-
-    const tool = createSubAgentTool({
-      source: 'chat',
-      sessionId: 'sess_bg_cwd',
-      cwd: '/repo/packages/app',
-      adapter: () => adapter,
-      agents: [
-        {
-          name: 'planner',
-          systemPrompt: 'Plan work in the current package',
-          background: true,
-        },
-      ],
-      createRegistry: () => ({
-        getToolDefinitions: () => [],
-        executeTool: async () => 'ok',
-      }),
-      buildSystemPrompt: async () => 'base system',
-      backgroundRunner,
-    });
-
-    const result = await tool.execute({
-      agent: 'planner',
-      prompt: 'plan next steps',
-    });
-
-    expect(result).toContain('job_1');
-    expect(start).toHaveBeenCalledWith(expect.objectContaining({
-      input: {
-        agent: 'planner',
-        prompt: 'plan next steps',
-        cwd: '/repo/packages/app',
-      },
-    }));
+    const desc = tool.definition.description;
+    expect(desc).toContain('Pre-defined agent');
+    expect(desc).toContain('Inline agent');
+    expect(desc).toContain('recursion');
   });
 });

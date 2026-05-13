@@ -3,6 +3,8 @@ import { AppLayout } from './layouts/AppLayout';
 import { WelcomePage } from './components/WelcomePage';
 import { ChatShell } from './components/ChatShell';
 import { ScheduledPage } from './components/ScheduledPage';
+import { ProjectsPage } from './components/projects/ProjectsPage';
+import { ProjectDetailPage } from './components/projects/ProjectDetailPage';
 
 export function App() {
   return (
@@ -11,6 +13,8 @@ export function App() {
         <Route index element={<WelcomePage />} />
         <Route path="t/:taskId" element={<ChatShell />} />
         <Route path="scheduled" element={<ScheduledPage />} />
+        <Route path="projects" element={<ProjectsPage />} />
+        <Route path="projects/:projectId" element={<ProjectDetailPage />} />
       </Route>
     </Routes>
   );

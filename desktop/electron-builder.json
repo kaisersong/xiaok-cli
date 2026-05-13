@@ -8,6 +8,26 @@
     "dist/**/*",
     "package.json"
   ],
+  "extraResources": [
+    {
+      "from": "../kswarm/src",
+      "to": "services/kswarm/src",
+      "filter": ["**/*.js", "**/*.json", "!**/node_modules/**"]
+    },
+    {
+      "from": "../kswarm/package.json",
+      "to": "services/kswarm/package.json"
+    },
+    {
+      "from": "../intent-broker/src",
+      "to": "services/intent-broker/src",
+      "filter": ["**/*.js", "**/*.json", "!**/node_modules/**"]
+    },
+    {
+      "from": "../intent-broker/package.json",
+      "to": "services/intent-broker/package.json"
+    }
+  ],
   "publish": {
     "provider": "github",
     "owner": "kaisersong",

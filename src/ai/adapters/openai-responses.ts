@@ -14,6 +14,21 @@ type ResponsesResult = {
   usage?: ResponsesUsage;
 };
 
+const STREAM_TIMEOUT_MS = 5 * 60_000;
+const MAX_RETRIES = 2;
+
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    if (error.name === 'AbortError' || error.name === 'TimeoutError') return true;
+    if (/ECONNRESET|ETIMEDOUT|fetch failed|network/i.test(error.message)) return true;
+  }
+  return false;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class OpenAIResponsesAdapter implements ModelAdapter {
   private readonly apiKey: string;
   private readonly baseUrl?: string;
@@ -45,27 +60,56 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     tools: ToolDefinition[],
     systemPrompt: string,
   ): AsyncIterable<StreamChunk> {
+    let attempt = 0;
+    while (true) {
+      try {
+        yield* this.streamOnce(messages, tools, systemPrompt);
+        return;
+      } catch (error) {
+        if (!isRetryableError(error) || attempt >= MAX_RETRIES) throw error;
+        const delayMs = Math.min(2000 * 2 ** attempt, 10000);
+        await sleep(delayMs);
+        attempt++;
+      }
+    }
+  }
+
+  private async *streamOnce(
+    messages: Message[],
+    tools: ToolDefinition[],
+    systemPrompt: string,
+  ): AsyncIterable<StreamChunk> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
     const endpoint = new URL('responses', ensureTrailingSlash(this.baseUrl)).toString();
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-        ...(this.defaultHeaders ?? {}),
-      },
-      body: JSON.stringify({
-        model: this.model,
-        input: buildResponsesInput(messages, systemPrompt),
-        tools: tools.length > 0
-          ? tools.map((tool) => ({
-              type: 'function',
-              name: tool.name,
-              description: tool.description,
-              parameters: tool.inputSchema,
-            }))
-          : undefined,
-      }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+          ...(this.defaultHeaders ?? {}),
+        },
+        body: JSON.stringify({
+          model: this.model,
+          input: buildResponsesInput(messages, systemPrompt),
+          tools: tools.length > 0
+            ? tools.map((tool) => ({
+                type: 'function',
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.inputSchema,
+              }))
+            : undefined,
+        }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      throw error;
+    }
+    clearTimeout(timer);
 
     if (!response.ok) {
       throw new Error(`${response.status} ${await response.text()}`);

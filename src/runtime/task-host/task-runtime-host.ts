@@ -1,4 +1,5 @@
 import type { RuntimeEvent } from '../events.js';
+import { runDeliverableGate, type DeliverableGateFunction } from './deliverable-gate.js';
 import { projectRuntimeEventsToDesktopEvents } from './event-projection.js';
 import type { MaterialRegistry } from './material-registry.js';
 import { NeedsUserQuestionCorrelator } from './question-correlator.js';
@@ -40,6 +41,7 @@ export interface InProcessTaskRuntimeHostOptions {
   materialRegistry: MaterialRegistry;
   snapshotStore: FileTaskSnapshotStore;
   runner: TaskRunner;
+  completionGate?: DeliverableGateFunction;
   now?: () => number;
   createTaskId?: () => string;
   createSessionId?: () => string;
@@ -239,6 +241,24 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       await this.flushMutations(taskId);
       const latest = await this.requireSnapshot(taskId);
       if (latest.status !== 'cancelled' && !this.cancellingTaskIds.has(taskId)) {
+        // Layer 3: Deliverable Gate — check if all requested deliverables were produced
+        const gatePass = await runDeliverableGate(latest, this.options.completionGate, controller.signal);
+        if (!gatePass && !this.cancellingTaskIds.has(taskId)) {
+          // Retry once with a resume prompt
+          await this.options.runner({
+            taskId,
+            sessionId: snapshot.sessionId,
+            prompt: '你之前的执行遗漏了部分交付物。请回顾用户原始请求，继续完成所有尚未生成的产物。',
+            materials: [],
+            understanding: snapshot.understanding,
+            signal: controller.signal,
+            history: [...this.history],
+            emitRuntimeEvent: (event) => {
+              void this.appendRuntimeEvent(taskId, event);
+            },
+          });
+          await this.flushMutations(taskId);
+        }
         await this.updateSnapshot(taskId, { status: 'completed' });
         await this.options.snapshotStore.clearActiveTask(taskId);
         this.closeSubscribers(taskId);

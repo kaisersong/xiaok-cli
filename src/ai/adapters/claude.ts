@@ -3,6 +3,7 @@ import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../t
 import type { CachedToolDefinition, ModelInvocationOptions, SystemPromptBlock } from '../runtime/model-capabilities.js';
 
 const MAX_RETRIES = 3;
+const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 
 function isRetryableError(error: unknown): boolean {
@@ -67,10 +68,14 @@ export class ClaudeAdapter implements ModelAdapter {
   ): AsyncIterable<StreamChunk> {
     let attempt = 0;
     while (true) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
       try {
-        yield* this.streamOnce(messages, tools, systemPrompt, options);
+        yield* this.streamOnce(messages, tools, systemPrompt, options, controller.signal);
+        clearTimeout(timer);
         return;
       } catch (error) {
+        clearTimeout(timer);
         if (!isRetryableError(error) || attempt >= MAX_RETRIES) {
           throw error;
         }
@@ -86,6 +91,7 @@ export class ClaudeAdapter implements ModelAdapter {
     tools: ToolDefinition[],
     systemPrompt: string,
     options?: ModelInvocationOptions,
+    signal?: AbortSignal,
   ): AsyncIterable<StreamChunk> {
     const sourceMessages = options?.promptCache?.messages ?? messages;
     const anthropicMessages: Anthropic.MessageParam[] = sourceMessages.map((message) => {
@@ -154,7 +160,7 @@ export class ClaudeAdapter implements ModelAdapter {
       system: (options?.promptCache?.systemPrompt ?? systemPrompt) as string | SystemPromptBlock[],
       messages: anthropicMessages,
       tools: anthropicTools.length > 0 ? anthropicTools : undefined,
-    });
+    }, { signal });
 
     // Buffer for tool_use arguments
     const toolBuffers = new Map<number, { id: string; name: string; jsonBuffer: string }>();

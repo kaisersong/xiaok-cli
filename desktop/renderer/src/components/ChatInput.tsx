@@ -243,6 +243,19 @@ export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...'
               onChange={handleChange}
               onKeyDown={handleKeyDown}
               onPaste={async (e) => {
+                // Try macOS Finder file copy first (NSFilenamesPboardType)
+                if (window.xiaokDesktop?.readClipboardFilePaths) {
+                  try {
+                    const finderPaths = await window.xiaokDesktop.readClipboardFilePaths();
+                    if (finderPaths.length > 0) {
+                      e.preventDefault();
+                      const newFiles = finderPaths.map(p => ({ filePath: p, name: p.split('/').pop() || p }));
+                      setFiles(prev => [...prev, ...newFiles]);
+                      return;
+                    }
+                  } catch { /* fall through to text-based detection */ }
+                }
+                // Fallback: detect paths from plain text
                 const items = e.clipboardData?.items;
                 if (!items) return;
                 for (const item of items) {

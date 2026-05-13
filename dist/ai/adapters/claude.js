@@ -1,4 +1,5 @@
 const MAX_RETRIES = 3;
+const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 function isRetryableError(error) {
     if (error instanceof Error) {
@@ -50,11 +51,15 @@ export class ClaudeAdapter {
     async *stream(messages, tools, systemPrompt, options) {
         let attempt = 0;
         while (true) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
             try {
-                yield* this.streamOnce(messages, tools, systemPrompt, options);
+                yield* this.streamOnce(messages, tools, systemPrompt, options, controller.signal);
+                clearTimeout(timer);
                 return;
             }
             catch (error) {
+                clearTimeout(timer);
                 if (!isRetryableError(error) || attempt >= MAX_RETRIES) {
                     throw error;
                 }
@@ -64,7 +69,7 @@ export class ClaudeAdapter {
             }
         }
     }
-    async *streamOnce(messages, tools, systemPrompt, options) {
+    async *streamOnce(messages, tools, systemPrompt, options, signal) {
         const sourceMessages = options?.promptCache?.messages ?? messages;
         const anthropicMessages = sourceMessages.map((message) => {
             const content = [];
@@ -125,7 +130,7 @@ export class ClaudeAdapter {
             system: (options?.promptCache?.systemPrompt ?? systemPrompt),
             messages: anthropicMessages,
             tools: anthropicTools.length > 0 ? anthropicTools : undefined,
-        });
+        }, { signal });
         // Buffer for tool_use arguments
         const toolBuffers = new Map();
         for await (const event of stream) {

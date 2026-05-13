@@ -1031,8 +1031,13 @@ export function useThreadSseEffect({
 
   useEffect(() => {
     drainSseEventsRef.current = drainSseEvents
-    drainSseEvents()
   })
+
+  // 挂载时执行一次以处理可能已累积的事件（后续由 subscribeEvents 驱动）
+  useEffect(() => {
+    drainSseEvents()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 401 SSE 错误时登出
   useEffect(() => {
