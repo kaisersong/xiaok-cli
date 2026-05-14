@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, LayoutGrid, Activity, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw } from 'lucide-react';
+import { ArrowLeft, FileText, LayoutGrid, Activity, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmProject, KSwarmTask, KSwarmActivityEvent, KSwarmHumanAction } from '../../hooks/useKSwarmClient';
@@ -15,12 +15,12 @@ import { KanbanBoard } from './KanbanBoard';
 import { ActivityTimeline } from './ActivityTimeline';
 import { DeliverableView } from './DeliverableView';
 
-type TabId = 'plan' | 'board' | 'activity' | 'deliverables';
+type TabId = 'plan' | 'board' | 'agents' | 'activity' | 'deliverables';
 
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const { getProjectFullDetail, approveProject, retryPlan, dispatchTasks, deliverProject, closeProject, connected } = useKSwarm();
+  const { getProjectFullDetail, approveProject, retryPlan, dispatchTasks, deliverProject, closeProject, connected, agents } = useKSwarm();
   const { t } = useLocale();
   const [detail, setDetail] = useState<ProjectFullDetail | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('board');
@@ -32,6 +32,7 @@ export function ProjectDetailPage() {
   const TABS: Array<{ id: TabId; label: string; icon: typeof FileText }> = useMemo(() => [
     { id: 'plan', label: t.projectsDetailPlan, icon: FileText },
     { id: 'board', label: t.projectsDetailKanban, icon: LayoutGrid },
+    { id: 'agents', label: '智能体', icon: Users },
     { id: 'activity', label: t.projectsDetailActivity, icon: Activity },
     { id: 'deliverables', label: t.projectsDetailDeliverables, icon: Package },
   ], [t]);
@@ -138,7 +139,7 @@ export function ProjectDetailPage() {
 
         {/* Action buttons */}
         <div className="flex items-center gap-2">
-          {showApprove && !plan && (
+          {showApprove && (
             <button type="button" onClick={async () => {
               await retryPlan(projectId!);
               await refreshOnce();
@@ -212,6 +213,54 @@ export function ProjectDetailPage() {
         )}
         {activeTab === 'board' && (
           <KanbanBoard project={{ ...project, tasks } as KSwarmProject} />
+        )}
+        {activeTab === 'agents' && (
+          <div className="p-6">
+            <div className="space-y-2">
+              {/* PO Agent */}
+              {project.poAgent && (() => {
+                const poAgentData = agents.find(a => a.id === project.poAgent);
+                return (
+                  <div key={project.poAgent} className="flex items-center gap-3 rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-4 py-3">
+                    <div className={`size-2.5 rounded-full ${poAgentData?.status === 'offline' ? 'bg-[var(--c-text-muted)]' : 'bg-[var(--c-status-success-text)]'}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12px] font-medium text-[var(--c-text-heading)]">{poAgentData?.name || project.poAgent}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-accent)]/10 text-[var(--c-accent)]">PO</span>
+                      </div>
+                      <span className="text-[11px] text-[var(--c-text-muted)]">{poAgentData?.status === 'offline' ? '离线' : poAgentData?.status === 'working' ? '工作中' : '空闲'}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+              {/* Worker Agents */}
+              {(() => {
+                const memberIds = new Set(project.members || []);
+                const workerAgents = agents.filter(a => memberIds.has(a.id));
+                return workerAgents.map(agent => {
+                  const assignedTask = tasks.find(t => t.assignedAgent === agent.id && t.status !== 'done' && t.status !== 'cancelled');
+                  return (
+                    <div key={agent.id} className="flex items-center gap-3 rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-4 py-3">
+                      <div className={`size-2.5 rounded-full ${agent.status === 'offline' ? 'bg-[var(--c-text-muted)]' : agent.status === 'working' ? 'bg-[var(--c-accent)]' : 'bg-[var(--c-status-success-text)]'}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] font-medium text-[var(--c-text-heading)]">{agent.name}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]">Worker</span>
+                        </div>
+                        <span className="text-[11px] text-[var(--c-text-muted)]">
+                          {agent.status === 'offline' ? '离线' : agent.status === 'working' ? '工作中' : '空闲'}
+                          {assignedTask && ` · ${assignedTask.title}`}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+              {agents.length === 0 && (
+                <p className="text-[12px] text-[var(--c-text-muted)] py-4 text-center">暂无智能体</p>
+              )}
+            </div>
+          </div>
         )}
         {activeTab === 'activity' && (
           <ActivityTimeline project={project} activities={activities} humanActions={humanActions} />
