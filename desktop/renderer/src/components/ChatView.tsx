@@ -176,56 +176,39 @@ export function ChatView({
                   <MarkdownRenderer content={result.summary} />
                 )}
                 {result?.artifacts && result.artifacts.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    {result.artifacts.map(a => (
-                      <div key={a.artifactId}>
+                  <div className="mt-3 flex flex-col gap-2">
+                    {result.artifacts.map(a => {
+                      const ext = a.title?.split('.').pop()?.toUpperCase() || 'FILE';
+                      return (
                         <button
+                          key={a.artifactId}
                           type="button"
                           onClick={(e) => {
                             const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
                             if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
                             else onArtifactClick?.(info);
                           }}
-                          className="flex items-center gap-1.5 text-sm text-[var(--c-accent)] hover:underline cursor-pointer"
+                          className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)] cursor-pointer"
+                          data-testid={`generated-file-${a.title}`}
                         >
-                          <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="currentColor"><path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zm5 0v4h4M7 9h4M7 12h4M5 9h1M5 12h1"/></svg>
-                          {a.title}
-                        </button>
-                        {a.creator && (
-                          <div className="ml-5 mt-0.5 text-[11px] text-[var(--c-text-tertiary)]">
-                            由 {a.creator === 'agent' ? 'Agent' : a.creator} 创建
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
+                            {'</>'}
                           </div>
-                        )}
-                      </div>
-                    ))}
+                          <div className="flex min-w-0 flex-1 flex-col items-start">
+                            <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{a.title}</span>
+                            <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
+                          </div>
+                          <span className="shrink-0 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)]">打开</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
-                {((result?.artifacts && result.artifacts.length > 0) || generatedFiles.length > 0) && (
-                  <div className={result && !(result?.artifacts && result.artifacts.length > 0) && generatedFiles.length > 0 ? 'mt-3' : ''}>
-                    <div className="space-y-2" data-testid="generated-files-list">
-                      {result?.artifacts && result.artifacts.map(a => (
-                        <div key={a.artifactId}>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
-                              if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
-                              else onArtifactClick?.(info);
-                            }}
-                            className="flex items-center gap-1.5 text-sm text-[var(--c-accent)] hover:underline cursor-pointer"
-                            data-testid={`generated-file-${a.title}`}
-                          >
-                            <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="currentColor"><path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zm5 0v4h4M7 9h4M7 12h4M5 9h1M5 12h1"/></svg>
-                            {a.title}
-                          </button>
-                          {a.creator && (
-                            <div className="ml-5 mt-0.5 text-[11px] text-[var(--c-text-tertiary)]">
-                              由 {a.creator === 'agent' ? 'Agent' : a.creator} 创建
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                      {(!result?.artifacts || result.artifacts.length === 0) && generatedFiles.map(f => (
+                {(!result?.artifacts || result.artifacts.length === 0) && generatedFiles.length > 0 && (
+                  <div className="mt-3 flex flex-col gap-2" data-testid="generated-files-list">
+                    {generatedFiles.map(f => {
+                      const ext = f.name?.split('.').pop()?.toUpperCase() || 'FILE';
+                      return (
                         <button
                           key={f.filePath}
                           type="button"
@@ -234,14 +217,20 @@ export function ChatView({
                             if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
                             else onArtifactClick?.(info);
                           }}
-                          className="flex items-center gap-1.5 text-sm text-[var(--c-accent)] hover:underline cursor-pointer"
+                          className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)] cursor-pointer"
                           data-testid={`generated-file-${f.name}`}
                         >
-                          <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="currentColor"><path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zm5 0v4h4M7 9h4M7 12h4M5 9h1M5 12h1"/></svg>
-                          {f.name}
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
+                            {'</>'}
+                          </div>
+                          <div className="flex min-w-0 flex-1 flex-col items-start">
+                            <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{f.name}</span>
+                            <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
+                          </div>
+                          <span className="shrink-0 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)]">打开</span>
                         </button>
-                      ))}
-                    </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

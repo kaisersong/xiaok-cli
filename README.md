@@ -20,6 +20,15 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.1.0:**
+
+- **Artifact Canvas Editing**: Click "修订" on HTML previews to annotate elements, send edit instructions to Agent with full DOM context
+- **Auto-refresh Preview**: Canvas preview automatically reloads when Agent modifies the artifact file
+- **Artifact Cards**: Claude-style file cards with type icon, title, and "打开" button for clear artifact identification
+- **Welcome Page Revamp**: Personalized typewriter greeting, quick-start prompt pills for enterprise workflows
+- **Profile Settings**: Editable display name and avatar in General Settings (localStorage, with system username fallback)
+- **Plugin Bundling Design**: Complete plugin lifecycle spec for desktop distribution (esbuild + Python venv)
+
 **What's New in v1.0.0:**
 
 - **Full i18n Support**: Complete Chinese/English internationalization across all desktop UI components with runtime locale switching

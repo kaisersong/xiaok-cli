@@ -1,20 +1,68 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ChatInput } from './ChatInput';
-import { api, type ThreadRecord } from '../api';
+import { api } from '../api';
+
+const QUICK_PROMPTS = [
+  '帮我写一篇产品调研报告',
+  '生成一份竞品对比分析',
+  '帮我整理会议纪要并提取待办',
+  '写一份项目立项方案',
+  '帮我撰写季度工作总结',
+  '起草一份合作邀约邮件',
+];
+
+function useProfileName() {
+  const [name, setName] = useState(() =>
+    localStorage.getItem('xiaok_display_name')
+    || (window as any).xiaokDesktop?.systemUsername
+    || ''
+  );
+  useEffect(() => {
+    const handler = () => {
+      setName(
+        localStorage.getItem('xiaok_display_name')
+        || (window as any).xiaokDesktop?.systemUsername
+        || ''
+      );
+    };
+    window.addEventListener('xiaok-profile-changed', handler);
+    return () => window.removeEventListener('xiaok-profile-changed', handler);
+  }, []);
+  return name;
+}
+
+function useTypewriter(text: string, speed = 80) {
+  const [displayed, setDisplayed] = useState('');
+  const indexRef = useRef(0);
+
+  useEffect(() => {
+    setDisplayed('');
+    indexRef.current = 0;
+    if (!text) return;
+
+    const timer = setInterval(() => {
+      indexRef.current++;
+      setDisplayed(text.slice(0, indexRef.current));
+      if (indexRef.current >= text.length) clearInterval(timer);
+    }, speed);
+
+    return () => clearInterval(timer);
+  }, [text, speed]);
+
+  return displayed;
+}
 
 export function WelcomePage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [prompt, setPrompt] = useState('');
-  const [recentThreads, setRecentThreads] = useState<ThreadRecord[]>([]);
 
-  useEffect(() => {
-    api.listThreads({ limit: 5 }).then(setRecentThreads);
-  }, [location.key]);
+  const username = useProfileName();
+  const greeting = `${username}，我们一起来完成工作吧！`;
+  const typedGreeting = useTypewriter(greeting, 60);
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
-    // Always create the thread first so it appears in sidebar regardless of task outcome
     const thread = await api.createThread({ title: text.slice(0, 40) });
 
     try {
@@ -35,50 +83,36 @@ export function WelcomePage() {
     navigate(`/t/${thread.id}`, { state: { initialPrompt: text } });
   };
 
-  const formatTime = (ts: number) => {
-    const d = new Date(ts);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 1) return 'just now';
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
-    return d.toLocaleDateString();
+  const handleQuickPrompt = (p: string) => {
+    setPrompt(p);
   };
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-8 p-8">
-      <h1 className="text-3xl font-medium">What do you want to build?</h1>
+      <h1 className="text-3xl font-medium min-h-[2.5rem]">{typedGreeting}</h1>
       <div className="w-full max-w-xl">
         <ChatInput
           value={prompt}
           onChange={setPrompt}
           onSubmit={handleSubmit}
-          placeholder="Describe your task..."
+          placeholder="描述你的工作需求..."
         />
       </div>
 
-      {recentThreads.length > 0 && (
-        <div className="w-full max-w-xl">
-          <p className="mb-2 text-xs font-medium text-[var(--c-text-secondary)]">Recent</p>
-          <div className="flex flex-col gap-1">
-            {recentThreads.map(thread => (
-              <button
-                key={thread.id}
-                type="button"
-                onClick={() => navigate(`/t/${thread.id}`)}
-                className="flex items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--c-bg-card)]"
-              >
-                <span className="truncate">{thread.title || 'Untitled'}</span>
-                <span className="ml-2 shrink-0 text-xs text-[var(--c-text-secondary)]">
-                  {formatTime(thread.createdAt)}
-                </span>
-              </button>
-            ))}
-          </div>
+      <div className="w-full max-w-xl">
+        <div className="flex flex-wrap gap-2">
+          {QUICK_PROMPTS.map(p => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => handleQuickPrompt(p)}
+              className="rounded-full border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:border-[var(--c-accent)] hover:text-[var(--c-accent)] hover:bg-[var(--c-bg-card)]"
+            >
+              {p}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }

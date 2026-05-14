@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Monitor, LogOut, HelpCircle, ArrowUpRight, Zap, Loader2, X } from 'lucide-react'
+import { Monitor, LogOut, HelpCircle, ArrowUpRight, Zap, Loader2, X, Camera } from 'lucide-react'
 import type { MeResponse } from '../../api'
 import {
   listLlmProviders,
@@ -284,36 +284,14 @@ export function GeneralSettings({ me, accessToken, onLogout, onMeUpdated }: Prop
     }
   }
 
-  const displayName = localMode ? (osUsername ?? me?.username ?? '?') : (me?.username ?? '?')
-  const userInitial = displayName.charAt(0).toUpperCase()
+  const storedName = localStorage.getItem('xiaok_display_name');
+  const displayName = storedName || (localMode ? (osUsername ?? me?.username ?? '?') : (me?.username ?? '?'));
+  const userInitial = displayName.charAt(0).toUpperCase();
 
   return (
     <div className="flex flex-col gap-6">
       {/* Profile */}
-      <div
-        className="flex items-center gap-4 rounded-xl bg-[var(--c-bg-menu)] px-5 py-4"
-        style={{ border: '0.5px solid var(--c-border-subtle)' }}
-      >
-        <div
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-base font-semibold"
-          style={{ background: 'var(--c-avatar-bg)', color: 'var(--c-avatar-text)' }}
-        >
-          {userInitial}
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-base font-semibold text-[var(--c-text-heading)]">
-            {displayName === '?' ? t.loading : displayName}
-          </span>
-          {localMode ? (
-            <span className="flex items-center gap-1 text-xs text-[var(--c-text-tertiary)]">
-              <Monitor size={11} />
-              {ds.localModeLabel ?? 'Local'}
-            </span>
-          ) : me?.email ? (
-            <span className="truncate text-xs text-[var(--c-text-tertiary)]">{me.email}</span>
-          ) : null}
-        </div>
-      </div>
+      <ProfileSection displayName={displayName} localMode={localMode} me={me} ds={ds} t={t} />
 
       {/* Language & Theme — image-card picker */}
       <div className="flex flex-col gap-4">
@@ -415,4 +393,154 @@ export function GeneralSettings({ me, accessToken, onLogout, onMeUpdated }: Prop
       </div>
     </div>
   )
+}
+
+// --- Profile Section with editable name & avatar ---
+
+const AVATAR_MAX_SIZE = 100 * 1024; // 100KB
+const AVATAR_MAX_DIM = 128;
+
+function resizeImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let w = img.width, h = img.height;
+        if (w > AVATAR_MAX_DIM || h > AVATAR_MAX_DIM) {
+          const scale = AVATAR_MAX_DIM / Math.max(w, h);
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        resolve(dataUrl);
+      };
+      img.onerror = reject;
+      img.src = reader.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function ProfileSection({ displayName, localMode, me, ds, t }: {
+  displayName: string;
+  localMode: boolean;
+  me: MeResponse | null;
+  ds: Record<string, string>;
+  t: Record<string, any>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState(() => localStorage.getItem('xiaok_avatar_url') || '');
+
+  const initial = displayName.charAt(0).toUpperCase();
+
+  const handleStartEdit = () => {
+    setNameInput(localStorage.getItem('xiaok_display_name') || displayName);
+    setEditing(true);
+  };
+
+  const handleSaveName = () => {
+    const trimmed = nameInput.trim();
+    if (trimmed) {
+      localStorage.setItem('xiaok_display_name', trimmed);
+    } else {
+      localStorage.removeItem('xiaok_display_name');
+    }
+    setEditing(false);
+    // Force re-render of other components reading this
+    window.dispatchEvent(new Event('xiaok-profile-changed'));
+  };
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return;
+
+    try {
+      const dataUrl = await resizeImage(file);
+      // Check final size
+      if (dataUrl.length > AVATAR_MAX_SIZE * 1.37) { // base64 overhead
+        alert('头像文件过大，请选择更小的图片');
+        return;
+      }
+      localStorage.setItem('xiaok_avatar_url', dataUrl);
+      setAvatarUrl(dataUrl);
+      window.dispatchEvent(new Event('xiaok-profile-changed'));
+    } catch {
+      // ignore
+    }
+    e.target.value = '';
+  };
+
+  return (
+    <div
+      className="flex items-center gap-4 rounded-xl bg-[var(--c-bg-menu)] px-5 py-4"
+      style={{ border: '0.5px solid var(--c-border-subtle)' }}
+    >
+      {/* Avatar */}
+      <div className="relative shrink-0">
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt="avatar"
+            className="h-12 w-12 rounded-full object-cover"
+          />
+        ) : (
+          <div
+            className="flex h-12 w-12 items-center justify-center rounded-full text-base font-semibold"
+            style={{ background: 'var(--c-avatar-bg, #e2e8f0)', color: 'var(--c-avatar-text, #475569)' }}
+          >
+            {initial}
+          </div>
+        )}
+        <label className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full bg-[var(--c-bg-card)] shadow"
+          title="更换头像"
+        >
+          <Camera size={10} />
+          <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
+        </label>
+      </div>
+
+      {/* Name */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {editing ? (
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') setEditing(false); }}
+              className="min-w-0 flex-1 rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]"
+              autoFocus
+            />
+            <button type="button" onClick={handleSaveName} className="text-xs text-[var(--c-accent)]">保存</button>
+            <button type="button" onClick={() => setEditing(false)} className="text-xs text-[var(--c-text-tertiary)]">取消</button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={handleStartEdit}
+            className="truncate text-left text-base font-semibold text-[var(--c-text-heading)] hover:text-[var(--c-accent)]"
+          >
+            {displayName === '?' ? t.loading : displayName}
+          </button>
+        )}
+        {localMode ? (
+          <span className="flex items-center gap-1 text-xs text-[var(--c-text-tertiary)]">
+            <Monitor size={11} />
+            {ds.localModeLabel ?? 'Local'}
+          </span>
+        ) : me?.email ? (
+          <span className="truncate text-xs text-[var(--c-text-tertiary)]">{me.email}</span>
+        ) : null}
+      </div>
+    </div>
+  );
 }

@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const os = require('os');
 
 contextBridge.exposeInMainWorld('xiaokDesktop', {
+  systemUsername: os.userInfo().username,
   getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig'),
   saveModelConfig: (input) => ipcRenderer.invoke('desktop:saveModelConfig', input),
   testProviderConnection: (input) => ipcRenderer.invoke('desktop:testProviderConnection', input),
