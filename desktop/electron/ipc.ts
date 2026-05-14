@@ -236,3 +236,45 @@ async function listFilesInDirectory(directory: string): Promise<string[]> {
   }
   return files;
 }
+
+  // ---- Memory ----
+  const { UserMemoryStore } = await import('./user-memory.js');
+  const memoryDir = join(services.getDataRoot(), 'memories');
+  const memoryStore = new UserMemoryStore(memoryDir);
+
+  ipcMain.handle('desktop:listMemories', async () => memoryStore.list());
+  ipcMain.handle('desktop:createMemory', async (_event, input: { content: string; tags: string[]; source?: string }) => memoryStore.create(input));
+  ipcMain.handle('desktop:updateMemory', async (_event, input: { id: string; content?: string; tags?: string[] }) => memoryStore.update(input.id, input));
+  ipcMain.handle('desktop:deleteMemory', async (_event, id: string) => memoryStore.delete(id));
+  ipcMain.handle('desktop:importMemories', async (_event, items: Array<{ content: string; tags?: string[]; source?: string }>) => memoryStore.importMemories(items));
+
+  // ---- Artifact Editing ----
+  const { sessionHash, backupArtifact, revertArtifact, cleanupBackups, watchArtifactFile, unwatchArtifactFile } = await import('./artifact-editing.js');
+
+  ipcMain.handle('desktop:artifactBackup', async (_event, filePath: string) => {
+    const sid = sessionHash(filePath);
+    return backupArtifact(filePath, sid);
+  });
+
+  ipcMain.handle('desktop:artifactRevert', async (_event, filePath: string) => {
+    const sid = sessionHash(filePath);
+    const ok = revertArtifact(filePath, sid);
+    if (ok) window.webContents.send('desktop:artifactFileChanged', filePath);
+    return ok;
+  });
+
+  ipcMain.handle('desktop:artifactCleanup', async (_event, filePath: string) => {
+    const sid = sessionHash(filePath);
+    cleanupBackups(sid);
+  });
+
+  ipcMain.handle('desktop:artifactWatch', async (_event, filePath: string) => {
+    watchArtifactFile(filePath, () => {
+      window.webContents.send('desktop:artifactFileChanged', filePath);
+    });
+  });
+
+  ipcMain.handle('desktop:artifactUnwatch', async (_event, filePath: string) => {
+    unwatchArtifactFile(filePath);
+  });
+}

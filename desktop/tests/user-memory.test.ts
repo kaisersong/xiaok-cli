@@ -132,4 +132,71 @@ describe('UserMemoryStore', () => {
       expect(store.list().length).toBeLessThanOrEqual(500);
     });
   });
+
+  describe('update', () => {
+    it('updates content', () => {
+      const m = store.create({ content: 'Old content', tags: ['old'] });
+      const updated = store.update(m.id, { content: 'New content' });
+      expect(updated!.content).toBe('New content');
+      expect(store.list()[0].content).toBe('New content');
+    });
+
+    it('updates tags', () => {
+      const m = store.create({ content: 'Test', tags: ['old'] });
+      const updated = store.update(m.id, { tags: ['new', 'tags'] });
+      expect(updated!.tags).toEqual(['new', 'tags']);
+    });
+
+    it('returns null for non-existent id', () => {
+      expect(store.update('non-existent', { content: 'x' })).toBeNull();
+    });
+  });
+
+  describe('importMemories', () => {
+    it('imports new memories', () => {
+      const result = store.importMemories([
+        { content: 'Imported memory 1', tags: ['import'] },
+        { content: 'Imported memory 2', tags: ['import'] },
+      ]);
+      expect(result.imported).toBe(2);
+      expect(result.deduped).toBe(0);
+      expect(store.list()).toHaveLength(2);
+    });
+
+    it('deduplicates against existing', () => {
+      store.create({ content: 'Existing memory', tags: [] });
+      const result = store.importMemories([
+        { content: 'Existing memory', tags: [] },
+        { content: 'New memory', tags: [] },
+      ]);
+      expect(result.imported).toBe(1);
+      expect(result.deduped).toBe(1);
+    });
+
+    it('auto-tags when no tags provided', () => {
+      store.importMemories([
+        { content: '用户偏好深色主题' },
+        { content: '项目 alpha 的技术栈是 React' },
+        { content: '部署前必须跑测试' },
+      ]);
+      const list = store.list();
+      expect(list[2].tags).toContain('preference');
+      expect(list[1].tags).toContain('project');
+      expect(list[0].tags).toContain('workflow');
+    });
+
+    it('skips empty content', () => {
+      const result = store.importMemories([
+        { content: '' },
+        { content: '   ' },
+        { content: 'Valid' },
+      ]);
+      expect(result.imported).toBe(1);
+    });
+
+    it('marks source as import', () => {
+      store.importMemories([{ content: 'From export', source: 'claude-code' }]);
+      expect(store.list()[0].source).toBe('claude-code');
+    });
+  });
 });

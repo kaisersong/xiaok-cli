@@ -74,6 +74,11 @@ export const PRELOAD_API_KEYS = [
   'onKSwarmStatus',
   'syncScheduledTasks',
   'onScheduledTaskDue',
+  'listMemories',
+  'createMemory',
+  'updateMemory',
+  'deleteMemory',
+  'importMemories',
 ] as const;
 
 export interface DesktopModelProviderView {

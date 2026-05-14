@@ -9,6 +9,12 @@ export interface UserMemory {
   source?: string;
 }
 
+export interface ImportedMemory {
+  content: string;
+  tags?: string[];
+  source?: string;
+}
+
 const FILE_NAME = 'user-memories.json';
 const MAX_ENTRIES = 500;
 
@@ -69,6 +75,15 @@ export class UserMemoryStore {
     );
   }
 
+  update(id: string, input: { content?: string; tags?: string[] }): UserMemory | null {
+    const m = this.memories.find(m => m.id === id);
+    if (!m) return null;
+    if (input.content !== undefined) m.content = input.content;
+    if (input.tags !== undefined) m.tags = input.tags;
+    this.save();
+    return { ...m };
+  }
+
   delete(id: string): boolean {
     const idx = this.memories.findIndex(m => m.id === id);
     if (idx === -1) return false;
@@ -76,4 +91,40 @@ export class UserMemoryStore {
     this.save();
     return true;
   }
+
+  importMemories(items: ImportedMemory[]): { imported: number; deduped: number } {
+    const existing = new Set(this.memories.map(m => m.content.toLowerCase().trim()));
+    let imported = 0;
+    let deduped = 0;
+    for (const item of items) {
+      const content = (item.content || '').trim();
+      if (!content) continue;
+      if (existing.has(content.toLowerCase())) {
+        deduped++;
+        continue;
+      }
+      const tags = deduceTags(content, item.tags || []);
+      this.create({ content, tags, source: item.source || 'import' });
+      existing.add(content.toLowerCase());
+      imported++;
+    }
+    return { imported, deduped };
+  }
+}
+
+function deduceTags(content: string, providedTags: string[]): string[] {
+  const tags = [...providedTags];
+  const lower = content.toLowerCase();
+
+  if (tags.length === 0) {
+    if (/偏好|喜欢|默认|prefer|like|default/i.test(content)) tags.push('preference');
+    if (/项目|project|仓库|repo/i.test(content)) tags.push('project');
+    if (/测试|test|ci|lint/i.test(content)) tags.push('workflow');
+    if (/bug|修复|fix|错误|error/i.test(content)) tags.push('bug');
+    if (/部署|deploy|发布|release|上线/i.test(content)) tags.push('deploy');
+    if (/架构|architecture|技术栈|stack|框架|framework/i.test(content)) tags.push('architecture');
+    if (/团队|team|成员|member|协作/i.test(content)) tags.push('team');
+  }
+
+  return [...new Set(tags)];
 }

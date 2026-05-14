@@ -904,6 +904,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     async executeTool(name: string, input: Record<string, unknown>) {
       return registry.executeTool(name, input);
     },
+    getDataRoot() {
+      return options.dataRoot;
+    },
   };
 }
 

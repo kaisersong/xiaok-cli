@@ -692,6 +692,29 @@ export const api = {
       return [];
     }
   },
+
+  // ---------------------
+  // Memory API (IPC)
+  // ---------------------
+  async listMemories() {
+    try {
+      return await window.xiaokDesktop.listMemories();
+    } catch {
+      return [];
+    }
+  },
+  async createMemory(input: { content: string; tags: string[]; source?: string }) {
+    return await window.xiaokDesktop.createMemory(input);
+  },
+  async updateMemory(input: { id: string; content?: string; tags?: string[] }) {
+    return await window.xiaokDesktop.updateMemory(input);
+  },
+  async deleteMemory(id: string) {
+    return await window.xiaokDesktop.deleteMemory(id);
+  },
+  async importMemories(items: Array<{ content: string; tags?: string[]; source?: string }>) {
+    return await window.xiaokDesktop.importMemories(items);
+  },
 };
 
 // Skill management functions — bridge between skill API and desktop local skill system
