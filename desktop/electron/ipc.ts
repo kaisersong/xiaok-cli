@@ -239,14 +239,36 @@ async function listFilesInDirectory(directory: string): Promise<string[]> {
 
   // ---- Memory ----
   const { UserMemoryStore } = await import('./user-memory.js');
+  const { parseMemories } = await import('./memory-import-parser.js');
   const memoryDir = join(services.getDataRoot(), 'memories');
   const memoryStore = new UserMemoryStore(memoryDir);
 
-  ipcMain.handle('desktop:listMemories', async () => memoryStore.list());
-  ipcMain.handle('desktop:createMemory', async (_event, input: { content: string; tags: string[]; source?: string }) => memoryStore.create(input));
-  ipcMain.handle('desktop:updateMemory', async (_event, input: { id: string; content?: string; tags?: string[] }) => memoryStore.update(input.id, input));
-  ipcMain.handle('desktop:deleteMemory', async (_event, id: string) => memoryStore.delete(id));
-  ipcMain.handle('desktop:importMemories', async (_event, items: Array<{ content: string; tags?: string[]; source?: string }>) => memoryStore.importMemories(items));
+  ipcMain.handle('desktop:listMemories', async () => {
+    try { return memoryStore.list(); }
+    catch (e) { log('error', 'listMemories failed', e); return []; }
+  });
+  ipcMain.handle('desktop:createMemory', async (_event, input: { content: string; tags: string[]; source?: string }) => {
+    try { return memoryStore.create(input); }
+    catch (e) { log('error', 'createMemory failed', e); throw e; }
+  });
+  ipcMain.handle('desktop:updateMemory', async (_event, input: { id: string; content?: string; tags?: string[] }) => {
+    try { return memoryStore.update(input.id, input); }
+    catch (e) { log('error', 'updateMemory failed', e); throw e; }
+  });
+  ipcMain.handle('desktop:deleteMemory', async (_event, id: string) => {
+    try { return memoryStore.delete(id); }
+    catch (e) { log('error', 'deleteMemory failed', e); throw e; }
+  });
+  ipcMain.handle('desktop:importMemories', async (_event, raw: string) => {
+    try {
+      const { items, errors } = parseMemories(raw);
+      if (items.length === 0 && errors.length === 0) return { imported: 0, deduped: 0, parseErrors: ['未解析到任何记忆'] };
+      const result = memoryStore.importMemories(items);
+      return { ...result, parseErrors: errors };
+    } catch (e) {
+      return { imported: 0, deduped: 0, parseErrors: [`导入失败: ${e}`] };
+    }
+  });
 
   // ---- Artifact Editing ----
   const { sessionHash, backupArtifact, revertArtifact, cleanupBackups, watchArtifactFile, unwatchArtifactFile } = await import('./artifact-editing.js');

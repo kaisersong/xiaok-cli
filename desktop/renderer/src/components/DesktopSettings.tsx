@@ -1340,7 +1340,7 @@ function MemoryPane() {
   const [newTags, setNewTags] = useState('');
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
-  const [importResult, setImportResult] = useState<{ imported: number; deduped: number } | null>(null);
+  const [importResult, setImportResult] = useState<{ imported: number; deduped: number; parseErrors?: string[] } | null>(null);
 
   const load = () => {
     api.listMemories().then(setMemories);
@@ -1382,16 +1382,11 @@ function MemoryPane() {
   };
 
   const handleImport = async () => {
-    try {
-      const items = JSON.parse(importText);
-      if (!Array.isArray(items)) { alert('格式错误：需要 JSON 数组'); return; }
-      const result = await api.importMemories(items);
-      setImportResult(result);
-      setImportText('');
-      load();
-    } catch {
-      alert('JSON 解析失败，请检查格式');
-    }
+    if (!importText.trim()) return;
+    const result = await api.importMemories(importText);
+    setImportResult(result);
+    setImportText('');
+    load();
   };
 
   return (
@@ -1453,21 +1448,29 @@ function MemoryPane() {
         {showImport && (
           <Card className="mb-4">
             <p className="text-xs text-[var(--c-text-secondary)] mb-2">
-              粘贴 JSON 数组，格式：[&#123;"content": "...", "tags": ["..."]&#125;]。支持从 Claude Code memory、Cursor rules 等导入。
+              粘贴任意格式内容，自动解析。支持 JSON 数组、JSON Lines、Markdown 列表、纯文本。可从 Claude Code memory、Cursor rules、其他 agent 导出导入。
             </p>
             <textarea
               value={importText}
               onChange={e => setImportText(e.target.value)}
-              placeholder='[{"content": "用户偏好深色主题", "tags": ["preference"]}]'
-              className={`${inputCls} mb-3 min-h-[100px] resize-y font-mono text-xs`}
+              placeholder={`示例：\n[\n  {"content": "用户偏好深色主题", "tags": ["preference"]}\n]\n\n或 Markdown 列表：\n- 用户偏好深色主题\n- 提交前跑测试`}
+              className={`${inputCls} mb-3 min-h-[120px] resize-y text-xs`}
             />
-            <div className="flex gap-2 items-center">
+            <div className="flex gap-2 items-center flex-wrap">
               <button onClick={handleImport} className={btnPrimary}>导入</button>
               <button onClick={() => { setShowImport(false); setImportResult(null); }} className={btnSecondary}>取消</button>
               {importResult && (
-                <span className="text-xs text-[var(--c-text-secondary)]">
-                  导入 {importResult.imported} 条，去重 {importResult.deduped} 条
-                </span>
+                <div className="text-xs space-y-0.5">
+                  <span className="text-[var(--c-text-secondary)]">
+                    导入 {importResult.imported} 条，去重 {importResult.deduped} 条
+                  </span>
+                  {importResult.parseErrors?.length > 0 && (
+                    <div className="text-[var(--c-error)]">
+                      解析提示：{importResult.parseErrors.slice(0, 3).join('；')}
+                      {importResult.parseErrors.length > 3 && ` 等 ${importResult.parseErrors.length} 条`}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </Card>

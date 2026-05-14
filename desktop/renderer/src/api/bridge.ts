@@ -712,8 +712,8 @@ export const api = {
   async deleteMemory(id: string) {
     return await window.xiaokDesktop.deleteMemory(id);
   },
-  async importMemories(items: Array<{ content: string; tags?: string[]; source?: string }>) {
-    return await window.xiaokDesktop.importMemories(items);
+  async importMemories(raw: string) {
+    return await window.xiaokDesktop.importMemories(raw);
   },
 };
 
