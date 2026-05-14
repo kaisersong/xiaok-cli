@@ -2,6 +2,7 @@ import { useRef, useEffect } from 'react';
 import remarkGfm from 'remark-gfm';
 import { ChatInput } from './ChatInput';
 import { ToolStepsMessage } from './ToolStepsMessage';
+import { ProjectInlineCard } from './projects/ProjectInlineCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import type { ThreadRecord } from '../api/types';
 import type { NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
@@ -16,13 +17,23 @@ export interface ToolStep {
   finishedAt?: number;
 }
 
+export interface ProjectCardData {
+  type: 'project_card';
+  projectId: string;
+  name: string;
+  status: string;
+  createdAt: number;
+  memberCount: number;
+}
+
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'progress' | 'tool_steps';
+  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card';
   content: string;
   stage?: string;
   steps?: ToolStep[];
   stepsLive?: boolean;
+  projectData?: ProjectCardData;
 }
 
 interface GeneratedFile {
@@ -133,6 +144,14 @@ export function ChatView({
                   </div>
                 ) : msg.role === 'tool_steps' ? (
                   <ToolStepsMessage steps={msg.steps ?? []} live={msg.stepsLive ?? false} />
+                ) : msg.role === 'project_card' && msg.projectData ? (
+                  <ProjectInlineCard
+                    projectId={msg.projectData.projectId}
+                    name={msg.projectData.name}
+                    status={msg.projectData.status}
+                    createdAt={msg.projectData.createdAt}
+                    memberCount={msg.projectData.memberCount}
+                  />
                 ) : (
                   <div className="max-w-[663px] text-sm text-[var(--c-text-primary)] leading-relaxed select-text">
                     <MarkdownRenderer content={msg.content} />

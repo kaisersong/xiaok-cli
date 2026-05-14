@@ -234,6 +234,20 @@ export function ChatShell() {
           };
           return updated;
         });
+        // Detect create_project tool result → render project card
+        if (ev.toolName === 'create_project' && ev.ok) {
+          try {
+            const data = JSON.parse(ev.response);
+            if (data.type === 'project_card') {
+              setMessages(prev => [...prev, {
+                id: `msg-project-${data.projectId}`,
+                role: 'project_card',
+                content: '',
+                projectData: data,
+              }]);
+            }
+          } catch { /* response not JSON */ }
+        }
         break;
       }
       case 'needs_user': {
@@ -322,6 +336,19 @@ export function ChatShell() {
           replayToolSteps = replayToolSteps.map(s =>
             s.toolUseId === evR.toolUseId ? { ...s, status: evR.ok ? 'done' : 'error', response: evR.response, finishedAt: evR.ts } : s
           );
+          if (evR.toolName === 'create_project' && evR.ok) {
+            try {
+              const data = JSON.parse(evR.response);
+              if (data.type === 'project_card') {
+                msgs.push({
+                  id: `msg-project-${data.projectId}`,
+                  role: 'project_card',
+                  content: '',
+                  projectData: data,
+                });
+              }
+            } catch { /* not JSON */ }
+          }
           continue;
         }
         if (ev.type === 'progress') {
@@ -733,6 +760,10 @@ export function ChatShell() {
             const next = !canvasExpanded;
             setCanvasExpanded(next);
             sidebarCollapse.setCollapsed(next);
+          }}
+          onAnnotation={(msg) => {
+            setPrompt(msg);
+            handleSubmit(msg);
           }}
         />
       )}
