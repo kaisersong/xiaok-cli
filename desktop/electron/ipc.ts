@@ -11,7 +11,7 @@ function log(level: string, msg: string, ...args: unknown[]) {
   console.log(`[${ts}] [${level}] [ipc] ${msg}${payload}`);
 }
 
-export function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow, services: DesktopServices): void {
+export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow, services: DesktopServices): Promise<void> {
   ipcMain.handle('desktop:getModelConfig', async () => {
     log('info', 'getModelConfig');
     const r = await services.getModelConfig();
@@ -204,38 +204,6 @@ export function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow, serv
       return await services.getSkillStats();
     } catch { return []; }
   });
-}
-
-async function expandSelectedMaterialPaths(paths: string[]): Promise<string[]> {
-  const files: string[] = [];
-  for (const path of paths) {
-    const entry = await stat(path);
-    if (entry.isFile()) {
-      files.push(path);
-      continue;
-    }
-    if (entry.isDirectory()) {
-      files.push(...await listFilesInDirectory(path));
-    }
-  }
-  return files.sort();
-}
-
-async function listFilesInDirectory(directory: string): Promise<string[]> {
-  const files: string[] = [];
-  const entries = await readdir(directory, { withFileTypes: true });
-  for (const entry of entries) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...await listFilesInDirectory(path));
-      continue;
-    }
-    if (entry.isFile()) {
-      files.push(path);
-    }
-  }
-  return files;
-}
 
   // ---- Memory ----
   const { UserMemoryStore } = await import('./user-memory.js');
@@ -299,4 +267,35 @@ async function listFilesInDirectory(directory: string): Promise<string[]> {
   ipcMain.handle('desktop:artifactUnwatch', async (_event, filePath: string) => {
     unwatchArtifactFile(filePath);
   });
+}
+
+async function expandSelectedMaterialPaths(paths: string[]): Promise<string[]> {
+  const files: string[] = [];
+  for (const path of paths) {
+    const entry = await stat(path);
+    if (entry.isFile()) {
+      files.push(path);
+      continue;
+    }
+    if (entry.isDirectory()) {
+      files.push(...await listFilesInDirectory(path));
+    }
+  }
+  return files.sort();
+}
+
+async function listFilesInDirectory(directory: string): Promise<string[]> {
+  const files: string[] = [];
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listFilesInDirectory(path));
+      continue;
+    }
+    if (entry.isFile()) {
+      files.push(path);
+    }
+  }
+  return files;
 }

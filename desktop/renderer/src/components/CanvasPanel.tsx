@@ -14,6 +14,7 @@ interface CanvasPanelProps {
   initialPreviewContent?: string;
   expanded?: boolean;
   onToggleExpand?: () => void;
+  onAnnotation?: (message: string) => void;
 }
 
 type CanvasTab = 'workspace' | 'preview' | 'tools';
@@ -24,7 +25,7 @@ const TABS: Array<{ key: CanvasTab; label: string; icon: typeof X }> = [
   { key: 'tools', label: 'Tools', icon: Wrench },
 ];
 
-export function CanvasPanel({ events, onClose, initialPreviewFile, initialPreviewContent, expanded, onToggleExpand }: CanvasPanelProps) {
+export function CanvasPanel({ events, onClose, initialPreviewFile, initialPreviewContent, expanded, onToggleExpand, onAnnotation }: CanvasPanelProps) {
   const [activeTab, setActiveTab] = useState<CanvasTab>('workspace');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [previewContent, setPreviewContent] = useState<string>('');
@@ -95,6 +96,28 @@ export function CanvasPanel({ events, onClose, initialPreviewFile, initialPrevie
   }, [toolResults]);
 
   const hasContent = fileChanges.length > 0 || toolCalls.length > 0;
+
+  // Auto-refresh preview when the selected file is modified by Agent
+  const fileChangesLen = fileChanges.length;
+  const toolResultsLen = toolResults.length;
+  useEffect(() => {
+    if (!selectedFile) return;
+    // Re-read content whenever events indicate the file may have changed
+    (async () => {
+      try {
+        const r = await api.readFileContent(selectedFile);
+        setPreviewContent(r.content);
+      } catch { /* ignore */ }
+    })();
+  }, [fileChangesLen, toolResultsLen, selectedFile]);
+
+  const handleRefreshPreview = useCallback(async () => {
+    if (!selectedFile) return;
+    try {
+      const r = await api.readFileContent(selectedFile);
+      setPreviewContent(r.content);
+    } catch { /* ignore */ }
+  }, [selectedFile]);
 
   const handleFileSelect = useCallback(async (path: string) => {
     setSelectedFile(path);
@@ -174,6 +197,8 @@ export function CanvasPanel({ events, onClose, initialPreviewFile, initialPrevie
           <CanvasPreview
             filePath={selectedFile}
             content={previewContent || fileContents[selectedFile] || ''}
+            onAnnotation={onAnnotation}
+            onRefresh={handleRefreshPreview}
           />
         )}
         {activeTab === 'preview' && !selectedFile && (

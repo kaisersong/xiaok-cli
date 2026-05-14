@@ -41,7 +41,7 @@ async function createWindow(): Promise<BrowserWindow> {
   const services = createDesktopServices({
     dataRoot: join(app.getPath('home'), '.xiaok', 'desktop'),
   });
-  registerDesktopIpc(ipcMain, window, services);
+  await registerDesktopIpc(ipcMain, window, services);
 
   // Register update IPC handlers
   ipcMain.handle('desktop:getUpdateStatus', () => {

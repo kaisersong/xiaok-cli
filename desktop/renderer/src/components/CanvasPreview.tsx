@@ -1,11 +1,17 @@
-import { useMemo, useRef, useEffect, useState } from 'react';
+import { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import { Code, Eye } from 'lucide-react';
 import { ArtifactIframe } from './ArtifactIframe';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { ArtifactEditableViewer, type AnnotationPayload } from './ArtifactEditableViewer';
+import { formatAnnotationForChat } from '../hooks/useArtifactAnnotation';
 
 interface CanvasPreviewProps {
   filePath: string;
   content: string;
+  /** Called when user submits an annotation from the artifact toolbar */
+  onAnnotation?: (message: string) => void;
+  /** Called when user clicks refresh button */
+  onRefresh?: () => void;
 }
 
 const textLikeMimeTypes = new Set([
@@ -46,7 +52,7 @@ function isImageFile(path: string): boolean {
   return /\.(png|jpg|jpeg|gif|svg|webp|ico)$/i.test(path);
 }
 
-export function CanvasPreview({ filePath, content }: CanvasPreviewProps) {
+export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: CanvasPreviewProps) {
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
   const iframeSrc = useRef<string | null>(null);
 
@@ -82,6 +88,26 @@ export function CanvasPreview({ filePath, content }: CanvasPreviewProps) {
       setViewMode('preview');
     }
   }, [filePath, isHtml, isMarkdown, isImage]);
+
+  const handleAnnotation = useCallback((payload: AnnotationPayload) => {
+    if (onAnnotation) {
+      onAnnotation(formatAnnotationForChat(payload, filePath));
+    }
+  }, [onAnnotation, filePath]);
+
+  const handleRevert = useCallback(() => {
+    // Trigger revert via IPC
+    if (typeof window !== 'undefined' && (window as any).xiaokDesktop?.artifactRevert) {
+      (window as any).xiaokDesktop.artifactRevert(filePath);
+    }
+  }, [filePath]);
+
+  const handleFinish = useCallback(() => {
+    // Cleanup backups via IPC
+    if (typeof window !== 'undefined' && (window as any).xiaokDesktop?.artifactCleanup) {
+      (window as any).xiaokDesktop.artifactCleanup(filePath);
+    }
+  }, [filePath]);
 
   const hasCodeView = isText;
   const hasPreview = isHtml || isMarkdown || isImage;
@@ -120,16 +146,16 @@ export function CanvasPreview({ filePath, content }: CanvasPreviewProps) {
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-auto">
-        {viewMode === 'preview' && isHtml && htmlBlobUrl && (
-          <div className="h-full bg-white">
-            <iframe
-              src={htmlBlobUrl}
-              className="h-full w-full border-0"
-              sandbox="allow-scripts allow-same-origin"
-              title={filePath}
-            />
-          </div>
+      <div className={`flex-1 min-h-0 ${viewMode === 'preview' && isHtml ? 'flex flex-col overflow-hidden' : 'overflow-auto'}`}>
+        {viewMode === 'preview' && isHtml && content && (
+          <ArtifactEditableViewer
+            htmlContent={content}
+            filePath={filePath}
+            onAnnotation={handleAnnotation}
+            onRevert={handleRevert}
+            onFinish={handleFinish}
+            onRefresh={onRefresh}
+          />
         )}
 
         {viewMode === 'preview' && isMarkdown && (

@@ -10,6 +10,7 @@ function renderCard(overrides = {}) {
   const props = {
     projectId: 'proj-123',
     name: 'AI推广方案',
+    goal: '把AI原生推广方案做出来',
     status: 'created',
     createdAt: Date.now(),
     memberCount: 3,

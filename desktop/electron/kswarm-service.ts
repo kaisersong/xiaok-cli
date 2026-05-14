@@ -9,9 +9,13 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { app } from 'electron';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const KSWARM_PORT = 4400;
 const BROKER_PORT = 4318;

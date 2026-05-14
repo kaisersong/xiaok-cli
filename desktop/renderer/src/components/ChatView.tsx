@@ -21,6 +21,7 @@ export interface ProjectCardData {
   type: 'project_card';
   projectId: string;
   name: string;
+  goal: string;
   status: string;
   createdAt: number;
   memberCount: number;
@@ -148,6 +149,7 @@ export function ChatView({
                   <ProjectInlineCard
                     projectId={msg.projectData.projectId}
                     name={msg.projectData.name}
+                    goal={msg.projectData.goal || ''}
                     status={msg.projectData.status}
                     createdAt={msg.projectData.createdAt}
                     memberCount={msg.projectData.memberCount}

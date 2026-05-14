@@ -175,3 +175,65 @@ body {
     display: none;
   }
 }
+
+/* ---- Artifact Editable Viewer ---- */
+.artifact-editable-viewer {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.artifact-editable-iframe {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: white;
+}
+
+.artifact-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--c-border);
+  background: var(--c-bg-card);
+  flex-shrink: 0;
+}
+
+.artifact-toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--c-border);
+  background: var(--c-bg-page);
+  color: var(--c-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.artifact-toolbar-btn:hover {
+  background: var(--c-bg-hover);
+  color: var(--c-text-heading);
+}
+
+.artifact-toolbar-btn.active {
+  background: var(--c-accent);
+  color: white;
+  border-color: var(--c-accent);
+}
+
+.artifact-toolbar-icon {
+  font-size: 14px;
+}
+
+.artifact-toolbar-status {
+  font-size: 11px;
+  color: var(--c-text-tertiary);
+  margin-left: 8px;
+}

@@ -289,6 +289,11 @@ export interface DesktopApi {
   onKSwarmStatus(handler: (status: KSwarmServiceStatus) => void): () => void;
   syncScheduledTasks(tasks: Array<{ id: string; cronExpr: string; enabled: boolean }>): Promise<void>;
   onScheduledTaskDue(handler: (event: { taskId: string }) => void): () => void;
+  listMemories(): Promise<unknown[]>;
+  createMemory(input: { content: string; tags: string[]; source?: string }): Promise<unknown>;
+  updateMemory(input: { id: string; content?: string; tags?: string[] }): Promise<unknown>;
+  deleteMemory(id: string): Promise<void>;
+  importMemories(raw: string): Promise<unknown>;
 }
 
 interface IpcRendererLike {
@@ -398,6 +403,11 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
         ipcRenderer.off(channel, listener);
       };
     },
+    listMemories: () => ipcRenderer.invoke('desktop:listMemories') as Promise<unknown[]>,
+    createMemory: (input) => ipcRenderer.invoke('desktop:createMemory', input) as Promise<unknown>,
+    updateMemory: (input) => ipcRenderer.invoke('desktop:updateMemory', input) as Promise<unknown>,
+    deleteMemory: (id) => ipcRenderer.invoke('desktop:deleteMemory', id) as Promise<void>,
+    importMemories: (items) => ipcRenderer.invoke('desktop:importMemories', items) as Promise<unknown>,
   };
 }
 

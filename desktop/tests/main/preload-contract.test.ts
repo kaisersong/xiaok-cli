@@ -57,6 +57,11 @@ describe('preload API contract', () => {
       'onKSwarmStatus',
       'syncScheduledTasks',
       'onScheduledTaskDue',
+      'listMemories',
+      'createMemory',
+      'updateMemory',
+      'deleteMemory',
+      'importMemories',
     ]);
   });
 

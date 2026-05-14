@@ -1,4 +1,5 @@
 const BLOCK_PATTERNS = [
+    { pattern: /\bsudo\b/, reason: 'sudo requires password which cannot be provided via Bash tool (stdin disabled). Use `! sudo <command>` to instruct user to run manually' },
     { pattern: /rm\s+-[^\s]*r[^\s]*f[^\s]*\s+\/\s*$/, reason: 'rm -rf /' },
     { pattern: /rm\s+-[^\s]*r[^\s]*f[^\s]*\s+~\s*$/, reason: 'rm -rf ~' },
     { pattern: /\bmkfs\b/, reason: 'filesystem format' },
@@ -16,7 +17,7 @@ const WARN_PATTERNS = [
     { pattern: /git\s+clean\s+-[^\s]*f/, reason: 'git clean -f' },
     { pattern: /\bDROP\s+(TABLE|DATABASE)\b/i, reason: 'DROP TABLE/DATABASE' },
     { pattern: /\bkill\s+-9\b/, reason: 'kill -9' },
-    { pattern: /\bkillall\b/, reason: 'killall' },
+    { pattern: /\bkillall\b/, reason: 'killall (may trigger sudo on macOS)' },
     { pattern: /chmod\s+[^\s]*-R/, reason: 'recursive chmod' },
     { pattern: /chown\s+[^\s]*-R/, reason: 'recursive chown' },
 ];

@@ -1033,7 +1033,7 @@ export class ScrollRegionManager {
         }
         this.stream.write(RESET_ALL);
         const targetRow = this.clampCursorRow(this._cursorRow);
-        this.stream.write(`${MOVE_TO_ROW.replace('%d', String(targetRow))}`);
+        this.stream.write(`${MOVE_TO_ROW.replace('%d', String(targetRow))}\r`);
         const cols = this.config.columns;
         const visibleText = stripAnsi(text);
         let col = this._cursorCol;

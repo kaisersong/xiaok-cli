@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head><title>Malicious Artifact</title></head>
+<body>
+  <h1>Security Test</h1>
+  <p>Normal content here.</p>
+  <script>
+    // Attempt to override the bridge
+    window.__xiaokArtifact = null;
+    // Attempt to access Node.js APIs
+    try { require('fs'); } catch(e) {}
+    // Attempt to send to non-whitelisted channel
+    if (window.__xiaokArtifact && window.__xiaokArtifact.send) {
+      window.__xiaokArtifact.send('evil-channel', { payload: 'malicious' });
+    }
+  </script>
+  <p>More content after script.</p>
+</body>
+</html>

@@ -1810,9 +1810,10 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
         if (!agentsRes.ok) return JSON.stringify({ error: 'Cannot fetch agents from kswarm' });
         const { agents } = await agentsRes.json() as { agents: Array<{ id: string; name: string; roles?: string[]; status: string }> };
 
-        // 2. 选 PO agent
-        const poAgent = agents.find(a => a.roles?.includes('project_owner'))?.id
-          || agents.find(a => a.id === 'xiaok')?.id
+        // 2. 选 PO agent（优先 xiaok，其次 project_owner，最后第一个）
+        const poAgent = agents.find(a => a.id === 'xiaok')?.id
+          || agents.find(a => a.id === 'cli-xiaok')?.id
+          || agents.find(a => a.roles?.includes('project_owner'))?.id
           || agents[0]?.id;
         if (!poAgent) return JSON.stringify({ error: 'No agents available. Create an agent in kswarm first.' });
 
@@ -1870,13 +1871,14 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
           }),
         });
         if (!res.ok) return JSON.stringify({ error: `Failed to create project: ${res.status}` });
-        const project = await res.json();
+        const { project } = await res.json() as { project: { id: string; name: string; status: string; createdAt: number } };
 
         // 5. 返回 project_card 标记
         return JSON.stringify({
           type: 'project_card',
           projectId: project.id,
           name: project.name,
+          goal,
           status: project.status,
           createdAt: project.createdAt,
           memberCount: resolved.length,

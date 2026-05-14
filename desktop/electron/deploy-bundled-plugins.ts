@@ -6,11 +6,15 @@
  */
 
 import { app } from 'electron';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { existsSync, cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const execFileAsync = promisify(execFile);
 
