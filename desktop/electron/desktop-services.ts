@@ -1775,36 +1775,112 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
     permission: 'safe',
     definition: {
       name: 'create_project',
-      description: '创建一个多 agent 协作项目。当用户表达了需要多步骤协作完成的复杂任务时（如"帮我做个竞品分析"、"写一份报告"），调用此工具创建项目并由 AI 团队执行。',
+      description: '创建一个多智能体协作项目（KSwarm）。当用户明确要求创建项目、建项目时调用。用户可能同时指定智能体数量、名称和交付物要求。',
       inputSchema: {
         type: 'object',
         properties: {
           name: { type: 'string', description: '项目名称，简短明确' },
           goal: { type: 'string', description: '项目目标，描述最终要交付什么' },
-          requirements: { type: 'string', description: '补充要求或约束条件（可选）' },
+          requirements: { type: 'string', description: '补充要求或约束条件（交付物格式、参考资料等）' },
+          memberNames: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '用户明确指定的 agent 名称，如 ["claude", "codex"]',
+          },
+          memberCount: {
+            type: 'integer',
+            description: '用户期望的智能体总数（不含 PO），未指定则不填',
+          },
         },
         required: ['name', 'goal'],
       },
     },
     async execute(input) {
-      const { name, goal, requirements } = input as { name: string; goal: string; requirements?: string };
+      const { name, goal, requirements, memberNames = [], memberCount = 0 } = input as {
+        name: string; goal: string; requirements?: string;
+        memberNames?: string[]; memberCount?: number;
+      };
+
+      const KSWARM_API = 'http://127.0.0.1:4400';
+      const MAX_TOTAL_AGENTS = 10;
+
       try {
-        // Auto-pick a PO agent (required by kswarm API)
-        const agentsRes = await fetch('http://127.0.0.1:4400/agents');
+        // 1. 获取现有 agents
+        const agentsRes = await fetch(`${KSWARM_API}/agents`);
         if (!agentsRes.ok) return JSON.stringify({ error: 'Cannot fetch agents from kswarm' });
-        const { agents } = await agentsRes.json() as { agents: Array<{ id: string; roles?: string[] }> };
-        const poAgent = agents.find(a => a.roles?.includes('project_owner'))?.id || agents[0]?.id;
+        const { agents } = await agentsRes.json() as { agents: Array<{ id: string; name: string; roles?: string[]; status: string }> };
+
+        // 2. 选 PO agent
+        const poAgent = agents.find(a => a.roles?.includes('project_owner'))?.id
+          || agents.find(a => a.id === 'xiaok')?.id
+          || agents[0]?.id;
         if (!poAgent) return JSON.stringify({ error: 'No agents available. Create an agent in kswarm first.' });
 
-        const members = agents.filter(a => a.id !== poAgent).map(a => a.id);
-        const res = await fetch('http://127.0.0.1:4400/projects', {
+        // 3. 解析智能体需求
+        const available = agents.filter(a => a.id !== poAgent && a.status !== 'offline');
+        const resolved: Array<{ id: string }> = [];
+
+        // 3a. 匹配命名的 agent
+        for (const agentName of memberNames) {
+          const match = available.find(a => a.name === agentName || a.id === agentName);
+          if (match) resolved.push(match);
+        }
+
+        // 3b. 补足数量
+        if (memberCount > 0) {
+          const remaining = available.filter(a => !resolved.some(r => r.id === a.id));
+          const needed = Math.max(0, memberCount - resolved.length);
+          resolved.push(...remaining.slice(0, needed));
+
+          // 3c. 自动创建 agent（如果不够且未达上限，并发创建）
+          const stillNeeded = memberCount - resolved.length;
+          const canCreate = Math.min(stillNeeded, MAX_TOTAL_AGENTS - agents.length);
+          if (canCreate > 0) {
+            const createResults = await Promise.all(
+              Array.from({ length: canCreate }, (_, i) =>
+                fetch(`${KSWARM_API}/agents`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    name: `Worker-${agents.length + i + 1}`,
+                    roles: ['worker'],
+                    instructions: 'You are a KSwarm worker agent. Execute assigned tasks and submit results.',
+                  }),
+                }).then(r => r.ok ? r.json() : null).catch(() => null)
+              )
+            );
+            for (const newAgent of createResults) {
+              if (newAgent) resolved.push({ id: newAgent.id });
+            }
+          }
+        } else if (memberNames.length === 0) {
+          // 未指定：用所有可用的
+          resolved.push(...available);
+        }
+
+        // 4. 创建项目
+        const res = await fetch(`${KSWARM_API}/projects`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, goal, requirements, poAgent, members }),
+          body: JSON.stringify({
+            name, goal,
+            requirements: requirements || '',
+            poAgent,
+            members: resolved.map(a => a.id),
+          }),
         });
         if (!res.ok) return JSON.stringify({ error: `Failed to create project: ${res.status}` });
         const project = await res.json();
-        return JSON.stringify({ ok: true, projectId: project.id, name: project.name, status: project.status });
+
+        // 5. 返回 project_card 标记
+        return JSON.stringify({
+          type: 'project_card',
+          projectId: project.id,
+          name: project.name,
+          status: project.status,
+          createdAt: project.createdAt,
+          memberCount: resolved.length,
+        });
       } catch (err) {
         return JSON.stringify({ error: `KSwarm service unavailable: ${(err as Error).message}` });
       }
