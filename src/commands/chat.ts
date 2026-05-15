@@ -15,6 +15,7 @@ import { createIntentDelegationTools } from '../ai/tools/intent-delegation.js';
 import { executeStagedSkill, formatDebugOutput, type StageDef, type StageOutput, type DebugEvent, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
+import { createMemoryStoreAsync, type MemoryStore } from '../ai/memory/store.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
 import { createHooksRunner } from '../runtime/hooks-runner.js';
 import type { RuntimeEvent } from '../runtime/events.js';
@@ -210,6 +211,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   // 加载配置和凭据
   log.info('chat started', { initialInput: initialInput?.slice(0, 80) });
   let config = await loadConfig();
+  const memoryStore: MemoryStore = await createMemoryStoreAsync(
+    config.memory?.type === 'layered' ? config.memory : undefined,
+  );
 
   let adapter: ModelAdapter;
   try {
@@ -288,7 +292,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const toolExplorer = new ToolExplorer(formatToolActivity);
   const turnLayout = new TurnLayout();
   const skillTool = createSkillTool(skillCatalog, platform.capabilityRegistry);
-  const promptBuilder = new PromptBuilder();
+  const promptBuilder = new PromptBuilder({ memoryStore });
   let agent: Agent | undefined;
   let runtimeFacade: RuntimeFacade | undefined;
   let skillCatalogWatcher: SkillCatalogWatcher | undefined;
@@ -683,7 +687,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     },
   };
   log.info('agent created', { provider: config.defaultProvider, model: config.defaultModelId, skills: skills.length });
-  agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks: runtimeHooks });
+  agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks: runtimeHooks, memoryStore });
   agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
   agent.setPromptSnapshot(initialPromptSnapshot);
   runtimeFacade = new RuntimeFacade({
