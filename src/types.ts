@@ -118,6 +118,26 @@ export interface Config {
   channels?: {
     yzj?: YZJChannelConfig;
   };
+  memory?: {
+    type: 'file' | 'layered';
+    dbPath?: string;
+    embedding?: {
+      apiUrl?: string;
+      model?: string;
+      dimensions?: number;
+    };
+    llm?: {
+      apiUrl?: string;
+      model?: string;
+      apiKey?: string;
+    };
+    compaction?: {
+      l0MinMessages?: number;
+      autoCompact?: boolean;
+      compactIntervalMs?: number;
+      maxPromptTokens?: number;
+    };
+  };
 }
 
 const VALID_LEGACY_PROVIDERS = ['claude', 'openai', 'custom'] as const;
