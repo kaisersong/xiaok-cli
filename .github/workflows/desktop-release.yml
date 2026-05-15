@@ -63,6 +63,9 @@ jobs:
       - name: Build desktop
         run: cd desktop && npm run build
 
+      - name: Package macOS installer
+        run: cd desktop && npx electron-builder --config electron-builder.json --mac --arm64 --publish never
+
       - name: Upload to GitHub Release
         run: gh release upload "${{ github.ref_name }}" desktop/release/*.dmg desktop/release/*-mac.zip desktop/release/latest-mac.yml --clobber
         env:
