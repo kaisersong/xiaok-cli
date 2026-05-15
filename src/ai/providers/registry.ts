@@ -47,9 +47,13 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     defaultModel: {
       modelId: 'kimi-default',
       model: 'kimi-for-coding',
-      label: 'Kimi Default',
+      label: 'Kimi for Coding',
       capabilities: ['tools', 'thinking'],
     },
+    availableModels: [
+      { modelId: 'kimi-for-coding', model: 'kimi-for-coding', label: 'Kimi for Coding', capabilities: ['tools', 'thinking'] },
+      { modelId: 'kimi-k2', model: 'k2-0507-preview', label: 'Kimi K2', capabilities: ['tools', 'thinking'] },
+    ],
   },
   deepseek: {
     id: 'deepseek',
@@ -77,9 +81,13 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     defaultModel: {
       modelId: 'glm-default',
       model: 'glm-4.5',
-      label: 'GLM Default',
+      label: 'GLM 4.5',
       capabilities: ['tools'],
     },
+    availableModels: [
+      { modelId: 'glm-4.5', model: 'glm-4.5', label: 'GLM 4.5', capabilities: ['tools'] },
+      { modelId: 'glm-4-plus', model: 'glm-4-plus', label: 'GLM 4 Plus', capabilities: ['tools'] },
+    ],
   },
   minimax: {
     id: 'minimax',
@@ -90,9 +98,13 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     defaultModel: {
       modelId: 'minimax-default',
       model: 'MiniMax-Text-01',
-      label: 'MiniMax Default',
+      label: 'MiniMax Text 01',
       capabilities: ['tools'],
     },
+    availableModels: [
+      { modelId: 'minimax-text-01', model: 'MiniMax-Text-01', label: 'MiniMax Text 01', capabilities: ['tools'] },
+      { modelId: 'minimax-m1', model: 'MiniMax-M1', label: 'MiniMax M1', capabilities: ['tools'] },
+    ],
   },
   gemini: {
     id: 'gemini',
@@ -103,9 +115,13 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     defaultModel: {
       modelId: 'gemini-default',
       model: 'gemini-2.5-pro',
-      label: 'Gemini Default',
+      label: 'Gemini 2.5 Pro',
       capabilities: ['tools', 'thinking', 'image_in'],
     },
+    availableModels: [
+      { modelId: 'gemini-2.5-pro', model: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', capabilities: ['tools', 'thinking', 'image_in'] },
+      { modelId: 'gemini-2.5-flash', model: 'gemini-2.5-flash-preview-05-20', label: 'Gemini 2.5 Flash', capabilities: ['tools', 'thinking', 'image_in'] },
+    ],
   },
 };
 

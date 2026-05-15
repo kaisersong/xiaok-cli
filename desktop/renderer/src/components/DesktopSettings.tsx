@@ -28,6 +28,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { api } from '../api';
+import { LocalMemoryStats } from './LocalMemoryStats';
 import type { DesktopModelConfigSnapshot, DesktopSaveModelConfigInput, TestProviderConnectionResult } from '../../../electron/preload-api';
 import { useLocale } from '../contexts/LocaleContext';
 
@@ -171,7 +172,6 @@ function ModelPane() {
     api.getModelConfig()
       .then(c => {
         setConfig(c);
-        if (c?.providers?.[0]) setSelectedProvider(c.providers[0].id);
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
@@ -322,6 +322,12 @@ function ModelPane() {
                         {testing[provider.id] ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
                         测试连接
                       </button>
+                      <button
+                        onClick={() => { setSelectedProvider(prev => prev === provider.id ? '' : provider.id); setApiKey(''); }}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
+                      >
+                        <Edit3 size={12} /> {provider.apiKeyConfigured ? '更新 Key' : '设置 Key'}
+                      </button>
                       {testResult && (
                         <span className={`text-xs truncate max-w-[200px] ${testResult.success ? 'text-green-600' : 'text-red-500'}`}>
                           {testResult.success
@@ -338,6 +344,34 @@ function ModelPane() {
                         </button>
                       )}
                     </div>
+                    {/* Inline API Key input */}
+                    {selectedProvider === provider.id && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <div className="relative flex-1">
+                          <input
+                            type={showKey ? 'text' : 'password'}
+                            value={apiKey}
+                            onChange={e => setApiKey(e.target.value)}
+                            placeholder="sk-..."
+                            className={`${inputCls} pr-10 !py-1.5 text-xs`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowKey(!showKey)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)]"
+                          >
+                            {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                          </button>
+                        </div>
+                        <button
+                          onClick={handleSave}
+                          disabled={saving || !apiKey.trim()}
+                          className="shrink-0 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white hover:opacity-90 disabled:opacity-50"
+                        >
+                          {saving ? '...' : '保存'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
                 {/* Model list */}
@@ -420,28 +454,136 @@ function ModelPane() {
       )}
 
       <Section>
-        <SectionHeader icon={Zap}>设置 API Key</SectionHeader>
-        <Card>
-          <div className="flex flex-col gap-3">
+        <SectionHeader icon={Plus}>添加模型提供商</SectionHeader>
+        <AddProviderCard
+          config={config}
+          onAdded={(updated) => {
+            setConfig(updated);
+            setSuccess('提供商已添加');
+          }}
+          onError={setError}
+        />
+      </Section>
+    </>
+  );
+}
+
+// ---- Skills ----
+
+// ---- Add Provider Card ----
+
+function AddProviderCard({
+  config,
+  onAdded,
+  onError,
+}: {
+  config: DesktopModelConfigSnapshot | null;
+  onAdded: (updated: DesktopModelConfigSnapshot) => void;
+  onError: (msg: string) => void;
+}) {
+  const [selectedProfileId, setSelectedProfileId] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [providerApiKey, setProviderApiKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [customName, setCustomName] = useState('');
+
+  const profiles = config?.providerProfiles ?? [];
+  const configuredIds = new Set(config?.providers.map(p => p.id) ?? []);
+  const unconfiguredProfiles = profiles.filter(p => !configuredIds.has(p.id));
+
+  const selectedProfile = profiles.find(p => p.id === selectedProfileId);
+  const isCustom = selectedProfileId === '__custom__';
+
+  const handleProfileChange = (id: string) => {
+    setSelectedProfileId(id);
+    if (id === '__custom__') {
+      setBaseUrl('');
+    } else {
+      const profile = profiles.find(p => p.id === id);
+      setBaseUrl(profile?.baseUrl ?? '');
+    }
+    setProviderApiKey('');
+  };
+
+  const handleAdd = async () => {
+    if (!selectedProfileId) return;
+    if (isCustom && !customName.trim()) {
+      onError('请输入自定义提供商名称');
+      return;
+    }
+    if (isCustom && !baseUrl.trim()) {
+      onError('自定义提供商需要 Base URL');
+      return;
+    }
+    setSaving(true);
+    try {
+      const providerId = isCustom ? customName.trim().toLowerCase().replace(/\s+/g, '-') : selectedProfileId;
+      const updated = await api.saveModelConfig({
+        providerId,
+        apiKey: providerApiKey.trim() || undefined,
+        baseUrl: baseUrl.trim() || undefined,
+      });
+      onAdded(updated);
+      setSelectedProfileId('');
+      setBaseUrl('');
+      setProviderApiKey('');
+      setCustomName('');
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <div className="flex flex-col gap-3">
+        <div>
+          <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">选择提供商</label>
+          <select
+            value={selectedProfileId}
+            onChange={e => handleProfileChange(e.target.value)}
+            className={inputCls}
+          >
+            <option value="">— 选择提供商 —</option>
+            {unconfiguredProfiles.map(p => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
+            <option value="__custom__">自定义 (OpenAI 兼容)</option>
+          </select>
+        </div>
+
+        {isCustom && (
+          <div>
+            <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">提供商名称</label>
+            <input
+              value={customName}
+              onChange={e => setCustomName(e.target.value)}
+              placeholder="my-provider"
+              className={inputCls}
+            />
+          </div>
+        )}
+
+        {selectedProfileId && (
+          <>
             <div>
-              <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">选择提供商</label>
-              <select
-                value={selectedProvider}
-                onChange={e => setSelectedProvider(e.target.value)}
+              <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">Base URL</label>
+              <input
+                value={baseUrl}
+                onChange={e => setBaseUrl(e.target.value)}
+                placeholder="https://api.example.com/v1"
                 className={inputCls}
-              >
-                {config?.providers.map(p => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
+              />
             </div>
             <div>
               <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">API Key</label>
               <div className="relative">
                 <input
                   type={showKey ? 'text' : 'password'}
-                  value={apiKey}
-                  onChange={e => setApiKey(e.target.value)}
+                  value={providerApiKey}
+                  onChange={e => setProviderApiKey(e.target.value)}
                   placeholder="sk-..."
                   className={`${inputCls} pr-10`}
                 />
@@ -454,51 +596,46 @@ function ModelPane() {
                 </button>
               </div>
             </div>
-            <div className="flex gap-2">
+
+            {/* Available models preview */}
+            {selectedProfile?.availableModels && selectedProfile.availableModels.length > 0 && (
+              <div>
+                <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">可用模型</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedProfile.availableModels.map(m => (
+                    <span
+                      key={m.modelId}
+                      className="inline-flex items-center rounded-md bg-[var(--c-bg-deep)] px-2 py-1 text-xs text-[var(--c-text-secondary)]"
+                    >
+                      {m.label}
+                    </span>
+                  ))}
+                </div>
+                <span className="mt-1 block text-[11px] text-[var(--c-text-muted)]">添加后默认模型: {selectedProfile.defaultModelLabel}</span>
+              </div>
+            )}
+
+            {!isCustom && selectedProfile && (
+              <div className="text-[11px] text-[var(--c-text-muted)]">
+                协议: {selectedProfile.protocol}
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-1">
               <button
-                onClick={handleSave}
-                disabled={saving || !apiKey.trim()}
+                onClick={handleAdd}
+                disabled={saving}
                 className={btnPrimary}
               >
-                {saving ? '保存中...' : '保存'}
-              </button>
-              <button
-                onClick={handleTest}
-                disabled={testing[selectedProvider] || !selectedProvider}
-                className={btnSecondary}
-              >
-                {testing[selectedProvider] ? '测试中...' : '测试连接'}
+                {saving ? '添加中...' : '添加提供商'}
               </button>
             </div>
-          </div>
-        </Card>
-      </Section>
-
-      <Section>
-        <SectionHeader>添加自定义提供商</SectionHeader>
-        <Card>
-          <p className="text-xs text-[var(--c-text-secondary)] mb-3">
-            如需添加自定义 OpenAI 兼容 API，请编辑配置文件 ~/.xiaok/config.json
-          </p>
-          <code className="text-xs font-mono bg-[var(--c-bg-deep)] p-2 rounded block">
-{`{
-  "providers": {
-    "custom-provider": {
-      "type": "custom",
-      "protocol": "openai_legacy",
-      "baseUrl": "https://your-api.com/v1",
-      "apiKey": "your-key"
-    }
-  }
-}`}
-          </code>
-        </Card>
-      </Section>
-    </>
+          </>
+        )}
+      </div>
+    </Card>
   );
 }
-
-// ---- Skills ----
 
 function SkillsPane() {
   const [skills, setSkills] = useState<SkillItem[]>([]);
@@ -1330,209 +1467,11 @@ interface MemoryItem {
 }
 
 function MemoryPane() {
-  const [memories, setMemories] = useState<MemoryItem[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editContent, setEditContent] = useState('');
-  const [editTags, setEditTags] = useState('');
-  const [showAdd, setShowAdd] = useState(false);
-  const [newContent, setNewContent] = useState('');
-  const [newTags, setNewTags] = useState('');
-  const [showImport, setShowImport] = useState(false);
-  const [importText, setImportText] = useState('');
-  const [importResult, setImportResult] = useState<{ imported: number; deduped: number; parseErrors?: string[] } | null>(null);
-
-  const load = () => {
-    api.listMemories().then(setMemories);
-  };
-
-  useEffect(() => { load(); }, []);
-
-  const filtered = searchQuery.trim()
-    ? memories.filter(m =>
-        m.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        m.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()))
-      )
-    : memories;
-
-  const handleAdd = async () => {
-    if (!newContent.trim()) return;
-    await api.createMemory({ content: newContent.trim(), tags: newTags.split(',').map(t => t.trim()).filter(Boolean) });
-    setNewContent('');
-    setNewTags('');
-    setShowAdd(false);
-    load();
-  };
-
-  const handleDelete = async (id: string) => {
-    await api.deleteMemory(id);
-    load();
-  };
-
-  const handleUpdate = async (id: string) => {
-    await api.updateMemory({ id, content: editContent, tags: editTags.split(',').map(t => t.trim()).filter(Boolean) });
-    setEditingId(null);
-    load();
-  };
-
-  const startEdit = (m: MemoryItem) => {
-    setEditingId(m.id);
-    setEditContent(m.content);
-    setEditTags(m.tags.join(', '));
-  };
-
-  const handleImport = async () => {
-    if (!importText.trim()) return;
-    const result = await api.importMemories(importText);
-    setImportResult(result);
-    setImportText('');
-    load();
-  };
-
   return (
-    <>
-      <Section>
-        <SectionHeader icon={Brain}>记忆管理</SectionHeader>
-        <p className="text-xs text-[var(--c-text-secondary)] mb-4">
-          管理你的偏好、工作流和项目知识。新对话会自动加载相关记忆。
-        </p>
-
-        <div className="relative mb-4">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--c-text-tertiary)]" />
-          <input
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="搜索记忆..."
-            className={`${inputCls} pl-9`}
-          />
-        </div>
-
-        <div className="flex gap-2 mb-4">
-          <button
-            onClick={() => setShowAdd(!showAdd)}
-            className="inline-flex items-center gap-2 rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
-          >
-            <Plus size={16} />
-            手动添加
-          </button>
-          <button
-            onClick={() => setShowImport(!showImport)}
-            className="inline-flex items-center gap-2 rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
-          >
-            <Upload size={16} />
-            导入记忆
-          </button>
-        </div>
-
-        {showAdd && (
-          <Card className="mb-4">
-            <textarea
-              value={newContent}
-              onChange={e => setNewContent(e.target.value)}
-              placeholder="记忆内容..."
-              className={`${inputCls} mb-2 min-h-[60px] resize-y`}
-            />
-            <input
-              value={newTags}
-              onChange={e => setNewTags(e.target.value)}
-              placeholder="标签（逗号分隔）"
-              className={`${inputCls} mb-3`}
-            />
-            <div className="flex gap-2">
-              <button onClick={handleAdd} className={btnPrimary}>保存</button>
-              <button onClick={() => setShowAdd(false)} className={btnSecondary}>取消</button>
-            </div>
-          </Card>
-        )}
-
-        {showImport && (
-          <Card className="mb-4">
-            <p className="text-xs text-[var(--c-text-secondary)] mb-2">
-              粘贴任意格式内容，自动解析。支持 JSON 数组、JSON Lines、Markdown 列表、纯文本。可从 Claude Code memory、Cursor rules、其他 agent 导出导入。
-            </p>
-            <textarea
-              value={importText}
-              onChange={e => setImportText(e.target.value)}
-              placeholder={`示例：\n[\n  {"content": "用户偏好深色主题", "tags": ["preference"]}\n]\n\n或 Markdown 列表：\n- 用户偏好深色主题\n- 提交前跑测试`}
-              className={`${inputCls} mb-3 min-h-[120px] resize-y text-xs`}
-            />
-            <div className="flex gap-2 items-center flex-wrap">
-              <button onClick={handleImport} className={btnPrimary}>导入</button>
-              <button onClick={() => { setShowImport(false); setImportResult(null); }} className={btnSecondary}>取消</button>
-              {importResult && (
-                <div className="text-xs space-y-0.5">
-                  <span className="text-[var(--c-text-secondary)]">
-                    导入 {importResult.imported} 条，去重 {importResult.deduped} 条
-                  </span>
-                  {importResult.parseErrors?.length > 0 && (
-                    <div className="text-[var(--c-error)]">
-                      解析提示：{importResult.parseErrors.slice(0, 3).join('；')}
-                      {importResult.parseErrors.length > 3 && ` 等 ${importResult.parseErrors.length} 条`}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </Card>
-        )}
-
-        <div className="space-y-2">
-          {filtered.length === 0 && (
-            <p className="text-xs text-[var(--c-text-tertiary)] text-center py-8">
-              {searchQuery ? '未找到匹配记忆' : '暂无记忆'}
-            </p>
-          )}
-          {filtered.map(m => (
-            <Card key={m.id}>
-              {editingId === m.id ? (
-                <div>
-                  <textarea
-                    value={editContent}
-                    onChange={e => setEditContent(e.target.value)}
-                    className={`${inputCls} mb-2 min-h-[40px] resize-y`}
-                  />
-                  <input
-                    value={editTags}
-                    onChange={e => setEditTags(e.target.value)}
-                    placeholder="标签（逗号分隔）"
-                    className={`${inputCls} mb-3`}
-                  />
-                  <div className="flex gap-2">
-                    <button onClick={() => handleUpdate(m.id)} className={btnPrimary}>保存</button>
-                    <button onClick={() => setEditingId(null)} className={btnSecondary}>取消</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm">{m.content}</div>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {m.tags.map(t => (
-                        <span key={t} className="rounded-full bg-[var(--c-bg-deep)] px-2 py-0.5 text-[10px] text-[var(--c-text-secondary)]">
-                          {t}
-                        </span>
-                      ))}
-                      <span className="text-[10px] text-[var(--c-text-tertiary)] ml-1">
-                        {formatRelativeTime(m.createdAt)}
-                        {m.source && ` · ${m.source}`}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    <button onClick={() => startEdit(m)} className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)] transition-colors">
-                      <Edit3 size={13} />
-                    </button>
-                    <button onClick={() => handleDelete(m.id)} className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 transition-colors">
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </Card>
-          ))}
-        </div>
-      </Section>
-    </>
+    <Section>
+      <SectionHeader icon={Brain}>记忆管理</SectionHeader>
+      <LocalMemoryStats />
+    </Section>
   );
 }
 

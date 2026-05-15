@@ -79,6 +79,14 @@ export const PRELOAD_API_KEYS = [
   'updateMemory',
   'deleteMemory',
   'importMemories',
+  'memoryStats',
+  'memoryCompact',
+  'memoryPersonaTraits',
+  'memoryListLayer',
+  'memoryDeleteEntry',
+  'memoryClearAll',
+  'memoryGetModelId',
+  'memorySetModelId',
 ] as const;
 
 export interface DesktopModelProviderView {
@@ -108,6 +116,7 @@ export interface DesktopProviderProfileView {
   defaultModel: string;
   defaultModelLabel: string;
   capabilities?: string[];
+  availableModels?: { modelId: string; model: string; label: string; capabilities?: string[] }[];
 }
 
 export interface DesktopModelConfigSnapshot {
@@ -294,6 +303,14 @@ export interface DesktopApi {
   updateMemory(input: { id: string; content?: string; tags?: string[] }): Promise<unknown>;
   deleteMemory(id: string): Promise<void>;
   importMemories(raw: string): Promise<unknown>;
+  memoryStats(): Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>;
+  memoryCompact(): Promise<boolean>;
+  memoryPersonaTraits(): Promise<{ trait: string; confidence: number }[]>;
+  memoryListLayer(layer: number, limit?: number, offset?: number): Promise<{ id: string; content: string; tags?: string[]; createdAt: string; meta?: Record<string, unknown> }[]>;
+  memoryDeleteEntry(id: string, layer: number): Promise<boolean>;
+  memoryClearAll(): Promise<boolean>;
+  memoryGetModelId(): Promise<string | null>;
+  memorySetModelId(modelId: string | null): Promise<boolean>;
 }
 
 interface IpcRendererLike {
@@ -408,6 +425,14 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     updateMemory: (input) => ipcRenderer.invoke('desktop:updateMemory', input) as Promise<unknown>,
     deleteMemory: (id) => ipcRenderer.invoke('desktop:deleteMemory', id) as Promise<void>,
     importMemories: (items) => ipcRenderer.invoke('desktop:importMemories', items) as Promise<unknown>,
+    memoryStats: () => ipcRenderer.invoke('desktop:memoryStats') as Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>,
+    memoryCompact: () => ipcRenderer.invoke('desktop:memoryCompact') as Promise<boolean>,
+    memoryPersonaTraits: () => ipcRenderer.invoke('desktop:memoryPersonaTraits') as Promise<{ trait: string; confidence: number }[]>,
+    memoryListLayer: (layer: number, limit?: number, offset?: number) => ipcRenderer.invoke('desktop:memoryListLayer', layer, limit, offset) as Promise<{ id: string; content: string; tags?: string[]; createdAt: string; meta?: Record<string, unknown> }[]>,
+    memoryDeleteEntry: (id: string, layer: number) => ipcRenderer.invoke('desktop:memoryDeleteEntry', id, layer) as Promise<boolean>,
+    memoryClearAll: () => ipcRenderer.invoke('desktop:memoryClearAll') as Promise<boolean>,
+    memoryGetModelId: () => ipcRenderer.invoke('desktop:memoryGetModelId') as Promise<string | null>,
+    memorySetModelId: (modelId: string | null) => ipcRenderer.invoke('desktop:memorySetModelId', modelId) as Promise<boolean>,
   };
 }
 

@@ -252,6 +252,88 @@ describe('desktop services', () => {
     expect(snapshot.providers.find(p => p.id === 'anthropic')).toBeDefined(); // Falls back to anthropic
   });
 
+  it('provider profiles include availableModels for all first-party providers', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const snapshot = await services.getModelConfig();
+    const providers = ['openai', 'anthropic', 'kimi', 'deepseek', 'glm', 'minimax', 'gemini'];
+    for (const id of providers) {
+      const profile = snapshot.providerProfiles.find(p => p.id === id);
+      expect(profile, `profile for ${id} should exist`).toBeDefined();
+      expect(profile!.availableModels, `${id} should have availableModels`).toBeDefined();
+      expect(profile!.availableModels!.length, `${id} should have at least 1 model`).toBeGreaterThanOrEqual(1);
+      // Each model should have modelId, model, label
+      for (const m of profile!.availableModels!) {
+        expect(m.modelId).toBeTruthy();
+        expect(m.model).toBeTruthy();
+        expect(m.label).toBeTruthy();
+      }
+    }
+  });
+
+  it('provider profiles include baseUrl for all first-party providers', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const snapshot = await services.getModelConfig();
+    const expectedUrls: Record<string, string> = {
+      openai: 'https://api.openai.com/v1',
+      anthropic: 'https://api.anthropic.com',
+      kimi: 'https://api.kimi.com/coding/v1',
+      deepseek: 'https://api.deepseek.com/v1',
+      glm: 'https://open.bigmodel.cn/api/paas/v4',
+      minimax: 'https://api.minimax.chat/v1',
+      gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    };
+
+    for (const [id, expectedUrl] of Object.entries(expectedUrls)) {
+      const profile = snapshot.providerProfiles.find(p => p.id === id);
+      expect(profile, `profile for ${id}`).toBeDefined();
+      expect(profile!.baseUrl).toBe(expectedUrl);
+    }
+  });
+
+  it('adding a first-party provider sets default baseUrl from registry', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const snapshot = await services.saveModelConfig({
+      providerId: 'deepseek',
+      apiKey: 'sk-ds-test',
+    });
+
+    const dsProvider = snapshot.providers.find(p => p.id === 'deepseek');
+    expect(dsProvider).toBeDefined();
+    expect(dsProvider!.baseUrl).toBe('https://api.deepseek.com/v1');
+    expect(dsProvider!.protocol).toBe('openai_legacy');
+    expect(dsProvider!.apiKeyConfigured).toBe(true);
+  });
+
+  it('lists available models for all first-party providers with models', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      now: () => 300,
+    });
+
+    const providersWithModels = ['openai', 'anthropic', 'kimi', 'deepseek', 'glm', 'minimax', 'gemini'];
+    for (const id of providersWithModels) {
+      const models = await services.listAvailableModelsForProvider(id);
+      expect(models.length, `${id} should have available models`).toBeGreaterThanOrEqual(1);
+      for (const m of models) {
+        expect(m.modelId).toBeTruthy();
+        expect(m.model).toBeTruthy();
+        expect(m.label).toBeTruthy();
+      }
+    }
+  });
+
   // ===== Channel API Tests (shared config.json) =====
 
   it('returns empty channels when config has no channels', async () => {

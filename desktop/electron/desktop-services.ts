@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync } from 'node:fs';
 import { join, extname, basename, dirname } from 'node:path';
 import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
 import { homedir, platform, arch, type } from 'node:os';
@@ -29,6 +29,130 @@ import { createMcpRuntimeClient } from '../../src/ai/mcp/runtime/client.js';
 import { buildMcpRuntimeTools } from '../../src/ai/mcp/runtime/tools.js';
 import { loadPlugins } from '../../src/platform/plugins/loader.js';
 import { UserMemoryStore } from './user-memory.js';
+import { createNotebookTools } from '../../src/ai/tools/notebook.js';
+import type { MemoryStore } from '../../src/ai/memory/store.js';
+// NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
+// because they import better-sqlite3 which may not be compatible with the current Electron
+// version's native module ABI.
+let _LayeredMemoryStoreClass: (typeof import('../../src/ai/memory/layered-store.js'))['LayeredMemoryStore'] | null = null;
+let _resolveLayeredConfigFn: (typeof import('../../src/ai/memory/layered-store.js'))['resolveLayeredConfig'] | null = null;
+try {
+  const mod = await import('../../src/ai/memory/layered-store.js');
+  _LayeredMemoryStoreClass = mod.LayeredMemoryStore;
+  _resolveLayeredConfigFn = mod.resolveLayeredConfig;
+} catch (e) {
+  console.warn('[memory] Could not load layered-store module:', (e as Error).message);
+}
+
+// ---- Shared memory store (singleton per dataRoot) ----
+
+let _desktopMemoryStore: MemoryStore | null = null;
+let _desktopMemoryStoreDataRoot: string | null = null;
+
+/**
+ * Adapt UserMemoryStore (pure-JS, no native deps) to the MemoryStore interface.
+ * Used as fallback when better-sqlite3 cannot load in this Electron version.
+ */
+function createFallbackMemoryStore(dataRoot: string): MemoryStore {
+  const memoriesDir = join(dataRoot, 'memories');
+  mkdirSync(memoriesDir, { recursive: true });
+  const userStore = new UserMemoryStore(memoriesDir);
+
+  const store: MemoryStore = {
+    async save(record) {
+      userStore.create({
+        content: record.summary || record.title || '',
+        tags: record.tags || [],
+        source: record.scope || 'global',
+      });
+    },
+    async listRelevant({ query }) {
+      const results = query ? userStore.search(query) : userStore.list().slice(0, 20);
+      return results.map(m => ({
+        id: m.id,
+        scope: 'global' as const,
+        title: m.content.slice(0, 80),
+        summary: m.content,
+        tags: m.tags,
+        updatedAt: m.createdAt,
+        type: 'user' as const,
+      }));
+    },
+    async search(query, limit = 20) {
+      const results = query ? userStore.search(query) : userStore.list();
+      return results.slice(0, limit).map(m => ({
+        id: m.id,
+        scope: 'global' as const,
+        title: m.content.slice(0, 80),
+        summary: m.content,
+        tags: m.tags,
+        updatedAt: m.createdAt,
+        type: 'user' as const,
+      }));
+    },
+    async delete(id) {
+      return userStore.delete(id);
+    },
+    getStats() {
+      const list = userStore.list();
+      return { l0: 0, l1: list.length, l2: 0, l3: 0, dbSizeBytes: 0 };
+    },
+    clearAll() {
+      for (const m of userStore.list()) userStore.delete(m.id);
+    },
+  };
+  return store;
+}
+
+export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
+  if (_desktopMemoryStore && _desktopMemoryStoreDataRoot === dataRoot) {
+    return _desktopMemoryStore;
+  }
+
+  let store: MemoryStore;
+
+  try {
+    if (!_LayeredMemoryStoreClass || !_resolveLayeredConfigFn) {
+      throw new Error('layered-store module not available');
+    }
+    const dbPath = join(dataRoot, 'memory.db');
+    const config = _resolveLayeredConfigFn({ dbPath });
+    const layeredStore = new _LayeredMemoryStoreClass(config);
+
+    // Migrate from legacy user-memories.json if present
+    const legacyPath = join(dataRoot, 'memories', 'user-memories.json');
+    if (existsSync(legacyPath)) {
+      try {
+        const raw = readFileSync(legacyPath, 'utf-8');
+        const entries = JSON.parse(raw) as Array<{ id: string; content: string; tags: string[]; createdAt?: number }>;
+        if (Array.isArray(entries)) {
+          for (const entry of entries) {
+            layeredStore.save({
+              id: entry.id,
+              scope: 'global',
+              title: (entry.content || '').slice(0, 80),
+              summary: entry.content || '',
+              tags: entry.tags || [],
+              updatedAt: entry.createdAt || Date.now(),
+              type: 'user',
+            }).catch(() => {});
+          }
+        }
+        // Rename to .migrated to avoid re-import
+        renameSync(legacyPath, legacyPath + '.migrated');
+      } catch { /* migration is best-effort */ }
+    }
+
+    store = layeredStore;
+  } catch (err) {
+    console.warn('[memory] LayeredMemoryStore unavailable (native module issue), using fallback:', (err as Error).message);
+    store = createFallbackMemoryStore(dataRoot);
+  }
+
+  _desktopMemoryStore = store;
+  _desktopMemoryStoreDataRoot = dataRoot;
+  return store;
+}
 
 // ---- Skill stats types ----
 
@@ -166,6 +290,7 @@ export interface DesktopProviderProfileView {
   defaultModel: string;
   defaultModelLabel: string;
   capabilities?: string[];
+  availableModels?: { modelId: string; model: string; label: string; capabilities?: string[] }[];
 }
 
 export interface DesktopModelConfigSnapshot {
@@ -1054,6 +1179,9 @@ function createModelConfigSnapshot(config: Config): DesktopModelConfigSnapshot {
       defaultModel: profile.defaultModel.model,
       defaultModelLabel: profile.defaultModel.label,
       capabilities: profile.defaultModel.capabilities,
+      availableModels: profile.availableModels?.map(m => ({
+        modelId: m.modelId, model: m.model, label: m.label, capabilities: m.capabilities,
+      })),
     })),
   };
 }
@@ -1386,51 +1514,10 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
   };
   registry.registerTool(reportProgressTool);
 
-  // Register notebook (memory) tools so Agent can remember things for the user
-  const memoryDir = join(dataRoot, 'memories');
-  const memoryStore = new UserMemoryStore(memoryDir);
-
-  const notebookWriteTool: Tool = {
-    permission: 'safe',
-    definition: {
-      name: 'notebook_write',
-      description: '将重要信息写入用户的长期记忆笔记本。当用户说"记住"、"帮我记一下"、"以后记得"等表达时使用此工具。写入的内容会在后续所有对话中持久存在。',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          content: { type: 'string', description: '要记住的内容，简洁明确' },
-          tags: { type: 'array', items: { type: 'string' }, description: '可选标签，如 ["偏好", "个人信息"]' },
-        },
-        required: ['content'],
-      },
-    },
-    async execute(input) {
-      const content = String(input.content ?? '').trim();
-      if (!content) return 'Error: content 不能为空';
-      const tags = Array.isArray(input.tags) ? input.tags.map(String) : [];
-      const entry = memoryStore.create({ content, tags, source: 'agent' });
-      return `已记住: "${content}" (id: ${(entry as any).id})`;
-    },
-  };
-
-  const notebookReadTool: Tool = {
-    permission: 'safe',
-    definition: {
-      name: 'notebook_read',
-      description: '读取用户的长期记忆笔记本。当需要回忆之前记住的信息时使用。',
-      inputSchema: { type: 'object', properties: {} },
-    },
-    async execute() {
-      const entries = memoryStore.list();
-      if (!Array.isArray(entries) || entries.length === 0) return '笔记本为空，暂无记忆。';
-      return JSON.stringify(entries.slice(0, 50).map((e: any) => ({
-        id: e.id, content: e.content, tags: e.tags, createdAt: e.createdAt,
-      })), null, 2);
-    },
-  };
-
-  registry.registerTool(notebookWriteTool);
-  registry.registerTool(notebookReadTool);
+  // Register notebook (memory) tools — shared LayeredMemoryStore
+  for (const tool of createNotebookTools(getDesktopMemoryStore(dataRoot))) {
+    registry.registerTool(tool);
+  }
 
   return async ({ sessionId, prompt, materials, signal, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
@@ -1998,51 +2085,10 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
   };
   registry.registerTool(reportProgressTool);
 
-  // Register notebook (memory) tools so Agent can remember things for the user
-  const memoryDir = join(dataRoot, 'memories');
-  const memoryStore = new UserMemoryStore(memoryDir);
-
-  const notebookWriteTool: Tool = {
-    permission: 'safe',
-    definition: {
-      name: 'notebook_write',
-      description: '将重要信息写入用户的长期记忆笔记本。当用户说"记住"、"帮我记一下"、"以后记得"等表达时使用此工具。写入的内容会在后续所有对话中持久存在。',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          content: { type: 'string', description: '要记住的内容，简洁明确' },
-          tags: { type: 'array', items: { type: 'string' }, description: '可选标签，如 ["偏好", "个人信息"]' },
-        },
-        required: ['content'],
-      },
-    },
-    async execute(input) {
-      const content = String(input.content ?? '').trim();
-      if (!content) return 'Error: content 不能为空';
-      const tags = Array.isArray(input.tags) ? input.tags.map(String) : [];
-      const entry = memoryStore.create({ content, tags, source: 'agent' });
-      return `已记住: "${content}" (id: ${(entry as any).id})`;
-    },
-  };
-
-  const notebookReadTool: Tool = {
-    permission: 'safe',
-    definition: {
-      name: 'notebook_read',
-      description: '读取用户的长期记忆笔记本。当需要回忆之前记住的信息时使用。',
-      inputSchema: { type: 'object', properties: {} },
-    },
-    async execute() {
-      const entries = memoryStore.list();
-      if (!Array.isArray(entries) || entries.length === 0) return '笔记本为空，暂无记忆。';
-      return JSON.stringify(entries.slice(0, 50).map((e: any) => ({
-        id: e.id, content: e.content, tags: e.tags, createdAt: e.createdAt,
-      })), null, 2);
-    },
-  };
-
-  registry.registerTool(notebookWriteTool);
-  registry.registerTool(notebookReadTool);
+  // Register notebook (memory) tools — shared LayeredMemoryStore
+  for (const tool of createNotebookTools(getDesktopMemoryStore(dataRoot))) {
+    registry.registerTool(tool);
+  }
 
   return async ({ sessionId, prompt, materials, signal, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
