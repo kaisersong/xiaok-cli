@@ -12,6 +12,7 @@ import { toLegacyStreamChunk } from './runtime/events.js';
 import { AgentRuntime } from './runtime/agent-runtime.js';
 import { AgentSessionState, type AgentSessionSnapshot, type CompactionRecord } from './runtime/session.js';
 import type { PromptSnapshot } from './prompts/types.js';
+import type { MemoryStore } from './memory/store.js';
 
 export type OnChunk = (chunk: StreamChunk) => void;
 
@@ -23,6 +24,7 @@ export interface AgentOptions {
   compactThreshold?: number;
   compactPlaceholder?: string;
   hooks?: RuntimeHookSink;
+  memoryStore?: MemoryStore;
 }
 
 export class Agent {
@@ -112,6 +114,7 @@ export class Agent {
       contextLimit: this.options.contextLimit,
       compactThreshold: this.options.compactThreshold,
       compactPlaceholder: this.options.compactPlaceholder,
+      memoryStore: this.options.memoryStore,
     });
   }
 

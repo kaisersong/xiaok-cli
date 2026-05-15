@@ -16,7 +16,15 @@ export interface MemoryRecord {
   type?: MemoryType;
 }
 
-export class FileMemoryStore {
+export interface MemoryStore {
+  save(record: MemoryRecord): Promise<void>;
+  listRelevant(input: { cwd: string; query: string; typeFilter?: MemoryType }): Promise<MemoryRecord[]>;
+  search?(query: string, limit?: number): Promise<MemoryRecord[]>;
+  writeRawMessage?(sessionId: string, role: string, content: string): Promise<void>;
+  close?(): void;
+}
+
+export class FileMemoryStore implements MemoryStore {
   constructor(private readonly rootDir = join(getConfigDir(), 'memory')) {}
 
   async save(record: MemoryRecord): Promise<void> {
@@ -51,4 +59,13 @@ export class FileMemoryStore {
         return rightMatches - leftMatches || right.updatedAt - left.updatedAt;
       });
   }
+}
+
+export async function createMemoryStoreAsync(config?: unknown): Promise<MemoryStore> {
+  if (config) {
+    const { LayeredMemoryStore, resolveLayeredConfig } = await import('./layered-store.js');
+    const resolved = resolveLayeredConfig(config as Record<string, unknown>);
+    return new LayeredMemoryStore(resolved);
+  }
+  return new FileMemoryStore();
 }

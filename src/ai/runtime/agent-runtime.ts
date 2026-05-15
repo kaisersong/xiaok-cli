@@ -13,7 +13,7 @@ import {
 import { AgentSessionState } from './session.js';
 import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
 import { CompactRunner } from './compact-runner.js';
-import type { FileMemoryStore } from '../memory/store.js';
+import type { MemoryStore } from '../memory/store.js';
 
 export interface AgentRuntimeOptions {
   adapter: ModelAdapter;
@@ -26,7 +26,7 @@ export interface AgentRuntimeOptions {
   contextLimit?: number;
   compactThreshold?: number;
   compactPlaceholder?: string;
-  memoryStore?: FileMemoryStore;
+  memoryStore?: MemoryStore;
 }
 
 export class AgentRuntime {
@@ -44,7 +44,7 @@ export class AgentRuntime {
   private supportsPromptCaching: boolean;
   private promptSnapshot?: PromptSnapshot;
   private compactRunner: CompactRunner;
-  private readonly memoryStore?: FileMemoryStore;
+  private readonly memoryStore?: MemoryStore;
 
   // 空响应自动重试配置
   private static readonly MAX_EMPTY_RETRIES = 2;

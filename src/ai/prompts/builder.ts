@@ -1,4 +1,4 @@
-import { FileMemoryStore } from '../memory/store.js';
+import { FileMemoryStore, type MemoryStore } from '../memory/store.js';
 import { assembleSystemPrompt, type AssemblerOptions } from './assembler.js';
 import type { PromptSnapshot } from './types.js';
 
@@ -7,14 +7,13 @@ export interface PromptBuilderInput extends AssemblerOptions {
 }
 
 export class PromptBuilder {
-  constructor(private readonly deps: { memoryStore?: FileMemoryStore } = {}) {}
+  constructor(private readonly deps: { memoryStore?: MemoryStore } = {}) {}
 
   async build(input: PromptBuilderInput): Promise<PromptSnapshot> {
-    const memoryStore = this.deps.memoryStore ?? new FileMemoryStore();
-    const memories = await memoryStore.listRelevant({
-      cwd: input.cwd,
-      query: input.cwd,
-    });
+    const memoryStore: MemoryStore = this.deps.memoryStore ?? new FileMemoryStore();
+    const memories = memoryStore.search
+      ? await memoryStore.search(input.cwd, 10)
+      : await memoryStore.listRelevant({ cwd: input.cwd, query: input.cwd });
 
     // Inject memories into assembler options for per-turn memory injection
     const assemblerOpts: AssemblerOptions = {
