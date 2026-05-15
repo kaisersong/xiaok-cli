@@ -89,6 +89,11 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
       ipcRenderer.off(channel, listener);
     };
   },
+  listMemories: () => ipcRenderer.invoke('desktop:listMemories'),
+  createMemory: (input) => ipcRenderer.invoke('desktop:createMemory', input),
+  updateMemory: (input) => ipcRenderer.invoke('desktop:updateMemory', input),
+  deleteMemory: (id) => ipcRenderer.invoke('desktop:deleteMemory', id),
+  importMemories: (items) => ipcRenderer.invoke('desktop:importMemories', items),
   syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks),
   onScheduledTaskDue(handler) {
     const channel = 'desktop:scheduledTaskDue';

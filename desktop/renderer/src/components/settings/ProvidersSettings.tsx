@@ -38,6 +38,10 @@ const VENDOR_PRESETS = [
   { key: 'openai_chat_completions', provider: 'openai', openai_api_mode: 'chat_completions' },
   { key: 'anthropic_message', provider: 'anthropic', openai_api_mode: undefined },
   { key: 'gemini', provider: 'gemini', openai_api_mode: undefined },
+  { key: 'kimi', provider: 'kimi', openai_api_mode: 'chat_completions' },
+  { key: 'deepseek', provider: 'deepseek', openai_api_mode: 'chat_completions' },
+  { key: 'glm', provider: 'glm', openai_api_mode: 'chat_completions' },
+  { key: 'minimax', provider: 'minimax', openai_api_mode: 'chat_completions' },
 ] as const
 
 type VendorPresetKey = (typeof VENDOR_PRESETS)[number]['key']
@@ -48,13 +52,17 @@ type OpenVikingBackendKey = 'openai' | 'azure' | 'volcengine' | 'openai_compatib
 
 function vendorLabel(
   key: string,
-  p: { vendorOpenai: string; vendorOpenaiChat: string; vendorAnthropic: string; vendorGemini: string },
+  p: { vendorOpenai: string; vendorOpenaiChat: string; vendorAnthropic: string; vendorGemini: string; vendorKimi: string; vendorDeepseek: string; vendorGlm: string; vendorMinimax: string },
 ): string {
   const map: Record<string, string> = {
     openai_responses: p.vendorOpenai,
     openai_chat_completions: p.vendorOpenaiChat,
     anthropic_message: p.vendorAnthropic,
     gemini: p.vendorGemini,
+    kimi: p.vendorKimi,
+    deepseek: p.vendorDeepseek,
+    glm: p.vendorGlm,
+    minimax: p.vendorMinimax,
   }
   return map[key] ?? key
 }
@@ -62,12 +70,16 @@ function vendorLabel(
 function toVendorKey(provider: string, mode: string | null): VendorPresetKey {
   if (provider === 'anthropic') return 'anthropic_message'
   if (provider === 'gemini') return 'gemini'
+  if (provider === 'kimi') return 'kimi'
+  if (provider === 'deepseek') return 'deepseek'
+  if (provider === 'glm') return 'glm'
+  if (provider === 'minimax') return 'minimax'
   if (mode === 'chat_completions') return 'openai_chat_completions'
   return 'openai_responses'
 }
 
 function defaultOpenVikingBackendForVendor(provider: string): OpenVikingBackendKey {
-  if (provider === 'anthropic' || provider === 'gemini') return 'openai_compatible'
+  if (provider === 'anthropic' || provider === 'gemini' || provider === 'kimi' || provider === 'deepseek' || provider === 'glm' || provider === 'minimax') return 'openai_compatible'
   return 'openai'
 }
 

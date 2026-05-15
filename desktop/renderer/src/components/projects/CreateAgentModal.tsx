@@ -156,15 +156,21 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
       ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/12 backdrop-blur-[2px]" onClick={handleClose} />
-      <div className="relative w-full max-w-lg max-h-[80vh] overflow-y-auto rounded-2xl border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-page)] p-6 shadow-xl">
+    <div
+      className="overlay-fade-in fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'var(--c-overlay)' }}
+      onClick={e => { if (e.target === e.currentTarget) handleClose(); }}
+    >
+      <div
+        className="modal-enter flex w-full max-w-lg flex-col rounded-[14px] p-6"
+        style={{ background: 'var(--c-bg-card)', border: '0.5px solid var(--c-border-subtle)', maxHeight: '80vh', margin: '0 20px', overflowY: 'auto' }}
+      >
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-[14px] font-semibold text-[var(--c-text-heading)]">
+          <h2 className="text-[15px] font-semibold text-[var(--c-text-heading)]">
             {step === 1 ? t.projectsAgentTypeTitle : '配置智能体'}
           </h2>
-          <button type="button" onClick={handleClose} className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]">
-            <X size={16} />
+          <button type="button" onClick={handleClose} className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]">
+            <X size={14} />
           </button>
         </div>
 
@@ -175,10 +181,10 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
               const selected = agentType === type.id;
               return (
                 <button key={type.id} type="button" onClick={() => setAgentType(type.id)}
-                  className={`flex items-center gap-3 rounded-xl p-4 text-left transition-colors border-[0.5px] ${
-                    selected ? 'border-[var(--c-btn-bg)] bg-[var(--c-btn-bg)]/10' : 'border-[var(--c-border-subtle)] hover:bg-[var(--c-bg-deep)]'
+                  className={`flex items-center gap-3 rounded-xl p-4 text-left transition-colors border ${
+                    selected ? 'border-[var(--c-btn-bg)] bg-[var(--c-btn-bg)]/10' : 'border-[var(--c-border-subtle)] hover:bg-[var(--c-bg-sub)]'
                   }`}>
-                  <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${selected ? 'bg-[var(--c-btn-bg)]' : 'bg-[var(--c-bg-deep)]'}`}>
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${selected ? 'bg-[var(--c-btn-bg)]' : 'bg-[var(--c-bg-sub)]'}`}>
                     <Icon size={18} className={selected ? 'text-[var(--c-btn-text)]' : 'text-[var(--c-text-secondary)]'} />
                   </div>
                   <div>
@@ -189,27 +195,27 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
               );
             })}
             <div className="mt-3 flex justify-end">
-              <button type="button" onClick={() => setStep(2)} className="rounded-lg bg-[var(--c-btn-bg)] px-4 py-1.5 text-sm font-medium text-[var(--c-btn-text)] hover:brightness-[1.12]">下一步</button>
+              <button type="button" onClick={() => setStep(2)} className="rounded-lg bg-[var(--c-btn-bg)] px-4 py-2 text-sm font-medium text-[var(--c-btn-text)] transition-colors duration-150 hover:brightness-[1.08]">下一步</button>
             </div>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{t.projectsAgentName}</label>
+              <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsAgentName}</label>
               <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例：研究员、编码专家"
-                className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-placeholder)] outline-none focus:border-[var(--c-input-border-color-focus)]"
+                className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]"
                 autoFocus />
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">本机智能体平台</label>
+              <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">本机智能体平台</label>
               <div className="flex flex-wrap gap-1.5">
                 {runtimeOptions.map(rt => (
                   <button key={rt.type} type="button" onClick={() => { setRuntimeType(rt.type); setProvider(''); setModel(''); }}
-                    className={`rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
+                    className={`rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors duration-150 ${
                       runtimeType === rt.type
                         ? 'bg-[var(--c-btn-bg)] text-[var(--c-btn-text)]'
-                        : 'bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] hover:text-[var(--c-text-primary)]'
+                        : 'bg-[var(--c-bg-sub)] text-[var(--c-text-secondary)] hover:text-[var(--c-text-primary)]'
                     }`}>
                     {rt.displayName}
                     {rt.type === 'xiaok' && <span className="ml-1 text-[10px] opacity-70">推荐</span>}
@@ -220,9 +226,9 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="agent-provider" className="text-[11px] font-medium text-[var(--c-text-tertiary)]">LLM 提供商</label>
+              <label htmlFor="agent-provider" className="text-[12px] font-medium text-[var(--c-text-secondary)]">LLM 提供商</label>
               <select id="agent-provider" data-testid="provider-select" value={provider} onChange={e => { setProvider(e.target.value); setModel(''); if (!e.target.value) { setBaseUrl(''); setApiKey(''); } }}
-                className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none focus:border-[var(--c-input-border-color-focus)]">
+                className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]">
                 {providerOptions.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
               </select>
               <p className="text-[10px] text-[var(--c-text-muted)]">
@@ -233,53 +239,53 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
             {provider && (
               <>
                 <div className="flex flex-col gap-1.5">
-                  <label htmlFor="agent-model" className="text-[11px] font-medium text-[var(--c-text-tertiary)]">模型</label>
+                  <label htmlFor="agent-model" className="text-[12px] font-medium text-[var(--c-text-secondary)]">模型</label>
                   {isXiaok && desktopModels.length > 0 ? (
                     <select id="agent-model" data-testid="model-select" value={model} onChange={e => setModel(e.target.value)}
-                      className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none focus:border-[var(--c-input-border-color-focus)]">
+                      className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]">
                       <option value="">选择模型</option>
                       {desktopModels.map(m => <option key={m.modelId} value={m.model}>{m.label}</option>)}
                     </select>
                   ) : kswarmModels.length > 0 ? (
                     <select id="agent-model" data-testid="model-select" value={model} onChange={e => setModel(e.target.value)}
-                      className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none focus:border-[var(--c-input-border-color-focus)]">
+                      className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]">
                       <option value="">选择模型</option>
                       {kswarmModels.map(m => <option key={m.id} value={m.id}>{m.label}{m.default ? ' (默认)' : ''}</option>)}
                     </select>
                   ) : (
                     <input id="agent-model" data-testid="model-input" type="text" value={model} onChange={e => setModel(e.target.value)}
                       placeholder={provider === 'anthropic' ? 'claude-sonnet-4-20250514' : provider === 'openai' ? 'gpt-4o' : 'llama3'}
-                      className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-placeholder)] outline-none focus:border-[var(--c-input-border-color-focus)]" />
+                      className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]" />
                   )}
                 </div>
                 {!isXiaok && (provider === 'openai' || provider === 'ollama') && (
                   <div className="flex flex-col gap-1.5">
-                    <label htmlFor="agent-baseurl" className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{t.commonBaseUrl}</label>
+                    <label htmlFor="agent-baseurl" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.commonBaseUrl}</label>
                     <input id="agent-baseurl" data-testid="baseurl-input" type="text" value={baseUrl} onChange={e => setBaseUrl(e.target.value)}
                       placeholder={provider === 'ollama' ? 'http://localhost:11434' : 'https://api.openai.com/v1'}
-                      className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-placeholder)] outline-none focus:border-[var(--c-input-border-color-focus)]" />
+                      className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]" />
                   </div>
                 )}
                 {!isXiaok && provider !== 'ollama' && (
                   <div className="flex flex-col gap-1.5">
-                    <label htmlFor="agent-apikey" className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{t.commonApiKey}</label>
+                    <label htmlFor="agent-apikey" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.commonApiKey}</label>
                     <input id="agent-apikey" data-testid="apikey-input" type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-..."
-                      className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-placeholder)] outline-none focus:border-[var(--c-input-border-color-focus)]" />
+                      className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]" />
                   </div>
                 )}
               </>
             )}
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">指令 <span className="text-[var(--c-text-muted)]">(可选)</span></label>
+              <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">指令 <span className="text-[var(--c-text-muted)]">(可选)</span></label>
               <textarea value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="系统提示词或行为指令..." rows={2}
-                className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-placeholder)] outline-none focus:border-[var(--c-input-border-color-focus)] resize-none" />
+                className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)] resize-none" />
             </div>
 
-            <div className="mt-2 flex justify-between">
-              <button type="button" onClick={() => setStep(1)} className="rounded-lg px-4 py-1.5 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">返回</button>
+            <div className="mt-3 flex justify-between">
+              <button type="button" onClick={() => setStep(1)} className="rounded-lg bg-[var(--c-bg-page)] px-4 py-2 text-sm font-medium text-[var(--c-text-secondary)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)]">返回</button>
               <button type="button" onClick={handleCreate} disabled={!name.trim() || loading}
-                className="rounded-lg bg-[var(--c-btn-bg)] px-4 py-1.5 text-sm font-medium text-[var(--c-btn-text)] hover:brightness-[1.12] disabled:opacity-50">
+                className="rounded-lg bg-[var(--c-btn-bg)] px-4 py-2 text-sm font-medium text-[var(--c-btn-text)] transition-colors duration-150 hover:brightness-[1.08] disabled:opacity-50 disabled:pointer-events-none">
                 {loading ? t.projectsAgentCreating : t.projectsAgentCreate}
               </button>
             </div>

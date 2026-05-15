@@ -26,21 +26,36 @@ const PROVIDER_PRESETS = [
   { key: 'openai_responses', provider: 'openai', openai_api_mode: 'responses' },
   { key: 'openai_chat_completions', provider: 'openai', openai_api_mode: 'chat_completions' },
   { key: 'anthropic_message', provider: 'anthropic', openai_api_mode: undefined },
+  { key: 'gemini', provider: 'gemini', openai_api_mode: 'responses' },
+  { key: 'kimi', provider: 'kimi', openai_api_mode: 'chat_completions' },
+  { key: 'deepseek', provider: 'deepseek', openai_api_mode: 'chat_completions' },
+  { key: 'glm', provider: 'glm', openai_api_mode: 'chat_completions' },
+  { key: 'minimax', provider: 'minimax', openai_api_mode: 'chat_completions' },
 ] as const
 
 type ProviderPresetKey = typeof PROVIDER_PRESETS[number]['key']
 
-function presetLabel(key: string, m: { vendorOpenaiResponses: string; vendorOpenaiChatCompletions: string; vendorAnthropicMessage: string }): string {
+function presetLabel(key: string, m: { vendorOpenaiResponses: string; vendorOpenaiChatCompletions: string; vendorAnthropicMessage: string; vendorGemini: string; vendorKimi: string; vendorDeepseek: string; vendorGlm: string; vendorMinimax: string }): string {
   const map: Record<string, string> = {
     openai_responses: m.vendorOpenaiResponses,
     openai_chat_completions: m.vendorOpenaiChatCompletions,
     anthropic_message: m.vendorAnthropicMessage,
+    gemini: m.vendorGemini,
+    kimi: m.vendorKimi,
+    deepseek: m.vendorDeepseek,
+    glm: m.vendorGlm,
+    minimax: m.vendorMinimax,
   }
   return map[key] ?? key
 }
 
 function toPresetKey(provider: string, mode: string | null): ProviderPresetKey {
   if (provider === 'anthropic') return 'anthropic_message'
+  if (provider === 'gemini') return 'gemini'
+  if (provider === 'kimi') return 'kimi'
+  if (provider === 'deepseek') return 'deepseek'
+  if (provider === 'glm') return 'glm'
+  if (provider === 'minimax') return 'minimax'
   if (mode === 'chat_completions') return 'openai_chat_completions'
   return 'openai_responses'
 }

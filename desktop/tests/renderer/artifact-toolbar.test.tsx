@@ -30,7 +30,7 @@ describe('ArtifactToolbar', () => {
     const { container } = renderToolbar('preview');
     const buttons = container.querySelectorAll('button');
     expect(buttons.length).toBe(1);
-    expect(buttons[0].textContent).toContain('标注');
+    expect(buttons[0].textContent).toContain('修订');
   });
 
   it('annotating state: annotate button has active class', () => {
@@ -43,7 +43,7 @@ describe('ArtifactToolbar', () => {
     const { container } = renderToolbar('reviewing');
     const buttons = container.querySelectorAll('button');
     expect(buttons.length).toBe(3);
-    expect(buttons[0].textContent).toContain('标注');
+    expect(buttons[0].textContent).toContain('修订');
     expect(buttons[1].textContent).toContain('撤回');
     expect(buttons[2].textContent).toContain('完成');
   });

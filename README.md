@@ -20,6 +20,15 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.2.0:**
+
+- **KSwarm Swarm-Style Projects**: Create multi-agent collaborative projects from chat — Agent auto-selects PO + members, distributes tasks, and delivers as a team
+- **Long-Term Memory**: Agent remembers user preferences, names, and habits across sessions via `notebook_write`/`notebook_read` tools
+- **Memory Management UI**: View, add, and delete persistent memories from the Settings panel
+- **Agent Settings Panel**: Configure agent persona, spawn profiles, and LLM provider bindings per agent
+- **Model Config Enhancements**: Improved provider settings with protocol selection and advanced JSON config support
+- **Smarter Task Delivery**: Progress reporting with step-by-step TaskPanel, agent autonomously plans and tracks multi-step work
+
 **What's New in v1.1.0:**
 
 - **Artifact Canvas Editing**: Click "修订" on HTML previews to annotate elements, send edit instructions to Agent with full DOM context
@@ -220,9 +229,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-1.0.0-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.0.0-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-1.0.0-setup.exe** — Windows installer (x64)
+- **xiaok-1.2.0-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.2.0-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-1.2.0-setup.exe** — Windows installer (x64)
 
 ### Features
 
@@ -481,6 +490,8 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.2.0** — KSwarm swarm-style multi-agent project delivery from chat, persistent long-term memory with notebook_write/notebook_read tools and Settings UI management, agent settings panel for persona/spawn/provider configuration, model config enhancements with protocol selection and advanced JSON, progress reporting TaskPanel for multi-step autonomous work tracking.
 
 **v1.0.0** — First major release: full i18n (Chinese/English) across all desktop UI with runtime locale switching, KSwarm multi-agent orchestration with status monitoring, project management with Kanban board and agent assignment, scheduled tasks with cron expressions, MCP plugin system with install/uninstall/enable/disable, desktop app v1.0.0 with all features integrated.
 

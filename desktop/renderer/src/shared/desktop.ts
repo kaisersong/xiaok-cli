@@ -86,11 +86,43 @@ export function getDesktopApi(): Record<string, unknown> | null {
     },
   }
 
+  const memory = {
+    async list() {
+      const items = await raw.listMemories() as any[]
+      const entries = (items ?? []).map((e: any) => ({
+        id: e.id,
+        content: e.content,
+        category: e.tags?.[0] || '',
+        key: e.id,
+        createdAt: typeof e.createdAt === 'number' ? new Date(e.createdAt).toISOString() : e.createdAt || '',
+        tags: e.tags || [],
+      }))
+      return { entries }
+    },
+    async add(content: string, category?: string) {
+      const tags = category ? [category] : []
+      return raw.createMemory({ content, tags })
+    },
+    async delete(id: string) {
+      return raw.deleteMemory(id)
+    },
+  }
+
   _cachedApi = {
     ...raw,
     appUpdater,
+    memory,
   }
   return _cachedApi
+}
+
+export interface MemoryEntry {
+  id: string;
+  content: string;
+  category: string;
+  key: string;
+  createdAt: string;
+  tags?: string[];
 }
 
 export type DesktopSettingsKey = 'general' | 'appearance' | 'providers' | 'agents' | 'channels' | 'tools' | 'skills' | 'memory' | 'security' | 'advanced' | 'about';

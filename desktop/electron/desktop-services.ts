@@ -28,6 +28,7 @@ import { startMcpServerProcess, createStdioMcpTransport } from '../../src/ai/mcp
 import { createMcpRuntimeClient } from '../../src/ai/mcp/runtime/client.js';
 import { buildMcpRuntimeTools } from '../../src/ai/mcp/runtime/tools.js';
 import { loadPlugins } from '../../src/platform/plugins/loader.js';
+import { UserMemoryStore } from './user-memory.js';
 
 // ---- Skill stats types ----
 
@@ -1174,6 +1175,8 @@ function buildSystemPrompt(): string {
 - skill_uninstall: 卸载一个技能（当用户说"卸载XX技能"时使用）
 - skill_list: 列出已安装的技能
 - report_progress: 向用户报告任务执行计划和进度
+- notebook_write: 将重要信息写入长期记忆（用户说"记住"、"帮我记一下"时使用）
+- notebook_read: 读取长期记忆笔记本
 
 ## 定时提醒功能
 
@@ -1206,6 +1209,12 @@ xiaok 支持从 ClawHub 安装技能。当用户说"安装XX技能"时：
 
 示例：
 - "帮我安装 kai-slide-creator 技能" → skill_install(skill_name="kai-slide-creator")
+
+## 长期记忆
+
+当用户要求你"记住"某些信息（如姓名、偏好、习惯、常用配置等），使用 notebook_write 工具写入笔记本。这些信息会跨对话持久保存。
+- "记住我叫张三" → notebook_write(content="用户名字：张三", tags=["个人信息"])
+- "以后代码都用 TypeScript" → notebook_write(content="用户偏好：代码使用 TypeScript", tags=["偏好"])
 
 ## 关于用户上传的附件
 
@@ -1287,6 +1296,8 @@ function toolNameToLabel(name: string, input?: Record<string, unknown>): string 
     case 'reminder_create': return '创建提醒';
     case 'reminder_list': return '查看提醒';
     case 'channel_send': return '发送消息';
+    case 'notebook_write': return '写入记忆';
+    case 'notebook_read': return '读取记忆';
     default: return name.replace(/_/g, ' ');
   }
 }
@@ -1374,6 +1385,52 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
     },
   };
   registry.registerTool(reportProgressTool);
+
+  // Register notebook (memory) tools so Agent can remember things for the user
+  const memoryDir = join(dataRoot, 'memories');
+  const memoryStore = new UserMemoryStore(memoryDir);
+
+  const notebookWriteTool: Tool = {
+    permission: 'safe',
+    definition: {
+      name: 'notebook_write',
+      description: '将重要信息写入用户的长期记忆笔记本。当用户说"记住"、"帮我记一下"、"以后记得"等表达时使用此工具。写入的内容会在后续所有对话中持久存在。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: '要记住的内容，简洁明确' },
+          tags: { type: 'array', items: { type: 'string' }, description: '可选标签，如 ["偏好", "个人信息"]' },
+        },
+        required: ['content'],
+      },
+    },
+    async execute(input) {
+      const content = String(input.content ?? '').trim();
+      if (!content) return 'Error: content 不能为空';
+      const tags = Array.isArray(input.tags) ? input.tags.map(String) : [];
+      const entry = memoryStore.create({ content, tags, source: 'agent' });
+      return `已记住: "${content}" (id: ${(entry as any).id})`;
+    },
+  };
+
+  const notebookReadTool: Tool = {
+    permission: 'safe',
+    definition: {
+      name: 'notebook_read',
+      description: '读取用户的长期记忆笔记本。当需要回忆之前记住的信息时使用。',
+      inputSchema: { type: 'object', properties: {} },
+    },
+    async execute() {
+      const entries = memoryStore.list();
+      if (!Array.isArray(entries) || entries.length === 0) return '笔记本为空，暂无记忆。';
+      return JSON.stringify(entries.slice(0, 50).map((e: any) => ({
+        id: e.id, content: e.content, tags: e.tags, createdAt: e.createdAt,
+      })), null, 2);
+    },
+  };
+
+  registry.registerTool(notebookWriteTool);
+  registry.registerTool(notebookReadTool);
 
   return async ({ sessionId, prompt, materials, signal, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
@@ -1940,6 +1997,52 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
     },
   };
   registry.registerTool(reportProgressTool);
+
+  // Register notebook (memory) tools so Agent can remember things for the user
+  const memoryDir = join(dataRoot, 'memories');
+  const memoryStore = new UserMemoryStore(memoryDir);
+
+  const notebookWriteTool: Tool = {
+    permission: 'safe',
+    definition: {
+      name: 'notebook_write',
+      description: '将重要信息写入用户的长期记忆笔记本。当用户说"记住"、"帮我记一下"、"以后记得"等表达时使用此工具。写入的内容会在后续所有对话中持久存在。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: '要记住的内容，简洁明确' },
+          tags: { type: 'array', items: { type: 'string' }, description: '可选标签，如 ["偏好", "个人信息"]' },
+        },
+        required: ['content'],
+      },
+    },
+    async execute(input) {
+      const content = String(input.content ?? '').trim();
+      if (!content) return 'Error: content 不能为空';
+      const tags = Array.isArray(input.tags) ? input.tags.map(String) : [];
+      const entry = memoryStore.create({ content, tags, source: 'agent' });
+      return `已记住: "${content}" (id: ${(entry as any).id})`;
+    },
+  };
+
+  const notebookReadTool: Tool = {
+    permission: 'safe',
+    definition: {
+      name: 'notebook_read',
+      description: '读取用户的长期记忆笔记本。当需要回忆之前记住的信息时使用。',
+      inputSchema: { type: 'object', properties: {} },
+    },
+    async execute() {
+      const entries = memoryStore.list();
+      if (!Array.isArray(entries) || entries.length === 0) return '笔记本为空，暂无记忆。';
+      return JSON.stringify(entries.slice(0, 50).map((e: any) => ({
+        id: e.id, content: e.content, tags: e.tags, createdAt: e.createdAt,
+      })), null, 2);
+    },
+  };
+
+  registry.registerTool(notebookWriteTool);
+  registry.registerTool(notebookReadTool);
 
   return async ({ sessionId, prompt, materials, signal, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;

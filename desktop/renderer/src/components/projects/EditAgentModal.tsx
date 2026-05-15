@@ -1,12 +1,26 @@
 /**
  * EditAgentModal — edit an existing kswarm agent's configuration.
+ * Uses dynamic provider/model lists from Desktop config (same as CreateAgentModal).
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
+import { api } from '../../api/bridge';
 import type { KSwarmAgent } from '../../hooks/useKSwarmClient';
+
+interface DesktopProvider {
+  id: string;
+  label: string;
+  apiKeyConfigured: boolean;
+}
+
+interface DesktopModel {
+  modelId: string;
+  model: string;
+  label: string;
+}
 
 interface EditAgentModalProps {
   agent: KSwarmAgent;
@@ -17,13 +31,6 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
   const { updateAgent } = useKSwarm();
   const { t } = useLocale();
 
-  const PROVIDERS = [
-    { value: '', label: t.commonNoConfig },
-    { value: 'anthropic', label: 'Anthropic' },
-    { value: 'openai', label: 'OpenAI' },
-    { value: 'ollama', label: 'Ollama' },
-  ];
-
   const [name, setName] = useState(agent.name);
   const [provider, setProvider] = useState((agent as any).provider || '');
   const [model, setModel] = useState((agent as any).model || '');
@@ -31,6 +38,32 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
   const [apiKey, setApiKey] = useState('');
   const [instructions, setInstructions] = useState((agent as any).instructions || '');
   const [loading, setLoading] = useState(false);
+
+  const [desktopProviders, setDesktopProviders] = useState<DesktopProvider[]>([]);
+  const [desktopModels, setDesktopModels] = useState<DesktopModel[]>([]);
+
+  // Load desktop providers on mount
+  useEffect(() => {
+    api.getModelConfig()
+      .then(c => setDesktopProviders(c.providers ?? []))
+      .catch(() => {});
+  }, []);
+
+  // Load available models when provider changes
+  useEffect(() => {
+    if (!provider) { setDesktopModels([]); return; }
+    api.listAvailableModelsForProvider(provider)
+      .then(m => setDesktopModels(m ?? []))
+      .catch(() => setDesktopModels([]));
+  }, [provider]);
+
+  const providerOptions = [
+    { value: '', label: t.commonNoConfig },
+    ...desktopProviders.map(p => ({
+      value: p.id,
+      label: `${p.label}${p.apiKeyConfigured ? '' : ' (未配置 API Key)'}`,
+    })),
+  ];
 
   const handleSave = async () => {
     if (!name.trim()) return;
@@ -51,51 +84,57 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/12 backdrop-blur-[2px]" onClick={onClose} />
-
-      <div className="relative w-full max-w-md max-h-[80vh] overflow-y-auto rounded-2xl border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-page)] p-6 shadow-xl">
+    <div
+      className="overlay-fade-in fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'var(--c-overlay)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="modal-enter flex w-full max-w-md flex-col rounded-[14px] p-6"
+        style={{ background: 'var(--c-bg-card)', border: '0.5px solid var(--c-border-subtle)', maxHeight: '80vh', margin: '0 20px', overflowY: 'auto' }}
+      >
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-[14px] font-semibold text-[var(--c-text-heading)]">{t.projectsEditAgentTitle}</h2>
+          <h2 className="text-[15px] font-semibold text-[var(--c-text-heading)]">{t.projectsEditAgentTitle}</h2>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] transition-colors duration-150"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
           >
-            <X size={16} />
+            <X size={14} />
           </button>
         </div>
 
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{t.projectsEditAgentName}</label>
+            <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsEditAgentName}</label>
             <input
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
-              className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-all focus:border-[var(--c-input-border-color-focus)] focus:shadow-[var(--c-input-shadow-focus)]"
+              className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-text-muted)] transition-colors duration-150 focus:border-[var(--c-border)]"
               autoFocus
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">ID</label>
+            <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">ID</label>
             <input
               type="text"
               value={agent.id}
               disabled
-              className="rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-deep)] px-3 py-2 text-sm text-[var(--c-text-muted)]"
+              className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-sub)] px-3 py-2 text-sm text-[var(--c-text-muted)]"
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">LLM 提供商</label>
+            <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">LLM 提供商</label>
             <select
+              data-testid="provider-select"
               value={provider}
-              onChange={e => setProvider(e.target.value)}
-              className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-all focus:border-[var(--c-input-border-color-focus)]"
+              onChange={e => { setProvider(e.target.value); setModel(''); }}
+              className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]"
             >
-              {PROVIDERS.map(p => (
+              {providerOptions.map(p => (
                 <option key={p.value} value={p.value}>{p.label}</option>
               ))}
             </select>
@@ -104,57 +143,71 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
           {provider && (
             <>
               <div className="flex flex-col gap-1.5">
-                <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{t.projectsEditAgentModel}</label>
+                <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsEditAgentModel}</label>
+                {desktopModels.length > 0 ? (
+                  <select
+                    data-testid="model-select"
+                    value={model}
+                    onChange={e => setModel(e.target.value)}
+                    className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]"
+                  >
+                    <option value="">选择模型</option>
+                    {desktopModels.map(m => <option key={m.modelId} value={m.model}>{m.label}</option>)}
+                  </select>
+                ) : (
+                  <input
+                    data-testid="model-input"
+                    type="text"
+                    value={model}
+                    onChange={e => setModel(e.target.value)}
+                    placeholder="e.g. gpt-4o"
+                    className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-text-muted)] transition-colors duration-150 focus:border-[var(--c-border)]"
+                  />
+                )}
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.commonBaseUrl}</label>
                 <input
+                  data-testid="baseurl-input"
                   type="text"
-                  value={model}
-                  onChange={e => setModel(e.target.value)}
-                  placeholder={provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o'}
-                  className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-placeholder)] outline-none transition-all focus:border-[var(--c-input-border-color-focus)] focus:shadow-[var(--c-input-shadow-focus)]"
+                  value={baseUrl}
+                  onChange={e => setBaseUrl(e.target.value)}
+                  placeholder="https://api.example.com/v1"
+                  className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-text-muted)] transition-colors duration-150 focus:border-[var(--c-border)]"
                 />
               </div>
-              {(provider === 'openai' || provider === 'ollama') && (
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{t.commonBaseUrl}</label>
-                  <input
-                    type="text"
-                    value={baseUrl}
-                    onChange={e => setBaseUrl(e.target.value)}
-                    className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-placeholder)] outline-none transition-all focus:border-[var(--c-input-border-color-focus)] focus:shadow-[var(--c-input-shadow-focus)]"
-                  />
-                </div>
-              )}
-              {provider !== 'ollama' && (
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{t.commonApiKey}</label>
-                  <input
-                    type="password"
-                    value={apiKey}
-                    onChange={e => setApiKey(e.target.value)}
-                    placeholder={t.projectsEditAgentModelHint}
-                    className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-placeholder)] outline-none transition-all focus:border-[var(--c-input-border-color-focus)] focus:shadow-[var(--c-input-shadow-focus)]"
-                  />
-                </div>
-              )}
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.commonApiKey}</label>
+                <input
+                  data-testid="apikey-input"
+                  type="password"
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  placeholder={t.projectsEditAgentModelHint}
+                  className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-text-muted)] transition-colors duration-150 focus:border-[var(--c-border)]"
+                />
+              </div>
             </>
           )}
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{t.projectsEditAgentInstructions}</label>
+            <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsEditAgentInstructions}</label>
             <textarea
               value={instructions}
               onChange={e => setInstructions(e.target.value)}
               placeholder="系统提示词..."
               rows={3}
-              className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-placeholder)] outline-none transition-all focus:border-[var(--c-input-border-color-focus)] focus:shadow-[var(--c-input-shadow-focus)] resize-none"
+              className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-text-muted)] transition-colors duration-150 focus:border-[var(--c-border)] resize-none"
             />
           </div>
 
-          <div className="mt-2 flex justify-end gap-2">
+          <div className="mt-3 flex justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg px-4 py-1.5 text-sm text-[var(--c-text-secondary)] transition-colors duration-150 hover:bg-[var(--c-bg-deep)]"
+              className="rounded-lg bg-[var(--c-bg-page)] px-4 py-2 text-sm font-medium text-[var(--c-text-secondary)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)]"
             >
               {t.projectsEditAgentClose}
             </button>
@@ -162,7 +215,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
               type="button"
               onClick={handleSave}
               disabled={!name.trim() || loading}
-              className="rounded-lg bg-[var(--c-btn-bg)] px-4 py-1.5 text-sm font-medium text-[var(--c-btn-text)] transition-[filter] duration-150 hover:brightness-[1.12] active:brightness-[0.95] disabled:opacity-50 disabled:pointer-events-none"
+              className="rounded-lg bg-[var(--c-btn-bg)] px-4 py-2 text-sm font-medium text-[var(--c-btn-text)] transition-colors duration-150 hover:brightness-[1.08] disabled:opacity-50 disabled:pointer-events-none"
             >
               {loading ? t.projectsEditAgentSaving : t.projectsEditAgentSave}
             </button>
