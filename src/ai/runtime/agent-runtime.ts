@@ -93,6 +93,10 @@ export class AgentRuntime {
     onEvent({ type: 'run_started', runId: run.runId });
     if (typeof input === 'string') {
       this.session.appendUserText(input);
+      if (this.memoryStore?.writeRawMessage) {
+        const sessionKey = this.promptSnapshot?.id?.slice(0, 16) ?? 'cli';
+        this.memoryStore.writeRawMessage(sessionKey, 'user', input).catch(() => {});
+      }
     } else {
       this.session.appendUserBlocks(input);
     }
