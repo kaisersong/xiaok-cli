@@ -161,8 +161,14 @@ export function registerConfigCommands(program: Command): void {
         return;
       }
       cfg.providers[provider].apiKey = key;
+      const switched = provider !== cfg.defaultProvider;
+      if (switched) {
+        const modelId = ensureDefaultModelForProvider(cfg, provider);
+        cfg.defaultProvider = provider;
+        cfg.defaultModelId = modelId;
+      }
       await saveConfig(cfg);
-      console.log(`已为 ${provider} 设置 API Key`);
+      console.log(`已为 ${provider} 设置 API Key${switched ? `，并切换为默认提供商` : ''}`);
     });
 
   configSet
