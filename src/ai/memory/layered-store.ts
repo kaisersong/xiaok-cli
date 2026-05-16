@@ -3,20 +3,17 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
 import type { MemoryStore, MemoryRecord, MemoryType } from './store.js';
+import type { ModelAdapter, Message } from '../../types.js';
 import { runMigrations } from './migrations.js';
 import { EmbeddingClient, type EmbeddingConfig } from './embedding.js';
 import { hybridSearch } from './retrieval.js';
 import { compactL0toL1, compactL1toL2, compactL2toL3 } from './compaction.js';
 import { segmentChinese } from './segment.js';
+import { MODEL_REGISTRY } from './model-registry.js';
 
 export interface LayeredMemoryConfig {
   dbPath: string;
-  embedding: EmbeddingConfig;
-  llm: {
-    apiUrl: string;
-    model: string;
-    apiKey?: string;
-  };
+  embedding?: Partial<EmbeddingConfig>;
   compaction?: {
     l0MinMessages?: number;
     autoCompact?: boolean;
@@ -25,19 +22,19 @@ export interface LayeredMemoryConfig {
   };
 }
 
-export function resolveLayeredConfig(config: Record<string, unknown>): LayeredMemoryConfig {
-  const c = config as Record<string, any>;
+export function resolveLayeredConfig(config?: Record<string, unknown>): LayeredMemoryConfig {
+  const c = (config ?? {}) as Record<string, any>;
+  const provider = c.embedding?.provider ?? 'local';
+  const modelId = c.embedding?.model ?? 'all-MiniLM-L6-v2';
+  const registryEntry = MODEL_REGISTRY.find(m => m.id === modelId);
+  const defaultDims = provider === 'api' ? 768 : (registryEntry?.dims ?? 384);
   return {
     dbPath: c.dbPath ?? path.join(process.env.HOME || '/tmp', '.xiaok', 'memory.db'),
     embedding: {
+      provider,
       apiUrl: c.embedding?.apiUrl ?? 'http://localhost:11434/v1',
-      model: c.embedding?.model ?? 'nomic-embed-text',
-      dimensions: c.embedding?.dimensions ?? 768,
-    },
-    llm: {
-      apiUrl: c.llm?.apiUrl ?? 'http://localhost:11434/v1',
-      model: c.llm?.model ?? 'qwen2.5',
-      apiKey: c.llm?.apiKey,
+      model: modelId,
+      dimensions: c.embedding?.dimensions ?? defaultDims,
     },
     compaction: {
       l0MinMessages: c.compaction?.l0MinMessages ?? 5,
@@ -48,10 +45,27 @@ export function resolveLayeredConfig(config: Record<string, unknown>): LayeredMe
   };
 }
 
+/**
+ * Create an LLM function from a ModelAdapter, following the CompactRunner pattern.
+ */
+export function createLLMFromAdapter(adapter: ModelAdapter): (prompt: string) => Promise<string> {
+  return async (prompt: string) => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: prompt }] },
+    ];
+    const chunks: string[] = [];
+    for await (const chunk of adapter.stream(messages, [], '只输出JSON结果，不要其他内容。不要调用任何工具。')) {
+      if (chunk.type === 'text') chunks.push(chunk.delta);
+    }
+    return chunks.join('');
+  };
+}
+
 export class LayeredMemoryStore implements MemoryStore {
   private db: Database.Database;
+  private dbPath: string;
   private embeddingClient: EmbeddingClient;
-  private llmConfig: { apiUrl: string; model: string; apiKey?: string };
+  private llmFn?: (prompt: string) => Promise<string>;
   private compactionConfig: {
     l0MinMessages: number;
     autoCompact: boolean;
@@ -62,6 +76,7 @@ export class LayeredMemoryStore implements MemoryStore {
   private compacting = false;
 
   constructor(config: LayeredMemoryConfig) {
+    this.dbPath = config.dbPath;
     const dir = path.dirname(config.dbPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -70,8 +85,13 @@ export class LayeredMemoryStore implements MemoryStore {
     this.db = new Database(config.dbPath);
     runMigrations(this.db);
 
-    this.embeddingClient = new EmbeddingClient(this.db, config.embedding);
-    this.llmConfig = config.llm;
+    const embeddingConfig: EmbeddingConfig = {
+      provider: config.embedding?.provider ?? 'local',
+      apiUrl: config.embedding?.apiUrl ?? 'http://localhost:11434/v1',
+      model: config.embedding?.model ?? 'all-MiniLM-L6-v2',
+      dimensions: config.embedding?.dimensions ?? 384,
+    };
+    this.embeddingClient = new EmbeddingClient(this.db, embeddingConfig);
     this.compactionConfig = {
       l0MinMessages: config.compaction?.l0MinMessages ?? 5,
       autoCompact: config.compaction?.autoCompact ?? false,
@@ -82,6 +102,10 @@ export class LayeredMemoryStore implements MemoryStore {
     if (this.compactionConfig.autoCompact) {
       this.startAutoCompact();
     }
+  }
+
+  setLLMFn(fn: (prompt: string) => Promise<string>): void {
+    this.llmFn = fn;
   }
 
   async save(record: MemoryRecord): Promise<void> {
@@ -131,9 +155,13 @@ export class LayeredMemoryStore implements MemoryStore {
 
   async compact(): Promise<void> {
     if (this.compacting) return;
+    if (!this.llmFn) {
+      console.warn('[memory] compaction skipped: no LLM function configured. Call setLLMFn() first.');
+      return;
+    }
     this.compacting = true;
     try {
-      const llm = this.createLLMFn();
+      const llm = this.llmFn;
       const r1 = await compactL0toL1(this.db, llm, {
         minMessages: this.compactionConfig.l0MinMessages,
         maxPromptTokens: this.compactionConfig.maxPromptTokens,
@@ -149,11 +177,39 @@ export class LayeredMemoryStore implements MemoryStore {
     }
   }
 
+  async delete(id: string, layer?: number): Promise<boolean> {
+    if (layer !== undefined) {
+      const tableMap: Record<number, string> = {
+        0: 'memory_l0_raw',
+        1: 'memory_l1_extracted',
+        2: 'memory_l2_scenario',
+        3: 'memory_l3_persona',
+      };
+      const table = tableMap[layer];
+      if (!table) return false;
+      const r = this.db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
+      return r.changes > 0;
+    }
+    const r1 = this.db.prepare('DELETE FROM memory_l1_extracted WHERE id = ?').run(id);
+    const r0 = this.db.prepare('DELETE FROM memory_l0_raw WHERE id = ?').run(id);
+    return (r1.changes + r0.changes) > 0;
+  }
+
   getPersonaTraits(): { trait: string; confidence: number }[] {
     const rows = this.db.prepare(
       'SELECT trait, confidence FROM memory_l3_persona ORDER BY confidence DESC'
     ).all() as any[];
     return rows.map(r => ({ trait: r.trait, confidence: r.confidence }));
+  }
+
+  getStats(): { l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } {
+    const l0 = (this.db.prepare('SELECT COUNT(*) as c FROM memory_l0_raw').get() as any).c;
+    const l1 = (this.db.prepare('SELECT COUNT(*) as c FROM memory_l1_extracted').get() as any).c;
+    const l2 = (this.db.prepare('SELECT COUNT(*) as c FROM memory_l2_scenario').get() as any).c;
+    const l3 = (this.db.prepare('SELECT COUNT(*) as c FROM memory_l3_persona').get() as any).c;
+    let dbSizeBytes = 0;
+    try { dbSizeBytes = fs.statSync(this.dbPath).size; } catch {}
+    return { l0, l1, l2, l3, dbSizeBytes };
   }
 
   getLayerCount(layer: number): number {
@@ -169,20 +225,99 @@ export class LayeredMemoryStore implements MemoryStore {
     return row.count;
   }
 
+  listLayer(layer: number, limit = 50, offset = 0): import('./store.js').LayerEntry[] {
+    switch (layer) {
+      case 0: {
+        const rows = this.db.prepare(
+          'SELECT id, role, content, session_id, created_at FROM memory_l0_raw ORDER BY created_at DESC LIMIT ? OFFSET ?'
+        ).all(limit, offset) as any[];
+        return rows.map(r => ({
+          id: r.id,
+          content: r.content,
+          createdAt: r.created_at,
+          meta: { role: r.role, sessionId: r.session_id },
+        }));
+      }
+      case 1: {
+        const rows = this.db.prepare(
+          'SELECT id, summary, tags, scope, mem_type, created_at FROM memory_l1_extracted ORDER BY created_at DESC LIMIT ? OFFSET ?'
+        ).all(limit, offset) as any[];
+        return rows.map(r => ({
+          id: r.id,
+          content: r.summary,
+          tags: JSON.parse(r.tags || '[]'),
+          createdAt: r.created_at,
+          meta: { scope: r.scope, type: r.mem_type },
+        }));
+      }
+      case 2: {
+        const rows = this.db.prepare(
+          'SELECT id, scenario, key_facts, created_at FROM memory_l2_scenario ORDER BY created_at DESC LIMIT ? OFFSET ?'
+        ).all(limit, offset) as any[];
+        return rows.map(r => ({
+          id: r.id,
+          content: r.scenario,
+          createdAt: r.created_at,
+          meta: { keyFacts: JSON.parse(r.key_facts || '[]') },
+        }));
+      }
+      case 3: {
+        const rows = this.db.prepare(
+          'SELECT id, trait, evidence, confidence, created_at FROM memory_l3_persona ORDER BY confidence DESC LIMIT ? OFFSET ?'
+        ).all(limit, offset) as any[];
+        return rows.map(r => ({
+          id: r.id,
+          content: r.trait,
+          createdAt: r.created_at,
+          meta: { evidence: JSON.parse(r.evidence || '[]'), confidence: r.confidence },
+        }));
+      }
+      default:
+        return [];
+    }
+  }
+
+  clearAll(): void {
+    this.db.exec(`
+      DELETE FROM memory_l0_raw;
+      DELETE FROM memory_l1_extracted;
+      DELETE FROM memory_l2_scenario;
+      DELETE FROM memory_l3_persona;
+      DELETE FROM memory_embeddings;
+    `);
+  }
+
   close(): void {
     if (this.compactTimer) {
       clearInterval(this.compactTimer);
     }
+    this.embeddingClient.close().catch(() => {});
     this.db.close();
   }
 
   private searchResultToRecord(r: { id: string; layer: number; content: string; metadata: Record<string, unknown> }): MemoryRecord {
-    const meta = r.metadata as {
+    let meta = r.metadata as {
       cwd?: string;
       mem_type?: MemoryType;
       scope?: 'global' | 'project';
       tags?: string[];
     };
+
+    // L0 results don't carry tags/scope — look up L1 for enriched metadata
+    if (r.layer === 0) {
+      const l1 = this.db.prepare(
+        'SELECT tags, scope, mem_type, cwd FROM memory_l1_extracted WHERE id = ?'
+      ).get(r.id) as { tags?: string; scope?: string; mem_type?: string; cwd?: string } | undefined;
+      if (l1) {
+        meta = {
+          tags: l1.tags ? JSON.parse(l1.tags) : [],
+          scope: (l1.scope as 'global' | 'project') || 'global',
+          mem_type: l1.mem_type as MemoryType | undefined,
+          cwd: l1.cwd || undefined,
+        };
+      }
+    }
+
     return {
       id: r.id,
       scope: meta?.scope || 'global',
@@ -201,32 +336,5 @@ export class LayeredMemoryStore implements MemoryStore {
         console.error('[memory] auto-compaction failed:', (err as Error).message);
       });
     }, this.compactionConfig.compactIntervalMs);
-  }
-
-  private createLLMFn(): (prompt: string) => Promise<string> {
-    const cfg = this.llmConfig;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (cfg.apiKey) {
-      headers['Authorization'] = `Bearer ${cfg.apiKey}`;
-    }
-
-    return async (prompt: string) => {
-      const resp = await fetch(`${cfg.apiUrl}/chat/completions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: cfg.model,
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.3,
-        }),
-      });
-
-      if (!resp.ok) {
-        throw new Error(`LLM API error: ${resp.status}`);
-      }
-
-      const data = await resp.json() as any;
-      return data.choices[0].message.content;
-    };
   }
 }

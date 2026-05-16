@@ -119,17 +119,14 @@ export interface Config {
     yzj?: YZJChannelConfig;
   };
   memory?: {
-    type: 'file' | 'layered';
+    type?: 'file' | 'layered';
     dbPath?: string;
+    modelId?: string; // references config.models[id] for compaction; defaults to main model
     embedding?: {
+      provider?: 'local' | 'api';
       apiUrl?: string;
       model?: string;
       dimensions?: number;
-    };
-    llm?: {
-      apiUrl?: string;
-      model?: string;
-      apiKey?: string;
     };
     compaction?: {
       l0MinMessages?: number;
