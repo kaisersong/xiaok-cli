@@ -31,6 +31,7 @@ import { api } from '../api';
 import { LocalMemoryStats } from './LocalMemoryStats';
 import type { DesktopModelConfigSnapshot, DesktopSaveModelConfigInput, TestProviderConnectionResult } from '../../../electron/preload-api';
 import { useLocale } from '../contexts/LocaleContext';
+import { MemoryModelSettings } from './settings/MemoryModelSettings';
 
 type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'general' | 'appearance' | 'data' | 'memory' | 'about';
 
@@ -197,13 +198,13 @@ function ModelPane() {
     }
   };
 
-  const handleTest = async () => {
-    if (!selectedProvider) return;
-    setTesting(prev => ({ ...prev, [selectedProvider]: true }));
+  const handleTest = async (providerId: string) => {
+    if (!providerId) return;
+    setTesting(prev => ({ ...prev, [providerId]: true }));
     setError('');
     try {
-      const result = await api.testProviderConnection({ providerId: selectedProvider });
-      setTestResults(prev => ({ ...prev, [selectedProvider]: result }));
+      const result = await api.testProviderConnection({ providerId });
+      setTestResults(prev => ({ ...prev, [providerId]: result }));
       if (result.success) {
         setSuccess(`连接成功，延迟 ${result.latencyMs}ms`);
       } else {
@@ -212,7 +213,7 @@ function ModelPane() {
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setTesting(prev => ({ ...prev, [selectedProvider]: false }));
+      setTesting(prev => ({ ...prev, [providerId]: false }));
     }
   };
 
@@ -309,10 +310,7 @@ function ModelPane() {
                     </div>
                     <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                       <button
-                        onClick={() => {
-                          setSelectedProvider(provider.id);
-                          handleTest();
-                        }}
+                        onClick={() => handleTest(provider.id)}
                         disabled={testing[provider.id]}
                         className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors disabled:opacity-50"
                       >
@@ -1474,6 +1472,9 @@ function MemoryPane() {
     <Section>
       <SectionHeader icon={Brain}>记忆管理</SectionHeader>
       <LocalMemoryStats />
+      <div className="mt-4">
+        <MemoryModelSettings />
+      </div>
     </Section>
   );
 }

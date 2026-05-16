@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 
-const CURRENT_SCHEMA_VERSION = 1;
+const CURRENT_SCHEMA_VERSION = 2;
 
 export function getSchemaVersion(db: Database.Database): number {
   const hasTable = db.prepare(
@@ -114,8 +114,14 @@ function migrateV0toV1(db: Database.Database): void {
   setSchemaVersion(db, 1);
 }
 
+function migrateV1toV2(db: Database.Database): void {
+  db.exec('DELETE FROM memory_embeddings');
+  setSchemaVersion(db, 2);
+}
+
 const MIGRATIONS: Record<number, (db: Database.Database) => void> = {
   1: migrateV0toV1,
+  2: migrateV1toV2,
 };
 
 export function runMigrations(db: Database.Database): void {

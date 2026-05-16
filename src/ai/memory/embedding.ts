@@ -1,7 +1,9 @@
 import Database from 'better-sqlite3';
 import * as crypto from 'node:crypto';
+import { OnnxEmbeddingEngine, type OnnxStatus } from './onnx-engine.js';
 
 export interface EmbeddingConfig {
+  provider: 'local' | 'api';
   apiUrl: string;
   model: string;
   dimensions: number;
@@ -11,10 +13,15 @@ export class EmbeddingClient {
   private db: Database.Database;
   private config: EmbeddingConfig;
   private cache: Map<string, Float32Array> = new Map();
+  private onnxEngine: OnnxEmbeddingEngine | null = null;
+  private onnxStatus: OnnxStatus | null = null;
 
   constructor(db: Database.Database, config: EmbeddingConfig) {
     this.db = db;
     this.config = config;
+    if (config.provider === 'local') {
+      this.onnxEngine = new OnnxEmbeddingEngine(config.model);
+    }
   }
 
   private cacheKey(text: string): string {
@@ -109,6 +116,15 @@ export class EmbeddingClient {
   }
 
   private async callEmbedApi(texts: string[]): Promise<Float32Array[]> {
+    if (this.onnxEngine) {
+      if (!this.onnxStatus) {
+        this.onnxStatus = await this.onnxEngine.init();
+      }
+      if (this.onnxStatus.engine === 'onnx') {
+        return this.onnxEngine.embed(texts);
+      }
+    }
+
     const resp = await fetch(`${this.config.apiUrl}/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -127,5 +143,11 @@ export class EmbeddingClient {
     };
 
     return data.data.map(d => new Float32Array(d.embedding));
+  }
+
+  async close(): Promise<void> {
+    if (this.onnxEngine) {
+      await this.onnxEngine.close();
+    }
   }
 }
