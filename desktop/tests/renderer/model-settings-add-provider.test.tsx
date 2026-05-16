@@ -105,7 +105,7 @@ describe('Model Settings — Add Provider', () => {
     expect(options.length).toBeGreaterThan(2) // placeholder + at least one provider + custom
   })
 
-  it('dropdown excludes already-configured providers', async () => {
+  it('dropdown shows all providers, marking configured ones', async () => {
     renderSettings()
     fireEvent.click(screen.getByText('模型设置'))
 
@@ -121,15 +121,15 @@ describe('Model Settings — Add Provider', () => {
     expect(addProviderSelect).toBeDefined()
 
     const options = Array.from(addProviderSelect!.querySelectorAll('option')).map(o => o.textContent)
-    // Anthropic is already configured, should NOT be in the list
-    expect(options).not.toContain('Anthropic')
-    // Unconfigured providers should be listed
+    // All providers should be listed
     expect(options).toContain('OpenAI')
     expect(options).toContain('Kimi')
     expect(options).toContain('DeepSeek')
     expect(options).toContain('GLM')
     expect(options).toContain('MiniMax')
     expect(options).toContain('Gemini')
+    // Anthropic is configured, should show with "(已配置)" suffix
+    expect(options).toContain('Anthropic (已配置)')
     // Custom option
     expect(options).toContain('自定义 (OpenAI 兼容)')
   })

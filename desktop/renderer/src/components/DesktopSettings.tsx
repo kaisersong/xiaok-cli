@@ -165,8 +165,7 @@ function ModelPane() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<Record<string, boolean>>({});
   const [testResults, setTestResults] = useState<Record<string, TestProviderConnectionResult>>({});
-  const [showAddModel, setShowAddModel] = useState(false);
-  const [availableModels, setAvailableModels] = useState<Array<{ modelId: string; model: string; label: string; capabilities?: string[] }>>([]);
+  const [showAddModel, setShowAddModel] = useState<string>('');
 
   useEffect(() => {
     api.getModelConfig()
@@ -176,15 +175,6 @@ function ModelPane() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
-
-  // Load available models when provider changes
-  useEffect(() => {
-    if (selectedProvider) {
-      api.listAvailableModelsForProvider(selectedProvider)
-        .then(setAvailableModels)
-        .catch(() => setAvailableModels([]));
-    }
-  }, [selectedProvider]);
 
   const handleSave = async () => {
     if (!selectedProvider || !apiKey.trim()) return;
@@ -227,20 +217,27 @@ function ModelPane() {
   };
 
   const handleAddModel = async (modelId: string) => {
-    const modelInfo = availableModels.find(m => m.modelId === modelId);
-    if (!modelInfo || !selectedProvider) return;
+    if (!config) return;
+    // Find the model across all provider profiles
+    let foundModel: { modelId: string; model: string; label: string } | undefined;
+    let foundProviderId = '';
+    for (const profile of config.providerProfiles) {
+      const m = profile.availableModels?.find(am => am.modelId === modelId);
+      if (m) { foundModel = m; foundProviderId = profile.id; break; }
+    }
+    if (!foundModel || !foundProviderId) return;
     setSaving(true);
     setError('');
     try {
       await api.saveModelConfig({
-        providerId: selectedProvider,
-        modelName: modelInfo.model,
-        label: modelInfo.label,
+        providerId: foundProviderId,
+        modelName: foundModel.model,
+        label: foundModel.label,
       });
       const updated = await api.getModelConfig();
       setConfig(updated);
-      setSuccess(`已添加模型 ${modelInfo.label}`);
-      setShowAddModel(false);
+      setSuccess(`已添加模型 ${foundModel.label}`);
+      setShowAddModel('');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -375,7 +372,7 @@ function ModelPane() {
                   </div>
                 </div>
                 {/* Model list */}
-                {provider.apiKeyConfigured && config?.models && (
+                {config?.models && (
                   <div className="mt-3 pt-3 border-t border-[var(--c-border-subtle)]">
                     <div className="text-xs text-[var(--c-text-secondary)] mb-1.5">已配置模型</div>
                     <div className="flex flex-wrap gap-1.5">
@@ -402,20 +399,24 @@ function ModelPane() {
                           </span>
                         ))}
                     </div>
-                    {/* Add model from available list */}
-                    {availableModels.length > 0 && (
-                      <div className="mt-2">
-                        <button
-                          onClick={() => setShowAddModel(!showAddModel)}
-                          className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
-                        >
-                          <Plus size={12} /> 添加模型
-                        </button>
-                        {showAddModel && (
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {availableModels
-                              .filter(m => !config.models.some(cm => cm.model === m.model && cm.provider === provider.id))
-                              .map(m => (
+                    {/* Add model from profile's available models */}
+                    {(() => {
+                      const profile = config.providerProfiles.find(p => p.id === provider.id);
+                      const profileModels = profile?.availableModels ?? [];
+                      const configuredModels = config.models.filter(m => m.provider === provider.id);
+                      const addable = profileModels.filter(m => !configuredModels.some(cm => cm.model === m.model));
+                      if (addable.length === 0) return null;
+                      return (
+                        <div className="mt-2">
+                          <button
+                            onClick={() => setShowAddModel(prev => prev === provider.id ? '' : provider.id)}
+                            className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
+                          >
+                            <Plus size={12} /> 添加模型
+                          </button>
+                          {showAddModel === provider.id && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {addable.map(m => (
                                 <button
                                   key={m.modelId}
                                   onClick={() => handleAddModel(m.modelId)}
@@ -425,10 +426,11 @@ function ModelPane() {
                                   {m.label}
                                 </button>
                               ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </Card>
@@ -490,7 +492,6 @@ function AddProviderCard({
 
   const profiles = config?.providerProfiles ?? [];
   const configuredIds = new Set(config?.providers.map(p => p.id) ?? []);
-  const unconfiguredProfiles = profiles.filter(p => !configuredIds.has(p.id));
 
   const selectedProfile = profiles.find(p => p.id === selectedProfileId);
   const isCustom = selectedProfileId === '__custom__';
@@ -547,8 +548,10 @@ function AddProviderCard({
             className={inputCls}
           >
             <option value="">— 选择提供商 —</option>
-            {unconfiguredProfiles.map(p => (
-              <option key={p.id} value={p.id}>{p.label}</option>
+            {profiles.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.label}{configuredIds.has(p.id) ? ' (已配置)' : ''}
+              </option>
             ))}
             <option value="__custom__">自定义 (OpenAI 兼容)</option>
           </select>
