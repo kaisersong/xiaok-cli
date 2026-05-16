@@ -46,7 +46,7 @@ export async function hybridSearch(
 ): Promise<SearchResult[]> {
   const {
     bm25Weight = 0.5,
-    vectorWeight = 0.0,
+    vectorWeight = 0.3,
     rrfK = 60,
     limit = 10,
     layers = [0, 1, 2, 3],
@@ -55,7 +55,23 @@ export async function hybridSearch(
   const segmentedQuery = segmentQuery(query);
 
   if (segmentedQuery.trim() === '') {
-    return [];
+    // Empty query: return recent L1 entries as a recency fallback
+    const rows = db.prepare(
+      `SELECT id, summary, tags, scope, mem_type, cwd, created_at
+       FROM memory_l1_extracted ORDER BY created_at DESC LIMIT ?`
+    ).all(limit) as any[];
+    return rows.map(row => ({
+      id: row.id,
+      layer: 1,
+      content: row.summary,
+      score: 1,
+      metadata: {
+        tags: JSON.parse(row.tags || '[]'),
+        scope: row.scope || 'global',
+        mem_type: row.mem_type,
+        cwd: row.cwd,
+      },
+    }));
   }
 
   const rrfScores = new Map<string, { score: number; layer: number; content: string; metadata: Record<string, unknown> }>();
@@ -186,10 +202,79 @@ function bm25Search(db: Database.Database, ftsQuery: string | null, segmentedQue
 
 function vectorSearch(
   db: Database.Database,
-  _queryEmbedding: Float32Array,
-  _layers: number[],
-  _limit: number
+  queryEmbedding: Float32Array,
+  layers: number[],
+  limit: number
 ): RankEntry[] {
-  // sqlite-vec integration deferred — vectorWeight defaults to 0
-  return [];
+  const results: RankEntry[] = [];
+  const queryDims = queryEmbedding.length;
+
+  const rows = db.prepare(
+    'SELECT memory_id, layer, embedding FROM memory_embeddings WHERE layer >= 0 LIMIT 5000'
+  ).all() as { memory_id: string; layer: number; embedding: Buffer }[];
+
+  const scored: { memoryId: string; layer: number; similarity: number }[] = [];
+  for (const row of rows) {
+    if (!layers.includes(row.layer)) continue;
+    const emb = new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength / 4);
+    if (emb.length !== queryDims) continue;
+    const sim = cosineSimilarity(queryEmbedding, emb);
+    if (sim > 0.3) {
+      scored.push({ memoryId: row.memory_id, layer: row.layer, similarity: sim });
+    }
+  }
+
+  scored.sort((a, b) => b.similarity - a.similarity);
+  const top = scored.slice(0, limit);
+
+  for (const entry of top) {
+    const content = getLayerContent(db, entry.memoryId, entry.layer);
+    if (!content) continue;
+    results.push({
+      id: entry.memoryId,
+      layer: entry.layer,
+      content: content.text,
+      metadata: content.metadata,
+      rank: results.length + 1,
+    });
+  }
+
+  return results;
+}
+
+function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom < 1e-12 ? 0 : dot / denom;
+}
+
+function getLayerContent(db: Database.Database, id: string, layer: number): { text: string; metadata: Record<string, unknown> } | null {
+  const tableMap: Record<number, { table: string; textCol: string; metaCols: string[] }> = {
+    0: { table: 'memory_l0_raw', textCol: 'content', metaCols: ['session_id', 'role', 'created_at'] },
+    1: { table: 'memory_l1_extracted', textCol: 'summary', metaCols: ['tags', 'scope', 'mem_type', 'cwd', 'created_at'] },
+    2: { table: 'memory_l2_scenario', textCol: 'scenario', metaCols: ['key_facts', 'created_at'] },
+    3: { table: 'memory_l3_persona', textCol: 'trait', metaCols: ['evidence', 'confidence', 'created_at'] },
+  };
+  const spec = tableMap[layer];
+  if (!spec) return null;
+
+  const cols = [spec.textCol, ...spec.metaCols];
+  const row = db.prepare(`SELECT ${cols.join(', ')} FROM ${spec.table} WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+  if (!row) return null;
+
+  const metadata: Record<string, unknown> = {};
+  for (const col of spec.metaCols) {
+    let val = row[col];
+    if (typeof val === 'string' && (val.startsWith('[') || val.startsWith('{'))) {
+      try { val = JSON.parse(val); } catch {}
+    }
+    metadata[col] = val;
+  }
+
+  return { text: String(row[spec.textCol]), metadata };
 }
