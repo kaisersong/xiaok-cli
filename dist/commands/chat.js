@@ -11,6 +11,7 @@ import { createIntentDelegationTools } from '../ai/tools/intent-delegation.js';
 import { formatDebugOutput, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
+import { createMemoryStoreAsync } from '../ai/memory/store.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
 import { createHooksRunner } from '../runtime/hooks-runner.js';
 import { createIntentPlan } from '../ai/intent-delegation/planner.js';
@@ -137,6 +138,7 @@ async function runChat(initialInput, opts) {
     // 加载配置和凭据
     log.info('chat started', { initialInput: initialInput?.slice(0, 80) });
     let config = await loadConfig();
+    const memoryStore = await createMemoryStoreAsync(config.memory?.type === 'layered' ? config.memory : undefined);
     let adapter;
     try {
         adapter = createAdapter(config);
@@ -209,7 +211,7 @@ async function runChat(initialInput, opts) {
     const toolExplorer = new ToolExplorer(formatToolActivity);
     const turnLayout = new TurnLayout();
     const skillTool = createSkillTool(skillCatalog, platform.capabilityRegistry);
-    const promptBuilder = new PromptBuilder();
+    const promptBuilder = new PromptBuilder({ memoryStore });
     let agent;
     let runtimeFacade;
     let skillCatalogWatcher;
@@ -564,7 +566,7 @@ async function runChat(initialInput, opts) {
         },
     };
     log.info('agent created', { provider: config.defaultProvider, model: config.defaultModelId, skills: skills.length });
-    agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks: runtimeHooks });
+    agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks: runtimeHooks, memoryStore });
     agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
     agent.setPromptSnapshot(initialPromptSnapshot);
     runtimeFacade = new RuntimeFacade({

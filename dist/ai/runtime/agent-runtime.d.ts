@@ -4,7 +4,7 @@ import type { PromptSnapshot } from '../prompts/types.js';
 import { AgentRunController } from './controller.js';
 import type { AgentRuntimeEvent } from './events.js';
 import { AgentSessionState } from './session.js';
-import type { FileMemoryStore } from '../memory/store.js';
+import type { MemoryStore } from '../memory/store.js';
 export interface AgentRuntimeOptions {
     adapter: ModelAdapter;
     registry: ToolRegistry;
@@ -16,7 +16,7 @@ export interface AgentRuntimeOptions {
     contextLimit?: number;
     compactThreshold?: number;
     compactPlaceholder?: string;
-    memoryStore?: FileMemoryStore;
+    memoryStore?: MemoryStore;
 }
 export declare class AgentRuntime {
     private adapter;

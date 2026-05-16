@@ -7,10 +7,9 @@ export class PromptBuilder {
     }
     async build(input) {
         const memoryStore = this.deps.memoryStore ?? new FileMemoryStore();
-        const memories = await memoryStore.listRelevant({
-            cwd: input.cwd,
-            query: input.cwd,
-        });
+        const memories = memoryStore.search
+            ? await memoryStore.search(input.cwd, 10)
+            : await memoryStore.listRelevant({ cwd: input.cwd, query: input.cwd });
         // Inject memories into assembler options for per-turn memory injection
         const assemblerOpts = {
             ...input,

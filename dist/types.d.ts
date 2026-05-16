@@ -125,6 +125,23 @@ export interface Config {
     channels?: {
         yzj?: YZJChannelConfig;
     };
+    memory?: {
+        type?: 'file' | 'layered';
+        dbPath?: string;
+        modelId?: string;
+        embedding?: {
+            provider?: 'local' | 'api';
+            apiUrl?: string;
+            model?: string;
+            dimensions?: number;
+        };
+        compaction?: {
+            l0MinMessages?: number;
+            autoCompact?: boolean;
+            compactIntervalMs?: number;
+            maxPromptTokens?: number;
+        };
+    };
 }
 export declare const DEFAULT_CONFIG: Config;
 /** 校验 legacy defaultModel 是否合法，防止脏数据写入 */

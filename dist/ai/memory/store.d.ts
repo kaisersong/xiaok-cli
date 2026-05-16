@@ -9,7 +9,18 @@ export interface MemoryRecord {
     updatedAt: number;
     type?: MemoryType;
 }
-export declare class FileMemoryStore {
+export interface MemoryStore {
+    save(record: MemoryRecord): Promise<void>;
+    listRelevant(input: {
+        cwd: string;
+        query: string;
+        typeFilter?: MemoryType;
+    }): Promise<MemoryRecord[]>;
+    search?(query: string, limit?: number): Promise<MemoryRecord[]>;
+    writeRawMessage?(sessionId: string, role: string, content: string): Promise<void>;
+    close?(): void;
+}
+export declare class FileMemoryStore implements MemoryStore {
     private readonly rootDir;
     constructor(rootDir?: string);
     save(record: MemoryRecord): Promise<void>;
@@ -19,3 +30,4 @@ export declare class FileMemoryStore {
         typeFilter?: MemoryType;
     }): Promise<MemoryRecord[]>;
 }
+export declare function createMemoryStoreAsync(config?: unknown): Promise<MemoryStore>;

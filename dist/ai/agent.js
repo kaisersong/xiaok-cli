@@ -74,6 +74,7 @@ export class Agent {
             contextLimit: this.options.contextLimit,
             compactThreshold: this.options.compactThreshold,
             compactPlaceholder: this.options.compactPlaceholder,
+            memoryStore: this.options.memoryStore,
         });
     }
     emitLegacyHook(event, turnId) {

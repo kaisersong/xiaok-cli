@@ -8,6 +8,7 @@ import { createAdapter } from '../ai/models.js';
 import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
+import { createMemoryStoreAsync } from '../ai/memory/store.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
 import { loadSettings, mergeRules } from '../ai/permissions/settings.js';
 import { createSkillCatalog } from '../ai/skills/loader.js';
@@ -135,6 +136,7 @@ async function runYZJServe(options) {
         process.exit(1);
     }
     const config = await loadConfig();
+    const memoryStore = await createMemoryStoreAsync(config.memory?.type === 'layered' ? config.memory : undefined);
     const yzjConfig = resolveYZJConfig(config, buildOverrides(options));
     const enableWebhook = options.webhook ?? true;
     if (yzjConfig.inboundMode === 'webhook' && !enableWebhook) {
@@ -218,7 +220,7 @@ async function runYZJServe(options) {
                 const skillState = await ensureSessionSkillCatalog(sessionSkillCatalogs, sessionId, cwd);
                 const skills = await skillState.catalog.reload();
                 const customAgents = skillState.platform.customAgents;
-                const promptBuilder = new PromptBuilder();
+                const promptBuilder = new PromptBuilder({ memoryStore });
                 const adapter = createAdapter(config);
                 const modelCapabilities = resolveModelCapabilities(adapter);
                 const getPromptInput = async () => ({
@@ -296,7 +298,7 @@ async function runYZJServe(options) {
                     },
                 });
                 const registry = registryFactory.createRegistry(cwd);
-                const agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks });
+                const agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks, memoryStore });
                 agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
                 agent.setPromptSnapshot(initialPromptSnapshot);
                 const runtimeFacade = new RuntimeFacade({

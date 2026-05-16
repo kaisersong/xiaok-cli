@@ -87,7 +87,7 @@ function downloadFile(url: string, dest: string): Promise<void> {
           return;
         }
         res.pipe(file);
-        file.on('finish', () => file.close(resolve));
+        file.on('finish', () => file.close(() => resolve()));
       }).on('error', reject);
     };
     request(url);

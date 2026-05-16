@@ -225,7 +225,7 @@ export class LayeredMemoryStore implements MemoryStore {
     return row.count;
   }
 
-  listLayer(layer: number, limit = 50, offset = 0): import('./store.js').LayerEntry[] {
+  listLayer(layer: number, limit = 50, offset = 0): Array<{ id: string | number; content: string; createdAt?: string; tags?: string[]; meta?: Record<string, unknown> }> {
     switch (layer) {
       case 0: {
         const rows = this.db.prepare(
@@ -285,6 +285,59 @@ export class LayeredMemoryStore implements MemoryStore {
       DELETE FROM memory_l3_persona;
       DELETE FROM memory_embeddings;
     `);
+  }
+
+  listUserMemories(limit = 200): Array<{ id: string; content: string; tags: string[]; createdAt: number; source?: string }> {
+    const rows = this.db.prepare(
+      `SELECT e.id, e.summary, e.tags, e.created_at, r.role
+       FROM memory_l1_extracted e
+       LEFT JOIN memory_l0_raw r ON e.id = r.id
+       WHERE e.mem_type = 'user' OR r.role = 'user' OR e.mem_type IS NULL
+       ORDER BY e.created_at DESC LIMIT ?`
+    ).all(limit) as any[];
+    return rows.map(r => ({
+      id: r.id,
+      content: r.summary,
+      tags: JSON.parse(r.tags || '[]'),
+      createdAt: new Date(r.created_at).getTime(),
+      source: r.role === 'user' ? 'notebook' : undefined,
+    }));
+  }
+
+  createUserMemory(input: { content: string; tags: string[]; source?: string }): { id: string; content: string; tags: string[]; createdAt: number; source?: string } {
+    const id = `mem_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+    const now = new Date().toISOString();
+    const segmented = segmentChinese(input.content);
+    this.db.prepare(
+      `INSERT INTO memory_l0_raw (id, session_id, role, content, segmented_content, scope, mem_type, cwd, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, 'manual', 'user', input.content, segmented, 'global', 'user', null, now);
+    this.db.prepare(
+      `INSERT INTO memory_l1_extracted (id, source_ids, summary, tags, scope, mem_type, cwd, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, JSON.stringify([id]), input.content, JSON.stringify(input.tags), 'global', 'user', null, now);
+    return { id, content: input.content, tags: input.tags, createdAt: Date.now(), source: input.source };
+  }
+
+  updateUserMemory(id: string, input: { content?: string; tags?: string[] }): { id: string; content: string; tags: string[] } | null {
+    const existing = this.db.prepare('SELECT id FROM memory_l1_extracted WHERE id = ?').get(id) as any;
+    if (!existing) return null;
+    if (input.content !== undefined) {
+      const segmented = segmentChinese(input.content);
+      this.db.prepare('UPDATE memory_l0_raw SET content = ?, segmented_content = ? WHERE id = ?').run(input.content, segmented, id);
+      this.db.prepare('UPDATE memory_l1_extracted SET summary = ? WHERE id = ?').run(input.content, id);
+    }
+    if (input.tags !== undefined) {
+      this.db.prepare('UPDATE memory_l1_extracted SET tags = ? WHERE id = ?').run(JSON.stringify(input.tags), id);
+    }
+    const updated = this.db.prepare('SELECT summary, tags FROM memory_l1_extracted WHERE id = ?').get(id) as any;
+    return { id, content: updated.summary, tags: JSON.parse(updated.tags || '[]') };
+  }
+
+  deleteUserMemory(id: string): boolean {
+    const del0 = this.db.prepare('DELETE FROM memory_l0_raw WHERE id = ?').run(id).changes;
+    const del1 = this.db.prepare('DELETE FROM memory_l1_extracted WHERE id = ?').run(id).changes;
+    return (del0 + del1) > 0;
   }
 
   close(): void {

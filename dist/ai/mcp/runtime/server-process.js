@@ -1,11 +1,16 @@
 import { spawn } from 'child_process';
-export function startMcpServerProcess(command, args = [], opts) {
-    const child = spawn(command, args, {
+export function buildMcpServerSpawnOptions(command, opts) {
+    const platform = opts?.platform ?? process.platform;
+    return {
         stdio: 'pipe',
         cwd: opts?.cwd,
         env: opts?.env ? { ...process.env, ...opts.env } : undefined,
-        windowsVerbatimArguments: process.platform === 'win32' && command.toLowerCase() === 'cmd.exe',
-    });
+        windowsVerbatimArguments: platform === 'win32' && command.toLowerCase() === 'cmd.exe',
+        ...(platform === 'win32' ? { windowsHide: true } : {}),
+    };
+}
+export function startMcpServerProcess(command, args = [], opts) {
+    const child = spawn(command, args, buildMcpServerSpawnOptions(command, opts));
     return {
         child,
         dispose() {
@@ -46,13 +51,34 @@ export function createStdioMcpTransport(child) {
     const pending = new Map();
     const handleStdout = (chunk) => {
         buffer += chunk.toString();
-        // NDJSON: split on newlines
-        const lines = buffer.split('\n');
-        buffer = lines.pop(); // keep incomplete last line in buffer
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed)
+        while (buffer.length > 0) {
+            if (buffer.startsWith('Content-Length:')) {
+                const messages = decodeMcpFrames(buffer);
+                if (messages.length === 0) {
+                    break;
+                }
+                let consumed = 0;
+                for (const message of messages) {
+                    consumed += Buffer.byteLength(encodeMcpMessage(message), 'utf8');
+                    if (typeof message.id === 'number' && pending.has(message.id)) {
+                        const request = pending.get(message.id);
+                        pending.delete(message.id);
+                        request.resolve(message);
+                    }
+                }
+                buffer = buffer.slice(consumed);
                 continue;
+            }
+            const newlineIndex = buffer.indexOf('\n');
+            if (newlineIndex === -1) {
+                break;
+            }
+            const line = buffer.slice(0, newlineIndex);
+            buffer = buffer.slice(newlineIndex + 1);
+            const trimmed = line.trim();
+            if (!trimmed) {
+                continue;
+            }
             try {
                 const message = JSON.parse(trimmed);
                 if (typeof message.id === 'number' && pending.has(message.id)) {
@@ -62,7 +88,7 @@ export function createStdioMcpTransport(child) {
                 }
             }
             catch {
-                // Skip non-JSON lines (e.g. server logs)
+                // Skip non-JSON log lines emitted to stdout.
             }
         }
     };

@@ -1,10 +1,15 @@
 import { spawn } from 'child_process';
 import { decodeLspFrames, encodeLspMessage } from './client.js';
-export function startLspServerProcess(command, args = []) {
-    const child = spawn(command, args, {
+export function buildLspServerSpawnOptions(command, options = {}) {
+    const platform = options.platform ?? process.platform;
+    return {
         stdio: 'pipe',
-        windowsVerbatimArguments: process.platform === 'win32' && command.toLowerCase() === 'cmd.exe',
-    });
+        windowsVerbatimArguments: platform === 'win32' && command.toLowerCase() === 'cmd.exe',
+        ...(platform === 'win32' ? { windowsHide: true } : {}),
+    };
+}
+export function startLspServerProcess(command, args = []) {
+    const child = spawn(command, args, buildLspServerSpawnOptions(command));
     return {
         child,
         dispose() {

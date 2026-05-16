@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react'
-import { FileText, RefreshCw, Settings, AlertTriangle, Brain, Check, ChevronRight } from 'lucide-react'
+import { FileText, RefreshCw, Settings, AlertTriangle, Brain, Check, ChevronRight, Database } from 'lucide-react'
 import { PillToggle, Modal } from '../shared'
 import { ProviderSelectCard } from './ProviderSelectCard'
 import { SpinnerIcon } from '../shared/components/auth-ui'
@@ -13,6 +13,52 @@ import { SettingsSectionHeader } from './_SettingsSectionHeader'
 import { MemoryConfigModal } from './MemoryConfigModal'
 import { listMemoryErrors, type MemoryErrorEvent } from '../../api'
 import { PastedContentModal } from '../PastedContentModal'
+
+// ---------------------------------------------------------------------------
+// Local memory stats display
+// ---------------------------------------------------------------------------
+
+function LocalMemoryStats() {
+  const [stats, setStats] = useState<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>(null);
+  const { locale } = useLocale();
+  const desktopApi = getDesktopApi();
+
+  useEffect(() => {
+    desktopApi.memoryStats().then(s => setStats(s)).catch(() => setStats(null));
+  }, [desktopApi]);
+
+  if (!stats) return null;
+
+  return (
+    <div className="rounded-xl bg-[var(--c-bg-menu)] p-4" style={{ border: '0.5px solid var(--c-border-subtle)' }}>
+      <div className="flex items-center gap-2 mb-3">
+        <Database className="w-4 h-4" />
+        <span className="text-sm font-medium">{locale === 'zh' ? '本地分层记忆' : 'Local Layered Memory'}</span>
+      </div>
+      <div className="grid grid-cols-4 gap-3 text-xs">
+        <div className="flex flex-col">
+          <span className="text-[var(--c-text-muted)]">L0 Raw</span>
+          <span className="font-medium">{stats.l0}</span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[var(--c-text-muted)]">L1 Extracted</span>
+          <span className="font-medium">{stats.l1}</span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[var(--c-text-muted)]">L2 Scenario</span>
+          <span className="font-medium">{stats.l2}</span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[var(--c-text-muted)]">L3 Persona</span>
+          <span className="font-medium">{stats.l3}</span>
+        </div>
+      </div>
+      <div className="mt-2 text-xs text-[var(--c-text-muted)]">
+        {locale === 'zh' ? `数据库大小: ${(stats.dbSizeBytes / 1024).toFixed(1)} KB` : `DB size: ${(stats.dbSizeBytes / 1024).toFixed(1)} KB`}
+      </div>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Status dot — shows health on the provider card
@@ -862,6 +908,9 @@ export function MemorySettings({ accessToken }: Props) {
   return (
     <div className="flex flex-col gap-6">
       <SettingsSectionHeader title={ds.memorySettingsTitle} description={ds.memorySettingsDesc} />
+
+      {/* Local layered memory stats */}
+      <LocalMemoryStats />
 
       {/* Enable Memory + Auto-summarize compound card */}
       <div className="rounded-xl border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-menu)]">

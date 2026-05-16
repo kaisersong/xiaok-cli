@@ -31,3 +31,11 @@ export class FileMemoryStore {
         });
     }
 }
+export async function createMemoryStoreAsync(config) {
+    if (config) {
+        const { LayeredMemoryStore, resolveLayeredConfig } = await import('./layered-store.js');
+        const resolved = resolveLayeredConfig(config);
+        return new LayeredMemoryStore(resolved);
+    }
+    return new FileMemoryStore();
+}

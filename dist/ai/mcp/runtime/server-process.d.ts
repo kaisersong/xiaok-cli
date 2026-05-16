@@ -7,7 +7,15 @@ export interface McpServerProcess {
 export interface McpServerProcessOptions {
     cwd?: string;
     env?: Record<string, string>;
+    platform?: NodeJS.Platform;
 }
+export declare function buildMcpServerSpawnOptions(command: string, opts?: McpServerProcessOptions): {
+    stdio: 'pipe';
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    windowsVerbatimArguments: boolean;
+    windowsHide?: boolean;
+};
 export declare function startMcpServerProcess(command: string, args?: string[], opts?: McpServerProcessOptions): McpServerProcess;
 export declare function encodeMcpMessage(message: McpRuntimeRequest | McpRuntimeResponse): string;
 export declare function decodeMcpFrames(input: string): McpRuntimeResponse[];
