@@ -26,7 +26,7 @@ describe('migrations', () => {
 
     runMigrations(db);
 
-    expect(getSchemaVersion(db)).toBe(1);
+    expect(getSchemaVersion(db)).toBe(2);
 
     const tables = db.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
@@ -47,6 +47,6 @@ describe('migrations', () => {
 
     runMigrations(db);
     runMigrations(db);
-    expect(getSchemaVersion(db)).toBe(1);
+    expect(getSchemaVersion(db)).toBe(2);
   });
 });
