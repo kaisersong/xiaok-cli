@@ -6,6 +6,7 @@ describe('preload API contract', () => {
     expect(PRELOAD_API_KEYS).toEqual([
       'getModelConfig',
       'saveModelConfig',
+      'createManagedXiaokAgent',
       'testProviderConnection',
       'listAvailableModelsForProvider',
       'deleteProvider',
@@ -62,6 +63,14 @@ describe('preload API contract', () => {
       'updateMemory',
       'deleteMemory',
       'importMemories',
+      'memoryStats',
+      'memoryCompact',
+      'memoryPersonaTraits',
+      'memoryListLayer',
+      'memoryDeleteEntry',
+      'memoryClearAll',
+      'memoryGetModelId',
+      'memorySetModelId',
     ]);
   });
 
@@ -157,6 +166,22 @@ describe('preload API contract', () => {
     await expect(api.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' })).resolves.toBe(snapshot);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:getModelConfig');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:saveModelConfig', { providerId: 'kimi', apiKey: 'sk-kimi' });
+  });
+
+  it('routes managed xiaok agent creation through semantic IPC channel', async () => {
+    const result = { ok: true, agent: { id: 'xiaok-po' } };
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue(result),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer);
+
+    await expect(api.createManagedXiaokAgent({ name: 'PO-Agent', roles: ['project_owner'] })).resolves.toBe(result);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:createManagedXiaokAgent', {
+      name: 'PO-Agent',
+      roles: ['project_owner'],
+    });
   });
 
   it('routes createTaskWithFiles through semantic IPC channel', async () => {

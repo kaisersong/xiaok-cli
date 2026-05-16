@@ -1,9 +1,7 @@
 /**
  * CreateAgentModal — 2-step wizard to create a new kswarm agent.
- * Runtime = detected local agent platforms. LLM follows platform config.
- *
- * When runtimeType === 'xiaok', provider/model lists come from Desktop's
- * configured model config (IPC), not kswarm's hardcoded /llm/providers.
+ * Runtime = detected local agent platforms. xiaok 运行时由桌面端主进程
+ * 负责绑定本地 runtime 与平台配置，renderer 不直接拼 provider/apiKey。
  */
 
 import { useState, useEffect } from 'react';
@@ -34,18 +32,6 @@ interface RuntimeOption {
   detected: boolean;
 }
 
-interface DesktopProvider {
-  id: string;
-  label: string;
-  apiKeyConfigured: boolean;
-}
-
-interface DesktopModel {
-  modelId: string;
-  model: string;
-  label: string;
-}
-
 export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
   const { createAgent, fetchRuntimes, fetchLlmProviders } = useKSwarm();
   const { t } = useLocale();
@@ -61,8 +47,6 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
   const [runtimeType, setRuntimeType] = useState('xiaok');
   const [runtimes, setRuntimes] = useState<RuntimeOption[]>([]);
   const [llmProviders, setLlmProviders] = useState<string[]>([]);
-  const [desktopProviders, setDesktopProviders] = useState<DesktopProvider[]>([]);
-  const [desktopModels, setDesktopModels] = useState<DesktopModel[]>([]);
   const [kswarmModels, setKswarmModels] = useState<ModelInfo[]>([]);
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
@@ -73,19 +57,12 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
 
   const isXiaok = runtimeType === 'xiaok';
 
-  // Fetch runtimes, kswarm providers, and desktop providers on open
+  // Fetch runtimes and kswarm providers on open.
   useEffect(() => {
     if (!open) return;
     fetchRuntimes().then(r => setRuntimes(r));
     fetchLlmProviders().then(p => setLlmProviders(p));
-    api.getModelConfig().then(c => setDesktopProviders(c.providers ?? [])).catch(() => {});
   }, [open, fetchRuntimes, fetchLlmProviders]);
-
-  // Fetch available models when xiaok provider changes
-  useEffect(() => {
-    if (!isXiaok || !provider) { setDesktopModels([]); return; }
-    api.listAvailableModelsForProvider(provider).then(m => setDesktopModels(m ?? [])).catch(() => setDesktopModels([]));
-  }, [isXiaok, provider]);
 
   // Fetch kswarm model catalog when a non-xiaok provider is selected
   useEffect(() => {
@@ -109,18 +86,23 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
     if (!name.trim()) return;
     setLoading(true);
     const roles = AGENT_TYPES.find(t => t.id === agentType)!.roles;
-    const input: CreateAgentInput = {
-      name: name.trim(),
-      roles,
-      runtimeType: runtimeType || undefined,
-      provider: provider || undefined,
-      model: model || undefined,
-      baseUrl: (!isXiaok && baseUrl) ? baseUrl : undefined,
-      apiKey: (!isXiaok && apiKey) ? apiKey : undefined,
-      instructions: instructions || undefined,
-    };
     try {
-      const result = await createAgent(input);
+      const result = isXiaok
+        ? await api.createManagedXiaokAgent({
+            name: name.trim(),
+            roles,
+            instructions: instructions || undefined,
+          })
+        : await createAgent({
+            name: name.trim(),
+            roles,
+            runtimeType: runtimeType || undefined,
+            provider: provider || undefined,
+            model: model || undefined,
+            baseUrl: baseUrl || undefined,
+            apiKey: apiKey || undefined,
+            instructions: instructions || undefined,
+          } satisfies CreateAgentInput);
       if (result) {
         handleClose();
       } else {
@@ -141,19 +123,10 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
       ]
     : [{ type: 'xiaok', displayName: 'xiaok', description: 'xiaok 内置智能体', detected: true }];
 
-  // Provider options: xiaok uses Desktop config, others use kswarm /llm/providers
-  const providerOptions = isXiaok && desktopProviders.length > 0
-    ? [
-        { value: '', label: '跟随平台配置' },
-        ...desktopProviders.map(p => ({
-          value: p.id,
-          label: `${p.label}${p.apiKeyConfigured ? '' : ' (未配置 API Key)'}`,
-        })),
-      ]
-    : [
-        { value: '', label: '跟随平台配置' },
-        ...llmProviders.map(p => ({ value: p, label: p === 'openai' ? 'OpenAI' : p === 'anthropic' ? 'Anthropic (Claude)' : p === 'ollama' ? 'Ollama (本地)' : p })),
-      ];
+  const providerOptions = [
+    { value: '', label: '跟随平台配置' },
+    ...llmProviders.map(p => ({ value: p, label: p === 'openai' ? 'OpenAI' : p === 'anthropic' ? 'Anthropic (Claude)' : p === 'ollama' ? 'Ollama (本地)' : p })),
+  ];
 
   return (
     <div
@@ -225,28 +198,29 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
               </div>
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="agent-provider" className="text-[12px] font-medium text-[var(--c-text-secondary)]">LLM 提供商</label>
-              <select id="agent-provider" data-testid="provider-select" value={provider} onChange={e => { setProvider(e.target.value); setModel(''); if (!e.target.value) { setBaseUrl(''); setApiKey(''); } }}
-                className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]">
-                {providerOptions.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-              </select>
-              <p className="text-[10px] text-[var(--c-text-muted)]">
-                {isXiaok ? '使用 xiaok 设置中已配置的 provider' : '默认跟随平台已配置的 provider，无需手动填写'}
-              </p>
-            </div>
+            {isXiaok ? (
+              <div className="rounded-xl border border-[var(--c-border-subtle)] bg-[var(--c-bg-sub)] px-3 py-3">
+                <p className="text-[12px] font-medium text-[var(--c-text-primary)]">将直接使用 xiaok 当前桌面环境运行</p>
+                <p className="mt-1 text-[10px] text-[var(--c-text-muted)]">
+                  provider、模型和本地 runtime 由桌面端自动绑定，无需手动填写。
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="agent-provider" className="text-[12px] font-medium text-[var(--c-text-secondary)]">LLM 提供商</label>
+                <select id="agent-provider" data-testid="provider-select" value={provider} onChange={e => { setProvider(e.target.value); setModel(''); if (!e.target.value) { setBaseUrl(''); setApiKey(''); } }}
+                  className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]">
+                  {providerOptions.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                </select>
+                <p className="text-[10px] text-[var(--c-text-muted)]">默认跟随平台已配置的 provider，无需手动填写</p>
+              </div>
+            )}
 
-            {provider && (
+            {!isXiaok && provider && (
               <>
                 <div className="flex flex-col gap-1.5">
                   <label htmlFor="agent-model" className="text-[12px] font-medium text-[var(--c-text-secondary)]">模型</label>
-                  {isXiaok && desktopModels.length > 0 ? (
-                    <select id="agent-model" data-testid="model-select" value={model} onChange={e => setModel(e.target.value)}
-                      className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]">
-                      <option value="">选择模型</option>
-                      {desktopModels.map(m => <option key={m.modelId} value={m.model}>{m.label}</option>)}
-                    </select>
-                  ) : kswarmModels.length > 0 ? (
+                  {kswarmModels.length > 0 ? (
                     <select id="agent-model" data-testid="model-select" value={model} onChange={e => setModel(e.target.value)}
                       className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]">
                       <option value="">选择模型</option>
@@ -258,7 +232,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
                       className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]" />
                   )}
                 </div>
-                {!isXiaok && (provider === 'openai' || provider === 'ollama') && (
+                {(provider === 'openai' || provider === 'ollama') && (
                   <div className="flex flex-col gap-1.5">
                     <label htmlFor="agent-baseurl" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.commonBaseUrl}</label>
                     <input id="agent-baseurl" data-testid="baseurl-input" type="text" value={baseUrl} onChange={e => setBaseUrl(e.target.value)}
@@ -266,7 +240,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
                       className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]" />
                   </div>
                 )}
-                {!isXiaok && provider !== 'ollama' && (
+                {provider !== 'ollama' && (
                   <div className="flex flex-col gap-1.5">
                     <label htmlFor="agent-apikey" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.commonApiKey}</label>
                     <input id="agent-apikey" data-testid="apikey-input" type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-..."

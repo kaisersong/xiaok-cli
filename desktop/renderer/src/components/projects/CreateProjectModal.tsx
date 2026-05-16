@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { X, Check, FolderOpen } from 'lucide-react';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmAgent } from '../../hooks/useKSwarmClient';
+import { getPreferredPoAgentId, getPreferredWorkerSeedId } from '../../../../shared/kswarm-seed-contract.js';
 
 interface CreateProjectModalProps {
   open: boolean;
@@ -21,21 +22,30 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
   const [requirements, setRequirements] = useState('');
   const [poAgent, setPoAgent] = useState('');
   const [members, setMembers] = useState<string[]>([]);
+  const [membersTouched, setMembersTouched] = useState(false);
   const [workFolder, setWorkFolder] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Auto-select PO agent: xiaok desktop seed agent first, then xiaok-cli, then any PO agent
+  // Auto-select PO agent from the dedicated xiaok seed pair when available.
   useEffect(() => {
     if (open && !poAgent && agents.length > 0) {
-      const seedAgent = agents.find(a => a.id === 'xiaok');
-      const cliAgent = agents.find(a => a.id === 'cli-xiaok');
-      const po = agents.find(a => a.roles?.includes('project_owner'));
-      if (seedAgent) setPoAgent(seedAgent.id);
-      else if (cliAgent) setPoAgent(cliAgent.id);
-      else if (po) setPoAgent(po.id);
-      else if (agents.length > 0) setPoAgent(agents[0].id);
+      const preferredPo = getPreferredPoAgentId(agents);
+      if (preferredPo) setPoAgent(preferredPo);
     }
   }, [open, agents, poAgent]);
+
+  const defaultWorkerSeedId = getPreferredWorkerSeedId(agents, poAgent);
+
+  useEffect(() => {
+    if (!open) return;
+    if (membersTouched) return;
+    setMembers(defaultWorkerSeedId ? [defaultWorkerSeedId] : []);
+  }, [open, defaultWorkerSeedId, membersTouched]);
+
+  useEffect(() => {
+    if (!open) return;
+    setMembersTouched(false);
+  }, [open]);
 
   if (!open) return null;
 
@@ -43,7 +53,17 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
   const workerAgents = agents.filter(a => a.id !== poAgent);
 
   const toggleMember = (id: string) => {
-    setMembers(prev => prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]);
+    setMembers(prev => {
+      const base = !membersTouched
+        && defaultWorkerSeedId
+        && prev.length === 1
+        && prev[0] === defaultWorkerSeedId
+        && id !== defaultWorkerSeedId
+        ? []
+        : prev;
+      return base.includes(id) ? base.filter(m => m !== id) : [...base, id];
+    });
+    setMembersTouched(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -64,6 +84,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
       setRequirements('');
       setPoAgent('');
       setMembers([]);
+      setMembersTouched(false);
       setWorkFolder('');
       onClose();
     } finally {

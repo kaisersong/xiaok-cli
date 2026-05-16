@@ -23,6 +23,7 @@ export type {
 export const PRELOAD_API_KEYS = [
   'getModelConfig',
   'saveModelConfig',
+  'createManagedXiaokAgent',
   'testProviderConnection',
   'listAvailableModelsForProvider',
   'deleteProvider',
@@ -230,6 +231,14 @@ export interface KSwarmServiceStatus {
 export interface DesktopApi {
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
+  createManagedXiaokAgent(input: {
+    name: string;
+    description?: string;
+    roles?: string[];
+    capabilities?: string[];
+    instructions?: string;
+    maxConcurrentTasks?: number;
+  }): Promise<unknown>;
   testProviderConnection(input: { providerId: string; modelId?: string }): Promise<TestProviderConnectionResult>;
   listAvailableModelsForProvider(providerId: string): Promise<AvailableModelView[]>;
   deleteProvider(providerId: string): Promise<void>;
@@ -323,6 +332,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
   return {
     getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig') as ReturnType<DesktopApi['getModelConfig']>,
     saveModelConfig: (input) => ipcRenderer.invoke('desktop:saveModelConfig', input) as ReturnType<DesktopApi['saveModelConfig']>,
+    createManagedXiaokAgent: (input) => ipcRenderer.invoke('desktop:createManagedXiaokAgent', input) as ReturnType<DesktopApi['createManagedXiaokAgent']>,
     testProviderConnection: (input) => ipcRenderer.invoke('desktop:testProviderConnection', input) as ReturnType<DesktopApi['testProviderConnection']>,
     listAvailableModelsForProvider: (providerId) => ipcRenderer.invoke('desktop:listAvailableModelsForProvider', providerId) as ReturnType<DesktopApi['listAvailableModelsForProvider']>,
     deleteProvider: (providerId) => ipcRenderer.invoke('desktop:deleteProvider', providerId) as Promise<void>,

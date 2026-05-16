@@ -13,6 +13,18 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { app } from 'electron';
+import {
+  buildSeedAgentReconciliationPlan,
+  createXiaokPoSeed,
+  createXiaokWorkerSeed,
+} from '../shared/kswarm-seed-contract.js';
+import {
+  getDevelopmentBrokerLaunchSpec,
+  getDevelopmentServiceCandidates,
+  type ServiceLaunchSpec,
+} from './kswarm-service-paths.js';
+import { loadConfig } from '../../src/utils/config.js';
+import { buildManagedXiaokAgentPayload, diffManagedXiaokAgentPatch } from './managed-xiaok-agent.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -40,15 +52,10 @@ function resolveServicePath(name: 'kswarm' | 'intent-broker', entryRelative: str
     // Production: bundled in resources/services/
     const bundled = join(process.resourcesPath, 'services', name, entryRelative);
     if (existsSync(bundled)) return bundled;
-  } else {
-    // Development: sibling repo (projects/kswarm, projects/intent-broker)
-    const devPaths = [
-      join(__dirname, '..', '..', '..', name, entryRelative),
-      join(process.env.HOME || '', 'projects', name, entryRelative),
-    ];
-    for (const p of devPaths) {
-      if (existsSync(p)) return p;
-    }
+  }
+
+  for (const p of getDevelopmentServiceCandidates(__dirname, name, entryRelative)) {
+    if (existsSync(p)) return p;
   }
   return null;
 }
@@ -61,12 +68,55 @@ export class KSwarmUnavailableError extends Error {
   }
 }
 
+function resolveBrokerLaunchSpec(): ServiceLaunchSpec | null {
+  const envPath = process.env.BROKER_SERVER_PATH;
+  if (envPath && existsSync(envPath)) {
+    return {
+      cwd: dirname(dirname(envPath)),
+      entryPath: envPath,
+      nodeArgs: ['--experimental-sqlite', envPath],
+    };
+  }
+
+  if (app.isPackaged) {
+    const entryPath = join(process.resourcesPath, 'services', 'intent-broker', 'src', 'cli.js');
+    if (existsSync(entryPath)) {
+      return {
+        cwd: join(process.resourcesPath, 'services', 'intent-broker'),
+        entryPath,
+        nodeArgs: ['--experimental-sqlite', entryPath],
+      };
+    }
+  }
+
+  return getDevelopmentBrokerLaunchSpec(__dirname);
+}
+
 export interface KSwarmServiceStatus {
   running: boolean;
   port: number;
   pid: number | null;
   restartCount: number;
   lastError: string | null;
+}
+
+export function buildBackgroundNodeSpawnOptions(options: {
+  env?: NodeJS.ProcessEnv;
+  cwd?: string;
+  platform?: NodeJS.Platform;
+}): {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  stdio: ['ignore', 'pipe', 'pipe'];
+  windowsHide?: boolean;
+} {
+  const platform = options.platform ?? process.platform;
+  return {
+    cwd: options.cwd,
+    env: options.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    ...(platform === 'win32' ? { windowsHide: true } : {}),
+  };
 }
 
 export interface KSwarmService {
@@ -143,6 +193,86 @@ export function createKSwarmService(): KSwarmService {
     }
   }
 
+  async function reconcileSeedAgents(): Promise<void> {
+    try {
+      const res = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents`);
+      if (!res.ok) return;
+      const payload = await res.json() as { agents?: Array<Record<string, unknown>> };
+      const agents = Array.isArray(payload.agents) ? payload.agents : [];
+      const plan = buildSeedAgentReconciliationPlan(agents as never);
+      const config = await loadConfig();
+      const desiredSeeds = [
+        buildManagedXiaokAgentPayload(createXiaokPoSeed(), config),
+        buildManagedXiaokAgentPayload(createXiaokWorkerSeed(), config),
+      ];
+      let liveness: Record<string, { online: boolean }> = {};
+      try {
+        const livenessRes = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents/liveness`);
+        if (livenessRes.ok) {
+          const livenessPayload = await livenessRes.json() as { liveness?: Record<string, { online: boolean }> };
+          liveness = livenessPayload.liveness ?? {};
+        }
+      } catch {
+        liveness = {};
+      }
+
+      for (const desired of desiredSeeds) {
+        if (!desired.id) {
+          continue;
+        }
+        const existing = agents.find((agent) => agent.id === desired.id);
+        if (!existing) {
+          const createRes = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(desired),
+          });
+          if (!createRes.ok && createRes.status !== 409) {
+            console.warn(`[kswarm-service] Failed to create seed agent ${desired.id}: ${createRes.status}`);
+          }
+          continue;
+        }
+
+        const detailRes = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents/${desired.id}`);
+        const detailPayload = detailRes.ok ? await detailRes.json() as { agent?: Record<string, unknown> } : null;
+        const currentAgent = detailPayload?.agent ?? existing;
+        const patch = diffManagedXiaokAgentPatch(currentAgent, desired);
+        if (patch) {
+          const updateRes = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents/${desired.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+          });
+          if (!updateRes.ok) {
+            console.warn(`[kswarm-service] Failed to update seed agent ${desired.id}: ${updateRes.status}`);
+          }
+        }
+
+        const status = String(existing.status ?? 'offline');
+        const isGhostOnline = status !== 'offline' && liveness[desired.id]?.online === false;
+        if ((patch && status !== 'offline') || isGhostOnline) {
+          const restartRes = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents/${desired.id}/restart`, {
+            method: 'POST',
+          });
+          if (!restartRes.ok) {
+            console.warn(`[kswarm-service] Failed to restart seed agent ${desired.id}: ${restartRes.status}`);
+          }
+        }
+      }
+
+      for (const agentId of plan.archive) {
+        const archiveRes = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents/${agentId}`, {
+          method: 'DELETE',
+        });
+        if (!archiveRes.ok && archiveRes.status !== 404) {
+          console.warn(`[kswarm-service] Failed to archive legacy seed ${agentId}: ${archiveRes.status}`);
+        }
+      }
+    } catch (error) {
+      console.warn('[kswarm-service] Seed agent reconciliation failed:', (error as Error).message);
+    }
+  }
+
   function scheduleRestart() {
     if (stopping || restartCount >= MAX_RESTART_ATTEMPTS) {
       if (restartCount >= MAX_RESTART_ATTEMPTS) {
@@ -169,17 +299,17 @@ export function createKSwarmService(): KSwarmService {
       if (res.ok) return true;
     } catch {}
 
-    const brokerEntry = resolveServicePath('intent-broker', 'src/index.js');
-    if (!brokerEntry) {
+    const brokerLaunch = resolveBrokerLaunchSpec();
+    if (!brokerLaunch) {
       console.log('[kswarm-service] Broker entry not found, assuming external broker');
       return true; // May be running externally
     }
 
-    console.log(`[kswarm-service] Spawning broker: ${brokerEntry}`);
-    brokerChild = spawn('node', [brokerEntry], {
+    console.log(`[kswarm-service] Spawning broker: ${brokerLaunch.entryPath}`);
+    brokerChild = spawn('node', brokerLaunch.nodeArgs, buildBackgroundNodeSpawnOptions({
+      cwd: brokerLaunch.cwd,
       env: { ...process.env, PORT: String(BROKER_PORT) },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    }));
     brokerChild.stdout?.on('data', (d: Buffer) => {
       const msg = d.toString().trim();
       if (msg) console.log(`[broker] ${msg}`);
@@ -214,17 +344,19 @@ export function createKSwarmService(): KSwarmService {
     }
 
     // Ensure broker is up first
-    await ensureBroker();
+    const brokerReady = await ensureBroker();
+    if (!brokerReady) {
+      console.warn('[kswarm-service] Broker not ready after bootstrap attempt; starting kswarm in degraded mode');
+    }
 
     console.log(`[kswarm-service] Spawning kswarm server: ${serverPath}`);
-    child = spawn('node', [serverPath], {
+    child = spawn('node', [serverPath], buildBackgroundNodeSpawnOptions({
       env: {
         ...process.env,
         KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`,
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    }));
 
     child.stdout?.on('data', (data: Buffer) => {
       const msg = data.toString().trim();
@@ -259,6 +391,7 @@ export function createKSwarmService(): KSwarmService {
     // Wait for health check to confirm server is ready
     const ready = await waitForReady(8_000);
     if (ready) {
+      await reconcileSeedAgents();
       running = true;
       lastError = null;
       restartCount = 0; // Reset on successful start

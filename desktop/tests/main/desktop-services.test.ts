@@ -131,6 +131,61 @@ describe('desktop services', () => {
     });
   });
 
+  it('creates managed xiaok agents from desktop config without asking renderer for provider details', async () => {
+    const originalFetch = globalThis.fetch;
+    const appDataRoot = join(rootDir, 'appdata');
+    const npmDir = join(appDataRoot, 'npm');
+    mkdirSync(npmDir, { recursive: true });
+    writeFileSync(join(npmDir, 'xiaok.ps1'), '# stub');
+    process.env.APPDATA = appDataRoot;
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, agent: { id: 'xiaok-po' } }),
+    });
+    globalThis.fetch = fetchMock as typeof globalThis.fetch;
+
+    try {
+      const services = createDesktopServices({
+        dataRoot: join(rootDir, 'data'),
+        now: () => 300,
+      });
+
+      await services.saveModelConfig({
+        providerId: 'anthropic',
+        modelId: 'anthropic-default',
+        apiKey: 'sk-anthropic',
+      });
+
+      const result = await services.createManagedXiaokAgent({
+        name: 'PO-Agent',
+        roles: ['project_owner'],
+        instructions: '负责规划',
+      });
+
+      expect(result).toEqual({ ok: true, agent: { id: 'xiaok-po' } });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:4400/agents', expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }));
+      const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+      expect(payload).toMatchObject({
+        name: 'PO-Agent',
+        instructions: '负责规划',
+        runtimeType: 'xiaok',
+        roles: ['project_owner'],
+        provider: 'anthropic',
+        model: 'claude-opus-4-6',
+        runtimeModel: 'claude-opus-4-6',
+        apiKey: 'sk-anthropic',
+        runtimePath: null,
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('lists available models for a first-party provider', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),

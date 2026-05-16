@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   systemUsername: os.userInfo().username,
   getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig'),
   saveModelConfig: (input) => ipcRenderer.invoke('desktop:saveModelConfig', input),
+  createManagedXiaokAgent: (input) => ipcRenderer.invoke('desktop:createManagedXiaokAgent', input),
   testProviderConnection: (input) => ipcRenderer.invoke('desktop:testProviderConnection', input),
   listAvailableModelsForProvider: (providerId) => ipcRenderer.invoke('desktop:listAvailableModelsForProvider', providerId),
   deleteProvider: (providerId) => ipcRenderer.invoke('desktop:deleteProvider', providerId),

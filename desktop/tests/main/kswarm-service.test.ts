@@ -1,10 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { KSwarmUnavailableError } from '../../electron/kswarm-service.js';
+import { describe, expect, it } from 'vitest';
 
-// We can't actually spawn kswarm in unit tests, so we test the
-// request() logic by creating a mock KSwarmService that exposes
-// the same interface.
+import { buildBackgroundNodeSpawnOptions, KSwarmUnavailableError } from '../../electron/kswarm-service.js';
 
+// We can't actually spawn kswarm in unit tests, so request() behavior is tested
+// with a mock that mirrors the service gateway contract.
 interface MockKSwarmService {
   running: boolean;
   startCalls: number;
@@ -16,6 +15,7 @@ interface MockKSwarmService {
 function createMockKSwarmService(handlers: {
   onStart?: () => Promise<void>;
   onFetch?: (path: string, init?: RequestInit) => Response | Promise<Response>;
+  shouldRunAfterStart?: boolean;
 }): MockKSwarmService {
   let running = false;
   let startCalls = 0;
@@ -23,16 +23,20 @@ function createMockKSwarmService(handlers: {
 
   async function ensureReady(): Promise<void> {
     if (running) return;
-    if (startingPromise) { await startingPromise; return; }
-    startingPromise = start().catch(() => {});
+    if (startingPromise) {
+      await startingPromise;
+      return;
+    }
+    startingPromise = start().finally(() => {
+      startingPromise = null;
+    });
     await startingPromise;
-    startingPromise = null;
   }
 
   async function start(): Promise<void> {
     startCalls++;
     if (handlers.onStart) await handlers.onStart();
-    running = true;
+    running = handlers.shouldRunAfterStart ?? true;
   }
 
   async function request(path: string, init?: RequestInit): Promise<Response> {
@@ -50,16 +54,44 @@ function createMockKSwarmService(handlers: {
     return { running };
   }
 
-  // Expose for test assertions
-  const service = {
+  return {
     get running() { return running; },
     get startCalls() { return startCalls; },
     start,
     getStatus,
     request,
   };
-  return service;
 }
+
+describe('kswarm service spawn options', () => {
+  it('hides Windows console windows for desktop-managed background services', () => {
+    const options = buildBackgroundNodeSpawnOptions({
+      platform: 'win32',
+      cwd: 'D:\\projects\\intent-broker',
+      env: { PORT: '4318' },
+    });
+
+    expect(options).toMatchObject({
+      cwd: 'D:\\projects\\intent-broker',
+      env: { PORT: '4318' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+  });
+
+  it('keeps the same stdio contract on non-Windows platforms without forcing windowsHide', () => {
+    const options = buildBackgroundNodeSpawnOptions({
+      platform: 'darwin',
+      env: { PORT: '4400' },
+    });
+
+    expect(options).toMatchObject({
+      env: { PORT: '4400' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    expect(options.windowsHide).toBeUndefined();
+  });
+});
 
 describe('kswarm service request gateway', () => {
   it('auto-starts when not running', async () => {
@@ -77,7 +109,7 @@ describe('kswarm service request gateway', () => {
     await svc.start();
     expect(svc.startCalls).toBe(1);
     await svc.request('/agents');
-    expect(svc.startCalls).toBe(1); // no additional start call
+    expect(svc.startCalls).toBe(1);
   });
 
   it('concurrent requests share the same start promise', async () => {
@@ -98,16 +130,13 @@ describe('kswarm service request gateway', () => {
     expect(r1).toBeTruthy();
     expect(r2).toBeTruthy();
     expect(r3).toBeTruthy();
-    expect(svc.startCalls).toBe(1); // only one start call
+    expect(svc.startCalls).toBe(1);
     expect(startComplete).toBe(true);
   });
 
-  it('throws KSwarmUnavailableError when start fails', async () => {
+  it('throws KSwarmUnavailableError when start does not make the service running', async () => {
     const svc = createMockKSwarmService({
-      onStart: async () => {
-        // Simulate failure: don't set running=true
-        throw new Error('spawn failed');
-      },
+      shouldRunAfterStart: false,
     });
 
     await expect(svc.request('/agents')).rejects.toThrow(KSwarmUnavailableError);

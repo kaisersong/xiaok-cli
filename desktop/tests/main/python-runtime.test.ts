@@ -1,0 +1,86 @@
+import { describe, expect, it, vi } from 'vitest';
+import {
+  buildPythonServerEnv,
+  ensureSlideRendererPythonReady,
+  normalizePythonServerCommand,
+  type PythonExecFile,
+} from '../../electron/python-runtime.js';
+
+describe('python runtime helper', () => {
+  it('returns ready immediately when imports already work', async () => {
+    const exec: PythonExecFile = vi.fn(async (_command, args) => {
+      if (args[0] === '-c') return;
+      throw new Error(`unexpected args: ${args.join(' ')}`);
+    });
+
+    const result = await ensureSlideRendererPythonReady({
+      venvPython: 'C:\\runtime\\python.exe',
+      wheelsDir: 'C:\\wheels',
+      markerPath: 'C:\\runtime\\.deps-installed',
+      exec,
+    });
+
+    expect(result).toEqual({ ready: true, mode: 'existing' });
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to online pip install when offline wheel install fails', async () => {
+    const exec: PythonExecFile = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('No module named mcp'))
+      .mockRejectedValueOnce(new Error('wheel not supported on this platform'))
+      .mockRejectedValueOnce(new Error('No module named mcp'))
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined);
+
+    const markerWrites: string[] = [];
+    const result = await ensureSlideRendererPythonReady({
+      venvPython: 'C:\\runtime\\python.exe',
+      wheelsDir: 'C:\\wheels',
+      markerPath: 'C:\\runtime\\.deps-installed',
+      exec,
+      writeMarker: (markerPath) => markerWrites.push(markerPath),
+    });
+
+    expect(result).toEqual({ ready: true, mode: 'online' });
+    expect(exec).toHaveBeenNthCalledWith(2, 'C:\\runtime\\python.exe', [
+      '-m', 'pip', 'install', '--no-index', '--find-links', 'C:\\wheels',
+      'mcp', 'jsonschema', 'pydantic', 'bs4',
+    ], { timeout: 60_000 });
+    expect(exec).toHaveBeenNthCalledWith(4, 'C:\\runtime\\python.exe', [
+      '-m', 'pip', 'install',
+      'mcp==1.27.1', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4',
+    ], { timeout: 120_000 });
+    expect(markerWrites).toEqual(['C:\\runtime\\.deps-installed']);
+  });
+
+  it('does not trust a stale marker when imports are still broken', async () => {
+    const exec: PythonExecFile = vi.fn().mockRejectedValue(new Error('No module named mcp'));
+    const result = await ensureSlideRendererPythonReady({
+      venvPython: 'C:\\runtime\\python.exe',
+      wheelsDir: 'C:\\wheels',
+      markerPath: 'C:\\runtime\\.deps-installed',
+      exec,
+      markerExists: true,
+    });
+
+    expect(result).toEqual({ ready: false, mode: 'failed' });
+  });
+
+  it('normalizes python3 to python on Windows when no managed venv is ready', () => {
+    expect(normalizePythonServerCommand('python3', 'win32')).toBe('python');
+    expect(normalizePythonServerCommand('python', 'win32')).toBe('python');
+  });
+
+  it('prefers managed python command when provided', () => {
+    expect(normalizePythonServerCommand('python3', 'win32', 'C:\\runtime\\python.exe')).toBe('C:\\runtime\\python.exe');
+  });
+
+  it('forces utf-8 env for python MCP subprocesses on Windows', () => {
+    expect(buildPythonServerEnv({ EXISTING: '1' })).toEqual({
+      EXISTING: '1',
+      PYTHONUTF8: '1',
+      PYTHONIOENCODING: 'utf-8',
+    });
+  });
+});

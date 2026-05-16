@@ -50,6 +50,12 @@ try {
 let _desktopMemoryStore: MemoryStore | null = null;
 let _desktopMemoryStoreDataRoot: string | null = null;
 
+type DesktopFallbackMemoryStore = MemoryStore & {
+  delete(id: string): boolean;
+  getStats(): { l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number };
+  clearAll(): void;
+};
+
 /**
  * Adapt UserMemoryStore (pure-JS, no native deps) to the MemoryStore interface.
  * Used as fallback when better-sqlite3 cannot load in this Electron version.
@@ -59,7 +65,7 @@ function createFallbackMemoryStore(dataRoot: string): MemoryStore {
   mkdirSync(memoriesDir, { recursive: true });
   const userStore = new UserMemoryStore(memoriesDir);
 
-  const store: MemoryStore = {
+  const store: DesktopFallbackMemoryStore = {
     async save(record) {
       userStore.create({
         content: record.summary || record.title || '',
@@ -91,7 +97,7 @@ function createFallbackMemoryStore(dataRoot: string): MemoryStore {
         type: 'user' as const,
       }));
     },
-    async delete(id) {
+    delete(id: string) {
       return userStore.delete(id);
     },
     getStats() {
@@ -154,6 +160,8 @@ export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
   _desktopMemoryStoreDataRoot = dataRoot;
   return store;
 }
+import { buildPythonServerEnv, normalizePythonServerCommand } from './python-runtime.js';
+import { buildManagedXiaokAgentPayload } from './managed-xiaok-agent.js';
 
 // ---- Skill stats types ----
 
@@ -613,12 +621,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             if (server.type !== 'stdio') continue;
             try {
               // Use managed venv python if available for Python MCP servers
-              const command = (server.command === 'python3' || server.command === 'python')
-                ? (process.env.XIAOK_PYTHON_CMD || server.command)
+              const isPythonServer = server.command === 'python3' || server.command === 'python';
+              const command = isPythonServer
+                ? normalizePythonServerCommand(server.command, process.platform, process.env.XIAOK_PYTHON_CMD)
                 : server.command;
+              const baseEnv = 'env' in server ? (server as { env?: Record<string, string> }).env : undefined;
               const proc = startMcpServerProcess(command, server.args ?? [], {
                 cwd: plugin.rootDir,
-                env: 'env' in server ? (server as { env?: Record<string, string> }).env : undefined,
+                env: isPythonServer ? buildPythonServerEnv(baseEnv) : baseEnv,
               });
               const transport = createStdioMcpTransport(proc.child);
               const client = createMcpRuntimeClient(transport);
@@ -795,6 +805,27 @@ export function createDesktopServices(options: DesktopServicesOptions) {
 
       await saveConfig(config);
       return createModelConfigSnapshot(config);
+    },
+    async createManagedXiaokAgent(input: {
+      name: string;
+      description?: string;
+      roles?: string[];
+      capabilities?: string[];
+      instructions?: string;
+      maxConcurrentTasks?: number;
+    }) {
+      const config = await loadConfig();
+      const payload = buildManagedXiaokAgentPayload(input, config);
+      const response = await fetch('http://127.0.0.1:4400/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const message = await response.text().catch(() => '');
+        throw new Error(message || `Failed to create managed xiaok agent: ${response.status}`);
+      }
+      return response.json();
     },
     async getSkillDebugConfig() {
       const config = await loadConfig();
