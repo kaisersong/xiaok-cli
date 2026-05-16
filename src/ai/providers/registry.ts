@@ -14,6 +14,8 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
       capabilities: ['tools'],
     },
     availableModels: [
+      { modelId: 'openai-gpt-5.5', model: 'gpt-5.5', label: 'GPT-5.5', capabilities: ['tools'] },
+      { modelId: 'openai-gpt-5', model: 'gpt-5', label: 'GPT-5', capabilities: ['tools'] },
       { modelId: 'openai-gpt-4o', model: 'gpt-4o', label: 'GPT-4o', capabilities: ['tools'] },
       { modelId: 'openai-gpt-4.1', model: 'gpt-4.1', label: 'GPT-4.1', capabilities: ['tools'] },
       { modelId: 'openai-o4-mini', model: 'o4-mini', label: 'o4-mini', capabilities: ['tools', 'thinking'] },
@@ -28,11 +30,13 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     envPrefixes: ['ANTHROPIC', 'CLAUDE'],
     defaultModel: {
       modelId: 'anthropic-default',
-      model: 'claude-opus-4-6',
-      label: 'Claude Opus 4.6',
+      model: 'claude-opus-4-7',
+      label: 'Claude Opus 4.7',
       capabilities: ['tools'],
     },
     availableModels: [
+      { modelId: 'anthropic-claude-opus-4-7', model: 'claude-opus-4-7', label: 'Claude Opus 4.7', capabilities: ['tools'] },
+      { modelId: 'anthropic-claude-sonnet-4-7', model: 'claude-sonnet-4-7', label: 'Claude Sonnet 4.7', capabilities: ['tools'] },
       { modelId: 'anthropic-claude-opus-4-6', model: 'claude-opus-4-6', label: 'Claude Opus 4.6', capabilities: ['tools'] },
       { modelId: 'anthropic-claude-sonnet-4-6', model: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', capabilities: ['tools'] },
       { modelId: 'anthropic-claude-haiku-4-6', model: 'claude-haiku-4-6', label: 'Claude Haiku 4.6', capabilities: ['tools'] },
@@ -46,13 +50,15 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     envPrefixes: ['KIMI'],
     defaultModel: {
       modelId: 'kimi-default',
-      model: 'kimi-for-coding',
-      label: 'Kimi for Coding',
+      model: 'kimi-k2.6',
+      label: 'Kimi K2.6',
       capabilities: ['tools', 'thinking'],
     },
     availableModels: [
+      { modelId: 'kimi-k2.6', model: 'kimi-k2.6', label: 'Kimi K2.6', capabilities: ['tools', 'thinking'] },
+      { modelId: 'kimi-k2.5', model: 'kimi-k2.5', label: 'Kimi K2.5', capabilities: ['tools', 'thinking'] },
       { modelId: 'kimi-for-coding', model: 'kimi-for-coding', label: 'Kimi for Coding', capabilities: ['tools', 'thinking'] },
-      { modelId: 'kimi-k2', model: 'k2-0507-preview', label: 'Kimi K2', capabilities: ['tools', 'thinking'] },
+      { modelId: 'kimi-k2-thinking', model: 'kimi-k2-thinking', label: 'Kimi K2 Thinking', capabilities: ['tools', 'thinking'] },
     ],
   },
   deepseek: {
@@ -80,13 +86,16 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     envPrefixes: ['GLM'],
     defaultModel: {
       modelId: 'glm-default',
-      model: 'glm-4.5',
-      label: 'GLM 4.5',
+      model: 'GLM-5.1',
+      label: 'GLM 5.1',
       capabilities: ['tools'],
     },
     availableModels: [
+      { modelId: 'glm-5.1', model: 'GLM-5.1', label: 'GLM 5.1', capabilities: ['tools'] },
+      { modelId: 'glm-5', model: 'GLM-5', label: 'GLM 5', capabilities: ['tools'] },
+      { modelId: 'glm-5-turbo', model: 'GLM-5-Turbo', label: 'GLM 5 Turbo', capabilities: ['tools'] },
+      { modelId: 'glm-4.7', model: 'GLM-4.7', label: 'GLM 4.7', capabilities: ['tools'] },
       { modelId: 'glm-4.5', model: 'glm-4.5', label: 'GLM 4.5', capabilities: ['tools'] },
-      { modelId: 'glm-4-plus', model: 'glm-4-plus', label: 'GLM 4 Plus', capabilities: ['tools'] },
     ],
   },
   minimax: {
