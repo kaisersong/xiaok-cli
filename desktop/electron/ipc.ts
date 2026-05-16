@@ -24,6 +24,12 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
     log('info', 'saveModelConfig ok');
     return r;
   });
+  ipcMain.handle('desktop:createManagedXiaokAgent', async (_event, input) => {
+    log('info', 'createManagedXiaokAgent', { name: input?.name, roles: input?.roles });
+    const r = await services.createManagedXiaokAgent(input);
+    log('info', 'createManagedXiaokAgent ok');
+    return r;
+  });
   ipcMain.handle('desktop:testProviderConnection', async (_event, input) => {
     log('info', 'testProviderConnection', { providerId: input?.providerId });
     const r = await services.testProviderConnection(input);

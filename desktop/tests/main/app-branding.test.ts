@@ -34,6 +34,7 @@ describe('desktop app branding', () => {
     expect(builder.mac?.icon).toBe('build/icon.icns');
     expect(builder.mac?.target).toContain('dir');
     expect(builder.win?.icon).toBe('build/icon.ico');
+    expect(desktopPackage.scripts?.['build:main']).toContain('generate-desktop-service-overrides.mjs');
     expect(desktopPackage.scripts?.['build:main']).toContain('build/icon.png');
     expect(builder.nsis?.oneClick).toBe(false);
     expect(builder.nsis?.perMachine).toBe(false);

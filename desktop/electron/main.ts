@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell, nativeImage } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { createDesktopServices } from './desktop-services.js';
 import { registerDesktopIpc } from './ipc.js';
 import { buildBrowserWindowOptions, isAllowedNavigationUrl } from './security.js';
@@ -23,25 +24,49 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
 
+function debugMain(message: string, extra?: unknown): void {
+  const suffix = extra === undefined ? '' : ` ${JSON.stringify(extra)}`;
+  const line = `[main-debug] ${message}${suffix}`;
+  try {
+    const logDir = join(__dirname, '..', '..', '..', '.tmp');
+    mkdirSync(logDir, { recursive: true });
+    appendFileSync(join(logDir, 'main-debug.log'), `${new Date().toISOString()} ${line}\n`);
+  } catch {}
+  console.log(line);
+}
+
 // Suppress EPIPE errors from console.log after stdout pipe closes
 process.on('uncaughtException', (err) => {
   if ((err as NodeJS.ErrnoException).code === 'EPIPE') return;
   console.error('[main] uncaughtException:', err);
 });
-const singleInstanceLock = app.requestSingleInstanceLock();
+process.on('unhandledRejection', (reason) => {
+  console.error('[main] unhandledRejection:', reason);
+});
+process.on('exit', (code) => {
+  debugMain('process exit', { code });
+});
+const singleInstanceDisabled = process.env.XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE === '1';
+const singleInstanceLock = singleInstanceDisabled ? true : app.requestSingleInstanceLock();
+if (singleInstanceDisabled) {
+  debugMain('single-instance-lock:disabled-by-env');
+}
 
 async function createWindow(): Promise<BrowserWindow> {
+  debugMain('createWindow:start');
   const preloadPath = join(__dirname, 'preload.cjs');
   const window = new BrowserWindow(buildBrowserWindowOptions(preloadPath, {
     platform: process.platform,
     iconPath: resolveDesktopWindowIconPath(__dirname, process.platform),
   }));
+  debugMain('createWindow:browserWindow-created');
   removeWindowsWindowMenu(window, process.platform);
   mainWindow = window;
   const services = createDesktopServices({
     dataRoot: join(app.getPath('home'), '.xiaok', 'desktop'),
   });
   await registerDesktopIpc(ipcMain, window, services);
+  debugMain('createWindow:ipc-registered');
 
   // Register update IPC handlers
   ipcMain.handle('desktop:getUpdateStatus', () => {
@@ -88,6 +113,7 @@ async function createWindow(): Promise<BrowserWindow> {
 
   // Deploy bundled plugins (report-creator, slide-creator) to ~/.xiaok/plugins/
   const deployResult = await deployBundledPlugins();
+  debugMain('createWindow:plugins-deployed', deployResult);
   if (deployResult.venvReady) {
     const venvDir = join(app.getPath('home'), '.xiaok', 'runtime', 'python-env');
     process.env.XIAOK_PYTHON_CMD = process.platform === 'win32'
@@ -100,6 +126,7 @@ async function createWindow(): Promise<BrowserWindow> {
   services.registerMcpTools().then(({ dispose }) => {
     mcpDispose = dispose;
   }).catch(() => {});
+  debugMain('createWindow:mcp-registration-started');
 
   // KSwarm service — manages kswarm server as a child process
   const kswarmService = createKSwarmService();
@@ -142,11 +169,13 @@ async function createWindow(): Promise<BrowserWindow> {
 
   // Setup menubar with K icon
   setupMenuBar(window);
+  debugMain('createWindow:menubar-ready');
 
   // Setup auto-updater (production only)
   if (process.env.NODE_ENV !== 'development' && !process.env.XIAOK_DESKTOP_DEV_SERVER) {
     setupAutoUpdater(window).catch(() => {});
   }
+  debugMain('createWindow:before-load');
 
   window.on('closed', () => {
     destroyMenuBar();
@@ -179,6 +208,7 @@ async function createWindow(): Promise<BrowserWindow> {
   } else {
     await window.loadFile(join(__dirname, '../../../renderer/index.html'));
   }
+  debugMain('createWindow:loaded');
   return window;
 }
 
@@ -192,9 +222,11 @@ function restoreOrCreateWindow(): void {
 }
 
 if (!singleInstanceLock) {
+  debugMain('single-instance-lock:failed');
   app.quit();
 } else {
   app.whenReady().then(async () => {
+    debugMain('app:whenReady');
     if (process.platform === 'darwin') {
       app.setName('xiaok');
       // Use .icns for proper macOS dock icon (auto-sizes + rounds corners)
@@ -207,20 +239,26 @@ if (!singleInstanceLock) {
       }
     }
     void createWindow();
+  }).catch((error) => {
+    console.error('[main] whenReady failed:', error);
   });
   app.on('second-instance', () => {
+    debugMain('app:second-instance');
     restoreOrCreateWindow();
   });
   app.on('before-quit', () => {
     isQuitting = true;
     destroyMenuBar();
+    debugMain('app:before-quit');
   });
   app.on('window-all-closed', () => {
+    debugMain('app:window-all-closed', { platform: process.platform });
     if (process.platform !== 'darwin') {
       app.quit();
     }
   });
   app.on('activate', () => {
+    debugMain('app:activate');
     restoreOrCreateWindow();
   });
 }

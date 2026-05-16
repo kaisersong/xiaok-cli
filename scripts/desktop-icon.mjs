@@ -13,7 +13,8 @@ const skipIcns = args.includes('--skip-icns');
 
 const srcPngPath = join(repoRoot, 'data', 'xiaok.png');
 const logoPath = join(repoRoot, 'data', 'logo.txt');
-const iconsetPath = join(outputRoot, 'icon.iconset');
+const defaultIconsetPath = join(outputRoot, 'icon.iconset');
+let iconsetPath = defaultIconsetPath;
 const pngPath = join(outputRoot, 'icon.png');
 const icnsPath = join(outputRoot, 'icon.icns');
 const icoPath = join(outputRoot, 'icon.ico');
@@ -21,8 +22,14 @@ const icoPath = join(outputRoot, 'icon.ico');
 // Use PNG source if available, fall back to text logo
 const usePng = existsSync(srcPngPath);
 
-await rm(iconsetPath, { recursive: true, force: true });
-await mkdir(iconsetPath, { recursive: true });
+try {
+  await rm(defaultIconsetPath, { recursive: true, force: true });
+  await mkdir(defaultIconsetPath, { recursive: true });
+} catch {
+  iconsetPath = join(outputRoot, `icon.iconset-${Date.now()}-${process.pid}`);
+  await rm(iconsetPath, { recursive: true, force: true });
+  await mkdir(iconsetPath, { recursive: true });
+}
 
 if (usePng) {
   await writeFile(join(outputRoot, 'icon-source.txt'), 'xiaok.png\n', 'utf8');

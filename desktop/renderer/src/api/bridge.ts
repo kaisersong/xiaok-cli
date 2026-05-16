@@ -298,6 +298,20 @@ export const api = {
     return r;
   },
 
+  async createManagedXiaokAgent(input: {
+    name: string;
+    description?: string;
+    roles?: string[];
+    capabilities?: string[];
+    instructions?: string;
+    maxConcurrentTasks?: number;
+  }): Promise<unknown> {
+    log.info('createManagedXiaokAgent', JSON.stringify({ name: input.name, roles: input.roles }));
+    const r = await window.xiaokDesktop.createManagedXiaokAgent(input);
+    log.info('createManagedXiaokAgent ok');
+    return r;
+  },
+
   async testProviderConnection(input: { providerId: string; modelId?: string }): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
     log.info('testProviderConnection', JSON.stringify({ providerId: input.providerId }));
     const r = await window.xiaokDesktop.testProviderConnection(input);

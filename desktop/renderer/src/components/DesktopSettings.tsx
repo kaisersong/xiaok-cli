@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import {
   ChevronLeft,
   Settings,
@@ -1184,7 +1184,7 @@ function McpPane() {
   const [newCommand, setNewCommand] = useState('');
   const [newArgs, setNewArgs] = useState('');
 
-  const load = () => {
+  const load = useCallback(() => {
     Promise.all([
       api.listMCPInstalls().catch(() => []),
       api.listPluginMcpServers().catch(() => []),
@@ -1192,9 +1192,13 @@ function McpPane() {
       setInstalls(mcpInstalls);
       setPluginServers(plugins);
     }).finally(() => setLoading(false));
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 2_000);
+    return () => clearInterval(timer);
+  }, [load]);
 
   const handleCreate = async () => {
     if (!newName.trim() || !newCommand.trim()) return;

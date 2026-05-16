@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { deployBundledPlugins, ensureReportRendererCssCompat } from '../../electron/deploy-bundled-plugins.js';
 
 // Mock electron app module
 const mockIsPackaged = vi.fn(() => false);
@@ -20,6 +21,10 @@ describe('deploy-bundled-plugins', () => {
   let rootDir: string;
   let pluginsDir: string;
   let bundledDir: string;
+  const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
+  const originalPath = process.env.PATH;
+  const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
 
   beforeEach(() => {
     rootDir = join(tmpdir(), `xiaok-deploy-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -31,6 +36,12 @@ describe('deploy-bundled-plugins', () => {
 
   afterEach(() => {
     rmSync(rootDir, { recursive: true, force: true });
+    process.env.HOME = originalHome;
+    process.env.USERPROFILE = originalUserProfile;
+    process.env.PATH = originalPath;
+    (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
+    mockIsPackaged.mockReturnValue(false);
+    mockResourcesPath.mockReturnValue('');
   });
 
   describe('semverGte', () => {
@@ -259,6 +270,55 @@ describe('deploy-bundled-plugins', () => {
       const deployed = simulateDeploy(bundledDir, pluginsDir, ['kai-report-creator']);
 
       expect(deployed).toEqual(['kai-report-creator']);
+    });
+
+    it('creates dist/css compatibility files for the bundled report renderer', () => {
+      const pluginDir = join(pluginsDir, 'kai-report-creator');
+      mkdirSync(join(pluginDir, 'mcp-servers', 'report-renderer', 'dist', 'themes', 'css'), { recursive: true });
+      writeFileSync(
+        join(pluginDir, 'mcp-servers', 'report-renderer', 'dist', 'themes', 'css', 'corporate-blue.css'),
+        'body { color: black; }',
+      );
+
+      ensureReportRendererCssCompat(pluginDir);
+
+      expect(
+        existsSync(join(pluginDir, 'mcp-servers', 'report-renderer', 'dist', 'css', 'corporate-blue.css')),
+      ).toBe(true);
+    });
+
+    it('reconciles report renderer css compatibility even when bundled-managed plugin is already current', async () => {
+      process.env.HOME = rootDir;
+      process.env.USERPROFILE = rootDir;
+      process.env.PATH = '';
+      mockIsPackaged.mockReturnValue(true);
+      mockResourcesPath.mockReturnValue(rootDir);
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = rootDir;
+
+      const bundledPluginDir = join(bundledDir, 'kai-report-creator');
+      createPluginManifest(bundledPluginDir, {
+        name: 'kai-report-creator',
+        version: '2.0.0',
+      });
+
+      const installedPluginDir = join(rootDir, '.xiaok', 'plugins', 'kai-report-creator');
+      createPluginManifest(installedPluginDir, {
+        name: 'kai-report-creator',
+        version: '2.0.0',
+        source: 'bundled',
+      });
+      mkdirSync(join(installedPluginDir, 'mcp-servers', 'report-renderer', 'dist', 'themes', 'css'), { recursive: true });
+      writeFileSync(
+        join(installedPluginDir, 'mcp-servers', 'report-renderer', 'dist', 'themes', 'css', 'corporate-blue.css'),
+        'body { color: black; }',
+      );
+
+      const result = await deployBundledPlugins();
+
+      expect(result.deployed).toEqual([]);
+      expect(
+        existsSync(join(installedPluginDir, 'mcp-servers', 'report-renderer', 'dist', 'css', 'corporate-blue.css')),
+      ).toBe(true);
     });
   });
 });

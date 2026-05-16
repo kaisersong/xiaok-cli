@@ -12,6 +12,7 @@ import { homedir } from 'node:os';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { ensureSlideRendererPythonReady } from './python-runtime.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -53,6 +54,19 @@ export interface DeployResult {
   venvReady: boolean;
 }
 
+export function ensureReportRendererCssCompat(pluginDir: string): void {
+  const distDir = join(pluginDir, 'mcp-servers', 'report-renderer', 'dist');
+  const legacyCssDir = join(distDir, 'css');
+  const themedCssDir = join(distDir, 'themes', 'css');
+
+  if (!existsSync(themedCssDir) || existsSync(legacyCssDir)) {
+    return;
+  }
+
+  mkdirSync(legacyCssDir, { recursive: true });
+  cpSync(themedCssDir, legacyCssDir, { recursive: true });
+}
+
 export async function deployBundledPlugins(): Promise<DeployResult> {
   const result: DeployResult = { deployed: [], pythonAvailable: false, venvReady: false };
   const pluginsDir = join(homedir(), '.xiaok', 'plugins');
@@ -80,13 +94,21 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
         const destVer = destMeta.version || '0.0.0';
         // Skip if installed version >= bundled AND not managed by us
         if (semverGte(destVer, srcVer) && destMeta.source !== 'bundled') continue;
-        if (semverGte(destVer, srcVer)) continue;
+        if (semverGte(destVer, srcVer)) {
+          if (name === 'kai-report-creator') {
+            ensureReportRendererCssCompat(dest);
+          }
+          continue;
+        }
       } catch {
         // parse error, overwrite
       }
     }
 
     cpSync(src, dest, { recursive: true });
+    if (name === 'kai-report-creator') {
+      ensureReportRendererCssCompat(dest);
+    }
     // Mark as bundled-managed
     try {
       const manifest = JSON.parse(readFileSync(join(dest, 'plugin.json'), 'utf8'));
@@ -122,23 +144,17 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
       ? join(process.resourcesPath, 'bundled-plugins', 'kai-slide-creator', 'bundled-wheels')
       : join(bundledDir, 'kai-slide-creator', 'bundled-wheels');
 
-    if (existsSync(wheelsDir)) {
-      const depsMarker = join(venvDir, '.deps-installed');
-      if (!existsSync(depsMarker)) {
-        try {
-          await execFileAsync(venvPython, [
-            '-m', 'pip', 'install', '--no-index', '--find-links', wheelsDir,
-            'mcp', 'pydantic', 'jsonschema'
-          ], { timeout: 60_000 });
-          writeFileSync(depsMarker, new Date().toISOString());
-          result.venvReady = true;
-        } catch {
-          // pip install failed, slide won't work but app continues
-        }
-      } else {
-        result.venvReady = true;
-      }
-    }
+    const depsMarker = join(venvDir, '.deps-installed');
+    const runtimeReady = await ensureSlideRendererPythonReady({
+      venvPython,
+      wheelsDir: existsSync(wheelsDir) ? wheelsDir : undefined,
+      markerPath: depsMarker,
+      markerExists: existsSync(depsMarker),
+      writeMarker: (markerPath) => {
+        writeFileSync(markerPath, new Date().toISOString());
+      },
+    });
+    result.venvReady = runtimeReady.ready;
   }
 
   return result;

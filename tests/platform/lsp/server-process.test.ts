@@ -100,3 +100,18 @@ describe('lsp server process transport', () => {
     expect(outcome).toBe('LSP server process exited before responding');
   });
 });
+
+describe('lsp server process spawn options', () => {
+  it('hides Windows console windows while preserving stdio transport options', async () => {
+    const { buildLspServerSpawnOptions } = await import('../../../src/platform/lsp/server-process.js');
+    const options = buildLspServerSpawnOptions('node', {
+      platform: 'win32',
+    });
+
+    expect(options).toMatchObject({
+      stdio: 'pipe',
+      windowsHide: true,
+      windowsVerbatimArguments: false,
+    });
+  });
+});

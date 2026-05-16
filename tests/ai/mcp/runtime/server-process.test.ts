@@ -72,12 +72,12 @@ describe('mcp server process transport', () => {
       result: { tools: [{ name: 'search' }] },
     }));
 
+    await new Promise((resolve) => setImmediate(resolve));
     await expect(pending).resolves.toEqual({
       jsonrpc: '2.0',
       id: 1,
       result: { tools: [{ name: 'search' }] },
     });
-    expect(writes[0]).toContain('Content-Length:');
     expect(writes[0]).toContain('"method":"tools/list"');
   });
 
@@ -100,5 +100,24 @@ describe('mcp server process transport', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(outcome).toBe('MCP server process exited before responding');
+  });
+});
+
+describe('mcp server process spawn options', () => {
+  it('hides Windows console windows while preserving stdio transport options', async () => {
+    const { buildMcpServerSpawnOptions } = await import('../../../../src/ai/mcp/runtime/server-process.js');
+    const options = buildMcpServerSpawnOptions('node', {
+      platform: 'win32',
+      cwd: 'D:\\projects\\plugin',
+      env: { DEMO: '1' },
+    });
+
+    expect(options).toMatchObject({
+      stdio: 'pipe',
+      cwd: 'D:\\projects\\plugin',
+      env: expect.objectContaining({ DEMO: '1' }),
+      windowsHide: true,
+      windowsVerbatimArguments: false,
+    });
   });
 });

@@ -6,11 +6,24 @@ export interface LspServerProcess {
   dispose(): void;
 }
 
-export function startLspServerProcess(command: string, args: string[] = []): LspServerProcess {
-  const child = spawn(command, args, {
+export function buildLspServerSpawnOptions(
+  command: string,
+  options: { platform?: NodeJS.Platform } = {},
+): {
+  stdio: 'pipe';
+  windowsVerbatimArguments: boolean;
+  windowsHide?: boolean;
+} {
+  const platform = options.platform ?? process.platform;
+  return {
     stdio: 'pipe',
-    windowsVerbatimArguments: process.platform === 'win32' && command.toLowerCase() === 'cmd.exe',
-  });
+    windowsVerbatimArguments: platform === 'win32' && command.toLowerCase() === 'cmd.exe',
+    ...(platform === 'win32' ? { windowsHide: true } : {}),
+  };
+}
+
+export function startLspServerProcess(command: string, args: string[] = []): LspServerProcess {
+  const child = spawn(command, args, buildLspServerSpawnOptions(command));
   return {
     child,
     dispose() {

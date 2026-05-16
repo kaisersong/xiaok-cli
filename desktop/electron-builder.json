@@ -10,25 +10,53 @@
   ],
   "extraResources": [
     {
-      "from": "../kswarm/src",
+      "from": "../../kswarm/src",
       "to": "services/kswarm/src",
       "filter": ["**/*.js", "**/*.json", "!**/node_modules/**"]
     },
     {
-      "from": "../kswarm/package.json",
+      "from": "../../kswarm/scripts",
+      "to": "services/kswarm/scripts",
+      "filter": ["**/*.js", "!**/node_modules/**", "!**/auto-worker.js"]
+    },
+    {
+      "from": "overrides/kswarm/windows-xiaok-launch.js",
+      "to": "services/kswarm/scripts/windows-xiaok-launch.js"
+    },
+    {
+      "from": ".generated/kswarm/scripts/auto-worker.js",
+      "to": "services/kswarm/scripts/auto-worker.js"
+    },
+    {
+      "from": "../../kswarm/package.json",
       "to": "services/kswarm/package.json"
     },
     {
-      "from": "../intent-broker/src",
+      "from": "../../kswarm/node_modules/ws",
+      "to": "services/kswarm/node_modules/ws",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "../../intent-broker/src",
       "to": "services/intent-broker/src",
       "filter": ["**/*.js", "**/*.json", "!**/node_modules/**"]
     },
     {
-      "from": "../intent-broker/package.json",
+      "from": "../../intent-broker/package.json",
       "to": "services/intent-broker/package.json"
     },
     {
-      "from": "../kai-xiaok-plugins/plugins/kai-report-creator",
+      "from": "../../intent-broker/adapters",
+      "to": "services/intent-broker/adapters",
+      "filter": ["**/*", "!**/node_modules/**"]
+    },
+    {
+      "from": "../../intent-broker/node_modules/ws",
+      "to": "services/intent-broker/node_modules/ws",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "../../kai-xiaok-plugins/plugins/kai-report-creator",
       "to": "bundled-plugins/kai-report-creator",
       "filter": [
         "plugin.json",
@@ -38,7 +66,7 @@
       ]
     },
     {
-      "from": "../kai-xiaok-plugins/plugins/kai-slide-creator",
+      "from": "../../kai-xiaok-plugins/plugins/kai-slide-creator",
       "to": "bundled-plugins/kai-slide-creator",
       "filter": [
         "plugin.json",

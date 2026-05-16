@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 /**
  * Integration tests for the artifact editing flow.
@@ -94,7 +94,7 @@ describe('artifact editing integration', () => {
       prompt: 'test',
     };
     const ctx = buildAgentContext(payload, artifactPath, 'test');
-    expect(ctx.artifact_path.startsWith('/')).toBe(true);
+    expect(isAbsolute(ctx.artifact_path)).toBe(true);
   });
 
   // B. File modification → reload cycle
