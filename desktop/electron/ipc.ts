@@ -212,36 +212,67 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
   });
 
   // ---- Memory ----
-  const { UserMemoryStore } = await import('./user-memory.js');
   const { parseMemories } = await import('./memory-import-parser.js');
-  const memoryDir = join(services.getDataRoot(), 'memories');
-  const memoryStore = new UserMemoryStore(memoryDir);
+  const { getDesktopMemoryStore } = await import('./desktop-services.js');
+  const memoryStore = getDesktopMemoryStore(services.getDataRoot());
 
   ipcMain.handle('desktop:listMemories', async () => {
-    try { return memoryStore.list(); }
-    catch (e) { log('error', 'listMemories failed', e); return []; }
+    try {
+      if ('listUserMemories' in memoryStore) return (memoryStore as any).listUserMemories();
+      return [];
+    } catch (e) { log('error', 'listMemories failed', e); return []; }
   });
   ipcMain.handle('desktop:createMemory', async (_event, input: { content: string; tags: string[]; source?: string }) => {
-    try { return memoryStore.create(input); }
-    catch (e) { log('error', 'createMemory failed', e); throw e; }
+    try {
+      if ('createUserMemory' in memoryStore) return (memoryStore as any).createUserMemory(input);
+      throw new Error('Memory store does not support create');
+    } catch (e) { log('error', 'createMemory failed', e); throw e; }
   });
   ipcMain.handle('desktop:updateMemory', async (_event, input: { id: string; content?: string; tags?: string[] }) => {
-    try { return memoryStore.update(input.id, input); }
-    catch (e) { log('error', 'updateMemory failed', e); throw e; }
+    try {
+      if ('updateUserMemory' in memoryStore) return (memoryStore as any).updateUserMemory(input.id, input);
+      return null;
+    } catch (e) { log('error', 'updateMemory failed', e); throw e; }
   });
   ipcMain.handle('desktop:deleteMemory', async (_event, id: string) => {
-    try { return memoryStore.delete(id); }
-    catch (e) { log('error', 'deleteMemory failed', e); throw e; }
+    try {
+      if ('deleteUserMemory' in memoryStore) return (memoryStore as any).deleteUserMemory(id);
+      return false;
+    } catch (e) { log('error', 'deleteMemory failed', e); throw e; }
   });
   ipcMain.handle('desktop:importMemories', async (_event, raw: string) => {
     try {
       const { items, errors } = parseMemories(raw);
       if (items.length === 0 && errors.length === 0) return { imported: 0, deduped: 0, parseErrors: ['未解析到任何记忆'] };
-      const result = memoryStore.importMemories(items);
-      return { ...result, parseErrors: errors };
+      if (!('createUserMemory' in memoryStore)) return { imported: 0, deduped: 0, parseErrors: ['Memory store does not support import'] };
+      const store = memoryStore as any;
+      const existing = new Set((store.listUserMemories() as Array<{ content: string }>).map((m: { content: string }) => m.content.toLowerCase().trim()));
+      let imported = 0;
+      let deduped = 0;
+      for (const item of items) {
+        const content = (item.content || '').trim();
+        if (!content) continue;
+        if (existing.has(content.toLowerCase())) { deduped++; continue; }
+        store.createUserMemory({ content, tags: item.tags || [], source: item.source || 'import' });
+        existing.add(content.toLowerCase());
+        imported++;
+      }
+      return { imported, deduped, parseErrors: errors };
     } catch (e) {
       return { imported: 0, deduped: 0, parseErrors: [`导入失败: ${e}`] };
     }
+  });
+  ipcMain.handle('desktop:memoryStats', async () => {
+    try {
+      if ('getStats' in memoryStore) return (memoryStore as any).getStats();
+      return null;
+    } catch (e) { log('error', 'memoryStats failed', e); return null; }
+  });
+  ipcMain.handle('desktop:memoryListLayer', async (_event, layer: number, limit?: number, offset?: number) => {
+    try {
+      if ('listLayer' in memoryStore) return (memoryStore as any).listLayer(layer, limit ?? 50, offset ?? 0);
+      return [];
+    } catch (e) { log('error', 'memoryListLayer failed', e); return []; }
   });
 
   // ---- Artifact Editing ----
