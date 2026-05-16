@@ -31,6 +31,7 @@ import { loadPlugins } from '../../src/platform/plugins/loader.js';
 import { UserMemoryStore } from './user-memory.js';
 import { createNotebookTools } from '../../src/ai/tools/notebook.js';
 import type { MemoryStore } from '../../src/ai/memory/store.js';
+import type { KSwarmService, KSwarmUnavailableError } from './kswarm-service.js';
 // NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
 // because they import better-sqlite3 which may not be compatible with the current Electron
 // version's native module ABI.
@@ -261,6 +262,7 @@ export interface DesktopServicesOptions {
   dataRoot: string;
   now?: () => number;
   runner?: TaskRunner;
+  kswarmService: KSwarmService;
 }
 
 export interface DesktopModelProviderView {
@@ -345,7 +347,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
     snapshotStore,
-    runner: options.runner ?? createDesktopModelRunnerWithRegistry(registry, tools, options.dataRoot),
+    runner: options.runner ?? createDesktopModelRunnerWithRegistry(registry, tools, options.dataRoot, options.kswarmService),
     now: options.now,
     // Use timestamp + random suffix to ensure unique taskId/sessionId across app restarts
     createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1908,7 +1910,7 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
   };
 }
 
-function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Tool[], dataRoot: string): TaskRunner {
+function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Tool[], dataRoot: string, kswarmService: KSwarmService): TaskRunner {
   const cwd = process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
   let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
@@ -1945,12 +1947,11 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
         memberNames?: string[]; memberCount?: number;
       };
 
-      const KSWARM_API = 'http://127.0.0.1:4400';
       const MAX_TOTAL_AGENTS = 10;
 
       try {
         // 1. 获取现有 agents
-        const agentsRes = await fetch(`${KSWARM_API}/agents`);
+        const agentsRes = await kswarmService.request('/agents');
         if (!agentsRes.ok) return JSON.stringify({ error: 'Cannot fetch agents from kswarm' });
         const { agents } = await agentsRes.json() as { agents: Array<{ id: string; name: string; roles?: string[]; status: string }> };
 
@@ -1983,7 +1984,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
           if (canCreate > 0) {
             const createResults = await Promise.all(
               Array.from({ length: canCreate }, (_, i) =>
-                fetch(`${KSWARM_API}/agents`, {
+                kswarmService.request('/agents', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -2004,7 +2005,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
         }
 
         // 4. 创建项目
-        const res = await fetch(`${KSWARM_API}/projects`, {
+        const res = await kswarmService.request('/projects', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

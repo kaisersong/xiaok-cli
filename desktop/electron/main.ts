@@ -38,8 +38,22 @@ async function createWindow(): Promise<BrowserWindow> {
   }));
   removeWindowsWindowMenu(window, process.platform);
   mainWindow = window;
+  // KSwarm service — manages kswarm server as a child process
+  const kswarmService = createKSwarmService();
+  kswarmService.start().catch((err) => {
+    console.error('[main] Failed to start kswarm service:', err);
+  });
+  ipcMain.handle('desktop:kswarm:getStatus', () => kswarmService.getStatus());
+  ipcMain.handle('desktop:kswarm:start', () => kswarmService.start());
+  ipcMain.handle('desktop:kswarm:stop', () => kswarmService.stop());
+  ipcMain.handle('desktop:kswarm:restart', () => kswarmService.restart());
+  kswarmService.onStatusChange((status) => {
+    window.webContents.send('desktop:kswarm:statusChange', status);
+  });
+
   const services = createDesktopServices({
     dataRoot: join(app.getPath('home'), '.xiaok', 'desktop'),
+    kswarmService,
   });
   await registerDesktopIpc(ipcMain, window, services);
 
@@ -100,19 +114,6 @@ async function createWindow(): Promise<BrowserWindow> {
   services.registerMcpTools().then(({ dispose }) => {
     mcpDispose = dispose;
   }).catch(() => {});
-
-  // KSwarm service — manages kswarm server as a child process
-  const kswarmService = createKSwarmService();
-  kswarmService.start().catch((err) => {
-    console.error('[main] Failed to start kswarm service:', err);
-  });
-  ipcMain.handle('desktop:kswarm:getStatus', () => kswarmService.getStatus());
-  ipcMain.handle('desktop:kswarm:start', () => kswarmService.start());
-  ipcMain.handle('desktop:kswarm:stop', () => kswarmService.stop());
-  ipcMain.handle('desktop:kswarm:restart', () => kswarmService.restart());
-  kswarmService.onStatusChange((status) => {
-    window.webContents.send('desktop:kswarm:statusChange', status);
-  });
 
   // Scheduled task auto-execution scheduler
   const taskScheduler = new ScheduledTaskScheduler();

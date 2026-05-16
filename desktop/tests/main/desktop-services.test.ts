@@ -1,8 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDesktopServices } from '../../electron/desktop-services.js';
+import type { KSwarmService } from '../../electron/kswarm-service.js';
+
+function mockKSwarmService(): KSwarmService {
+  return {
+    start: async () => {},
+    stop: async () => {},
+    restart: async () => {},
+    getStatus: () => ({ running: true, port: 4400, pid: 1, restartCount: 0, lastError: null }),
+    onStatusChange: () => () => {},
+    request: async (path: string, init?: RequestInit) => new Response('{"error":"mock"}', { status: 501 }),
+  };
+}
 
 describe('desktop services', () => {
   let rootDir: string;
@@ -23,6 +35,7 @@ describe('desktop services', () => {
     writeFileSync(sourcePath, '# A 客户需求\n需要制造业数字化方案。');
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
       runner: async ({ sessionId, emitRuntimeEvent }) => {
         emitRuntimeEvent({
@@ -87,6 +100,7 @@ describe('desktop services', () => {
   it('reads and writes the same provider/model config catalog as xiaok cli', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -120,6 +134,7 @@ describe('desktop services', () => {
   it('lists available models for a first-party provider', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -135,6 +150,7 @@ describe('desktop services', () => {
   it('returns empty array for unknown provider', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -145,6 +161,7 @@ describe('desktop services', () => {
   it('deletes a provider and its associated models', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -172,6 +189,7 @@ describe('desktop services', () => {
   it('deletes a specific model but keeps the provider', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -197,6 +215,7 @@ describe('desktop services', () => {
   it('testProviderConnection returns error when API key not configured', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -209,6 +228,7 @@ describe('desktop services', () => {
   it('testProviderConnection attempts connection when API key is configured', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
       runner: async () => { // Minimal runner
       },
@@ -232,6 +252,7 @@ describe('desktop services', () => {
   it('resets defaultProvider when deleted provider was default', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -255,6 +276,7 @@ describe('desktop services', () => {
   it('provider profiles include availableModels for all first-party providers', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -277,6 +299,7 @@ describe('desktop services', () => {
   it('provider profiles include baseUrl for all first-party providers', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -301,6 +324,7 @@ describe('desktop services', () => {
   it('adding a first-party provider sets default baseUrl from registry', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -319,6 +343,7 @@ describe('desktop services', () => {
   it('lists available models for all first-party providers with models', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -339,6 +364,7 @@ describe('desktop services', () => {
   it('returns empty channels when config has no channels', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -363,6 +389,7 @@ describe('desktop services', () => {
 
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -376,6 +403,7 @@ describe('desktop services', () => {
   it('creates a channel and persists to config.json', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -395,6 +423,7 @@ describe('desktop services', () => {
   it('updates an existing channel', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -410,6 +439,7 @@ describe('desktop services', () => {
   it('throws on updating non-existent channel', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -419,6 +449,7 @@ describe('desktop services', () => {
   it('deletes a channel from config.json', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -436,6 +467,7 @@ describe('desktop services', () => {
   it('returns empty MCP installs initially', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -446,6 +478,7 @@ describe('desktop services', () => {
   it('creates an MCP install and persists to file', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -471,6 +504,7 @@ describe('desktop services', () => {
   it('updates an MCP install', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -487,6 +521,7 @@ describe('desktop services', () => {
   it('throws on updating non-existent MCP install', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -496,6 +531,7 @@ describe('desktop services', () => {
   it('deletes an MCP install', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -509,6 +545,7 @@ describe('desktop services', () => {
   it('supports multiple MCP installs with distinct IDs', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
     });
 
@@ -538,6 +575,7 @@ describe('desktop services', () => {
     let historySeenOnSecondRun: Array<{ role: string; content: string }> = [];
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
       now: () => 300,
       runner: async ({ signal, history, emitRuntimeEvent, sessionId }) => {
         runCount++;

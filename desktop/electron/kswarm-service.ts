@@ -53,6 +53,14 @@ function resolveServicePath(name: 'kswarm' | 'intent-broker', entryRelative: str
   return null;
 }
 
+/** Thrown when KSwarm service is not available (failed to start or crashed). */
+export class KSwarmUnavailableError extends Error {
+  constructor(reason: string) {
+    super(`KSwarm service unavailable: ${reason}`);
+    this.name = 'KSwarmUnavailableError';
+  }
+}
+
 export interface KSwarmServiceStatus {
   running: boolean;
   port: number;
@@ -67,6 +75,8 @@ export interface KSwarmService {
   restart(): Promise<void>;
   getStatus(): KSwarmServiceStatus;
   onStatusChange(cb: (status: KSwarmServiceStatus) => void): () => void;
+  /** Make an HTTP request to the KSwarm service. Auto-starts if not running. */
+  request(path: string, init?: RequestInit): Promise<Response>;
 }
 
 export function createKSwarmService(): KSwarmService {
@@ -78,6 +88,7 @@ export function createKSwarmService(): KSwarmService {
   let healthTimer: ReturnType<typeof setInterval> | null = null;
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
   let stopping = false;
+  let startingPromise: Promise<void> | null = null;
   const listeners = new Set<(status: KSwarmServiceStatus) => void>();
 
   function getStatus(): KSwarmServiceStatus {
@@ -272,6 +283,39 @@ export function createKSwarmService(): KSwarmService {
     return false;
   }
 
+  async function ensureReady(): Promise<void> {
+    if (running) return;
+    if (startingPromise) { await startingPromise; return; }
+    startingPromise = start().finally(() => { startingPromise = null; });
+    await startingPromise;
+  }
+
+  const REQUEST_TIMEOUT_MS = 30_000;
+
+  async function request(path: string, init?: RequestInit): Promise<Response> {
+    await ensureReady();
+
+    if (!running) {
+      throw new KSwarmUnavailableError(lastError || 'KSwarm service failed to start');
+    }
+
+    const url = `http://127.0.0.1:${KSWARM_PORT}${path}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    try {
+      const res = await fetch(url, { ...init, signal: controller.signal });
+      return res;
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error(`KSwarm request timed out (${REQUEST_TIMEOUT_MS}ms): ${url}`);
+      }
+      throw new KSwarmUnavailableError((err as Error).message);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function start(): Promise<void> {
     if (running || child) return;
     stopping = false;
@@ -314,5 +358,5 @@ export function createKSwarmService(): KSwarmService {
     await spawnServer();
   }
 
-  return { start, stop, restart, getStatus, onStatusChange };
+  return { start, stop, restart, getStatus, onStatusChange, request };
 }
