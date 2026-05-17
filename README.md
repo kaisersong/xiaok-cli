@@ -20,6 +20,15 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.3.0:**
+
+- **KSwarm Reliability Release**: Runtime health probing, stalled-run watchdogs, capability-aware routing, and automatic cooldown for agents that are online but cannot execute correctly
+- **Recoverable Project Planning**: If Xiaok/Desktop or the PO agent stops while a project plan is being drafted, the project detail page exposes "重新制定计划" so work can continue instead of getting stuck
+- **Deliverable Contracts**: Explicit PPTX/HTML/Markdown requests are validated before PO review; markdown-only output no longer passes as a slide deck
+- **Local PPTX Fallback**: Presentation tasks can fall back to a deterministic local PPTX executor when no healthy agent advertises PPTX output capability
+- **Desktop Configuration Preservation**: Desktop launch and release flow are aligned around the real user HOME so model, skill, plugin, and channel settings remain visible
+- **Release Packaging Refresh**: macOS and Windows desktop artifacts are built from the same 1.3.0 source and plugin bundle baseline
+
 **What's New in v1.2.0:**
 
 - **KSwarm Swarm-Style Projects**: Create multi-agent collaborative projects from chat — Agent auto-selects PO + members, distributes tasks, and delivers as a team
@@ -229,9 +238,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-1.2.0-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.2.0-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-1.2.0-setup.exe** — Windows installer (x64)
+- **xiaok-1.3.0-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.3.0-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-1.3.0-setup.exe** — Windows installer (x64)
 
 ### Features
 
@@ -490,6 +499,8 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.3.0** — Reliability release for Desktop + KSwarm: runtime probes and health cooldowns for CLI agents, stalled-run watchdog telemetry, capability-aware retry routing, hard deliverable validation for PPTX/HTML/Markdown tasks, deterministic local PPTX fallback, and recoverable project planning when the PO planning phase is interrupted before a plan is submitted.
 
 **v1.2.0** — KSwarm swarm-style multi-agent project delivery from chat, persistent long-term memory with notebook_write/notebook_read tools and Settings UI management, agent settings panel for persona/spawn/provider configuration, model config enhancements with protocol selection and advanced JSON, progress reporting TaskPanel for multi-step autonomous work tracking.
 
