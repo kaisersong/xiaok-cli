@@ -27,9 +27,46 @@ vi.mock('../../../src/platform/lsp/server-process.js', async () => {
   };
 });
 
-function parseFramedPayload(payload: string): Record<string, unknown> {
-  const [, body = ''] = payload.split('\r\n\r\n');
-  return JSON.parse(body) as Record<string, unknown>;
+function createFramedPayloadHandler(
+  onPayload: (payload: Record<string, unknown>) => void,
+): (chunk: Buffer | string) => void {
+  let buffer = '';
+  return (chunk) => {
+    buffer += String(chunk);
+    while (true) {
+      if (!buffer.startsWith('Content-Length:')) {
+        const newlineIndex = buffer.indexOf('\n');
+        if (newlineIndex < 0) {
+          return;
+        }
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line) {
+          onPayload(JSON.parse(line) as Record<string, unknown>);
+        }
+        continue;
+      }
+
+      const separatorIndex = buffer.indexOf('\r\n\r\n');
+      if (separatorIndex < 0) {
+        return;
+      }
+      const header = buffer.slice(0, separatorIndex);
+      const lengthMatch = /Content-Length:\s*(\d+)/i.exec(header);
+      if (!lengthMatch) {
+        throw new Error(`missing Content-Length header: ${header}`);
+      }
+      const bodyStart = separatorIndex + 4;
+      const bodyLength = Number(lengthMatch[1]);
+      const bodyEnd = bodyStart + bodyLength;
+      if (buffer.length < bodyEnd) {
+        return;
+      }
+      const body = buffer.slice(bodyStart, bodyEnd);
+      buffer = buffer.slice(bodyEnd);
+      onPayload(JSON.parse(body) as Record<string, unknown>);
+    }
+  };
 }
 
 function createMockChildProcess() {
@@ -67,8 +104,7 @@ describe('platform plugin runtime', () => {
 
   it('connects to a declared MCP server over the shared stdio transport', async () => {
     const child = createMockChildProcess();
-    child.stdin.on('data', (chunk) => {
-      const request = parseFramedPayload(String(chunk));
+    child.stdin.on('data', createFramedPayloadHandler((request) => {
       const id = Number(request.id);
       if (request.method === 'initialize') {
         child.stdout.write(encodeMcpMessage({
@@ -103,7 +139,7 @@ describe('platform plugin runtime', () => {
           },
         }));
       }
-    });
+    }));
 
     startMcpServerProcessMock.mockReturnValue({
       child,
@@ -130,8 +166,7 @@ describe('platform plugin runtime', () => {
 
   it('connects to a declared LSP server over the shared stdio transport', async () => {
     const child = createMockChildProcess();
-    child.stdin.on('data', (chunk) => {
-      const request = parseFramedPayload(String(chunk));
+    child.stdin.on('data', createFramedPayloadHandler((request) => {
       if (request.method === 'initialize') {
         child.stdout.write(encodeLspMessage({
           jsonrpc: '2.0',
@@ -147,7 +182,7 @@ describe('platform plugin runtime', () => {
           },
         }));
       }
-    });
+    }));
 
     startLspServerProcessMock.mockReturnValue({
       child,

@@ -271,6 +271,70 @@ describe('contentStreaming flag logic (simulated)', () => {
 });
 
 describe('scroll-region prompt frame ownership', () => {
+  it('renders queued overlay while preserving the status line', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderPromptFrame({
+        inputValue: '',
+        cursor: 0,
+        placeholder: 'Finishing response...',
+        summaryLine: '',
+        statusLine: 'gpt-5.4 · 5% · project',
+        overlayKind: 'queued',
+        overlayLines: [
+          'Queued (press ↑ to edit):',
+          '  更新了没',
+        ],
+      });
+
+      const text = harness.screen.text();
+      expect(text).toContain('Queued (press ↑ to edit):');
+      expect(text).toContain('更新了没');
+      expect(text).toContain('gpt-5.4 · 5% · project');
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('clears stale queued overlay rows when the prompt frame no longer has an overlay', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderPromptFrame({
+        inputValue: '',
+        cursor: 0,
+        placeholder: 'Finishing response...',
+        summaryLine: '',
+        statusLine: 'gpt-5.4 · 5% · project',
+        overlayKind: 'queued',
+        overlayLines: [
+          'Queued (press ↑ to edit):',
+          '  更新了没',
+        ],
+      });
+      manager.renderPromptFrame({
+        inputValue: '',
+        cursor: 0,
+        placeholder: 'Finishing response...',
+        summaryLine: '',
+        statusLine: 'gpt-5.4 · 5% · project',
+        overlayLines: [],
+      });
+
+      const text = harness.screen.text();
+      expect(text).not.toContain('Queued (press ↑ to edit):');
+      expect(text).not.toContain('更新了没');
+      expect(text).toContain('gpt-5.4 · 5% · project');
+    } finally {
+      harness.restore();
+    }
+  });
+
   it('renders the sticky summary line above the input and separate from activity and status rows', () => {
     const harness = createTtyHarness(80, 24);
     const manager = new ScrollRegionManager(process.stdout);

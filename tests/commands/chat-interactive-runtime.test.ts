@@ -126,7 +126,7 @@ function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithMode
         lastToolResult,
       });
 
-      if (lastToolResult.includes('background subagent queued:')) {
+      if (lastToolResult.includes('background subagent queued:') || lastToolResult.includes('background agent queued:')) {
         yield { type: 'text', delta: '后台任务已安排，等待完成通知。' };
         yield { type: 'done' };
         return;
@@ -1065,12 +1065,21 @@ vi.mock('../../src/ui/model-selector.js', () => ({
 describe('chat interactive runtime', () => {
   const tempDirs: string[] = [];
   let originalConfigDir: string | undefined;
+  let originalHome: string | undefined;
+  let originalDisableGlobalPlugins: string | undefined;
   let cwdSpy: ReturnType<typeof vi.spyOn> | undefined;
 
   beforeEach(() => {
     resetAdapterState();
     mockSelectModel.mockReset();
     originalConfigDir = process.env.XIAOK_CONFIG_DIR;
+    originalHome = process.env.HOME;
+    originalDisableGlobalPlugins = process.env.XIAOK_DISABLE_GLOBAL_PLUGINS;
+    const isolatedHome = join(tmpdir(), `xiaok-chat-home-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(isolatedHome, { recursive: true });
+    tempDirs.push(isolatedHome);
+    process.env.HOME = isolatedHome;
+    process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = '1';
   });
 
   afterEach(() => {
@@ -1080,6 +1089,16 @@ describe('chat interactive runtime', () => {
       delete process.env.XIAOK_CONFIG_DIR;
     } else {
       process.env.XIAOK_CONFIG_DIR = originalConfigDir;
+    }
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    if (originalDisableGlobalPlugins === undefined) {
+      delete process.env.XIAOK_DISABLE_GLOBAL_PLUGINS;
+    } else {
+      process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = originalDisableGlobalPlugins;
     }
 
     for (const dir of tempDirs.splice(0)) {
@@ -1463,6 +1482,91 @@ describe('chat interactive runtime', () => {
       await waitFor(() => {
         expect(harness.output.normalized).toContain('Thinking');
         expect(harness.output.normalized).toContain('echo:hi');
+      }, { timeoutMs: 3_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('queues input typed during a busy turn and submits it on the next loop', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-queued-input-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('延迟回复');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('› 延迟回复');
+      }, { timeoutMs: 500 });
+
+      await waitFor(() => {
+        const text = harness.screen.text();
+        expect(text).toContain('Thinking');
+        expect(text).toContain('Finishing response...');
+        expect(harness.emitter.listenerCount('data')).toBeGreaterThan(0);
+      }, { timeoutMs: 1_000 });
+
+      harness.send('更新了没');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const text = harness.screen.text();
+        expect(text).toContain('Queued (press ↑ to edit):');
+        expect(text).toContain('更新了没');
+      }, { timeoutMs: 1_000 });
+
+      await waitFor(() => {
+        expect(harness.screen.text()).toContain('delayed reply');
+      }, { timeoutMs: 3_000 });
+
+      await waitFor(() => {
+        expect(adapterCalls.some((call) => call.lastUserText.includes('更新了没'))).toBe(true);
+        expect(harness.screen.text()).toContain('echo:更新了没');
       }, { timeoutMs: 3_000 });
 
       await waitForInputTurnReady(harness);
@@ -2172,7 +2276,7 @@ describe('chat interactive runtime', () => {
         expect(lines.some((line) => line.includes('/reminder-cancel'))).toBe(false);
         expect(lines.some((line) => line.includes('/commit'))).toBe(false);
         expect(commandLines.some((line) => line.includes('/review'))).toBe(false);
-        expect(lines.some((line) => line.includes('/pr'))).toBe(false);
+        expect(commandLines.some((line) => line.includes('/pr'))).toBe(false);
         expect(lines.some((line) => line.includes('/doctor'))).toBe(false);
         expect(lines.some((line) => line.includes('/init'))).toBe(false);
       }, { timeoutMs: 3_000 });

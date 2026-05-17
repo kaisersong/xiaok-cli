@@ -10,6 +10,8 @@ import { askQuestion } from '../../ui/ask-question.js';
 export interface AskUserQuestionToolOptions {
   onEnterInteractive?: () => void;
   onExitInteractive?: () => void;
+  renderFrame?: (lines: string[]) => boolean | void;
+  clearFrame?: () => void;
 }
 
 export function createAskUserQuestionTool(options: AskUserQuestionToolOptions = {}): Tool {
@@ -87,6 +89,8 @@ IMPORTANT: Do NOT use this tool as a first response to friction or minor obstacl
             question: q.question,
             options: q.options,
             multiSelect: q.multiSelect ?? false,
+            renderFrame: options.renderFrame,
+            clearFrame: options.clearFrame,
           });
         } finally {
           options.onExitInteractive?.();

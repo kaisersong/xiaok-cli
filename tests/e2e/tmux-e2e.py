@@ -671,6 +671,23 @@ def write_feedback_resume_session(config_dir: Path, project_dir: Path, session_i
     (sessions_dir / f"{session_id}.json").write_text(json.dumps(session_doc, indent=2), encoding="utf-8")
 
 
+def request_contains_user_text(request: dict, expected: str) -> bool:
+    for message in request.get("messages", []):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str) and expected in content:
+            return True
+        if isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                text = part.get("text")
+                if isinstance(text, str) and expected in text:
+                    return True
+    return False
+
+
 def assert_true(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
@@ -1084,6 +1101,15 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
     ])
     second_response_head = "辣的午餐："
     second_response_tail = "• 小吃：麻辣烫"
+    queued_busy_prompt = "queued slow first turn"
+    queued_followup_prompt = "更新了没"
+    queued_busy_response = "queued slow first turn complete"
+    queued_followup_response = "echo:更新了没"
+    queued_edit_busy_prompt = "queued edit busy first turn"
+    queued_edit_initial_prompt = "先别发"
+    queued_edit_final_prompt = "刚才更新了没"
+    queued_edit_busy_response = "queued edit busy first turn complete"
+    queued_edit_followup_response = "echo:刚才更新了没"
     wrapped_footer_response = "\n".join([
         "- 报告：金蝶灵基_for_CEO_V2.0，包含 KPI 概览、里程碑时间线、组织能力地图",
         "- 幻灯片：金蝶灵基_for_CEO_V2.0，瑞士现代风格（Swiss Modern）",
@@ -1158,6 +1184,10 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
     server = FakeOpenAIServer([
         text_response_events(first_response),
         text_response_events(second_response),
+        text_response_events(queued_busy_response),
+        text_response_events(queued_followup_response),
+        text_response_events(queued_edit_busy_response),
+        text_response_events(queued_edit_followup_response),
         tool_call_response_events("bash", {"command": permission_command}, "call_permission_1"),
         text_response_events(permission_response_one),
         tool_call_response_events("bash", {"command": permission_command}, "call_permission_2"),
@@ -1375,7 +1405,18 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
     write_feedback_resume_session(config_dir, project_fixture, feedback_resume_ctrlc_session_id)
 
     session = f"xiaok-e2e-{os.getpid()}"
-    tmux = TmuxHarness(session, project_fixture, config_dir, home_dir, cli_entry, tmux_bin)
+    e2e_env = {
+        "XIAOK_DISABLE_GLOBAL_PLUGINS": "1",
+    }
+    tmux = TmuxHarness(
+        session,
+        project_fixture,
+        config_dir,
+        home_dir,
+        cli_entry,
+        tmux_bin,
+        env_overrides=e2e_env,
+    )
 
     try:
         tmux.start()
@@ -1549,6 +1590,115 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_true(activity_line_count(second) <= 2, f"too many activity lines after second response:\n{second}")
         print("PASS: multi-turn output remains visible without activity duplication")
 
+        print("--- E2E 7b: input typed during a busy turn queues and runs on the next loop ---")
+        tmux.send_text(queued_busy_prompt)
+        time.sleep(0.15)
+        tmux.send_key("Enter")
+        queued_pending = tmux.wait_for(
+            lambda text: (
+                queued_busy_prompt in text
+                and any(label in text for label in SPINNER_LABELS)
+                and has_input_prompt(text)
+            ),
+            timeout=12,
+        )
+        assert_activity_above_prompt_with_gap(queued_pending)
+
+        tmux.send_text(queued_followup_prompt)
+        time.sleep(0.15)
+        tmux.send_key("Enter")
+        queued_preview = tmux.wait_for(
+            lambda text: (
+                "Queued (press ↑ to edit):" in text
+                and queued_followup_prompt in text
+                and has_input_prompt(text)
+            ),
+            timeout=12,
+        )
+        assert_contains(queued_preview, "Queued (press ↑ to edit):", "queued input preview title did not render")
+        assert_contains(queued_preview, queued_followup_prompt, "queued input text did not render")
+        assert_footer_chrome_is_singular(queued_preview)
+
+        queued_final = tmux.wait_for(
+            lambda text: (
+                queued_followup_response in text
+                and len(server.requests) >= 4
+                and footer_has_empty_prompt(text)
+            ),
+            timeout=25,
+        )
+        assert_contains(queued_final, queued_followup_response, "queued follow-up response did not render")
+        assert_true(
+            any(request_contains_user_text(request, queued_followup_prompt) for request in server.requests),
+            f"fake server did not receive queued user input {queued_followup_prompt!r}",
+        )
+        assert_true(
+            "Queued (press ↑ to edit):" not in queued_final,
+            f"queued preview leaked after the queued turn completed:\n{queued_final}",
+        )
+        assert_footer_chrome_is_singular(queued_final, allow_completed_summary=True)
+        print("PASS: busy typed input is queued and submitted on the next loop")
+
+        print("--- E2E 7c: queued input can be edited with up arrow before it runs ---")
+        tmux.send_text(queued_edit_busy_prompt)
+        time.sleep(0.15)
+        tmux.send_key("Enter")
+        queued_edit_pending = tmux.wait_for(
+            lambda text: (
+                queued_edit_busy_prompt in text
+                and any(label in text for label in SPINNER_LABELS)
+                and has_input_prompt(text)
+            ),
+            timeout=12,
+        )
+        assert_activity_above_prompt_with_gap(queued_edit_pending)
+
+        tmux.send_text(queued_edit_initial_prompt)
+        time.sleep(0.15)
+        tmux.send_key("Enter")
+        queued_edit_preview = tmux.wait_for(
+            lambda text: (
+                "Queued (press ↑ to edit):" in text
+                and queued_edit_initial_prompt in text
+                and has_input_prompt(text)
+            ),
+            timeout=12,
+        )
+        assert_contains(queued_edit_preview, queued_edit_initial_prompt, "initial queued edit text did not render")
+
+        tmux.send_key("Up")
+        time.sleep(0.15)
+        tmux.send_key("C-u")
+        tmux.send_text(queued_edit_final_prompt)
+        time.sleep(0.15)
+        tmux.send_key("Enter")
+        queued_edit_replaced_preview = tmux.wait_for(
+            lambda text: (
+                "Queued (press ↑ to edit):" in text
+                and queued_edit_final_prompt in text
+                and has_input_prompt(text)
+            ),
+            timeout=12,
+        )
+        assert_contains(queued_edit_replaced_preview, queued_edit_final_prompt, "edited queued text did not render")
+        assert_footer_chrome_is_singular(queued_edit_replaced_preview)
+
+        queued_edit_final = tmux.wait_for(
+            lambda text: (
+                queued_edit_followup_response in text
+                and len(server.requests) >= 6
+                and footer_has_empty_prompt(text)
+            ),
+            timeout=25,
+        )
+        assert_contains(queued_edit_final, queued_edit_followup_response, "edited queued response did not render")
+        assert_true(
+            any(request_contains_user_text(request, queued_edit_final_prompt) for request in server.requests),
+            f"fake server did not receive edited queued user input {queued_edit_final_prompt!r}",
+        )
+        assert_footer_chrome_is_singular(queued_edit_final, allow_completed_summary=True)
+        print("PASS: queued input can be edited before the next turn consumes it")
+
         tmux.auto_mode = False
         tmux.stop()
         tmux.start()
@@ -1625,7 +1775,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_true("xiaok 想要执行以下操作" not in no_reprompt, f"persisted project permission still prompted:\n{no_reprompt}")
 
         second_permission_result = tmux.wait_for(
-            lambda text: permission_response_two in text and len(server.requests) >= 6,
+            lambda text: permission_response_two in text and len(server.requests) >= 10,
             timeout=20,
         )
         assert_contains(second_permission_result, permission_response_two, "persisted permission response did not render")
@@ -1685,7 +1835,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_true("sandbox-expand:bash" not in sandbox_no_reprompt, f"persisted sandbox approval still prompted:\n{sandbox_no_reprompt}")
 
         second_sandbox_result = tmux.wait_for(
-            lambda text: sandbox_response_two in text and len(server.requests) >= 10,
+            lambda text: sandbox_response_two in text and len(server.requests) >= 14,
             timeout=20,
         )
         assert_contains(second_sandbox_result, sandbox_response_two, "persisted sandbox approval response did not render")
@@ -2616,6 +2766,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
             cli_entry,
             tmux_bin,
             env_overrides={
+                **e2e_env,
                 "XIAOK_E2E_ACTIVITY_LABEL_FACTOR": "120",
             },
         )
@@ -2681,7 +2832,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
 
         print("--- E2E Summary ---")
         print(f"Requests observed by fake OpenAI server: {len(server.requests)}")
-        assert_true(len(server.requests) >= 89, "expected at least eighty-nine model requests")
+        assert_true(len(server.requests) >= 93, "expected at least ninety-three model requests")
         print("PASS: terminal e2e completed")
     finally:
         if keep_session:

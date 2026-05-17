@@ -5,6 +5,11 @@ import { getConfigDir } from '../utils/config.js';
 export type TranscriptEvent =
   | { type: 'input_key'; key: string; timestamp: number }
   | { type: 'input_submit'; value: string; timestamp: number }
+  | { type: 'input_queue_submit'; value: string; timestamp: number }
+  | { type: 'input_queue_replace'; oldValue: string; newValue: string; timestamp: number }
+  | { type: 'input_queue_edit'; value: string; timestamp: number }
+  | { type: 'input_queue_cancel'; value?: string; timestamp: number }
+  | { type: 'input_queue_dequeue'; value: string; timestamp: number }
   | { type: 'permission_prompt_open'; toolName: string; timestamp: number }
   | { type: 'permission_prompt_navigate'; direction: 'up' | 'down'; timestamp: number }
   | { type: 'permission_prompt_decision'; action: string; timestamp: number }

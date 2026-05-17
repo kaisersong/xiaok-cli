@@ -40,7 +40,7 @@ export interface ScrollPromptFrame {
   summaryLine?: string;
   statusLine: string;
   overlayLines?: string[];
-  overlayKind?: 'generic' | 'permission' | 'feedback';
+  overlayKind?: 'generic' | 'permission' | 'feedback' | 'queued';
   owner?: 'input' | 'renderer';
 }
 
@@ -736,6 +736,7 @@ export class ScrollRegionManager {
     const keepStatusLineVisible = (
       (isPermissionOverlay && !shouldSkipPermissionOverlayReserve())
       || frame.overlayKind === 'feedback'
+      || frame.overlayKind === 'queued'
     );
     this._footerVisible = isPermissionOverlay || keepStatusLineVisible;
     const cols = this.config.columns;

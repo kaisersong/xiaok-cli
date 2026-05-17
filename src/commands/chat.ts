@@ -49,7 +49,7 @@ import { ScrollRegionManager } from '../ui/scroll-region.js';
 import { TuiRuntimeState, type TuiSummarySource } from '../ui/tui/runtime-state.js';
 import { renderWelcomeScreen, renderInputSeparator, dim, boldCyan, formatProgressNote, formatSubmittedInput, formatToolActivity, formatHistoryBlock } from '../ui/render.js';
 import { getDisplayWidth, stripAnsi } from '../ui/display-width.js';
-import { InputReader } from '../ui/input.js';
+import { InputReader, type BusyCaptureHandle } from '../ui/input.js';
 import { sliceByDisplayColumns } from '../ui/text-metrics.js';
 import { ReplRenderer } from '../ui/repl-renderer.js';
 import { ToolExplorer } from '../ui/tool-explorer.js';
@@ -296,6 +296,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   let agent: Agent | undefined;
   let runtimeFacade: RuntimeFacade | undefined;
   let skillCatalogWatcher: SkillCatalogWatcher | undefined;
+  let activeBusyCapture: BusyCaptureHandle | null = null;
+  let stopBusyCapture: () => void = () => {};
   let activeIntentReminderBlock: MessageBlock | undefined;
   let currentTurnIntentPlan: IntentPlanDraft | undefined;
   let currentTurnStageIndex = 0;
@@ -515,6 +517,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   // This avoids TS2448 (use-before-declare) for const-declared functions.
   let askUserOnEnter: (() => void) | null = null;
   let askUserOnExit: (() => void) | null = null;
+  let askUserRenderFrame: ((lines: string[]) => boolean | void) | null = null;
+  let askUserClearFrame: (() => void) | null = null;
 
   const workflowTools = [
     createAskUserTool({
@@ -545,6 +549,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     createAskUserQuestionTool({
       onEnterInteractive: () => askUserOnEnter?.(),
       onExitInteractive: () => askUserOnExit?.(),
+      renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
+      clearFrame: () => askUserClearFrame?.(),
     }),
     createInstallSkillTool({
       cwd,
@@ -744,10 +750,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
   inputReader.setScrollPromptRenderer((frame) => {
     if (!scrollRegion.isActive()) return false;
+    const placeholder = frame.placeholder === '> ' ? getFooterInputPrompt() : frame.placeholder;
     scrollRegion.renderPromptFrame({
       inputValue: frame.inputValue,
       cursor: frame.cursor,
-      placeholder: 'Type your message...',
+      placeholder,
       summaryLine: frame.summaryLine,
       statusLine: frame.statusLine,
       overlayLines: frame.overlayLines,
@@ -885,17 +892,66 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     runtimeState.withPausedLiveActivity(action)
   );
 
-  // Wire up lazy callbacks for AskUserQuestion interactive prompt
-  askUserOnEnter = () => {
-    runtimeState.enterInteractivePrompt();
+  let askUserQuestionPromptActive = false;
+
+  const enterAskUserQuestionPrompt = (): void => {
+    stopBusyCapture();
+    if (!askUserQuestionPromptActive) {
+      askUserQuestionPromptActive = true;
+      runtimeState.enterInteractivePrompt();
+    }
     if (scrollRegion.isActive()) {
       scrollRegion.clearActivityLine();
       scrollRegion.positionCursorAtContentCursor();
     }
   };
-  askUserOnExit = () => {
-    runtimeState.exitInteractivePrompt();
+
+  const exitAskUserQuestionPrompt = (): void => {
+    if (askUserQuestionPromptActive) {
+      askUserQuestionPromptActive = false;
+      runtimeState.exitInteractivePrompt();
+    }
     runtimeState.beginActivity(describeLiveActivity('AskUserQuestion', {}), true);
+    if (!terminalUiSuspended && scrollRegion.isActive()) {
+      activeBusyCapture = inputReader.startBusyCapture({
+        placeholder: getFooterInputPrompt(),
+      });
+    }
+  };
+
+  // Wire up lazy callbacks for AskUserQuestion interactive prompt.
+  askUserOnEnter = enterAskUserQuestionPrompt;
+  askUserOnExit = exitAskUserQuestionPrompt;
+  askUserRenderFrame = (lines: string[]): boolean => {
+    if (terminalUiSuspended || !scrollRegion.isActive()) {
+      return false;
+    }
+    scrollRegion.renderPromptFrame({
+      inputValue: '',
+      cursor: 0,
+      placeholder: getFooterInputPrompt(),
+      summaryLine: getCurrentIntentSummaryLine(),
+      statusLine: statusBar.getStatusLine(),
+      overlayLines: lines,
+      overlayKind: 'generic',
+      owner: 'renderer',
+    });
+    return true;
+  };
+  askUserClearFrame = (): void => {
+    if (terminalUiSuspended || !scrollRegion.isActive()) {
+      return;
+    }
+    scrollRegion.renderPromptFrame({
+      inputValue: '',
+      cursor: 0,
+      placeholder: getFooterInputPrompt(),
+      summaryLine: getCurrentIntentSummaryLine(),
+      statusLine: statusBar.getStatusLine(),
+      overlayLines: [],
+      owner: 'renderer',
+    });
+    scrollRegion.positionCursorAtContentCursor();
   };
 
   const stopActivity = (): void => {
@@ -1040,19 +1096,17 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       return;
     }
 
-    // 延迟判断，给文本 chunk 时间到达
     if (thinkingOnlyToolNoticeTimer) {
-      return;
+      clearTimeout(thinkingOnlyToolNoticeTimer);
+      thinkingOnlyToolNoticeTimer = null;
     }
 
-    thinkingOnlyToolNoticeTimer = setTimeout(() => {
-      if (!turnVisibleAssistantTextSeen && !turnThinkingOnlyToolNoticeWritten) {
-        turnThinkingOnlyToolNoticeWritten = true;
-        turnLayout.noteProgressNote();
-        writeProgressTranscriptNote(THINKING_ONLY_TOOL_TURN_NOTICE);
-      }
-      thinkingOnlyToolNoticeTimer = null;
-    }, 150); // 150ms 延迟
+    if (!turnVisibleAssistantTextSeen && !turnThinkingOnlyToolNoticeWritten) {
+      turnThinkingOnlyToolNoticeWritten = true;
+      turnLayout.noteProgressNote();
+      writeProgressTranscriptNote(THINKING_ONLY_TOOL_TURN_NOTICE);
+      return;
+    }
   };
 
   const isTerminalIntentStatus = (
@@ -2116,6 +2170,22 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     // 创建输入读取器
     inputReader.setSkills(skills);
 
+  let deferredInput: string | null = null;
+  let pendingQueuedInput: string | null = null;
+
+  stopBusyCapture = (): void => {
+    activeBusyCapture?.stop();
+    activeBusyCapture = null;
+  };
+
+  const stashQueuedInputIfAny = (): void => {
+    const queuedInput = activeBusyCapture?.consumeQueued() ?? null;
+    stopBusyCapture();
+    if (queuedInput !== null && queuedInput.trim().length > 0) {
+      pendingQueuedInput = queuedInput;
+    }
+  };
+
   runtimeHooks.on('turn_started', (e) => {
     log.debug('turn_started', JSON.stringify({ turnId: e?.turnId }));
     completedTurnIntentSummaryLine = '';
@@ -2132,11 +2202,22 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (!terminalUiSuspended) {
       scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
     }
+    if (!terminalUiSuspended && scrollRegion.isActive()) {
+      activeBusyCapture?.stop();
+      activeBusyCapture = inputReader.startBusyCapture({
+        placeholder: getFooterInputPrompt(),
+      });
+    }
   });
 
   runtimeHooks.on('tool_started', (e) => {
     log.debug('tool_started', JSON.stringify({ tool: (e as any)?.toolName }));
     endStreamingPhaseForInterrupt();
+    if (e.toolName === 'AskUserQuestion') {
+      enterAskUserQuestionPrompt();
+      maybeAdvanceCurrentTurnStageForTool(e.toolName, e.toolInput);
+      return;
+    }
     runtimeState.enterToolInterrupt();
     beginActivity(describeLiveActivity(e.toolName, e.toolInput));
     maybeAdvanceCurrentTurnStageForTool(e.toolName, e.toolInput);
@@ -2217,6 +2298,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
 
   runtimeHooks.on('turn_completed', () => {
+    stashQueuedInputIfAny();
     toolExplorer.reset();
     if (currentTurnIntentPlan?.stages.length) {
       currentTurnStageIndex = currentTurnIntentPlan.stages.length - 1;
@@ -2274,6 +2356,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   // SIGINT 处理
   process.on('SIGINT', () => {
     void (async () => {
+      stopBusyCapture();
       stopActivity();
       if (handleResize) {
         process.stdout.off('resize', handleResize);
@@ -2291,11 +2374,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     })();
   });
 
-  let deferredInput: string | null = null;
-
   const handleCompletedIntentFeedbackResult = async (
     result: CompletedIntentFeedbackResult,
   ): Promise<boolean> => {
+    stashQueuedInputIfAny();
     if (result.deferredInput !== null) {
       if (scrollRegion.isActive()) {
         scrollRegion.clearOverlayPromptState();
@@ -2325,6 +2407,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       if (deferredInput !== null) {
         input = deferredInput;
         deferredInput = null;
+      } else if (pendingQueuedInput !== null) {
+        input = pendingQueuedInput;
+        pendingQueuedInput = null;
       } else {
         // 输入前的分隔线 — scroll region 激活后跳过，由 footer 处理
         if (!scrollRegion.isActive() && !terminalUiSuspended) {
@@ -2334,6 +2419,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
 
     if (input === null || input.trim() === '/exit') {
+      stopBusyCapture();
       clearTurnIntentContext();
       await releaseSessionOwnershipForExit();
       scrollRegion.end();
@@ -2714,6 +2800,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
             process.stdout.write('\n');
           }
         } catch (e) {
+          stashQueuedInputIfAny();
           handleTurnFailure(e);
         }
         if (!scrollRegion.isActive()) {
@@ -2895,6 +2982,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
     } catch (e) {
       clearTurnIntentContext();
+      stashQueuedInputIfAny();
       handleTurnFailure(e);
     }
     if (deferredInput === null && scrollRegion.isActive() && runtimeState.getSnapshot().footerMode !== 'busy') {
@@ -2906,6 +2994,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     // of content streaming. Skipping nextTick clear to avoid clearing content.
     }
   } finally {
+    stopBusyCapture();
     stopActivity();
     if (resizeTimeout) {
       clearTimeout(resizeTimeout);
