@@ -95,6 +95,8 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   updateMemory: (input) => ipcRenderer.invoke('desktop:updateMemory', input),
   deleteMemory: (id) => ipcRenderer.invoke('desktop:deleteMemory', id),
   importMemories: (items) => ipcRenderer.invoke('desktop:importMemories', items),
+  memoryStats: () => ipcRenderer.invoke('desktop:memoryStats'),
+  memoryListLayer: (layer, limit, offset) => ipcRenderer.invoke('desktop:memoryListLayer', layer, limit, offset),
   syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks),
   onScheduledTaskDue(handler) {
     const channel = 'desktop:scheduledTaskDue';

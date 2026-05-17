@@ -10,6 +10,14 @@ interface MemoryEntryView {
   source?: string;
 }
 
+interface LayerStats {
+  l0: number;
+  l1: number;
+  l2: number;
+  l3: number;
+  dbSizeBytes: number;
+}
+
 function formatCreatedAt(value: number | string | undefined): string {
   if (typeof value === 'number') {
     return new Date(value).toLocaleString();
@@ -27,6 +35,7 @@ export function LocalMemoryStats() {
   const [entries, setEntries] = useState<MemoryEntryView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [layerStats, setLayerStats] = useState<LayerStats | null>(null);
 
   const loadEntries = async () => {
     setLoading(true);
@@ -40,6 +49,13 @@ export function LocalMemoryStats() {
     } finally {
       setLoading(false);
     }
+    try {
+      const w = window as any;
+      if (w?.xiaokDesktop?.memoryStats) {
+        const stats = await w.xiaokDesktop.memoryStats();
+        if (stats) setLayerStats(stats);
+      }
+    } catch {}
   };
 
   useEffect(() => {
@@ -69,6 +85,26 @@ export function LocalMemoryStats() {
             </div>
           </div>
         </div>
+        {layerStats ? (
+          <div className="mt-3 grid grid-cols-4 gap-2 text-xs">
+            <div className="rounded-lg px-2 py-1" style={{ background: 'var(--c-bg-elevated)' }}>
+              <div className="text-[var(--c-text-secondary)]">L0 原始</div>
+              <div className="font-medium text-[var(--c-text-primary)]">{layerStats.l0}</div>
+            </div>
+            <div className="rounded-lg px-2 py-1" style={{ background: 'var(--c-bg-elevated)' }}>
+              <div className="text-[var(--c-text-secondary)]">L1 提取</div>
+              <div className="font-medium text-[var(--c-text-primary)]">{layerStats.l1}</div>
+            </div>
+            <div className="rounded-lg px-2 py-1" style={{ background: 'var(--c-bg-elevated)' }}>
+              <div className="text-[var(--c-text-secondary)]">L2 场景</div>
+              <div className="font-medium text-[var(--c-text-primary)]">{layerStats.l2}</div>
+            </div>
+            <div className="rounded-lg px-2 py-1" style={{ background: 'var(--c-bg-elevated)' }}>
+              <div className="text-[var(--c-text-secondary)]">L3 人格</div>
+              <div className="font-medium text-[var(--c-text-primary)]">{layerStats.l3}</div>
+            </div>
+          </div>
+        ) : null}
         <button
           type="button"
           onClick={() => void loadEntries()}

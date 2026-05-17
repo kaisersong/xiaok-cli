@@ -106,6 +106,9 @@ export function getDesktopApi(): Record<string, unknown> | null {
     async delete(id: string) {
       return raw.deleteMemory(id)
     },
+    async stats() {
+      return raw.memoryStats() as Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>
+    },
   }
 
   _cachedApi = {
