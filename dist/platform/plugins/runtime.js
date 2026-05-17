@@ -20,8 +20,9 @@ export function resolvePluginShellCommand(command, platform = process.platform) 
     };
 }
 export async function loadPlatformPluginRuntime(cwd, builtinCommands) {
+    const disableGlobalPlugins = process.env.XIAOK_DISABLE_GLOBAL_PLUGINS === '1';
     const pluginDirs = [
-        join(homedir(), '.xiaok', 'plugins'),
+        ...(disableGlobalPlugins ? [] : [join(homedir(), '.xiaok', 'plugins')]),
         join(cwd, '.xiaok', 'plugins'),
     ];
     const plugins = await loadPlugins(pluginDirs, { builtinCommands });

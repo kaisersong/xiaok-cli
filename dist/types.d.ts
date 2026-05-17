@@ -5,6 +5,7 @@ import type { AgentSessionSnapshot } from './ai/runtime/session.js';
 import type { PromptCacheSegments } from './ai/runtime/model-capabilities.js';
 import type { PromptSnapshot } from './ai/prompts/types.js';
 import type { ModelConfigEntry, ProviderConfig, ProviderId } from './ai/providers/types.js';
+import type { IntentBoundaryConfig } from './ai/intent-delegation/boundary-types.js';
 export type { MessageBlock, UsageStats };
 export interface ModelAdapter {
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string): AsyncIterable<StreamChunk>;
@@ -122,6 +123,7 @@ export interface Config {
     };
     defaultMode: 'interactive';
     skillDebug?: boolean;
+    intentBoundary: IntentBoundaryConfig;
     channels?: {
         yzj?: YZJChannelConfig;
     };
@@ -143,6 +145,7 @@ export interface Config {
         };
     };
 }
+export declare const DEFAULT_INTENT_BOUNDARY_CONFIG: IntentBoundaryConfig;
 export declare const DEFAULT_CONFIG: Config;
 /** 校验 legacy defaultModel 是否合法，防止脏数据写入 */
 export declare function isValidLegacyProvider(v: unknown): v is LegacyConfig['defaultModel'];

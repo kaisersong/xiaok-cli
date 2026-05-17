@@ -7,6 +7,27 @@ export type TranscriptEvent = {
     value: string;
     timestamp: number;
 } | {
+    type: 'input_queue_submit';
+    value: string;
+    timestamp: number;
+} | {
+    type: 'input_queue_replace';
+    oldValue: string;
+    newValue: string;
+    timestamp: number;
+} | {
+    type: 'input_queue_edit';
+    value: string;
+    timestamp: number;
+} | {
+    type: 'input_queue_cancel';
+    value?: string;
+    timestamp: number;
+} | {
+    type: 'input_queue_dequeue';
+    value: string;
+    timestamp: number;
+} | {
     type: 'permission_prompt_open';
     toolName: string;
     timestamp: number;

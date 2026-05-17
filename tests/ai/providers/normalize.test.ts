@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeConfig } from '../../../src/ai/providers/normalize.js';
+import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../../src/types.js';
 
 describe('normalizeConfig', () => {
   it('upgrades a v1 claude config into provider and model catalogs', () => {
@@ -58,7 +59,7 @@ describe('normalizeConfig', () => {
     });
   });
 
-  it('passes schema v2 config through unchanged', () => {
+  it('normalizes schema v2 config with default intent boundary settings', () => {
     const input = {
       schemaVersion: 2 as const,
       defaultProvider: 'openai',
@@ -82,6 +83,9 @@ describe('normalizeConfig', () => {
       channels: {},
     };
 
-    expect(normalizeConfig(input)).toEqual(input);
+    expect(normalizeConfig(input)).toEqual({
+      ...input,
+      intentBoundary: DEFAULT_INTENT_BOUNDARY_CONFIG,
+    });
   });
 });

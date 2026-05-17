@@ -1,6 +1,6 @@
 {
   "name": "xiaok-desktop",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "description": "xiaok Desktop Intent Cockpit",
   "author": "xiaok",
@@ -16,10 +16,12 @@
     "test:smoke": "vitest run --reporter=verbose tests/renderer tests/main",
     "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "pack:dir": "npm run build:icon && npm run build && electron-builder --dir --config electron-builder.json -c.win.signAndEditExecutable=false",
-    "pack:release": "npm run build:icon && npm run build && electron-builder --config electron-builder.json -c.win.signAndEditExecutable=false"
+    "pack:release": "npm run build:icon && npm run build && electron-builder --config electron-builder.json -c.win.signAndEditExecutable=false",
+    "postinstall": "cd node_modules/better-sqlite3 && npx prebuild-install --runtime electron --target $(node -e \"console.log(require('electron/package.json').version)\") || true"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.10",
+    "better-sqlite3": "^12.10.0",
     "electron-updater": "^6.8.3",
     "fast-glob": "^3.3.2",
     "openai": "^4.77.0"

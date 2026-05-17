@@ -29,6 +29,8 @@ export interface AskQuestionParams {
     question: string;
     options: AskOption[];
     multiSelect?: boolean;
+    renderFrame?: (lines: string[]) => boolean | void;
+    clearFrame?: () => void;
 }
 export interface AskQuestionResult {
     selected: number[];

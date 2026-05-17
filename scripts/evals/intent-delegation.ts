@@ -1,5 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { classifyIntentBoundaryByRules } from '../../src/ai/intent-delegation/boundary-classifier.js';
+import { createIntentBoundaryResolver } from '../../src/ai/intent-delegation/boundary-resolver.js';
+import type { AmbiguityType, RuleBoundaryDecision } from '../../src/ai/intent-delegation/boundary-types.js';
 import { createIntentPlan, type ActiveIntentContext } from '../../src/ai/intent-delegation/planner.js';
 import type { IntentPlanDraft, IntentType, PlannedStep, RiskTier } from '../../src/ai/intent-delegation/types.js';
 import { activateIntentStep, createIntentLedgerRecord } from '../../src/runtime/intent-delegation/dispatcher.js';
@@ -14,6 +17,7 @@ import {
   formatReceiptTranscriptBlock,
   formatSalvageTranscriptBlock,
 } from '../../src/ui/orchestration.js';
+import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../src/types.js';
 
 type BoundaryContinuationMode = 'new_intent' | 'continue_active' | 'clarify' | 'non_intent';
 
@@ -21,6 +25,8 @@ type IntentBoundaryRow = {
   id: string;
   hasActiveIntent: boolean;
   activeIntent?: ActiveIntentContext;
+  expectedRuleKind: RuleBoundaryDecision['kind'];
+  expectedAmbiguityType: AmbiguityType | null;
   expectedResultKind: 'plan' | 'non_intent';
   expectedContinuationMode: BoundaryContinuationMode;
   expectedIntentType: IntentType | null;
@@ -121,7 +127,7 @@ const PLAN_STATUSES: IntentLedgerRecord['overallStatus'][] = [
 async function main(): Promise<void> {
   try {
     const suites = [
-      evaluateIntentBoundary(),
+      await evaluateIntentBoundary(),
       evaluateIntentPlanning(),
       evaluateDispatch(),
       evaluateSurface(),
@@ -159,13 +165,15 @@ async function main(): Promise<void> {
   }
 }
 
-function evaluateIntentBoundary(): EvalSuiteResult {
+async function evaluateIntentBoundary(): Promise<EvalSuiteResult> {
   const rows = readCsvRows('evals/intent-boundary.prompts.csv', [
     'id',
     'has_active_intent',
     'active_deliverable',
     'active_intent_type',
     'active_template_id',
+    'expected_rule_kind',
+    'expected_ambiguity_type',
     'expected_result_kind',
     'expected_continuation_mode',
     'expected_intent_type',
@@ -174,16 +182,38 @@ function evaluateIntentBoundary(): EvalSuiteResult {
   const failures: EvalFailure[] = [];
 
   for (const row of rows) {
-    const result = createIntentPlan({
+    const input = {
       instanceId: 'eval-instance',
       sessionId: 'eval-session',
       input: row.prompt,
+      cwd: REPO_ROOT,
       skills: EMPTY_SKILLS,
       activeIntent: row.activeIntent,
-    });
+    };
+    const ruleDecision = classifyIntentBoundaryByRules(input);
 
-    const actualResultKind = result.kind;
-    const actualContinuationMode: BoundaryContinuationMode = result.kind === 'plan'
+    if (ruleDecision.kind !== row.expectedRuleKind) {
+      failures.push({
+        suite: 'intent-boundary',
+        id: row.id,
+        message: `expected rule kind ${row.expectedRuleKind}, got ${ruleDecision.kind}`,
+      });
+    }
+
+    const actualAmbiguityType = ruleDecision.kind === 'ambiguous' ? ruleDecision.ambiguityType : null;
+    if (actualAmbiguityType !== row.expectedAmbiguityType) {
+      failures.push({
+        suite: 'intent-boundary',
+        id: row.id,
+        message: `expected ambiguity type ${row.expectedAmbiguityType ?? NONE}, got ${actualAmbiguityType ?? NONE}`,
+      });
+    }
+
+    const resolver = createIntentBoundaryResolver({ config: DEFAULT_INTENT_BOUNDARY_CONFIG });
+    const result = await resolver.resolve(input);
+
+    const actualResultKind = result.kind === 'intent' ? 'plan' : 'non_intent';
+    const actualContinuationMode: BoundaryContinuationMode = result.kind === 'intent'
       ? result.plan.continuationMode
       : 'non_intent';
 
@@ -204,7 +234,7 @@ function evaluateIntentBoundary(): EvalSuiteResult {
       });
     }
 
-    if (row.expectedIntentType && result.kind === 'plan' && result.plan.intentType !== row.expectedIntentType) {
+    if (row.expectedIntentType && result.kind === 'intent' && result.plan.intentType !== row.expectedIntentType) {
       failures.push({
         suite: 'intent-boundary',
         id: row.id,
@@ -540,6 +570,20 @@ function parseIntentBoundaryRow(row: CsvRecord, index: number): IntentBoundaryRo
   const id = readRequiredString(row, 'id', 'intent-boundary', index);
   const hasActiveIntent = readBooleanCell(row, 'has_active_intent', 'intent-boundary', index);
   const activeIntent = readActiveIntent(row, 'intent-boundary', index, hasActiveIntent);
+  const expectedRuleKind = readEnumCell(
+    row,
+    'expected_rule_kind',
+    ['definite_non_intent', 'definite_intent', 'ambiguous'],
+    'intent-boundary',
+    index,
+  ) as RuleBoundaryDecision['kind'];
+  const expectedAmbiguityType = readEnumOrNone(
+    row,
+    'expected_ambiguity_type',
+    ['verb_no_output', 'material_no_directive', 'implicit_workflow'],
+    'intent-boundary',
+    index,
+  ) as AmbiguityType | null;
   const expectedResultKind = readEnumCell(row, 'expected_result_kind', ['plan', 'non_intent'], 'intent-boundary', index);
   const expectedContinuationMode = readEnumCell(
     row,
@@ -557,6 +601,12 @@ function parseIntentBoundaryRow(row: CsvRecord, index: number): IntentBoundaryRo
   if (expectedResultKind === 'plan' && expectedContinuationMode === 'non_intent') {
     throw new Error(`[intent-boundary] row ${index + 1} (${id}) plan rows cannot use expected_continuation_mode=non_intent`);
   }
+  if (expectedRuleKind !== 'ambiguous' && expectedAmbiguityType !== null) {
+    throw new Error(`[intent-boundary] row ${index + 1} (${id}) non-ambiguous rule rows must use expected_ambiguity_type=${NONE}`);
+  }
+  if (expectedRuleKind === 'ambiguous' && expectedAmbiguityType === null) {
+    throw new Error(`[intent-boundary] row ${index + 1} (${id}) ambiguous rule rows must declare expected_ambiguity_type`);
+  }
   if (expectedResultKind === 'non_intent' && expectedIntentType !== null) {
     throw new Error(`[intent-boundary] row ${index + 1} (${id}) non_intent rows must use expected_intent_type=${NONE}`);
   }
@@ -568,6 +618,8 @@ function parseIntentBoundaryRow(row: CsvRecord, index: number): IntentBoundaryRo
     id,
     hasActiveIntent,
     activeIntent,
+    expectedRuleKind,
+    expectedAmbiguityType,
     expectedResultKind,
     expectedContinuationMode,
     expectedIntentType,

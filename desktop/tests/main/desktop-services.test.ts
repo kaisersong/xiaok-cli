@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDesktopServices } from '../../electron/desktop-services.js';
+import { createDesktopServices, createKSwarmCreateProjectTool } from '../../electron/desktop-services.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 
 function mockKSwarmService(): KSwarmService {
@@ -613,6 +613,49 @@ describe('desktop services', () => {
 
     const installs = await services.listMCPInstalls();
     expect(installs).toHaveLength(2);
+  });
+
+  it('forwards workFolder from the chat create_project tool to kswarm', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'po-agent', name: 'PO', roles: ['project_owner'], status: 'idle' },
+              { id: 'worker-agent', name: 'Worker', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            ok: true,
+            project: { id: 'proj-1', name: 'Demo', status: 'created', createdAt: 123 },
+          }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmCreateProjectTool(kswarmService);
+    const result = await tool.execute({
+      name: 'Demo',
+      goal: 'Ship a report',
+      workFolder: '  /tmp/kswarm-demo  ',
+    });
+
+    expect(JSON.parse(result)).toMatchObject({ type: 'project_card', projectId: 'proj-1' });
+    const createRequest = requests.find(request => request.path === '/projects');
+    expect(createRequest).toBeTruthy();
+    expect(JSON.parse(String(createRequest?.init?.body))).toMatchObject({
+      name: 'Demo',
+      goal: 'Ship a report',
+      poAgent: 'po-agent',
+      members: ['worker-agent'],
+      workFolder: '/tmp/kswarm-demo',
+    });
   });
   it('system prompt defaults to reminder_create for scheduled tasks', async () => {
     const { readFileSync } = await import('node:fs');

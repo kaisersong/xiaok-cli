@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../types.js';
 import { loadConfig, saveConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
@@ -12,9 +13,11 @@ import { formatDebugOutput, analyzeIntent as analyzeStageIntent } from '../runti
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync } from '../ai/memory/store.js';
+import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
 import { createHooksRunner } from '../runtime/hooks-runner.js';
-import { createIntentPlan } from '../ai/intent-delegation/planner.js';
+import { createIntentBoundaryResolver } from '../ai/intent-delegation/boundary-resolver.js';
+import { classifyBoundaryWithLlm, createAdapterBoundaryInvoker } from '../ai/intent-delegation/llm-boundary-classifier.js';
 import { writeError, isTTY } from '../utils/ui.js';
 import { showPermissionPrompt } from '../ui/permission-prompt.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
@@ -79,6 +82,10 @@ const { version: cliVersion } = JSON.parse(readFileSync(new URL('../../package.j
 // but do not prompt interactively until feedback has a non-footer surface.
 const COMPLETED_INTENT_FEEDBACK_ENABLED = false;
 const THINKING_ONLY_TOOL_TURN_NOTICE = '正在执行工具...';
+let intentBoundaryResolverFactoryForTests;
+export function __setIntentBoundaryResolverFactoryForTests(factory) {
+    intentBoundaryResolverFactoryForTests = factory;
+}
 function describeLiveActivity(toolName, input) {
     if (['tool_search', 'grep', 'glob', 'read', 'skill', 'web_fetch', 'web_search'].includes(toolName)) {
         return 'Exploring codebase';
@@ -138,7 +145,7 @@ async function runChat(initialInput, opts) {
     // 加载配置和凭据
     log.info('chat started', { initialInput: initialInput?.slice(0, 80) });
     let config = await loadConfig();
-    const memoryStore = await createMemoryStoreAsync(config.memory?.type === 'layered' ? config.memory : undefined);
+    const memoryStore = await createMemoryStoreAsync(config.memory);
     let adapter;
     try {
         adapter = createAdapter(config);
@@ -147,6 +154,7 @@ async function runChat(initialInput, opts) {
         writeError(String(e));
         process.exit(1);
     }
+    memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
     const creds = await loadCredentials();
     const devApp = await getDevAppIdentity();
     const cwd = process.cwd();
@@ -215,6 +223,8 @@ async function runChat(initialInput, opts) {
     let agent;
     let runtimeFacade;
     let skillCatalogWatcher;
+    let activeBusyCapture = null;
+    let stopBusyCapture = () => { };
     let activeIntentReminderBlock;
     let currentTurnIntentPlan;
     let currentTurnStageIndex = 0;
@@ -392,6 +402,8 @@ async function runChat(initialInput, opts) {
     // This avoids TS2448 (use-before-declare) for const-declared functions.
     let askUserOnEnter = null;
     let askUserOnExit = null;
+    let askUserRenderFrame = null;
+    let askUserClearFrame = null;
     const workflowTools = [
         createAskUserTool({
             ask: async (question, placeholder) => {
@@ -421,6 +433,8 @@ async function runChat(initialInput, opts) {
         createAskUserQuestionTool({
             onEnterInteractive: () => askUserOnEnter?.(),
             onExitInteractive: () => askUserOnExit?.(),
+            renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
+            clearFrame: () => askUserClearFrame?.(),
         }),
         createInstallSkillTool({
             cwd,
@@ -470,6 +484,7 @@ async function runChat(initialInput, opts) {
         adapter: () => adapter,
         skillTool,
         workflowTools,
+        memoryStore,
         dryRun: opts.dryRun,
         permissionManager,
         onPrompt: async (name, input) => {
@@ -619,10 +634,11 @@ async function runChat(initialInput, opts) {
     inputReader.setScrollPromptRenderer((frame) => {
         if (!scrollRegion.isActive())
             return false;
+        const placeholder = frame.placeholder === '> ' ? getFooterInputPrompt() : frame.placeholder;
         scrollRegion.renderPromptFrame({
             inputValue: frame.inputValue,
             cursor: frame.cursor,
-            placeholder: 'Type your message...',
+            placeholder,
             summaryLine: frame.summaryLine,
             statusLine: frame.statusLine,
             overlayLines: frame.overlayLines,
@@ -748,17 +764,63 @@ async function runChat(initialInput, opts) {
         runtimeState.stopLiveActivityTimer();
     };
     const withPausedLiveActivity = async (action) => (runtimeState.withPausedLiveActivity(action));
-    // Wire up lazy callbacks for AskUserQuestion interactive prompt
-    askUserOnEnter = () => {
-        runtimeState.enterInteractivePrompt();
+    let askUserQuestionPromptActive = false;
+    const enterAskUserQuestionPrompt = () => {
+        stopBusyCapture();
+        if (!askUserQuestionPromptActive) {
+            askUserQuestionPromptActive = true;
+            runtimeState.enterInteractivePrompt();
+        }
         if (scrollRegion.isActive()) {
             scrollRegion.clearActivityLine();
             scrollRegion.positionCursorAtContentCursor();
         }
     };
-    askUserOnExit = () => {
-        runtimeState.exitInteractivePrompt();
+    const exitAskUserQuestionPrompt = () => {
+        if (askUserQuestionPromptActive) {
+            askUserQuestionPromptActive = false;
+            runtimeState.exitInteractivePrompt();
+        }
         runtimeState.beginActivity(describeLiveActivity('AskUserQuestion', {}), true);
+        if (!terminalUiSuspended && scrollRegion.isActive()) {
+            activeBusyCapture = inputReader.startBusyCapture({
+                placeholder: getFooterInputPrompt(),
+            });
+        }
+    };
+    // Wire up lazy callbacks for AskUserQuestion interactive prompt.
+    askUserOnEnter = enterAskUserQuestionPrompt;
+    askUserOnExit = exitAskUserQuestionPrompt;
+    askUserRenderFrame = (lines) => {
+        if (terminalUiSuspended || !scrollRegion.isActive()) {
+            return false;
+        }
+        scrollRegion.renderPromptFrame({
+            inputValue: '',
+            cursor: 0,
+            placeholder: getFooterInputPrompt(),
+            summaryLine: getCurrentIntentSummaryLine(),
+            statusLine: statusBar.getStatusLine(),
+            overlayLines: lines,
+            overlayKind: 'generic',
+            owner: 'renderer',
+        });
+        return true;
+    };
+    askUserClearFrame = () => {
+        if (terminalUiSuspended || !scrollRegion.isActive()) {
+            return;
+        }
+        scrollRegion.renderPromptFrame({
+            inputValue: '',
+            cursor: 0,
+            placeholder: getFooterInputPrompt(),
+            summaryLine: getCurrentIntentSummaryLine(),
+            statusLine: statusBar.getStatusLine(),
+            overlayLines: [],
+            owner: 'renderer',
+        });
+        scrollRegion.positionCursorAtContentCursor();
     };
     const stopActivity = () => {
         runtimeState.stopActivity();
@@ -887,18 +949,16 @@ async function runChat(initialInput, opts) {
         if (turnVisibleAssistantTextSeen || turnThinkingOnlyToolNoticeWritten) {
             return;
         }
-        // 延迟判断，给文本 chunk 时间到达
         if (thinkingOnlyToolNoticeTimer) {
+            clearTimeout(thinkingOnlyToolNoticeTimer);
+            thinkingOnlyToolNoticeTimer = null;
+        }
+        if (!turnVisibleAssistantTextSeen && !turnThinkingOnlyToolNoticeWritten) {
+            turnThinkingOnlyToolNoticeWritten = true;
+            turnLayout.noteProgressNote();
+            writeProgressTranscriptNote(THINKING_ONLY_TOOL_TURN_NOTICE);
             return;
         }
-        thinkingOnlyToolNoticeTimer = setTimeout(() => {
-            if (!turnVisibleAssistantTextSeen && !turnThinkingOnlyToolNoticeWritten) {
-                turnThinkingOnlyToolNoticeWritten = true;
-                turnLayout.noteProgressNote();
-                writeProgressTranscriptNote(THINKING_ONLY_TOOL_TURN_NOTICE);
-            }
-            thinkingOnlyToolNoticeTimer = null;
-        }, 150); // 150ms 延迟
     };
     const isTerminalIntentStatus = (status) => status === 'completed' || status === 'failed' || status === 'cancelled';
     const refreshIntentLedger = async () => {
@@ -1220,12 +1280,34 @@ async function runChat(initialInput, opts) {
             blockedReason: '',
         });
     };
-    const prepareIntentReminderForInput = (input) => {
+    const createConfiguredIntentBoundaryResolver = () => {
+        const boundaryConfig = config.intentBoundary ?? DEFAULT_INTENT_BOUNDARY_CONFIG;
+        const resolverFactory = intentBoundaryResolverFactoryForTests ?? createIntentBoundaryResolver;
+        return resolverFactory({
+            config: boundaryConfig,
+            llmClassify: boundaryConfig.llmClassifier === 'off'
+                ? undefined
+                : async (boundaryInput, ruleDecision) => classifyBoundaryWithLlm({
+                    input: boundaryInput.input,
+                    sessionId: boundaryInput.sessionId,
+                    instanceId: boundaryInput.instanceId,
+                    cwd: boundaryInput.cwd,
+                    providedSourcePaths: [],
+                    ruleDecision,
+                }, createAdapterBoundaryInvoker(adapter, boundaryConfig)),
+            emitDebug: (event) => {
+                log.info('intent_boundary_decision', event);
+            },
+        });
+    };
+    let intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
+    const prepareIntentReminderForInput = async (input) => {
         const activeIntent = getWaitingUserIntentForInput(input);
-        const planResult = createIntentPlan({
+        const decision = await intentBoundaryResolver.resolve({
             instanceId,
             sessionId,
             input,
+            cwd,
             skills,
             skillScoreLookup: ({ skillName, intentType, stageRole, deliverable }) => skillScoreStore.getBoost({
                 skillName,
@@ -1242,7 +1324,7 @@ async function runChat(initialInput, opts) {
                 }
                 : undefined,
         });
-        currentTurnIntentPlan = planResult.kind === 'plan' ? planResult.plan : undefined;
+        currentTurnIntentPlan = decision.kind === 'intent' ? decision.plan : undefined;
         resetCurrentTurnSummary();
         if (currentTurnIntentPlan?.continuationMode === 'continue_active') {
             activeIntentReminderBlock = buildIntentReminderBlock(currentIntentLedger, instanceId);
@@ -1521,7 +1603,7 @@ async function runChat(initialInput, opts) {
             }
             await refreshSkills();
             await refreshIntentLedger();
-            prepareIntentReminderForInput(initialInput);
+            await prepareIntentReminderForInput(initialInput);
             // Stage executor debug output (when --skill-debug is enabled)
             if (skillDebugEnabled) {
                 const stageOutput = await runStageAnalysis(initialInput);
@@ -1784,6 +1866,19 @@ async function runChat(initialInput, opts) {
         });
         // 创建输入读取器
         inputReader.setSkills(skills);
+        let deferredInput = null;
+        let pendingQueuedInput = null;
+        stopBusyCapture = () => {
+            activeBusyCapture?.stop();
+            activeBusyCapture = null;
+        };
+        const stashQueuedInputIfAny = () => {
+            const queuedInput = activeBusyCapture?.consumeQueued() ?? null;
+            stopBusyCapture();
+            if (queuedInput !== null && queuedInput.trim().length > 0) {
+                pendingQueuedInput = queuedInput;
+            }
+        };
         runtimeHooks.on('turn_started', (e) => {
             log.debug('turn_started', JSON.stringify({ turnId: e?.turnId }));
             completedTurnIntentSummaryLine = '';
@@ -1800,10 +1895,21 @@ async function runChat(initialInput, opts) {
             if (!terminalUiSuspended) {
                 scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
             }
+            if (!terminalUiSuspended && scrollRegion.isActive()) {
+                activeBusyCapture?.stop();
+                activeBusyCapture = inputReader.startBusyCapture({
+                    placeholder: getFooterInputPrompt(),
+                });
+            }
         });
         runtimeHooks.on('tool_started', (e) => {
             log.debug('tool_started', JSON.stringify({ tool: e?.toolName }));
             endStreamingPhaseForInterrupt();
+            if (e.toolName === 'AskUserQuestion') {
+                enterAskUserQuestionPrompt();
+                maybeAdvanceCurrentTurnStageForTool(e.toolName, e.toolInput);
+                return;
+            }
             runtimeState.enterToolInterrupt();
             beginActivity(describeLiveActivity(e.toolName, e.toolInput));
             maybeAdvanceCurrentTurnStageForTool(e.toolName, e.toolInput);
@@ -1877,6 +1983,7 @@ async function runChat(initialInput, opts) {
             renderIntentSummaryLine();
         });
         runtimeHooks.on('turn_completed', () => {
+            stashQueuedInputIfAny();
             toolExplorer.reset();
             if (currentTurnIntentPlan?.stages.length) {
                 currentTurnStageIndex = currentTurnIntentPlan.stages.length - 1;
@@ -1931,6 +2038,7 @@ async function runChat(initialInput, opts) {
         // SIGINT 处理
         process.on('SIGINT', () => {
             void (async () => {
+                stopBusyCapture();
                 stopActivity();
                 if (handleResize) {
                     process.stdout.off('resize', handleResize);
@@ -1947,8 +2055,8 @@ async function runChat(initialInput, opts) {
                 process.exit(0);
             })();
         });
-        let deferredInput = null;
         const handleCompletedIntentFeedbackResult = async (result) => {
+            stashQueuedInputIfAny();
             if (result.deferredInput !== null) {
                 if (scrollRegion.isActive()) {
                     scrollRegion.clearOverlayPromptState();
@@ -1975,6 +2083,10 @@ async function runChat(initialInput, opts) {
                 input = deferredInput;
                 deferredInput = null;
             }
+            else if (pendingQueuedInput !== null) {
+                input = pendingQueuedInput;
+                pendingQueuedInput = null;
+            }
             else {
                 // 输入前的分隔线 — scroll region 激活后跳过，由 footer 处理
                 if (!scrollRegion.isActive() && !terminalUiSuspended) {
@@ -1983,6 +2095,7 @@ async function runChat(initialInput, opts) {
                 input = await inputReader.read('> ');
             }
             if (input === null || input.trim() === '/exit') {
+                stopBusyCapture();
                 clearTurnIntentContext();
                 await releaseSessionOwnershipForExit();
                 scrollRegion.end();
@@ -2151,7 +2264,9 @@ async function runChat(initialInput, opts) {
                         await saveConfig(newConfig);
                         adapter = nextAdapter;
                         config = newConfig;
+                        intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
                         agent.setAdapter(adapter);
+                        memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
                         statusBar.updateModel(selected.model);
                         writeCommandOutput(trimmed, `已切换到：[${selected.provider}] ${selected.label} (${selected.model})\n\n`);
                     }
@@ -2337,6 +2452,7 @@ async function runChat(initialInput, opts) {
                         }
                     }
                     catch (e) {
+                        stashQueuedInputIfAny();
                         handleTurnFailure(e);
                     }
                     if (!scrollRegion.isActive()) {
@@ -2366,7 +2482,7 @@ async function runChat(initialInput, opts) {
                 const inputBlocks = await parseInputBlocks(effectiveInput, resolveModelCapabilities(adapter).supportsImageInput);
                 clearPastedImagePaths();
                 await refreshIntentLedger();
-                prepareIntentReminderForInput(trimmed);
+                await prepareIntentReminderForInput(trimmed);
                 // Stage executor debug output (when --skill-debug is enabled)
                 if (skillDebugEnabled) {
                     const stageOutput = await runStageAnalysis(trimmed);
@@ -2452,7 +2568,7 @@ async function runChat(initialInput, opts) {
                     const continueBlocks = await parseInputBlocks(stopResult.message, resolveModelCapabilities(adapter).supportsImageInput);
                     clearPastedImagePaths();
                     await refreshIntentLedger();
-                    prepareIntentReminderForInput(stopResult.message);
+                    await prepareIntentReminderForInput(stopResult.message);
                     await primeTurnIntentPlan(true);
                     if (!terminalUiSuspended) {
                         scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
@@ -2505,6 +2621,7 @@ async function runChat(initialInput, opts) {
             }
             catch (e) {
                 clearTurnIntentContext();
+                stashQueuedInputIfAny();
                 handleTurnFailure(e);
             }
             if (deferredInput === null && scrollRegion.isActive() && runtimeState.getSnapshot().footerMode !== 'busy') {
@@ -2517,6 +2634,7 @@ async function runChat(initialInput, opts) {
         }
     }
     finally {
+        stopBusyCapture();
         stopActivity();
         if (resizeTimeout) {
             clearTimeout(resizeTimeout);

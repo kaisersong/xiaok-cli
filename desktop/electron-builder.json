@@ -1,6 +1,7 @@
 {
   "appId": "com.xiaok.desktop",
   "productName": "xiaok",
+  "npmRebuild": false,
   "directories": {
     "output": "release"
   },

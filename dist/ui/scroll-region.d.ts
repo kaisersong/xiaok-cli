@@ -36,7 +36,7 @@ export interface ScrollPromptFrame {
     summaryLine?: string;
     statusLine: string;
     overlayLines?: string[];
-    overlayKind?: 'generic' | 'permission' | 'feedback';
+    overlayKind?: 'generic' | 'permission' | 'feedback' | 'queued';
     owner?: 'input' | 'renderer';
 }
 export declare class ScrollRegionManager {
@@ -65,6 +65,8 @@ export declare class ScrollRegionManager {
     private _activeOverlayKind;
     /** Which subsystem last rendered the active overlay. */
     private _activeOverlayOwner;
+    /** Last overlay lines, used to preserve queued overlays across footer redraws. */
+    private lastOverlayLines;
     /** Footer is currently visible on screen. */
     private _footerVisible;
     /** Tracks if we have already pushed past the welcome screen. */

@@ -335,6 +335,67 @@ describe('scroll-region prompt frame ownership', () => {
     }
   });
 
+  it('keeps queued overlay visible when footer chrome redraws during the busy turn', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderPromptFrame({
+        inputValue: '',
+        cursor: 0,
+        placeholder: 'Finishing response...',
+        summaryLine: '',
+        statusLine: 'gpt-5.4 · 5% · project',
+        overlayKind: 'queued',
+        overlayLines: [
+          'Queued (press ↑ to edit):',
+          '  更新了没',
+        ],
+      });
+
+      manager.renderFooter({
+        inputPrompt: 'Finishing response...',
+        summaryLine: '',
+        statusLine: 'gpt-5.4 · 6% · project',
+      });
+
+      const text = harness.screen.text();
+      expect(text).toContain('Queued (press ↑ to edit):');
+      expect(text).toContain('更新了没');
+      expect(text).toContain('gpt-5.4 · 6% · project');
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('compacts queued overlay to keep the queued text visible when only one overlay row fits', () => {
+    const harness = createTtyHarness(48, 7);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderPromptFrame({
+        inputValue: '',
+        cursor: 0,
+        placeholder: 'Finishing response...',
+        summaryLine: '',
+        statusLine: 'gpt-5.4 · 8% · project',
+        overlayKind: 'queued',
+        overlayLines: [
+          'Queued (press ↑ to edit):',
+          '  第二次提示词',
+        ],
+      });
+
+      const text = harness.screen.text();
+      expect(text).toContain('Queued (press ↑ to edit):');
+      expect(text).toContain('第二次提示词');
+    } finally {
+      harness.restore();
+    }
+  });
+
   it('renders the sticky summary line above the input and separate from activity and status rows', () => {
     const harness = createTtyHarness(80, 24);
     const manager = new ScrollRegionManager(process.stdout);

@@ -143,11 +143,19 @@ async function createWindow(): Promise<BrowserWindow> {
   debugMain('createWindow:mcp-registration-started');
 
   // Scheduled task auto-execution scheduler
-  const taskScheduler = new ScheduledTaskScheduler();
+  const taskScheduler = new ScheduledTaskScheduler({
+    dataDir: join(app.getPath('home'), '.xiaok', 'desktop'),
+  });
   taskScheduler.setMainWindow(window);
+  taskScheduler.setExecutor(async (prompt: string) => {
+    return services.createTask({ prompt, materials: [] });
+  });
   taskScheduler.start();
   ipcMain.handle('desktop:syncScheduledTasks', (_event, tasks) => {
     taskScheduler.syncTasks(tasks);
+  });
+  ipcMain.handle('desktop:getScheduledTasks', () => {
+    return taskScheduler.getTasks();
   });
 
   app.on('before-quit', () => {

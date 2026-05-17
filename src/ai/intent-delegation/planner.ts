@@ -256,11 +256,15 @@ function looksLikeDelegatedWorkRequest(
     return true;
   }
 
-  if (workRequestCue) {
+  if (activeIntent && (hasContinuationCue(rawIntent) || isSupplementOrClarification(rawIntent))) {
     return true;
   }
 
-  if (activeIntent && (hasContinuationCue(rawIntent) || isSupplementOrClarification(rawIntent))) {
+  if (extracted.deliverable === '交付物' && extracted.finalDeliverable === '交付物') {
+    return false;
+  }
+
+  if (workRequestCue) {
     return true;
   }
 

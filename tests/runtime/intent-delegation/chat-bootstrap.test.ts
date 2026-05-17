@@ -64,6 +64,29 @@ describe('chat intent bootstrap', () => {
 
     expect(next).toEqual(initial);
   });
+
+  it('does not bootstrap default-deliverable analyze plans', async () => {
+    const sessionId = 'sess_analyze_default';
+    const snapshot = createSnapshot(sessionId);
+    const store = new StubSessionStore(snapshot);
+    const ledgerStore = new SessionIntentDelegationStore(store);
+    const initial = createEmptySessionIntentLedger(sessionId);
+    const plan = createPlanDraft({
+      sessionId,
+      instanceId: 'inst_analyze_default',
+      intentId: 'intent_analyze_default',
+      rawIntent: '分析ChatGPT最近一月的产品更新动态',
+      normalizedIntent: '分析chatgpt最近一月的产品更新动态',
+      intentType: 'analyze',
+      deliverable: '交付物',
+      continuationMode: 'new_intent',
+      riskTier: 'medium',
+    });
+
+    const next = await bootstrapTurnIntentPlan(ledgerStore, sessionId, initial, plan);
+
+    expect(next).toEqual(initial);
+  });
 });
 
 class StubSessionStore implements SessionStore {
@@ -124,22 +147,31 @@ function createPlanDraft(input: {
   deliverable?: string;
   rawIntent?: string;
   normalizedIntent?: string;
+  intentType?: IntentPlanDraft['intentType'];
   continuationMode: IntentPlanDraft['continuationMode'];
   riskTier?: RiskTier;
 }): IntentPlanDraft {
   const riskTier = input.riskTier ?? 'low';
+  const intentType = input.intentType ?? 'generate';
+  const deliverable = input.deliverable ?? '幻灯片';
+  const templateId = intentType === 'analyze' ? 'analyze_v1' : 'generate_v1';
   return {
     instanceId: input.instanceId,
     intentId: input.intentId,
     sessionId: input.sessionId,
     rawIntent: input.rawIntent ?? '把这篇文档生成幻灯片 /Users/song/Downloads/x-article-intent-ux.pdf',
     normalizedIntent: input.normalizedIntent ?? '把这篇文档生成幻灯片 /users/song/downloads/x-article-intent-ux pdf',
-    intentType: 'generate',
-    deliverable: input.deliverable ?? '幻灯片',
+    providedSourcePaths: [],
+    intentType,
+    deliverable,
+    finalDeliverable: deliverable,
     explicitConstraints: [],
     delegationBoundary: [],
     riskTier,
-    templateId: 'generate_v1',
+    intentMode: 'single_stage',
+    segmentationConfidence: 'low',
+    templateId,
+    stages: [],
     steps: [
       createStep(input.intentId, 0, 'collect', [], riskTier),
       createStep(input.intentId, 1, 'normalize', [`${input.intentId}:step:collect`], riskTier),

@@ -1,0 +1,93 @@
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { getConfigDir } from '../../utils/config.js';
+import { resolveSkillRoots } from './loader.js';
+function fingerprintSubtree(root, prefix) {
+    if (!existsSync(root)) {
+        return [];
+    }
+    const entries = readdirSync(root, { withFileTypes: true });
+    const fingerprints = [];
+    for (const entry of entries) {
+        const fullPath = join(root, entry.name);
+        if (entry.isFile()) {
+            const stat = statSync(fullPath);
+            fingerprints.push(`${prefix}:${fullPath}:${stat.mtimeMs}:${stat.size}`);
+            continue;
+        }
+        if (entry.isDirectory() || entry.isSymbolicLink()) {
+            fingerprints.push(...fingerprintSubtree(fullPath, prefix));
+        }
+    }
+    return fingerprints;
+}
+function computeRootFingerprint(root) {
+    const resolvedRoot = resolve(root);
+    if (!existsSync(resolvedRoot)) {
+        return [`missing:${resolvedRoot}`];
+    }
+    const entries = readdirSync(resolvedRoot, { withFileTypes: true });
+    const fingerprints = [`root:${resolvedRoot}`];
+    for (const entry of entries) {
+        if (entry.isFile() && entry.name.endsWith('.md')) {
+            const filePath = join(resolvedRoot, entry.name);
+            const stat = statSync(filePath);
+            fingerprints.push(`flat:${filePath}:${stat.mtimeMs}:${stat.size}`);
+            continue;
+        }
+        if (!entry.isDirectory() && !entry.isSymbolicLink()) {
+            continue;
+        }
+        const skillPath = join(resolvedRoot, entry.name, 'SKILL.md');
+        if (!existsSync(skillPath)) {
+            fingerprints.push(`dir:${join(resolvedRoot, entry.name)}:empty`);
+            continue;
+        }
+        const stat = statSync(skillPath);
+        fingerprints.push(`dir-skill:${skillPath}:${stat.mtimeMs}:${stat.size}`);
+        fingerprints.push(...fingerprintSubtree(join(resolvedRoot, entry.name, 'references'), 'dir-reference'));
+        fingerprints.push(...fingerprintSubtree(join(resolvedRoot, entry.name, 'scripts'), 'dir-script'));
+        fingerprints.push(...fingerprintSubtree(join(resolvedRoot, entry.name, 'assets'), 'dir-asset'));
+    }
+    return fingerprints;
+}
+function computeCatalogFingerprint(options) {
+    const roots = resolveSkillRoots(options.xiaokConfigDir ?? getConfigDir(), options.cwd ?? process.cwd(), options.options);
+    const parts = [
+        ...roots.builtinRoots.flatMap((root) => computeRootFingerprint(root)),
+        ...computeRootFingerprint(roots.globalSkillsDir),
+        ...computeRootFingerprint(roots.projectSkillsDir),
+    ];
+    return parts.sort().join('|');
+}
+export function createSkillCatalogWatcher(options) {
+    let closed = false;
+    let fingerprint = computeCatalogFingerprint(options);
+    let running = false;
+    const pollMs = options.pollMs ?? 250;
+    const interval = setInterval(() => {
+        if (closed || running) {
+            return;
+        }
+        running = true;
+        try {
+            const next = computeCatalogFingerprint(options);
+            if (next !== fingerprint) {
+                fingerprint = next;
+                void Promise.resolve(options.onChange()).catch(() => { });
+            }
+        }
+        finally {
+            running = false;
+        }
+    }, pollMs);
+    return {
+        close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            clearInterval(interval);
+        },
+    };
+}

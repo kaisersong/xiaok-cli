@@ -7,6 +7,7 @@ import type { AgentSessionSnapshot } from './ai/runtime/session.js';
 import type { PromptCacheSegments } from './ai/runtime/model-capabilities.js';
 import type { PromptSnapshot } from './ai/prompts/types.js';
 import type { ModelConfigEntry, ProviderConfig, ProviderId } from './ai/providers/types.js';
+import type { IntentBoundaryConfig } from './ai/intent-delegation/boundary-types.js';
 
 export type { MessageBlock, UsageStats };
 
@@ -115,6 +116,7 @@ export interface Config {
   devApp?: { appKey: string; appSecret: string };
   defaultMode: 'interactive';
   skillDebug?: boolean;
+  intentBoundary: IntentBoundaryConfig;
   channels?: {
     yzj?: YZJChannelConfig;
   };
@@ -139,6 +141,16 @@ export interface Config {
 
 const VALID_LEGACY_PROVIDERS = ['claude', 'openai', 'custom'] as const;
 
+export const DEFAULT_INTENT_BOUNDARY_CONFIG: IntentBoundaryConfig = {
+  llmClassifier: 'off',
+  ambiguousFallback: 'legacy_validator',
+  confidenceThreshold: 0.75,
+  falseNegativeClarifyThreshold: 0.85,
+  timeoutMs: 1500,
+  maxInputTokens: 200,
+  maxOutputTokens: 100,
+};
+
 export const DEFAULT_CONFIG: Config = {
   schemaVersion: 2,
   defaultProvider: 'anthropic',
@@ -153,13 +165,14 @@ export const DEFAULT_CONFIG: Config = {
   models: {
     'anthropic-default': {
       provider: 'anthropic',
-      model: 'claude-opus-4-6',
+      model: 'claude-opus-4-7',
       label: 'Anthropic Default',
       capabilities: ['tools'],
     },
   },
   defaultMode: 'interactive',
   skillDebug: false,
+  intentBoundary: DEFAULT_INTENT_BOUNDARY_CONFIG,
   channels: {},
 };
 

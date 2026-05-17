@@ -419,6 +419,25 @@ describe('intent delegation planner', () => {
     }
   });
 
+  it('keeps ordinary analysis research prompts without a concrete deliverable out of intent mode', () => {
+    for (const input of [
+      '分析ChatGPT最近一月的产品更新动态',
+      '分析最近一个月 OpenAI 产品更新',
+    ]) {
+      const result = createIntentPlan({
+        instanceId: 'instance-1',
+        sessionId: 'session-1',
+        input,
+        skills,
+      });
+
+      expect(result).toEqual({
+        kind: 'non_intent',
+        reason: 'non_substantial',
+      });
+    }
+  });
+
   it('still treats delegated work phrased as a question as intent', () => {
     const result = createIntentPlan({
       instanceId: 'instance-1',

@@ -87,6 +87,33 @@ export function getDesktopApi(): Record<string, unknown> | null {
   }
 
   const memory = {
+    async getConfig() {
+      try {
+        const raw = localStorage.getItem('xiaok:memory-config')
+        return raw ? JSON.parse(raw) : { enabled: true, provider: 'notebook' }
+      } catch { return { enabled: true, provider: 'notebook' } }
+    },
+    async setConfig(config: Record<string, unknown>) {
+      try { localStorage.setItem('xiaok:memory-config', JSON.stringify(config)) } catch { /* noop */ }
+    },
+    async getStatus() {
+      return { configured: true, healthy: true }
+    },
+    async getSnapshot() {
+      return { memory_block: '', hits: [] }
+    },
+    async getImpression() {
+      return { impression: '', updated_at: undefined }
+    },
+    async rebuildSnapshot() {
+      return { memory_block: '', hits: [] }
+    },
+    async rebuildImpression() {
+      return { updated_at: undefined }
+    },
+    async getContent(_uri: string, _layer: string) {
+      return { content: '' }
+    },
     async list() {
       const items = await raw.listMemories() as any[]
       const entries = (items ?? []).map((e: any) => ({
@@ -109,6 +136,27 @@ export function getDesktopApi(): Record<string, unknown> | null {
     async stats() {
       return raw.memoryStats() as Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>
     },
+    async compact() {
+      return raw.memoryCompact() as Promise<boolean>
+    },
+    async personaTraits() {
+      return raw.memoryPersonaTraits() as Promise<{ trait: string; confidence: number }[]>
+    },
+    async listLayer(layer: number, limit?: number, offset?: number) {
+      return raw.memoryListLayer(layer, limit, offset) as Promise<{ id: string; content: string; tags?: string[]; createdAt: string; meta?: Record<string, unknown> }[]>
+    },
+    async deleteEntry(id: string, layer: number) {
+      return raw.memoryDeleteEntry(id, layer) as Promise<boolean>
+    },
+    async clearAll() {
+      return raw.memoryClearAll() as Promise<boolean>
+    },
+    async getModelId() {
+      return raw.memoryGetModelId() as Promise<string | null>
+    },
+    async setModelId(modelId: string | null) {
+      return raw.memorySetModelId(modelId) as Promise<boolean>
+    },
   }
 
   _cachedApi = {
@@ -129,3 +177,41 @@ export interface MemoryEntry {
 }
 
 export type DesktopSettingsKey = 'general' | 'appearance' | 'providers' | 'agents' | 'channels' | 'tools' | 'skills' | 'memory' | 'security' | 'advanced' | 'about';
+
+export interface OpenVikingDesktopConfig {
+  vlmSelector?: string;
+  vlmModel?: string;
+  vlmProvider?: string;
+  vlmApiKey?: string;
+  vlmApiBase?: string;
+  embeddingSelector?: string;
+  embeddingModel?: string;
+  embeddingProvider?: string;
+  embeddingApiKey?: string;
+  embeddingApiBase?: string;
+  rerankSelector?: string;
+  rerankModel?: string;
+  rerankProvider?: string;
+  rerankApiKey?: string;
+  rerankApiBase?: string;
+}
+
+export interface NowledgeDesktopConfig {
+  baseUrl?: string;
+  apiKey?: string;
+  requestTimeoutMs?: number;
+}
+
+export interface MemoryConfig {
+  enabled: boolean;
+  provider?: 'notebook' | 'openviking' | 'nowledge';
+  memoryCommitEachTurn?: boolean;
+  openviking?: OpenVikingDesktopConfig;
+  nowledge?: NowledgeDesktopConfig;
+}
+
+export interface SnapshotHit {
+  uri: string;
+  abstract?: string;
+  is_leaf?: boolean;
+}

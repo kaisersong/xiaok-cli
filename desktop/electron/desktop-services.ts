@@ -51,7 +51,6 @@ let _desktopMemoryStore: MemoryStore | null = null;
 let _desktopMemoryStoreDataRoot: string | null = null;
 
 type DesktopFallbackMemoryStore = MemoryStore & {
-  delete(id: string): boolean;
   getStats(): { l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number };
   clearAll(): void;
 };
@@ -97,7 +96,7 @@ function createFallbackMemoryStore(dataRoot: string): MemoryStore {
         type: 'user' as const,
       }));
     },
-    delete(id: string) {
+    async delete(id: string, _layer?: number) {
       return userStore.delete(id);
     },
     getStats() {
@@ -1941,14 +1940,8 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
   };
 }
 
-function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Tool[], dataRoot: string, kswarmService: KSwarmService): TaskRunner {
-  const cwd = process.cwd();
-  const pluginSkillRoots = getPluginSkillRoots();
-  let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
-  let skillsLoaded = false;
-
-  // Register kswarm create_project tool (allows AI to create multi-agent projects from chat)
-  const kswarmCreateProjectTool: Tool = {
+export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Tool {
+  return {
     permission: 'safe',
     definition: {
       name: 'create_project',
@@ -1968,15 +1961,20 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
             type: 'integer',
             description: '用户期望的智能体总数（不含 PO），未指定则不填',
           },
+          workFolder: {
+            type: 'string',
+            description: '项目工作目录的完整本地路径；仅当用户明确指定工作目录时填写',
+          },
         },
         required: ['name', 'goal'],
       },
     },
     async execute(input) {
-      const { name, goal, requirements, memberNames = [], memberCount = 0 } = input as {
+      const { name, goal, requirements, memberNames = [], memberCount = 0, workFolder } = input as {
         name: string; goal: string; requirements?: string;
-        memberNames?: string[]; memberCount?: number;
+        memberNames?: string[]; memberCount?: number; workFolder?: string;
       };
+      const resolvedWorkFolder = typeof workFolder === 'string' ? workFolder.trim() : '';
 
       const MAX_TOTAL_AGENTS = 10;
 
@@ -2044,6 +2042,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
             requirements: requirements || '',
             poAgent,
             members: resolved.map(a => a.id),
+            ...(resolvedWorkFolder ? { workFolder: resolvedWorkFolder } : {}),
           }),
         });
         if (!res.ok) return JSON.stringify({ error: `Failed to create project: ${res.status}` });
@@ -2064,7 +2063,16 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       }
     },
   };
-  registry.registerTool(kswarmCreateProjectTool);
+}
+
+function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Tool[], dataRoot: string, kswarmService: KSwarmService): TaskRunner {
+  const cwd = process.cwd();
+  const pluginSkillRoots = getPluginSkillRoots();
+  let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
+  let skillsLoaded = false;
+
+  // Register kswarm create_project tool (allows AI to create multi-agent projects from chat)
+  registry.registerTool(createKSwarmCreateProjectTool(kswarmService));
 
   // Register report_progress tool (TaskPanel progress reporting)
   const reportProgressTool: Tool = {
@@ -2442,4 +2450,3 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
     }
   };
 }
-

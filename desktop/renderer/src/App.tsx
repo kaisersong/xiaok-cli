@@ -5,8 +5,11 @@ import { ChatShell } from './components/ChatShell';
 import { ScheduledPage } from './components/ScheduledPage';
 import { ProjectsPage } from './components/projects/ProjectsPage';
 import { ProjectDetailPage } from './components/projects/ProjectDetailPage';
+import { useScheduledTaskBootstrap } from './hooks/useScheduledTaskBootstrap';
 
 export function App() {
+  useScheduledTaskBootstrap();
+
   return (
     <Routes>
       <Route element={<AppLayout />}>

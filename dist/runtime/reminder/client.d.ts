@@ -1,0 +1,57 @@
+import { type CreateReminderFromRequestInput, type CreateStructuredReminderInput, type ReminderApi, type ReminderCreateResult } from './service.js';
+import type { ReminderSink } from './notifier.js';
+import type { ReminderRecord } from './types.js';
+export interface ReminderClientServiceOptions {
+    workspaceRoot: string;
+    sessionId: string;
+    creatorUserId: string;
+    defaultTimeZone: string;
+    socketPath?: string;
+    autoStart?: boolean;
+    heartbeatIntervalMs?: number;
+    reconnectDelayMs?: number;
+    clientVersion?: string;
+}
+export declare class ReminderClientService implements ReminderApi {
+    readonly defaultTimeZone: string;
+    readonly sessionId: string;
+    readonly creatorUserId: string;
+    private readonly workspaceRoot;
+    private readonly socketPath;
+    private readonly autoStart;
+    private readonly heartbeatIntervalMs;
+    private readonly reconnectDelayMs;
+    private readonly clientInstanceId;
+    private readonly clientVersion;
+    private readonly sinks;
+    private readonly pending;
+    private socket;
+    private buffer;
+    private connectPromise;
+    private heartbeatTimer;
+    private reconnectTimer;
+    private helloResolver;
+    private helloRejecter;
+    private disposed;
+    constructor(options: ReminderClientServiceOptions);
+    start(): Promise<void>;
+    registerInChatSink(sessionId: string, sink: ReminderSink): () => void;
+    createFromRequest(input: CreateReminderFromRequestInput): Promise<ReminderCreateResult>;
+    createStructured(input: CreateStructuredReminderInput): Promise<ReminderCreateResult>;
+    listForCreator(_sessionId: string, _creatorUserId: string): Promise<ReminderRecord[]>;
+    listTasksForCreator(_sessionId: string, _creatorUserId: string): Promise<ReminderRecord[]>;
+    cancelForCreator(reminderId: string, _creatorUserId: string): Promise<ReminderRecord | undefined>;
+    cancelTaskChain(taskId: string, _creatorUserId: string): Promise<number>;
+    dispose(): Promise<void>;
+    private callRpc;
+    private ensureConnected;
+    private connect;
+    private openSocket;
+    private handleData;
+    private handleServerMessage;
+    private resolveRpc;
+    private rejectRpc;
+    private dispatchReminder;
+    private startHeartbeat;
+    private handleDisconnect;
+}

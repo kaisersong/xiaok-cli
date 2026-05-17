@@ -59,6 +59,9 @@ export interface KSwarmProject {
   updatedAt?: string;
   progress?: number;
   deliverables?: KSwarmDeliverable[];
+  enableSummary?: boolean;
+  summary?: string | null;
+  summaryScore?: number | null;
 }
 
 export interface KSwarmDeliverable {
@@ -153,10 +156,11 @@ export interface KSwarmClientActions {
   fetchProjects(): Promise<KSwarmProject[]>;
   getProjectDetail(projectId: string): Promise<KSwarmProject | null>;
   getProjectFullDetail(projectId: string): Promise<ProjectFullDetail | null>;
-  createProject(input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string }): Promise<KSwarmProject | null>;
+  createProject(input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string; enableSummary?: boolean }): Promise<KSwarmProject | null>;
   approveProject(projectId: string): Promise<boolean>;
   retryPlan(projectId: string): Promise<{ ok: boolean } | null>;
   closeProject(projectId: string): Promise<boolean>;
+  deleteProject(projectId: string): Promise<boolean>;
   deliverProject(projectId: string): Promise<boolean>;
   // Task actions
   humanAddTasks(projectId: string, tasks: Array<{ title: string; description?: string }>): Promise<boolean>;
@@ -189,6 +193,43 @@ export interface ProjectFullDetail {
   workspace: { path: string; custom?: boolean; artifacts?: string[] };
   plan: any | null;
   planProgress: { phases: Array<{ phaseId: string | number; total: number; done: number }>; total: number; done: number } | null;
+}
+
+// ─── Principles Injection ────────────────────────────────────────
+
+interface PrincipleEntry {
+  id: string;
+  content: string;
+  scenarios: string[];
+  enabled: boolean;
+  createdAt: number;
+}
+
+function injectPrinciples(requirements: string, principles: PrincipleEntry[]): string {
+  // Filter: enabled + planning or execution scenarios (Phase 1: only createProject)
+  const matched = principles.filter(
+    p => p.enabled && (p.scenarios.includes('planning') || p.scenarios.includes('execution'))
+  );
+  if (matched.length === 0) return requirements;
+
+  // Format lines: collapse multiline, escape ## headings
+  const lines: string[] = [];
+  let totalLen = 0;
+  for (let i = 0; i < matched.length; i++) {
+    const content = matched[i].content.replace(/\n/g, '；').replace(/^## /gm, '> ## ');
+    const line = `${i + 1}. ${content}`;
+    if (totalLen + line.length > 3000) break;
+    lines.push(line);
+    totalLen += line.length;
+  }
+
+  const truncateNote = lines.length < matched.length
+    ? `\n\n（共 ${matched.length} 条原则，已展示前 ${lines.length} 条）`
+    : '';
+
+  const block = lines.join('\n');
+  const separator = requirements ? '\n\n' : '';
+  return `${requirements}${separator}## 项目原则（必须遵守）\n\n以下原则适用于当前阶段，请严格遵循：\n\n${block}${truncateNote}`;
 }
 
 // ─── HTTP Helpers ─────────────────────────────────────────────────
@@ -367,8 +408,21 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     return await httpGet<ProjectFullDetail>(`/projects/${projectId}`);
   }, []);
 
-  const createProject = useCallback(async (input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string }): Promise<KSwarmProject | null> => {
-    const result = await httpPost<KSwarmProject>('/projects', input);
+  const createProject = useCallback(async (input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string; enableSummary?: boolean }): Promise<KSwarmProject | null> => {
+    // Inject project principles into requirements
+    let requirements = input.requirements || '';
+    try {
+      const api = (window as any).xiaokDesktop;
+      if (api?.listPrinciples) {
+        const principles = await api.listPrinciples();
+        if (Array.isArray(principles) && principles.length > 0) {
+          requirements = injectPrinciples(requirements, principles);
+        }
+      }
+    } catch (e) {
+      console.warn('[principles] Failed to load principles for injection, using original requirements', e);
+    }
+    const result = await httpPost<KSwarmProject>('/projects', { ...input, requirements: requirements || undefined, enableSummary: input.enableSummary ?? true });
     if (result) fetchProjects();
     return result;
   }, [fetchProjects]);
@@ -387,6 +441,12 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     const result = await httpPost<{ ok: boolean }>(`/projects/${projectId}/close`);
     if (result?.ok) fetchProjects();
     return !!result?.ok;
+  }, [fetchProjects]);
+
+  const deleteProject = useCallback(async (projectId: string): Promise<boolean> => {
+    const ok = await httpDelete(`/projects/${projectId}`);
+    if (ok) fetchProjects();
+    return ok;
   }, [fetchProjects]);
 
   const deliverProject = useCallback(async (projectId: string): Promise<boolean> => {
@@ -511,7 +571,9 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     getProjectFullDetail,
     createProject,
     approveProject,
+    retryPlan,
     closeProject,
+    deleteProject,
     deliverProject,
     // Task actions
     humanAddTasks,

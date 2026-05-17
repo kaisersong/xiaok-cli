@@ -12,7 +12,7 @@ interface CreateProjectModalProps {
   open: boolean;
   agents: KSwarmAgent[];
   onClose(): void;
-  onCreate(input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string }): Promise<void>;
+  onCreate(input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string; enableSummary?: boolean }): Promise<void>;
 }
 
 export function CreateProjectModal({ open, agents, onClose, onCreate }: CreateProjectModalProps) {
@@ -24,7 +24,29 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
   const [members, setMembers] = useState<string[]>([]);
   const [membersTouched, setMembersTouched] = useState(false);
   const [workFolder, setWorkFolder] = useState('');
+  const [enableSummary, setEnableSummary] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [principlesCounts, setPrinciplesCounts] = useState<{ planning: number; execution: number }>({ planning: 0, execution: 0 });
+
+  // Load principles count when modal opens
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      try {
+        const api = (window as any).xiaokDesktop;
+        if (!api?.listPrinciples) return;
+        const list = await api.listPrinciples();
+        if (!Array.isArray(list)) return;
+        const enabled = list.filter((p: any) => p.enabled);
+        setPrinciplesCounts({
+          planning: enabled.filter((p: any) => p.scenarios?.includes('planning')).length,
+          execution: enabled.filter((p: any) => p.scenarios?.includes('execution')).length,
+        });
+      } catch {
+        setPrinciplesCounts({ planning: 0, execution: 0 });
+      }
+    })();
+  }, [open]);
 
   // Auto-select PO agent from the dedicated xiaok seed pair when available.
   useEffect(() => {
@@ -66,6 +88,13 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
     setMembersTouched(true);
   };
 
+  const handlePickWorkFolder = async () => {
+    try {
+      const result = await (window as any).xiaokDesktop?.selectDirectory?.();
+      if (result?.filePath) setWorkFolder(result.filePath);
+    } catch { /* user cancelled or desktop API unavailable */ }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !goal.trim() || !poAgent) return;
@@ -78,6 +107,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
         poAgent,
         members: members.length > 0 ? members : undefined,
         workFolder: workFolder.trim() || undefined,
+        enableSummary,
       });
       setName('');
       setGoal('');
@@ -225,12 +255,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
               />
               <button
                 type="button"
-                onClick={async () => {
-                  try {
-                    const handle = await (window as any).showDirectoryPicker?.();
-                    if (handle) setWorkFolder(handle.name);
-                  } catch { /* user cancelled */ }
-                }}
+                onClick={handlePickWorkFolder}
                 className="rounded-lg p-2 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] transition-colors duration-150"
                 title="选择目录"
               >
@@ -238,6 +263,26 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
               </button>
             </div>
           </div>
+
+          {/* Summary toggle */}
+          <div className="mt-3 flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={enableSummary}
+              onChange={e => setEnableSummary(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-[var(--c-border-subtle)] accent-[var(--c-accent)]"
+              id="enableSummary"
+            />
+            <label htmlFor="enableSummary" className="text-xs text-[var(--c-text-secondary)]">
+              {t.projectsSummaryEnable}
+            </label>
+          </div>
+
+          {(principlesCounts.planning > 0 || principlesCounts.execution > 0) && (
+            <p className="mt-3 text-[11px] text-[var(--c-text-muted)]">
+              {t.projectsPrinciplesInjectHint(principlesCounts.planning, principlesCounts.execution)}
+            </p>
+          )}
 
           <div className="mt-2 flex justify-end gap-2">
             <button

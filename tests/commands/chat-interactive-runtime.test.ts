@@ -1560,6 +1560,14 @@ describe('chat interactive runtime', () => {
         expect(text).toContain('更新了没');
       }, { timeoutMs: 1_000 });
 
+      process.stdout.emit('resize');
+      await waitFor(() => {
+        const text = harness.screen.text();
+        expect(text).toContain('Queued (press ↑ to edit):');
+        expect(text).toContain('更新了没');
+        expect(text).toContain('Finishing response...');
+      }, { timeoutMs: 1_000 });
+
       await waitFor(() => {
         expect(harness.screen.text()).toContain('delayed reply');
       }, { timeoutMs: 3_000 });
@@ -1816,11 +1824,11 @@ describe('chat interactive runtime', () => {
       ))).toBe(true);
       expect(countOccurrences(harness.output.normalized, '🤝 已理解')).toBe(1);
 
-      harness.send('今天先不聊这个');
+      harness.send('分析ChatGPT最近一月的产品更新动态');
       harness.send('\r');
 
       await waitFor(() => {
-        expect(harness.output.normalized).toContain('echo:今天先不聊这个');
+        expect(harness.output.normalized).toContain('echo:分析ChatGPT最近一月的产品更新动态');
       }, { timeoutMs: 3_000 });
 
       await waitForInputTurnReady(harness);
@@ -1833,6 +1841,249 @@ describe('chat interactive runtime', () => {
       harness.send('\r');
       await pending;
     } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('keeps ordinary analysis prompts out of intent mode through the boundary resolver', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-boundary-plain-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('分析ChatGPT最近一月的产品更新动态');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('echo:分析ChatGPT最近一月的产品更新动态');
+      }, { timeoutMs: 3_000 });
+
+      await waitForInputTurnReady(harness);
+      expect(harness.screen.lines().some((line) => line.includes('Intent:'))).toBe(false);
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('uses a mocked active LLM boundary decision for ambiguous inputs', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-boundary-llm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 2,
+      defaultProvider: 'anthropic',
+      defaultModelId: 'anthropic-default',
+      providers: {
+        anthropic: { type: 'first_party', protocol: 'anthropic', baseUrl: 'https://api.anthropic.com' },
+      },
+      models: {
+        'anthropic-default': { provider: 'anthropic', model: 'claude-test', label: 'Claude Test' },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+      intentBoundary: {
+        llmClassifier: 'ambiguous_only',
+        ambiguousFallback: 'legacy_validator',
+        confidenceThreshold: 0.75,
+        falseNegativeClarifyThreshold: 0.85,
+        timeoutMs: 1500,
+        maxInputTokens: 200,
+        maxOutputTokens: 100,
+      },
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const chatModule = await import('../../src/commands/chat.js');
+    const { createIntentPlan } = await import('../../src/ai/intent-delegation/planner.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    chatModule.__setIntentBoundaryResolverFactoryForTests(() => ({
+      resolve: async (input) => {
+        const planResult = createIntentPlan({
+          instanceId: input.instanceId,
+          sessionId: input.sessionId,
+          input: '帮我生成报告',
+          skills: input.skills,
+        });
+        if (planResult.kind !== 'plan') {
+          throw new Error('expected mocked report prompt to create a plan');
+        }
+        return {
+          kind: 'intent',
+          source: 'llm',
+          plan: planResult.plan,
+        };
+      },
+    }));
+
+    try {
+      const program = new Command();
+      chatModule.registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('帮我分析一下这个方向');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('echo:帮我分析一下这个方向');
+      }, { timeoutMs: 3_000 });
+
+      expect(harness.output.normalized).toContain('Intent: 报告');
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      chatModule.__setIntentBoundaryResolverFactoryForTests(undefined);
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it('does not classify queued input until the previous busy turn completes', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-boundary-queued-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const chatModule = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+    const seen: string[] = [];
+
+    chatModule.__setIntentBoundaryResolverFactoryForTests(() => ({
+      resolve: async (input) => {
+        seen.push(input.input);
+        return { kind: 'non_intent', source: 'rule', reason: 'test' };
+      },
+    }));
+
+    try {
+      const program = new Command();
+      chatModule.registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+
+      harness.send('报告后慢速长续问');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(seen).toEqual(['报告后慢速长续问']);
+        expect(harness.output.normalized).toContain('Thinking');
+      }, { timeoutMs: 3_000 });
+
+      harness.send('第二条普通问题');
+      harness.send('\r');
+      expect(seen).toEqual(['报告后慢速长续问']);
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('Queued');
+      }, { timeoutMs: 3_000 });
+
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('echo:第二条普通问题');
+      }, { timeoutMs: 5_000 });
+
+      expect(seen).toEqual(['报告后慢速长续问', '第二条普通问题']);
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      chatModule.__setIntentBoundaryResolverFactoryForTests(undefined);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);

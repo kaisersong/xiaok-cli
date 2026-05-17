@@ -20,7 +20,7 @@
  * └──────────────────────────────────┘
  */
 
-import { getDisplayWidth, splitSymbols, stripAnsi } from './text-metrics.js';
+import { getDisplayWidth, splitSymbols, stripAnsi, truncateAnsi } from './text-metrics.js';
 
 export interface ScrollRegionConfig {
   /** Height of fixed footer (input bar + status bar) */
@@ -118,6 +118,8 @@ export class ScrollRegionManager {
   private _activeOverlayKind: ScrollPromptFrame['overlayKind'] | null = null;
   /** Which subsystem last rendered the active overlay. */
   private _activeOverlayOwner: ScrollPromptFrame['owner'] | null = null;
+  /** Last overlay lines, used to preserve queued overlays across footer redraws. */
+  private lastOverlayLines: string[] = [];
   /** Footer is currently visible on screen. */
   private _footerVisible = false;
   /** Tracks if we have already pushed past the welcome screen. */
@@ -230,7 +232,11 @@ export class ScrollRegionManager {
     return this.config.rows;
   }
 
-  private getOverlayVisibleLines(lines: string[], inputRows: number): string[] {
+  private getOverlayVisibleLines(
+    lines: string[],
+    inputRows: number,
+    overlayKind?: ScrollPromptFrame['overlayKind'],
+  ): string[] {
     const inputFrameRows = this.getInputFrameRows(inputRows);
     const maxOverlayRows = Math.max(
       0,
@@ -238,6 +244,13 @@ export class ScrollRegionManager {
     );
     if (maxOverlayRows <= 0) {
       return [];
+    }
+    if (overlayKind === 'queued') {
+      if (maxOverlayRows === 1 && lines.length > 1) {
+        const compactText = lines.slice(1).join(' ').trim();
+        return [`${lines[0]} ${compactText}`.trim()];
+      }
+      return lines.slice(0, maxOverlayRows);
     }
     return lines.slice(-maxOverlayRows);
   }
@@ -254,6 +267,7 @@ export class ScrollRegionManager {
     this._overlayPromptVisible = false;
     this._activeOverlayKind = null;
     this._activeOverlayOwner = null;
+    this.lastOverlayLines = [];
   }
 
   private clearScreenRow(row: number): void {
@@ -481,6 +495,7 @@ export class ScrollRegionManager {
       this._activeOverlayKind = frame.overlayKind ?? 'generic';
       this._activeOverlayOwner = owner;
       this._overlayPromptVisible = this.isRendererPermissionOverlayActive();
+      this.lastOverlayLines = [...(frame.overlayLines ?? [])];
       this.renderOverlayPromptFrame(frame);
       return;
     }
@@ -705,6 +720,19 @@ export class ScrollRegionManager {
     summaryLine?: string;
     statusLine?: string;
   }): void {
+    if (this.hasActiveOverlayPrompt() && this._activeOverlayKind === 'queued' && this.lastOverlayLines.length > 0) {
+      this.renderPromptFrame({
+        inputValue: this.lastInputValue,
+        cursor: this.lastInputCursor,
+        placeholder: options?.inputPrompt ?? this.lastInputPrompt ?? 'waiting...',
+        summaryLine: options?.summaryLine ?? this.lastSummaryLine,
+        statusLine: options?.statusLine ?? this.lastStatusLine,
+        overlayLines: this.lastOverlayLines,
+        overlayKind: 'queued',
+        owner: this._activeOverlayOwner ?? 'input',
+      });
+      return;
+    }
     this.renderFooterFrame(options, true);
   }
 
@@ -749,7 +777,7 @@ export class ScrollRegionManager {
     const inputLines = inputState?.visibleLines ?? [frame.placeholder];
     const inputRows = Math.max(1, inputLines.length);
     const inputFrameRows = this.getInputFrameRows(inputRows);
-    const overlayLines = this.getOverlayVisibleLines(frame.overlayLines ?? [], inputRows);
+    const overlayLines = this.getOverlayVisibleLines(frame.overlayLines ?? [], inputRows, frame.overlayKind);
     const overlayRows = overlayLines.length;
     const summaryReserveRows = this.getSummaryReserveRows(frame.summaryLine ?? this.lastSummaryLine);
     const statusBarRow = this.getStatusBarRow();
@@ -1410,7 +1438,7 @@ export class ScrollRegionManager {
   private padLine(line: string, width: number, hasBackground = false): string {
     const safeWidth = getSafeRenderWidth(width);
     const visibleLen = getDisplayWidth(line);
-    if (visibleLen >= safeWidth) return line.slice(0, safeWidth + (line.length - visibleLen));
+    if (visibleLen >= safeWidth) return truncateAnsi(line, safeWidth);
     const padding = ' '.repeat(safeWidth - visibleLen);
     if (hasBackground) {
       // Background already set, just add spaces, then reset
@@ -1428,7 +1456,7 @@ export class ScrollRegionManager {
     const visibleLen = getDisplayWidth(line);
     if (visibleLen >= safeWidth) {
       // Line is too long, truncate and reset
-      return line.slice(0, safeWidth + (line.length - visibleLen)) + RESET_ALL;
+      return truncateAnsi(line, safeWidth) + RESET_ALL;
     }
     // Add spaces to fill width (background color continues), then reset
     const padding = ' '.repeat(safeWidth - visibleLen);

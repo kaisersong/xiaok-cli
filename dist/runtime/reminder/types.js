@@ -1,0 +1,1 @@
+export const REMINDER_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000];

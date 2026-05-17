@@ -24,14 +24,11 @@ import {
   Package,
   Languages,
   Brain,
-  Search,
-  Upload,
 } from 'lucide-react';
 import { api } from '../api';
-import { LocalMemoryStats } from './LocalMemoryStats';
+import { LocalMemoryStatsCard } from './settings/LocalMemoryStatsCard';
 import type { DesktopModelConfigSnapshot, DesktopSaveModelConfigInput, TestProviderConnectionResult } from '../../../electron/preload-api';
 import { useLocale } from '../contexts/LocaleContext';
-import { MemoryModelSettings } from './settings/MemoryModelSettings';
 
 type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'general' | 'appearance' | 'data' | 'memory' | 'about';
 
@@ -1463,244 +1460,17 @@ function GeneralPane() {
 
 // ---- Memory ----
 
-interface MemoryItem {
-  id: string;
-  content: string;
-  tags: string[];
-  createdAt: number;
-  source?: string;
-}
-
 function MemoryPane() {
-  const [memories, setMemories] = useState<MemoryItem[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editContent, setEditContent] = useState('');
-  const [editTags, setEditTags] = useState('');
-  const [showAdd, setShowAdd] = useState(false);
-  const [newContent, setNewContent] = useState('');
-  const [newTags, setNewTags] = useState('');
-  const [showImport, setShowImport] = useState(false);
-  const [importText, setImportText] = useState('');
-  const [importResult, setImportResult] = useState<{ imported: number; deduped: number } | null>(null);
-
-  const load = () => {
-    api.listMemories().then(setMemories);
-  };
-
-  useEffect(() => { load(); }, []);
-
-  const filtered = searchQuery.trim()
-    ? memories.filter(m =>
-        m.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        m.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()))
-      )
-    : memories;
-
-  const handleAdd = async () => {
-    if (!newContent.trim()) return;
-    await api.createMemory({ content: newContent.trim(), tags: newTags.split(',').map(t => t.trim()).filter(Boolean) });
-    setNewContent('');
-    setNewTags('');
-    setShowAdd(false);
-    load();
-  };
-
-  const handleDelete = async (id: string) => {
-    await api.deleteMemory(id);
-    load();
-  };
-
-  const handleUpdate = async (id: string) => {
-    await api.updateMemory({ id, content: editContent, tags: editTags.split(',').map(t => t.trim()).filter(Boolean) });
-    setEditingId(null);
-    load();
-  };
-
-  const startEdit = (m: MemoryItem) => {
-    setEditingId(m.id);
-    setEditContent(m.content);
-    setEditTags(m.tags.join(', '));
-  };
-
-  const handleImport = async () => {
-    try {
-      const items = JSON.parse(importText);
-      if (!Array.isArray(items)) { alert('格式错误：需要 JSON 数组'); return; }
-      const result = await api.importMemories(items);
-      setImportResult(result);
-      setImportText('');
-      load();
-    } catch {
-      alert('JSON 解析失败，请检查格式');
-    }
-  };
-
   return (
-    <>
-      <Section>
-        <SectionHeader icon={Brain}>记忆管理</SectionHeader>
-        <p className="text-xs text-[var(--c-text-secondary)] mb-4">
-          管理你的偏好、工作流和项目知识。新对话会自动加载相关记忆。
-        </p>
-
-        {/* Local Layered Memory Stats */}
-        <LocalMemoryStats />
-
-        {/* Search */}
-        <div className="relative mb-4 mt-4">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--c-text-tertiary)]" />
-          <input
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="搜索记忆..."
-            className={`${inputCls} pl-9`}
-          />
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex gap-2 mb-4">
-          <button
-            onClick={() => setShowAdd(!showAdd)}
-            className="inline-flex items-center gap-2 rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
-          >
-            <Plus size={16} />
-            手动添加
-          </button>
-          <button
-            onClick={() => setShowImport(!showImport)}
-            className="inline-flex items-center gap-2 rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
-          >
-            <Upload size={16} />
-            导入记忆
-          </button>
-        </div>
-
-        {/* Add Memory Form */}
-        {showAdd && (
-          <Card className="mb-4">
-            <textarea
-              value={newContent}
-              onChange={e => setNewContent(e.target.value)}
-              placeholder="记忆内容..."
-              className={`${inputCls} mb-2 min-h-[60px] resize-y`}
-            />
-            <input
-              value={newTags}
-              onChange={e => setNewTags(e.target.value)}
-              placeholder="标签（逗号分隔）"
-              className={`${inputCls} mb-3`}
-            />
-            <div className="flex gap-2">
-              <button onClick={handleAdd} className={btnPrimary}>保存</button>
-              <button onClick={() => setShowAdd(false)} className={btnSecondary}>取消</button>
-            </div>
-          </Card>
-        )}
-
-        {/* Import Memory Form */}
-        {showImport && (
-          <Card className="mb-4">
-            <p className="text-xs text-[var(--c-text-secondary)] mb-2">
-              粘贴 JSON 数组，格式：[&#123;"content": "...", "tags": ["..."]&#125;]。支持从 Claude Code memory、Cursor rules 等导入。
-            </p>
-            <textarea
-              value={importText}
-              onChange={e => setImportText(e.target.value)}
-              placeholder='[{"content": "用户偏好深色主题", "tags": ["preference"]}]'
-              className={`${inputCls} mb-3 min-h-[100px] resize-y font-mono text-xs`}
-            />
-            <div className="flex gap-2 items-center">
-              <button onClick={handleImport} className={btnPrimary}>导入</button>
-              <button onClick={() => { setShowImport(false); setImportResult(null); }} className={btnSecondary}>取消</button>
-              {importResult && (
-                <span className="text-xs text-[var(--c-text-secondary)]">
-                  导入 {importResult.imported} 条，去重 {importResult.deduped} 条
-                </span>
-              )}
-            </div>
-          </Card>
-        )}
-
-        {/* Memory List */}
-        <div className="space-y-2">
-          {filtered.length === 0 && (
-            <p className="text-xs text-[var(--c-text-tertiary)] text-center py-8">
-              {searchQuery ? '未找到匹配记忆' : '暂无记忆'}
-            </p>
-          )}
-          {filtered.map(m => (
-            <Card key={m.id}>
-              {editingId === m.id ? (
-                <div>
-                  <textarea
-                    value={editContent}
-                    onChange={e => setEditContent(e.target.value)}
-                    className={`${inputCls} mb-2 min-h-[40px] resize-y`}
-                  />
-                  <input
-                    value={editTags}
-                    onChange={e => setEditTags(e.target.value)}
-                    placeholder="标签（逗号分隔）"
-                    className={`${inputCls} mb-3`}
-                  />
-                  <div className="flex gap-2">
-                    <button onClick={() => handleUpdate(m.id)} className={btnPrimary}>保存</button>
-                    <button onClick={() => setEditingId(null)} className={btnSecondary}>取消</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm">{m.content}</div>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {m.tags.map(t => (
-                        <span key={t} className="rounded-full bg-[var(--c-bg-deep)] px-2 py-0.5 text-[10px] text-[var(--c-text-secondary)]">
-                          {t}
-                        </span>
-                      ))}
-                      <span className="text-[10px] text-[var(--c-text-tertiary)] ml-1">
-                        {formatRelativeTime(m.createdAt)}
-                        {m.source && ` · ${m.source}`}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    <button onClick={() => startEdit(m)} className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)] transition-colors">
-                      <Edit3 size={13} />
-                    </button>
-                    <button onClick={() => handleDelete(m.id)} className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 transition-colors">
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </Card>
-          ))}
-        </div>
-      </Section>
-
-      {/* Memory Model Settings */}
-      <Section>
-        <SectionHeader icon={HardDrive}>向量化模型</SectionHeader>
-        <MemoryModelSettings />
-      </Section>
-    </>
+    <Section>
+      <SectionHeader icon={Brain}>记忆管理</SectionHeader>
+      <p className="text-xs text-[var(--c-text-secondary)] mb-4">
+        管理你的偏好、工作流和项目知识。新对话会自动加载相关记忆。
+      </p>
+      <LocalMemoryStatsCard />
+    </Section>
   );
 }
-
-function formatRelativeTime(ts: number): string {
-  const diff = Date.now() - ts;
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return '刚刚';
-  if (min < 60) return `${min} 分钟前`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr} 小时前`;
-  const day = Math.floor(hr / 24);
-  if (day < 30) return `${day} 天前`;
-  return new Date(ts).toLocaleDateString();
-}
-
 // ---- Appearance ----
 
 function AppearancePane() {

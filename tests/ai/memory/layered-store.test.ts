@@ -17,10 +17,6 @@ describe('LayeredMemoryStore', () => {
         model: 'nomic-embed-text',
         dimensions: 768,
       },
-      llm: {
-        apiUrl: 'http://localhost:11434/v1',
-        model: 'qwen2.5',
-      },
       compaction: { autoCompact: false },
     };
     store = new LayeredMemoryStore(config);

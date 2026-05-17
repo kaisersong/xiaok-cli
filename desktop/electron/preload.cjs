@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   deleteProvider: (providerId) => ipcRenderer.invoke('desktop:deleteProvider', providerId),
   deleteModel: (modelId) => ipcRenderer.invoke('desktop:deleteModel', modelId),
   readClipboardFilePaths: () => ipcRenderer.invoke('desktop:readClipboardFilePaths'),
+  selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory'),
   selectMaterials: () => ipcRenderer.invoke('desktop:selectMaterials'),
   importMaterial: (input) => ipcRenderer.invoke('desktop:importMaterial', input),
   listSkills: () => ipcRenderer.invoke('desktop:listSkills'),
@@ -96,8 +97,20 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   deleteMemory: (id) => ipcRenderer.invoke('desktop:deleteMemory', id),
   importMemories: (items) => ipcRenderer.invoke('desktop:importMemories', items),
   memoryStats: () => ipcRenderer.invoke('desktop:memoryStats'),
+  memoryCompact: () => ipcRenderer.invoke('desktop:memoryCompact'),
+  memoryPersonaTraits: () => ipcRenderer.invoke('desktop:memoryPersonaTraits'),
   memoryListLayer: (layer, limit, offset) => ipcRenderer.invoke('desktop:memoryListLayer', layer, limit, offset),
+  memoryDeleteEntry: (id, layer) => ipcRenderer.invoke('desktop:memoryDeleteEntry', id, layer),
+  memoryClearAll: () => ipcRenderer.invoke('desktop:memoryClearAll'),
+  memoryGetModelId: () => ipcRenderer.invoke('desktop:memoryGetModelId'),
+  memorySetModelId: (modelId) => ipcRenderer.invoke('desktop:memorySetModelId', modelId),
   syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks),
+  getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks'),
+  showSaveDialog: (input) => ipcRenderer.invoke('desktop:showSaveDialog', input),
+  saveFile: (input) => ipcRenderer.invoke('desktop:saveFile', input),
+  listPrinciples: () => ipcRenderer.invoke('desktop:listPrinciples'),
+  savePrinciple: (principle) => ipcRenderer.invoke('desktop:savePrinciple', principle),
+  deletePrinciple: (id) => ipcRenderer.invoke('desktop:deletePrinciple', id),
   onScheduledTaskDue(handler) {
     const channel = 'desktop:scheduledTaskDue';
     const listener = (_event, payload) => {

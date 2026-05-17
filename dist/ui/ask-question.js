@@ -139,12 +139,19 @@ export async function askQuestion(params) {
         let selectedIdx = 0;
         const checked = new Set();
         let renderedRowCount = 0;
+        let externallyRendered = false;
         // Switch to raw mode
         const rl = createInterface({ input: process.stdin });
         process.stdin.setRawMode?.(true);
         process.stdin.resume();
         process.stdin.setEncoding('utf8');
         function clearFrame() {
+            if (externallyRendered) {
+                params.clearFrame?.();
+                externallyRendered = false;
+                renderedRowCount = 0;
+                return;
+            }
             if (renderedRowCount > 0) {
                 if (renderedRowCount > 1) {
                     stdout.write(`\x1b[${renderedRowCount - 1}A`);
@@ -167,6 +174,11 @@ export async function askQuestion(params) {
             const terminalCols = stdout.columns ?? cols;
             const frameLines = renderFrame(params, selectedIdx, checked, terminalCols);
             renderedRowCount = countRenderedTerminalRows(frameLines, terminalCols);
+            if (params.renderFrame?.(frameLines) !== false) {
+                externallyRendered = true;
+                return;
+            }
+            externallyRendered = false;
             // Write lines without trailing newline — cursor stays on last line
             stdout.write(frameLines.join('\n'));
         }

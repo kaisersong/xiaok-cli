@@ -32,10 +32,17 @@ export class FileMemoryStore {
     }
 }
 export async function createMemoryStoreAsync(config) {
-    if (config) {
+    // Explicit file mode bypasses layered store
+    if (config?.type === 'file') {
+        return new FileMemoryStore();
+    }
+    try {
         const { LayeredMemoryStore, resolveLayeredConfig } = await import('./layered-store.js');
         const resolved = resolveLayeredConfig(config);
         return new LayeredMemoryStore(resolved);
     }
-    return new FileMemoryStore();
+    catch (err) {
+        console.warn('[memory] Failed to initialize layered store, falling back to file store:', err.message);
+        return new FileMemoryStore();
+    }
 }

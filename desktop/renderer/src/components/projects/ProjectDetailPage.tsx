@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, LayoutGrid, Activity, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users } from 'lucide-react';
+import { ArrowLeft, FileText, LayoutGrid, Activity, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users, Download, FolderOpen } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmProject, KSwarmTask, KSwarmActivityEvent, KSwarmHumanAction } from '../../hooks/useKSwarmClient';
@@ -14,6 +14,9 @@ import { PlanView } from './PlanView';
 import { KanbanBoard } from './KanbanBoard';
 import { ActivityTimeline } from './ActivityTimeline';
 import { DeliverableView } from './DeliverableView';
+import { exportProjectMarkdown } from './exportProjectMarkdown';
+import { getDesktopApi } from '../../shared/desktop';
+import { canRetryPlanForProject, isInterruptedPlanProject } from './projectPlanRecovery';
 
 type TabId = 'plan' | 'board' | 'agents' | 'activity' | 'deliverables';
 
@@ -77,6 +80,20 @@ export function ProjectDetailPage() {
     setActionLoading(null);
   };
 
+  const handleExport = async () => {
+    if (!detail) return;
+    const api = getDesktopApi() as any;
+    if (!api?.showSaveDialog || !api?.saveFile) return;
+    const defaultName = `${detail.project.name.replace(/[/\\:*?"<>|]/g, '_')}.md`;
+    const { canceled, filePath } = await api.showSaveDialog({
+      defaultPath: defaultName,
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+    });
+    if (canceled || !filePath) return;
+    const md = exportProjectMarkdown(detail, agents, t);
+    await api.saveFile({ filePath, content: md });
+  };
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -96,6 +113,8 @@ export function ProjectDetailPage() {
 
   const { project, tasks, activities, humanActions, workspace, plan, planProgress } = detail;
   const showApprove = project.status === 'created' || project.status === 'draft' || project.status === 'planning';
+  const showRetryPlan = canRetryPlanForProject(project, plan, tasks);
+  const showInterruptedPlanHint = isInterruptedPlanProject(project, plan, tasks);
   const showDispatch = project.status === 'active' && tasks.some(t => t.status === 'pending');
   const showDeliver = project.status === 'active' && tasks.every(t => t.status === 'done' || t.status === 'cancelled');
   const showClose = project.status === 'active' || project.status === 'delivered';
@@ -104,90 +123,108 @@ export function ProjectDetailPage() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-[var(--c-border-subtle)] px-6 py-4">
-        <button type="button" onClick={() => navigate('/projects')} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]">
-          <ArrowLeft size={16} />
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-[14px] font-semibold text-[var(--c-text-heading)] truncate">{project.name}</h1>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full border-[0.5px] border-[var(--c-border-subtle)] text-[var(--c-text-muted)]`}>{statusLabel}</span>
+      <div className="border-b border-[var(--c-border-subtle)] px-6 py-3 space-y-2">
+        {/* Row 1: Back + Title + Status + Actions */}
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={() => navigate('/projects')} className="shrink-0 rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]">
+            <ArrowLeft size={16} />
+          </button>
+          <h1 className="text-[15px] font-semibold text-[var(--c-text-heading)] truncate">{project.name}</h1>
+          <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border-[0.5px] border-[var(--c-border-subtle)] text-[var(--c-text-muted)]`}>{statusLabel}</span>
+          <button type="button" onClick={handleExport} title={t.projectsDetailExport} className="shrink-0 rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]">
+            <Download size={14} />
+          </button>
+          <div className="flex-1" />
+          {/* Action buttons */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {showRetryPlan && (
+              <button type="button" onClick={() => handleAction('retry', () => retryPlan(projectId!))} disabled={actionLoading === 'retry'}
+                className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-accent)] bg-[var(--c-bg-deep)] hover:brightness-[0.95] disabled:opacity-50">
+                <RefreshCw size={12} /><span>{actionLoading === 'retry' ? '...' : t.projectsDetailRetryPlan ?? '重新制定计划'}</span>
+              </button>
+            )}
+            {showApprove && (
+              <button type="button" onClick={() => handleAction('approve', () => approveProject(projectId!))}
+                disabled={actionLoading === 'approve'}
+                className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-status-success-text)] bg-[var(--c-bg-deep)] hover:brightness-[0.95] disabled:opacity-50">
+                <CheckCircle2 size={12} /><span>{actionLoading === 'approve' ? '...' : t.projectsDetailApprove}</span>
+              </button>
+            )}
+            {showDispatch && (
+              <button type="button" onClick={() => handleAction('dispatch', () => dispatchTasks(projectId!, project?.poAgent))}
+                disabled={actionLoading === 'dispatch'}
+                className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-text-primary)] bg-[var(--c-bg-deep)] hover:brightness-[0.95] disabled:opacity-50">
+                <Send size={12} /><span>{actionLoading === 'dispatch' ? '...' : t.projectsDetailDispatch}</span>
+              </button>
+            )}
+            {showDeliver && (
+              <button type="button" onClick={() => handleAction('deliver', () => deliverProject(projectId!))}
+                disabled={actionLoading === 'deliver'}
+                className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-status-success-text)] bg-[var(--c-bg-deep)] hover:brightness-[0.95] disabled:opacity-50">
+                <Archive size={12} /><span>{actionLoading === 'deliver' ? '...' : t.projectsDetailDeliver}</span>
+              </button>
+            )}
+            {showClose && !confirmClose && (
+              <button type="button" onClick={() => setConfirmClose(true)}
+                className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-status-error-text)] bg-[var(--c-bg-deep)] hover:brightness-[0.95]">
+                <XCircle size={12} /><span>完成项目</span>
+              </button>
+            )}
+            {confirmClose && (
+              <div className="flex items-center gap-1">
+                <button type="button" onClick={() => handleAction('close', () => closeProject(projectId!))} disabled={actionLoading === 'close'}
+                  className="rounded-lg px-2.5 py-1 text-[11px] font-medium bg-[var(--c-status-error-text)] text-white">
+                  {actionLoading === 'close' ? '...' : t.projectsDetailConfirmDone}
+                </button>
+                <button type="button" onClick={() => setConfirmClose(false)} className="rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]">{t.commonCancel}</button>
+              </div>
+            )}
+            {!connected && (
+              <span className="rounded-full bg-[var(--c-error-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--c-status-warning-text)]">{t.projectsPageOffline}</span>
+            )}
           </div>
-          {project.goal && <p className="text-[12px] text-[var(--c-text-tertiary)] truncate mt-0.5">{project.goal}</p>}
-          {/* Requirements */}
-          {(project as any).requirements && (
-            <p className="text-[11px] text-[var(--c-text-tertiary)] mt-0.5 line-clamp-1">{(project as any).requirements}</p>
-          )}
-          {/* Workspace path */}
-          {workspace?.path && (
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="text-[10px] text-[var(--c-text-muted)]">Workspace:</span>
-              <span className="text-[10px] text-[var(--c-text-tertiary)] font-mono truncate max-w-[300px]">{workspace.path}</span>
-              {workspace.artifacts && workspace.artifacts.length > 0 && (
-                <span className="text-[9px] px-1 rounded bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]">{workspace.artifacts.length} files</span>
-              )}
-            </div>
-          )}
-          {/* Status hints */}
-          {(project.status === 'created' || project.status === 'draft' || project.status === 'planning') && !plan && (
-            <p className="text-[10px] text-[var(--c-status-warning-text)] mt-1">等待 PO 制定计划...</p>
-          )}
-          {(project.status === 'created' || project.status === 'draft' || project.status === 'planning') && plan && (
-            <p className="text-[10px] text-[var(--c-status-success-text)] mt-1">Plan v{plan.version} 已就绪，可审批</p>
-          )}
         </div>
 
-        {/* Action buttons */}
-        <div className="flex items-center gap-2">
-          {showApprove && (
-            <button type="button" onClick={async () => {
-              await retryPlan(projectId!);
-              await refreshOnce();
-            }} disabled={actionLoading === 'retry'}
-              className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-[12px] font-medium text-[var(--c-accent)] bg-[var(--c-bg-deep)] hover:brightness-[0.95] disabled:opacity-50">
-              <RefreshCw size={13} /><span>{actionLoading === 'retry' ? '...' : t.projectsDetailRetryPlan ?? '重新制定计划'}</span>
-            </button>
-          )}
-          {showApprove && (
-            <button type="button" onClick={() => handleAction('approve', () => approveProject(projectId!))}
-              disabled={actionLoading === 'approve'}
-              className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-[12px] font-medium text-[var(--c-status-success-text)] bg-[var(--c-bg-deep)] hover:brightness-[0.95] disabled:opacity-50">
-              <CheckCircle2 size={13} /><span>{actionLoading === 'approve' ? '...' : t.projectsDetailApprove}</span>
-            </button>
-          )}
-          {showDispatch && (
-            <button type="button" onClick={() => handleAction('dispatch', () => dispatchTasks(projectId!, project?.poAgent))}
-              disabled={actionLoading === 'dispatch'}
-              className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-[12px] font-medium text-[var(--c-text-primary)] bg-[var(--c-bg-deep)] hover:brightness-[0.95] disabled:opacity-50">
-              <Send size={13} /><span>{actionLoading === 'dispatch' ? '...' : t.projectsDetailDispatch}</span>
-            </button>
-          )}
-          {showDeliver && (
-            <button type="button" onClick={() => handleAction('deliver', () => deliverProject(projectId!))}
-              disabled={actionLoading === 'deliver'}
-              className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-[12px] font-medium text-[var(--c-status-success-text)] bg-[var(--c-bg-deep)] hover:brightness-[0.95] disabled:opacity-50">
-              <Archive size={13} /><span>{actionLoading === 'deliver' ? '...' : t.projectsDetailDeliver}</span>
-            </button>
-          )}
-          {showClose && !confirmClose && (
-            <button type="button" onClick={() => setConfirmClose(true)}
-              className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-[12px] font-medium text-[var(--c-status-error-text)] bg-[var(--c-bg-deep)] hover:brightness-[0.95]">
-              <XCircle size={13} /><span>完成项目</span>
-            </button>
-          )}
-          {confirmClose && (
-            <div className="flex items-center gap-1">
-              <button type="button" onClick={() => handleAction('close', () => closeProject(projectId!))} disabled={actionLoading === 'close'}
-                className="rounded-lg px-2.5 py-1 text-[11px] font-medium bg-[var(--c-status-error-text)] text-white">
-                {actionLoading === 'close' ? '...' : t.projectsDetailConfirmDone}
-              </button>
-              <button type="button" onClick={() => setConfirmClose(false)} className="rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]">{t.commonCancel}</button>
-            </div>
-          )}
-          {!connected && (
-            <span className="rounded-full bg-[var(--c-error-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--c-status-warning-text)]">{t.projectsPageOffline}</span>
-          )}
-        </div>
+        {/* Row 2: Goal */}
+        {project.goal && (
+          <p className="text-[12px] text-[var(--c-text-secondary)] line-clamp-2 pl-[38px]">{project.goal}</p>
+        )}
+
+        {/* Row 3: Metadata tags */}
+        {((project as any).requirements || workspace?.path) && (
+          <div className="flex items-center gap-3 pl-[38px] flex-wrap">
+            {workspace?.path && (
+              <div className="flex items-center gap-1 text-[11px] text-[var(--c-text-muted)]">
+                <FolderOpen size={11} className="shrink-0" />
+                <span className="font-mono truncate max-w-[260px]">{workspace.path}</span>
+                {workspace.artifacts && workspace.artifacts.length > 0 && (
+                  <span className="text-[9px] px-1 rounded bg-[var(--c-bg-deep)]">{workspace.artifacts.length} files</span>
+                )}
+              </div>
+            )}
+            {(project as any).requirements && (
+              <div className="flex items-center gap-1 text-[11px] text-[var(--c-text-muted)]">
+                <FileText size={11} className="shrink-0" />
+                <span className="truncate max-w-[400px]">{(project as any).requirements}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Status hint */}
+        {(project.status === 'created' || project.status === 'draft' || project.status === 'planning' || showInterruptedPlanHint) && (
+          <div className="pl-[38px]">
+            {showInterruptedPlanHint && (
+              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-[var(--c-bg-deep)] text-[var(--c-status-warning-text)]">计划中断，可重新制定计划</span>
+            )}
+            {!showInterruptedPlanHint && !plan && (
+              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-[var(--c-bg-deep)] text-[var(--c-status-warning-text)]">等待 PO 制定计划...</span>
+            )}
+            {!showInterruptedPlanHint && plan && (
+              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-[var(--c-bg-deep)] text-[var(--c-status-success-text)]">Plan v{plan.version} 已就绪，可审批</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Tab bar */}
@@ -266,7 +303,29 @@ export function ProjectDetailPage() {
           <ActivityTimeline project={project} activities={activities} humanActions={humanActions} />
         )}
         {activeTab === 'deliverables' && (
-          <DeliverableView project={project} tasks={tasks} />
+          <div className="space-y-4">
+            {/* Project Summary */}
+            {project.summary && (
+              <div className="rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <h4 className="text-[13px] font-semibold text-[var(--c-text-heading)]">{t.projectsSummaryTitle}</h4>
+                  {project.summaryScore != null && (
+                    <span className={`rounded-md px-2 py-0.5 text-xs font-bold ${
+                      project.summaryScore >= 8 ? 'bg-[var(--c-status-success-text)]/15 text-[var(--c-status-success-text)]'
+                        : project.summaryScore >= 5 ? 'bg-[var(--c-status-warning-text)]/15 text-[var(--c-status-warning-text)]'
+                        : 'bg-[var(--c-status-error-text)]/15 text-[var(--c-status-error-text)]'
+                    }`}>
+                      {project.summaryScore}/10
+                    </span>
+                  )}
+                </div>
+                <div className="text-[12px] leading-relaxed text-[var(--c-text-secondary)] whitespace-pre-wrap">
+                  {project.summary}
+                </div>
+              </div>
+            )}
+            <DeliverableView project={project} tasks={tasks} />
+          </div>
         )}
       </div>
     </div>

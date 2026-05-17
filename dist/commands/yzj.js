@@ -9,6 +9,7 @@ import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync } from '../ai/memory/store.js';
+import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
 import { loadSettings, mergeRules } from '../ai/permissions/settings.js';
 import { createSkillCatalog } from '../ai/skills/loader.js';
@@ -136,7 +137,7 @@ async function runYZJServe(options) {
         process.exit(1);
     }
     const config = await loadConfig();
-    const memoryStore = await createMemoryStoreAsync(config.memory?.type === 'layered' ? config.memory : undefined);
+    const memoryStore = await createMemoryStoreAsync(config.memory);
     const yzjConfig = resolveYZJConfig(config, buildOverrides(options));
     const enableWebhook = options.webhook ?? true;
     if (yzjConfig.inboundMode === 'webhook' && !enableWebhook) {
@@ -211,6 +212,7 @@ async function runYZJServe(options) {
     let agentService = null;
     if (!options.dryRun) {
         const adapter = createAdapter(config);
+        memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
         const creds = await loadCredentials();
         const devApp = await getDevAppIdentity();
         agentService = new ChannelAgentService({
@@ -262,6 +264,7 @@ async function runYZJServe(options) {
                     adapter: () => adapter,
                     skillTool,
                     workflowTools: [],
+                    memoryStore,
                     dryRun: false,
                     permissionManager,
                     getCurrentTaskId: () => taskManager.getActiveTask(sessionId)?.taskId,

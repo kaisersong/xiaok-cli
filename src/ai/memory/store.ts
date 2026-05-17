@@ -16,12 +16,27 @@ export interface MemoryRecord {
   type?: MemoryType;
 }
 
+export interface LayerEntry {
+  id: string;
+  content: string;
+  tags?: string[];
+  createdAt?: string;
+  meta?: Record<string, unknown>;
+}
+
 export interface MemoryStore {
   save(record: MemoryRecord): Promise<void>;
   listRelevant(input: { cwd: string; query: string; typeFilter?: MemoryType }): Promise<MemoryRecord[]>;
   search?(query: string, limit?: number): Promise<MemoryRecord[]>;
   writeRawMessage?(sessionId: string, role: string, content: string): Promise<void>;
   close?(): void;
+  compact?(): Promise<void>;
+  getStats?(): { l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number };
+  getPersonaTraits?(): { trait: string; confidence: number }[];
+  clearAll?(): void;
+  setLLMFn?(fn: (prompt: string) => Promise<string>): void;
+  delete?(id: string, layer?: number): Promise<boolean>;
+  listLayer?(layer: number, limit?: number, offset?: number): LayerEntry[];
 }
 
 export class FileMemoryStore implements MemoryStore {
@@ -61,11 +76,18 @@ export class FileMemoryStore implements MemoryStore {
   }
 }
 
-export async function createMemoryStoreAsync(config?: unknown): Promise<MemoryStore> {
-  if (config) {
-    const { LayeredMemoryStore, resolveLayeredConfig } = await import('./layered-store.js');
-    const resolved = resolveLayeredConfig(config as Record<string, unknown>);
-    return new LayeredMemoryStore(resolved);
+export async function createMemoryStoreAsync(config?: Record<string, unknown>): Promise<MemoryStore> {
+  // Explicit file mode bypasses layered store
+  if (config?.type === 'file') {
+    return new FileMemoryStore();
   }
-  return new FileMemoryStore();
+
+  try {
+    const { LayeredMemoryStore, resolveLayeredConfig } = await import('./layered-store.js');
+    const resolved = resolveLayeredConfig(config);
+    return new LayeredMemoryStore(resolved);
+  } catch (err) {
+    console.warn('[memory] Failed to initialize layered store, falling back to file store:', (err as Error).message);
+    return new FileMemoryStore();
+  }
 }

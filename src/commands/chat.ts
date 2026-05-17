@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { Command } from 'commander';
 import type { ModelAdapter, MessageBlock } from '../types.js';
+import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../types.js';
 import type { IntentPlanDraft } from '../ai/intent-delegation/types.js';
 import { loadConfig, saveConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
@@ -16,10 +17,12 @@ import { executeStagedSkill, formatDebugOutput, type StageDef, type StageOutput,
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync, type MemoryStore } from '../ai/memory/store.js';
+import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
 import { createHooksRunner } from '../runtime/hooks-runner.js';
 import type { RuntimeEvent } from '../runtime/events.js';
-import { createIntentPlan } from '../ai/intent-delegation/planner.js';
+import { createIntentBoundaryResolver } from '../ai/intent-delegation/boundary-resolver.js';
+import { classifyBoundaryWithLlm, createAdapterBoundaryInvoker } from '../ai/intent-delegation/llm-boundary-classifier.js';
 import { writeError, isTTY } from '../utils/ui.js';
 import { showPermissionPrompt } from '../ui/permission-prompt.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
@@ -126,6 +129,15 @@ const { version: cliVersion } = JSON.parse(
 const COMPLETED_INTENT_FEEDBACK_ENABLED = false;
 const THINKING_ONLY_TOOL_TURN_NOTICE = '正在执行工具...';
 
+type IntentBoundaryResolverFactory = typeof createIntentBoundaryResolver;
+let intentBoundaryResolverFactoryForTests: IntentBoundaryResolverFactory | undefined;
+
+export function __setIntentBoundaryResolverFactoryForTests(
+  factory: IntentBoundaryResolverFactory | undefined,
+): void {
+  intentBoundaryResolverFactoryForTests = factory;
+}
+
 interface ChatOptions {
   auto: boolean;
   dryRun: boolean;
@@ -212,7 +224,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   log.info('chat started', { initialInput: initialInput?.slice(0, 80) });
   let config = await loadConfig();
   const memoryStore: MemoryStore = await createMemoryStoreAsync(
-    config.memory?.type === 'layered' ? config.memory : undefined,
+    config.memory as Record<string, unknown> | undefined,
   );
 
   let adapter: ModelAdapter;
@@ -222,6 +234,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     writeError(String(e));
     process.exit(1);
   }
+  memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
 
   const creds = await loadCredentials();
   const devApp = await getDevAppIdentity();
@@ -606,6 +619,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     adapter: () => adapter,
     skillTool,
     workflowTools,
+    memoryStore,
     dryRun: opts.dryRun,
     permissionManager,
     onPrompt: async (name, input) => {
@@ -1517,12 +1531,40 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     });
   };
 
-  const prepareIntentReminderForInput = (input: string): void => {
+  const createConfiguredIntentBoundaryResolver = (): ReturnType<IntentBoundaryResolverFactory> => {
+    const boundaryConfig = config.intentBoundary ?? DEFAULT_INTENT_BOUNDARY_CONFIG;
+    const resolverFactory = intentBoundaryResolverFactoryForTests ?? createIntentBoundaryResolver;
+    return resolverFactory({
+      config: boundaryConfig,
+      llmClassify: boundaryConfig.llmClassifier === 'off'
+        ? undefined
+        : async (boundaryInput, ruleDecision) => classifyBoundaryWithLlm(
+            {
+              input: boundaryInput.input,
+              sessionId: boundaryInput.sessionId,
+              instanceId: boundaryInput.instanceId,
+              cwd: boundaryInput.cwd,
+              providedSourcePaths: [],
+              ruleDecision,
+            },
+            createAdapterBoundaryInvoker(adapter, boundaryConfig),
+          ),
+      emitDebug: (event) => {
+        log.info('intent_boundary_decision', event);
+      },
+    });
+  };
+
+  let intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
+
+  const prepareIntentReminderForInput = async (input: string): Promise<void> => {
     const activeIntent = getWaitingUserIntentForInput(input);
-    const planResult = createIntentPlan({
+
+    const decision = await intentBoundaryResolver.resolve({
       instanceId,
       sessionId,
       input,
+      cwd,
       skills,
       skillScoreLookup: ({ skillName, intentType, stageRole, deliverable }) => skillScoreStore.getBoost({
         skillName,
@@ -1540,7 +1582,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         : undefined,
     });
 
-    currentTurnIntentPlan = planResult.kind === 'plan' ? planResult.plan : undefined;
+    currentTurnIntentPlan = decision.kind === 'intent' ? decision.plan : undefined;
     resetCurrentTurnSummary();
 
     if (currentTurnIntentPlan?.continuationMode === 'continue_active') {
@@ -1900,7 +1942,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
       await refreshSkills();
       await refreshIntentLedger();
-      prepareIntentReminderForInput(initialInput);
+      await prepareIntentReminderForInput(initialInput);
 
       // Stage executor debug output (when --skill-debug is enabled)
       if (skillDebugEnabled) {
@@ -2601,7 +2643,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           await saveConfig(newConfig);
           adapter = nextAdapter;
           config = newConfig;
+          intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
           agent.setAdapter(adapter);
+          memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
           statusBar.updateModel(selected.model);
           writeCommandOutput(trimmed, `已切换到：[${selected.provider}] ${selected.label} (${selected.model})\n\n`);
         } catch (e) {
@@ -2837,7 +2881,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       );
       clearPastedImagePaths();
       await refreshIntentLedger();
-      prepareIntentReminderForInput(trimmed);
+      await prepareIntentReminderForInput(trimmed);
 
       // Stage executor debug output (when --skill-debug is enabled)
       if (skillDebugEnabled) {
@@ -2929,7 +2973,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         );
         clearPastedImagePaths();
         await refreshIntentLedger();
-        prepareIntentReminderForInput(stopResult.message);
+        await prepareIntentReminderForInput(stopResult.message);
         await primeTurnIntentPlan(true);
         if (!terminalUiSuspended) {
           scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });

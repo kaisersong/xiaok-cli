@@ -56,6 +56,42 @@ export function offsetToDisplayColumn(text: string, offset: number): number {
   return getDisplayWidth(symbols.slice(0, clampOffset(text, offset)).join(''));
 }
 
+/**
+ * Truncate a string (potentially containing ANSI escape codes) to a maximum
+ * display width. ANSI sequences are preserved up to the truncation point.
+ */
+export function truncateAnsi(text: string, maxWidth: number): string {
+  if (maxWidth <= 0) return '';
+
+  const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/y;
+  let width = 0;
+  let i = 0;
+  let result = '';
+
+  while (i < text.length) {
+    ANSI_RE.lastIndex = i;
+    const match = ANSI_RE.exec(text);
+    if (match) {
+      result += match[0];
+      i += match[0].length;
+      continue;
+    }
+
+    const codePoint = text.codePointAt(i)!;
+    const charLen = codePoint > 0xffff ? 2 : 1;
+    const charWidth = (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f))
+      ? 0
+      : isFullWidthCodePoint(codePoint) ? 2 : 1;
+
+    if (width + charWidth > maxWidth) break;
+    result += text.slice(i, i + charLen);
+    width += charWidth;
+    i += charLen;
+  }
+
+  return result;
+}
+
 export function sliceByDisplayColumns(text: string, start: number, width: number): string {
   if (width <= 0) return '';
 

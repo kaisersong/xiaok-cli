@@ -20,9 +20,5 @@ export async function bootstrapTurnIntentPlan(
 }
 
 function isBootstrapEligible(plan: IntentPlanDraft): boolean {
-  if (plan.intentType !== 'generate') {
-    return true;
-  }
-
-  return plan.deliverable !== '交付物';
+  return plan.deliverable !== '交付物' && plan.finalDeliverable !== '交付物';
 }

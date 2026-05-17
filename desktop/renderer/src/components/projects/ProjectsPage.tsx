@@ -4,15 +4,16 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, FolderKanban, ArrowLeft } from 'lucide-react';
+import { Plus, FolderKanban, ArrowLeft, Download } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import { ProjectCard } from './ProjectCard';
 import { CreateProjectModal } from './CreateProjectModal';
 import { CreateAgentModal } from './CreateAgentModal';
 import { AgentsTab } from './AgentsTab';
+import { PrinciplesTab } from './PrinciplesTab';
 
-type TabId = 'projects' | 'agents';
+type TabId = 'projects' | 'agents' | 'principles';
 
 export function ProjectsPage() {
   const navigate = useNavigate();
@@ -21,14 +22,17 @@ export function ProjectsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>('projects');
+  const [principleAddTrigger, setPrincipleAddTrigger] = useState(0);
+  const [principleImportTrigger, setPrincipleImportTrigger] = useState(0);
 
-  const handleCreate = async (input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string }) => {
+  const handleCreate = async (input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string; enableSummary?: boolean }) => {
     await createProject(input);
   };
 
   const TABS: Array<{ id: TabId; label: string; count?: number }> = [
     { id: 'projects', label: t.projectsPageTitle, count: projects.length },
     { id: 'agents', label: t.projectsPageAgents, count: agents.length },
+    { id: 'principles', label: t.projectsPrinciplesTab },
   ];
 
   return (
@@ -82,6 +86,26 @@ export function ProjectsPage() {
             <span>{t.projectsPageNewAgent}</span>
           </button>
         )}
+        {activeTab === 'principles' && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPrincipleImportTrigger(n => n + 1)}
+              className="flex items-center gap-1.5 rounded-lg border-[0.5px] border-[var(--c-border-subtle)] px-3 py-1.5 text-sm font-medium text-[var(--c-text-secondary)] transition-colors duration-150 hover:bg-[var(--c-bg-deep)]"
+            >
+              <Download size={15} />
+              <span>{t.projectsPrinciplesImportMemory}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPrincipleAddTrigger(n => n + 1)}
+              className="flex items-center gap-1.5 rounded-lg bg-[var(--c-btn-bg)] px-3.5 py-1.5 text-sm font-medium text-[var(--c-btn-text)] transition-[filter] duration-150 hover:brightness-[1.12] active:brightness-[0.95]"
+            >
+              <Plus size={15} />
+              <span>{t.projectsPrinciplesAdd}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Content */}
@@ -117,6 +141,9 @@ export function ProjectsPage() {
         )}
         {activeTab === 'agents' && (
           <AgentsTab />
+        )}
+        {activeTab === 'principles' && (
+          <PrinciplesTab addTrigger={principleAddTrigger} importTrigger={principleImportTrigger} />
         )}
       </div>
 

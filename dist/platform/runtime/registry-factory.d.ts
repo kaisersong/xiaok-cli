@@ -10,6 +10,7 @@ export interface PlatformRegistryFactoryOptions {
     adapter: () => ModelAdapter;
     skillTool?: Tool;
     workflowTools?: Tool[];
+    memoryStore?: import('../../ai/memory/store.js').MemoryStore;
     dryRun?: boolean;
     permissionManager?: ConstructorParameters<typeof ToolRegistry>[0]['permissionManager'];
     onPrompt?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;

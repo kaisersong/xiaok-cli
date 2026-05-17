@@ -1099,6 +1099,36 @@ export interface LocaleStrings {
     memoryClearAll: string;
     memoryClearAllConfirm: string;
     memoryDeleteConfirm: string;
+    memoryLocalTitle: string;
+    memoryCompact: string;
+    memoryCompactDone: string;
+    memoryClear: string;
+    memoryClearConfirmTitle: string;
+    memoryClearConfirmDesc: string;
+    memoryClearConfirmBtn: string;
+    memoryCancel: string;
+    memoryCompactionModel: string;
+    memoryCompactionModelDefault: string;
+    memoryLayerL0: string;
+    memoryLayerL1: string;
+    memoryLayerL2: string;
+    memoryLayerL3: string;
+    memoryNoEntries: string;
+    memoryPrev: string;
+    memoryNext: string;
+    memoryAdd: string;
+    memoryImport: string;
+    memorySearch: string;
+    memoryAddPlaceholder: string;
+    memoryTagsPlaceholder: string;
+    memorySave: string;
+    memoryImportDesc: string;
+    memoryImportPlaceholder: string;
+    memoryImportBtn: string;
+    memoryImported: (imported: number, deduped: number) => string;
+    memoryParseHint: string;
+    memoryNoMatch: string;
+    memoryEmpty: string;
     memorySnapshotTitle: string;
     memoryRebuildSnapshot: string;
     memorySnapshotEmpty: string;
@@ -1645,6 +1675,7 @@ export interface LocaleStrings {
   projectsDetailDispatch: string;
   projectsDetailDeliver: string;
   projectsDetailConfirmDone: string;
+  projectsDetailExport: string;
 
   // projects - page
   projectsPageTitle: string;
@@ -1655,6 +1686,44 @@ export interface LocaleStrings {
   projectsPageEmptyDesc: string;
   projectsPageCreateFirst: string;
   projectsPageOffline: string;
+
+  // projects - principles tab
+  projectsPrinciplesTab: string;
+  projectsPrinciplesAdd: string;
+  projectsPrinciplesImportMemory: string;
+  projectsPrinciplesEmpty: string;
+  projectsPrinciplesEmptyDesc: string;
+  projectsPrinciplesSource: string;
+  projectsPrinciplesSourceManual: string;
+  projectsPrinciplesSourceMemory: string;
+  projectsPrinciplesEdit: string;
+  projectsPrinciplesDelete: string;
+  projectsPrinciplesDeleteConfirm: string;
+  projectsPrinciplesDeleteConfirmBody: string;
+  projectsPrinciplesDeleteCancel: string;
+  projectsPrinciplesEnabled: string;
+  projectsPrinciplesDisabled: string;
+  projectsPrinciplesScenarioPlanning: string;
+  projectsPrinciplesScenarioExecution: string;
+  projectsPrinciplesScenarioReview: string;
+  projectsPrinciplesScenarioDelivery: string;
+  projectsPrinciplesEditTitle: string;
+  projectsPrinciplesEditTitleNew: string;
+  projectsPrinciplesEditContent: string;
+  projectsPrinciplesEditContentPlaceholder: string;
+  projectsPrinciplesEditScenarios: string;
+  projectsPrinciplesEditScenariosHint: string;
+  projectsPrinciplesEditEnabled: string;
+  projectsPrinciplesEditSave: string;
+  projectsPrinciplesEditCancel: string;
+  projectsPrinciplesImportTitle: string;
+  projectsPrinciplesImportSearch: string;
+  projectsPrinciplesImportEmpty: string;
+  projectsPrinciplesImportBtn: string;
+  projectsPrinciplesImportSuccess: (count: number) => string;
+  projectsPrinciplesLimitReached: string;
+  projectsPrinciplesContentTooLong: string;
+  projectsPrinciplesInjectHint: (planning: number, execution: number) => string;
 
   // projects - create project modal
   projectsCreateTitle: string;
@@ -1667,6 +1736,10 @@ export interface LocaleStrings {
   projectsCreateCancel: string;
   projectsCreateCreating: string;
   projectsCreateSubmit: string;
+
+  // projects - summary
+  projectsSummaryEnable: string;
+  projectsSummaryTitle: string;
 
   // projects - create agent modal
   projectsAgentTypeTitle: string;
@@ -1789,6 +1862,11 @@ export interface LocaleStrings {
   scheduledPause: string;
   scheduledResume: string;
   scheduledDeleteConfirm: string;
+  scheduledDeleteTitle: string;
+  scheduledDeleteBody: string;
+  scheduledDeleteInstanceConfirm: string;
+  scheduledDeleteInstanceTitle: string;
+  scheduledDeleteInstanceBody: string;
   scheduledLastRun: string;
   scheduledNextRun: string;
   scheduledSave: string;

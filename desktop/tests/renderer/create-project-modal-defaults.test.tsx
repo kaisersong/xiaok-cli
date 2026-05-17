@@ -8,6 +8,7 @@ import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  delete (window as any).xiaokDesktop;
 });
 
 function renderModal(props?: Partial<ComponentProps<typeof CreateProjectModal>>) {
@@ -60,6 +61,34 @@ describe('CreateProjectModal defaults', () => {
       expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
         poAgent: 'xiaok-po',
         members: ['codex-worker'],
+      }));
+    });
+  });
+
+  it('uses the desktop directory picker full path as the project work folder', async () => {
+    const selectedPath = '/Users/song/projects/customer-work';
+    Object.defineProperty(window, 'xiaokDesktop', {
+      configurable: true,
+      value: {
+        selectDirectory: vi.fn().mockResolvedValue({ filePath: selectedPath }),
+      },
+    });
+
+    const { onCreate } = renderModal();
+
+    fireEvent.click(screen.getByTitle('选择目录'));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('~/projects/my-project')).toHaveValue(selectedPath);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('例：竞品分析报告'), { target: { value: '测试项目' } });
+    fireEvent.change(screen.getByPlaceholderText('描述你希望完成什么...'), { target: { value: '验证工作目录' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }));
+
+    await waitFor(() => {
+      expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+        workFolder: selectedPath,
       }));
     });
   });

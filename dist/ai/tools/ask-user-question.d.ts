@@ -7,5 +7,7 @@ import type { Tool } from '../../types.js';
 export interface AskUserQuestionToolOptions {
     onEnterInteractive?: () => void;
     onExitInteractive?: () => void;
+    renderFrame?: (lines: string[]) => boolean | void;
+    clearFrame?: () => void;
 }
 export declare function createAskUserQuestionTool(options?: AskUserQuestionToolOptions): Tool;

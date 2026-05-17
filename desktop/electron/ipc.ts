@@ -1,5 +1,5 @@
 import { clipboard, dialog, type BrowserWindow, type IpcMain } from 'electron';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
 
@@ -64,6 +64,18 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
       }
     } catch { /* not available on this platform */ }
     return [];
+  });
+  ipcMain.handle('desktop:selectDirectory', async () => {
+    log('info', 'selectDirectory');
+    const result = await dialog.showOpenDialog(window, {
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (result.canceled || !result.filePaths[0]) {
+      log('info', 'selectDirectory cancelled');
+      return { filePath: '' };
+    }
+    log('info', 'selectDirectory ok', { filePath: result.filePaths[0] });
+    return { filePath: result.filePaths[0] };
   });
   ipcMain.handle('desktop:selectMaterials', async () => {
     log('info', 'selectMaterials');
@@ -212,67 +224,107 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
   });
 
   // ---- Memory ----
-  const { parseMemories } = await import('./memory-import-parser.js');
   const { getDesktopMemoryStore } = await import('./desktop-services.js');
+  const { parseMemories } = await import('./memory-import-parser.js');
   const memoryStore = getDesktopMemoryStore(services.getDataRoot());
 
   ipcMain.handle('desktop:listMemories', async () => {
     try {
-      if ('listUserMemories' in memoryStore) return (memoryStore as any).listUserMemories();
-      return [];
+      if (memoryStore.search) {
+        return (await memoryStore.search('', 50)).map(r => ({
+          id: r.id, content: r.summary, tags: r.tags, createdAt: r.updatedAt,
+        }));
+      }
+      return (await memoryStore.listRelevant({ cwd: '', query: '' })).map(r => ({
+        id: r.id, content: r.summary, tags: r.tags, createdAt: r.updatedAt,
+      }));
     } catch (e) { log('error', 'listMemories failed', e); return []; }
   });
   ipcMain.handle('desktop:createMemory', async (_event, input: { content: string; tags: string[]; source?: string }) => {
     try {
-      if ('createUserMemory' in memoryStore) return (memoryStore as any).createUserMemory(input);
-      throw new Error('Memory store does not support create');
+      const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      await memoryStore.save({
+        id, scope: 'global', title: input.content.slice(0, 80),
+        summary: input.content, tags: input.tags, updatedAt: Date.now(), type: 'user',
+      });
+      return { id, content: input.content, tags: input.tags, createdAt: Date.now() };
     } catch (e) { log('error', 'createMemory failed', e); throw e; }
   });
   ipcMain.handle('desktop:updateMemory', async (_event, input: { id: string; content?: string; tags?: string[] }) => {
     try {
-      if ('updateUserMemory' in memoryStore) return (memoryStore as any).updateUserMemory(input.id, input);
-      return null;
+      // Delete old + re-save with updated content
+      await memoryStore.delete?.(input.id);
+      const content = input.content ?? '';
+      await memoryStore.save({
+        id: input.id, scope: 'global', title: content.slice(0, 80),
+        summary: content, tags: input.tags ?? [], updatedAt: Date.now(), type: 'user',
+      });
+      return { id: input.id, content, tags: input.tags ?? [], createdAt: Date.now() };
     } catch (e) { log('error', 'updateMemory failed', e); throw e; }
   });
   ipcMain.handle('desktop:deleteMemory', async (_event, id: string) => {
-    try {
-      if ('deleteUserMemory' in memoryStore) return (memoryStore as any).deleteUserMemory(id);
-      return false;
-    } catch (e) { log('error', 'deleteMemory failed', e); throw e; }
+    try { return await memoryStore.delete?.(id) ?? false; }
+    catch (e) { log('error', 'deleteMemory failed', e); throw e; }
   });
   ipcMain.handle('desktop:importMemories', async (_event, raw: string) => {
     try {
       const { items, errors } = parseMemories(raw);
       if (items.length === 0 && errors.length === 0) return { imported: 0, deduped: 0, parseErrors: ['未解析到任何记忆'] };
-      if (!('createUserMemory' in memoryStore)) return { imported: 0, deduped: 0, parseErrors: ['Memory store does not support import'] };
-      const store = memoryStore as any;
-      const existing = new Set((store.listUserMemories() as Array<{ content: string }>).map((m: { content: string }) => m.content.toLowerCase().trim()));
       let imported = 0;
-      let deduped = 0;
       for (const item of items) {
         const content = (item.content || '').trim();
         if (!content) continue;
-        if (existing.has(content.toLowerCase())) { deduped++; continue; }
-        store.createUserMemory({ content, tags: item.tags || [], source: item.source || 'import' });
-        existing.add(content.toLowerCase());
+        await memoryStore.save({
+          id: `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          scope: 'global', title: content.slice(0, 80),
+          summary: content, tags: item.tags || [], updatedAt: Date.now(), type: 'user',
+        });
         imported++;
       }
-      return { imported, deduped, parseErrors: errors };
+      return { imported, deduped: 0, parseErrors: errors };
     } catch (e) {
       return { imported: 0, deduped: 0, parseErrors: [`导入失败: ${e}`] };
     }
   });
   ipcMain.handle('desktop:memoryStats', async () => {
-    try {
-      if ('getStats' in memoryStore) return (memoryStore as any).getStats();
-      return null;
-    } catch (e) { log('error', 'memoryStats failed', e); return null; }
+    try { return memoryStore.getStats?.() ?? null; }
+    catch (e) { log('error', 'memoryStats failed', e); return null; }
+  });
+  ipcMain.handle('desktop:memoryCompact', async () => {
+    try { await memoryStore.compact?.(); return true; }
+    catch (e) { log('error', 'memoryCompact failed', e); return false; }
+  });
+  ipcMain.handle('desktop:memoryPersonaTraits', async () => {
+    try { return memoryStore.getPersonaTraits?.() ?? []; }
+    catch (e) { log('error', 'memoryPersonaTraits failed', e); return []; }
   });
   ipcMain.handle('desktop:memoryListLayer', async (_event, layer: number, limit?: number, offset?: number) => {
+    try { return memoryStore.listLayer?.(layer, limit ?? 50, offset ?? 0) ?? []; }
+    catch (e) { log('error', 'memoryListLayer failed', e); return []; }
+  });
+  ipcMain.handle('desktop:memoryDeleteEntry', async (_event, id: string, layer: number) => {
+    try { return await memoryStore.delete?.(id, layer) ?? false; }
+    catch (e) { log('error', 'memoryDeleteEntry failed', e); return false; }
+  });
+  ipcMain.handle('desktop:memoryClearAll', async () => {
+    try { memoryStore.clearAll?.(); return true; }
+    catch (e) { log('error', 'memoryClearAll failed', e); return false; }
+  });
+  ipcMain.handle('desktop:memoryGetModelId', async () => {
     try {
-      if ('listLayer' in memoryStore) return (memoryStore as any).listLayer(layer, limit ?? 50, offset ?? 0);
-      return [];
-    } catch (e) { log('error', 'memoryListLayer failed', e); return []; }
+      const config = await (await import('../../src/utils/config.js')).loadConfig();
+      return config.memory?.modelId ?? null;
+    } catch { return null; }
+  });
+  ipcMain.handle('desktop:memorySetModelId', async (_event, modelId: string | null) => {
+    try {
+      const { loadConfig, saveConfig: saveConfigFn } = await import('../../src/utils/config.js');
+      const config = await loadConfig();
+      if (!config.memory) config.memory = {};
+      config.memory.modelId = modelId ?? undefined;
+      await saveConfigFn(config);
+      return true;
+    } catch (e) { log('error', 'memorySetModelId failed', e); return false; }
   });
 
   // ---- Artifact Editing ----
@@ -303,6 +355,56 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
 
   ipcMain.handle('desktop:artifactUnwatch', async (_event, filePath: string) => {
     unwatchArtifactFile(filePath);
+  });
+
+  // ---- File Export ----
+  ipcMain.handle('desktop:showSaveDialog', async (_event, input: { defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }) => {
+    log('info', 'showSaveDialog', { defaultPath: input?.defaultPath });
+    const result = await dialog.showSaveDialog(window, {
+      defaultPath: input?.defaultPath,
+      filters: input?.filters ?? [{ name: 'Markdown', extensions: ['md'] }],
+    });
+    if (result.canceled || !result.filePath) {
+      log('info', 'showSaveDialog cancelled');
+      return { canceled: true, filePath: '' };
+    }
+    log('info', 'showSaveDialog ok', { filePath: result.filePath });
+    return { canceled: false, filePath: result.filePath };
+  });
+
+  ipcMain.handle('desktop:saveFile', async (_event, input: { filePath: string; content: string }) => {
+    log('info', 'saveFile', { filePath: input?.filePath });
+    try {
+      await writeFile(input.filePath, input.content, 'utf-8');
+      log('info', 'saveFile ok');
+      return { success: true };
+    } catch (e) {
+      log('error', 'saveFile failed', String(e));
+      return { success: false, error: String(e) };
+    }
+  });
+
+  // ---- Project Principles ----
+  const { PrinciplesStore } = await import('./principles-store.js');
+  const principlesStore = new PrinciplesStore(services.getDataRoot());
+
+  ipcMain.handle('desktop:listPrinciples', async () => {
+    log('info', 'listPrinciples');
+    return principlesStore.list();
+  });
+
+  ipcMain.handle('desktop:savePrinciple', async (_event, input) => {
+    log('info', 'savePrinciple', { id: input?.id });
+    const result = await principlesStore.save(input);
+    log('info', 'savePrinciple result', result);
+    return result;
+  });
+
+  ipcMain.handle('desktop:deletePrinciple', async (_event, id: string) => {
+    log('info', 'deletePrinciple', { id });
+    const result = await principlesStore.delete(id);
+    log('info', 'deletePrinciple result', result);
+    return result;
   });
 }
 

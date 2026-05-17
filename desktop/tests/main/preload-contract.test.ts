@@ -12,6 +12,7 @@ describe('preload API contract', () => {
       'deleteProvider',
       'deleteModel',
       'readClipboardFilePaths',
+      'selectDirectory',
       'selectMaterials',
       'importMaterial',
       'createTask',
@@ -151,6 +152,18 @@ describe('preload API contract', () => {
 
     await expect(api.selectMaterials()).resolves.toEqual({ filePaths: ['/tmp/a.pdf'] });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:selectMaterials');
+  });
+
+  it('routes directory selection through a semantic IPC channel', async () => {
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue({ filePath: '/tmp/workspace' }),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer);
+
+    await expect(api.selectDirectory()).resolves.toEqual({ filePath: '/tmp/workspace' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:selectDirectory');
   });
 
   it('routes model config reads and saves through semantic IPC channels', async () => {

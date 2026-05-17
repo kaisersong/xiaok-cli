@@ -11,6 +11,7 @@ import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync, type MemoryStore } from '../ai/memory/store.js';
+import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
 import { loadSettings, mergeRules } from '../ai/permissions/settings.js';
 import { createSkillCatalog, type SkillCatalog } from '../ai/skills/loader.js';
@@ -177,7 +178,7 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
 
   const config = await loadConfig();
   const memoryStore: MemoryStore = await createMemoryStoreAsync(
-    config.memory?.type === 'layered' ? config.memory : undefined,
+    config.memory as Record<string, unknown> | undefined,
   );
   const yzjConfig = resolveYZJConfig(config, buildOverrides(options));
   const enableWebhook = options.webhook ?? true;
@@ -273,6 +274,7 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
   let agentService: ChannelAgentService | null = null;
   if (!options.dryRun) {
     const adapter = createAdapter(config);
+    memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
     const creds = await loadCredentials();
     const devApp = await getDevAppIdentity();
 
@@ -327,6 +329,7 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
             adapter: () => adapter,
             skillTool,
             workflowTools: [],
+            memoryStore,
             dryRun: false,
             permissionManager,
             getCurrentTaskId: () => taskManager.getActiveTask(sessionId)?.taskId,

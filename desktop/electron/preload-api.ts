@@ -29,6 +29,7 @@ export const PRELOAD_API_KEYS = [
   'deleteProvider',
   'deleteModel',
   'readClipboardFilePaths',
+  'selectDirectory',
   'selectMaterials',
   'importMaterial',
   'createTask',
@@ -244,6 +245,7 @@ export interface DesktopApi {
   deleteProvider(providerId: string): Promise<void>;
   deleteModel(modelId: string): Promise<void>;
   readClipboardFilePaths(): Promise<string[]>;
+  selectDirectory(): Promise<{ filePath: string }>;
   selectMaterials(): Promise<{ filePaths: string[] }>;
   importMaterial(input: { taskId: string; filePath: string; role: MaterialRole }): Promise<MaterialView>;
   createTask(input: {
@@ -338,6 +340,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     deleteProvider: (providerId) => ipcRenderer.invoke('desktop:deleteProvider', providerId) as Promise<void>,
     deleteModel: (modelId) => ipcRenderer.invoke('desktop:deleteModel', modelId) as Promise<void>,
     readClipboardFilePaths: () => ipcRenderer.invoke('desktop:readClipboardFilePaths') as Promise<string[]>,
+    selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory') as Promise<{ filePath: string }>,
     selectMaterials: () => ipcRenderer.invoke('desktop:selectMaterials') as ReturnType<DesktopApi['selectMaterials']>,
     importMaterial: (input) => ipcRenderer.invoke('desktop:importMaterial', input) as ReturnType<DesktopApi['importMaterial']>,
     createTask: (input) => ipcRenderer.invoke('desktop:createTask', input) as ReturnType<DesktopApi['createTask']>,

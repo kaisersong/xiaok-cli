@@ -1,6 +1,6 @@
 import type { Config, LegacyConfig } from '../../types.js';
 import type { ModelConfigEntry, ProtocolId, ProviderConfig, ProviderId } from './types.js';
-import { DEFAULT_CONFIG } from '../../types.js';
+import { DEFAULT_CONFIG, DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../types.js';
 import { getProviderProfile } from './registry.js';
 
 function cloneDefaultConfig(): Config {
@@ -64,6 +64,7 @@ function buildFirstPartyConfig(
       },
     },
     defaultMode: 'interactive',
+    intentBoundary: DEFAULT_INTENT_BOUNDARY_CONFIG,
     channels: {},
   };
 }
@@ -138,19 +139,32 @@ function normalizeLegacyConfig(config: LegacyConfig): Config {
     },
     devApp: config.devApp,
     defaultMode: config.defaultMode,
+    intentBoundary: DEFAULT_INTENT_BOUNDARY_CONFIG,
     channels: config.channels ?? {},
   };
 }
 
 export function normalizeConfig(config: Config | LegacyConfig): Config {
   if (config.schemaVersion === 2) {
-    return {
+    const normalized = {
       ...config,
       providers: { ...config.providers },
       models: { ...config.models },
       channels: { ...(config.channels ?? {}) },
     };
+    return withNormalizedDefaults(normalized);
   }
 
-  return normalizeLegacyConfig(config);
+  return withNormalizedDefaults(normalizeLegacyConfig(config));
+}
+
+function withNormalizedDefaults(config: Config): Config {
+  return {
+    ...config,
+    intentBoundary: {
+      ...DEFAULT_INTENT_BOUNDARY_CONFIG,
+      ...(config.intentBoundary ?? {}),
+    },
+    channels: { ...(config.channels ?? {}) },
+  };
 }

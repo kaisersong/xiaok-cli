@@ -120,4 +120,43 @@ describe('config', () => {
     const loaded = await loadConfig();
     expect((loaded as typeof loaded & { contextBudget?: number }).contextBudget).toBe(2000);
   });
+
+  it('provides default intent boundary settings', async () => {
+    const config = await loadConfig();
+
+    expect(config.intentBoundary).toEqual({
+      llmClassifier: 'off',
+      ambiguousFallback: 'legacy_validator',
+      confidenceThreshold: 0.75,
+      falseNegativeClarifyThreshold: 0.85,
+      timeoutMs: 1500,
+      maxInputTokens: 200,
+      maxOutputTokens: 100,
+    });
+  });
+
+  it('normalizes partial intent boundary settings', async () => {
+    writeFileSync(
+      join(testDir, 'config.json'),
+      JSON.stringify({
+        ...DEFAULT_CONFIG,
+        intentBoundary: {
+          llmClassifier: 'shadow',
+          timeoutMs: 500,
+        },
+      }),
+    );
+
+    const config = await loadConfig();
+
+    expect(config.intentBoundary).toEqual({
+      llmClassifier: 'shadow',
+      ambiguousFallback: 'legacy_validator',
+      confidenceThreshold: 0.75,
+      falseNegativeClarifyThreshold: 0.85,
+      timeoutMs: 500,
+      maxInputTokens: 200,
+      maxOutputTokens: 100,
+    });
+  });
 });

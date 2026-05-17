@@ -2,32 +2,33 @@
  * DeliverableView — shows project deliverables, task output summaries, and artifacts with inline preview.
  */
 
-import { useState } from 'react';
-import { FileText, Download, Eye } from 'lucide-react';
+import { FileText, ExternalLink } from 'lucide-react';
 import type { KSwarmProject, KSwarmArtifact, KSwarmTask } from '../../hooks/useKSwarmClient';
 import { useLocale } from '../../contexts/LocaleContext';
-import { ArtifactPreviewModal } from './ArtifactPreviewModal';
 
 interface DeliverableViewProps {
   project: KSwarmProject;
   tasks?: KSwarmTask[];
 }
 
-function ArtifactCard({ artifact, taskTitle, onPreview }: { artifact: KSwarmArtifact; taskTitle: string; onPreview(): void }) {
+function ArtifactCard({ artifact, taskTitle }: { artifact: KSwarmArtifact; taskTitle: string }) {
   const { t } = useLocale();
-  const isPreviewable = /\.(md|markdown|html|htm|txt|json|svg)$/i.test(artifact.name || '') ||
-    /text|json|html|markdown|svg/.test(artifact.mimeType || '');
 
   const handleOpen = () => {
-    if (artifact.url) {
-      window.open(artifact.url, '_blank');
-    } else if (artifact.path) {
+    if (artifact.path) {
       window.open(`file://${artifact.path}`, '_blank');
+    } else if (artifact.url) {
+      window.open(artifact.url, '_blank');
     }
   };
 
+  const hasPath = !!(artifact.path || artifact.url);
+
   return (
-    <div className="flex items-center gap-3 rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-4 py-3 hover:bg-[var(--c-bg-deep)]">
+    <div
+      onClick={hasPath ? handleOpen : undefined}
+      className={`flex items-center gap-3 rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-4 py-3 ${hasPath ? 'cursor-pointer hover:bg-[var(--c-bg-deep)]' : ''}`}
+    >
       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
         <FileText size={15} className="text-[var(--c-text-icon)]" />
       </div>
@@ -35,21 +36,17 @@ function ArtifactCard({ artifact, taskTitle, onPreview }: { artifact: KSwarmArti
         <p className="text-[13px] font-medium text-[var(--c-text-primary)] truncate">{artifact.name}</p>
         <p className="text-[10px] text-[var(--c-text-muted)] truncate">{taskTitle} · {artifact.mimeType || t.projectsDeliverableUnknownType}</p>
       </div>
-      <div className="flex items-center gap-0.5">
-        {isPreviewable && (
-          <button type="button" onClick={onPreview} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title={t.projectsDeliverablePreview}><Eye size={14} /></button>
-        )}
-        {(artifact.url || artifact.path) && (
-          <button type="button" onClick={handleOpen} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title={t.projectsDeliverableDownload}><Download size={14} /></button>
-        )}
-      </div>
+      {hasPath && (
+        <div className="flex items-center">
+          <span className="rounded-md p-1.5 text-[var(--c-text-muted)]"><ExternalLink size={14} /></span>
+        </div>
+      )}
     </div>
   );
 }
 
 export function DeliverableView({ project, tasks: propTasks }: DeliverableViewProps) {
   const { t } = useLocale();
-  const [previewArtifact, setPreviewArtifact] = useState<KSwarmArtifact | null>(null);
   const tasks = propTasks || project.tasks || [];
 
   // Collect all artifacts from tasks with their summaries
@@ -129,7 +126,7 @@ export function DeliverableView({ project, tasks: propTasks }: DeliverableViewPr
                 <div className="divide-y divide-[var(--c-border-subtle)]/50">
                   {artifacts.map((art, i) => (
                     <div key={i} className="px-4 py-2">
-                      <ArtifactCard artifact={art} taskTitle={task.title} onPreview={() => setPreviewArtifact(art)} />
+                      <ArtifactCard artifact={art} taskTitle={task.title} />
                     </div>
                   ))}
                 </div>
@@ -138,8 +135,6 @@ export function DeliverableView({ project, tasks: propTasks }: DeliverableViewPr
           </div>
         </div>
       )}
-
-      {previewArtifact && <ArtifactPreviewModal artifact={previewArtifact} onClose={() => setPreviewArtifact(null)} />}
     </div>
   );
 }

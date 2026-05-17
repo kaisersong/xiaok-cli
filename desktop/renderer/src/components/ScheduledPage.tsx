@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, X, Clock, Edit3, Trash2, Play, ChevronLeft, Settings as SettingsIcon } from 'lucide-react';
+import { Plus, X, Clock, Edit3, Trash2, Play, ChevronLeft, Settings as SettingsIcon, XCircle } from 'lucide-react';
 import { api, type ThreadRecord } from '../api';
 import { useNavigate } from 'react-router-dom';
 import { useLocale } from '../contexts/LocaleContext';
@@ -119,6 +119,8 @@ export function ScheduledPage() {
   const [modalMode, setModalMode] = useState<ModalMode>(null);
   const [editingTask, setEditingTask] = useState<ScheduledTask | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDeleteInstanceId, setConfirmDeleteInstanceId] = useState<string | null>(null);
 
   // Form state
   const [formName, setFormName] = useState('');
@@ -166,74 +168,21 @@ export function ScheduledPage() {
     return () => window.removeEventListener('desktop:reminder', handler);
   }, []);
 
-  // Sync tasks to main on mount + listen for auto-execution triggers
+  // Sync tasks to main on mount + refresh when global bootstrap executes a task
   useEffect(() => {
     const desktop = (window as any).xiaokDesktop;
-    if (!desktop) return;
 
-    // Initial sync to main
+    // Re-sync to main in case localStorage was updated externally
     const raw = localStorage.getItem('xiaok:scheduled-tasks');
     const items = raw ? JSON.parse(raw) : [];
-    if (items.length > 0 && desktop.syncScheduledTasks) {
+    if (items.length > 0 && desktop?.syncScheduledTasks) {
       desktop.syncScheduledTasks(items).catch(() => {});
     }
 
-    // Listen for task due events from scheduler
-    if (!desktop.onScheduledTaskDue) return;
-    const unsub = desktop.onScheduledTaskDue((payload: { taskId: string; name: string; prompt: string }) => {
-      // Auto-execute: find the task and run it without navigation
-      const raw = localStorage.getItem('xiaok:scheduled-tasks');
-      const currentTasks: ScheduledTask[] = raw ? JSON.parse(raw) : [];
-      const task = currentTasks.find(t => t.id === payload.taskId);
-      if (!task || task.status !== 'active') return;
-
-      // Execute in background (no navigate)
-      (async () => {
-        try {
-          let threadId = task.threadId;
-          if (threadId) {
-            try {
-              const { taskId } = await api.createTask({
-                prompt: SCHEDULED_CONTEXT_PREFIX + task.prompt,
-                materials: [],
-              });
-              await api.updateThreadTaskId(threadId, taskId);
-            } catch {
-              threadId = undefined;
-            }
-          }
-          if (!threadId) {
-            const thread = await api.createThread({ title: task.name.slice(0, 40) });
-            const { taskId } = await api.createTask({
-              prompt: SCHEDULED_CONTEXT_PREFIX + task.prompt,
-              materials: [],
-            });
-            await api.updateThreadTaskId(thread.id, taskId);
-            threadId = thread.id;
-          }
-
-          // Update task: lastRunAt, nextRunAt, threadId
-          const now = Date.now();
-          const nextRunAt = computeNextRunAt(task.frequency, task.scheduleConfig, now);
-          const updatedTasks = currentTasks.map(t =>
-            t.id === task.id
-              ? { ...t, lastRunAt: now, updatedAt: now, threadId, nextRunAt }
-              : t
-          );
-          localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify(updatedTasks));
-          setTasks(updatedTasks);
-          window.dispatchEvent(new CustomEvent('xiaok:scheduled-tasks-updated'));
-          if (desktop.syncScheduledTasks) {
-            desktop.syncScheduledTasks(updatedTasks).catch(() => {});
-          }
-          console.log(`[Scheduled] Auto-executed: "${task.name}"`);
-        } catch (e) {
-          console.error(`[Scheduled] Auto-execution failed for "${task.name}":`, e);
-        }
-      })();
-    });
-
-    return unsub;
+    // Refresh task list when global bootstrap auto-executes a task
+    const handleUpdated = () => loadTasks();
+    window.addEventListener('xiaok:scheduled-tasks-updated', handleUpdated);
+    return () => window.removeEventListener('xiaok:scheduled-tasks-updated', handleUpdated);
   }, []);
 
   const loadTasks = async () => {
@@ -338,8 +287,34 @@ export function ScheduledPage() {
   };
 
   const handleDelete = (id: string) => {
-    if (!confirm(t.scheduledDeleteConfirm)) return;
-    saveTasks(tasks.filter(task => task.id !== id));
+    setConfirmDeleteId(id);
+  };
+
+  const confirmDelete = () => {
+    if (!confirmDeleteId) return;
+    saveTasks(tasks.filter(task => task.id !== confirmDeleteId));
+    setConfirmDeleteId(null);
+  };
+
+  const handleDeleteInstance = (id: string) => {
+    setConfirmDeleteInstanceId(id);
+  };
+
+  const confirmDeleteInstance = async () => {
+    if (!confirmDeleteInstanceId) return;
+    const task = tasks.find(t => t.id === confirmDeleteInstanceId);
+    if (task?.threadId) {
+      try {
+        await api.deleteThread(task.threadId);
+      } catch { /* ignore */ }
+      // Clear threadId from the definition
+      saveTasks(tasks.map(t =>
+        t.id === confirmDeleteInstanceId
+          ? { ...t, threadId: undefined, lastRunAt: undefined }
+          : t
+      ));
+    }
+    setConfirmDeleteInstanceId(null);
   };
 
   const handleToggle = (task: ScheduledTask) => {
@@ -521,6 +496,15 @@ export function ScheduledPage() {
                         title={t.scheduledView}
                       >
                         {t.scheduledView}
+                      </button>
+                    )}
+                    {task.threadId && (
+                      <button
+                        onClick={() => handleDeleteInstance(task.id)}
+                        className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 hover:bg-red-50 transition-colors"
+                        title={t.scheduledDeleteInstanceTitle}
+                      >
+                        <XCircle size={14} />
                       </button>
                     )}
                     <button
@@ -732,6 +716,92 @@ export function ScheduledPage() {
                 className="rounded-lg bg-[var(--c-accent)] px-5 py-2 text-sm text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
               >
                 {saving ? t.scheduledSaving : t.scheduledSave}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete definition confirmation */}
+      {confirmDeleteId && (
+        <div
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ zIndex: 10000, background: 'rgba(0,0,0,0.12)', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setConfirmDeleteId(null); }}
+        >
+          <div
+            style={{
+              background: 'var(--c-bg-page)',
+              border: '0.5px solid var(--c-border-subtle)',
+              borderRadius: '16px',
+              padding: '24px',
+              width: '320px',
+              boxShadow: 'var(--c-dropdown-shadow)',
+            }}
+          >
+            <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--c-text-primary)', marginBottom: '8px' }}>
+              {t.scheduledDeleteTitle}
+            </p>
+            <p style={{ fontSize: '13px', color: 'var(--c-text-secondary)', lineHeight: 1.55, marginBottom: '20px' }}>
+              {t.scheduledDeleteBody}
+            </p>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setConfirmDeleteId(null)}
+                className="hover:bg-[var(--c-bg-deep)]"
+                style={{ padding: '7px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: 'var(--c-text-secondary)', background: 'transparent', border: '0.5px solid var(--c-border-subtle)', cursor: 'pointer' }}
+              >
+                {t.scheduledCancel}
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="hover:opacity-85 active:opacity-70"
+                style={{ padding: '7px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: '#fff', background: '#ef4444', border: 'none', cursor: 'pointer' }}
+              >
+                {t.scheduledDeleteConfirm}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete instance confirmation */}
+      {confirmDeleteInstanceId && (
+        <div
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ zIndex: 10000, background: 'rgba(0,0,0,0.12)', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setConfirmDeleteInstanceId(null); }}
+        >
+          <div
+            style={{
+              background: 'var(--c-bg-page)',
+              border: '0.5px solid var(--c-border-subtle)',
+              borderRadius: '16px',
+              padding: '24px',
+              width: '320px',
+              boxShadow: 'var(--c-dropdown-shadow)',
+            }}
+          >
+            <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--c-text-primary)', marginBottom: '8px' }}>
+              {t.scheduledDeleteInstanceTitle}
+            </p>
+            <p style={{ fontSize: '13px', color: 'var(--c-text-secondary)', lineHeight: 1.55, marginBottom: '20px' }}>
+              {t.scheduledDeleteInstanceBody}
+            </p>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setConfirmDeleteInstanceId(null)}
+                className="hover:bg-[var(--c-bg-deep)]"
+                style={{ padding: '7px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: 'var(--c-text-secondary)', background: 'transparent', border: '0.5px solid var(--c-border-subtle)', cursor: 'pointer' }}
+              >
+                {t.scheduledCancel}
+              </button>
+              <button
+                onClick={confirmDeleteInstance}
+                className="hover:opacity-85 active:opacity-70"
+                style={{ padding: '7px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: '#fff', background: '#ef4444', border: 'none', cursor: 'pointer' }}
+              >
+                {t.scheduledDeleteInstanceConfirm}
               </button>
             </div>
           </div>

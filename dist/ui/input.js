@@ -12,6 +12,7 @@ import { sliceByDisplayColumns } from './text-metrics.js';
 import { identifyKey, loadKeybindingsSync, resolveAction } from './keybindings.js';
 import { clearPastedImagePaths, setPastedImagePath } from './image-input.js';
 import { saveClipboardImageToTemp } from '../utils/clipboard.js';
+import { createQueuedInputState } from './queued-input.js';
 const DEBUG_LOG = '/tmp/xiaok-debug.log';
 const MAX_MENU_VISIBLE_ITEMS = 8;
 const SAVE_CURSOR = '\x1b[s';
@@ -27,6 +28,35 @@ function normalizeBatchedInput(raw) {
         .replace(/\r[ \t]*(?:›|❯)\s*/gu, '')
         .replace(/\r\n/gu, '\n')
         .replace(/\r(?!$)/gu, '\n');
+}
+function createDisabledBusyCapture() {
+    const state = createQueuedInputState();
+    return {
+        pause() { },
+        resume() { },
+        stop() { },
+        consumeQueued() {
+            return null;
+        },
+        getSnapshot() {
+            return state.getSnapshot();
+        },
+        isActive() {
+            return false;
+        },
+    };
+}
+function buildQueuedOverlayLines(text) {
+    if (!text)
+        return [];
+    const previewLines = text.split('\n').slice(0, 3).map((line) => `  ${line}`);
+    if (text.split('\n').length > 3) {
+        previewLines.push('  ...');
+    }
+    return [
+        'Queued (press ↑ to edit):',
+        ...previewLines,
+    ];
 }
 /** 向左找词边界（Ctrl+W / Alt+Left 用） */
 export function wordBoundaryLeft(text, cursor) {
@@ -190,6 +220,8 @@ export class InputReader {
     scrollPromptRenderer;
     forcePlainMode = false;
     clipboardImageSaver = saveClipboardImageToTemp;
+    busyCapture = null;
+    readActive = false;
     constructor(renderer) {
         this.renderer = renderer;
     }
@@ -214,6 +246,305 @@ export class InputReader {
     setClipboardImageSaver(saver) {
         this.clipboardImageSaver = saver ?? saveClipboardImageToTemp;
     }
+    startBusyCapture(options = {}) {
+        if (!stdin.isTTY || this.forcePlainMode || this.readActive || (!this.scrollPromptRenderer && !this.renderer)) {
+            options.onDeactivate?.('disabled');
+            return createDisabledBusyCapture();
+        }
+        loadKeybindingsSync();
+        const state = createQueuedInputState();
+        const reader = this;
+        const placeholder = options.placeholder ?? 'Finishing response...';
+        let active = true;
+        let paused = false;
+        let attached = false;
+        let uiErrorNotified = false;
+        let renderedBusyFrame = false;
+        const render = () => {
+            if (!active || paused)
+                return;
+            const snapshot = state.getSnapshot();
+            const hasVisibleBusyInput = snapshot.draft.length > 0 || snapshot.queued !== null;
+            if (!hasVisibleBusyInput && !renderedBusyFrame) {
+                return;
+            }
+            const footerLines = (() => {
+                try {
+                    return this.statusLineProvider?.() ?? [];
+                }
+                catch {
+                    return [];
+                }
+            })();
+            const summaryLine = footerLines.length > 1 ? footerLines[0] ?? '' : '';
+            const statusLine = footerLines.length > 1
+                ? footerLines[1] ?? ''
+                : footerLines[0] ?? '';
+            const overlayLines = buildQueuedOverlayLines(snapshot.queued?.text ?? null);
+            try {
+                if (this.scrollPromptRenderer) {
+                    this.scrollPromptRenderer({
+                        inputValue: snapshot.draft,
+                        cursor: snapshot.cursor,
+                        placeholder,
+                        summaryLine,
+                        statusLine,
+                        overlayLines,
+                        overlayKind: overlayLines.length > 0 ? 'queued' : undefined,
+                    });
+                    renderedBusyFrame = hasVisibleBusyInput;
+                }
+                else if (this.renderer) {
+                    this.renderer.renderInput({
+                        prompt: placeholder,
+                        input: snapshot.draft,
+                        cursor: snapshot.cursor,
+                        overlayLines,
+                        footerLines,
+                    });
+                    renderedBusyFrame = hasVisibleBusyInput;
+                }
+            }
+            catch (error) {
+                if (!uiErrorNotified) {
+                    uiErrorNotified = true;
+                    try {
+                        stdout.write(`\n${dim(`[xiaok] UI 已降级：busy_capture_render`)}\n`);
+                    }
+                    catch { }
+                }
+                handle.stop();
+                options.onDeactivate?.('ui_error');
+                log(`busy capture render failed: ${String(error)}`);
+            }
+        };
+        const recordQueueMutation = (mutation) => {
+            if (mutation.type === 'submit') {
+                this.transcriptLogger?.record({ type: 'input_queue_submit', value: mutation.value, timestamp: Date.now() });
+            }
+            else if (mutation.type === 'replace') {
+                this.transcriptLogger?.record({
+                    type: 'input_queue_replace',
+                    oldValue: mutation.oldValue,
+                    newValue: mutation.newValue,
+                    timestamp: Date.now(),
+                });
+            }
+            else if (mutation.type === 'edit') {
+                this.transcriptLogger?.record({ type: 'input_queue_edit', value: mutation.value, timestamp: Date.now() });
+            }
+            else if (mutation.type === 'clear-draft') {
+                this.transcriptLogger?.record({ type: 'input_queue_cancel', value: mutation.value, timestamp: Date.now() });
+            }
+        };
+        const submitDraft = () => {
+            const mutation = state.submitDraft();
+            recordQueueMutation(mutation);
+            render();
+        };
+        const editQueued = () => {
+            const mutation = state.editQueued();
+            recordQueueMutation(mutation);
+            render();
+        };
+        const handleEscape = () => {
+            const mutation = state.handleEscape();
+            recordQueueMutation(mutation);
+            render();
+        };
+        const handleHistoryPrevious = () => {
+            const snapshot = state.getSnapshot();
+            const movedCursor = moveCursorUpLogicalLine(snapshot.draft, snapshot.cursor);
+            if (movedCursor !== null) {
+                state.setDraft(snapshot.draft, movedCursor);
+                render();
+                return;
+            }
+            if (snapshot.draft.length === 0 && snapshot.queued) {
+                editQueued();
+            }
+        };
+        const handleHistoryNext = () => {
+            const snapshot = state.getSnapshot();
+            const movedCursor = moveCursorDownLogicalLine(snapshot.draft, snapshot.cursor);
+            if (movedCursor !== null) {
+                state.setDraft(snapshot.draft, movedCursor);
+                render();
+            }
+        };
+        const swallowBusyImagePaste = (raw) => {
+            if (raw.startsWith('\x1b]1337;File='))
+                return true;
+            if (raw.startsWith('\x1b_G'))
+                return true;
+            return false;
+        };
+        const handleAction = (action) => {
+            if (action === 'submit') {
+                submitDraft();
+                return true;
+            }
+            if (action === 'newline') {
+                state.insertNewline();
+                render();
+                return true;
+            }
+            if (action === 'cancel' || action === 'escape') {
+                handleEscape();
+                return true;
+            }
+            if (action === 'delete-back') {
+                state.backspace();
+                render();
+                return true;
+            }
+            if (action === 'delete-to-start') {
+                state.deleteToStart();
+                render();
+                return true;
+            }
+            if (action === 'cursor-left' || action === 'word-left') {
+                state.moveLeft();
+                render();
+                return true;
+            }
+            if (action === 'cursor-right' || action === 'word-right') {
+                state.moveRight();
+                render();
+                return true;
+            }
+            if (action === 'cursor-home') {
+                state.moveHome();
+                render();
+                return true;
+            }
+            if (action === 'cursor-end') {
+                state.moveEnd();
+                render();
+                return true;
+            }
+            if (action === 'history-prev') {
+                handleHistoryPrevious();
+                return true;
+            }
+            if (action === 'history-next') {
+                handleHistoryNext();
+                return true;
+            }
+            if (action === 'paste-image') {
+                return true;
+            }
+            return false;
+        };
+        const handleText = (text) => {
+            if (!text)
+                return;
+            state.insertText(text);
+            render();
+        };
+        const onData = (data) => {
+            const key = data.toString('utf8');
+            this.transcriptLogger?.record({ type: 'input_key', key, timestamp: Date.now() });
+            if (swallowBusyImagePaste(key)) {
+                return;
+            }
+            const normalizedBatch = key.length > 1 ? normalizeBatchedInput(key) : key;
+            let i = 0;
+            while (i < normalizedBatch.length) {
+                const identified = identifyKey(normalizedBatch, i);
+                if (identified && identified.consumed > 0) {
+                    const action = resolveAction(identified.key);
+                    if (action) {
+                        handleAction(action);
+                    }
+                    i += identified.consumed;
+                    continue;
+                }
+                const ch = normalizedBatch[i] ?? '';
+                if (ch >= ' ' && !/[\x1b\x7f]/.test(ch)) {
+                    handleText(ch);
+                }
+                i += 1;
+            }
+        };
+        const attach = () => {
+            if (!active || paused || attached)
+                return;
+            stdin.on('data', onData);
+            stdout.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l');
+            stdin.setRawMode(true);
+            stdin.resume();
+            attached = true;
+            render();
+        };
+        const detach = () => {
+            if (!attached)
+                return;
+            stdin.removeListener('data', onData);
+            attached = false;
+        };
+        const handle = {
+            pause() {
+                if (!active || paused)
+                    return;
+                paused = true;
+                detach();
+            },
+            resume() {
+                if (!active || !paused || reader.readActive)
+                    return;
+                paused = false;
+                attach();
+            },
+            stop() {
+                if (!active)
+                    return;
+                active = false;
+                detach();
+                if (reader.busyCapture === handle) {
+                    reader.busyCapture = null;
+                }
+                try {
+                    stdin.setRawMode(false);
+                    stdin.pause();
+                }
+                catch { }
+                options.onDeactivate?.('stopped');
+            },
+            consumeQueued() {
+                const value = state.consumeQueued();
+                if (value !== null) {
+                    reader.transcriptLogger?.record({ type: 'input_queue_dequeue', value, timestamp: Date.now() });
+                }
+                render();
+                return value;
+            },
+            getSnapshot() {
+                return state.getSnapshot();
+            },
+            isActive() {
+                return active && !paused;
+            },
+        };
+        if (this.busyCapture) {
+            this.busyCapture.stop();
+        }
+        this.busyCapture = handle;
+        attach();
+        return handle;
+    }
+    pauseBusyCaptureForRead() {
+        const capture = this.busyCapture;
+        if (!capture?.isActive()) {
+            return null;
+        }
+        capture.pause();
+        return () => {
+            if (this.busyCapture === capture) {
+                capture.resume();
+            }
+        };
+    }
     async read(prompt, options) {
         if (!stdin.isTTY) {
             const rl = readline.createInterface({ input: stdin, output: stdout });
@@ -225,6 +556,8 @@ export class InputReader {
             });
         }
         loadKeybindingsSync();
+        const resumeBusyCapture = this.pauseBusyCaptureForRead();
+        this.readActive = true;
         return new Promise((resolve) => {
             clearPastedImagePaths();
             let input = '';
@@ -555,6 +888,8 @@ export class InputReader {
                 stdin.removeListener('data', onData);
                 stdin.setRawMode(false);
                 stdin.pause();
+                this.readActive = false;
+                resumeBusyCapture?.();
                 if (result !== null && result.length > 0 && this.history[this.history.length - 1] !== result) {
                     this.history.push(result);
                 }

@@ -19,7 +19,7 @@
  * │ gpt-5.4 · 0% · master · xiaok-cli│  ← Status bar (fixed footer bottom row)
  * └──────────────────────────────────┘
  */
-import { getDisplayWidth, splitSymbols, stripAnsi } from './text-metrics.js';
+import { getDisplayWidth, splitSymbols, stripAnsi, truncateAnsi } from './text-metrics.js';
 const RESET_SCROLL_REGION = '\x1b[r';
 const SET_SCROLL_REGION = '\x1b[1;%dr';
 const CLEAR_LINE = '\x1b[2K';
@@ -77,6 +77,8 @@ export class ScrollRegionManager {
     _activeOverlayKind = null;
     /** Which subsystem last rendered the active overlay. */
     _activeOverlayOwner = null;
+    /** Last overlay lines, used to preserve queued overlays across footer redraws. */
+    lastOverlayLines = [];
     /** Footer is currently visible on screen. */
     _footerVisible = false;
     /** Tracks if we have already pushed past the welcome screen. */
@@ -164,11 +166,18 @@ export class ScrollRegionManager {
     getStatusBarRow() {
         return this.config.rows;
     }
-    getOverlayVisibleLines(lines, inputRows) {
+    getOverlayVisibleLines(lines, inputRows, overlayKind) {
         const inputFrameRows = this.getInputFrameRows(inputRows);
         const maxOverlayRows = Math.max(0, this.config.rows - inputFrameRows - 1 - this.config.gapHeight - this.getSummaryReserveRows());
         if (maxOverlayRows <= 0) {
             return [];
+        }
+        if (overlayKind === 'queued') {
+            if (maxOverlayRows === 1 && lines.length > 1) {
+                const compactText = lines.slice(1).join(' ').trim();
+                return [`${lines[0]} ${compactText}`.trim()];
+            }
+            return lines.slice(0, maxOverlayRows);
         }
         return lines.slice(-maxOverlayRows);
     }
@@ -182,6 +191,7 @@ export class ScrollRegionManager {
         this._overlayPromptVisible = false;
         this._activeOverlayKind = null;
         this._activeOverlayOwner = null;
+        this.lastOverlayLines = [];
     }
     clearScreenRow(row) {
         this.stream.write(`\x1b[${row};1H${CLEAR_LINE}`);
@@ -376,6 +386,7 @@ export class ScrollRegionManager {
             this._activeOverlayKind = frame.overlayKind ?? 'generic';
             this._activeOverlayOwner = owner;
             this._overlayPromptVisible = this.isRendererPermissionOverlayActive();
+            this.lastOverlayLines = [...(frame.overlayLines ?? [])];
             this.renderOverlayPromptFrame(frame);
             return;
         }
@@ -558,6 +569,19 @@ export class ScrollRegionManager {
         this.positionCursorForInput();
     }
     renderFooter(options) {
+        if (this.hasActiveOverlayPrompt() && this._activeOverlayKind === 'queued' && this.lastOverlayLines.length > 0) {
+            this.renderPromptFrame({
+                inputValue: this.lastInputValue,
+                cursor: this.lastInputCursor,
+                placeholder: options?.inputPrompt ?? this.lastInputPrompt ?? 'waiting...',
+                summaryLine: options?.summaryLine ?? this.lastSummaryLine,
+                statusLine: options?.statusLine ?? this.lastStatusLine,
+                overlayLines: this.lastOverlayLines,
+                overlayKind: 'queued',
+                owner: this._activeOverlayOwner ?? 'input',
+            });
+            return;
+        }
         this.renderFooterFrame(options, true);
     }
     reserveTranscriptRows(nextScrollBottom, previousScrollBottom) {
@@ -583,7 +607,8 @@ export class ScrollRegionManager {
     renderOverlayPromptFrame(frame) {
         const isPermissionOverlay = frame.overlayKind === 'permission';
         const keepStatusLineVisible = ((isPermissionOverlay && !shouldSkipPermissionOverlayReserve())
-            || frame.overlayKind === 'feedback');
+            || frame.overlayKind === 'feedback'
+            || frame.overlayKind === 'queued');
         this._footerVisible = isPermissionOverlay || keepStatusLineVisible;
         const cols = this.config.columns;
         const previousInputRows = this.lastInputRenderRows;
@@ -595,7 +620,7 @@ export class ScrollRegionManager {
         const inputLines = inputState?.visibleLines ?? [frame.placeholder];
         const inputRows = Math.max(1, inputLines.length);
         const inputFrameRows = this.getInputFrameRows(inputRows);
-        const overlayLines = this.getOverlayVisibleLines(frame.overlayLines ?? [], inputRows);
+        const overlayLines = this.getOverlayVisibleLines(frame.overlayLines ?? [], inputRows, frame.overlayKind);
         const overlayRows = overlayLines.length;
         const summaryReserveRows = this.getSummaryReserveRows(frame.summaryLine ?? this.lastSummaryLine);
         const statusBarRow = this.getStatusBarRow();
@@ -1177,7 +1202,7 @@ export class ScrollRegionManager {
         const safeWidth = getSafeRenderWidth(width);
         const visibleLen = getDisplayWidth(line);
         if (visibleLen >= safeWidth)
-            return line.slice(0, safeWidth + (line.length - visibleLen));
+            return truncateAnsi(line, safeWidth);
         const padding = ' '.repeat(safeWidth - visibleLen);
         if (hasBackground) {
             // Background already set, just add spaces, then reset
@@ -1194,7 +1219,7 @@ export class ScrollRegionManager {
         const visibleLen = getDisplayWidth(line);
         if (visibleLen >= safeWidth) {
             // Line is too long, truncate and reset
-            return line.slice(0, safeWidth + (line.length - visibleLen)) + RESET_ALL;
+            return truncateAnsi(line, safeWidth) + RESET_ALL;
         }
         // Add spaces to fill width (background color continues), then reset
         const padding = ' '.repeat(safeWidth - visibleLen);

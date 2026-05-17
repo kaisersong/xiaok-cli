@@ -26,7 +26,7 @@ interface ProjectCardProps {
 
 export function ProjectCard({ project }: ProjectCardProps) {
   const navigate = useNavigate();
-  const { closeProject } = useKSwarm();
+  const { deleteProject } = useKSwarm();
   const { t } = useLocale();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -62,10 +62,8 @@ export function ProjectCard({ project }: ProjectCardProps) {
     e.stopPropagation();
     setDeleting(true);
     try {
-      await closeProject(project.id);
+      await deleteProject(project.id);
       setConfirmDelete(false);
-      // Trigger a page refresh to update the list
-      setTimeout(() => { window.location.reload(); }, 300);
     } finally {
       setDeleting(false);
     }
@@ -80,7 +78,8 @@ export function ProjectCard({ project }: ProjectCardProps) {
             <AlertTriangle size={12} className="text-[var(--c-status-error-text)]" />
             <span className="text-[10px] text-[var(--c-text-tertiary)] whitespace-nowrap">{t.projectsCardDeleteConfirm}</span>
             <button onClick={handleDelete} disabled={deleting}
-              className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-status-error-text)] text-white hover:brightness-110 disabled:opacity-50">
+              className="text-[10px] px-1.5 py-0.5 rounded font-medium text-white disabled:opacity-50"
+              style={{ backgroundColor: 'var(--c-status-error-text, #ef4444)' }}>
               {deleting ? '...' : t.commonConfirm}
             </button>
             <button onClick={() => setConfirmDelete(false)} disabled={deleting}

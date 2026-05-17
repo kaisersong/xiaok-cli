@@ -7,6 +7,7 @@ import { executeNamedSubAgent } from '../../ai/agents/subagent-executor.js';
 import { applySandboxToTools } from '../sandbox/tool-wrappers.js';
 import { createTeamTools } from '../teams/tools.js';
 import { createReminderTools } from '../../ai/tools/reminders.js';
+import { createNotebookTools } from '../../ai/tools/notebook.js';
 import type { ReminderApi } from '../../runtime/reminder/service.js';
 import type { PlatformRuntimeContext } from './context.js';
 import { mergeToolPools, isMcpTool } from '../../ai/tools/tool-pool.js';
@@ -19,6 +20,7 @@ export interface PlatformRegistryFactoryOptions {
   adapter: () => ModelAdapter;
   skillTool?: Tool;
   workflowTools?: Tool[];
+  memoryStore?: import('../../ai/memory/store.js').MemoryStore;
   dryRun?: boolean;
   permissionManager?: ConstructorParameters<typeof ToolRegistry>[0]['permissionManager'];
   onPrompt?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
@@ -82,6 +84,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
         })
         : []),
       ...createTeamTools(options.platform.teamService),
+      ...(options.memoryStore ? createNotebookTools(options.memoryStore) : []),
       ...options.platform.mcpTools,
       createLspTool({ getLspClient: () => options.platform.lspClient, cwd }),
       createSubAgentTool({

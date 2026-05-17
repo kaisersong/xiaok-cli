@@ -4,6 +4,12 @@
 
 - Always reply in Chinese (中文回复).
 
+## Related Projects
+
+- xiaok-cli 关联的项目：`kai-xiaok-plugins`、`kswarm`、`intent-broker`（均在 `/Users/song/projects/` 下）。
+- 从 GitHub 拉取更新时，这些项目要一起更新。
+- 提交代码时，相关项目也要一起提交。
+
 ## Worktrees
 
 - The CLI runtime layer refactor has been integrated back into the main workspace.

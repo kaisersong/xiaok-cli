@@ -2,6 +2,7 @@ import { type SkillMeta } from '../ai/skills/loader.js';
 import type { PermissionMode } from '../ai/permissions/manager.js';
 import type { TranscriptLogger } from './transcript.js';
 import type { ReplRenderer } from './repl-renderer.js';
+import { type QueuedInputSnapshot } from './queued-input.js';
 type MenuItem = {
     cmd: string;
     desc: string;
@@ -21,13 +22,25 @@ export interface ScrollPromptRenderFrame {
     summaryLine: string;
     statusLine: string;
     overlayLines: string[];
-    overlayKind?: 'generic' | 'permission' | 'feedback';
+    overlayKind?: 'generic' | 'permission' | 'feedback' | 'queued';
 }
 export interface InputReadOptions {
     overlayLines?: string[];
     overlayKind?: ScrollPromptRenderFrame['overlayKind'];
 }
 type ClipboardImageSaver = () => string | null;
+export interface BusyCaptureOptions {
+    placeholder?: string;
+    onDeactivate?: (reason: 'disabled' | 'stopped' | 'ui_error') => void;
+}
+export interface BusyCaptureHandle {
+    pause(): void;
+    resume(): void;
+    stop(): void;
+    consumeQueued(): string | null;
+    getSnapshot(): QueuedInputSnapshot;
+    isActive(): boolean;
+}
 /** 向左找词边界（Ctrl+W / Alt+Left 用） */
 export declare function wordBoundaryLeft(text: string, cursor: number): number;
 /** 向右找词边界（Alt+Right 用） */
@@ -76,6 +89,8 @@ export declare class InputReader {
     private scrollPromptRenderer?;
     private forcePlainMode;
     private clipboardImageSaver;
+    private busyCapture;
+    private readActive;
     constructor(renderer?: ReplRenderer | undefined);
     setSkills(skills: SkillMeta[]): void;
     setModeCycleHandler(handler: () => PermissionMode): void;
@@ -84,6 +99,8 @@ export declare class InputReader {
     setScrollPromptRenderer(renderer: ((frame: ScrollPromptRenderFrame) => boolean | void) | undefined): void;
     setForcePlainMode(enabled: boolean): void;
     setClipboardImageSaver(saver: ClipboardImageSaver | undefined): void;
+    startBusyCapture(options?: BusyCaptureOptions): BusyCaptureHandle;
+    private pauseBusyCaptureForRead;
     read(prompt: string, options?: InputReadOptions): Promise<string | null>;
 }
 export {};

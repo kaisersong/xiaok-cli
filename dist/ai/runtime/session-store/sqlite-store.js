@@ -1,0 +1,210 @@
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import Database from 'better-sqlite3';
+import { applySessionStoreSchema } from './schema.js';
+import { cloneSessionSkillExecutionState } from '../../skills/execution-state.js';
+export class SQLiteSessionStore {
+    db;
+    constructor(dbPath) {
+        mkdirSync(dirname(dbPath), { recursive: true });
+        this.db = new Database(dbPath);
+        this.db.pragma('journal_mode = WAL');
+        this.db.pragma('busy_timeout = 5000');
+        applySessionStoreSchema(this.db);
+    }
+    createSessionId() {
+        return `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+    async save(snapshot) {
+        const saveTransaction = this.db.transaction((nextSnapshot) => {
+            this.db.prepare(`
+        INSERT INTO sessions (
+          session_id, cwd, model, created_at, updated_at, forked_from_session_id,
+          lineage_json, usage_json, compactions_json, prompt_snapshot_id,
+          memory_refs_json, approval_refs_json, background_job_refs_json,
+          intent_delegation_json, skill_eval_json, skill_execution_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+          cwd = excluded.cwd,
+          model = excluded.model,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at,
+          forked_from_session_id = excluded.forked_from_session_id,
+          lineage_json = excluded.lineage_json,
+          usage_json = excluded.usage_json,
+          compactions_json = excluded.compactions_json,
+          prompt_snapshot_id = excluded.prompt_snapshot_id,
+          memory_refs_json = excluded.memory_refs_json,
+          approval_refs_json = excluded.approval_refs_json,
+          background_job_refs_json = excluded.background_job_refs_json,
+          intent_delegation_json = excluded.intent_delegation_json,
+          skill_eval_json = excluded.skill_eval_json,
+          skill_execution_json = excluded.skill_execution_json
+      `).run(nextSnapshot.sessionId, nextSnapshot.cwd, nextSnapshot.model ?? null, nextSnapshot.createdAt, nextSnapshot.updatedAt, nextSnapshot.forkedFromSessionId ?? null, JSON.stringify(nextSnapshot.lineage), JSON.stringify(nextSnapshot.usage), JSON.stringify(nextSnapshot.compactions), nextSnapshot.promptSnapshotId ?? null, JSON.stringify(nextSnapshot.memoryRefs), JSON.stringify(nextSnapshot.approvalRefs), JSON.stringify(nextSnapshot.backgroundJobRefs), JSON.stringify(nextSnapshot.intentDelegation ?? null), JSON.stringify(nextSnapshot.skillEval ?? null), JSON.stringify(nextSnapshot.skillExecution ?? null));
+            this.db.prepare('DELETE FROM session_messages WHERE session_id = ?').run(nextSnapshot.sessionId);
+            this.db.prepare('DELETE FROM session_messages_fts WHERE session_id = ?').run(nextSnapshot.sessionId);
+            const insertMessage = this.db.prepare(`
+        INSERT INTO session_messages (
+          session_id, message_index, role, content_json, text_content
+        ) VALUES (?, ?, ?, ?, ?)
+      `);
+            const insertFts = this.db.prepare(`
+        INSERT INTO session_messages_fts (
+          rowid, session_id, message_index, text_content
+        ) VALUES (?, ?, ?, ?)
+      `);
+            nextSnapshot.messages.forEach((message, index) => {
+                const textContent = extractMessageText(message);
+                const result = insertMessage.run(nextSnapshot.sessionId, index, message.role, JSON.stringify(message.content), textContent);
+                insertFts.run(result.lastInsertRowid, nextSnapshot.sessionId, index, textContent);
+            });
+            this.db.prepare(`
+        INSERT INTO session_meta (key, value)
+        VALUES ('last_session', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(nextSnapshot.sessionId);
+        });
+        saveTransaction(snapshot);
+    }
+    async loadLast() {
+        const row = this.db.prepare(`
+      SELECT value
+      FROM session_meta
+      WHERE key = 'last_session'
+    `).get();
+        const sessionId = row?.value?.trim();
+        if (!sessionId) {
+            return null;
+        }
+        return this.load(sessionId);
+    }
+    async load(sessionId) {
+        const row = this.db.prepare(`
+      SELECT *
+      FROM sessions
+      WHERE session_id = ?
+    `).get(sessionId);
+        if (!row) {
+            return null;
+        }
+        const messages = this.db.prepare(`
+      SELECT *
+      FROM session_messages
+      WHERE session_id = ?
+      ORDER BY message_index ASC
+    `).all(sessionId);
+        const parsedSkillExecution = row.skill_execution_json
+            ? (JSON.parse(row.skill_execution_json) ?? undefined)
+            : undefined;
+        return {
+            sessionId: row.session_id,
+            cwd: row.cwd,
+            model: row.model ?? undefined,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            forkedFromSessionId: row.forked_from_session_id ?? undefined,
+            lineage: JSON.parse(row.lineage_json),
+            messages: messages.map((message) => ({
+                role: message.role,
+                content: JSON.parse(message.content_json),
+            })),
+            usage: JSON.parse(row.usage_json),
+            compactions: JSON.parse(row.compactions_json),
+            promptSnapshotId: row.prompt_snapshot_id ?? undefined,
+            memoryRefs: JSON.parse(row.memory_refs_json),
+            approvalRefs: JSON.parse(row.approval_refs_json),
+            backgroundJobRefs: JSON.parse(row.background_job_refs_json),
+            intentDelegation: row.intent_delegation_json ? (JSON.parse(row.intent_delegation_json) ?? undefined) : undefined,
+            skillEval: row.skill_eval_json ? (JSON.parse(row.skill_eval_json) ?? undefined) : undefined,
+            skillExecution: parsedSkillExecution ? cloneSessionSkillExecutionState(parsedSkillExecution) : undefined,
+        };
+    }
+    async list() {
+        const rows = this.db.prepare(`
+      SELECT
+        s.session_id,
+        s.cwd,
+        s.updated_at,
+        COALESCE((
+          SELECT sm.text_content
+          FROM session_messages sm
+          WHERE sm.session_id = s.session_id
+            AND sm.text_content != ''
+          ORDER BY sm.message_index DESC
+          LIMIT 1
+        ), '') AS preview
+      FROM sessions s
+      ORDER BY s.updated_at DESC
+    `).all();
+        return rows.map((row) => ({
+            sessionId: row.session_id,
+            cwd: row.cwd,
+            updatedAt: row.updated_at,
+            preview: row.preview,
+        }));
+    }
+    async fork(sessionId) {
+        const source = await this.load(sessionId);
+        if (!source) {
+            throw new Error(`session not found: ${sessionId}`);
+        }
+        const now = Date.now();
+        const sourceLineage = source.lineage ?? [source.sessionId];
+        const lineage = sourceLineage.at(-1) === source.sessionId
+            ? [...sourceLineage]
+            : [...sourceLineage, source.sessionId];
+        const forked = {
+            ...source,
+            sessionId: this.createSessionId(),
+            createdAt: now,
+            updatedAt: now,
+            forkedFromSessionId: source.sessionId,
+            lineage,
+            messages: cloneMessages(source.messages),
+            usage: { ...source.usage },
+            compactions: (source.compactions ?? []).map((compaction) => ({ ...compaction })),
+            memoryRefs: [...(source.memoryRefs ?? [])],
+            approvalRefs: [...(source.approvalRefs ?? [])],
+            backgroundJobRefs: [...(source.backgroundJobRefs ?? [])],
+            skillExecution: source.skillExecution ? cloneSessionSkillExecutionState(source.skillExecution) : undefined,
+        };
+        await this.save(forked);
+        return forked;
+    }
+    searchMessages(query, limit = 10) {
+        const rows = this.db.prepare(`
+      SELECT
+        sm.session_id,
+        sm.message_index,
+        sm.role,
+        sm.text_content
+      FROM session_messages_fts fts
+      JOIN session_messages sm ON sm.message_id = fts.rowid
+      WHERE session_messages_fts MATCH ?
+      ORDER BY bm25(session_messages_fts), sm.message_index ASC
+      LIMIT ?
+    `).all(query, limit);
+        return rows.map((row) => ({
+            sessionId: row.session_id,
+            messageIndex: row.message_index,
+            role: row.role,
+            textContent: row.text_content,
+        }));
+    }
+    dispose() {
+        this.db.close();
+    }
+}
+function extractMessageText(message) {
+    return message.content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n')
+        .trim();
+}
+function cloneMessages(messages) {
+    return messages.map((message) => ({
+        role: message.role,
+        content: message.content.map((block) => ({ ...block })),
+    }));
+}

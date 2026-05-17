@@ -6,6 +6,7 @@ import { executeNamedSubAgent } from '../../ai/agents/subagent-executor.js';
 import { applySandboxToTools } from '../sandbox/tool-wrappers.js';
 import { createTeamTools } from '../teams/tools.js';
 import { createReminderTools } from '../../ai/tools/reminders.js';
+import { createNotebookTools } from '../../ai/tools/notebook.js';
 import { mergeToolPools, isMcpTool } from '../../ai/tools/tool-pool.js';
 export function createPlatformRegistryFactory(options) {
     const runNamedSubAgent = async (agentName, prompt, cwd) => {
@@ -46,6 +47,7 @@ export function createPlatformRegistryFactory(options) {
                 })
                 : []),
             ...createTeamTools(options.platform.teamService),
+            ...(options.memoryStore ? createNotebookTools(options.memoryStore) : []),
             ...options.platform.mcpTools,
             createLspTool({ getLspClient: () => options.platform.lspClient, cwd }),
             createSubAgentTool({

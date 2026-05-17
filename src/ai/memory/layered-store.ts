@@ -225,14 +225,14 @@ export class LayeredMemoryStore implements MemoryStore {
     return row.count;
   }
 
-  listLayer(layer: number, limit = 50, offset = 0): Array<{ id: string | number; content: string; createdAt?: string; tags?: string[]; meta?: Record<string, unknown> }> {
+  listLayer(layer: number, limit = 50, offset = 0): Array<{ id: string; content: string; createdAt?: string; tags?: string[]; meta?: Record<string, unknown> }> {
     switch (layer) {
       case 0: {
         const rows = this.db.prepare(
           'SELECT id, role, content, session_id, created_at FROM memory_l0_raw ORDER BY created_at DESC LIMIT ? OFFSET ?'
         ).all(limit, offset) as any[];
         return rows.map(r => ({
-          id: r.id,
+          id: String(r.id),
           content: r.content,
           createdAt: r.created_at,
           meta: { role: r.role, sessionId: r.session_id },
@@ -243,7 +243,7 @@ export class LayeredMemoryStore implements MemoryStore {
           'SELECT id, summary, tags, scope, mem_type, created_at FROM memory_l1_extracted ORDER BY created_at DESC LIMIT ? OFFSET ?'
         ).all(limit, offset) as any[];
         return rows.map(r => ({
-          id: r.id,
+          id: String(r.id),
           content: r.summary,
           tags: JSON.parse(r.tags || '[]'),
           createdAt: r.created_at,
@@ -255,7 +255,7 @@ export class LayeredMemoryStore implements MemoryStore {
           'SELECT id, scenario, key_facts, created_at FROM memory_l2_scenario ORDER BY created_at DESC LIMIT ? OFFSET ?'
         ).all(limit, offset) as any[];
         return rows.map(r => ({
-          id: r.id,
+          id: String(r.id),
           content: r.scenario,
           createdAt: r.created_at,
           meta: { keyFacts: JSON.parse(r.key_facts || '[]') },
@@ -266,7 +266,7 @@ export class LayeredMemoryStore implements MemoryStore {
           'SELECT id, trait, evidence, confidence, created_at FROM memory_l3_persona ORDER BY confidence DESC LIMIT ? OFFSET ?'
         ).all(limit, offset) as any[];
         return rows.map(r => ({
-          id: r.id,
+          id: String(r.id),
           content: r.trait,
           createdAt: r.created_at,
           meta: { evidence: JSON.parse(r.evidence || '[]'), confidence: r.confidence },
