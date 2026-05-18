@@ -118,6 +118,7 @@ import {
   formatSalvageTranscriptBlock,
   formatStageActivatedTranscriptBlock,
 } from '../ui/orchestration.js';
+import { createRuntimeTraceRecorderFromEnv } from '../runtime/trace/runtime-recorder.js';
 
 const { version: cliVersion } = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
@@ -706,6 +707,28 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       rawRuntimeHooks.emit({ ...event, sessionId });
     },
   };
+  const traceRecorder = createRuntimeTraceRecorderFromEnv({
+    sessionId,
+    cwd,
+    command: 'xiaok chat',
+    version: cliVersion,
+    onWarning: (error) => {
+      log.warn('runtime trace recorder warning', { error: String(error) });
+    },
+  });
+  if (traceRecorder) {
+    rawRuntimeHooks.onAny((event) => {
+      traceRecorder.handleEvent(event);
+      if (
+        event.type === 'turn_completed'
+        || event.type === 'turn_failed'
+        || event.type === 'turn_aborted'
+        || event.type === 'session_end'
+      ) {
+        void traceRecorder.flush();
+      }
+    });
+  }
   log.info('agent created', { provider: config.defaultProvider, model: config.defaultModelId, skills: skills.length });
   agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks: runtimeHooks, memoryStore });
   agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);

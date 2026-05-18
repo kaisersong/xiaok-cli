@@ -20,7 +20,7 @@ export interface KSwarmTask {
   id: string;
   title: string;
   description?: string;
-  status: 'pending' | 'dispatched' | 'in_progress' | 'review' | 'done' | 'failed' | 'cancelled';
+  status: 'pending' | 'dispatched' | 'accepted' | 'in_progress' | 'submitted' | 'review' | 'done' | 'failed' | 'blocked' | 'cancelled';
   assignedAgent?: string;
   phase?: number;
   priority?: number;
@@ -28,6 +28,10 @@ export interface KSwarmTask {
   acceptanceCriteria?: string[];
   result?: string;
   artifacts?: KSwarmArtifact[];
+  blockedReason?: string;
+  failureClass?: string;
+  failureCount?: number;
+  qualityFailureCount?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -79,7 +83,7 @@ export interface KSwarmAgent {
   description?: string;
   roles?: string[];
   capabilities?: string[];
-  status: 'idle' | 'working' | 'blocked' | 'error' | 'offline';
+  status: 'idle' | 'waiting' | 'working' | 'blocked' | 'failed' | 'error' | 'completed' | 'offline';
   runtimeType?: string;
   runtimeMode?: 'local' | 'cloud';
   maxConcurrentTasks?: number;
@@ -193,6 +197,17 @@ export interface ProjectFullDetail {
   workspace: { path: string; custom?: boolean; artifacts?: string[] };
   plan: any | null;
   planProgress: { phases: Array<{ phaseId: string | number; total: number; done: number }>; total: number; done: number } | null;
+  dispatchPlan?: {
+    dispatchable?: Array<{ taskId: string; agentId?: string; reason?: string }>;
+    blocked?: Array<{ taskId: string; reason: string; blockedByTaskId?: string }>;
+    waiting?: Array<{ taskId: string; reason: string; agentId?: string }>;
+  };
+  projectHealth?: {
+    status: 'healthy' | 'running' | 'waiting' | 'blocked' | 'failed' | 'unknown';
+    primaryBlockedTaskId?: string;
+    message?: string;
+    actions?: Array<{ id: string; label: string; recommended?: boolean }>;
+  };
 }
 
 // ─── Principles Injection ────────────────────────────────────────

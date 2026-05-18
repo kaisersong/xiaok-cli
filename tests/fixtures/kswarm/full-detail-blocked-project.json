@@ -1,0 +1,76 @@
+{
+  "project": {
+    "id": "proj-tech-conf",
+    "name": "技术大会演讲报告",
+    "status": "active",
+    "goal": "生成技术大会演讲报告",
+    "members": ["cli-claude", "cli-qoder", "cli-codex"],
+    "poAgent": "po-agent"
+  },
+  "tasks": [
+    {
+      "id": "item-1",
+      "title": "收集资料",
+      "status": "done",
+      "assignedAgent": "cli-claude",
+      "artifacts": [{ "name": "research.md", "path": "/Users/[USER]/projects/report/research.md" }]
+    },
+    {
+      "id": "item-6",
+      "title": "结构评审",
+      "status": "blocked",
+      "assignedAgent": "cli-claude",
+      "blockedReason": "missing_review_evidence",
+      "failureClass": "quality_gate",
+      "qualityFailureCount": 1
+    },
+    {
+      "id": "item-7",
+      "title": "视觉风格",
+      "status": "pending",
+      "assignedAgent": "cli-qoder"
+    },
+    {
+      "id": "item-8",
+      "title": "最终校验",
+      "status": "failed",
+      "assignedAgent": "cli-codex",
+      "failureClass": "verification_failed",
+      "failureCount": 2
+    }
+  ],
+  "agents": [
+    { "id": "po-agent", "name": "PO", "status": "waiting" },
+    { "id": "cli-claude", "name": "Claude CLI", "status": "idle" },
+    { "id": "cli-qoder", "name": "Qoder CLI", "status": "idle" },
+    { "id": "cli-codex", "name": "Codex CLI", "status": "idle" }
+  ],
+  "activities": [],
+  "humanActions": [],
+  "workspace": {
+    "path": "/Users/[USER]/projects/tech-conf-report",
+    "artifacts": ["research.md"]
+  },
+  "plan": {
+    "version": 1
+  },
+  "planProgress": {
+    "phases": [{ "phaseId": 1, "total": 4, "done": 1 }],
+    "total": 4,
+    "done": 1
+  },
+  "dispatchPlan": {
+    "dispatchable": [{ "taskId": "item-7", "agentId": "cli-qoder", "reason": "no_dependencies" }],
+    "blocked": [{ "taskId": "item-6", "reason": "missing_review_evidence" }],
+    "waiting": [{ "taskId": "item-8", "agentId": "cli-codex", "reason": "quality_retry_required" }]
+  },
+  "projectHealth": {
+    "status": "blocked",
+    "primaryBlockedTaskId": "item-6",
+    "message": "结构评审缺少证据，后续任务不会继续推进。",
+    "actions": [
+      { "id": "diagnose", "label": "诊断", "recommended": true },
+      { "id": "dispatch_unblocked_task", "label": "派发未阻塞任务" }
+    ]
+  }
+}

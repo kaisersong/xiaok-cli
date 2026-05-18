@@ -13,6 +13,8 @@ import { registerTranscriptCommands } from './commands/transcript.js';
 import { registerYZJCommands } from './commands/yzj.js';
 import { registerPluginCommands } from './commands/plugin.js';
 import { registerMemoryCommands } from './commands/memory.js';
+import { registerDiagnoseCommands } from './commands/diagnose.js';
+import { registerTraceCommands } from './commands/trace-export.js';
 import { installGlobalCrashHandlers } from './utils/crash-reporter.js';
 installGlobalCrashHandlers();
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -34,6 +36,8 @@ registerChatCommands(program);
 registerYZJCommands(program);
 registerPluginCommands(program);
 registerMemoryCommands(program);
+registerTraceCommands(program);
+registerDiagnoseCommands(program);
 // chat 命令注册时使用 { isDefault: true }，Commander 自动处理无子命令时的路由
 // 无需额外 program.action() — 会导致双重调用
 program.parse();

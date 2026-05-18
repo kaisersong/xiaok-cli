@@ -1,0 +1,55 @@
+{
+  "project": {
+    "id": "proj-busy",
+    "name": "跨项目忙碌任务",
+    "status": "active",
+    "members": ["cli-claude"]
+  },
+  "tasks": [
+    {
+      "id": "item-2",
+      "title": "等待可用 agent",
+      "status": "dispatched",
+      "assignedAgent": "cli-claude"
+    },
+    {
+      "id": "item-3",
+      "title": "agent 已接受",
+      "status": "accepted",
+      "assignedAgent": "cli-qoder"
+    },
+    {
+      "id": "item-4",
+      "title": "等待人工复核",
+      "status": "submitted",
+      "assignedAgent": "cli-codex"
+    }
+  ],
+  "agents": [
+    { "id": "cli-claude", "name": "Claude CLI", "status": "waiting", "currentTask": "external-task-1" },
+    { "id": "cli-qoder", "name": "Qoder CLI", "status": "working", "currentTask": "item-3" },
+    { "id": "cli-codex", "name": "Codex CLI", "status": "completed" }
+  ],
+  "activities": [],
+  "humanActions": [],
+  "workspace": {
+    "path": "/Users/[USER]/projects/busy",
+    "artifacts": []
+  },
+  "plan": null,
+  "planProgress": {
+    "phases": [],
+    "total": 3,
+    "done": 0
+  },
+  "dispatchPlan": {
+    "dispatchable": [],
+    "blocked": [],
+    "waiting": [{ "taskId": "item-2", "agentId": "cli-claude", "reason": "agent_busy_elsewhere" }]
+  },
+  "projectHealth": {
+    "status": "waiting",
+    "message": "Claude CLI 正在其他项目执行任务，当前任务等待中。",
+    "actions": [{ "id": "split_or_reassign", "label": "拆分或改派", "recommended": true }]
+  }
+}
