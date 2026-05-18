@@ -67,9 +67,11 @@ export interface KSwarmProject {
   tasks?: KSwarmTask[];
   phases?: KSwarmPhase[];
   poAgent?: string;
+  members?: string[];
   createdAt?: string;
   updatedAt?: string;
   progress?: number;
+  cancelledCount?: number;
   deliverables?: KSwarmDeliverable[];
   enableSummary?: boolean;
   summary?: string | null;

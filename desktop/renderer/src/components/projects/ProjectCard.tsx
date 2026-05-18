@@ -19,10 +19,11 @@ interface ProjectCardProps {
     status: string;
     taskCount?: number;
     doneCount?: number;
+    cancelledCount?: number;
     plan?: { version: number };
     poAgent?: string;
-    updatedAt?: number;
-    createdAt?: number;
+    updatedAt?: number | string;
+    createdAt?: number | string;
     projectHealth?: {
       status: ProjectHealthStatus;
       primaryBlockedTaskId?: string;
@@ -71,9 +72,11 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const StatusIcon = visibleStatus.icon;
   const totalTasks = project.taskCount || 0;
   const doneTasks = project.doneCount || 0;
-  const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+  const cancelledTasks = project.cancelledCount || 0;
+  const completedTasks = doneTasks + cancelledTasks;
+  const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
-  const formatTime = (ts?: number) => {
+  const formatTime = (ts?: number | string) => {
     if (!ts) return '';
     const d = new Date(ts);
     const now = new Date();
@@ -155,7 +158,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
               <div className="h-full rounded-full bg-[var(--c-status-success-text)] transition-all" style={{ width: `${progress}%` }} />
             </div>
             <div className="flex items-center justify-between text-[10px] text-[var(--c-text-muted)]">
-              <span>{doneTasks}/{totalTasks} 任务</span>
+              <span>{cancelledTasks > 0 ? `${doneTasks} 完成 · ${cancelledTasks} 取消` : `${doneTasks}/${totalTasks} 任务`}</span>
               <span>{progress}%</span>
             </div>
           </div>

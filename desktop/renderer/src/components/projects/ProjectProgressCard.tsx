@@ -13,6 +13,7 @@ interface ProjectProgressCardProps {
     status: string;
     taskCount?: number;
     doneCount?: number;
+    cancelledCount?: number;
     dispatchPlan?: {
       dispatchable?: Array<{ taskId: string; agentId?: string; reason?: string }>;
       blocked?: Array<{ taskId: string; reason: string; blockedByTaskId?: string }>;
@@ -29,7 +30,9 @@ export function ProjectProgressCard({ project }: ProjectProgressCardProps) {
   const navigate = useNavigate();
   const totalTasks = project.taskCount || 0;
   const doneTasks = project.doneCount || 0;
-  const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+  const cancelledTasks = project.cancelledCount || 0;
+  const completedTasks = doneTasks + cancelledTasks;
+  const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
   const statusLabels: Record<string, string> = {
     draft: '草稿', planning: '规划中', created: '已创建',
@@ -67,7 +70,7 @@ export function ProjectProgressCard({ project }: ProjectProgressCardProps) {
             <div className="h-1 flex-1 overflow-hidden rounded-full bg-[var(--c-bg-deep)]">
               <div className="h-full rounded-full bg-[var(--c-status-success-text)] transition-all" style={{ width: `${progress}%` }} />
             </div>
-            <span className="shrink-0 text-[10px] text-[var(--c-text-muted)]">{doneTasks}/{totalTasks}</span>
+            <span className="shrink-0 text-[10px] text-[var(--c-text-muted)]">{cancelledTasks > 0 ? `${doneTasks} 完成 · ${cancelledTasks} 取消` : `${doneTasks}/${totalTasks}`}</span>
           </div>
         )}
         {(dispatchableCount > 0 || blockedCount > 0 || waitingCount > 0) && (
