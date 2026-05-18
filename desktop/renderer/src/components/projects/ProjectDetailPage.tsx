@@ -17,6 +17,14 @@ import { DeliverableView } from './DeliverableView';
 import { exportProjectMarkdown } from './exportProjectMarkdown';
 import { getDesktopApi } from '../../shared/desktop';
 import { canRetryPlanForProject, isInterruptedPlanProject } from './projectPlanRecovery';
+import {
+  describeKSwarmAgentStatus,
+  formatKSwarmAgentStatus,
+  getAgentStatusDotClass,
+  getProjectHealthLabel,
+  shouldShowProjectHealth,
+  summarizeProjectHealth,
+} from './kswarmStatus';
 
 type TabId = 'plan' | 'board' | 'agents' | 'activity' | 'deliverables';
 
@@ -119,6 +127,8 @@ export function ProjectDetailPage() {
   const showDeliver = project.status === 'active' && tasks.every(t => t.status === 'done' || t.status === 'cancelled');
   const showClose = project.status === 'active' || project.status === 'delivered';
   const statusLabel = STATUS_LABELS[project.status] || project.status;
+  const healthSummary = summarizeProjectHealth(detail);
+  const showHealthBanner = shouldShowProjectHealth(healthSummary.status);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -211,6 +221,43 @@ export function ProjectDetailPage() {
           </div>
         )}
 
+        {showHealthBanner && (
+          <div className={`ml-[38px] rounded-lg border px-3 py-2 ${
+            healthSummary.status === 'blocked' || healthSummary.status === 'failed'
+              ? 'border-[var(--c-status-error-text)]/30 bg-[var(--c-error-bg)] text-[var(--c-status-error-text)]'
+              : 'border-[var(--c-status-warning-text)]/30 bg-[var(--c-bg-deep)] text-[var(--c-status-warning-text)]'
+          }`}>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[12px] font-semibold">{getProjectHealthLabel(healthSummary.status)}</span>
+              {healthSummary.primaryTaskId && (
+                <span className="rounded bg-[var(--c-bg-page)]/70 px-1.5 py-0.5 font-mono text-[10px]">{healthSummary.primaryTaskId}</span>
+              )}
+              {detail.projectHealth?.actions?.map((action) => (
+                <span
+                  key={action.id}
+                  className={`rounded px-1.5 py-0.5 text-[10px] ${
+                    action.recommended
+                      ? 'bg-[var(--c-bg-page)] text-[var(--c-text-primary)]'
+                      : 'bg-[var(--c-bg-page)]/60 text-[var(--c-text-secondary)]'
+                  }`}
+                >
+                  {action.label}
+                </span>
+              ))}
+            </div>
+            {healthSummary.message && (
+              <p className="mt-1 text-[11px] leading-relaxed text-[var(--c-text-secondary)]">{healthSummary.message}</p>
+            )}
+            {(healthSummary.dispatchableCount > 0 || healthSummary.blockedCount > 0 || healthSummary.waitingCount > 0) && (
+              <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-[var(--c-text-muted)]">
+                <span>可派发 {healthSummary.dispatchableCount}</span>
+                <span>阻塞 {healthSummary.blockedCount}</span>
+                <span>等待 {healthSummary.waitingCount}</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Status hint */}
         {(project.status === 'created' || project.status === 'draft' || project.status === 'planning' || showInterruptedPlanHint) && (
           <div className="pl-[38px]">
@@ -257,15 +304,19 @@ export function ProjectDetailPage() {
               {/* PO Agent */}
               {project.poAgent && (() => {
                 const poAgentData = agents.find(a => a.id === project.poAgent);
+                const runtimeStatus = describeKSwarmAgentStatus(
+                  poAgentData ?? { id: project.poAgent, name: project.poAgent, status: 'offline' },
+                  tasks,
+                );
                 return (
                   <div key={project.poAgent} className="flex items-center gap-3 rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-4 py-3">
-                    <div className={`size-2.5 rounded-full ${poAgentData?.status === 'offline' ? 'bg-[var(--c-text-muted)]' : 'bg-[var(--c-status-success-text)]'}`} />
+                    <div className={`size-2.5 rounded-full ${getAgentStatusDotClass(runtimeStatus.status)}`} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-[12px] font-medium text-[var(--c-text-heading)]">{poAgentData?.name || project.poAgent}</span>
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-accent)]/10 text-[var(--c-accent)]">PO</span>
                       </div>
-                      <span className="text-[11px] text-[var(--c-text-muted)]">{poAgentData?.status === 'offline' ? '离线' : poAgentData?.status === 'working' ? '工作中' : '空闲'}</span>
+                      <span className="text-[11px] text-[var(--c-text-muted)]">{formatKSwarmAgentStatus(runtimeStatus)}</span>
                     </div>
                   </div>
                 );
@@ -275,19 +326,16 @@ export function ProjectDetailPage() {
                 const memberIds = new Set(project.members || []);
                 const workerAgents = agents.filter(a => memberIds.has(a.id));
                 return workerAgents.map(agent => {
-                  const assignedTask = tasks.find(t => t.assignedAgent === agent.id && t.status !== 'done' && t.status !== 'cancelled');
+                  const runtimeStatus = describeKSwarmAgentStatus(agent, tasks);
                   return (
                     <div key={agent.id} className="flex items-center gap-3 rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-4 py-3">
-                      <div className={`size-2.5 rounded-full ${agent.status === 'offline' ? 'bg-[var(--c-text-muted)]' : agent.status === 'working' ? 'bg-[var(--c-accent)]' : 'bg-[var(--c-status-success-text)]'}`} />
+                      <div className={`size-2.5 rounded-full ${getAgentStatusDotClass(runtimeStatus.status)}`} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-[12px] font-medium text-[var(--c-text-heading)]">{agent.name}</span>
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]">Worker</span>
                         </div>
-                        <span className="text-[11px] text-[var(--c-text-muted)]">
-                          {agent.status === 'offline' ? '离线' : agent.status === 'working' ? '工作中' : '空闲'}
-                          {assignedTask && ` · ${assignedTask.title}`}
-                        </span>
+                        <span className="text-[11px] text-[var(--c-text-muted)]">{formatKSwarmAgentStatus(runtimeStatus)}</span>
                       </div>
                     </div>
                   );

@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { FolderKanban, CheckCircle2, Clock, Loader2, Trash2, AlertTriangle } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
+import { getCompactProjectHealthLabel, shouldShowProjectHealth, type ProjectHealthStatus } from './kswarmStatus';
 
 interface ProjectCardProps {
   project: {
@@ -21,6 +22,11 @@ interface ProjectCardProps {
     poAgent?: string;
     updatedAt?: number;
     createdAt?: number;
+    projectHealth?: {
+      status: ProjectHealthStatus;
+      primaryBlockedTaskId?: string;
+      message?: string;
+    };
   };
 }
 
@@ -42,7 +48,18 @@ export function ProjectCard({ project }: ProjectCardProps) {
   };
 
   const statusConf = STATUS_CONFIG[project.status] || STATUS_CONFIG.draft;
-  const StatusIcon = statusConf.icon;
+  const healthStatus = project.projectHealth?.status ?? 'unknown';
+  const hasHealthSignal = shouldShowProjectHealth(healthStatus);
+  const visibleStatus = hasHealthSignal
+    ? {
+        label: getCompactProjectHealthLabel(healthStatus),
+        color: healthStatus === 'failed' || healthStatus === 'blocked'
+          ? 'text-[var(--c-status-error-text)]'
+          : 'text-[var(--c-status-warning-text)]',
+        icon: healthStatus === 'failed' || healthStatus === 'blocked' ? AlertTriangle : Clock,
+      }
+    : statusConf;
+  const StatusIcon = visibleStatus.icon;
   const totalTasks = project.taskCount || 0;
   const doneTasks = project.doneCount || 0;
   const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
@@ -104,14 +121,19 @@ export function ProjectCard({ project }: ProjectCardProps) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h3 className="text-[13px] font-medium text-[var(--c-text-primary)] truncate">{project.name}</h3>
-              <span className={`shrink-0 text-[10px] ${statusConf.color}`}>
-                <StatusIcon size={10} className="inline" /> {statusConf.label}
+              <span className={`shrink-0 text-[10px] ${visibleStatus.color}`}>
+                <StatusIcon size={10} className="inline" /> {visibleStatus.label}
               </span>
             </div>
           </div>
         </div>
 
         {project.goal && <p className="text-xs text-[var(--c-text-tertiary)] mt-2 line-clamp-2">{project.goal}</p>}
+        {hasHealthSignal && project.projectHealth?.message && (
+          <p className="mt-2 text-[11px] leading-relaxed text-[var(--c-status-error-text)] line-clamp-2">
+            {project.projectHealth.message}
+          </p>
+        )}
 
         {totalTasks > 0 && (
           <div className="flex flex-col gap-1.5 mt-3">
