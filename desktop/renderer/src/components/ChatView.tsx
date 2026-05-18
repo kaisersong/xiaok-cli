@@ -105,18 +105,8 @@ export function ChatView({
     return () => window.removeEventListener('keydown', handler);
   }, [onToggleCanvas]);
 
-  // Enable context menu for copy/select
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const selection = window.getSelection()?.toString();
-    if (selection) {
-      // Use native clipboard API
-      navigator.clipboard.writeText(selection).catch(() => {});
-    }
-  };
-
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-[var(--c-bg-page)]" onContextMenu={handleContextMenu}>
+    <div className="flex flex-1 flex-col overflow-hidden bg-[var(--c-bg-page)]">
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto" style={{ userSelect: 'text' }}>
         <div className="mx-auto max-w-[800px] px-14 py-6">
