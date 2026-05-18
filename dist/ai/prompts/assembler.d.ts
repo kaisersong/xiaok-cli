@@ -5,6 +5,7 @@ import type { CustomAgentDef } from '../agents/loader.js';
 import type { SkillMeta } from '../skills/loader.js';
 import type { LoadedContext } from '../runtime/context-loader.js';
 import type { MemoryRecord } from '../memory/store.js';
+import type { HarnessMemoryRecord } from '../../runtime/harness-memory/types.js';
 export interface AssemblerOptions {
     channel?: 'chat' | 'yzj';
     enterpriseId: string | null;
@@ -19,6 +20,7 @@ export interface AssemblerOptions {
     autoContext?: LoadedContext;
     mcpInstructions?: string;
     memories?: MemoryRecord[];
+    harnessMemories?: HarnessMemoryRecord[];
     currentTokenUsage?: number;
     contextLimit?: number;
     allowedToolsActive?: string[];

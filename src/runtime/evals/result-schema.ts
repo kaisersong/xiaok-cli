@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { computeBaselineHash } from './baseline.js';
 import { diagnoseTraceBundle } from '../diagnostics/diagnoser.js';
+import type { DiagnosisFinding } from '../diagnostics/types.js';
 import { validateTraceBundle, type TraceBundleV1 } from '../trace/schema.js';
 
 export interface AheLiteEvalResult {
@@ -39,14 +40,16 @@ export function validateAheLiteEvalResult(
 
   if (bundle) {
     const report = diagnoseTraceBundle(bundle);
+    const guardFinding = deriveGuardFinding(bundle);
+    const primary = report.primaryFinding ?? guardFinding;
     const evidenceIds = Array.isArray(input.evidenceIds) ? input.evidenceIds.map(String) : [];
     evidenceIds.forEach((id, index) => {
       if (!resolveEvidenceId(bundle!, id)) errors.push(`evidenceIds[${index}]:${id}`);
     });
 
-    const expectedPrimary = report.primaryFinding ? findingSignature(report.primaryFinding.category, report.primaryFinding.evidenceIds[0]) : '';
+    const expectedPrimary = primary ? findingSignature(primary.category, primary.evidenceIds[0]) : '';
     if (input.primaryFinding !== expectedPrimary) errors.push(`primaryFinding:${String(input.primaryFinding)}`);
-    if (input.actualFailureCategory !== report.primaryFinding?.category) {
+    if (input.actualFailureCategory !== primary?.category) {
       errors.push(`actualFailureCategory:${String(input.actualFailureCategory)}`);
     }
   }
@@ -64,6 +67,26 @@ export function validateAheLiteEvalResult(
 function findingSignature(category: string, evidenceId?: string): string {
   const suffix = evidenceId?.startsWith('task:') ? evidenceId.slice('task:'.length) : evidenceId;
   return suffix ? `${category}:${suffix}` : category;
+}
+
+function deriveGuardFinding(bundle: TraceBundleV1): DiagnosisFinding | null {
+  const event = bundle.events.find((item) => (
+    (item.type === 'guard.warned' || item.type === 'guard.blocked')
+    && typeof item.data?.category === 'string'
+  ));
+  if (!event || typeof event.data?.category !== 'string') return null;
+  const evidenceId = event.refs?.taskId
+    ? `task:${event.refs.taskId}`
+    : `event:${event.id}`;
+  return {
+    id: `finding:${event.data.category}:${event.id}`,
+    severity: event.type === 'guard.blocked' ? 'critical' : 'medium',
+    category: event.data.category as DiagnosisFinding['category'],
+    title: String(event.data.reason ?? event.data.category),
+    explanation: String(event.data.action ?? event.data.reason ?? event.data.category),
+    confidence: 0.8,
+    evidenceIds: [evidenceId],
+  };
 }
 
 function resolveEvidenceId(bundle: TraceBundleV1, evidenceId: string): boolean {

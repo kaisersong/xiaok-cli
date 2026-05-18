@@ -188,6 +188,23 @@ export class Agent {
         sessionId: this.sessionId,
         turnId,
       });
+      return;
+    }
+
+    if (event.type === 'guard_evaluated') {
+      this.options.hooks.emit({
+        type: 'guard_evaluated',
+        sessionId: this.sessionId,
+        turnId,
+        guardId: event.guardId,
+        mode: event.mode,
+        category: event.category,
+        reason: event.reason,
+        action: event.action,
+        taskId: event.taskId,
+        artifactId: event.artifactId,
+        target: event.target,
+      });
     }
   }
 }

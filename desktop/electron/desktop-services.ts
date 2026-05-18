@@ -9,7 +9,16 @@ import type { ProtocolId } from '../../src/ai/providers/types.js';
 import { MaterialRegistry } from '../../src/runtime/task-host/material-registry.js';
 import { FileTaskSnapshotStore } from '../../src/runtime/task-host/snapshot-store.js';
 import { InProcessTaskRuntimeHost, type TaskRunner } from '../../src/runtime/task-host/task-runtime-host.js';
-import type { MaterialRecord, MaterialRole, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
+import type { MaterialRecord, MaterialRole, TaskSnapshot, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
+import { diagnoseTraceBundle } from '../../src/runtime/diagnostics/diagnoser.js';
+import { diagnoseProjectSnapshot } from '../../src/runtime/diagnostics/project-diagnoser.js';
+import type { DiagnosisReport } from '../../src/runtime/diagnostics/types.js';
+import {
+  buildProjectTraceBundleFromKSwarmDetail,
+  buildSessionTraceBundleFromSnapshots,
+  loadTaskSnapshotsForSession,
+  writeTraceBundleToPath,
+} from '../../src/runtime/trace/exporter.js';
 import type { Config, Message, MessageBlock, StreamChunk, ToolCall } from '../../src/types.js';
 import { buildToolList, ToolRegistry } from '../../src/ai/tools/index.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta } from '../../src/ai/skills/loader.js';
@@ -356,6 +365,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     snapshotStore,
     runner: options.runner ?? createDesktopModelRunnerWithRegistry(registry, tools, options.dataRoot, options.kswarmService),
     now: options.now,
+    aheGuards: { artifactEvidence: true, recoveryContinuity: true },
     // Use timestamp + random suffix to ensure unique taskId/sessionId across app restarts
     createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     createSessionId: () => `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1055,6 +1065,31 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       await saveJsonFile(path, installs.filter(c => c.id !== id));
     },
 
+    async exportTraceBundle(input: { kind: 'session' | 'project' | 'task'; id: string }): Promise<{ ok: boolean; path?: string; error?: string }> {
+      try {
+        const bundle = input.kind === 'project'
+          ? buildProjectTraceBundleFromKSwarmDetail(await fetchKSwarmProjectFullDetail(options.kswarmService, input.id), { projectId: input.id })
+          : await buildDesktopSessionTraceBundle({ kind: input.kind, id: input.id }, options.dataRoot, snapshotStore);
+        const path = writeTraceBundleToPath({
+          bundle,
+          outputPath: join(options.dataRoot, 'traces', `${input.kind}_${sanitizeFilePart(input.id)}_${Date.now()}.json`),
+          force: true,
+        });
+        return { ok: true, path };
+      } catch (error) {
+        return { ok: false, error: (error as Error).message };
+      }
+    },
+
+    async diagnose(input: { kind: 'session' | 'project' | 'task'; id: string }): Promise<DiagnosisReport> {
+      if (input.kind === 'project') {
+        const detail = await fetchKSwarmProjectFullDetail(options.kswarmService, input.id);
+        return diagnoseProjectSnapshot(detail as never);
+      }
+      const bundle = await buildDesktopSessionTraceBundle({ kind: input.kind, id: input.id }, options.dataRoot, snapshotStore);
+      return diagnoseTraceBundle(bundle);
+    },
+
     // Test helpers for AI runner tool registration
     getToolDefinitions() {
       return registry.getToolDefinitions();
@@ -1066,6 +1101,40 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return options.dataRoot;
     },
   };
+}
+
+async function buildDesktopSessionTraceBundle(
+  input: { kind: 'session' | 'task'; id: string },
+  dataRoot: string,
+  snapshotStore: FileTaskSnapshotStore,
+) {
+  if (input.kind === 'task') {
+    const snapshot = await requireTaskSnapshot(snapshotStore, input.id);
+    return buildSessionTraceBundleFromSnapshots([snapshot], { sessionId: snapshot.sessionId, dataRoot });
+  }
+  const snapshots = loadTaskSnapshotsForSession({ dataRoot, sessionId: input.id });
+  if (snapshots.length === 0) {
+    throw new Error(`no snapshots found for session: ${input.id}`);
+  }
+  return buildSessionTraceBundleFromSnapshots(snapshots, { sessionId: input.id, dataRoot });
+}
+
+async function requireTaskSnapshot(snapshotStore: FileTaskSnapshotStore, taskId: string): Promise<TaskSnapshot> {
+  const snapshot = await snapshotStore.recoverTask(taskId);
+  if (!snapshot) throw new Error(`task snapshot not found: ${taskId}`);
+  return snapshot;
+}
+
+async function fetchKSwarmProjectFullDetail(kswarmService: KSwarmService, projectId: string): Promise<unknown> {
+  const response = await kswarmService.request(`/projects/${projectId}/full`);
+  if (!response.ok) {
+    throw new Error(`kswarm project detail request failed: HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+function sanitizeFilePart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.-]+/g, '_');
 }
 
 // ---- Channel types ----

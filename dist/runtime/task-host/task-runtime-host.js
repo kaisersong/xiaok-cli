@@ -1,3 +1,4 @@
+import { evaluateArtifactEvidenceGuard } from '../guards/artifact-evidence-guard.js';
 import { runDeliverableGate } from './deliverable-gate.js';
 import { projectRuntimeEventsToDesktopEvents } from './event-projection.js';
 import { NeedsUserQuestionCorrelator } from './question-correlator.js';
@@ -185,6 +186,12 @@ export class InProcessTaskRuntimeHost {
                     });
                     await this.flushMutations(taskId);
                 }
+                const guardedLatest = await this.requireSnapshot(taskId);
+                if (!await this.applyArtifactEvidenceGuard(taskId, guardedLatest)) {
+                    await this.options.snapshotStore.clearActiveTask(taskId);
+                    this.closeSubscribers(taskId);
+                    return;
+                }
                 await this.updateSnapshot(taskId, { status: 'completed' });
                 await this.options.snapshotStore.clearActiveTask(taskId);
                 this.closeSubscribers(taskId);
@@ -224,6 +231,35 @@ export class InProcessTaskRuntimeHost {
         for (const desktopEvent of desktopEvents) {
             await this.appendEvent(taskId, desktopEvent);
         }
+    }
+    async applyArtifactEvidenceGuard(taskId, snapshot) {
+        if (!this.options.aheGuards?.artifactEvidence) {
+            return true;
+        }
+        const artifacts = collectArtifactEvidence(snapshot);
+        const decision = evaluateArtifactEvidenceGuard({
+            taskId,
+            status: 'completed',
+            artifacts,
+        });
+        if (decision.ok) {
+            return true;
+        }
+        await this.appendEvent(taskId, {
+            type: 'progress',
+            eventId: `${taskId}:guard:artifact-evidence`,
+            message: decision.reason,
+            stage: 'blocked',
+        });
+        await this.appendEvent(taskId, { type: 'error', message: decision.reason });
+        await this.updateSnapshot(taskId, {
+            status: 'failed',
+            salvage: {
+                summary: ['AHE artifact evidence guard blocked task completion before an empty delivery could be marked complete.'],
+                reason: decision.reason,
+            },
+        });
+        return false;
     }
     async appendEvent(taskId, event) {
         await this.enqueueMutation(taskId, async () => {
@@ -342,4 +378,9 @@ export class InProcessTaskRuntimeHost {
     now() {
         return this.options.now?.() ?? Date.now();
     }
+}
+function collectArtifactEvidence(snapshot) {
+    const resultArtifacts = snapshot.result?.artifacts ?? [];
+    const eventArtifacts = snapshot.events.filter((event) => event.type === 'artifact_recorded');
+    return [...resultArtifacts, ...eventArtifacts];
 }

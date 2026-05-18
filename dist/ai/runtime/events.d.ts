@@ -26,6 +26,17 @@ export type AgentRuntimeEvent = {
     summary: string;
     compactionId?: string;
 } | {
+    type: 'guard_evaluated';
+    runId: string;
+    guardId: string;
+    mode: 'passed' | 'warned' | 'blocked' | 'override';
+    category?: string;
+    reason?: string;
+    action?: string;
+    taskId?: string;
+    artifactId?: string;
+    target?: string;
+} | {
     type: 'max_iterations_reached';
     runId: string;
     maxIterations: number;

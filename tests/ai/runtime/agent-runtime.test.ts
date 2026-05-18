@@ -437,6 +437,41 @@ describe('AgentRuntime', () => {
       },
     });
   });
+
+  it('emits a verification guard warning when a code task finishes after edits without tests', async () => {
+    let streamCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () => {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          return mockStream([
+            { type: 'tool_use', id: 'tu_1', name: 'edit', input: { file_path: '/repo/src/app.ts', old_string: 'a', new_string: 'b' } },
+            { type: 'done' },
+          ]);
+        }
+        return mockStream([{ type: 'text', delta: 'done' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock({
+        executeTool: async () => 'edited file',
+      }) as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    const events: string[] = [];
+    await runtime.run('修改 TypeScript 代码里的 bug', (event) => {
+      events.push(event.type);
+    });
+
+    expect(events).toContain('guard_evaluated');
+    expect(events[events.length - 2]).toBe('guard_evaluated');
+    expect(events.at(-1)).toBe('run_completed');
+  });
 });
 
 import { FileMemoryStore } from '../../../src/ai/memory/store.js';

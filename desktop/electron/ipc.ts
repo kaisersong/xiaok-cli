@@ -222,6 +222,18 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
       return await services.getSkillStats();
     } catch { return []; }
   });
+  ipcMain.handle('desktop:trace:export', async (_event, input) => {
+    log('info', 'traceExport', { kind: input?.kind, id: input?.id });
+    const result = await services.exportTraceBundle(input);
+    log('info', 'traceExport result', { ok: result.ok, path: result.path });
+    return result;
+  });
+  ipcMain.handle('desktop:diagnose', async (_event, input) => {
+    log('info', 'diagnose', { kind: input?.kind, id: input?.id });
+    const result = await services.diagnose(input);
+    log('info', 'diagnose result', { health: result?.health, primaryFinding: result?.primaryFinding?.category ?? null });
+    return result;
+  });
 
   // ---- Memory ----
   const { getDesktopMemoryStore } = await import('./desktop-services.js');

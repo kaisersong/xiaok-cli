@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { PromptBuilder } from '../../../src/ai/prompts/builder.js';
 import { FileMemoryStore } from '../../../src/ai/memory/store.js';
+import { JsonHarnessMemoryStore } from '../../../src/runtime/harness-memory/store.js';
 
 describe('PromptBuilder', () => {
   it('renders cacheable prompt segments and preserves memory references in the snapshot', async () => {
@@ -143,6 +144,52 @@ describe('PromptBuilder static/dynamic split', () => {
       }));
       expect(snapshot.rendered).toContain('Background memory');
       expect(snapshot.rendered).toContain('Always validate in tmux before landing terminal UI changes.');
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('injects promoted harness memory as a separate scoped prompt segment', async () => {
+    const rootDir = join(tmpdir(), `xiaok-harness-memory-builder-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    try {
+      const harnessStore = new JsonHarnessMemoryStore(join(rootDir, 'harness-memory.json'), () => new Date('2026-05-18T00:00:00.000Z'));
+      const candidate = harnessStore.createCandidate({
+        category: 'missing_verification',
+        summary: 'After editing TypeScript, run tsc or focused tests before finalizing.',
+        scope: { repo: '/repo', runtime: 'chat' },
+        evidence: [{ traceBundlePath: '/tmp/trace.json', evidenceIds: ['task:task-1'], sessionId: 'sess-1' }],
+      });
+      harnessStore.promote(candidate.id, {
+        promotedBy: 'human',
+        reason: 'verified by review',
+        evidence: [{ traceBundlePath: '/tmp/trace.json', evidenceIds: ['task:task-1'], sessionId: 'sess-1' }],
+      });
+
+      const builder = new PromptBuilder({ harnessMemoryStore: harnessStore });
+      const snapshot = await builder.build({
+        cwd: '/repo',
+        enterpriseId: null,
+        devApp: null,
+        budget: 2000,
+        channel: 'chat',
+        skills: [],
+        deferredTools: [],
+        agents: [],
+        pluginCommands: [],
+        lspDiagnostics: '',
+        autoContext: { docs: [], git: null },
+      });
+
+      expect(snapshot.rendered).toContain('Harness memory');
+      expect(snapshot.rendered).toContain('After editing TypeScript, run tsc or focused tests before finalizing.');
+      expect(snapshot.segments).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          key: 'harness_memory',
+          kind: 'background_context',
+          cacheable: false,
+        }),
+      ]));
+      expect(snapshot.memoryRefs).toContain(`harness:${candidate.id}`);
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
     }

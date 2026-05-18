@@ -9,6 +9,7 @@ import type { CustomAgentDef } from '../agents/loader.js';
 import type { SkillMeta } from '../skills/loader.js';
 import type { LoadedContext } from '../runtime/context-loader.js';
 import type { MemoryRecord } from '../memory/store.js';
+import type { HarnessMemoryRecord } from '../../runtime/harness-memory/types.js';
 import { formatLoadedContext, loadAutoContext } from '../runtime/context-loader.js';
 import { formatSkillsContext } from '../skills/loader.js';
 import {
@@ -48,6 +49,7 @@ export interface AssemblerOptions {
   // New dynamic section inputs
   mcpInstructions?: string;
   memories?: MemoryRecord[];
+  harnessMemories?: HarnessMemoryRecord[];
   currentTokenUsage?: number;
   contextLimit?: number;
   allowedToolsActive?: string[];
@@ -266,6 +268,20 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
       key: 'memory_summary',
       title: 'Background Memory',
       text: `Background memory:\n${memoryText}`,
+      cacheable: false,
+      kind: 'background_context',
+    });
+  }
+
+  if (opts.harnessMemories && opts.harnessMemories.length > 0) {
+    const harnessText = opts.harnessMemories
+      .slice(0, 6)
+      .map((memory) => `- [${memory.category}] ${memory.summary}`)
+      .join('\n');
+    segments.push({
+      key: 'harness_memory',
+      title: 'Harness Memory',
+      text: `Harness memory:\n${harnessText}`,
       cacheable: false,
       kind: 'background_context',
     });

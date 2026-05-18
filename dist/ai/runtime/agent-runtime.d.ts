@@ -45,5 +45,6 @@ export declare class AgentRuntime {
     private refreshModelPolicy;
     private buildInvocationOptions;
     private buildToolExecutionContext;
+    private emitVerificationGuardIfNeeded;
     private injectMemoryAfterCompact;
 }

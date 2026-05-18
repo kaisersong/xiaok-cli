@@ -15,6 +15,19 @@ export type RuntimeEvent =
   | { type: 'tool_started'; sessionId: string; turnId: string; toolName: string; toolInput: Record<string, unknown> }
   | { type: 'tool_finished'; sessionId: string; turnId: string; toolName: string; ok: boolean }
   | { type: 'compact_triggered'; sessionId: string; turnId: string }
+  | {
+      type: 'guard_evaluated';
+      sessionId: string;
+      turnId: string;
+      guardId: string;
+      mode: 'passed' | 'warned' | 'blocked' | 'override';
+      category?: string;
+      reason?: string;
+      action?: string;
+      taskId?: string;
+      artifactId?: string;
+      target?: string;
+    }
   // Extended hook events (aligned with Claude Code hook_event_name schema)
   | { type: 'pre_tool_use'; sessionId: string; turnId: string; toolName: string; toolInput: Record<string, unknown>; toolUseId: string }
   | { type: 'post_tool_use'; sessionId: string; turnId: string; toolName: string; toolInput: Record<string, unknown>; toolResponse: unknown; toolUseId: string }

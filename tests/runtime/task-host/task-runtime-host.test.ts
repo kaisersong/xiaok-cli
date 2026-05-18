@@ -394,6 +394,47 @@ describe('InProcessTaskRuntimeHost', () => {
   });
 
   describe('deliverable gate integration', () => {
+    it('blocks completion when the AHE artifact evidence guard sees no delivered artifact', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '已完成',
+        });
+      });
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        aheGuards: { artifactEvidence: true },
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: '生成 A 客户方案 PPT',
+        materials: [{ materialId: material.materialId }],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'failed', 3000);
+      const recovered = await host.recoverTask('task_1');
+      expect(recovered.snapshot.status).toBe('failed');
+      expect(recovered.snapshot.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'progress',
+          stage: 'blocked',
+          message: expect.stringContaining('artifact evidence'),
+        }),
+      ]));
+      expect(await host.getActiveTask()).toBeNull();
+    });
+
     it('retries runner when built-in plan check detects incomplete steps', async () => {
       let callCount = 0;
       const runner = vi.fn<TaskRunner>(async ({ prompt, emitRuntimeEvent }) => {

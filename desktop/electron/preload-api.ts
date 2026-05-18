@@ -74,6 +74,8 @@ export const PRELOAD_API_KEYS = [
   'kswarmStop',
   'kswarmRestart',
   'onKSwarmStatus',
+  'exportTraceBundle',
+  'diagnose',
   'syncScheduledTasks',
   'onScheduledTaskDue',
   'listMemories',
@@ -229,6 +231,8 @@ export interface KSwarmServiceStatus {
   lastError: string | null;
 }
 
+export type DesktopTraceTarget = { kind: 'session' | 'project' | 'task'; id: string };
+
 export interface DesktopApi {
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
@@ -307,6 +311,8 @@ export interface DesktopApi {
   kswarmStop(): Promise<void>;
   kswarmRestart(): Promise<void>;
   onKSwarmStatus(handler: (status: KSwarmServiceStatus) => void): () => void;
+  exportTraceBundle(input: DesktopTraceTarget): Promise<{ ok: boolean; path?: string; error?: string }>;
+  diagnose(input: DesktopTraceTarget): Promise<unknown>;
   syncScheduledTasks(tasks: Array<{ id: string; cronExpr: string; enabled: boolean }>): Promise<void>;
   onScheduledTaskDue(handler: (event: { taskId: string }) => void): () => void;
   listMemories(): Promise<unknown[]>;
@@ -422,6 +428,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
         ipcRenderer.off(channel, listener);
       };
     },
+    exportTraceBundle: (input) => ipcRenderer.invoke('desktop:trace:export', input) as Promise<{ ok: boolean; path?: string; error?: string }>,
+    diagnose: (input) => ipcRenderer.invoke('desktop:diagnose', input) as Promise<unknown>,
     syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks) as Promise<void>,
     onScheduledTaskDue(handler) {
       const channel = 'desktop:scheduledTaskDue';

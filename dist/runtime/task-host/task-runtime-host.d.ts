@@ -26,6 +26,10 @@ export interface InProcessTaskRuntimeHostOptions {
     now?: () => number;
     createTaskId?: () => string;
     createSessionId?: () => string;
+    aheGuards?: {
+        artifactEvidence?: boolean;
+        recoveryContinuity?: boolean;
+    };
 }
 export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private readonly options;
@@ -67,6 +71,7 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     isExecutingForTest(taskId: string): boolean;
     private executeTask;
     private appendRuntimeEvent;
+    private applyArtifactEvidenceGuard;
     private appendEvent;
     private updateSnapshot;
     private enqueueMutation;

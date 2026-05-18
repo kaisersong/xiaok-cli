@@ -197,6 +197,45 @@ describe('ToolRegistry', () => {
     ]);
   });
 
+  it('blocks protected delivered artifact overwrites before tool execution', async () => {
+    const execute = vi.fn(async () => 'should not write');
+    const guardDecisions: unknown[] = [];
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      protectedOutputGuard: {
+        getProtectedArtifacts: () => [{ artifactId: 'artifact-1', path: '/tmp/final-report.md' }],
+        onDecision: (decision) => guardDecisions.push(decision),
+      },
+    }, [{
+      permission: 'write',
+      definition: {
+        name: 'write',
+        description: 'mock write',
+        inputSchema: {
+          type: 'object',
+          properties: { file_path: { type: 'string' }, content: { type: 'string' } },
+          required: ['file_path', 'content'],
+        },
+      },
+      execute,
+    }]);
+
+    const result = await registry.executeTool('write', {
+      file_path: '/tmp/final-report.md',
+      content: 'replacement',
+    });
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(result).toContain('protected delivered artifact');
+    expect(guardDecisions).toEqual([
+      expect.objectContaining({
+        ok: false,
+        mode: 'block',
+        reason: expect.stringContaining('artifact-1'),
+      }),
+    ]);
+  });
+
   it('normalizes thrown tool errors without duplicating the Error prefix', async () => {
     const registry = new ToolRegistry({
       permissionManager: new PermissionManager({ mode: 'auto' }),

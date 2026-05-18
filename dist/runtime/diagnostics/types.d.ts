@@ -1,6 +1,6 @@
 export type DiagnosisHealth = 'healthy' | 'running' | 'waiting' | 'blocked' | 'failed' | 'unknown';
 export type DiagnosisSeverity = 'critical' | 'high' | 'medium' | 'low';
-export type DiagnosisCategory = 'blocked_task' | 'dispatch_stalled' | 'empty_artifact' | 'approval_wait' | 'quality_failure' | 'unknown';
+export type DiagnosisCategory = 'blocked_task' | 'dispatch_stalled' | 'empty_artifact' | 'approval_wait' | 'missing_verification' | 'protected_output' | 'missing_recovery_runtime' | 'quality_failure' | 'unknown';
 export interface DiagnosisFinding {
     id: string;
     severity: DiagnosisSeverity;
