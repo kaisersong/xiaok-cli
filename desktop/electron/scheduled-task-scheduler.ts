@@ -69,9 +69,7 @@ export function computeNextRunAt(
   return undefined;
 }
 
-const SCHEDULED_CONTEXT_PREFIX = `[SYSTEM: This is a scheduled/automated task. ` +
-  `The user set this up to run automatically. ` +
-  `Please provide a friendly, concise reminder response.]\n\n`;
+const SCHEDULED_CONTEXT_PREFIX = `[SYSTEM: 这是用户设置的自动定时任务，请给出友好简洁的回复。]\n\n`;
 
 const EXECUTOR_TIMEOUT_MS = 5 * 60_000; // 5 minutes
 const MAX_CONCURRENT = 2;
@@ -114,6 +112,14 @@ export class ScheduledTaskScheduler {
       if (current) incoming.set(id, current);
     }
     this.tasks = [...incoming.values()];
+    // Heal tasks missing nextRunAt (e.g. due to renderer bug overwriting state)
+    const now = Date.now();
+    for (let i = 0; i < this.tasks.length; i++) {
+      const t = this.tasks[i];
+      if (t.status === 'active' && t.frequency !== 'manual' && !t.nextRunAt) {
+        this.tasks[i] = { ...t, nextRunAt: computeNextRunAt(t.frequency, t.scheduleConfig, now) };
+      }
+    }
     this.persistToDisk();
   }
 
@@ -165,6 +171,14 @@ export class ScheduledTaskScheduler {
       if (Array.isArray(loaded) && loaded.length > 0) {
         // Disk data is loaded unconditionally on startup (before any renderer sync)
         this.tasks = loaded;
+        // Heal tasks missing nextRunAt
+        const now = Date.now();
+        for (let i = 0; i < this.tasks.length; i++) {
+          const t = this.tasks[i];
+          if (t.status === 'active' && t.frequency !== 'manual' && !t.nextRunAt) {
+            this.tasks[i] = { ...t, nextRunAt: computeNextRunAt(t.frequency, t.scheduleConfig, now) };
+          }
+        }
         console.log(`[scheduled-task] Loaded ${loaded.length} tasks from disk`);
       }
     } catch {
@@ -247,9 +261,9 @@ export class ScheduledTaskScheduler {
     });
 
     Promise.race([this.executor(prompt), timeoutPromise])
-      .then(() => {
+      .then((result) => {
         console.log(`[scheduled-task] Completed: "${task.name}"`);
-        this.advanceSchedule(task, true);
+        this.advanceSchedule(task, true, result?.taskId);
       })
       .catch((err) => {
         console.error(`[scheduled-task] Failed: "${task.name}"`, (err as Error).message);
@@ -265,7 +279,7 @@ export class ScheduledTaskScheduler {
       });
   }
 
-  private advanceSchedule(task: ScheduledTaskRecord, success: boolean): void {
+  private advanceSchedule(task: ScheduledTaskRecord, success: boolean, runtimeTaskId?: string): void {
     const now = Date.now();
     if (success) {
       const nextRunAt = computeNextRunAt(task.frequency, task.scheduleConfig, now);
@@ -275,15 +289,16 @@ export class ScheduledTaskScheduler {
     }
     // On failure: leave nextRunAt unchanged so next scan retries
     this.persistToDisk();
-    this.notifyRenderer(task, success);
+    this.notifyRenderer(task, success, runtimeTaskId);
   }
 
-  private notifyRenderer(task: ScheduledTaskRecord, success: boolean): void {
+  private notifyRenderer(task: ScheduledTaskRecord, success: boolean, runtimeTaskId?: string): void {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return;
     // Find the updated task record to send authoritative state
     const current = this.tasks.find(t => t.id === task.id);
     this.mainWindow.webContents.send('desktop:scheduledTaskDue', {
       taskId: task.id,
+      runtimeTaskId,
       completed: true,
       success,
       lastRunAt: current?.lastRunAt,

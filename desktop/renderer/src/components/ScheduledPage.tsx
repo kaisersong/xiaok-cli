@@ -35,9 +35,7 @@ const FREQUENCY_OPTIONS = [
 ];
 
 // Scheduled task context prefix — placed at the START of prompt so LLM sees it first
-const SCHEDULED_CONTEXT_PREFIX = `[SYSTEM: This is a scheduled/automated task. ` +
-  `The user set this up to run automatically. ` +
-  `Please provide a friendly, concise reminder response.]\n\n`;
+const SCHEDULED_CONTEXT_PREFIX = `[SYSTEM: 这是用户设置的自动定时任务，请给出友好简洁的回复。]\n\n`;
 
 const INTERVAL_OPTIONS = [
   { value: 30 },
@@ -290,8 +288,10 @@ export function ScheduledPage() {
     setConfirmDeleteId(id);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!confirmDeleteId) return;
+    // Cancel in main process (IPC reminder) so it won't be re-merged on reload
+    try { await api.cancelReminder(confirmDeleteId); } catch { /* may not exist in IPC */ }
     saveTasks(tasks.filter(task => task.id !== confirmDeleteId));
     setConfirmDeleteId(null);
   };
@@ -356,10 +356,11 @@ export function ScheduledPage() {
         threadId = thread.id;
       }
 
-      // Update task record
+      // Update task record — recompute nextRunAt so scheduler continues auto-executing
+      const now = Date.now();
       saveTasks(tasks.map(t =>
         t.id === task.id
-          ? { ...t, lastRunAt: Date.now(), updatedAt: Date.now(), threadId }
+          ? { ...t, lastRunAt: now, updatedAt: now, threadId, nextRunAt: computeNextRunAt(t.frequency, t.scheduleConfig, now) }
           : t
       ));
 

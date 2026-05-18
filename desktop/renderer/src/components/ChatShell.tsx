@@ -277,10 +277,12 @@ export function ChatShell() {
     let lastResult: TaskResult | null = null;
     const replayEvents: DesktopTaskEvent[] = []; // Local array for Canvas, not ref
     if (addPromptAsUser && snapshot?.prompt) {
+      // Strip scheduled task system prefix — it's for the model, not the user
+      const displayPrompt = snapshot.prompt.replace(/^\[SYSTEM:[^\]]*\]\n*/s, '');
       msgs.push({
         id: `msg-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: 'user',
-        content: snapshot.prompt,
+        content: displayPrompt,
       });
     }
 

@@ -10,6 +10,7 @@
  */
 
 import { useEffect } from 'react';
+import { api } from '../api';
 
 const STORAGE_KEY = 'xiaok:scheduled-tasks';
 
@@ -26,8 +27,9 @@ export function useScheduledTaskBootstrap(): void {
     }
 
     // 2. Listen for task execution notifications from main — trust main's state
-    const unsub = desktop.onScheduledTaskDue((payload: {
+    const unsub = desktop.onScheduledTaskDue(async (payload: {
       taskId: string;
+      runtimeTaskId?: string;
       completed?: boolean;
       success?: boolean;
       lastRunAt?: number;
@@ -41,8 +43,25 @@ export function useScheduledTaskBootstrap(): void {
 
       // Use authoritative state from main process — no local recalculation
       if (payload.success && payload.lastRunAt) {
+        const task = currentTasks[idx];
+
+        // Associate auto-execution result with a thread
+        if (payload.runtimeTaskId) {
+          try {
+            let threadId = task.threadId;
+            if (threadId) {
+              await api.updateThreadTaskId(threadId, payload.runtimeTaskId);
+            } else {
+              const thread = await api.createThread({ title: (task.name || '').slice(0, 40) });
+              await api.updateThreadTaskId(thread.id, payload.runtimeTaskId);
+              threadId = thread.id;
+            }
+            task.threadId = threadId;
+          } catch { /* ignore thread errors */ }
+        }
+
         currentTasks[idx] = {
-          ...currentTasks[idx],
+          ...task,
           lastRunAt: payload.lastRunAt,
           nextRunAt: payload.nextRunAt,
           updatedAt: payload.lastRunAt,

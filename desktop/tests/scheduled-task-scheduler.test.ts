@@ -360,7 +360,7 @@ describe('ScheduledTaskScheduler', () => {
     const window = createMockWindow();
     const scheduler = new ScheduledTaskScheduler({ scanIntervalMs: 60_000, dataDir: tmpDir });
     scheduler.setMainWindow(window);
-    scheduler.setExecutor(async () => ({ taskId: 'r' }));
+    scheduler.setExecutor(async () => ({ taskId: 'runtime_task_123' }));
 
     const task = makeTask({ id: 'notify_ok', nextRunAt: Date.now() - 1000 });
     scheduler.syncTasks([task]);
@@ -371,6 +371,7 @@ describe('ScheduledTaskScheduler', () => {
       'desktop:scheduledTaskDue',
       expect.objectContaining({
         taskId: 'notify_ok',
+        runtimeTaskId: 'runtime_task_123',
         completed: true,
         success: true,
         lastRunAt: expect.any(Number),
@@ -586,5 +587,59 @@ describe('ScheduledTaskScheduler', () => {
     const updated = scheduler.getTasks().find(t => t.id === task.id)!;
     expect(updated.lastRunAt).toBeGreaterThan(0);
     scheduler.stop();
+  });
+
+  // ─── nextRunAt healing ────────────────────────────────────────────
+
+  it('syncTasks heals active non-manual tasks with missing nextRunAt', () => {
+    const scheduler = new ScheduledTaskScheduler({ dataDir: tmpDir });
+    const task = makeTask({
+      id: 'heal_sync',
+      frequency: 'daily',
+      status: 'active',
+      scheduleConfig: { hour: 9, minute: 0 },
+      nextRunAt: undefined,
+    });
+    scheduler.syncTasks([task]);
+
+    const healed = scheduler.getTasks().find(t => t.id === 'heal_sync')!;
+    expect(healed.nextRunAt).toBeGreaterThan(0);
+  });
+
+  it('syncTasks does not overwrite existing nextRunAt', () => {
+    const scheduler = new ScheduledTaskScheduler({ dataDir: tmpDir });
+    const futureTime = Date.now() + 999_999;
+    const task = makeTask({
+      id: 'heal_no_overwrite',
+      frequency: 'hourly',
+      status: 'active',
+      scheduleConfig: { intervalMinutes: 60 },
+      nextRunAt: futureTime,
+    });
+    scheduler.syncTasks([task]);
+
+    const result = scheduler.getTasks().find(t => t.id === 'heal_no_overwrite')!;
+    expect(result.nextRunAt).toBe(futureTime);
+  });
+
+  it('loadFromDisk heals tasks with missing nextRunAt', () => {
+    // Write a task with missing nextRunAt to disk
+    const task = makeTask({
+      id: 'heal_disk',
+      frequency: 'hourly',
+      status: 'active',
+      scheduleConfig: { intervalMinutes: 30 },
+      nextRunAt: undefined,
+    });
+    const { writeFileSync, mkdirSync } = require('node:fs');
+    mkdirSync(tmpDir, { recursive: true });
+    writeFileSync(join(tmpDir, 'scheduled-tasks.json'), JSON.stringify([task]));
+
+    const scheduler = new ScheduledTaskScheduler({ dataDir: tmpDir });
+    scheduler.start();
+    scheduler.stop();
+
+    const healed = scheduler.getTasks().find(t => t.id === 'heal_disk')!;
+    expect(healed.nextRunAt).toBeGreaterThan(0);
   });
 });
