@@ -2123,6 +2123,137 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
   };
 }
 
+export function createKSwarmContinueProjectTool(kswarmService: KSwarmService): Tool {
+  return {
+    permission: 'safe',
+    definition: {
+      name: 'continue_project',
+      description: '诊断并安全推进一个已经卡住的 KSwarm 项目。仅在用户要求小K帮忙推进项目，或当前上下文明确包含卡住项目时调用。该工具不会跳过必需任务，也不会人工放行不合格结果。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string', description: 'KSwarm 项目 ID，例如 proj-1779090338840' },
+          expectedPrimaryTaskId: { type: 'string', description: '当前卡住的主任务 ID，用于防止状态过期' },
+          expectedTaskUpdatedAt: {
+            oneOf: [{ type: 'number' }, { type: 'string' }],
+            description: '卡住任务在诊断时的更新时间，用于防止状态过期',
+          },
+          idempotencyKey: { type: 'string', description: '本次继续推进操作的幂等键；同一次会话重试时保持一致' },
+        },
+        required: ['projectId'],
+      },
+    },
+    async execute(input) {
+      const projectId = typeof input.projectId === 'string' ? input.projectId.trim() : '';
+      if (!projectId) return JSON.stringify({ error: 'projectId is required' });
+
+      const body: Record<string, unknown> = {
+        idempotencyKey: typeof input.idempotencyKey === 'string' && input.idempotencyKey.trim()
+          ? input.idempotencyKey.trim()
+          : `xiaok-chat-${projectId}-${Date.now()}`,
+      };
+      if (typeof input.expectedPrimaryTaskId === 'string' && input.expectedPrimaryTaskId.trim()) {
+        body.expectedPrimaryTaskId = input.expectedPrimaryTaskId.trim();
+      }
+      if (input.expectedTaskUpdatedAt !== undefined && input.expectedTaskUpdatedAt !== null && input.expectedTaskUpdatedAt !== '') {
+        body.expectedTaskUpdatedAt = input.expectedTaskUpdatedAt;
+      }
+
+      try {
+        const res = await kswarmService.request(`/projects/${encodeURIComponent(projectId)}/continue`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const payload = await res.json().catch(() => ({})) as Record<string, unknown>;
+        if (!res.ok) {
+          return JSON.stringify({
+            ok: false,
+            status: res.status,
+            error: payload.error || `continue_project_failed_${res.status}`,
+            ...payload,
+          });
+        }
+        return JSON.stringify(payload);
+      } catch (err) {
+        return JSON.stringify({ ok: false, error: `KSwarm service unavailable: ${(err as Error).message}` });
+      }
+    },
+  };
+}
+
+export function createKSwarmRepairProjectTaskTool(kswarmService: KSwarmService): Tool {
+  return {
+    permission: 'safe',
+    definition: {
+      name: 'repair_project_task',
+      description: '修复 KSwarm 项目中卡住或失败的任务，并把修复后的产物提交回项目审核。仅当用户要求诊断/推进已有 Swarm 项目，且上下文中给出 projectId 和 taskId 时调用。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string', description: 'KSwarm 项目 ID' },
+          taskId: { type: 'string', description: '需要修复并提交的任务 ID，通常来自项目干预上下文' },
+          expectedTaskUpdatedAt: {
+            oneOf: [{ type: 'number' }, { type: 'string' }],
+            description: '任务更新时间戳，用于防止覆盖已经变化的任务状态',
+          },
+          summary: { type: 'string', description: '本次修复提交的简要说明' },
+          filename: { type: 'string', description: '要写入 artifacts 的文件名，例如 report.md' },
+          content: { type: 'string', description: '修复后的完整产物正文，不能是占位符或空内容' },
+          mimeType: { type: 'string', description: '产物 MIME 类型，默认 text/markdown' },
+          idempotencyKey: { type: 'string', description: '可选幂等键；重复调用同一请求时复用' },
+        },
+        required: ['projectId', 'taskId', 'filename', 'content'],
+      },
+    },
+    async execute(input) {
+      const projectId = String(input.projectId || '').trim();
+      const taskId = String(input.taskId || '').trim();
+      const filename = String(input.filename || '').trim();
+      const content = typeof input.content === 'string' ? input.content : '';
+      if (!projectId || !taskId || !filename || !content.trim()) {
+        return JSON.stringify({ ok: false, error: 'projectId, taskId, filename and content are required' });
+      }
+
+      const body = {
+        idempotencyKey: String(input.idempotencyKey || `repair-${projectId}-${taskId}-${Date.now()}`).trim(),
+        resolution: 'repair_and_submit',
+        fromAgent: 'xiaok',
+        expectedPrimaryTaskId: taskId,
+        expectedTaskUpdatedAt: input.expectedTaskUpdatedAt ?? undefined,
+        summary: typeof input.summary === 'string' && input.summary.trim() ? input.summary.trim() : `Repaired submission for ${taskId}`,
+        artifacts: [
+          {
+            filename,
+            content,
+            mimeType: typeof input.mimeType === 'string' && input.mimeType.trim() ? input.mimeType.trim() : 'text/markdown',
+          },
+        ],
+      };
+
+      try {
+        const res = await kswarmService.request(`/projects/${encodeURIComponent(projectId)}/intervention/resolve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return JSON.stringify({
+            ok: false,
+            error: payload?.error || `repair_project_task_failed:${res.status}`,
+            status: res.status,
+            ...payload,
+          });
+        }
+        return JSON.stringify(payload);
+      } catch (err) {
+        return JSON.stringify({ ok: false, error: `KSwarm service unavailable: ${(err as Error).message}` });
+      }
+    },
+  };
+}
+
 function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Tool[], dataRoot: string, kswarmService: KSwarmService): TaskRunner {
   const cwd = process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
@@ -2131,6 +2262,8 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
 
   // Register kswarm create_project tool (allows AI to create multi-agent projects from chat)
   registry.registerTool(createKSwarmCreateProjectTool(kswarmService));
+  registry.registerTool(createKSwarmContinueProjectTool(kswarmService));
+  registry.registerTool(createKSwarmRepairProjectTaskTool(kswarmService));
 
   // Register report_progress tool (TaskPanel progress reporting)
   const reportProgressTool: Tool = {

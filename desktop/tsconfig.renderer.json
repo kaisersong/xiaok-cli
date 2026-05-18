@@ -14,7 +14,7 @@
     }
   },
   "include": [
-    "renderer/**/*.ts",
-    "renderer/**/*.tsx"
+    "renderer/src/main.tsx",
+    "renderer/src/global.d.ts"
   ]
 }

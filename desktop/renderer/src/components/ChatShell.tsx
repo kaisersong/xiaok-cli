@@ -6,10 +6,27 @@ import { ChatView, type ChatMessage, type ToolStep } from './ChatView';
 import { CanvasPanel } from './CanvasPanel';
 import { TaskPanel } from './TaskPanel';
 import type { ThreadRecord } from '../api/types';
-import type { DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
+import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
 import { useSidebarCollapse } from '../layouts/AppLayout';
 
 const log = createLogger('ChatShell');
+const ARTIFACT_KINDS = new Set<ArtifactKind>(['pptx', 'pdf', 'docx', 'xlsx', 'html', 'image', 'text', 'other']);
+
+function normalizeArtifactKind(kind: string): ArtifactKind {
+  return ARTIFACT_KINDS.has(kind as ArtifactKind) ? kind as ArtifactKind : 'other';
+}
+
+function artifactSummaryFromEvent(event: Extract<DesktopTaskEvent, { type: 'artifact_recorded' }>): ArtifactSummary {
+  return {
+    artifactId: event.artifactId,
+    kind: normalizeArtifactKind(event.kind),
+    title: event.label,
+    createdAt: event.turnId,
+    previewAvailable: event.previewAvailable,
+    filePath: event.filePath,
+    creator: event.creator ?? 'agent',
+  };
+}
 
 export function ChatShell() {
   const { taskId } = useParams<{ taskId: string }>();
@@ -38,9 +55,10 @@ export function ChatShell() {
   const toolStepsMsgIdRef = useRef<string | null>(null);
   const toolStepsActiveRef = useRef(false);
 
-  // Read initialPrompt from navigation state (from WelcomePage)
-  const state = location.state as { initialPrompt?: string } | undefined;
+  // Read prompt state from navigation (WelcomePage initial submit or project help draft)
+  const state = location.state as { initialPrompt?: string; draftPrompt?: string } | undefined;
   const initialPrompt = state?.initialPrompt;
+  const draftPrompt = state?.draftPrompt;
 
   const handleEvent = useCallback((rawEvent: { type: string }) => {
     const event = rawEvent as DesktopTaskEvent;
@@ -91,22 +109,14 @@ export function ChatShell() {
         break;
       }
       case 'artifact_recorded': {
-        const ar = event as { artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string; creator?: string };
+        const artifact = artifactSummaryFromEvent(event);
         setResult(prev => {
           if (!prev) return prev;
           return {
             ...prev,
             artifacts: [
               ...(prev.artifacts || []),
-              {
-                artifactId: ar.artifactId,
-                kind: ar.kind,
-                title: ar.label,
-                createdAt: ar.turnId,
-                previewAvailable: ar.previewAvailable,
-                filePath: ar.filePath,
-                creator: ar.creator ?? 'agent',
-              },
+              artifact,
             ],
           };
         });
@@ -292,26 +302,10 @@ export function ChatShell() {
       // For replay, also collect tool_steps so past tasks show tool execution
       let replayToolSteps: ToolStep[] = [];
       let replayToolMsgId: string | null = null;
+      const replayArtifacts: ArtifactSummary[] = [];
       for (const ev of snapshot.events) {
         if (ev.type === 'artifact_recorded') {
-          const ar = ev as { artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string; creator?: string };
-          if (lastResult) {
-            lastResult = {
-              ...lastResult,
-              artifacts: [
-                ...(lastResult.artifacts || []),
-                {
-                  artifactId: ar.artifactId,
-                  kind: ar.kind,
-                  title: ar.label,
-                  createdAt: ar.turnId,
-                  previewAvailable: ar.previewAvailable,
-                  filePath: ar.filePath,
-                  creator: ar.creator ?? 'agent',
-                },
-              ],
-            };
-          }
+          replayArtifacts.push(artifactSummaryFromEvent(ev));
           continue;
         }
         if (ev.type === 'progress_plan_reported') {
@@ -367,6 +361,9 @@ export function ChatShell() {
           lastProgress = null;
         } else if (ev.type === 'result') {
           const r = (ev as { result: TaskResult }).result;
+          const resultWithArtifacts = replayArtifacts.length > 0
+            ? { ...r, artifacts: [...(r.artifacts || []), ...replayArtifacts] }
+            : r;
           if (accumulated || r.summary) {
             msgs.push({
               id: `msg-assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -375,7 +372,7 @@ export function ChatShell() {
             });
             accumulated = '';
           }
-          lastResult = r;
+          lastResult = resultWithArtifacts;
         }
       }
       if (replayToolSteps.length > 0 && replayToolMsgId) {
@@ -417,6 +414,7 @@ export function ChatShell() {
     setThread(null);
     setStatus('idle');
     setLoadError(null);
+    setPrompt(draftPrompt || '');
 
     // If we have an initialPrompt from WelcomePage, pre-populate
     if (initialPrompt) {
@@ -451,7 +449,7 @@ export function ChatShell() {
             if (snapshot) {
               console.log(`[ChatShell] Replaying task=${tid} prompt="${snapshot.prompt?.slice(0, 40)}" status=${snapshot.status} events=${snapshot.events?.length}`);
               const isFirst = tid === allTaskIds[0];
-              const addPrompt = snapshot.prompt && (!isFirst || !initialPrompt);
+              const addPrompt = Boolean(snapshot.prompt && (!isFirst || !initialPrompt));
               const { msgs: replayMsgs, result: replayResult, events: replayEvents } = replaySnapshot(snapshot, addPrompt);
               console.log(`[ChatShell] Replayed task=${tid} → ${replayMsgs.length} msgs, addPrompt=${addPrompt}`);
               allMessages.push(...replayMsgs);
@@ -522,7 +520,7 @@ export function ChatShell() {
       unsubRef.current?.();
       unsubRef.current = null;
     };
-  }, [taskId, initialPrompt, handleEvent, replaySnapshot]);
+  }, [taskId, initialPrompt, draftPrompt, handleEvent, replaySnapshot]);
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
     if (!taskId) return;

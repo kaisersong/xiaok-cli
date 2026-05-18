@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDesktopServices, createKSwarmCreateProjectTool } from '../../electron/desktop-services.js';
+import { createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmRepairProjectTaskTool } from '../../electron/desktop-services.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 
 function mockKSwarmService(): KSwarmService {
@@ -32,12 +32,14 @@ describe('desktop services', () => {
 
   it('imports material, creates a task, runs without confirmation, and recovers result', async () => {
     const sourcePath = join(rootDir, 'A客户需求.md');
+    const artifactPath = join(rootDir, 'A客户方案.pptx');
     writeFileSync(sourcePath, '# A 客户需求\n需要制造业数字化方案。');
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
       kswarmService: mockKSwarmService(),
       now: () => 300,
       runner: async ({ sessionId, emitRuntimeEvent }) => {
+        writeFileSync(artifactPath, 'fake pptx');
         emitRuntimeEvent({
           type: 'assistant_delta',
           sessionId,
@@ -53,6 +55,17 @@ describe('desktop services', () => {
           intentId: 'intent_1',
           stepId: 'step_1',
           delta: '回复内容',
+        });
+        emitRuntimeEvent({
+          type: 'artifact_recorded',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stageId: 'stage_1',
+          artifactId: 'artifact_1',
+          label: 'A客户方案.pptx',
+          kind: 'pptx',
+          path: artifactPath,
         });
         emitRuntimeEvent({
           type: 'receipt_emitted',
@@ -94,6 +107,36 @@ describe('desktop services', () => {
       expect.objectContaining({ type: 'assistant_delta', delta: '回复内容' }),
       expect.objectContaining({ type: 'result', result: expect.objectContaining({ summary: '模型回复内容' }) }),
       expect.objectContaining({ type: 'result' }),
+    ]));
+  });
+
+  it('completes operational tasks without artifact evidence', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner: async ({ sessionId, emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '已创建 xiaok 定时任务。',
+        });
+      },
+    });
+
+    const task = await services.createTask({
+      prompt: '创建定时任务，每天晚上11点同步mydocs',
+      materials: [],
+    });
+
+    await waitFor(async () => (await services.recoverTask(task.taskId)).snapshot.status === 'completed');
+    const recovered = await services.recoverTask(task.taskId);
+    expect(recovered.snapshot.status).toBe('completed');
+    expect(recovered.snapshot.events).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'error', message: 'Task is being completed without artifact evidence.' }),
     ]));
   });
 
@@ -698,6 +741,109 @@ describe('desktop services', () => {
       goal: 'Verify seed routing',
       poAgent: 'xiaok-po',
       members: ['xiaok-worker'],
+    });
+  });
+
+  it('forwards chat continue_project tool requests to kswarm', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        return new Response(JSON.stringify({
+          ok: true,
+          action: 'continue_project',
+          strategy: 'retry_best_agent',
+          dispatched: ['item-1'],
+        }));
+      },
+    };
+
+    const tool = createKSwarmContinueProjectTool(kswarmService);
+    const result = await tool.execute({
+      projectId: 'proj-1',
+      expectedPrimaryTaskId: 'item-1',
+      expectedTaskUpdatedAt: 1779093510355,
+      idempotencyKey: 'chat-idem-1',
+    });
+
+    expect(JSON.parse(result)).toMatchObject({
+      ok: true,
+      action: 'continue_project',
+      strategy: 'retry_best_agent',
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].path).toBe('/projects/proj-1/continue');
+    expect(requests[0].init?.method).toBe('POST');
+    expect(JSON.parse(String(requests[0].init?.body))).toMatchObject({
+      expectedPrimaryTaskId: 'item-1',
+      expectedTaskUpdatedAt: 1779093510355,
+      idempotencyKey: 'chat-idem-1',
+    });
+  });
+
+  it('does not call kswarm when continue_project is missing projectId', async () => {
+    const request = vi.fn();
+    const tool = createKSwarmContinueProjectTool({
+      ...mockKSwarmService(),
+      request,
+    });
+
+    const result = await tool.execute({ expectedPrimaryTaskId: 'item-1' });
+
+    expect(JSON.parse(result)).toMatchObject({ error: 'projectId is required' });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('repair_project_task submits repaired artifacts through kswarm intervention resolution', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        if (path === '/projects/proj-1/intervention/resolve') {
+          return new Response(JSON.stringify({
+            ok: true,
+            outcome: 'submitted_for_review',
+            projectChanged: true,
+            taskId: 'proj-1__item-1',
+            reviewNotification: 'sent',
+          }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmRepairProjectTaskTool(kswarmService);
+    const result = await tool.execute({
+      projectId: 'proj-1',
+      taskId: 'proj-1__item-1',
+      expectedTaskUpdatedAt: 1779093510355,
+      summary: '已补齐报告',
+      filename: 'foreign_trade_trend.md',
+      content: '这是一份人工补齐后的外贸趋势分析报告正文，包含数据源、假设、分析和结论，长度足够提交审核。',
+    });
+
+    expect(JSON.parse(result)).toMatchObject({
+      ok: true,
+      outcome: 'submitted_for_review',
+      projectChanged: true,
+      reviewNotification: 'sent',
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].path).toBe('/projects/proj-1/intervention/resolve');
+    expect(JSON.parse(String(requests[0].init?.body))).toMatchObject({
+      resolution: 'repair_and_submit',
+      fromAgent: 'xiaok',
+      expectedPrimaryTaskId: 'proj-1__item-1',
+      expectedTaskUpdatedAt: 1779093510355,
+      summary: '已补齐报告',
+      artifacts: [
+        {
+          filename: 'foreign_trade_trend.md',
+          mimeType: 'text/markdown',
+        },
+      ],
     });
   });
 

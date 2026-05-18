@@ -317,6 +317,9 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     if (!this.options.aheGuards?.artifactEvidence) {
       return true;
     }
+    if (!shouldRequireArtifactEvidence(snapshot)) {
+      return true;
+    }
     const artifacts = collectArtifactEvidence(snapshot);
     const decision = evaluateArtifactEvidenceGuard({
       taskId,
@@ -482,3 +485,21 @@ function collectArtifactEvidence(snapshot: TaskSnapshot): unknown[] {
   const eventArtifacts = snapshot.events.filter((event) => event.type === 'artifact_recorded');
   return [...resultArtifacts, ...eventArtifacts];
 }
+
+function shouldRequireArtifactEvidence(snapshot: TaskSnapshot): boolean {
+  const prompt = snapshot.prompt.trim();
+  if (!prompt) {
+    return false;
+  }
+
+  // The current Desktop understanding builder is still sales-deck biased, so
+  // the guard follows explicit user wording rather than inferred deliverable.
+  if (OPERATIONAL_PROMPT_PATTERN.test(prompt)) {
+    return false;
+  }
+  return ARTIFACT_PROMPT_PATTERN.test(prompt);
+}
+
+const OPERATIONAL_PROMPT_PATTERN = /(?:定时任务|提醒我|提醒|闹钟|reminder|schedule|scheduled|继续推进|推进项目|诊断.*项目|项目.*诊断|恢复项目|修复项目|KSwarm|continue_project|让小K帮忙|问小K|卡住|阻塞|stuck project)/iu;
+
+const ARTIFACT_PROMPT_PATTERN = /(?:ppt|pptx|幻灯片|演示文稿|slides?|deck|报告|文档|文章|故事|小故事|初稿|草稿|稿件|markdown|\.md\b|pdf|word|docx|excel|xlsx|表格|图表|图片|image|html|网页|文件|导出|保存为|生成.*(?:报告|文档|ppt|幻灯片|故事|文章|文件)|写.*(?:报告|文档|故事|文章|稿))/iu;

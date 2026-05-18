@@ -9,6 +9,7 @@ import type {
   TaskUnderstanding,
   UserAnswer,
   DesktopTaskEvent,
+  ProtocolId,
 } from '../../../electron/preload-api';
 import type { ThreadRecord } from './types';
 
@@ -463,15 +464,19 @@ export const api = {
       providerId: input.providerId,
       apiKey: input.apiKey,
       baseUrl: input.baseUrl,
-      protocol: input.protocol as never,
+      protocol: input.protocol as ProtocolId,
     });
   },
 
   async updateLlmProvider(providerId: string, input: { label?: string; protocol?: string; apiKey?: string; baseUrl?: string; advanced_json?: Record<string, unknown> }) {
-    return api.saveModelConfig({
+    const payload: DesktopSaveModelConfigInput = {
       providerId,
-      ...input,
-    });
+      label: input.label,
+      apiKey: input.apiKey,
+      baseUrl: input.baseUrl,
+    };
+    if (input.protocol) payload.protocol = input.protocol as ProtocolId;
+    return api.saveModelConfig(payload);
   },
 
   async deleteLlmProvider(providerId: string) {

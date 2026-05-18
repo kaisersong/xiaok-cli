@@ -290,7 +290,11 @@ export interface DesktopApi {
   createReminder(input: { content: string; scheduleAt: number; timezone?: string }): Promise<ReminderRecord>;
   listReminders(): Promise<ReminderRecord[]>;
   cancelReminder(id: string): Promise<boolean>;
-  getReminderStatus(): Promise<{ pendingCount: number; activeReminders: ReminderRecord[] }>;
+  getReminderStatus(): Promise<{
+    pendingCount: number;
+    activeReminders: ReminderRecord[];
+    desktopNotification?: { ok: boolean; skipped?: boolean; reason?: string; at: number } | null;
+  }>;
   onReminder(handler: (event: { reminderId: string; content: string; createdAt: number }) => void): () => void;
   getSkillDebugConfig(): Promise<{ enabled: boolean }>;
   saveSkillDebugConfig(input: { enabled: boolean }): Promise<{ enabled: boolean }>;

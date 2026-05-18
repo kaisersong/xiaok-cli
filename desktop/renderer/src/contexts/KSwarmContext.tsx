@@ -6,7 +6,7 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useKSwarmClient, type KSwarmClientState, type KSwarmClientActions } from '../hooks/useKSwarmClient';
-import type { KSwarmServiceStatus } from '../../../../electron/preload-api';
+import type { KSwarmServiceStatus } from '../../../electron/preload-api';
 
 interface KSwarmContextValue extends KSwarmClientState, KSwarmClientActions {
   serviceStatus: KSwarmServiceStatus | null;

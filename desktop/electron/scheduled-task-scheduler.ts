@@ -1,6 +1,11 @@
 import { BrowserWindow } from 'electron';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  createElectronDesktopNotificationPort,
+  type DesktopNotificationPort,
+  type DesktopNotificationResult,
+} from './desktop-notifications.js';
 
 export interface ScheduledTaskRecord {
   id: string;
@@ -86,10 +91,13 @@ export class ScheduledTaskScheduler {
   private dataDir: string | null = null;
   private pendingQueue: ScheduledTaskRecord[] = [];
   private processingQueue = false;
+  private readonly notificationPort: DesktopNotificationPort;
+  private lastDesktopNotification: (DesktopNotificationResult & { at: number }) | null = null;
 
-  constructor(options: { scanIntervalMs?: number; dataDir?: string } = {}) {
+  constructor(options: { scanIntervalMs?: number; dataDir?: string; notificationPort?: DesktopNotificationPort } = {}) {
     this.scanIntervalMs = options.scanIntervalMs ?? 30_000;
     this.dataDir = options.dataDir ?? null;
+    this.notificationPort = options.notificationPort ?? createElectronDesktopNotificationPort();
   }
 
   setMainWindow(window: BrowserWindow): void {
@@ -126,6 +134,10 @@ export class ScheduledTaskScheduler {
   /** Return current task list (main process is source of truth) */
   getTasks(): ScheduledTaskRecord[] {
     return this.tasks;
+  }
+
+  getLastDesktopNotification(): (DesktopNotificationResult & { at: number }) | null {
+    return this.lastDesktopNotification;
   }
 
   start(): void {
@@ -290,6 +302,30 @@ export class ScheduledTaskScheduler {
     // On failure: leave nextRunAt unchanged so next scan retries
     this.persistToDisk();
     this.notifyRenderer(task, success, runtimeTaskId);
+    void this.notifyDesktop(task, success, runtimeTaskId);
+  }
+
+  private async notifyDesktop(task: ScheduledTaskRecord, success: boolean, runtimeTaskId?: string): Promise<void> {
+    const result = await this.notificationPort.show({
+      title: success ? 'xiaok 定时任务已完成' : 'xiaok 定时任务失败',
+      body: success
+        ? `${task.name}${runtimeTaskId ? `：已生成任务 ${runtimeTaskId}` : ''}`
+        : `${task.name} 执行失败，将在下次扫描时重试`,
+      silent: false,
+      onClick: () => {
+        try {
+          if (this.mainWindow) {
+            if (this.mainWindow.isMinimized()) this.mainWindow.restore();
+            this.mainWindow.show();
+            this.mainWindow.focus();
+          }
+        } catch { /* focus is best-effort */ }
+      },
+    });
+    this.lastDesktopNotification = { ...result, at: Date.now() };
+    if (!result.ok && !result.skipped) {
+      console.warn('[scheduled-task] Desktop notification failed:', result.reason ?? 'unknown');
+    }
   }
 
   private notifyRenderer(task: ScheduledTaskRecord, success: boolean, runtimeTaskId?: string): void {

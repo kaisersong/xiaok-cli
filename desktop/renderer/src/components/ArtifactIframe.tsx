@@ -743,7 +743,7 @@ export const ArtifactIframe = forwardRef<ArtifactIframeHandle, Props>(
         }
       }
 
-      const url = `${apiBaseUrl()}/v1/artifacts/${artifact.key}`
+      const url = `${apiBaseUrl()}/v1/artifacts/${artifact.key || artifact.artifactId}`
       fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
         .then(async (res) => {
           if (!res.ok) throw new Error(`${res.status}`)

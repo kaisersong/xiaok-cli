@@ -10,6 +10,12 @@ interface ProjectInterventionBannerProps {
   onAskXiaok(): void;
 }
 
+function getSecondaryActionLabel(intervention: ProjectIntervention): string {
+  const label = intervention.secondaryAction?.label?.trim();
+  if (!label || label === '问小K') return '让小K帮忙';
+  return label;
+}
+
 export function ProjectInterventionBanner({ intervention, busy = false, onContinue, onAskXiaok }: ProjectInterventionBannerProps) {
   const [detailOpen, setDetailOpen] = useState(false);
   if (!intervention?.required) return null;
@@ -51,7 +57,7 @@ export function ProjectInterventionBanner({ intervention, busy = false, onContin
             className="inline-flex items-center gap-1 rounded-lg bg-[var(--c-bg-page)] px-2.5 py-1 text-[11px] font-medium text-[var(--c-text-primary)] hover:bg-[var(--c-bg-card)] disabled:opacity-50"
           >
             <MessageCircle size={11} />
-            <span>{intervention.secondaryAction?.label || '问小K'}</span>
+            <span>{getSecondaryActionLabel(intervention)}</span>
           </button>
           <button
             type="button"

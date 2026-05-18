@@ -47,6 +47,11 @@ vi.mock('../../renderer/src/shared/desktop', () => ({
     saveFile: mockSaveFile,
   }),
 }));
+vi.mock('../../renderer/src/api', () => ({
+  api: {
+    createThread: vi.fn(),
+  },
+}));
 
 import { ProjectCard } from '../../renderer/src/components/projects/ProjectCard';
 import { ProjectDetailPage } from '../../renderer/src/components/projects/ProjectDetailPage';

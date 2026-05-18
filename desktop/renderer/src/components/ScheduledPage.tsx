@@ -160,10 +160,8 @@ export function ScheduledPage() {
   useEffect(() => {
     loadTasks();
 
-    // Listen for reminder events from main process
-    const handler = () => loadTasks();
-    window.addEventListener('desktop:reminder', handler);
-    return () => window.removeEventListener('desktop:reminder', handler);
+    // Listen for reminder events from the main process preload bridge.
+    return api.onReminder(() => loadTasks());
   }, []);
 
   // Sync tasks to main on mount + refresh when global bootstrap executes a task

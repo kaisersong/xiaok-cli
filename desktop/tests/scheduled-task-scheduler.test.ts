@@ -32,6 +32,19 @@ function createMockWindow() {
   } as any;
 }
 
+function createNotificationRecorder() {
+  const notifications: Array<{ title: string; body: string }> = [];
+  return {
+    notifications,
+    port: {
+      show: vi.fn(async (input: { title: string; body: string }) => {
+        notifications.push({ title: input.title, body: input.body });
+        return { ok: true };
+      }),
+    },
+  };
+}
+
 /** Flush microtask queue (let promises resolve) — process.nextTick is never faked */
 function flushPromises(): Promise<void> {
   return new Promise(resolve => process.nextTick(resolve));
@@ -400,6 +413,58 @@ describe('ScheduledTaskScheduler', () => {
         success: false,
       })
     );
+    scheduler.stop();
+  });
+
+  it('notifies macOS notification port when a background task succeeds', async () => {
+    const notification = createNotificationRecorder();
+    const scheduler = new ScheduledTaskScheduler({
+      scanIntervalMs: 60_000,
+      dataDir: tmpDir,
+      notificationPort: notification.port,
+    });
+    scheduler.setMainWindow(createMockWindow());
+    scheduler.setExecutor(async () => ({ taskId: 'runtime_task_456' }));
+
+    const task = makeTask({ id: 'notify_desktop_ok', name: '每日复盘', nextRunAt: Date.now() - 1000 });
+    scheduler.syncTasks([task]);
+    scheduler.start();
+    await tick(2_000);
+    await flushPromises();
+
+    expect(notification.notifications).toEqual([
+      {
+        title: 'xiaok 定时任务已完成',
+        body: '每日复盘：已生成任务 runtime_task_456',
+      },
+    ]);
+    expect(scheduler.getLastDesktopNotification()).toMatchObject({ ok: true });
+    scheduler.stop();
+  });
+
+  it('notifies macOS notification port when a background task fails', async () => {
+    const notification = createNotificationRecorder();
+    const scheduler = new ScheduledTaskScheduler({
+      scanIntervalMs: 60_000,
+      dataDir: tmpDir,
+      notificationPort: notification.port,
+    });
+    scheduler.setMainWindow(createMockWindow());
+    scheduler.setExecutor(async () => { throw new Error('fail'); });
+
+    const task = makeTask({ id: 'notify_desktop_fail', name: '外贸趋势分析', nextRunAt: Date.now() - 1000 });
+    scheduler.syncTasks([task]);
+    scheduler.start();
+    await tick(2_000);
+    await flushPromises();
+
+    expect(notification.notifications).toEqual([
+      {
+        title: 'xiaok 定时任务失败',
+        body: '外贸趋势分析 执行失败，将在下次扫描时重试',
+      },
+    ]);
+    expect(scheduler.getLastDesktopNotification()).toMatchObject({ ok: true });
     scheduler.stop();
   });
 

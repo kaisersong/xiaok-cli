@@ -110,10 +110,6 @@ async function createWindow(): Promise<BrowserWindow> {
   const reminderStore = new JsonReminderStore(reminderDataDir);
   const reminderScheduler = new ReminderScheduler(reminderStore);
   reminderScheduler.setMainWindow(window);
-  reminderScheduler.setOnDelivery((event) => {
-    // Broadcast to renderer
-    window.webContents.send('desktop:reminder', event);
-  });
   reminderScheduler.start();
 
   // Register reminder tools with AI runner

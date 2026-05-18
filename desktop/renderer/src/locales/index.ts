@@ -234,6 +234,16 @@ export interface LocaleStrings {
     externalLoadFailed: string;
     externalSaveFailed: string;
     externalRemoveFailed: string;
+    statsWeekSummary: (calls: number, avgSec: string, successRate: string) => string;
+    statsCardLine: (calls: number, avgSec: string, successRate: string) => string;
+    statsDetailCalls: string;
+    statsDetailAvgDuration: string;
+    statsDetailSuccessRate: string;
+    statsDetailTokens: string;
+    statsDetailCallsValue: (n: number) => string;
+    statsDetailDurationValue: (ms: number) => string;
+    statsDetailSuccessValue: (success: number, total: number) => string;
+    statsDetailTokensValue: (tokens: number) => string;
   };
   // invite code
   inviteCode: string;
@@ -834,9 +844,11 @@ export interface LocaleStrings {
     save: string;
   };
 
-  security: PromptInjectionTexts & {
+  security: PromptInjectionTexts & Record<string, string> & {
     title: string;
     description: string;
+    tabLayers: string;
+    tabAudit: string;
     auditLoading: string;
   };
 
@@ -1853,9 +1865,24 @@ export interface LocaleStrings {
   scheduledDayOfWeek: string;
   scheduledManual: string;
   scheduledHourly: string;
+  scheduledEvery30Min: string;
+  scheduledEveryHour: string;
+  scheduledEvery2Hours: string;
+  scheduledEvery3Hours: string;
+  scheduledEvery4Hours: string;
+  scheduledEvery6Hours: string;
+  scheduledEvery8Hours: string;
+  scheduledEvery12Hours: string;
   scheduledDaily: string;
   scheduledWeekdays: string;
   scheduledWeekly: string;
+  scheduledSun: string;
+  scheduledMon: string;
+  scheduledTue: string;
+  scheduledWed: string;
+  scheduledThu: string;
+  scheduledFri: string;
+  scheduledSat: string;
   scheduledActive: string;
   scheduledPaused: string;
   scheduledRun: string;

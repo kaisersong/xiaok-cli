@@ -284,11 +284,23 @@ export interface ContinueProjectResult {
   ok: boolean;
   action?: 'continue_project' | string;
   strategy?: string | null;
+  outcome?: 'advanced' | 'submitted_for_review' | 'needs_user_action' | 'not_advanced' | string;
+  projectChanged?: boolean;
+  humanActionRequired?: boolean;
   error?: string;
   status?: number;
   dispatched?: string[];
   idempotent?: boolean;
   xiaokContext?: Record<string, unknown>;
+  nextActions?: Array<{
+    id: string;
+    label?: string;
+    description?: string;
+    toolName?: string;
+    params?: Record<string, unknown>;
+  }>;
+  reviewNotification?: 'sent' | 'failed' | 'not_available' | string;
+  reviewNotificationError?: string;
 }
 
 // ─── Principles Injection ────────────────────────────────────────

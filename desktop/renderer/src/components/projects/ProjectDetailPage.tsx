@@ -17,6 +17,7 @@ import { DeliverableView } from './DeliverableView';
 import { ProjectInterventionBanner } from './ProjectInterventionBanner';
 import { exportProjectMarkdown } from './exportProjectMarkdown';
 import { getDesktopApi } from '../../shared/desktop';
+import { api } from '../../api';
 import { canRetryPlanForProject, isInterruptedPlanProject } from './projectPlanRecovery';
 import {
   describeKSwarmAgentStatus,
@@ -123,6 +124,86 @@ function downloadTextFile(filename: string, content: string, mimeType: string) {
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+function toText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
+}
+
+function buildSwarmContinueContext(detail: ProjectFullDetail, intervention: ProjectIntervention, projectId: string) {
+  const actionContext = intervention.secondaryAction?.context || {};
+  const primaryFailure = intervention.primaryFailure || {};
+  const primaryAction = intervention.primaryAction || null;
+  const taskId = toText(actionContext.taskId) || intervention.primaryTaskId || primaryAction?.taskId || '';
+  const taskTitle = toText(actionContext.taskTitle) || intervention.primaryTaskTitle || '';
+  const lastFailure = toText(actionContext.lastFailure)
+    || primaryFailure.feedback
+    || primaryFailure.reason
+    || intervention.message
+    || '';
+  const downstreamRaw = intervention.downstreamBlockedCount ?? actionContext.downstreamBlockedCount;
+  const downstreamBlockedCount = typeof downstreamRaw === 'number'
+    ? downstreamRaw
+    : Number(downstreamRaw || 0) || 0;
+  return {
+    projectId,
+    projectName: toText(actionContext.projectName) || detail.project.name,
+    projectGoal: detail.project.goal || '',
+    taskId,
+    taskTitle,
+    message: intervention.message || '',
+    headline: intervention.headline || '需要处理',
+    lastFailure,
+    downstreamBlockedCount,
+    strategy: primaryAction?.strategy || 'needs_conversation',
+    expectedPrimaryTaskId: taskId || undefined,
+    expectedTaskUpdatedAt: primaryAction?.taskUpdatedAt ?? intervention.lastEventAt ?? undefined,
+    continueTool: 'continue_project',
+    continueEndpoint: `/projects/${projectId}/continue`,
+    repairTool: 'repair_project_task',
+    repairEndpoint: `/projects/${projectId}/intervention/resolve`,
+    availableTools: ['continue_project', 'repair_project_task'],
+  };
+}
+
+function buildXiaokInterventionDraft(context: ReturnType<typeof buildSwarmContinueContext>): string {
+  const lines = [
+    '请帮我诊断并推进这个 Swarm 项目。',
+    '',
+    `项目：${context.projectName}`,
+    `项目 ID：${context.projectId}`,
+  ];
+  if (context.projectGoal) lines.push(`目标：${context.projectGoal}`);
+  if (context.taskTitle || context.taskId) {
+    lines.push(`当前卡住任务：${context.taskTitle || context.taskId}`);
+  }
+  if (context.taskId) lines.push(`任务 ID：${context.taskId}`);
+  if (context.message) lines.push(`当前提示：${context.message}`);
+  if (context.lastFailure) lines.push(`失败/审核反馈：${context.lastFailure}`);
+  lines.push(`后续影响：后续 ${context.downstreamBlockedCount || 0} 个任务正在等待。`);
+  lines.push(`建议策略：${context.strategy}`);
+  lines.push('');
+  lines.push('请先判断是不是可以安全自动推进。可以安全推进时，调用 continue_project 工具，参数使用：');
+  lines.push(`- projectId: ${context.projectId}`);
+  if (context.expectedPrimaryTaskId) lines.push(`- expectedPrimaryTaskId: ${context.expectedPrimaryTaskId}`);
+  if (context.expectedTaskUpdatedAt !== undefined && context.expectedTaskUpdatedAt !== null) {
+    lines.push(`- expectedTaskUpdatedAt: ${context.expectedTaskUpdatedAt}`);
+  }
+  lines.push('- idempotencyKey: 由你生成一个本次会话唯一值');
+  lines.push('');
+  lines.push('如果 continue_project 返回 needs_user_action、recovery_budget_exceeded，或发现已有产物为空/不合格，请生成完整修复产物并调用 repair_project_task：');
+  lines.push(`- projectId: ${context.projectId}`);
+  if (context.expectedPrimaryTaskId) lines.push(`- taskId: ${context.expectedPrimaryTaskId}`);
+  if (context.expectedTaskUpdatedAt !== undefined && context.expectedTaskUpdatedAt !== null) {
+    lines.push(`- expectedTaskUpdatedAt: ${context.expectedTaskUpdatedAt}`);
+  }
+  lines.push('- filename/content/summary: 使用你修复后的实际产物，不要提交占位符');
+  lines.push('');
+  lines.push('不要跳过必需任务，不要人工放行不合格结果；如果需要调整目标或接受风险，请先向我确认。');
+  return lines.join('\n');
 }
 
 export function ProjectDetailPage() {
@@ -280,11 +361,31 @@ export function ProjectDetailPage() {
         idempotencyKey: `continue-${projectId}-${Date.now()}`,
       });
       if (result?.ok) {
-        showNotice({ action: 'continue', kind: 'success', message: '已继续推进项目。' }, 5_000);
+        const message = result.outcome === 'submitted_for_review'
+          ? (result.reviewNotification === 'failed' ? '已提交审核，但通知失败，请稍后刷新。' : '已提交审核。')
+          : '已继续推进项目。';
+        showNotice({ action: 'continue', kind: 'success', message }, 5_000);
       } else if (result?.error === 'task_state_changed' || result?.status === 409) {
         showNotice({ action: 'continue', kind: 'info', message: '状态已变化，已刷新项目。' }, 8_000);
-      } else if (result?.strategy === 'needs_conversation' || result?.error === 'needs_conversation') {
-        showNotice({ action: 'continue', kind: 'info', message: '当前需要先问小K确认下一步。' }, 8_000);
+      } else if (result?.error === 'no_recoverable_artifacts') {
+        showNotice({ action: 'continue', kind: 'error', message: '没有找到可恢复产物，请查看原因或让小K帮忙处理。' }, 8_000);
+      } else if (
+        result?.outcome === 'needs_user_action' ||
+        result?.humanActionRequired ||
+        result?.error === 'recovery_budget_exceeded'
+      ) {
+        if (detail) {
+          const context = buildSwarmContinueContext(detail, intervention, projectId);
+          window.sessionStorage.setItem('xiaok.swarmContinueContext', JSON.stringify({
+            ...context,
+            xiaokContext: result.xiaokContext || {},
+            nextActions: result.nextActions || [],
+            draftPrompt: buildXiaokInterventionDraft(context),
+          }));
+        }
+        showNotice({ action: 'continue', kind: 'info', message: '需要让小K帮忙诊断并提交修复产物。' }, 8_000);
+      } else if (result?.error === 'needs_conversation' || (result?.strategy === 'needs_conversation' && !result?.error)) {
+        showNotice({ action: 'continue', kind: 'info', message: '当前需要让小K帮忙确认下一步。' }, 8_000);
       } else {
         showNotice({ action: 'continue', kind: 'error', message: '继续推进失败，请稍后重试。' }, 8_000);
       }
@@ -296,15 +397,26 @@ export function ProjectDetailPage() {
     }
   };
 
-  const handleAskXiaok = (intervention: ProjectIntervention) => {
-    const context = intervention.secondaryAction?.context || {
-      projectId,
-      taskId: intervention.primaryTaskId,
-      taskTitle: intervention.primaryTaskTitle,
-      message: intervention.message,
-    };
-    window.sessionStorage.setItem('xiaok.swarmContinueContext', JSON.stringify(context));
-    showNotice({ action: 'continue', kind: 'info', message: '已准备小K上下文，可在会话中继续处理。' }, 8_000);
+  const handleAskXiaok = async (intervention: ProjectIntervention) => {
+    if (!projectId || !detail || actionLoading !== null) return;
+    setActionLoading('ask_xiaok');
+    try {
+      const context = buildSwarmContinueContext(detail, intervention, projectId);
+      const draftPrompt = buildXiaokInterventionDraft(context);
+      const storedContext = { ...context, draftPrompt };
+      window.sessionStorage.setItem('xiaok.swarmContinueContext', JSON.stringify(storedContext));
+      const thread = await api.createThread({ title: `让小K帮忙：${detail.project.name}`.slice(0, 40) });
+      navigate(`/t/${thread.id}`, {
+        state: {
+          draftPrompt,
+          swarmContinueContext: context,
+        },
+      });
+    } catch {
+      showNotice({ action: 'continue', kind: 'error', message: '打开小K会话失败，请稍后重试。' }, 8_000);
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   if (loading) {
@@ -341,7 +453,7 @@ export function ProjectDetailPage() {
   const retryBusy = actionLoading === 'retry';
   const retryCoolingDown = retryCooldownUntil > Date.now();
   const retryDisabled = actionLoading !== null || retryCoolingDown;
-  const retryButtonLabel = retryBusy ? '正在发起' : retryCoolingDown ? '已发起' : t.projectsDetailRetryPlan ?? '重新制定计划';
+  const retryButtonLabel = retryBusy ? '正在发起' : retryCoolingDown ? '已发起' : '重新制定计划';
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -470,7 +582,7 @@ export function ProjectDetailPage() {
         {projectIntervention?.required && (
           <ProjectInterventionBanner
             intervention={projectIntervention}
-            busy={actionLoading === 'continue'}
+            busy={actionLoading === 'continue' || actionLoading === 'ask_xiaok'}
             onContinue={() => handleContinueProject(projectIntervention)}
             onAskXiaok={() => handleAskXiaok(projectIntervention)}
           />

@@ -1,4 +1,5 @@
 import { X } from 'lucide-react';
+import type { MouseEvent } from 'react';
 import type { ProjectIntervention } from '../../hooks/useKSwarmClient';
 
 interface ProjectInterventionDetailDrawerProps {
@@ -8,6 +9,11 @@ interface ProjectInterventionDetailDrawerProps {
 
 export function ProjectInterventionDetailDrawer({ intervention, onClose }: ProjectInterventionDetailDrawerProps) {
   const failure = intervention.primaryFailure;
+  const closeFromButton = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onClose();
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/20" role="presentation" onMouseDown={onClose}>
@@ -22,7 +28,8 @@ export function ProjectInterventionDetailDrawer({ intervention, onClose }: Proje
           <button
             type="button"
             aria-label="关闭"
-            onClick={onClose}
+            onMouseDown={closeFromButton}
+            onClick={closeFromButton}
             className="ml-auto rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
           >
             <X size={14} />
@@ -64,7 +71,7 @@ function formatStrategy(strategy: string) {
     case 'restart_then_retry':
       return '重置过期执行后重新派发。';
     case 'needs_conversation':
-      return '当前不能安全自动推进，需要问小K确认。';
+      return '当前不能安全自动推进，需要让小K帮忙确认。';
     default:
       return '重新派发任务继续推进。';
   }

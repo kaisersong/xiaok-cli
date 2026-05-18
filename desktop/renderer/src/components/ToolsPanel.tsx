@@ -87,7 +87,7 @@ export function ToolsPanel({ toolCalls, toolResults }: ToolsPanelProps) {
               <span className="text-xs font-medium text-[var(--c-text-heading)]">{call.toolName}</span>
               <span className="truncate text-xs text-[var(--c-text-tertiary)]">
                 {typeof call.input === 'object' && call.input !== null
-                  ? (call.input as Record<string, unknown>).path || ''
+                  ? String((call.input as Record<string, unknown>).path || '')
                   : ''}
               </span>
               {duration && (

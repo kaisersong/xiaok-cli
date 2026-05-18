@@ -208,7 +208,15 @@ export function writeCustomBodyFontToStorage(font: string | null): void {
 // ---- Message metadata types ----
 
 export type WebSource = { url: string; title?: string; snippet?: string; index?: number }
-export type ArtifactRef = { artifactId: string; type: string; title?: string }
+export type ArtifactRef = {
+  artifactId: string;
+  type: string;
+  title?: string;
+  key?: string;
+  filename?: string;
+  mime_type?: string;
+  size?: number;
+}
 export type WidgetRef = { widgetId: string; type: string }
 export type BrowserActionRef = { actionId: string; type: string; url?: string }
 export type CodeExecutionRef = { executionId: string; language?: string; status?: string }

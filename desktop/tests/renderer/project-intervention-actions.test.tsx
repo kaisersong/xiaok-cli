@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import type { ProjectFullDetail } from '../../renderer/src/hooks/useKSwarmClient';
 
-const { mockGetProjectFullDetail, mockContinueProject } = vi.hoisted(() => ({
+const { mockGetProjectFullDetail, mockContinueProject, mockCreateThread } = vi.hoisted(() => ({
   mockGetProjectFullDetail: vi.fn(),
   mockContinueProject: vi.fn(),
+  mockCreateThread: vi.fn(),
 }));
 
 vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
@@ -38,6 +39,11 @@ vi.mock('../../renderer/src/components/projects/DeliverableView', () => ({
 vi.mock('../../renderer/src/shared/desktop', () => ({
   getDesktopApi: () => ({}),
 }));
+vi.mock('../../renderer/src/api', () => ({
+  api: {
+    createThread: mockCreateThread,
+  },
+}));
 
 import { ProjectDetailPage } from '../../renderer/src/components/projects/ProjectDetailPage';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
@@ -55,9 +61,21 @@ function renderProjectDetail(detail: ProjectFullDetail) {
       <MemoryRouter initialEntries={[`/projects/${detail.project.id}`]}>
         <Routes>
           <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
+          <Route path="/t/:threadId" element={<ChatRouteProbe />} />
         </Routes>
       </MemoryRouter>
     </LocaleProvider>
+  );
+}
+
+function ChatRouteProbe() {
+  const location = useLocation();
+  const params = useParams<{ threadId: string }>();
+  return (
+    <div>
+      <span data-testid="chat-thread-id">{params.threadId}</span>
+      <pre data-testid="chat-state">{JSON.stringify(location.state)}</pre>
+    </div>
   );
 }
 
@@ -133,7 +151,8 @@ describe('project intervention actions', () => {
 
     expect(await screen.findByText('需要处理')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '继续推进' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '问小K' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '让小K帮忙' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '问小K' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '查看原因' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /人工放行/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /跳过/ })).not.toBeInTheDocument();
@@ -148,6 +167,19 @@ describe('project intervention actions', () => {
     expect(screen.getByRole('dialog', { name: '处理原因' })).toBeInTheDocument();
     expect(screen.getByText(/CLI failed/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /人工放行|跳过|换 Agent/ })).not.toBeInTheDocument();
+  });
+
+  it('closes the reason drawer from the close button on mouse down', async () => {
+    renderProjectDetail(interventionDetail());
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看原因' }));
+    const dialog = screen.getByRole('dialog', { name: '处理原因' });
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: '关闭' }));
+
+    await waitFor(() => {
+      expect(dialog).not.toBeInTheDocument();
+    });
   });
 
   it('calls continueProject with expected stale-state guards', async () => {
@@ -165,15 +197,45 @@ describe('project intervention actions', () => {
     });
   });
 
-  it('stores xiaok context when the user asks xiaok', async () => {
+  it('opens a xiaok chat draft with project intervention context', async () => {
+    mockCreateThread.mockResolvedValue({
+      id: 'thread-help',
+      title: '让小K帮忙：外贸趋势分析',
+      status: 'idle',
+      mode: 'work',
+      createdAt: 1779000000000,
+      updatedAt: 1779000000000,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: null,
+      taskIds: [],
+    });
     renderProjectDetail(interventionDetail());
 
-    fireEvent.click(await screen.findByRole('button', { name: '问小K' }));
+    fireEvent.click(await screen.findByRole('button', { name: '让小K帮忙' }));
+
+    await waitFor(() => {
+      expect(mockCreateThread).toHaveBeenCalledWith({ title: expect.stringContaining('让小K帮忙') });
+    });
+    expect(await screen.findByTestId('chat-thread-id')).toHaveTextContent('thread-help');
+    const state = JSON.parse(screen.getByTestId('chat-state').textContent || '{}');
+    expect(state.draftPrompt).toContain('外贸趋势分析');
+    expect(state.draftPrompt).toContain('proj-intervention');
+    expect(state.draftPrompt).toContain('item-1');
+    expect(state.draftPrompt).toContain('CLI failed');
+    expect(state.draftPrompt).toContain('continue_project');
+    expect(state.draftPrompt).toContain('repair_project_task');
+    expect(state.swarmContinueContext).toMatchObject({
+      projectId: 'proj-intervention',
+      taskId: 'item-1',
+      taskTitle: '确定数据源与假设基线',
+    });
 
     const stored = JSON.parse(window.sessionStorage.getItem('xiaok.swarmContinueContext') || '{}');
     expect(stored.projectId).toBe('proj-intervention');
-    expect(stored.taskId).toBe('item-1');
-    expect(await screen.findByText('已准备小K上下文，可在会话中继续处理。')).toBeInTheDocument();
+    expect(stored.draftPrompt).toContain('continue_project');
+    expect(stored.availableTools).toContain('repair_project_task');
   });
 
   it('shows stale-state feedback when continue returns 409', async () => {
@@ -184,5 +246,47 @@ describe('project intervention actions', () => {
 
     expect(await screen.findByText('状态已变化，已刷新项目。')).toBeInTheDocument();
     expect(mockGetProjectFullDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows a concrete message when recoverable artifacts are missing', async () => {
+    mockContinueProject.mockResolvedValue({
+      ok: false,
+      error: 'no_recoverable_artifacts',
+      strategy: 'needs_conversation',
+    });
+    renderProjectDetail(interventionDetail());
+
+    fireEvent.click(await screen.findByRole('button', { name: '继续推进' }));
+
+    expect(await screen.findByText('没有找到可恢复产物，请查看原因或让小K帮忙处理。')).toBeInTheDocument();
+  });
+
+  it('stores executable next action when continue needs user action', async () => {
+    mockContinueProject.mockResolvedValue({
+      ok: false,
+      error: 'recovery_budget_exceeded',
+      outcome: 'needs_user_action',
+      humanActionRequired: true,
+      xiaokContext: { projectId: 'proj-intervention', taskId: 'item-1' },
+      nextActions: [
+        {
+          id: 'repair_and_submit',
+          toolName: 'repair_project_task',
+          params: {
+            projectId: 'proj-intervention',
+            expectedPrimaryTaskId: 'item-1',
+            expectedTaskUpdatedAt: 1779093510355,
+          },
+        },
+      ],
+    });
+    renderProjectDetail(interventionDetail());
+
+    fireEvent.click(await screen.findByRole('button', { name: '继续推进' }));
+
+    expect(await screen.findByText('需要让小K帮忙诊断并提交修复产物。')).toBeInTheDocument();
+    const stored = JSON.parse(window.sessionStorage.getItem('xiaok.swarmContinueContext') || '{}');
+    expect(stored.nextActions[0].toolName).toBe('repair_project_task');
+    expect(stored.nextActions[0].params.expectedPrimaryTaskId).toBe('item-1');
   });
 });

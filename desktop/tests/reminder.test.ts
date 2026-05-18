@@ -282,13 +282,23 @@ describe('ReminderScheduler', () => {
   let scheduler: ReminderScheduler;
   let cleanup: () => void;
   let deliveries: Array<{ reminderId: string; content: string }>;
+  let desktopNotifications: Array<{ title: string; body: string }>;
 
   beforeEach(() => {
     const { store: s, cleanup: c } = setupStore();
     store = s;
     cleanup = c;
     deliveries = [];
-    scheduler = new ReminderScheduler(store, { scanIntervalMs: 100 });
+    desktopNotifications = [];
+    scheduler = new ReminderScheduler(store, {
+      scanIntervalMs: 100,
+      notificationPort: {
+        show(input) {
+          desktopNotifications.push({ title: input.title, body: input.body });
+          return { ok: true };
+        },
+      },
+    });
     scheduler.setOnDelivery((event: ReminderDeliveryEvent) => {
       deliveries.push({ reminderId: event.reminderId, content: event.content });
     });
@@ -338,10 +348,40 @@ describe('ReminderScheduler', () => {
 
       expect(deliveries).toHaveLength(1);
       expect(deliveries[0].content).toBe('Due reminder');
+      expect(desktopNotifications).toEqual([
+        { title: 'xiaok 提醒', body: 'Due reminder' },
+      ]);
 
       // Verify reminder is marked as sent
       const list = scheduler.listReminders();
       expect(list).toHaveLength(0);
+    });
+
+    it('should continue delivery when desktop notification is unavailable', async () => {
+      scheduler.stop();
+      scheduler = new ReminderScheduler(store, {
+        scanIntervalMs: 100,
+        notificationPort: {
+          show() {
+            return { ok: false, skipped: true, reason: 'notifications_disabled' };
+          },
+        },
+      });
+      scheduler.setOnDelivery((event: ReminderDeliveryEvent) => {
+        deliveries.push({ reminderId: event.reminderId, content: event.content });
+      });
+      const pastTime = Date.now() - 1000;
+      scheduler.createReminder('Still delivered', pastTime);
+
+      await scheduler.runOnce();
+
+      expect(deliveries).toHaveLength(1);
+      expect(scheduler.listReminders()).toHaveLength(0);
+      expect(scheduler.getStatus().desktopNotification).toMatchObject({
+        ok: false,
+        skipped: true,
+        reason: 'notifications_disabled',
+      });
     });
 
     it('should not deliver future reminders', async () => {
