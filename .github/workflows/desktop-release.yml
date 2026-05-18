@@ -43,6 +43,13 @@ jobs:
           path: kai-xiaok-plugins
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Checkout KSwarm repo
+        uses: actions/checkout@v4
+        with:
+          repository: kaisersong/kswarm
+          path: kswarm
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build report-renderer bundle
         run: |
           cd kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
@@ -62,6 +69,8 @@ jobs:
 
       - name: Build desktop
         run: cd desktop && npm run build
+        env:
+          KSWARM_SOURCE_ROOT: ${{ github.workspace }}/kswarm
 
       - name: Package macOS installer
         run: cd desktop && npx electron-builder --config electron-builder.json --mac --arm64 --publish never
@@ -96,6 +105,13 @@ jobs:
           path: kai-xiaok-plugins
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Checkout KSwarm repo
+        uses: actions/checkout@v4
+        with:
+          repository: kaisersong/kswarm
+          path: kswarm
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build report-renderer bundle
         run: |
           cd kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
@@ -109,6 +125,8 @@ jobs:
 
       - name: Build desktop
         run: cd desktop && npm run build
+        env:
+          KSWARM_SOURCE_ROOT: ${{ github.workspace }}/kswarm
 
       - name: Package Windows installer
         run: cd desktop && npx electron-builder --config electron-builder.json --win nsis --publish never

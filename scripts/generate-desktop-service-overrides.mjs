@@ -1,13 +1,28 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoRoot = dirname(__dirname);
 
-const sourcePath = join(repoRoot, '..', 'kswarm', 'scripts', 'auto-worker.js');
+const kswarmRoots = [
+  process.env.KSWARM_SOURCE_ROOT ? resolve(process.env.KSWARM_SOURCE_ROOT) : null,
+  join(repoRoot, 'kswarm'),
+  join(repoRoot, '..', 'kswarm'),
+].filter(Boolean);
+
+const sourcePath = kswarmRoots
+  .map((root) => join(root, 'scripts', 'auto-worker.js'))
+  .find((path) => existsSync(path));
 const targetPath = join(repoRoot, 'desktop', '.generated', 'kswarm', 'scripts', 'auto-worker.js');
+
+if (!sourcePath) {
+  const checkedPaths = kswarmRoots
+    .map((root) => join(root, 'scripts', 'auto-worker.js'))
+    .join(', ');
+  throw new Error(`failed to locate kswarm auto-worker.js; checked: ${checkedPaths}`);
+}
 
 const source = readFileSync(sourcePath, 'utf8');
 
