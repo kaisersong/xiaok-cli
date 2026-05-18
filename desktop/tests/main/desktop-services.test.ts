@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmRepairProjectTaskTool } from '../../electron/desktop-services.js';
+import { createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskTool } from '../../electron/desktop-services.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 
 function mockKSwarmService(): KSwarmService {
@@ -847,6 +847,157 @@ describe('desktop services', () => {
     });
   });
 
+  it('inspect_project finds a kswarm project by name and returns the blocking context with readable artifacts', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            projects: [
+              { id: 'proj-1', name: '外贸趋势分析', status: 'active', createdAt: 100, updatedAt: 300 },
+              { id: 'proj-2', name: '写一个AI工作小故事', status: 'active', createdAt: 200, updatedAt: 200 },
+            ],
+          }));
+        }
+        if (path === '/projects/proj-1') {
+          return new Response(JSON.stringify({
+            project: { id: 'proj-1', name: '外贸趋势分析', goal: '生成外贸趋势报告', status: 'active' },
+            tasks: [
+              {
+                id: 'proj-1__item-1',
+                title: '确定数据源与假设基线',
+                status: 'failed',
+                assignedAgent: 'xiaok-worker',
+                updatedAt: 1779117987675,
+                qualityFailureCount: 27,
+                result: {
+                  summary: '旧结果缺字段',
+                  artifacts: [
+                    {
+                      filename: 'data_sources_and_assumptions.json',
+                      url: '/projects/proj-1/artifacts/data_sources_and_assumptions.json',
+                      mimeType: 'application/json',
+                      size: 512,
+                      generatedAt: 1779131000347,
+                    },
+                  ],
+                },
+              },
+              { id: 'proj-1__item-2', title: '生成模拟数据集', status: 'pending', dependencies: ['proj-1__item-1'] },
+            ],
+            workspace: {
+              artifacts: [
+                {
+                  filename: 'data_sources_and_assumptions.json',
+                  url: '/projects/proj-1/artifacts/data_sources_and_assumptions.json',
+                  mimeType: 'application/json',
+                  size: 512,
+                  generatedAt: 1779131000347,
+                },
+              ],
+            },
+            projectHealth: { state: 'waiting', gate: 'waiting_for_assignment' },
+            dispatchPlan: { dispatchedTasks: [], blocked: [{ taskId: 'proj-1__item-2', reason: 'dependency_pending' }] },
+            projectIntervention: {
+              required: true,
+              primaryTaskId: 'proj-1__item-1',
+              primaryTaskTitle: '确定数据源与假设基线',
+              message: '需要带着质量反馈重新执行',
+              primaryAction: {
+                id: 'continue_project',
+                strategy: 'retry_with_repair_instruction',
+                taskId: 'proj-1__item-1',
+                taskUpdatedAt: 1779117987675,
+              },
+            },
+          }));
+        }
+        if (path === '/projects/proj-1/artifacts/data_sources_and_assumptions.json') {
+          return new Response(JSON.stringify({
+            trade_overview: {},
+            trade_partners: {},
+            exchange_rate: {},
+            policy_changes: [],
+            hot_events: [],
+          }), { headers: { 'Content-Type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({ error: 'unexpected path' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmInspectProjectTool(kswarmService);
+    const result = JSON.parse(await tool.execute({ projectName: '外贸趋势分析' }));
+
+    expect(result).toMatchObject({
+      ok: true,
+      match: { mode: 'name_exact' },
+      project: { id: 'proj-1', name: '外贸趋势分析', status: 'active' },
+      projectIntervention: {
+        required: true,
+        primaryTaskId: 'proj-1__item-1',
+      },
+      projectHealth: { state: 'waiting' },
+    });
+    expect(result.tasks).toEqual([
+      expect.objectContaining({
+        id: 'proj-1__item-1',
+        title: '确定数据源与假设基线',
+        status: 'failed',
+        qualityFailureCount: 27,
+        artifactCount: 1,
+      }),
+      expect.objectContaining({
+        id: 'proj-1__item-2',
+        title: '生成模拟数据集',
+        status: 'pending',
+      }),
+    ]);
+    expect(result.readableArtifacts).toEqual([
+      expect.objectContaining({
+        filename: 'data_sources_and_assumptions.json',
+        url: '/projects/proj-1/artifacts/data_sources_and_assumptions.json',
+        content: expect.stringContaining('exchange_rate'),
+        truncated: false,
+      }),
+    ]);
+    expect(requests.map(request => request.path)).toEqual([
+      '/projects',
+      '/projects/proj-1',
+      '/projects/proj-1/artifacts/data_sources_and_assumptions.json',
+    ]);
+  });
+
+  it('inspect_project asks for clarification when a project name matches multiple projects', async () => {
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string) => {
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            projects: [
+              { id: 'proj-1', name: '外贸趋势分析', status: 'active', createdAt: 100, updatedAt: 100 },
+              { id: 'proj-2', name: '外贸趋势分析', status: 'active', createdAt: 200, updatedAt: 200 },
+            ],
+          }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected path' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmInspectProjectTool(kswarmService);
+    const result = JSON.parse(await tool.execute({ projectName: '外贸趋势分析' }));
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: 'ambiguous_project',
+      candidates: [
+        { id: 'proj-2', name: '外贸趋势分析', status: 'active' },
+        { id: 'proj-1', name: '外贸趋势分析', status: 'active' },
+      ],
+    });
+  });
+
   it('system prompt defaults to reminder_create for scheduled tasks', async () => {
     const { readFileSync } = await import('node:fs');
     const { join: pathJoin } = await import('node:path');
@@ -856,6 +1007,17 @@ describe('desktop services', () => {
     expect(sourceFile).toContain('默认使用 reminder_create 工具');
     expect(sourceFile).toContain('如果用户明确要求写脚本或使用系统定时，则遵循用户要求');
     expect(sourceFile).toContain('reminder_create(content=');
+  });
+
+  it('system prompt routes stuck Swarm project recovery through inspect_project and repair_project_task', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join: pathJoin } = await import('node:path');
+    const sourceFile = readFileSync(pathJoin(__dirname, '../../electron/desktop-services.ts'), 'utf-8');
+
+    expect(sourceFile).toContain('先调用 inspect_project');
+    expect(sourceFile).toContain('recovery_budget_exceeded');
+    expect(sourceFile).toContain('repair_project_task');
+    expect(sourceFile).toContain('不要反复调用 continue_project');
   });
 
   it('preserves history for cancelled tasks so subsequent tasks see prior context', async () => {
