@@ -240,7 +240,7 @@ Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases
 
 - **xiaok-1.3.1-arm64.dmg** — macOS DMG installer (Apple Silicon)
 - **xiaok-1.3.1-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-1.3.1-setup.exe** — Windows installer (x64)
+- **xiaok-setup-1.3.1.exe** — Windows installer (x64)
 
 ### Features
 
