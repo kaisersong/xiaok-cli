@@ -91,6 +91,8 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
       ipcRenderer.off(channel, listener);
     };
   },
+  exportTraceBundle: (input) => ipcRenderer.invoke('desktop:trace:export', input),
+  diagnose: (input) => ipcRenderer.invoke('desktop:diagnose', input),
   listMemories: () => ipcRenderer.invoke('desktop:listMemories'),
   createMemory: (input) => ipcRenderer.invoke('desktop:createMemory', input),
   updateMemory: (input) => ipcRenderer.invoke('desktop:updateMemory', input),

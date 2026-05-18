@@ -186,6 +186,19 @@ export async function assembleSystemPrompt(opts) {
             kind: 'background_context',
         });
     }
+    if (opts.harnessMemories && opts.harnessMemories.length > 0) {
+        const harnessText = opts.harnessMemories
+            .slice(0, 6)
+            .map((memory) => `- [${memory.category}] ${memory.summary}`)
+            .join('\n');
+        segments.push({
+            key: 'harness_memory',
+            title: 'Harness Memory',
+            text: `Harness memory:\n${harnessText}`,
+            cacheable: false,
+            kind: 'background_context',
+        });
+    }
     const rendered = segments
         .map((segment) => segment.text)
         .filter(Boolean)

@@ -1,6 +1,7 @@
 import type { RuntimeEvent } from '../events.js';
 import type { TraceAgent, TraceEvent, TraceTask } from './schema.js';
 import { redactString } from './redactor.js';
+import { guardEvent } from '../guards/policy.js';
 
 export function normalizeRuntimeEvent(event: RuntimeEvent): TraceEvent[] {
   const now = new Date().toISOString();
@@ -35,6 +36,18 @@ export function normalizeRuntimeEvent(event: RuntimeEvent): TraceEvent[] {
       refs: { turnId: event.turnId, toolCallId: event.toolUseId },
       data: { toolName: event.toolName, error },
     }];
+  }
+  if (event.type === 'guard_evaluated') {
+    return [guardEvent({
+      guardId: event.guardId,
+      mode: event.mode,
+      taskId: event.taskId,
+      artifactId: event.artifactId,
+      target: event.target,
+      category: event.category,
+      reason: event.reason,
+      action: event.action,
+    })];
   }
   return [{
     id: `runtime:${'sessionId' in event ? event.sessionId : 'unknown'}:${event.type}`,

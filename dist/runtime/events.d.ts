@@ -100,6 +100,18 @@ export type RuntimeEvent = {
     sessionId: string;
     turnId: string;
 } | {
+    type: 'guard_evaluated';
+    sessionId: string;
+    turnId: string;
+    guardId: string;
+    mode: 'passed' | 'warned' | 'blocked' | 'override';
+    category?: string;
+    reason?: string;
+    action?: string;
+    taskId?: string;
+    artifactId?: string;
+    target?: string;
+} | {
     type: 'pre_tool_use';
     sessionId: string;
     turnId: string;

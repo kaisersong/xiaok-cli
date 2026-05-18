@@ -1,6 +1,7 @@
 import { PermissionManager } from '../permissions/manager.js';
 import { formatErrorText } from '../../utils/ui.js';
 import { validateToolInput } from './validate-input.js';
+import { evaluateProtectedOutputGuard } from '../../runtime/guards/protected-output-guard.js';
 import { createReadTool } from './read.js';
 import { createWriteTool } from './write.js';
 import { createEditTool } from './edit.js';
@@ -205,6 +206,10 @@ export class ToolRegistry {
                 ?? `[${name} handled by pre hook]`;
             return `${message}\n[agent loop should stop after this tool]`;
         }
+        const protectedOutputDecision = await this.evaluateProtectedOutputGuard(tool.definition.name, input);
+        if (protectedOutputDecision && !protectedOutputDecision.ok) {
+            return `Error: ${protectedOutputDecision.reason}\n${protectedOutputDecision.action}`;
+        }
         try {
             let result = await tool.execute(input, context);
             const observedResult = result;
@@ -230,6 +235,21 @@ export class ToolRegistry {
             return `Error: ${formatErrorText(String(e))}`;
         }
     }
+    async evaluateProtectedOutputGuard(toolName, input) {
+        const guard = this.options.protectedOutputGuard;
+        if (!guard)
+            return null;
+        const targetPath = resolveWriteTargetPath(toolName, input);
+        if (!targetPath)
+            return null;
+        const decision = evaluateProtectedOutputGuard({
+            operation: 'overwrite',
+            targetPath,
+            protectedArtifacts: guard.getProtectedArtifacts(),
+        });
+        await guard.onDecision?.(decision);
+        return decision;
+    }
     /** 用户输入 y! 后，切换当前 registry 为 auto 模式 */
     enableAutoMode() {
         this.permissionManager.setMode('auto');
@@ -244,4 +264,13 @@ function isSuccessfulToolResult(result) {
         return false;
     }
     return true;
+}
+function resolveWriteTargetPath(toolName, input) {
+    const normalized = toolName.toLowerCase();
+    if (normalized !== 'write' && normalized !== 'edit') {
+        return null;
+    }
+    return typeof input.file_path === 'string' && input.file_path.trim()
+        ? input.file_path
+        : null;
 }

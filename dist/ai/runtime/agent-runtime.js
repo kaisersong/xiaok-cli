@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { buildPromptCacheSegments, resolveModelCapabilities, } from './model-capabilities.js';
 import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
 import { CompactRunner } from './compact-runner.js';
+import { evaluateVerificationBeforeCompletionGuard } from '../../runtime/guards/verification-before-completion-guard.js';
 export class AgentRuntime {
     adapter;
     registry;
@@ -66,6 +67,8 @@ export class AgentRuntime {
         try {
             let iteration = 0;
             let emptyRetries = 0;
+            const verificationToolCalls = [];
+            let codeMutatingToolSeen = false;
             while (true) {
                 this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
                 // Check if we've reached the max iterations limit (Claude Code style)
@@ -149,6 +152,7 @@ export class AgentRuntime {
                 this.session.appendAssistantBlocks(assistantBlocks);
                 const toolCalls = assistantBlocks.filter((block) => block.type === 'tool_use');
                 if (toolCalls.length === 0) {
+                    this.emitVerificationGuardIfNeeded(input, verificationToolCalls, codeMutatingToolSeen, run.runId, onEvent);
                     onEvent({ type: 'run_completed', runId: run.runId });
                     return;
                 }
@@ -164,6 +168,16 @@ export class AgentRuntime {
                     });
                     const result = await this.registry.executeTool(toolCall.name, toolCall.input, toolExecutionContext);
                     const ok = !result.startsWith('Error');
+                    verificationToolCalls.push({
+                        id: toolCall.id,
+                        name: toolCall.name,
+                        inputPreview: JSON.stringify(toolCall.input),
+                        outputPreview: result.slice(0, 10_000),
+                        startedAt: new Date().toISOString(),
+                        endedAt: new Date().toISOString(),
+                        ok,
+                    });
+                    codeMutatingToolSeen = codeMutatingToolSeen || isCodeMutatingToolCall(toolCall.name, toolCall.input);
                     onEvent({
                         type: 'tool_finished',
                         runId: run.runId,
@@ -255,6 +269,29 @@ export class AgentRuntime {
                 : undefined,
         };
     }
+    emitVerificationGuardIfNeeded(input, toolCalls, codeMutatingToolSeen, runId, onEvent) {
+        if (!codeMutatingToolSeen || !looksLikeCodeRequest(input)) {
+            return;
+        }
+        const bundle = buildGuardTraceBundle(toolCalls);
+        const decision = evaluateVerificationBeforeCompletionGuard({
+            scope: { kind: 'code', confidence: 0.85 },
+            bundle,
+        });
+        if (decision.ok) {
+            return;
+        }
+        const event = decision.events[0];
+        onEvent({
+            type: 'guard_evaluated',
+            runId,
+            guardId: 'verification-before-completion',
+            mode: decision.mode === 'block' ? 'blocked' : 'warned',
+            category: typeof event?.data?.category === 'string' ? event.data.category : 'missing_verification',
+            reason: decision.reason,
+            action: decision.action,
+        });
+    }
     async injectMemoryAfterCompact() {
         if (!this.memoryStore)
             return;
@@ -268,4 +305,45 @@ export class AgentRuntime {
         const memText = relevant.map((m) => `- ${m.title}: ${m.summary}`).join('\n');
         this.session.appendUserText(`<system-reminder>\n[Memory restored after compact]\n${memText}\n</system-reminder>`);
     }
+}
+function looksLikeCodeRequest(input) {
+    const text = typeof input === 'string'
+        ? input
+        : input.map((block) => block.type === 'text' ? block.text : '').join('\n');
+    return /(code|bug|test|tests|typescript|javascript|python|rust|go|编译|测试|代码|修复|修改|实现|src\/|\.ts\b|\.tsx\b|\.js\b|\.py\b)/iu.test(text);
+}
+function isCodeMutatingToolCall(toolName, input) {
+    const normalized = toolName.toLowerCase();
+    if (normalized === 'edit' || normalized === 'write') {
+        return typeof input.file_path === 'string' && /\.(ts|tsx|js|jsx|py|rs|go|java|kt|swift|c|cc|cpp|h|hpp|css|scss|json|ya?ml|toml|mjs|cjs)$/iu.test(input.file_path);
+    }
+    if (normalized === 'bash' && typeof input.command === 'string') {
+        return /\b(apply_patch|sed\s+-i|perl\s+-pi|npm\s+run\s+build|tsc|cargo|go)\b/iu.test(input.command);
+    }
+    return false;
+}
+function buildGuardTraceBundle(toolCalls) {
+    const now = new Date().toISOString();
+    return {
+        schemaVersion: 1,
+        bundleId: 'runtime_guard_verification',
+        createdAt: now,
+        source: { app: 'xiaok-cli' },
+        scope: { kind: 'session', sessionId: 'runtime' },
+        environment: {},
+        turns: [],
+        events: [],
+        toolCalls,
+        approvals: [],
+        tasks: [],
+        agents: [],
+        artifacts: [],
+        memoryRefs: [],
+        skillEvidence: [],
+        recovery: [],
+        crashes: [],
+        redactions: [],
+        attachments: [],
+        summary: { toolCallCount: toolCalls.length },
+    };
 }

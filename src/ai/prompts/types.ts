@@ -16,6 +16,7 @@ export interface PromptSegment {
     | 'channel_hints'
     | 'project_context'
     | 'memory_summary'
+    | 'harness_memory'
     | 'model_hints';
   title: string;
   text: string;

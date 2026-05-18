@@ -1,4 +1,5 @@
 import { redactString } from './redactor.js';
+import { guardEvent } from '../guards/policy.js';
 export function normalizeRuntimeEvent(event) {
     const now = new Date().toISOString();
     if (event.type === 'pre_tool_use') {
@@ -32,6 +33,18 @@ export function normalizeRuntimeEvent(event) {
                 refs: { turnId: event.turnId, toolCallId: event.toolUseId },
                 data: { toolName: event.toolName, error },
             }];
+    }
+    if (event.type === 'guard_evaluated') {
+        return [guardEvent({
+                guardId: event.guardId,
+                mode: event.mode,
+                taskId: event.taskId,
+                artifactId: event.artifactId,
+                target: event.target,
+                category: event.category,
+                reason: event.reason,
+                action: event.action,
+            })];
     }
     return [{
             id: `runtime:${'sessionId' in event ? event.sessionId : 'unknown'}:${event.type}`,

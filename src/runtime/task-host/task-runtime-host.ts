@@ -1,4 +1,5 @@
 import type { RuntimeEvent } from '../events.js';
+import { evaluateArtifactEvidenceGuard } from '../guards/artifact-evidence-guard.js';
 import { runDeliverableGate, type DeliverableGateFunction } from './deliverable-gate.js';
 import { projectRuntimeEventsToDesktopEvents } from './event-projection.js';
 import type { MaterialRegistry } from './material-registry.js';
@@ -45,6 +46,10 @@ export interface InProcessTaskRuntimeHostOptions {
   now?: () => number;
   createTaskId?: () => string;
   createSessionId?: () => string;
+  aheGuards?: {
+    artifactEvidence?: boolean;
+    recoveryContinuity?: boolean;
+  };
 }
 
 interface LiveSubscription {
@@ -259,6 +264,12 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
           });
           await this.flushMutations(taskId);
         }
+        const guardedLatest = await this.requireSnapshot(taskId);
+        if (!await this.applyArtifactEvidenceGuard(taskId, guardedLatest)) {
+          await this.options.snapshotStore.clearActiveTask(taskId);
+          this.closeSubscribers(taskId);
+          return;
+        }
         await this.updateSnapshot(taskId, { status: 'completed' });
         await this.options.snapshotStore.clearActiveTask(taskId);
         this.closeSubscribers(taskId);
@@ -300,6 +311,36 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     for (const desktopEvent of desktopEvents) {
       await this.appendEvent(taskId, desktopEvent);
     }
+  }
+
+  private async applyArtifactEvidenceGuard(taskId: string, snapshot: TaskSnapshot): Promise<boolean> {
+    if (!this.options.aheGuards?.artifactEvidence) {
+      return true;
+    }
+    const artifacts = collectArtifactEvidence(snapshot);
+    const decision = evaluateArtifactEvidenceGuard({
+      taskId,
+      status: 'completed',
+      artifacts,
+    });
+    if (decision.ok) {
+      return true;
+    }
+    await this.appendEvent(taskId, {
+      type: 'progress',
+      eventId: `${taskId}:guard:artifact-evidence`,
+      message: decision.reason,
+      stage: 'blocked',
+    });
+    await this.appendEvent(taskId, { type: 'error', message: decision.reason });
+    await this.updateSnapshot(taskId, {
+      status: 'failed',
+      salvage: {
+        summary: ['AHE artifact evidence guard blocked task completion before an empty delivery could be marked complete.'],
+        reason: decision.reason,
+      },
+    });
+    return false;
   }
 
   private async appendEvent(taskId: string, event: DesktopTaskEvent): Promise<void> {
@@ -434,4 +475,10 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private now(): number {
     return this.options.now?.() ?? Date.now();
   }
+}
+
+function collectArtifactEvidence(snapshot: TaskSnapshot): unknown[] {
+  const resultArtifacts = snapshot.result?.artifacts ?? [];
+  const eventArtifacts = snapshot.events.filter((event) => event.type === 'artifact_recorded');
+  return [...resultArtifacts, ...eventArtifacts];
 }

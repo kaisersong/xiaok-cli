@@ -1,12 +1,46 @@
 import { copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { Command } from 'commander';
 import { validateTraceBundle } from '../runtime/trace/schema.js';
+import {
+  buildProjectTraceBundleFromKSwarmDetail,
+  buildSessionTraceBundleFromSnapshots,
+  loadTaskSnapshotsForSession,
+  writeTraceBundleToPath,
+} from '../runtime/trace/exporter.js';
 
 export async function runTraceExportCommand(input: {
-  inputPath: string;
+  inputPath?: string;
+  sessionId?: string;
+  projectId?: string;
+  dataRoot?: string;
+  projectDetailPath?: string;
   outputPath: string;
   force?: boolean;
 }): Promise<string> {
+  if (input.sessionId) {
+    const dataRoot = input.dataRoot ?? join(homedir(), '.xiaok', 'desktop');
+    const snapshots = loadTaskSnapshotsForSession({ dataRoot, sessionId: input.sessionId });
+    if (snapshots.length === 0) {
+      throw new Error(`no snapshots found for session: ${input.sessionId}`);
+    }
+    const bundle = buildSessionTraceBundleFromSnapshots(snapshots, { sessionId: input.sessionId, dataRoot });
+    return writeTraceBundleToPath({ bundle, outputPath: input.outputPath, force: input.force });
+  }
+
+  if (input.projectId) {
+    if (!input.projectDetailPath) {
+      throw new Error('project trace export requires projectDetailPath outside desktop IPC');
+    }
+    const detail = JSON.parse(readFileSync(input.projectDetailPath, 'utf8')) as unknown;
+    const bundle = buildProjectTraceBundleFromKSwarmDetail(detail, { projectId: input.projectId });
+    return writeTraceBundleToPath({ bundle, outputPath: input.outputPath, force: input.force });
+  }
+
+  if (!input.inputPath) {
+    throw new Error('trace export requires --input, --session, or --project');
+  }
   if (existsSync(input.outputPath) && !input.force) {
     throw new Error(`output already exists: ${input.outputPath}`);
   }
@@ -24,12 +58,28 @@ export function registerTraceCommands(program: Command): void {
   trace
     .command('export')
     .description('导出已生成的 trace bundle')
-    .requiredOption('--input <path>', '输入 Trace Bundle JSON 文件路径')
+    .option('--input <path>', '输入 Trace Bundle JSON 文件路径')
+    .option('--session <sessionId>', '从 Desktop task snapshots 导出指定 session trace')
+    .option('--project <projectId>', '从 KSwarm full-detail snapshot 导出指定 project trace')
+    .option('--data-root <path>', 'Desktop data root，默认 ~/.xiaok/desktop')
+    .option('--project-detail <path>', 'KSwarm /projects/:id/full JSON snapshot 路径')
     .requiredOption('--output <path>', '输出文件路径')
     .option('--force', '允许覆盖已存在输出文件', false)
-    .action(async (options: { input: string; output: string; force?: boolean }) => {
+    .action(async (options: {
+      input?: string;
+      session?: string;
+      project?: string;
+      dataRoot?: string;
+      projectDetail?: string;
+      output: string;
+      force?: boolean;
+    }) => {
       const output = await runTraceExportCommand({
         inputPath: options.input,
+        sessionId: options.session,
+        projectId: options.project,
+        dataRoot: options.dataRoot,
+        projectDetailPath: options.projectDetail,
         outputPath: options.output,
         force: Boolean(options.force),
       });

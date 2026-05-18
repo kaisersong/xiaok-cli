@@ -6,6 +6,9 @@ export type DiagnosisCategory =
   | 'dispatch_stalled'
   | 'empty_artifact'
   | 'approval_wait'
+  | 'missing_verification'
+  | 'protected_output'
+  | 'missing_recovery_runtime'
   | 'quality_failure'
   | 'unknown';
 

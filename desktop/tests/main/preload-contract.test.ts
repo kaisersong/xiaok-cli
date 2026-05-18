@@ -57,6 +57,8 @@ describe('preload API contract', () => {
       'kswarmStop',
       'kswarmRestart',
       'onKSwarmStatus',
+      'exportTraceBundle',
+      'diagnose',
       'syncScheduledTasks',
       'onScheduledTaskDue',
       'listMemories',

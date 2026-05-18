@@ -4,6 +4,8 @@ import type { HooksRunner } from '../../runtime/hooks-runner.js';
 import { formatErrorText } from '../../utils/ui.js';
 import type { CapabilityRegistry } from '../../platform/runtime/capability-registry.js';
 import { validateToolInput } from './validate-input.js';
+import { evaluateProtectedOutputGuard } from '../../runtime/guards/protected-output-guard.js';
+import type { GuardDecision } from '../../runtime/guards/policy.js';
 import { createReadTool, type WorkspaceToolOptions } from './read.js';
 import { createWriteTool } from './write.js';
 import { createEditTool } from './edit.js';
@@ -57,6 +59,10 @@ export interface RegistryOptions {
   hooksRunner?: HooksRunner;
   agentId?: string;
   onToolObserved?: (event: ToolObservation) => Promise<void> | void;
+  protectedOutputGuard?: {
+    getProtectedArtifacts(): Array<{ artifactId: string; path: string }>;
+    onDecision?: (decision: GuardDecision) => Promise<void> | void;
+  };
 }
 
 export interface ToolObservation {
@@ -276,6 +282,11 @@ export class ToolRegistry {
       return `${message}\n[agent loop should stop after this tool]`;
     }
 
+    const protectedOutputDecision = await this.evaluateProtectedOutputGuard(tool.definition.name, input);
+    if (protectedOutputDecision && !protectedOutputDecision.ok) {
+      return `Error: ${protectedOutputDecision.reason}\n${protectedOutputDecision.action}`;
+    }
+
     try {
       let result = await tool.execute(input, context);
       const observedResult = result;
@@ -304,6 +315,25 @@ export class ToolRegistry {
     }
   }
 
+  private async evaluateProtectedOutputGuard(
+    toolName: string,
+    input: Record<string, unknown>,
+  ): Promise<GuardDecision | null> {
+    const guard = this.options.protectedOutputGuard;
+    if (!guard) return null;
+
+    const targetPath = resolveWriteTargetPath(toolName, input);
+    if (!targetPath) return null;
+
+    const decision = evaluateProtectedOutputGuard({
+      operation: 'overwrite',
+      targetPath,
+      protectedArtifacts: guard.getProtectedArtifacts(),
+    });
+    await guard.onDecision?.(decision);
+    return decision;
+  }
+
   /** 用户输入 y! 后，切换当前 registry 为 auto 模式 */
   enableAutoMode(): void {
     this.permissionManager.setMode('auto');
@@ -319,4 +349,14 @@ function isSuccessfulToolResult(result: string): boolean {
     return false;
   }
   return true;
+}
+
+function resolveWriteTargetPath(toolName: string, input: Record<string, unknown>): string | null {
+  const normalized = toolName.toLowerCase();
+  if (normalized !== 'write' && normalized !== 'edit') {
+    return null;
+  }
+  return typeof input.file_path === 'string' && input.file_path.trim()
+    ? input.file_path
+    : null;
 }
