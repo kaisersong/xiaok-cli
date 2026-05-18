@@ -29,19 +29,27 @@ export interface KSwarmTask {
   result?: string;
   artifacts?: KSwarmArtifact[];
   blockedReason?: string;
+  failureReason?: string;
+  lastFailureClass?: string;
   failureClass?: string;
   failureCount?: number;
   qualityFailureCount?: number;
+  reviewResult?: { passed?: boolean; feedback?: string; failureClass?: string; reviewedAt?: number };
   createdAt?: string;
   updatedAt?: string;
 }
 
 export interface KSwarmArtifact {
-  name: string;
-  mimeType: string;
+  name?: string;
+  filename?: string;
+  mimeType?: string;
   path?: string;
   url?: string;
   size?: number;
+  previewable?: boolean;
+  createdAt?: number | string;
+  updatedAt?: number | string;
+  generatedAt?: number | string;
 }
 
 export interface KSwarmPhase {
@@ -98,10 +106,18 @@ export interface KSwarmActivityEvent {
   agent?: string;
   by?: string;
   target?: string;
-  ts?: number;
+  ts?: number | string;
   tasks?: Array<{ title: string; assignedAgent?: string }>;
   output?: { artifacts?: KSwarmArtifact[] };
   count?: number;
+  failureReason?: string;
+  errorMessage?: string;
+  feedback?: string;
+  reason?: string;
+  blockedReason?: string;
+  failureClass?: string;
+  action?: string;
+  passed?: boolean;
 }
 
 export interface KSwarmHumanAction {
@@ -162,7 +178,7 @@ export interface KSwarmClientActions {
   getProjectFullDetail(projectId: string): Promise<ProjectFullDetail | null>;
   createProject(input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string; enableSummary?: boolean }): Promise<KSwarmProject | null>;
   approveProject(projectId: string): Promise<boolean>;
-  retryPlan(projectId: string): Promise<{ ok: boolean } | null>;
+  retryPlan(projectId: string): Promise<{ ok: boolean; retried?: boolean; poReassigned?: boolean; poAgent?: string; previousPoAgent?: string; poResolutionReason?: string } | null>;
   closeProject(projectId: string): Promise<boolean>;
   deleteProject(projectId: string): Promise<boolean>;
   deliverProject(projectId: string): Promise<boolean>;
@@ -198,6 +214,17 @@ export interface ProjectFullDetail {
   plan: any | null;
   planProgress: { phases: Array<{ phaseId: string | number; total: number; done: number }>; total: number; done: number } | null;
   dispatchPlan?: {
+    dispatchedTasks?: Array<{
+      id?: string;
+      taskId?: string;
+      title?: string;
+      status?: string;
+      agentId?: string;
+      assignedAgent?: string;
+      reason?: string;
+      blockKind?: string | null;
+      activeRunId?: string | null;
+    }>;
     dispatchable?: Array<{ taskId: string; agentId?: string; reason?: string }>;
     blocked?: Array<{ taskId: string; reason: string; blockedByTaskId?: string }>;
     waiting?: Array<{ taskId: string; reason: string; agentId?: string }>;
@@ -449,7 +476,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   }, [fetchProjects]);
 
   const retryPlan = useCallback(async (projectId: string) => {
-    return httpPost<{ ok: boolean; retried: boolean }>(`/projects/${projectId}/retry-plan`, {});
+    return httpPost<{ ok: boolean; retried?: boolean; poReassigned?: boolean; poAgent?: string; previousPoAgent?: string; poResolutionReason?: string }>(`/projects/${projectId}/retry-plan`, {});
   }, []);
 
   const closeProject = useCallback(async (projectId: string): Promise<boolean> => {

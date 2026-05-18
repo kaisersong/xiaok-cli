@@ -25,6 +25,7 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 - **Desktop Update Recovery**: Fixed the `electron-updater` CJS/ESM interop bug that made "Check for Updates" silently do nothing in affected desktop builds
 - **Proactive Upgrade Reminder**: The sidebar footer now shows a clear upgrade/download/install reminder next to the Settings icon when a new desktop version is available
 - **Scheduled Task Recovery**: Desktop scheduled tasks now heal missing `nextRunAt`, keep auto-run results linked to their task thread, and remove deleted tasks from the main-process scheduler state
+- **KSwarm Plan Retry Reassignment**: "重新制定计划" now checks whether the stored PO is missing, archived, invalid, stale, or the legacy `xiaok` singleton; it reassigns to the best Xiaok PO and sends the full project context before restarting planning
 - **Release Guardrail**: Desktop release CI now marks the desktop tag as GitHub Latest and verifies `latest-mac.yml`, `latest.yml`, and installer assets before a release is considered valid
 - **Manual One-Time Recovery**: Desktop `0.5.6` and `1.3.1` can have the broken updater loader locally, so affected users must install `1.3.2` manually once; future updates can then use the in-app updater
 
@@ -33,7 +34,7 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 - **KSwarm Reliability Release**: Runtime health probing, stalled-run watchdogs, capability-aware routing, and automatic cooldown for agents that are online but cannot execute correctly
 - **Recoverable Project Planning**: If Xiaok/Desktop or the PO agent stops while a project plan is being drafted, the project detail page exposes "重新制定计划" so work can continue instead of getting stuck
 - **Deliverable Contracts**: Explicit PPTX/HTML/Markdown requests are validated before PO review; markdown-only output no longer passes as a slide deck
-- **Local PPTX Fallback**: Presentation tasks can fall back to a deterministic local PPTX executor when no healthy agent advertises PPTX output capability
+- **Local Executor Registry**: Explicit PPTX presentation tasks can fall back to a deterministic registered executor when no healthy agent advertises PPTX output capability
 - **Desktop Configuration Preservation**: Desktop launch and release flow are aligned around the real user HOME so model, skill, plugin, and channel settings remain visible
 - **Release Packaging Refresh**: macOS and Windows desktop artifacts are built from the same 1.3.1 source and plugin bundle baseline
 
@@ -508,9 +509,9 @@ npm run dev -- --help  # Run from source
 
 ## Version History
 
-**v1.3.2** — Desktop recovery release: fixes the `electron-updater` CJS/ESM import regression that made "Check for Updates" silently no-op in affected builds, adds a clear sidebar upgrade/download/install reminder next to Settings, restores scheduled task execution when `nextRunAt` is missing or tasks are deleted, and adds a release gate that verifies GitHub Latest plus macOS/Windows updater metadata and assets. Users already on affected desktop `0.5.6` or `1.3.1` builds need a one-time manual install of `1.3.2`; later updates can flow through the repaired in-app updater.
+**v1.3.2** — Desktop recovery release: fixes the `electron-updater` CJS/ESM import regression that made "Check for Updates" silently no-op in affected builds, adds a clear sidebar upgrade/download/install reminder next to Settings, restores scheduled task execution when `nextRunAt` is missing or tasks are deleted, and makes KSwarm plan retry repair stale PO assignments by reassigning to the best Xiaok PO before sending a full `assign_po` payload. The release gate verifies GitHub Latest plus macOS/Windows updater metadata and assets. Users already on affected desktop `0.5.6` or `1.3.1` builds need a one-time manual install of `1.3.2`; later updates can flow through the repaired in-app updater.
 
-**v1.3.1** — Reliability release for Desktop + KSwarm: runtime probes and health cooldowns for CLI agents, stalled-run watchdog telemetry, capability-aware retry routing, hard deliverable validation for PPTX/HTML/Markdown tasks, deterministic local PPTX fallback, recoverable project planning when the PO planning phase is interrupted before a plan is submitted, and a desktop release workflow fix that checks out KSwarm before packaging.
+**v1.3.1** — Reliability release for Desktop + KSwarm: runtime probes and health cooldowns for CLI agents, stalled-run watchdog telemetry, capability-aware retry routing, hard deliverable validation for PPTX/HTML/Markdown tasks, deterministic local executor fallback for explicit PPTX presentation tasks, recoverable project planning when the PO planning phase is interrupted before a plan is submitted, and a desktop release workflow fix that checks out KSwarm before packaging.
 
 **v1.2.0** — KSwarm swarm-style multi-agent project delivery from chat, persistent long-term memory with notebook_write/notebook_read tools and Settings UI management, agent settings panel for persona/spawn/provider configuration, model config enhancements with protocol selection and advanced JSON, progress reporting TaskPanel for multi-step autonomous work tracking.
 

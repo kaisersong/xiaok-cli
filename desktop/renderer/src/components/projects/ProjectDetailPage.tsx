@@ -27,6 +27,102 @@ import {
 } from './kswarmStatus';
 
 type TabId = 'plan' | 'board' | 'agents' | 'activity' | 'deliverables';
+type ActionNotice = {
+  action: 'retry' | 'export';
+  kind: 'info' | 'success' | 'error';
+  message: string;
+};
+
+const RETRY_PLAN_COOLDOWN_MS = 15_000;
+const DETAIL_HOVER_DELAY_MS = 500;
+
+function DelayedHoverText({
+  text,
+  as = 'span',
+  className,
+  wrapperClassName = '',
+  testId,
+}: {
+  text: string;
+  as?: 'p' | 'span';
+  className: string;
+  wrapperClassName?: string;
+  testId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const elementRef = useRef<HTMLElement | null>(null);
+  const Element = as;
+  const Wrapper = as === 'p' ? 'div' : 'span';
+
+  const clearHoverTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  useEffect(() => clearHoverTimer, []);
+
+  const mightBeClipped = () => {
+    const element = elementRef.current;
+    if (element) {
+      const hasLayout = element.clientWidth > 0 || element.clientHeight > 0;
+      if (hasLayout) {
+        return element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight;
+      }
+    }
+    return text.length > 40 || text.includes('\n');
+  };
+
+  const handleMouseEnter = () => {
+    clearHoverTimer();
+    if (!mightBeClipped()) return;
+    timerRef.current = setTimeout(() => setOpen(true), DETAIL_HOVER_DELAY_MS);
+  };
+
+  const handleMouseLeave = () => {
+    clearHoverTimer();
+    setOpen(false);
+  };
+
+  return (
+    <Wrapper
+      data-testid={testId}
+      className={`relative ${as === 'p' ? 'block' : 'inline-block'} ${wrapperClassName}`}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      <Element ref={elementRef as any} className={className}>
+        {text}
+      </Element>
+      {open && (
+        <span
+          role="tooltip"
+          data-testid="project-detail-hover-tooltip"
+          className="absolute left-0 top-full z-50 mt-2 block max-h-60 w-[min(560px,calc(100vw-96px))] overflow-auto rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-3 py-2 text-[12px] leading-relaxed text-[var(--c-text-primary)] shadow-xl whitespace-pre-wrap"
+        >
+          {text}
+        </span>
+      )}
+    </Wrapper>
+  );
+}
+
+function downloadTextFile(filename: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -37,8 +133,12 @@ export function ProjectDetailPage() {
   const [activeTab, setActiveTab] = useState<TabId>('board');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
+  const [retryCooldownUntil, setRetryCooldownUntil] = useState(0);
   const [confirmClose, setConfirmClose] = useState(false);
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const retryCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noticeClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const TABS: Array<{ id: TabId; label: string; icon: typeof FileText }> = useMemo(() => [
     { id: 'plan', label: t.projectsDetailPlan, icon: FileText },
@@ -75,9 +175,38 @@ export function ProjectDetailPage() {
     };
   }, [projectId, getProjectFullDetail]);
 
+  useEffect(() => {
+    return () => {
+      if (retryCooldownRef.current) clearTimeout(retryCooldownRef.current);
+      if (noticeClearRef.current) clearTimeout(noticeClearRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!detail?.plan || actionNotice?.action !== 'retry' || actionNotice.kind !== 'success') return;
+    setActionNotice(null);
+    setRetryCooldownUntil(0);
+    if (retryCooldownRef.current) clearTimeout(retryCooldownRef.current);
+    if (noticeClearRef.current) clearTimeout(noticeClearRef.current);
+  }, [detail?.plan, actionNotice]);
+
   const refreshOnce = async () => {
     const data = await load();
     return data;
+  };
+
+  const showNotice = (notice: ActionNotice, ttlMs?: number) => {
+    if (noticeClearRef.current) clearTimeout(noticeClearRef.current);
+    setActionNotice(notice);
+    if (ttlMs) {
+      noticeClearRef.current = setTimeout(() => setActionNotice(null), ttlMs);
+    }
+  };
+
+  const startRetryCooldown = () => {
+    if (retryCooldownRef.current) clearTimeout(retryCooldownRef.current);
+    setRetryCooldownUntil(Date.now() + RETRY_PLAN_COOLDOWN_MS);
+    retryCooldownRef.current = setTimeout(() => setRetryCooldownUntil(0), RETRY_PLAN_COOLDOWN_MS);
   };
 
   const handleAction = async (action: string, fn: () => Promise<any>) => {
@@ -88,18 +217,55 @@ export function ProjectDetailPage() {
     setActionLoading(null);
   };
 
+  const handleRetryPlan = async () => {
+    if (!projectId || actionLoading || retryCooldownUntil > Date.now()) return;
+    setActionLoading('retry');
+    showNotice({ action: 'retry', kind: 'info', message: '正在通知 PO 重新制定计划...' });
+    try {
+      const result = await retryPlan(projectId);
+      if (result?.ok) {
+        const message = result.poReassigned && result.poAgent
+          ? `已改派到 ${result.poAgent} 并重新制定计划，正在等待 PO 提交新计划。`
+          : '已发起重新制定计划，正在等待 PO 提交新计划。';
+        startRetryCooldown();
+        showNotice({ action: 'retry', kind: 'success', message }, RETRY_PLAN_COOLDOWN_MS);
+      } else {
+        setRetryCooldownUntil(0);
+        showNotice({ action: 'retry', kind: 'error', message: '重新制定计划失败，请稍后重试。' }, 8_000);
+      }
+    } catch {
+      setRetryCooldownUntil(0);
+      showNotice({ action: 'retry', kind: 'error', message: '重新制定计划失败，请稍后重试。' }, 8_000);
+    } finally {
+      await refreshOnce();
+      setActionLoading(null);
+    }
+  };
+
   const handleExport = async () => {
-    if (!detail) return;
-    const api = getDesktopApi() as any;
-    if (!api?.showSaveDialog || !api?.saveFile) return;
+    if (!detail || actionLoading !== null) return;
+    setActionLoading('export');
     const defaultName = `${detail.project.name.replace(/[/\\:*?"<>|]/g, '_')}.md`;
-    const { canceled, filePath } = await api.showSaveDialog({
-      defaultPath: defaultName,
-      filters: [{ name: 'Markdown', extensions: ['md'] }],
-    });
-    if (canceled || !filePath) return;
     const md = exportProjectMarkdown(detail, agents, t);
-    await api.saveFile({ filePath, content: md });
+
+    try {
+      const api = getDesktopApi() as any;
+      if (api?.showSaveDialog && api?.saveFile) {
+        const { canceled, filePath } = await api.showSaveDialog({
+          defaultPath: defaultName,
+          filters: [{ name: 'Markdown', extensions: ['md'] }],
+        });
+        if (canceled || !filePath) return;
+        await api.saveFile({ filePath, content: md });
+      } else {
+        downloadTextFile(defaultName, md, 'text/markdown;charset=utf-8');
+      }
+      showNotice({ action: 'export', kind: 'success', message: '已导出项目报告。' }, 5_000);
+    } catch {
+      showNotice({ action: 'export', kind: 'error', message: '导出失败，请稍后重试。' }, 8_000);
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   if (loading) {
@@ -120,15 +286,22 @@ export function ProjectDetailPage() {
   }
 
   const { project, tasks, activities, humanActions, workspace, plan, planProgress } = detail;
+  const dispatchableTaskCount = detail.dispatchPlan?.dispatchedTasks?.length
+    ?? detail.dispatchPlan?.dispatchable?.length
+    ?? tasks.filter(t => t.status === 'pending').length;
   const showApprove = project.status === 'created' || project.status === 'draft' || project.status === 'planning';
   const showRetryPlan = canRetryPlanForProject(project, plan, tasks);
   const showInterruptedPlanHint = isInterruptedPlanProject(project, plan, tasks);
-  const showDispatch = project.status === 'active' && tasks.some(t => t.status === 'pending');
+  const showDispatch = project.status === 'active' && dispatchableTaskCount > 0;
   const showDeliver = project.status === 'active' && tasks.every(t => t.status === 'done' || t.status === 'cancelled');
   const showClose = project.status === 'active' || project.status === 'delivered';
   const statusLabel = STATUS_LABELS[project.status] || project.status;
   const healthSummary = summarizeProjectHealth(detail);
   const showHealthBanner = shouldShowProjectHealth(healthSummary.status);
+  const retryBusy = actionLoading === 'retry';
+  const retryCoolingDown = retryCooldownUntil > Date.now();
+  const retryDisabled = actionLoading !== null || retryCoolingDown;
+  const retryButtonLabel = retryBusy ? '正在发起' : retryCoolingDown ? '已发起' : t.projectsDetailRetryPlan ?? '重新制定计划';
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -141,35 +314,42 @@ export function ProjectDetailPage() {
           </button>
           <h1 className="text-[15px] font-semibold text-[var(--c-text-heading)] truncate">{project.name}</h1>
           <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border-[0.5px] border-[var(--c-border-subtle)] text-[var(--c-text-muted)]`}>{statusLabel}</span>
-          <button type="button" onClick={handleExport} title={t.projectsDetailExport} className="shrink-0 rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]">
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={actionLoading !== null}
+            title={t.projectsDetailExport}
+            aria-label={t.projectsDetailExport}
+            className="shrink-0 rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)] disabled:opacity-50"
+          >
             <Download size={14} />
           </button>
           <div className="flex-1" />
           {/* Action buttons */}
           <div className="flex items-center gap-1.5 shrink-0">
             {showRetryPlan && (
-              <button type="button" onClick={() => handleAction('retry', () => retryPlan(projectId!))} disabled={actionLoading === 'retry'}
+              <button type="button" onClick={handleRetryPlan} disabled={retryDisabled}
                 className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-accent)] bg-[var(--c-bg-deep)] hover:brightness-[0.95] disabled:opacity-50">
-                <RefreshCw size={12} /><span>{actionLoading === 'retry' ? '...' : t.projectsDetailRetryPlan ?? '重新制定计划'}</span>
+                <RefreshCw size={12} className={retryBusy ? 'animate-spin' : ''} /><span>{retryButtonLabel}</span>
               </button>
             )}
             {showApprove && (
               <button type="button" onClick={() => handleAction('approve', () => approveProject(projectId!))}
-                disabled={actionLoading === 'approve'}
+                disabled={actionLoading !== null}
                 className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-status-success-text)] bg-[var(--c-bg-deep)] hover:brightness-[0.95] disabled:opacity-50">
                 <CheckCircle2 size={12} /><span>{actionLoading === 'approve' ? '...' : t.projectsDetailApprove}</span>
               </button>
             )}
             {showDispatch && (
               <button type="button" onClick={() => handleAction('dispatch', () => dispatchTasks(projectId!, project?.poAgent))}
-                disabled={actionLoading === 'dispatch'}
+                disabled={actionLoading !== null}
                 className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-text-primary)] bg-[var(--c-bg-deep)] hover:brightness-[0.95] disabled:opacity-50">
                 <Send size={12} /><span>{actionLoading === 'dispatch' ? '...' : t.projectsDetailDispatch}</span>
               </button>
             )}
             {showDeliver && (
               <button type="button" onClick={() => handleAction('deliver', () => deliverProject(projectId!))}
-                disabled={actionLoading === 'deliver'}
+                disabled={actionLoading !== null}
                 className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-status-success-text)] bg-[var(--c-bg-deep)] hover:brightness-[0.95] disabled:opacity-50">
                 <Archive size={12} /><span>{actionLoading === 'deliver' ? '...' : t.projectsDetailDeliver}</span>
               </button>
@@ -182,7 +362,7 @@ export function ProjectDetailPage() {
             )}
             {confirmClose && (
               <div className="flex items-center gap-1">
-                <button type="button" onClick={() => handleAction('close', () => closeProject(projectId!))} disabled={actionLoading === 'close'}
+                <button type="button" onClick={() => handleAction('close', () => closeProject(projectId!))} disabled={actionLoading !== null}
                   className="rounded-lg px-2.5 py-1 text-[11px] font-medium bg-[var(--c-status-error-text)] text-white">
                   {actionLoading === 'close' ? '...' : t.projectsDetailConfirmDone}
                 </button>
@@ -197,7 +377,13 @@ export function ProjectDetailPage() {
 
         {/* Row 2: Goal */}
         {project.goal && (
-          <p className="text-[12px] text-[var(--c-text-secondary)] line-clamp-2 pl-[38px]">{project.goal}</p>
+          <DelayedHoverText
+            as="p"
+            text={project.goal}
+            testId="project-goal-preview"
+            wrapperClassName="pl-[38px]"
+            className="block text-[12px] text-[var(--c-text-secondary)] line-clamp-2"
+          />
         )}
 
         {/* Row 3: Metadata tags */}
@@ -215,9 +401,29 @@ export function ProjectDetailPage() {
             {(project as any).requirements && (
               <div className="flex items-center gap-1 text-[11px] text-[var(--c-text-muted)]">
                 <FileText size={11} className="shrink-0" />
-                <span className="truncate max-w-[400px]">{(project as any).requirements}</span>
+                <DelayedHoverText
+                  text={(project as any).requirements}
+                  testId="project-requirements-preview"
+                  wrapperClassName="max-w-[400px] align-bottom"
+                  className="inline-block max-w-full truncate"
+                />
               </div>
             )}
+          </div>
+        )}
+
+        {actionNotice && (
+          <div
+            role={actionNotice.kind === 'error' ? 'alert' : 'status'}
+            className={`ml-[38px] rounded-lg border px-3 py-2 text-[11px] ${
+              actionNotice.kind === 'error'
+                ? 'border-[var(--c-status-error-text)]/30 bg-[var(--c-error-bg)] text-[var(--c-status-error-text)]'
+                : actionNotice.kind === 'success'
+                  ? 'border-[var(--c-status-success-text)]/30 bg-[var(--c-status-success-text)]/10 text-[var(--c-status-success-text)]'
+                  : 'border-[var(--c-accent)]/25 bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]'
+            }`}
+          >
+            {actionNotice.message}
           </div>
         )}
 

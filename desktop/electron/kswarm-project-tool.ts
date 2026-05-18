@@ -33,6 +33,10 @@ export function resolveCreateProjectMembers(
     const defaultWorkerId = getPreferredWorkerSeedId(agents, poAgent);
     if (defaultWorkerId) {
       uniquePush(resolved, defaultWorkerId);
+    } else {
+      for (const agent of workers.filter((item) => item.status !== 'offline')) {
+        uniquePush(resolved, agent.id);
+      }
     }
     return {
       members: resolved,

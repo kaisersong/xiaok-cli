@@ -32,6 +32,8 @@ import { UserMemoryStore } from './user-memory.js';
 import { createNotebookTools } from '../../src/ai/tools/notebook.js';
 import type { MemoryStore } from '../../src/ai/memory/store.js';
 import type { KSwarmService, KSwarmUnavailableError } from './kswarm-service.js';
+import { resolveCreateProjectMembers } from './kswarm-project-tool.js';
+import { getPreferredPoAgentId } from '../shared/kswarm-seed-contract.js';
 // NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
 // because they import better-sqlite3 which may not be compatible with the current Electron
 // version's native module ABI.
@@ -1982,33 +1984,23 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
         // 1. 获取现有 agents
         const agentsRes = await kswarmService.request('/agents');
         if (!agentsRes.ok) return JSON.stringify({ error: 'Cannot fetch agents from kswarm' });
-        const { agents } = await agentsRes.json() as { agents: Array<{ id: string; name: string; roles?: string[]; status: string }> };
+        const { agents } = await agentsRes.json() as { agents: Array<{ id: string; name: string; runtimeType?: string; roles?: string[]; status: string; archivedAt?: number | null }> };
 
-        // 2. 选 PO agent（优先 xiaok，其次 project_owner，最后第一个）
-        const poAgent = agents.find(a => a.id === 'xiaok')?.id
-          || agents.find(a => a.id === 'cli-xiaok')?.id
-          || agents.find(a => a.roles?.includes('project_owner'))?.id
-          || agents[0]?.id;
+        // 2. 选 PO agent（优先 dedicated xiaok-po，兼容旧 xiaok）
+        const poAgent = getPreferredPoAgentId(agents);
         if (!poAgent) return JSON.stringify({ error: 'No agents available. Create an agent in kswarm first.' });
 
         // 3. 解析智能体需求
-        const available = agents.filter(a => a.id !== poAgent && a.status !== 'offline');
-        const resolved: Array<{ id: string }> = [];
+        const resolvedMembers = resolveCreateProjectMembers({
+          agents,
+          poAgent,
+          memberNames,
+          memberCount,
+        }).members;
 
-        // 3a. 匹配命名的 agent
-        for (const agentName of memberNames) {
-          const match = available.find(a => a.name === agentName || a.id === agentName);
-          if (match) resolved.push(match);
-        }
-
-        // 3b. 补足数量
+        // 3a. 自动创建 agent（如果用户明确指定数量且不够，并发创建）
         if (memberCount > 0) {
-          const remaining = available.filter(a => !resolved.some(r => r.id === a.id));
-          const needed = Math.max(0, memberCount - resolved.length);
-          resolved.push(...remaining.slice(0, needed));
-
-          // 3c. 自动创建 agent（如果不够且未达上限，并发创建）
-          const stillNeeded = memberCount - resolved.length;
+          const stillNeeded = memberCount - resolvedMembers.length;
           const canCreate = Math.min(stillNeeded, MAX_TOTAL_AGENTS - agents.length);
           if (canCreate > 0) {
             const createResults = await Promise.all(
@@ -2025,12 +2017,9 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
               )
             );
             for (const newAgent of createResults) {
-              if (newAgent) resolved.push({ id: newAgent.id });
+              if (newAgent && !resolvedMembers.includes(newAgent.id)) resolvedMembers.push(newAgent.id);
             }
           }
-        } else if (memberNames.length === 0) {
-          // 未指定：用所有可用的
-          resolved.push(...available);
         }
 
         // 4. 创建项目
@@ -2041,7 +2030,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
             name, goal,
             requirements: requirements || '',
             poAgent,
-            members: resolved.map(a => a.id),
+            members: resolvedMembers,
             ...(resolvedWorkFolder ? { workFolder: resolvedWorkFolder } : {}),
           }),
         });
@@ -2056,7 +2045,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
           goal,
           status: project.status,
           createdAt: project.createdAt,
-          memberCount: resolved.length,
+          memberCount: resolvedMembers.length,
         });
       } catch (err) {
         return JSON.stringify({ error: `KSwarm service unavailable: ${(err as Error).message}` });

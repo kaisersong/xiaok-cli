@@ -35,6 +35,7 @@ manual-test.sh
 .test-dist/
 .worktrees/
 .xiaok/
+.codex-desktop-runtime/
 .tmp*/
 .superpowers/
 __pycache__/

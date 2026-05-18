@@ -84,11 +84,15 @@ export function summarizeProjectHealth(detail: ProjectFullDetail): {
   blockedCount: number;
   waitingCount: number;
 } {
+  const dispatchableCount = detail.dispatchPlan?.dispatchedTasks?.length
+    ?? detail.dispatchPlan?.dispatchable?.length
+    ?? 0;
+
   return {
     status: detail.projectHealth?.status ?? 'unknown',
     message: detail.projectHealth?.message,
     primaryTaskId: detail.projectHealth?.primaryBlockedTaskId,
-    dispatchableCount: detail.dispatchPlan?.dispatchable?.length ?? 0,
+    dispatchableCount,
     blockedCount: detail.dispatchPlan?.blocked?.length ?? 0,
     waitingCount: detail.dispatchPlan?.waiting?.length ?? 0,
   };

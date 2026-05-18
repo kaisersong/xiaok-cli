@@ -61,24 +61,26 @@ describe('kswarm seed contract', () => {
 
 describe('desktop service path contract', () => {
   it('resolves sibling repo candidates from the xiaok-cli repo root in development', () => {
+    const repoRoot = join(__dirname, '..', '..', '..');
     const candidates = getDevelopmentServiceCandidates(
-      join('D:', 'projects', 'xiaok-cli', 'desktop', 'dist', 'main', 'desktop', 'electron'),
+      join(repoRoot, 'desktop', 'dist', 'main', 'desktop', 'electron'),
       'kswarm',
       join('src', 'server', 'index.js'),
     );
 
-    expect(candidates).toContain(join('D:', 'projects', 'kswarm', 'src', 'server', 'index.js'));
+    expect(candidates).toContain(join(repoRoot, '..', 'kswarm', 'src', 'server', 'index.js'));
   });
 
   it('builds the intent-broker launch spec against src/cli.js with experimental sqlite in development', () => {
+    const repoRoot = join(__dirname, '..', '..', '..');
     const spec = getDevelopmentBrokerLaunchSpec(
-      join('D:', 'projects', 'xiaok-cli', 'desktop', 'dist', 'main', 'desktop', 'electron'),
+      join(repoRoot, 'desktop', 'dist', 'main', 'desktop', 'electron'),
     );
 
     expect(spec).toEqual({
-      cwd: join('D:', 'projects', 'intent-broker'),
-      entryPath: join('D:', 'projects', 'intent-broker', 'src', 'cli.js'),
-      nodeArgs: ['--experimental-sqlite', join('D:', 'projects', 'intent-broker', 'src', 'cli.js')],
+      cwd: join(repoRoot, '..', 'intent-broker'),
+      entryPath: join(repoRoot, '..', 'intent-broker', 'src', 'cli.js'),
+      nodeArgs: ['--experimental-sqlite', join(repoRoot, '..', 'intent-broker', 'src', 'cli.js')],
     });
   });
 

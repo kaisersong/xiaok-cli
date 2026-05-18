@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { X, Download } from 'lucide-react';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmArtifact } from '../../hooks/useKSwarmClient';
+import { artifactDisplayName, downloadArtifact, resolveArtifactUrl } from './artifactActions';
 
 interface ArtifactPreviewModalProps {
   artifact: KSwarmArtifact;
@@ -17,11 +18,16 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const displayName = artifactDisplayName(artifact);
 
-  const isPreviewable = /\.(md|markdown|html|htm|txt|json|svg)$/i.test(artifact.name || '') ||
+  const isPreviewable = /\.(md|markdown|html|htm|txt|json|svg)$/i.test(displayName) ||
     /text|json|html|markdown|svg/.test(artifact.mimeType || '');
 
   useEffect(() => {
+    setContent(null);
+    setError(null);
+    setLoading(true);
+
     if (!isPreviewable) {
       setLoading(false);
       return;
@@ -29,7 +35,7 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
 
     const loadContent = async () => {
       try {
-        const url = artifact.url || (artifact.path ? `file://${artifact.path}` : null);
+        const url = resolveArtifactUrl(artifact);
         if (!url) {
           setError(t.projectsArtifactNoPath);
           setLoading(false);
@@ -49,13 +55,12 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
   }, [artifact, isPreviewable]);
 
   const handleDownload = () => {
-    const url = artifact.url || (artifact.path ? `file://${artifact.path}` : null);
-    if (url) window.open(url, '_blank');
+    downloadArtifact(artifact);
   };
 
-  const isHtml = /\.(html|htm|svg)$/i.test(artifact.name || '') || artifact.mimeType?.includes('html') || artifact.mimeType?.includes('svg');
-  const isJson = /\.json$/i.test(artifact.name || '') || artifact.mimeType?.includes('json');
-  const isMarkdown = /\.(md|markdown)$/i.test(artifact.name || '') || artifact.mimeType?.includes('markdown');
+  const isHtml = /\.(html|htm|svg)$/i.test(displayName) || artifact.mimeType?.includes('html') || artifact.mimeType?.includes('svg');
+  const isJson = /\.json$/i.test(displayName) || artifact.mimeType?.includes('json');
+  const isMarkdown = /\.(md|markdown)$/i.test(displayName) || artifact.mimeType?.includes('markdown');
 
   const renderMarkdown = (md: string) => {
     const html = md
@@ -90,7 +95,7 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
 
     if (isHtml) {
       return (
-        <iframe srcDoc={content} className="h-[60vh] w-full rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-white" sandbox="allow-same-origin" title={artifact.name} />
+        <iframe srcDoc={content} className="h-[60vh] w-full rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-white" sandbox="allow-same-origin" title={displayName} />
       );
     }
 
@@ -119,7 +124,7 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--c-border-subtle)] px-5 py-3">
           <div className="min-w-0 flex-1">
-            <p className="text-[13px] font-medium text-[var(--c-text-heading)] truncate">{artifact.name}</p>
+            <p className="text-[13px] font-medium text-[var(--c-text-heading)] truncate">{displayName}</p>
             <p className="text-[10px] text-[var(--c-text-muted)]">{artifact.mimeType || t.projectsDeliverableUnknownType}</p>
           </div>
           <div className="flex items-center gap-1">

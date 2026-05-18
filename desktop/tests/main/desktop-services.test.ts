@@ -176,8 +176,8 @@ describe('desktop services', () => {
         runtimeType: 'xiaok',
         roles: ['project_owner'],
         provider: 'anthropic',
-        model: 'claude-opus-4-6',
-        runtimeModel: 'claude-opus-4-6',
+        model: 'claude-opus-4-7',
+        runtimeModel: 'claude-opus-4-7',
         apiKey: 'sk-anthropic',
         runtimePath: null,
       });
@@ -657,6 +657,50 @@ describe('desktop services', () => {
       workFolder: '/tmp/kswarm-demo',
     });
   });
+
+  it('prefers the dedicated xiaok PO and worker seeds when chat creates a project', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'xiaok', name: 'xiaok', runtimeType: 'xiaok', roles: ['project_owner', 'worker'], status: 'idle' },
+              { id: 'xiaok-po', name: 'PO-Agent', runtimeType: 'xiaok', roles: ['project_owner'], status: 'offline' },
+              { id: 'xiaok-worker', name: 'Worker-Agent', runtimeType: 'xiaok', roles: ['worker'], status: 'offline' },
+              { id: 'codex-worker', name: 'Codex', runtimeType: 'codex', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            ok: true,
+            project: { id: 'proj-seed', name: 'Seed Demo', status: 'created', createdAt: 456 },
+          }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmCreateProjectTool(kswarmService);
+    const result = await tool.execute({
+      name: 'Seed Demo',
+      goal: 'Verify seed routing',
+    });
+
+    expect(JSON.parse(result)).toMatchObject({ type: 'project_card', projectId: 'proj-seed', memberCount: 1 });
+    const createRequest = requests.find(request => request.path === '/projects');
+    expect(createRequest).toBeTruthy();
+    expect(JSON.parse(String(createRequest?.init?.body))).toMatchObject({
+      name: 'Seed Demo',
+      goal: 'Verify seed routing',
+      poAgent: 'xiaok-po',
+      members: ['xiaok-worker'],
+    });
+  });
+
   it('system prompt defaults to reminder_create for scheduled tasks', async () => {
     const { readFileSync } = await import('node:fs');
     const { join: pathJoin } = await import('node:path');

@@ -9,7 +9,7 @@ const QUICK_PROMPTS = [
   '帮我整理会议纪要并提取待办',
   '写一份项目立项方案',
   '帮我撰写季度工作总结',
-  '创建项目，让2个智能体完成本月外贸趋势分析',
+  '创建项目，让2个智能体完成本月国外主要AI产品动态分析',
 ];
 
 function useProfileName() {
@@ -59,7 +59,7 @@ export function WelcomePage() {
   const [prompt, setPrompt] = useState('');
 
   const username = useProfileName();
-  const greeting = `${username}，我们一起来完成工作吧！`;
+  const greeting = `${username}，我们一起来搞定工作吧！`;
   const typedGreeting = useTypewriter(greeting, 60);
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {

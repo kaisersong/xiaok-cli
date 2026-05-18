@@ -24,6 +24,7 @@
 - **桌面更新链路恢复**：修复 `electron-updater` CJS/ESM interop 导致“检查更新”静默无反应的问题
 - **主动升级提醒**：当发现新版桌面端时，左下角设置 icon 左侧会显示清晰的升级/下载/安装提醒
 - **定时任务恢复**：Desktop 定时任务会修复缺失的 `nextRunAt`，自动执行结果会关联回任务 Thread，删除任务也会同步移出主进程调度状态
+- **KSwarm 重新制定计划改派 PO**：“重新制定计划”现在会检查项目里保存的 PO 是否缺失、归档、角色不对、启动失败或仍是旧 `xiaok` 单体；异常时会改派到当前最合适的 Xiaok PO，并带完整项目上下文重新发起规划
 - **发布门禁**：desktop release CI 会把桌面 tag 标记为 GitHub Latest，并校验 `latest-mac.yml`、`latest.yml` 和安装包资产一致后才算发布有效
 - **一次性手动恢复**：桌面版 `0.5.6` 和 `1.3.1` 可能已经带着本地 updater loader 缺陷，受影响用户需要手动安装一次 `1.3.2`；之后才能通过修复后的应用内更新继续升级
 
@@ -32,7 +33,7 @@
 - **KSwarm 可靠性版本**：新增 runtime 健康探测、卡住运行 watchdog、按能力路由，以及对“在线但 CLI 不可执行”的 agent 自动降级/冷却
 - **项目规划可恢复**：如果 Xiaok/Desktop 或 PO agent 在制定计划阶段中断，项目详情页会显示“重新制定计划”，项目不再卡死
 - **交付物合同校验**：显式要求 PPTX/HTML/Markdown 的任务会在进入 PO 验收前校验产物类型，Markdown 不再能冒充幻灯片交付
-- **本地 PPTX 兜底执行器**：当没有健康 agent 具备 PPTX 输出能力时，演示任务可以使用确定性的本地 PPTX fallback
+- **本地执行器注册表**：当没有健康 agent 具备 PPTX 输出能力时，明确要求 PPTX 的演示任务可以使用确定性的注册执行器兜底
 - **桌面配置保持**：Desktop 启动与发布流程统一使用真实用户 HOME，模型、skill、plugin、channel 配置不会因为隔离 HOME 消失
 - **发布打包刷新**：macOS 与 Windows 桌面产物统一从 1.3.1 源码和插件 bundle 基线构建
 
@@ -507,9 +508,9 @@ npm run dev -- --help  # 从源码运行
 
 ## 版本日志
 
-**v1.3.2** — 桌面恢复版本：修复 `electron-updater` CJS/ESM 导入回归导致“检查更新”静默无反应的问题；左下角设置按钮旁新增清晰的升级/下载/安装提醒；修复定时任务在 `nextRunAt` 缺失或删除后仍被主进程调度状态影响的问题；发布门禁会校验 GitHub Latest 以及 macOS/Windows 更新元数据和安装包资产。已经安装受影响桌面版 `0.5.6` 或 `1.3.1` 的用户需要手动安装一次 `1.3.2`，后续版本才能走修复后的应用内更新。
+**v1.3.2** — 桌面恢复版本：修复 `electron-updater` CJS/ESM 导入回归导致“检查更新”静默无反应的问题；左下角设置按钮旁新增清晰的升级/下载/安装提醒；修复定时任务在 `nextRunAt` 缺失或删除后仍被主进程调度状态影响的问题；KSwarm 重新制定计划会修复旧 PO 归属，异常时改派到当前最合适的 Xiaok PO，并发送完整 `assign_po` 项目上下文；发布门禁会校验 GitHub Latest 以及 macOS/Windows 更新元数据和安装包资产。已经安装受影响桌面版 `0.5.6` 或 `1.3.1` 的用户需要手动安装一次 `1.3.2`，后续版本才能走修复后的应用内更新。
 
-**v1.3.1** — Desktop + KSwarm 可靠性版本：为 CLI agent 增加 runtime 探测和健康冷却，加入卡住运行 watchdog telemetry，失败重试重新走能力路由；PPTX/HTML/Markdown 任务进入 PO 验收前做强交付物校验，提供确定性的本地 PPTX 兜底执行器，修复 PO 制定计划中断后项目无法继续的问题，并修复 desktop release workflow 在 CI 中未 checkout KSwarm 导致打包失败的问题。
+**v1.3.1** — Desktop + KSwarm 可靠性版本：为 CLI agent 增加 runtime 探测和健康冷却，加入卡住运行 watchdog telemetry，失败重试重新走能力路由；PPTX/HTML/Markdown 任务进入 PO 验收前做强交付物校验，为显式 PPTX 演示任务提供确定性本地执行器兜底，修复 PO 制定计划中断后项目无法继续的问题，并修复 desktop release workflow 在 CI 中未 checkout KSwarm 导致打包失败的问题。
 
 **v1.2.0** — KSwarm 蜂群式多智能体项目交付（对话中直接创建项目），持久化长期记忆（notebook_write/notebook_read 工具 + 设置界面管理），Agent 设置面板（人格/Spawn Profile/Provider 配置），模型配置增强（协议选择、高级 JSON），TaskPanel 分步进度上报实现多步骤自主任务追踪。
 

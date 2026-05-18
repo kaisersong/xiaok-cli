@@ -1751,6 +1751,7 @@ export const en: LocaleStrings = {
   projectsKanbanActive: "In Progress",
   projectsKanbanReview: "In Review",
   projectsKanbanDone: "Done",
+  projectsKanbanStopped: "Stopped",
   projectsKanbanNoTasks: "No tasks yet",
   projectsKanbanAddRequirement: "Add Requirement",
   projectsKanbanRequirementPlaceholder: "Requirement title...",

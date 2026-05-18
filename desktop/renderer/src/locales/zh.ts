@@ -1731,6 +1731,7 @@ export const zh: LocaleStrings = {
   projectsKanbanActive: "进行中",
   projectsKanbanReview: "待审核",
   projectsKanbanDone: "已完成",
+  projectsKanbanStopped: "已停止",
   projectsKanbanNoTasks: "暂无任务",
   projectsKanbanAddRequirement: "新增需求",
   projectsKanbanRequirementPlaceholder: "需求标题...",

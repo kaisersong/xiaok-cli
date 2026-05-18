@@ -1657,6 +1657,7 @@ export interface LocaleStrings {
   projectsKanbanActive: string;
   projectsKanbanReview: string;
   projectsKanbanDone: string;
+  projectsKanbanStopped: string;
   projectsKanbanNoTasks: string;
   projectsKanbanAddRequirement: string;
   projectsKanbanRequirementPlaceholder: string;

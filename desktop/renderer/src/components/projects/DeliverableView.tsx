@@ -2,51 +2,51 @@
  * DeliverableView — shows project deliverables, task output summaries, and artifacts with inline preview.
  */
 
+import { useState } from 'react';
 import { FileText, ExternalLink } from 'lucide-react';
 import type { KSwarmProject, KSwarmArtifact, KSwarmTask } from '../../hooks/useKSwarmClient';
 import { useLocale } from '../../contexts/LocaleContext';
+import { ArtifactPreviewModal } from './ArtifactPreviewModal';
+import { artifactDisplayName, formatArtifactGeneratedTime, resolveArtifactUrl } from './artifactActions';
 
 interface DeliverableViewProps {
   project: KSwarmProject;
   tasks?: KSwarmTask[];
 }
 
-function ArtifactCard({ artifact, taskTitle }: { artifact: KSwarmArtifact; taskTitle: string }) {
+function ArtifactCard({ artifact, taskTitle, onPreview }: { artifact: KSwarmArtifact; taskTitle: string; onPreview(artifact: KSwarmArtifact): void }) {
   const { t } = useLocale();
-
-  const handleOpen = () => {
-    if (artifact.path) {
-      window.open(`file://${artifact.path}`, '_blank');
-    } else if (artifact.url) {
-      window.open(artifact.url, '_blank');
-    }
-  };
-
-  const hasPath = !!(artifact.path || artifact.url);
+  const displayName = artifactDisplayName(artifact);
+  const hasPath = !!resolveArtifactUrl(artifact);
+  const generatedTime = formatArtifactGeneratedTime(artifact);
+  const annotation = `${taskTitle} · ${artifact.mimeType || t.projectsDeliverableUnknownType}${generatedTime ? ` · 生成 ${generatedTime}` : ''}`;
 
   return (
-    <div
-      onClick={hasPath ? handleOpen : undefined}
-      className={`flex items-center gap-3 rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-4 py-3 ${hasPath ? 'cursor-pointer hover:bg-[var(--c-bg-deep)]' : ''}`}
+    <button
+      type="button"
+      onClick={hasPath ? () => onPreview(artifact) : undefined}
+      disabled={!hasPath}
+      className={`flex w-full items-center gap-3 rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-4 py-3 text-left ${hasPath ? 'cursor-pointer hover:bg-[var(--c-bg-deep)]' : 'cursor-default opacity-70'}`}
     >
       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
         <FileText size={15} className="text-[var(--c-text-icon)]" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-[13px] font-medium text-[var(--c-text-primary)] truncate">{artifact.name}</p>
-        <p className="text-[10px] text-[var(--c-text-muted)] truncate">{taskTitle} · {artifact.mimeType || t.projectsDeliverableUnknownType}</p>
+        <p className="text-[13px] font-medium text-[var(--c-text-primary)] truncate">{displayName}</p>
+        <p className="text-[10px] text-[var(--c-text-muted)] truncate">{annotation}</p>
       </div>
       {hasPath && (
         <div className="flex items-center">
           <span className="rounded-md p-1.5 text-[var(--c-text-muted)]"><ExternalLink size={14} /></span>
         </div>
       )}
-    </div>
+    </button>
   );
 }
 
 export function DeliverableView({ project, tasks: propTasks }: DeliverableViewProps) {
   const { t } = useLocale();
+  const [previewArtifact, setPreviewArtifact] = useState<KSwarmArtifact | null>(null);
   const tasks = propTasks || project.tasks || [];
 
   // Collect all artifacts from tasks with their summaries
@@ -126,7 +126,7 @@ export function DeliverableView({ project, tasks: propTasks }: DeliverableViewPr
                 <div className="divide-y divide-[var(--c-border-subtle)]/50">
                   {artifacts.map((art, i) => (
                     <div key={i} className="px-4 py-2">
-                      <ArtifactCard artifact={art} taskTitle={task.title} />
+                      <ArtifactCard artifact={art} taskTitle={task.title} onPreview={setPreviewArtifact} />
                     </div>
                   ))}
                 </div>
@@ -134,6 +134,9 @@ export function DeliverableView({ project, tasks: propTasks }: DeliverableViewPr
             ))}
           </div>
         </div>
+      )}
+      {previewArtifact && (
+        <ArtifactPreviewModal artifact={previewArtifact} onClose={() => setPreviewArtifact(null)} />
       )}
     </div>
   );

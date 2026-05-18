@@ -44,6 +44,8 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
     'task.done': { icon: CheckCircle2, label: t.projectsActivityDone, color: 'text-[var(--c-status-success-text)]' },
     'task.rework': { icon: AlertCircle, label: t.projectsActivityRework, color: 'text-[var(--c-status-error-text)]' },
     'task.failed': { icon: AlertCircle, label: t.projectsActivityFailed, color: 'text-[var(--c-status-error-text)]' },
+    'task.quality_reviewed': { icon: Eye, label: 'PO 质量验收', color: 'text-[var(--c-status-warning-text)]' },
+    'task.blocked': { icon: AlertCircle, label: '任务阻塞', color: 'text-[var(--c-status-error-text)]' },
     'task.cancelled': { icon: AlertCircle, label: t.projectsActivityCancelled, color: 'text-[var(--c-text-muted)]' },
     'project.delivered': { icon: Archive, label: 'PO 提交交付', color: 'text-[var(--c-status-success-text)]' },
     'project.closed': { icon: CheckCircle2, label: '项目关闭', color: 'text-[var(--c-text-muted)]' },
@@ -80,6 +82,7 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
           const agent = event.agent || event.by || event.target || '';
           const taskTitle = event.taskTitle || '';
           const artifacts = event.output?.artifacts || [];
+          const detailText = getActivityDetail(event);
 
           return (
             <div key={idx} className="flex gap-3 group">
@@ -126,6 +129,11 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
                 )}
 
                 {event.count && <span className="text-[10px] text-[var(--c-text-muted)] ml-1">{event.count} tasks</span>}
+                {detailText && (
+                  <p className="mt-1 max-w-3xl rounded-md bg-[var(--c-bg-deep)] px-2 py-1 text-[10px] leading-relaxed text-[var(--c-text-secondary)] line-clamp-3">
+                    {detailText}
+                  </p>
+                )}
               </div>
 
               <span className="text-[10px] text-[var(--c-text-muted)] shrink-0 font-mono pt-1">{formatTime(event.ts)}</span>
@@ -156,5 +164,16 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
       <div ref={bottomRef} />
       {previewArtifact && <ArtifactPreviewModal artifact={previewArtifact} onClose={() => setPreviewArtifact(null)} />}
     </div>
+  );
+}
+
+function getActivityDetail(event: KSwarmActivityEvent): string {
+  return (
+    event.errorMessage ||
+    event.failureReason ||
+    event.feedback ||
+    event.reason ||
+    event.blockedReason ||
+    ''
   );
 }
