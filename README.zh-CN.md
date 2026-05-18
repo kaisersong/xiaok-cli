@@ -23,6 +23,7 @@
 
 - **桌面更新链路恢复**：修复 `electron-updater` CJS/ESM interop 导致“检查更新”静默无反应的问题
 - **主动升级提醒**：当发现新版桌面端时，左下角设置 icon 左侧会显示清晰的升级/下载/安装提醒
+- **定时任务恢复**：Desktop 定时任务会修复缺失的 `nextRunAt`，自动执行结果会关联回任务 Thread，删除任务也会同步移出主进程调度状态
 - **发布门禁**：desktop release CI 会把桌面 tag 标记为 GitHub Latest，并校验 `latest-mac.yml`、`latest.yml` 和安装包资产一致后才算发布有效
 - **一次性手动恢复**：桌面版 `0.5.6` 和 `1.3.1` 可能已经带着本地 updater loader 缺陷，受影响用户需要手动安装一次 `1.3.2`；之后才能通过修复后的应用内更新继续升级
 
@@ -506,7 +507,7 @@ npm run dev -- --help  # 从源码运行
 
 ## 版本日志
 
-**v1.3.2** — 桌面更新链路恢复版本：修复 `electron-updater` CJS/ESM 导入回归导致“检查更新”静默无反应的问题；左下角设置按钮旁新增清晰的升级/下载/安装提醒；发布门禁会校验 GitHub Latest 以及 macOS/Windows 更新元数据和安装包资产。已经安装受影响桌面版 `0.5.6` 或 `1.3.1` 的用户需要手动安装一次 `1.3.2`，后续版本才能走修复后的应用内更新。
+**v1.3.2** — 桌面恢复版本：修复 `electron-updater` CJS/ESM 导入回归导致“检查更新”静默无反应的问题；左下角设置按钮旁新增清晰的升级/下载/安装提醒；修复定时任务在 `nextRunAt` 缺失或删除后仍被主进程调度状态影响的问题；发布门禁会校验 GitHub Latest 以及 macOS/Windows 更新元数据和安装包资产。已经安装受影响桌面版 `0.5.6` 或 `1.3.1` 的用户需要手动安装一次 `1.3.2`，后续版本才能走修复后的应用内更新。
 
 **v1.3.1** — Desktop + KSwarm 可靠性版本：为 CLI agent 增加 runtime 探测和健康冷却，加入卡住运行 watchdog telemetry，失败重试重新走能力路由；PPTX/HTML/Markdown 任务进入 PO 验收前做强交付物校验，提供确定性的本地 PPTX 兜底执行器，修复 PO 制定计划中断后项目无法继续的问题，并修复 desktop release workflow 在 CI 中未 checkout KSwarm 导致打包失败的问题。
 

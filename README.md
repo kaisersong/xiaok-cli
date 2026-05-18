@@ -24,6 +24,7 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 
 - **Desktop Update Recovery**: Fixed the `electron-updater` CJS/ESM interop bug that made "Check for Updates" silently do nothing in affected desktop builds
 - **Proactive Upgrade Reminder**: The sidebar footer now shows a clear upgrade/download/install reminder next to the Settings icon when a new desktop version is available
+- **Scheduled Task Recovery**: Desktop scheduled tasks now heal missing `nextRunAt`, keep auto-run results linked to their task thread, and remove deleted tasks from the main-process scheduler state
 - **Release Guardrail**: Desktop release CI now marks the desktop tag as GitHub Latest and verifies `latest-mac.yml`, `latest.yml`, and installer assets before a release is considered valid
 - **Manual One-Time Recovery**: Desktop `0.5.6` and `1.3.1` can have the broken updater loader locally, so affected users must install `1.3.2` manually once; future updates can then use the in-app updater
 
@@ -507,7 +508,7 @@ npm run dev -- --help  # Run from source
 
 ## Version History
 
-**v1.3.2** — Desktop update recovery release: fixes the `electron-updater` CJS/ESM import regression that made "Check for Updates" silently no-op in affected builds, adds a clear sidebar upgrade/download/install reminder next to Settings, and adds a release gate that verifies GitHub Latest plus macOS/Windows updater metadata and assets. Users already on affected desktop `0.5.6` or `1.3.1` builds need a one-time manual install of `1.3.2`; later updates can flow through the repaired in-app updater.
+**v1.3.2** — Desktop recovery release: fixes the `electron-updater` CJS/ESM import regression that made "Check for Updates" silently no-op in affected builds, adds a clear sidebar upgrade/download/install reminder next to Settings, restores scheduled task execution when `nextRunAt` is missing or tasks are deleted, and adds a release gate that verifies GitHub Latest plus macOS/Windows updater metadata and assets. Users already on affected desktop `0.5.6` or `1.3.1` builds need a one-time manual install of `1.3.2`; later updates can flow through the repaired in-app updater.
 
 **v1.3.1** — Reliability release for Desktop + KSwarm: runtime probes and health cooldowns for CLI agents, stalled-run watchdog telemetry, capability-aware retry routing, hard deliverable validation for PPTX/HTML/Markdown tasks, deterministic local PPTX fallback, recoverable project planning when the PO planning phase is interrupted before a plan is submitted, and a desktop release workflow fix that checks out KSwarm before packaging.
 
