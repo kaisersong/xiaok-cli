@@ -9,6 +9,7 @@ import { FolderKanban, CheckCircle2, Clock, Loader2, Trash2, AlertTriangle } fro
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import { getCompactProjectHealthLabel, shouldShowProjectHealth, type ProjectHealthStatus } from './kswarmStatus';
+import type { ProjectIntervention } from '../../hooks/useKSwarmClient';
 
 interface ProjectCardProps {
   project: {
@@ -27,6 +28,7 @@ interface ProjectCardProps {
       primaryBlockedTaskId?: string;
       message?: string;
     };
+    projectIntervention?: ProjectIntervention | null;
   };
 }
 
@@ -50,7 +52,14 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const statusConf = STATUS_CONFIG[project.status] || STATUS_CONFIG.draft;
   const healthStatus = project.projectHealth?.status ?? 'unknown';
   const hasHealthSignal = shouldShowProjectHealth(healthStatus);
-  const visibleStatus = hasHealthSignal
+  const hasInterventionSignal = project.projectIntervention?.required === true;
+  const visibleStatus = hasInterventionSignal
+    ? {
+        label: '需要处理',
+        color: 'text-[var(--c-status-warning-text)]',
+        icon: AlertTriangle,
+      }
+    : hasHealthSignal
     ? {
         label: getCompactProjectHealthLabel(healthStatus),
         color: healthStatus === 'failed' || healthStatus === 'blocked'
@@ -129,7 +138,12 @@ export function ProjectCard({ project }: ProjectCardProps) {
         </div>
 
         {project.goal && <p className="text-xs text-[var(--c-text-tertiary)] mt-2 line-clamp-2">{project.goal}</p>}
-        {hasHealthSignal && project.projectHealth?.message && (
+        {hasInterventionSignal && project.projectIntervention?.message && (
+          <p className="mt-2 text-[11px] leading-relaxed text-[var(--c-status-warning-text)] line-clamp-2">
+            {project.projectIntervention.message}
+          </p>
+        )}
+        {!hasInterventionSignal && hasHealthSignal && project.projectHealth?.message && (
           <p className="mt-2 text-[11px] leading-relaxed text-[var(--c-status-error-text)] line-clamp-2">
             {project.projectHealth.message}
           </p>

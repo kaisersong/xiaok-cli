@@ -74,6 +74,7 @@ export interface KSwarmProject {
   enableSummary?: boolean;
   summary?: string | null;
   summaryScore?: number | null;
+  projectIntervention?: ProjectIntervention | null;
 }
 
 export interface KSwarmDeliverable {
@@ -179,6 +180,7 @@ export interface KSwarmClientActions {
   createProject(input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string; enableSummary?: boolean }): Promise<KSwarmProject | null>;
   approveProject(projectId: string): Promise<boolean>;
   retryPlan(projectId: string): Promise<{ ok: boolean; retried?: boolean; poReassigned?: boolean; poAgent?: string; previousPoAgent?: string; poResolutionReason?: string } | null>;
+  continueProject(projectId: string, request: ContinueProjectRequest): Promise<ContinueProjectResult | null>;
   closeProject(projectId: string): Promise<boolean>;
   deleteProject(projectId: string): Promise<boolean>;
   deliverProject(projectId: string): Promise<boolean>;
@@ -235,6 +237,56 @@ export interface ProjectFullDetail {
     message?: string;
     actions?: Array<{ id: string; label: string; recommended?: boolean }>;
   };
+  projectIntervention?: ProjectIntervention | null;
+}
+
+export interface ProjectIntervention {
+  required: boolean;
+  severity?: 'normal' | 'warning' | 'action_required' | string;
+  projectId?: string | null;
+  reason?: string;
+  headline?: string | null;
+  message?: string;
+  primaryTaskId?: string | null;
+  primaryTaskTitle?: string | null;
+  lastEventAt?: number | string | null;
+  downstreamBlockedCount?: number;
+  primaryFailure?: {
+    reason?: string | null;
+    feedback?: string;
+    assignedAgent?: string | null;
+    status?: string | null;
+    qualityFailureCount?: number;
+  } | null;
+  primaryAction?: {
+    id: 'continue_project' | string;
+    label: string;
+    strategy?: string;
+    taskId?: string;
+    taskUpdatedAt?: number | string | null;
+  } | null;
+  secondaryAction?: {
+    id: 'ask_xiaok' | string;
+    label: string;
+    context?: Record<string, unknown>;
+  } | null;
+}
+
+export interface ContinueProjectRequest {
+  expectedPrimaryTaskId?: string;
+  expectedTaskUpdatedAt?: number | string | null;
+  idempotencyKey: string;
+}
+
+export interface ContinueProjectResult {
+  ok: boolean;
+  action?: 'continue_project' | string;
+  strategy?: string | null;
+  error?: string;
+  status?: number;
+  dispatched?: string[];
+  idempotent?: boolean;
+  xiaokContext?: Record<string, unknown>;
 }
 
 // ─── Principles Injection ────────────────────────────────────────
@@ -295,6 +347,21 @@ async function httpPost<T>(path: string, body?: unknown): Promise<T | null> {
     });
     if (!res.ok) return null;
     return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function httpPostJson<T>(path: string, body?: unknown): Promise<T | null> {
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => null);
+    if (!data) return null;
+    return { ...data, status: data.status ?? res.status } as T;
   } catch {
     return null;
   }
@@ -397,7 +464,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
       'project_created', 'project_approved', 'project_closed', 'project_deliverable',
       'tasks_created', 'tasks_dispatched', 'task_done', 'task_failed', 'task_retry',
       'task_update', 'task_reviewed', 'task_cancelled', 'task_rework',
-      'plan_submitted', 'plan_revised',
+      'plan_submitted', 'plan_revised', 'project_continue',
     ];
     if (msg.type && refreshEvents.includes(msg.type)) {
       fetchProjects();
@@ -478,6 +545,12 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   const retryPlan = useCallback(async (projectId: string) => {
     return httpPost<{ ok: boolean; retried?: boolean; poReassigned?: boolean; poAgent?: string; previousPoAgent?: string; poResolutionReason?: string }>(`/projects/${projectId}/retry-plan`, {});
   }, []);
+
+  const continueProject = useCallback(async (projectId: string, request: ContinueProjectRequest): Promise<ContinueProjectResult | null> => {
+    const result = await httpPostJson<ContinueProjectResult>(`/projects/${projectId}/continue`, request);
+    if (result?.ok) fetchProjects();
+    return result;
+  }, [fetchProjects]);
 
   const closeProject = useCallback(async (projectId: string): Promise<boolean> => {
     const result = await httpPost<{ ok: boolean }>(`/projects/${projectId}/close`);
@@ -614,6 +687,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     createProject,
     approveProject,
     retryPlan,
+    continueProject,
     closeProject,
     deleteProject,
     deliverProject,

@@ -54,4 +54,14 @@ describe('KSwarm kanban failure visibility', () => {
     expect(within(stopped).getByText('阻塞')).toBeInTheDocument();
     expect(within(stopped).getByText(/产出物缺少实际内容/)).toBeInTheDocument();
   });
+
+  it('does not expose advanced manual intervention actions on failed task cards', () => {
+    renderKanban([
+      { id: 'failed-task', title: '失败任务', status: 'failed', assignedAgent: 'worker', failureReason: 'agent_error' },
+    ]);
+
+    expect(screen.queryByRole('button', { name: /人工放行/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /跳过/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /换 Agent/ })).not.toBeInTheDocument();
+  });
 });

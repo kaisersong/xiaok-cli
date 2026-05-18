@@ -145,6 +145,31 @@ describe('project health status UI', () => {
     expect(screen.getByText(/最终校验失败/)).toBeInTheDocument();
   });
 
+  it('shows simplified intervention state on project list cards', () => {
+    renderWithProviders(
+      <ProjectCard
+        project={{
+          id: 'proj-1',
+          name: '外贸趋势分析',
+          status: 'active',
+          taskCount: 4,
+          doneCount: 0,
+          projectIntervention: {
+            required: true,
+            headline: '需要处理',
+            message: '确定数据源与假设基线 执行失败，后续 2 个任务正在等待它。',
+            primaryTaskId: 'item-1',
+            primaryAction: { id: 'continue_project', label: '继续推进' },
+            secondaryAction: { id: 'ask_xiaok', label: '问小K' },
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText('需要处理')).toBeInTheDocument();
+    expect(screen.getByText(/后续 2 个任务/)).toBeInTheDocument();
+  });
+
   it('shows dispatch plan counters on inline project progress cards', () => {
     renderWithProviders(
       <ProjectProgressCard

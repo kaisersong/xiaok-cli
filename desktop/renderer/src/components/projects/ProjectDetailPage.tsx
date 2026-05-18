@@ -8,12 +8,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, LayoutGrid, Activity, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users, Download, FolderOpen } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import type { KSwarmProject, KSwarmTask, KSwarmActivityEvent, KSwarmHumanAction } from '../../hooks/useKSwarmClient';
+import type { KSwarmProject, KSwarmTask, KSwarmActivityEvent, KSwarmHumanAction, ProjectIntervention } from '../../hooks/useKSwarmClient';
 import type { ProjectFullDetail } from '../../hooks/useKSwarmClient';
 import { PlanView } from './PlanView';
 import { KanbanBoard } from './KanbanBoard';
 import { ActivityTimeline } from './ActivityTimeline';
 import { DeliverableView } from './DeliverableView';
+import { ProjectInterventionBanner } from './ProjectInterventionBanner';
 import { exportProjectMarkdown } from './exportProjectMarkdown';
 import { getDesktopApi } from '../../shared/desktop';
 import { canRetryPlanForProject, isInterruptedPlanProject } from './projectPlanRecovery';
@@ -28,7 +29,7 @@ import {
 
 type TabId = 'plan' | 'board' | 'agents' | 'activity' | 'deliverables';
 type ActionNotice = {
-  action: 'retry' | 'export';
+  action: 'retry' | 'export' | 'continue';
   kind: 'info' | 'success' | 'error';
   message: string;
 };
@@ -127,7 +128,7 @@ function downloadTextFile(filename: string, content: string, mimeType: string) {
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const { getProjectFullDetail, approveProject, retryPlan, dispatchTasks, deliverProject, closeProject, connected, agents } = useKSwarm();
+  const { getProjectFullDetail, approveProject, retryPlan, continueProject, dispatchTasks, deliverProject, closeProject, connected, agents } = useKSwarm();
   const { t } = useLocale();
   const [detail, setDetail] = useState<ProjectFullDetail | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('board');
@@ -268,6 +269,44 @@ export function ProjectDetailPage() {
     }
   };
 
+  const handleContinueProject = async (intervention: ProjectIntervention) => {
+    if (!projectId || actionLoading !== null) return;
+    const primaryAction = intervention.primaryAction;
+    setActionLoading('continue');
+    try {
+      const result = await continueProject(projectId, {
+        expectedPrimaryTaskId: intervention.primaryTaskId || primaryAction?.taskId || undefined,
+        expectedTaskUpdatedAt: primaryAction?.taskUpdatedAt ?? intervention.lastEventAt ?? undefined,
+        idempotencyKey: `continue-${projectId}-${Date.now()}`,
+      });
+      if (result?.ok) {
+        showNotice({ action: 'continue', kind: 'success', message: '已继续推进项目。' }, 5_000);
+      } else if (result?.error === 'task_state_changed' || result?.status === 409) {
+        showNotice({ action: 'continue', kind: 'info', message: '状态已变化，已刷新项目。' }, 8_000);
+      } else if (result?.strategy === 'needs_conversation' || result?.error === 'needs_conversation') {
+        showNotice({ action: 'continue', kind: 'info', message: '当前需要先问小K确认下一步。' }, 8_000);
+      } else {
+        showNotice({ action: 'continue', kind: 'error', message: '继续推进失败，请稍后重试。' }, 8_000);
+      }
+    } catch {
+      showNotice({ action: 'continue', kind: 'error', message: '继续推进失败，请稍后重试。' }, 8_000);
+    } finally {
+      await refreshOnce();
+      setActionLoading(null);
+    }
+  };
+
+  const handleAskXiaok = (intervention: ProjectIntervention) => {
+    const context = intervention.secondaryAction?.context || {
+      projectId,
+      taskId: intervention.primaryTaskId,
+      taskTitle: intervention.primaryTaskTitle,
+      message: intervention.message,
+    };
+    window.sessionStorage.setItem('xiaok.swarmContinueContext', JSON.stringify(context));
+    showNotice({ action: 'continue', kind: 'info', message: '已准备小K上下文，可在会话中继续处理。' }, 8_000);
+  };
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -292,12 +331,13 @@ export function ProjectDetailPage() {
   const showApprove = project.status === 'created' || project.status === 'draft' || project.status === 'planning';
   const showRetryPlan = canRetryPlanForProject(project, plan, tasks);
   const showInterruptedPlanHint = isInterruptedPlanProject(project, plan, tasks);
-  const showDispatch = project.status === 'active' && dispatchableTaskCount > 0;
+  const projectIntervention = detail.projectIntervention;
+  const showDispatch = project.status === 'active' && dispatchableTaskCount > 0 && !projectIntervention?.required;
   const showDeliver = project.status === 'active' && tasks.every(t => t.status === 'done' || t.status === 'cancelled');
   const showClose = project.status === 'active' || project.status === 'delivered';
   const statusLabel = STATUS_LABELS[project.status] || project.status;
   const healthSummary = summarizeProjectHealth(detail);
-  const showHealthBanner = shouldShowProjectHealth(healthSummary.status);
+  const showHealthBanner = shouldShowProjectHealth(healthSummary.status) && !projectIntervention?.required;
   const retryBusy = actionLoading === 'retry';
   const retryCoolingDown = retryCooldownUntil > Date.now();
   const retryDisabled = actionLoading !== null || retryCoolingDown;
@@ -425,6 +465,15 @@ export function ProjectDetailPage() {
           >
             {actionNotice.message}
           </div>
+        )}
+
+        {projectIntervention?.required && (
+          <ProjectInterventionBanner
+            intervention={projectIntervention}
+            busy={actionLoading === 'continue'}
+            onContinue={() => handleContinueProject(projectIntervention)}
+            onAskXiaok={() => handleAskXiaok(projectIntervention)}
+          />
         )}
 
         {showHealthBanner && (
