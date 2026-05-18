@@ -179,6 +179,29 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
 
   const isOnScheduled = activeNav === 'scheduled';
   const hideThreadList = activeNav === 'scheduled' || activeNav === 'projects';
+  const updateVersion = updateStatus?.version || '新版本';
+  const showUpdateReminder = Boolean(updateStatus && (
+    updateStatus.checking ||
+    updateStatus.available ||
+    updateStatus.downloading ||
+    updateStatus.downloaded
+  ));
+  const updateReminderLabel = updateStatus?.downloaded
+    ? `安装 ${updateVersion}`
+    : updateStatus?.downloading
+      ? `${updateStatus.progress}%`
+      : updateStatus?.checking
+        ? '检查中'
+        : `升级到 ${updateVersion}`;
+
+  const handleUpdateReminderClick = async () => {
+    if (!updateStatus || updateStatus.downloading || updateStatus.checking) return;
+    if (updateStatus.downloaded) {
+      await api.quitAndInstall();
+      return;
+    }
+    await api.checkForUpdates();
+  };
 
   return (
     <aside
@@ -379,31 +402,36 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
         <div className="flex items-center justify-between">
           <div className="text-xs text-[var(--c-text-secondary)]">local@xiaok</div>
           <div className="flex items-center gap-1">
-            {updateStatus?.downloaded && (
+            {showUpdateReminder && (
               <button
                 type="button"
-                onClick={() => api.quitAndInstall()}
-                className="flex h-8 w-8 items-center justify-center rounded-md text-green-500 transition-[background-color,color,transform] duration-[60ms] hover:bg-green-50 active:scale-[0.96] animate-pulse"
-                title={`更新已就绪: v${updateStatus.version || '新版本'}，点击安装`}
+                onClick={handleUpdateReminderClick}
+                disabled={updateStatus?.downloading || updateStatus?.checking}
+                aria-label={updateReminderLabel}
+                className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-[background-color,color,transform] duration-[60ms] active:scale-[0.96] ${
+                  updateStatus?.downloaded
+                    ? 'bg-green-50 text-green-700 hover:bg-green-100'
+                    : updateStatus?.downloading || updateStatus?.checking
+                      ? 'cursor-default bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]'
+                      : 'bg-[var(--c-accent)] text-white hover:opacity-90'
+                }`}
+                title={
+                  updateStatus?.downloaded
+                    ? `更新已就绪: v${updateVersion}，点击安装`
+                    : updateStatus?.downloading
+                      ? `正在下载: ${updateStatus.progress}%`
+                      : updateStatus?.checking
+                        ? '正在检查更新'
+                        : `发现新版本: v${updateVersion}，点击升级`
+                }
               >
-                <Download size={18} />
+                {updateStatus?.downloaded ? (
+                  <Download size={14} />
+                ) : (
+                  <RefreshCw size={14} className={updateStatus?.downloading || updateStatus?.checking ? 'animate-spin' : ''} />
+                )}
+                <span>{updateReminderLabel}</span>
               </button>
-            )}
-            {updateStatus?.downloading && (
-              <div
-                className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--c-accent)]"
-                title={`正在下载: ${updateStatus.progress}%`}
-              >
-                <RefreshCw size={18} className="animate-spin" />
-              </div>
-            )}
-            {updateStatus?.available && !updateStatus.downloaded && !updateStatus.downloading && (
-              <div
-                className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--c-accent)]"
-                title={`发现新版本: v${updateStatus.version || '更新'}`}
-              >
-                <RefreshCw size={18} className="animate-pulse" />
-              </div>
             )}
             {onOpenSettings && (
               <button

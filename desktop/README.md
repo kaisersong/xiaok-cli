@@ -49,6 +49,17 @@ Build customer-facing desktop artifacts from the repo root:
 npm run desktop:pack
 ```
 
+After a tagged desktop release finishes, verify that the updater feed and
+release assets are usable:
+
+```bash
+npm run desktop:verify-release -- desktop-v<version>
+```
+
+The release is not considered complete until this check passes. It verifies
+GitHub Latest, `latest-mac.yml`, `latest.yml`, and the macOS/Windows installer
+asset names against the desktop package version.
+
 On Windows this produces:
 
 ```text

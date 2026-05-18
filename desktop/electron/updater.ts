@@ -23,6 +23,21 @@ let updateStatus: UpdateStatus = {
 let mainWindow: BrowserWindow | null = null;
 let isDevMode = false;
 let autoUpdater: any = null;
+let autoUpdaterEventsRegistered = false;
+
+export function resolveAutoUpdaterExport(module: unknown): any | null {
+  if (!module || typeof module !== 'object') return null;
+  const candidate = (module as { autoUpdater?: unknown }).autoUpdater
+    ?? (module as { default?: { autoUpdater?: unknown } }).default?.autoUpdater;
+  if (!candidate || typeof candidate !== 'object') return null;
+  if (typeof (candidate as { checkForUpdates?: unknown }).checkForUpdates !== 'function') return null;
+  return candidate;
+}
+
+function setUpdateStatus(patch: Partial<UpdateStatus>): void {
+  updateStatus = { ...updateStatus, ...patch };
+  sendUpdateStatus();
+}
 
 function isDevelopmentMode(): boolean {
   // Check multiple indicators for development mode
@@ -39,14 +54,68 @@ function isDevelopmentMode(): boolean {
   return false;
 }
 
-async function loadAutoUpdater(): Promise<void> {
-  if (autoUpdater) return;
+async function loadAutoUpdater(): Promise<boolean> {
+  if (autoUpdater) return true;
   try {
     const pkg = await import('electron-updater');
-    autoUpdater = pkg.autoUpdater;
+    autoUpdater = resolveAutoUpdaterExport(pkg);
+    if (!autoUpdater) {
+      setUpdateStatus({ error: '无法加载更新器: electron-updater 未导出 autoUpdater' });
+      return false;
+    }
+    return true;
   } catch (e) {
-    updateStatus.error = `无法加载更新器: ${(e as Error).message}`;
+    setUpdateStatus({ error: `无法加载更新器: ${(e as Error).message}` });
+    return false;
   }
+}
+
+function registerAutoUpdaterEvents(): void {
+  if (!autoUpdater || autoUpdaterEventsRegistered) return;
+  autoUpdaterEventsRegistered = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    setUpdateStatus({ checking: true, error: undefined });
+  });
+
+  autoUpdater.on('update-available', (info: { version: string }) => {
+    setUpdateStatus({
+      checking: false,
+      available: true,
+      version: info.version,
+    });
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    setUpdateStatus({
+      checking: false,
+      available: false,
+    });
+  });
+
+  autoUpdater.on('download-progress', (progress: { percent: number }) => {
+    setUpdateStatus({
+      downloading: true,
+      progress: Math.round(progress.percent),
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info: { version: string }) => {
+    setUpdateStatus({
+      downloading: false,
+      downloaded: true,
+      version: info.version,
+      progress: 100,
+    });
+  });
+
+  autoUpdater.on('error', (error: Error) => {
+    setUpdateStatus({
+      checking: false,
+      downloading: false,
+      error: error.message,
+    });
+  });
 }
 
 export async function setupAutoUpdater(window: BrowserWindow): Promise<void> {
@@ -60,78 +129,35 @@ export async function setupAutoUpdater(window: BrowserWindow): Promise<void> {
   }
 
   // Load autoUpdater dynamically
-  await loadAutoUpdater();
-  if (!autoUpdater) return;
+  if (!(await loadAutoUpdater())) return;
 
   // Configure autoUpdater
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = false;
+  registerAutoUpdaterEvents();
 
   // Check for updates immediately on startup
-  autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+  autoUpdater.checkForUpdatesAndNotify().catch((error: Error) => {
+    setUpdateStatus({
+      checking: false,
+      downloading: false,
+      error: error.message,
+    });
+  });
 
   // Also check periodically (every 4 hours)
   setInterval(() => {
     if (autoUpdater) {
-      autoUpdater.checkForUpdates().catch(() => {});
+      autoUpdater.checkForUpdates().catch((error: Error) => {
+        setUpdateStatus({
+          checking: false,
+          downloading: false,
+          error: error.message,
+        });
+      });
     }
   }, 4 * 60 * 60 * 1000);
-
-  // Event handlers
-  autoUpdater.on('checking-for-update', () => {
-    updateStatus = { ...updateStatus, checking: true, error: undefined };
-    sendUpdateStatus();
-  });
-
-  autoUpdater.on('update-available', (info: { version: string }) => {
-    updateStatus = {
-      ...updateStatus,
-      checking: false,
-      available: true,
-      version: info.version,
-    };
-    sendUpdateStatus();
-  });
-
-  autoUpdater.on('update-not-available', () => {
-    updateStatus = {
-      ...updateStatus,
-      checking: false,
-      available: false,
-    };
-    sendUpdateStatus();
-  });
-
-  autoUpdater.on('download-progress', (progress: { percent: number }) => {
-    updateStatus = {
-      ...updateStatus,
-      downloading: true,
-      progress: Math.round(progress.percent),
-    };
-    sendUpdateStatus();
-  });
-
-  autoUpdater.on('update-downloaded', (info: { version: string }) => {
-    updateStatus = {
-      ...updateStatus,
-      downloading: false,
-      downloaded: true,
-      version: info.version,
-      progress: 100,
-    };
-    sendUpdateStatus();
-  });
-
-  autoUpdater.on('error', (error: Error) => {
-    updateStatus = {
-      ...updateStatus,
-      checking: false,
-      downloading: false,
-      error: error.message,
-    };
-    sendUpdateStatus();
-  });
 }
 
 function sendUpdateStatus(): void {
@@ -158,23 +184,34 @@ export function getUpdateStatus(): UpdateStatus {
 export async function checkForUpdates(): Promise<void> {
   // Skip in development mode - app-update.yml doesn't exist
   if (isDevMode || isDevelopmentMode()) {
-    updateStatus = {
-      ...updateStatus,
+    setUpdateStatus({
       checking: false,
       error: '开发模式下无法检查更新',
-    };
-    sendUpdateStatus();
+    });
     return;
   }
 
-  await loadAutoUpdater();
-  if (!autoUpdater) return;
+  setUpdateStatus({ checking: true, error: undefined });
+  if (!(await loadAutoUpdater())) {
+    setUpdateStatus({ checking: false });
+    return;
+  }
+  registerAutoUpdaterEvents();
 
   try {
-    await autoUpdater.checkForUpdates();
+    const result = await autoUpdater.checkForUpdates();
+    if (result === null) {
+      setUpdateStatus({
+        checking: false,
+        error: '更新器未激活',
+      });
+    }
   } catch (e) {
-    updateStatus.error = (e as Error).message;
-    sendUpdateStatus();
+    setUpdateStatus({
+      checking: false,
+      downloading: false,
+      error: (e as Error).message,
+    });
   }
 }
 
