@@ -24,6 +24,8 @@ import {
   Package,
   Languages,
   Brain,
+  Camera,
+  User,
 } from 'lucide-react';
 import { api } from '../api';
 import { LocalMemoryStatsCard } from './settings/LocalMemoryStatsCard';
@@ -1363,6 +1365,10 @@ function GeneralPane() {
   const { locale, setLocale, t } = useLocale();
   const [skillDebug, setSkillDebug] = useState(false);
   const [savingSkillDebug, setSavingSkillDebug] = useState(false);
+  const [displayName, setDisplayName] = useState(() => localStorage.getItem('xiaok_display_name') || '');
+  const [avatarUrl, setAvatarUrl] = useState(() => localStorage.getItem('xiaok_avatar_url') || '');
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
 
   useEffect(() => {
     api.getSkillDebugConfig().then(c => {
@@ -1380,8 +1386,106 @@ function GeneralPane() {
     }
   };
 
+  const handleStartEditName = () => {
+    setNameInput(displayName);
+    setEditingName(true);
+  };
+
+  const handleSaveName = () => {
+    const trimmed = nameInput.trim();
+    if (trimmed) {
+      localStorage.setItem('xiaok_display_name', trimmed);
+    } else {
+      localStorage.removeItem('xiaok_display_name');
+    }
+    setDisplayName(trimmed);
+    setEditingName(false);
+    window.dispatchEvent(new Event('xiaok-profile-changed'));
+  };
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const size = Math.min(img.width, img.height, 128);
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, size, size);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        if (dataUrl.length > 140000) {
+          alert('头像文件过大，请选择更小的图片');
+          return;
+        }
+        localStorage.setItem('xiaok_avatar_url', dataUrl);
+        setAvatarUrl(dataUrl);
+        window.dispatchEvent(new Event('xiaok-profile-changed'));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const initial = (displayName || '?').charAt(0).toUpperCase();
+
   return (
     <>
+      <Section>
+        <SectionHeader icon={User}>个人资料</SectionHeader>
+        <Card>
+          <div className="flex items-center gap-4">
+            {/* Avatar */}
+            <div className="relative shrink-0">
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="avatar" className="h-12 w-12 rounded-full object-cover" />
+              ) : (
+                <div
+                  className="flex h-12 w-12 items-center justify-center rounded-full text-base font-semibold"
+                  style={{ background: 'var(--c-avatar-bg, #e2e8f0)', color: 'var(--c-avatar-text, #475569)' }}
+                >
+                  {initial}
+                </div>
+              )}
+              <label className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full bg-[var(--c-bg-card)] shadow" title="更换头像">
+                <Camera size={10} />
+                <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
+              </label>
+            </div>
+            {/* Name */}
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              {editingName ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') setEditingName(false); }}
+                    className="min-w-0 flex-1 rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]"
+                    placeholder="输入你的名字"
+                    autoFocus
+                  />
+                  <button type="button" onClick={handleSaveName} className="text-xs text-[var(--c-accent)]">保存</button>
+                  <button type="button" onClick={() => setEditingName(false)} className="text-xs text-[var(--c-text-tertiary)]">取消</button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleStartEditName}
+                  className="truncate text-left text-sm font-medium text-[var(--c-text-heading)] hover:text-[var(--c-accent)]"
+                >
+                  {displayName || '点击设置名字'}
+                </button>
+              )}
+              <span className="text-xs text-[var(--c-text-tertiary)]">小K 回复时会称呼你</span>
+            </div>
+          </div>
+        </Card>
+      </Section>
       <Section>
         <SectionHeader icon={SlidersHorizontal}>语言</SectionHeader>
         <Card>

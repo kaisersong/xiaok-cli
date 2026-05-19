@@ -397,10 +397,10 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       {/* Spacer for scheduled/projects page view */}
       {hideThreadList && <div className="flex-1" />}
 
-      {/* Footer with settings button */}
+      {/* Footer with user profile and settings button */}
       <div className="border-t border-[var(--c-border)] p-3">
         <div className="flex items-center justify-between">
-          <div className="text-xs text-[var(--c-text-secondary)]">local@xiaok</div>
+          <SidebarUserProfile />
           <div className="flex items-center gap-1">
             {showUpdateReminder && (
               <button
@@ -446,5 +446,38 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
         </div>
       </div>
     </aside>
+  );
+}
+
+function SidebarUserProfile() {
+  const [name, setName] = useState(() => localStorage.getItem('xiaok_display_name') || '');
+  const [avatar, setAvatar] = useState(() => localStorage.getItem('xiaok_avatar_url') || '');
+
+  useEffect(() => {
+    const handler = () => {
+      setName(localStorage.getItem('xiaok_display_name') || '');
+      setAvatar(localStorage.getItem('xiaok_avatar_url') || '');
+    };
+    window.addEventListener('xiaok-profile-changed', handler);
+    return () => window.removeEventListener('xiaok-profile-changed', handler);
+  }, []);
+
+  const displayName = name || 'local';
+  const initial = displayName.charAt(0).toUpperCase();
+
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      {avatar ? (
+        <img src={avatar} alt="" className="h-6 w-6 rounded-full object-cover shrink-0" />
+      ) : (
+        <div
+          className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold shrink-0"
+          style={{ background: 'var(--c-avatar-bg, #e2e8f0)', color: 'var(--c-avatar-text, #475569)' }}
+        >
+          {initial}
+        </div>
+      )}
+      <span className="text-xs text-[var(--c-text-secondary)] truncate">{displayName}</span>
+    </div>
   );
 }

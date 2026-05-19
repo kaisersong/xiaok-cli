@@ -592,6 +592,12 @@ export function ChatShell() {
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
     if (!taskId) return;
 
+    // If streaming is active, queue the message instead of interrupting
+    if (status === 'running' && (!files || files.length === 0)) {
+      setQueuedPrompt(text);
+      return;
+    }
+
     toolStepsMsgIdRef.current = null;
 
     // Add user message immediately (include file names in content)
