@@ -53,6 +53,9 @@ interface ChatViewProps {
   prompt: string;
   onPromptChange: (value: string) => void;
   onSubmit: (text: string, files?: Array<{ filePath: string; name: string }>) => void;
+  onQueue?: (text: string) => void;
+  queuedText?: string | null;
+  onCancelQueue?: () => void;
   onAnswer: (choiceId: string) => void;
   onCancel: () => void;
   canvasOpen: boolean;
@@ -64,7 +67,7 @@ interface ChatViewProps {
 export function ChatView({
   thread, messages, streamingText, status, currentQuestion, result,
   generatedFiles,
-  prompt, onPromptChange, onSubmit, onAnswer, onCancel,
+  prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
   canvasOpen, onToggleCanvas, onArtifactClick, onArtifactOpenExternal,
 }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -289,6 +292,9 @@ export function ChatView({
           value={prompt}
           onChange={onPromptChange}
           onSubmit={onSubmit}
+          onQueue={onQueue}
+          queuedText={queuedText}
+          onCancelQueue={onCancelQueue}
           placeholder={status === 'running' ? '输入消息...' : '回复...'}
           disabled={status === 'waiting_user'}
           isRunning={status === 'running'}

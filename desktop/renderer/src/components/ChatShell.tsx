@@ -98,6 +98,7 @@ export function ChatShell() {
   const [canvasPreviewFile, setCanvasPreviewFile] = useState<string | undefined>();
   const [canvasPreviewContent, setCanvasPreviewContent] = useState<string | undefined>();
   const [planSteps, setPlanSteps] = useState<Array<{ id: string; label: string; status: string }>>([]);
+  const [queuedPrompt, setQueuedPrompt] = useState<string | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
   const streamRef = useRef('');
   const currentLoadIdRef = useRef<string | null>(null);
@@ -675,6 +676,18 @@ export function ChatShell() {
     return () => { unsubRef.current?.(); };
   }, []);
 
+  // Drain queued prompt when current task completes
+  const handleSubmitRef = useRef(handleSubmit);
+  handleSubmitRef.current = handleSubmit;
+  useEffect(() => {
+    if (queuedPrompt && (status === 'idle' || status === 'completed')) {
+      const text = queuedPrompt;
+      setQueuedPrompt(null);
+      const timer = setTimeout(() => handleSubmitRef.current(text), 100);
+      return () => clearTimeout(timer);
+    }
+  }, [status, queuedPrompt]);
+
   if (loadError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 text-[var(--c-text-secondary)]">
@@ -757,6 +770,9 @@ export function ChatShell() {
           prompt={prompt}
           onPromptChange={setPrompt}
           onSubmit={handleSubmit}
+          onQueue={setQueuedPrompt}
+          queuedText={queuedPrompt}
+          onCancelQueue={() => setQueuedPrompt(null)}
           onAnswer={handleAnswer}
           onCancel={handleCancel}
           canvasOpen={canvasOpen}

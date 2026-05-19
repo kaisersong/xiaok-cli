@@ -19,6 +19,9 @@ interface ChatInputProps {
   value?: string;
   onChange?: (value: string) => void;
   onSubmit: (text: string, files: AttachedFile[]) => void;
+  onQueue?: (text: string) => void;
+  queuedText?: string | null;
+  onCancelQueue?: () => void;
   placeholder?: string;
   disabled?: boolean;
   isRunning?: boolean;
@@ -27,7 +30,7 @@ interface ChatInputProps {
 
 const TEXTAREA_MAX_HEIGHT = 220;
 
-export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...', disabled, isRunning, onStop }: ChatInputProps) {
+export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder = '回复...', disabled, isRunning, onStop }: ChatInputProps) {
   const [internalValue, setInternalValue] = useState(value ?? '');
   const [files, setFiles] = useState<AttachedFile[]>([]);
   const [focused, setFocused] = useState(false);
@@ -101,6 +104,12 @@ export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...'
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
+      if (isRunning && onQueue && internalValue.trim()) {
+        onQueue(internalValue.trim());
+        setInternalValue('');
+        onChange?.('');
+        return;
+      }
       // Allow submit with text OR files
       if (internalValue.trim() || files.length > 0) {
         submit();
@@ -206,6 +215,30 @@ export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...'
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Queued message banner */}
+      {queuedText && (
+        <div
+          className="flex items-center gap-2 rounded-lg px-3 py-2 mb-2"
+          style={{
+            background: 'var(--c-bg-deep)',
+            border: '0.5px solid var(--c-border-subtle)',
+          }}
+        >
+          <span className="text-xs text-[var(--c-text-secondary)] shrink-0">队列中</span>
+          <span className="text-sm text-[var(--c-text-primary)] truncate flex-1" title={queuedText}>{queuedText}</span>
+          {onCancelQueue && (
+            <button
+              type="button"
+              onClick={onCancelQueue}
+              className="flex items-center justify-center rounded-md hover:bg-[rgba(0,0,0,0.05)]"
+              style={{ width: '20px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}
+            >
+              <X size={14} style={{ color: 'var(--c-text-secondary)' }} />
+            </button>
+          )}
         </div>
       )}
 
