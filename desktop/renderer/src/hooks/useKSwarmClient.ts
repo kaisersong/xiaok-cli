@@ -22,6 +22,7 @@ export interface KSwarmTask {
   description?: string;
   status: 'pending' | 'dispatched' | 'accepted' | 'in_progress' | 'submitted' | 'review' | 'done' | 'failed' | 'blocked' | 'cancelled';
   assignedAgent?: string;
+  assignedRuntimeInstance?: string;
   phase?: number;
   priority?: number;
   planItemId?: string;
@@ -35,8 +36,10 @@ export interface KSwarmTask {
   failureCount?: number;
   qualityFailureCount?: number;
   reviewResult?: { passed?: boolean; feedback?: string; failureClass?: string; reviewedAt?: number };
-  createdAt?: string;
-  updatedAt?: string;
+  startedAt?: number | string | null;
+  completedAt?: number | string | null;
+  createdAt?: number | string;
+  updatedAt?: number | string;
 }
 
 export interface KSwarmArtifact {

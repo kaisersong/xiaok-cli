@@ -4,7 +4,7 @@
  */
 
 import { useState, useMemo } from 'react';
-import { Circle, Loader2, Eye, CheckCircle2, Plus, X as XIcon, Check, AlertCircle } from 'lucide-react';
+import { Circle, Loader2, Eye, CheckCircle2, Plus, X as XIcon, Check, AlertCircle, Clock3 } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmProject, KSwarmTask, KSwarmArtifact } from '../../hooks/useKSwarmClient';
@@ -22,11 +22,88 @@ interface Column {
   statuses: KSwarmTask['status'][];
 }
 
+function getTaskDisplayTitle(task: KSwarmTask): string {
+  const legacyBrief = (task as KSwarmTask & { brief?: string }).brief;
+  return [task.title, legacyBrief, task.description]
+    .map(value => typeof value === 'string' ? value.trim() : '')
+    .find(Boolean) || '';
+}
+
+function isRenderableTask(task: KSwarmTask): boolean {
+  return getTaskDisplayTitle(task).length > 0;
+}
+
+function coerceTimestamp(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : null;
+  if (typeof value !== 'string') return null;
+
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function firstTimestamp(values: unknown[]): number | null {
+  for (const value of values) {
+    const timestamp = coerceTimestamp(value);
+    if (timestamp) return timestamp;
+  }
+  return null;
+}
+
+function formatTaskTimestamp(value: number): string {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(value)).replace(',', '');
+}
+
+function getTaskTimeMeta(task: KSwarmTask): { label: string; value: number } | null {
+  const rawTask = task as KSwarmTask & {
+    runTelemetry?: { startedAt?: number | string; startedAtMs?: number | string };
+    runLease?: { startedAt?: number | string; createdAt?: number | string };
+    lastRunLease?: { startedAt?: number | string; createdAt?: number | string };
+  };
+  const activeStatuses: KSwarmTask['status'][] = ['dispatched', 'accepted', 'in_progress', 'submitted', 'review'];
+
+  if (activeStatuses.includes(task.status)) {
+    const value = firstTimestamp([
+      rawTask.startedAt,
+      rawTask.runTelemetry?.startedAt,
+      rawTask.runTelemetry?.startedAtMs,
+      rawTask.runLease?.startedAt,
+      rawTask.lastRunLease?.startedAt,
+      rawTask.runLease?.createdAt,
+      rawTask.lastRunLease?.createdAt,
+      task.updatedAt,
+      task.createdAt,
+    ]);
+    return value ? { label: '启动时间', value } : null;
+  }
+
+  if (task.status === 'done') {
+    const value = firstTimestamp([
+      task.completedAt,
+      task.reviewResult?.reviewedAt,
+      task.updatedAt,
+    ]);
+    return value ? { label: '完成时间', value } : null;
+  }
+
+  return null;
+}
 
 function TaskCard({ task, projectId, onPreviewArtifact }: { task: KSwarmTask; projectId: string; onPreviewArtifact: (art: KSwarmArtifact) => void }) {
   const { cancelTask, markTaskDone, agents } = useKSwarm();
   const { t } = useLocale();
   const [acting, setActing] = useState(false);
+  const displayTitle = getTaskDisplayTitle(task);
+  const description = typeof task.description === 'string' ? task.description.trim() : '';
+  const taskTime = getTaskTimeMeta(task);
   const isFailed = task.status === 'failed';
   const isBlocked = task.status === 'blocked';
   const isCancelled = task.status === 'cancelled';
@@ -63,7 +140,7 @@ function TaskCard({ task, projectId, onPreviewArtifact }: { task: KSwarmTask; pr
         isFailed || isBlocked ? 'border-[var(--c-status-error-text)]/30' : isCancelled ? 'opacity-50' : ''
       }`}>
         <div className="flex items-start justify-between gap-1">
-          <p className="text-[12px] font-medium text-[var(--c-text-primary)] line-clamp-2 flex-1">{task.title}</p>
+          <p className="text-[12px] font-medium text-[var(--c-text-primary)] line-clamp-2 flex-1">{displayTitle}</p>
           {!acting && (canCancel || canMarkDone) && (
             <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
               {canMarkDone && (
@@ -77,8 +154,8 @@ function TaskCard({ task, projectId, onPreviewArtifact }: { task: KSwarmTask; pr
         </div>
 
         {/* Description */}
-        {task.description && (
-          <p className="mt-1 text-[11px] text-[var(--c-text-tertiary)] line-clamp-2">{task.description}</p>
+        {description && description !== displayTitle && (
+          <p className="mt-1 text-[11px] text-[var(--c-text-tertiary)] line-clamp-2">{description}</p>
         )}
 
         {/* Agent */}
@@ -88,6 +165,13 @@ function TaskCard({ task, projectId, onPreviewArtifact }: { task: KSwarmTask; pr
               <span className="text-[8px] font-bold text-[var(--c-text-secondary)]">{task.assignedAgent.charAt(0).toUpperCase()}</span>
             </div>
             <span className="text-[10px] text-[var(--c-text-muted)] truncate">{agentName(task.assignedAgent)}</span>
+          </div>
+        )}
+
+        {taskTime && (
+          <div className="mt-1.5 flex items-center gap-1 text-[10px] text-[var(--c-text-muted)]">
+            <Clock3 size={10} />
+            <span>{taskTime.label} {formatTaskTimestamp(taskTime.value)}</span>
           </div>
         )}
 
@@ -206,7 +290,7 @@ function AddTaskForm({ projectId, onDone }: { projectId: string; onDone(): void 
 
 export function KanbanBoard({ project }: KanbanBoardProps) {
   const { t } = useLocale();
-  const tasks = project.tasks || [];
+  const tasks = useMemo(() => (project.tasks || []).filter(isRenderableTask), [project.tasks]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [previewArtifact, setPreviewArtifact] = useState<KSwarmArtifact | null>(null);
 

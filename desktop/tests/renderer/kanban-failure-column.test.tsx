@@ -25,6 +25,29 @@ function renderKanban(tasks: any[]) {
 }
 
 describe('KSwarm kanban failure visibility', () => {
+  it('shows start time for active and review tasks, and completion time for done tasks', () => {
+    const activeStartedAt = Date.parse('2026-05-19T10:11:00+08:00');
+    const reviewStartedAt = Date.parse('2026-05-19T11:12:00+08:00');
+    const completedAt = Date.parse('2026-05-19T12:13:00+08:00');
+
+    renderKanban([
+      { id: 'pending-task', title: '待处理任务', status: 'pending', assignedAgent: 'worker', createdAt: activeStartedAt },
+      { id: 'active-task', title: '进行中任务', status: 'in_progress', assignedAgent: 'worker', startedAt: activeStartedAt },
+      { id: 'review-task', title: '待审核任务', status: 'submitted', assignedAgent: 'worker', startedAt: reviewStartedAt, updatedAt: Date.parse('2026-05-19T11:50:00+08:00') },
+      { id: 'done-task', title: '完成任务', status: 'done', assignedAgent: 'worker', completedAt },
+    ]);
+
+    const pending = screen.getByTestId('kanban-column-pending');
+    const active = screen.getByTestId('kanban-column-active');
+    const review = screen.getByTestId('kanban-column-review');
+    const done = screen.getByTestId('kanban-column-done');
+
+    expect(within(pending).queryByText(/时间/)).not.toBeInTheDocument();
+    expect(within(active).getByText('启动时间 05/19 10:11')).toBeInTheDocument();
+    expect(within(review).getByText('启动时间 05/19 11:12')).toBeInTheDocument();
+    expect(within(done).getByText('完成时间 05/19 12:13')).toBeInTheDocument();
+  });
+
   it('keeps failed and blocked tasks out of the completed column', () => {
     renderKanban([
       { id: 'done-task', title: '完成任务', status: 'done', assignedAgent: 'worker' },
@@ -63,5 +86,33 @@ describe('KSwarm kanban failure visibility', () => {
     expect(screen.queryByRole('button', { name: /人工放行/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /跳过/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /换 Agent/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps metadata-only pending tasks out of the kanban columns and counts', () => {
+    renderKanban([
+      { id: 'valid-pending', title: '有效待处理任务', status: 'pending', assignedAgent: 'worker' },
+      { id: 'metadata-only', status: 'pending', assignedAgent: 'ghost-agent' },
+    ]);
+
+    const pending = screen.getByTestId('kanban-column-pending');
+    expect(within(pending).getByText('有效待处理任务')).toBeInTheDocument();
+    expect(within(pending).queryByText('ghost-agent')).not.toBeInTheDocument();
+    expect(within(pending).getByText('1')).toBeInTheDocument();
+  });
+
+  it('uses description as the card title for legacy tasks without title', () => {
+    renderKanban([
+      {
+        id: 'description-only',
+        description: '只有描述的历史任务也应该可读',
+        status: 'pending',
+        assignedAgent: 'worker',
+      },
+    ]);
+
+    const pending = screen.getByTestId('kanban-column-pending');
+    expect(within(pending).getByText('只有描述的历史任务也应该可读')).toBeInTheDocument();
+    expect(within(pending).getByText('Worker')).toBeInTheDocument();
+    expect(within(pending).getByText('1')).toBeInTheDocument();
   });
 });

@@ -52,6 +52,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   window.sessionStorage.clear();
+  window.localStorage.clear();
 });
 
 function renderProjectDetail(detail: ProjectFullDetail) {
@@ -234,8 +235,14 @@ describe('project intervention actions', () => {
 
     const stored = JSON.parse(window.sessionStorage.getItem('xiaok.swarmContinueContext') || '{}');
     expect(stored.projectId).toBe('proj-intervention');
+    expect(stored.threadId).toBe('thread-help');
     expect(stored.draftPrompt).toContain('continue_project');
     expect(stored.availableTools).toContain('repair_project_task');
+
+    const threadDraft = JSON.parse(window.localStorage.getItem('xiaok.threadDraft.thread-help') || '{}');
+    expect(threadDraft.threadId).toBe('thread-help');
+    expect(threadDraft.projectId).toBe('proj-intervention');
+    expect(threadDraft.draftPrompt).toContain('continue_project');
   });
 
   it('shows stale-state feedback when continue returns 409', async () => {

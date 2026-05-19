@@ -25,6 +25,8 @@ interface ChatInputProps {
   onStop?: () => void;
 }
 
+const TEXTAREA_MAX_HEIGHT = 220;
+
 export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...', disabled, isRunning, onStop }: ChatInputProps) {
   const [internalValue, setInternalValue] = useState(value ?? '');
   const [files, setFiles] = useState<AttachedFile[]>([]);
@@ -47,7 +49,7 @@ export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...'
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, TEXTAREA_MAX_HEIGHT)}px`;
     }
   }, [internalValue]);
 
@@ -283,6 +285,8 @@ export function ChatInput({ value, onChange, onSubmit, placeholder = '回复...'
                 lineHeight: 1.45,
                 color: 'var(--c-text-primary)',
                 letterSpacing: '-0.16px',
+                maxHeight: `${TEXTAREA_MAX_HEIGHT}px`,
+                overflowY: 'auto',
               }}
             />
           </div>

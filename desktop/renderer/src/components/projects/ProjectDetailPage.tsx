@@ -37,6 +37,19 @@ type ActionNotice = {
 
 const RETRY_PLAN_COOLDOWN_MS = 15_000;
 const DETAIL_HOVER_DELAY_MS = 500;
+const THREAD_DRAFT_STORAGE_PREFIX = 'xiaok.threadDraft.';
+const SWARM_CONTEXT_STORAGE_KEY = 'xiaok.swarmContinueContext';
+
+function storeXiaokThreadDraft(threadId: string, context: Record<string, unknown>) {
+  const storedContext = { ...context, threadId };
+  window.sessionStorage.setItem(SWARM_CONTEXT_STORAGE_KEY, JSON.stringify(storedContext));
+  try {
+    window.localStorage.setItem(`${THREAD_DRAFT_STORAGE_PREFIX}${threadId}`, JSON.stringify(storedContext));
+  } catch {
+    // Route state still carries the fresh draft; storage is for recovery from sidebar navigation.
+  }
+  return storedContext;
+}
 
 function DelayedHoverText({
   text,
@@ -406,6 +419,7 @@ export function ProjectDetailPage() {
       const storedContext = { ...context, draftPrompt };
       window.sessionStorage.setItem('xiaok.swarmContinueContext', JSON.stringify(storedContext));
       const thread = await api.createThread({ title: `让小K帮忙：${detail.project.name}`.slice(0, 40) });
+      storeXiaokThreadDraft(thread.id, storedContext);
       navigate(`/t/${thread.id}`, {
         state: {
           draftPrompt,

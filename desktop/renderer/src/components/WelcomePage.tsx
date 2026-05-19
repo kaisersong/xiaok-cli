@@ -8,8 +8,8 @@ const QUICK_PROMPTS = [
   '生成一份竞品对比分析',
   '帮我整理会议纪要并提取待办',
   '写一份项目立项方案',
-  '帮我撰写季度工作总结',
-  '创建项目，让2个智能体完成本月国外主要AI产品动态分析',
+  '帮我写本周工作总结',
+  '创建项目, 让2个智能体搞定本月国外主要AI产品动态分析',
 ];
 
 function useProfileName() {
@@ -99,14 +99,19 @@ export function WelcomePage() {
         />
       </div>
 
-      <div className="w-full max-w-xl">
-        <div className="flex flex-wrap gap-2">
-          {QUICK_PROMPTS.map(p => (
+      <div className="w-full max-w-3xl">
+        <div data-testid="quick-prompts" className="grid grid-cols-4 gap-2">
+          {QUICK_PROMPTS.map((p, index) => (
             <button
               key={p}
               type="button"
               onClick={() => handleQuickPrompt(p)}
-              className="rounded-full border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:border-[var(--c-accent)] hover:text-[var(--c-accent)] hover:bg-[var(--c-bg-card)]"
+              title={p}
+              className={[
+                'min-w-0 rounded-full border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:border-[var(--c-accent)] hover:text-[var(--c-accent)] hover:bg-[var(--c-bg-card)]',
+                'whitespace-nowrap overflow-hidden text-ellipsis',
+                index === QUICK_PROMPTS.length - 1 ? 'col-span-3' : '',
+              ].filter(Boolean).join(' ')}
             >
               {p}
             </button>

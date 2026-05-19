@@ -11,6 +11,16 @@ import { useSidebarCollapse } from '../layouts/AppLayout';
 
 const log = createLogger('ChatShell');
 const ARTIFACT_KINDS = new Set<ArtifactKind>(['pptx', 'pdf', 'docx', 'xlsx', 'html', 'image', 'text', 'other']);
+const THREAD_DRAFT_STORAGE_PREFIX = 'xiaok.threadDraft.';
+const LEGACY_SWARM_CONTEXT_KEY = 'xiaok.swarmContinueContext';
+
+interface StoredThreadDraft {
+  threadId?: string;
+  projectId?: string;
+  projectName?: string;
+  draftPrompt?: string;
+  [key: string]: unknown;
+}
 
 function normalizeArtifactKind(kind: string): ArtifactKind {
   return ARTIFACT_KINDS.has(kind as ArtifactKind) ? kind as ArtifactKind : 'other';
@@ -26,6 +36,47 @@ function artifactSummaryFromEvent(event: Extract<DesktopTaskEvent, { type: 'arti
     filePath: event.filePath,
     creator: event.creator ?? 'agent',
   };
+}
+
+function readStoredThreadDraft(threadId: string | undefined): StoredThreadDraft | null {
+  if (!threadId || typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(`${THREAD_DRAFT_STORAGE_PREFIX}${threadId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredThreadDraft;
+    return typeof parsed?.draftPrompt === 'string' && parsed.draftPrompt.trim() ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function readLegacySwarmDraftForThread(thread: ThreadRecord): StoredThreadDraft | null {
+  if (typeof window === 'undefined') return null;
+  const title = thread.title || '';
+  if (!title.startsWith('让小K帮忙')) return null;
+  try {
+    const raw = window.sessionStorage.getItem(LEGACY_SWARM_CONTEXT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredThreadDraft;
+    const draftPrompt = typeof parsed?.draftPrompt === 'string' ? parsed.draftPrompt.trim() : '';
+    const projectName = typeof parsed?.projectName === 'string' ? parsed.projectName.trim() : '';
+    if (!draftPrompt || !projectName || !title.includes(projectName)) return null;
+    return { ...parsed, draftPrompt };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredThreadDraft(threadId: string, draft: StoredThreadDraft): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(`${THREAD_DRAFT_STORAGE_PREFIX}${threadId}`, JSON.stringify({
+      ...draft,
+      threadId,
+    }));
+  } catch {
+    // Local storage is a convenience cache; route state still carries fresh drafts.
+  }
 }
 
 export function ChatShell() {
@@ -414,6 +465,7 @@ export function ChatShell() {
     setThread(null);
     setStatus('idle');
     setLoadError(null);
+    const storedDraft = readStoredThreadDraft(taskId);
     setPrompt(draftPrompt || '');
 
     // If we have an initialPrompt from WelcomePage, pre-populate
@@ -434,6 +486,20 @@ export function ChatShell() {
         // Replay all tasks in the thread to show full conversation history
         const allTaskIds = (t.taskIds && t.taskIds.length > 0) ? t.taskIds
           : t.currentTaskId ? [t.currentTaskId] : [];
+        const isEmptyHelpThread = allTaskIds.length === 0 && !initialPrompt;
+        if (isEmptyHelpThread) {
+          if (draftPrompt) {
+            setPrompt(draftPrompt);
+          } else if (storedDraft?.draftPrompt) {
+            setPrompt(storedDraft.draftPrompt);
+          } else {
+            const legacyDraft = readLegacySwarmDraftForThread(t);
+            if (legacyDraft?.draftPrompt) {
+              setPrompt(legacyDraft.draftPrompt);
+              writeStoredThreadDraft(t.id, legacyDraft);
+            }
+          }
+        }
         console.log(`[ChatShell] Loading thread=${taskId.slice(0,8)} title="${t.title}" currentTaskId=${t.currentTaskId ?? 'none'}`);
         const allMessages: ChatMessage[] = [];
         let lastResult: TaskResult | null = null;
