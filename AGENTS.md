@@ -1,81 +1,210 @@
 # Repo Notes
 
-## Language
+## 语言
 
-- Always reply in Chinese (中文回复).
+- 始终使用中文回复。
 
-## Related Projects
+## 相关项目
 
-- xiaok-cli 关联的项目：`kai-xiaok-plugins`、`kswarm`、`intent-broker`（均在 `/Users/song/projects/` 下）。
+- `xiaok-cli` 关联项目都在 `/Users/song/projects/` 下：
+  - `kswarm`：多智能体项目编排服务。负责 project / task / deliverable 状态、PO / worker agent、任务分派、项目推进、干预、重试、review、project health 和项目产物状态。`xiaok desktop` 通过 main process 的 KSwarm service adapter 启动、探活和调用它，renderer 只展示结构化项目状态。
+  - `intent-broker`：本地协作与事件中转服务。负责 participant / agent 注册、消息和事件流、任务进度同步、跨 agent adapter 协调，以及 KSwarm 与本地执行 agent 之间的通信基础。desktop 打包时它是关联 sidecar service。
+  - `kai-xiaok-plugins`：小 K 插件与 MCP server 集合。负责 report / slide 等 bundled plugin 能力、plugin registry、MCP server 资源和打包输入。desktop 会把其中需要的插件资源打入 `extraResources` 并部署到 `~/.xiaok/plugins`。
 - 从 GitHub 拉取更新时，这些项目要一起更新。
-- 提交代码时，相关项目也要一起提交。
+- 提交代码时，相关项目也要一起提交；如果某次只提交其中一部分，必须在最终说明里写清楚原因。
+- 修改 KSwarm project workflow、agent contract、project state、artifact handoff 时，优先检查 `kswarm` 是否也需要改。
+- 修改 agent 协作、事件投递、adapter、broker lifecycle、queued / progress / approval 流程时，优先检查 `intent-broker` 是否也需要改。
+- 修改报告、幻灯片、MCP plugin、bundled plugin、plugin packaging 或 runtime path 时，优先检查 `kai-xiaok-plugins` 是否也需要改。
+
+## 关联项目构建 / 测试 / 发布联动
+
+- 本地构建 desktop 时，`desktop/electron-builder.json` 会从 sibling repos 打包资源：
+  - `../../kswarm/src`、`../../kswarm/scripts`、`../../kswarm/package.json`、`../../kswarm/node_modules/ws`
+  - `../../intent-broker/src`、`../../intent-broker/package.json`、`../../intent-broker/adapters`、`../../intent-broker/node_modules/ws`
+  - `../../kai-xiaok-plugins/plugins/kai-report-creator`
+  - `../../kai-xiaok-plugins/plugins/kai-slide-creator`
+- 因此 packaging / release 不能只看 `xiaok-cli` 当前 repo；必须确认 sibling repos 的本地内容、依赖和构建产物是当前要发布的版本。
+- 改 `kswarm` 后，至少在 `/Users/song/projects/kswarm` 跑与改动相关的 focused test；发布或改 project workflow / runtime / recovery 时优先跑：
+  ```bash
+  npm test
+  npm run test:all
+  ```
+  如果只改了窄路径，可以用对应脚本，例如 `npm run test:delivery`、`npm run test:event-log`、`npm run test:e2e-p0`，但最终说明要写清楚为什么足够。
+- 改 `intent-broker` 后，至少在 `/Users/song/projects/intent-broker` 跑：
+  ```bash
+  npm test
+  ```
+  如果改 participant / adapter / collaboration 流程，再跑：
+  ```bash
+  npm run verify:collaboration
+  ```
+- 改 `kai-xiaok-plugins` 的 report-renderer 后，在 `plugins/kai-report-creator/mcp-servers/report-renderer` 跑：
+  ```bash
+  npm run build
+  npm run build:bundle
+  ```
+  并做 MCP initialize smoke test，确认 `dist/server.bundle.js` 可启动。
+- 改 `kai-xiaok-plugins` 的 slide-renderer / Python MCP / bundled wheels 后，要按目标平台更新或验证 `plugins/kai-slide-creator/bundled-wheels/`，并跑该插件相关 Python tests；desktop release 的 macOS 和 Windows wheels 不能混用。
+- 只要关联项目改动会进入 desktop 打包资源，回到 `/Users/song/projects/xiaok-cli` 后还要跑 desktop packaging contract：
+  ```bash
+  cd desktop
+  npm run test -- --run tests/main/kswarm-contract.test.ts tests/main/deploy-bundled-plugins.test.ts tests/main/e2e-plugin-bundling.test.ts tests/main/e2e-plugin-rendering.test.ts
+  npm run build
+  ```
+  必要时再跑 `npm run pack:dir`，确认 `extraResources` 真正进入 unpacked app。
+- desktop release / CI 必须 checkout 与 `extraResources` 对应的 sibling repos。不要假设 CI 里存在本机的 `/Users/song/projects/*`；release workflow 需要显式 checkout `kai-xiaok-plugins`、`kswarm`、`intent-broker` 或使用等价的 vendor / submodule 方案。
+- 发布前如果 sibling repo 有未提交改动、未 push commit、未构建 bundle、缺 wheels，不能宣称 desktop release ready。
+
+## Desktop 构建新鲜度 / Stale Build Artifacts
+
+- 如果 desktop 构建提示某个产物还是旧的，不要靠反复运行同一个 build 直到碰巧通过。把它当成 build graph / generated artifact 新鲜度问题处理。
+- 先定位提示里的 owner：
+  - `kswarm` / `auto-worker` / generated service override：检查 `/Users/song/projects/kswarm` 的源文件和 `desktop/.generated/kswarm/**` 是否由当前源重新生成，通常需要重新跑 `cd desktop && npm run build:main`，必要时先确认 `scripts/generate-desktop-service-overrides.mjs` 的输入路径。
+  - `report-renderer` / `server.bundle.js`：到 `/Users/song/projects/kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer` 跑 `npm run build` 和 `npm run build:bundle`，再回到 desktop build。
+  - `slide-renderer` / `bundled-wheels`：确认 `/Users/song/projects/kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels/` 是当前目标平台需要的 wheel 集合。
+  - `intent-broker` 或 `kswarm` dependency：确认 sibling repo 的 `node_modules/ws` 存在且来自当前 repo install，而不是依赖旧打包输出。
+- 修 stale build 时只重建对应 owner 的产物；不要无差别清理多个 repo 的 build output。需要删除生成物时，只删除明确可再生的命名产物，并在最终说明写清楚。
+- stale build 修复后，至少跑一次 deterministic 验证，而不是把“重复 build 终于过了”当作通过：
+  ```bash
+  cd desktop
+  npm run test -- --run tests/main/kswarm-contract.test.ts tests/main/deploy-bundled-plugins.test.ts tests/main/e2e-plugin-bundling.test.ts tests/main/e2e-plugin-rendering.test.ts
+  npm run build
+  ```
+  packaging / release 相关时再跑 `npm run pack:dir`。
+
+## 当前重心
+
+- 当前项目重心是 `xiaok desktop`，不是旧的 `xiaok chat` CLI runtime refactor。
+- desktop 相关工作默认先考虑 Electron main process、preload / IPC、renderer、daemon、scheduler、SQLite、KSwarm、intent-broker、bundled plugins、packaging 的边界。
+- `xiaok chat` terminal frontend 规则仍然有效，但只在修改 `src/ui/**` 或 `src/commands/chat.ts` 中直接影响 TUI 的路径时适用。
+- 不要把 `yzj` channel、webhook、websocket 工作混入 desktop 或 terminal frontend 的当前变更，除非用户明确要求。
 
 ## Worktrees
 
-- The CLI runtime layer refactor has been integrated back into the main workspace.
-- There is no active runtime refactor worktree for the current effort.
-- Local validation of the `xiaok` command must use the main workspace at `/Users/song/projects/xiaok-cli`; do not `npm link` a feature worktree.
-- If a future effort needs a worktree, create it only for isolated implementation and remove it after the change is integrated.
-
-## Current Scope
-
-- The completed refactor scope was the `xiaok chat` CLI runtime only.
-- Do not fold `yzj` channel or webhook/websocket work into this runtime refactor.
+- CLI runtime layer refactor 已经合回主工作区。
+- 当前没有 active runtime refactor worktree。
+- 本地验证 `xiaok` 命令必须使用主工作区 `/Users/song/projects/xiaok-cli`；不要 `npm link` feature worktree。
+- 如果后续确实需要 worktree，只为隔离实现创建，并在集成后移除。
 
 ## Requirement Implementation Gate
 
-- For any new requirement or behavior change, write the design documentation first.
-- Run an adversarial review against that design before implementation.
-- Write the test cases after the review and before production code.
-- Only write or edit production code after the docs, adversarial review, and tests are in place.
-- **核心/高风险改动强制执行**：涉及以下场景时，方案+对抗性评审不可跳过：
-  - 跨层架构变更（如数据流、生命周期管理、状态归属变更）
-  - 影响多文件的接口/协议变更
-  - 并发、竞态、信号传递相关逻辑
-  - 会话上下文、历史记录等影响用户体验连续性的机制
-  - Bug 修复涉及根因不明确或曾经回归过的问题
-- 对抗性评审要点：审查边界条件、并发竞态、取消/异常路径、测试是否真正覆盖核心行为（而非只覆盖表面流程）。
+- 任何新需求或行为变更，先写设计文档。
+- 实现前先对设计做对抗性评审。
+- 评审后先写测试，再写 production code。
+- 只有 docs、adversarial review、tests 都到位后，才开始写或修改 production code。
+- 核心/高风险改动强制执行方案 + 对抗性评审，不可跳过：
+  - 跨层架构变更，例如 main / preload / renderer / daemon / scheduler / executor / store 的数据流或生命周期变化。
+  - 影响多文件的接口、协议、IPC contract、preload API、tool schema、store schema。
+  - 并发、竞态、信号传递、轮询、后台任务、恢复、取消、重试相关逻辑。
+  - SQLite / durable state / migration / data ownership 相关逻辑。
+  - 会话上下文、历史记录、project state、artifact handoff、KSwarm task state 等影响用户体验连续性的机制。
+  - Bug 修复涉及根因不明确、曾经回归、或者只能通过真实用户流程暴露的问题。
+- 对抗性评审重点：边界条件、并发竞态、取消/异常路径、恢复路径、测试是否真正覆盖核心行为，而不是只覆盖 happy path。
 
-## Current Release Notes
+## Desktop 设计文档
 
-- `xiaok` is currently linked from the main workspace only and reports `0.6.7`.
-- Terminal E2E verification uses `tests/e2e/tmux-e2e.py`, which starts a local OpenAI-compatible SSE server and a real tmux TTY.
-- First submitted input keeps the startup welcome card above it until normal terminal scrolling moves it away; do not clear the content region on first submit.
-- Live activity such as `Thinking` and `Working` renders on the activity row above the input footer, with a blank gap row between activity and `❯`; activity lines must not repeat footer status fields such as model, mode, tokens, or project.
-- Verified after the 0.6.7 integration:
-- `npm run build`
-- `npm run test:sandbox:build`
-- `npm run test:sandbox:run -- .test-dist/tests/ui/scroll-region.test.js .test-dist/tests/ui/tool-explorer.test.js .test-dist/tests/ui/permission-prompt.test.js`
+- `docs/design/README.md` 是当前设计文档总入口，已经 desktop-first。
+- desktop 改动优先读取：
+  - `docs/design/2026-05-20-xiaok-desktop-architecture-design.md`
+  - `docs/design/2026-05-20-xiaok-desktop-test-matrix.md`
+  - `docs/design/2026-05-20-xiaok-desktop-change-checklist.md`
+- scheduled task / reminder / timed action 相关改动还要读取：
+  - `docs/superpowers/specs/2026-05-20-desktop-recurring-autorun-scheduled-tasks-design.md`
+  - `docs/design/2026-05-20-desktop-scheduled-task-daemon-offline-execution.md`
+  - `docs/design/2026-05-20-desktop-scheduled-task-daemon-offline-execution-test-plan.md`
+- KSwarm / project workflow 相关改动还要读取：
+  - `docs/design/2026-05-12-kswarm-xiaok-integration-architecture.md`
+  - `docs/design/2026-05-16-kswarm-service-lifecycle-gateway.md`
+  - `docs/design/2026-05-16-kswarm-service-lifecycle-gateway-adversarial-review.md`
 
-## Current Roadmap Docs
+## Desktop 架构规则
 
-- Wave 1 spec: `docs/superpowers/specs/2026-03-31-xiaok-clio-wave1-runtime-tools-design.md`
-- Wave 1 plan: `docs/superpowers/plans/2026-03-31-xiaok-clio-wave1-runtime-tools.md`
-- Wave 2 spec: `docs/superpowers/specs/2026-03-31-xiaok-clio-wave2-workflow-operator-design.md`
-- Wave 2 plan: `docs/superpowers/plans/2026-03-31-xiaok-clio-wave2-workflow-operator.md`
-- Wave 3 spec: `docs/superpowers/specs/2026-03-31-xiaok-clio-wave3-agent-platform-design.md`
-- Wave 3 plan: `docs/superpowers/plans/2026-03-31-xiaok-clio-wave3-agent-platform.md`
+- Electron main process 是本地事实来源，负责 filesystem、SQLite、daemon、scheduler、notification、child process、KSwarm / intent-broker / plugin lifecycle、window lifecycle、packaging runtime path。
+- preload 只暴露白名单、语义级 API，不暴露通用 `fs`、`shell`、`sql`、任意命令执行、任意 socket 连接。
+- renderer 负责展示、交互、局部 UI state、loading / empty / error / success，不负责 durable state 和后台执行。
+- renderer 不能成为 scheduled task、reminder、project、artifact、agent runtime status 的最终事实来源。
+- 不要让 main、renderer、daemon 各自轮询同一个业务事实。轮询服务只能有一个 owner，不同业务通过 executor 分流。
+- reminder 是到点通知；scheduled task 是自动执行任务。工具说明、system prompt、renderer 文案、store 字段必须保持这条边界。
+- scheduler 负责 claim due action、调用 executor、记录结果、计算下一次触发；业务是否补跑 overdue 由 executor 决定。
+- 改 IPC / preload contract 时，同步更新 main handler、`preload-api.ts`、`preload.cjs`、renderer API type 和 contract tests。
 
-## Local Verification Note
+## Desktop 验证
 
-- In this Codex sandbox, raw `vitest` against TypeScript sources can fail with `spawn EPERM` because Vite/esbuild try to start child processes.
-- Use `npm test` or `npm run test:sandbox`, which first compiles `src/` and `tests/` into `.test-dist/` and then runs Vitest against emitted JavaScript with `vitest.sandbox.config.mjs`.
-- The reminder/daemon suites open real Unix sockets. In the restricted sandbox they can fail with `listen EPERM`; rerun `npm run test:sandbox` with unrestricted permissions when you need the full pass signal.
-- The sandbox suite excludes subprocess-dependent tests such as `bash` and `grep`; run `npm run test:full` on an unrestricted machine for the complete suite.
+- desktop main / service / scheduler:
+  ```bash
+  cd desktop
+  npm run test -- --run tests/main/<target>.test.ts
+  npm run build:main
+  ```
+- preload / IPC contract:
+  ```bash
+  cd desktop
+  npm run test -- --run tests/main/preload-contract.test.ts tests/main/preload-sandbox.test.ts
+  npm run build:main
+  ```
+- renderer UI / hooks / context:
+  ```bash
+  cd desktop
+  npm run test -- --run tests/renderer/<target>.test.tsx
+  npm run build:renderer
+  ```
+- cross-layer desktop 改动：
+  ```bash
+  cd desktop
+  npm run test -- --run tests/main/<target>.test.ts tests/renderer/<target>.test.tsx
+  npm run build:main
+  npm run build:renderer
+  ```
+- typecheck:
+  ```bash
+  cd desktop
+  npm run typecheck
+  ```
+- packaging 相关改动：
+  ```bash
+  cd desktop
+  npm run build
+  ```
+  必要时再跑：
+  ```bash
+  cd desktop
+  npm run pack:dir
+  ```
+- `desktop` 的 `typecheck` 使用 baseline；不要因为无关历史错误更新 baseline。只有本次改动确实需要改变 baseline 时，才说明原因并更新。
+
+## Terminal Frontend 说明
+
+- Terminal E2E verification 使用 `tests/e2e/tmux-e2e.py`，它会启动本地 OpenAI-compatible SSE server 和真实 tmux TTY。
+- 首次提交输入后，startup welcome card 应保持在输入上方，直到正常 terminal scrolling 将其滚走；不要在首次 submit 时清空 content region。
+- `Thinking`、`Working` 等 live activity 渲染在 input footer 上方的 activity row，activity 和 `❯` 之间保留一行空白 gap。
+- activity line 不应重复 footer status fields，例如 model、mode、tokens、project。
+- terminal frontend focused 验证示例：
+  ```bash
+  npm run build
+  npm run test:sandbox:build
+  npm run test:sandbox:run -- .test-dist/tests/ui/scroll-region.test.js .test-dist/tests/ui/tool-explorer.test.js .test-dist/tests/ui/permission-prompt.test.js
+  python3 tests/e2e/tmux-e2e.py --project-dir /Users/song/projects/xiaok-cli
+  ```
+
+## CLI / Sandbox 验证说明
+
+- 在 Codex sandbox 中，raw `vitest` 跑 TypeScript source 可能因为 Vite / esbuild 启动 child process 出现 `spawn EPERM`。
+- CLI 侧优先使用 `npm test` 或 `npm run test:sandbox`，它会先把 `src/` 和 `tests/` 编译到 `.test-dist/`，再用 `vitest.sandbox.config.mjs` 跑 emitted JavaScript。
+- reminder / daemon suites 会打开真实 Unix socket；受限 sandbox 中可能出现 `listen EPERM`。需要 full pass signal 时，在 unrestricted 环境重跑。
+- sandbox suite 会排除依赖 subprocess 的测试，例如 `bash` 和 `grep`；完整套件在非受限机器跑 `npm run test:full`。
 
 ## Docs Symlink Scope
 
-- `docs` in this workspace is a symlink to `/Users/song/projects/mydocs/xiaok-cli`.
-- Treat `docs/design/**` and related design/spec docs under `docs/**` as normal in-scope project files for this repo's work.
-- Do not ask for extra confirmation just because a design-doc edit crosses that symlink boundary; update the smallest relevant doc set directly when the task requires it.
-- Remember that `git status` in `/Users/song/projects/xiaok-cli` will not show those doc edits, because the actual files live in the `mydocs` repo.
+- 本工作区的 `docs` 是 symlink，指向 `/Users/song/projects/mydocs/xiaok-cli`。
+- `docs/design/**`、`docs/superpowers/**`、`docs/analysis/**`、`docs/bugfix/**` 都视为本 repo 工作范围内的项目文档。
+- 任务需要时，直接更新最小相关文档集；不要因为 design-doc edit 跨 symlink 就额外请求确认。
+- 注意：在 `/Users/song/projects/xiaok-cli` 下执行 `git status` 不会显示这些 docs 改动，因为实际文件属于 `mydocs` repo。
 
 ## Desktop Packaging
 
-- `desktop/package.json` 的 `dependencies` 只保留 **main 进程运行时需要** 的包（当前：`electron-updater`、`fast-glob`、`openai`）。
-- 所有纯前端依赖（react、framer-motion、mermaid、lucide-react 等）放在 `devDependencies`——Vite 打包 renderer 时不区分 deps/devDeps，不影响开发和构建。
-- `electron-builder.json` 的 `files` 不需要手动加 `node_modules/**/*`，electron-builder 默认会根据 `dependencies` 自动打包需要的模块。
-- 优化效果：DMG 从 152MB 降到 110MB（节约 42MB / 27.6%）。
+- `desktop/package.json` 的 `dependencies` 只保留 main process 运行时需要的包；纯 renderer 依赖放在 `devDependencies`。
+- Vite 打包 renderer 时不区分 dependencies / devDependencies，不影响前端构建。
+- `electron-builder.json` 的 `files` 不需要手动加 `node_modules/**/*`，electron-builder 默认会根据 `dependencies` 自动打包运行时模块。
 - 打包前务必确认 `dist/main/` 中所有外部 import 都在 `dependencies` 中声明，验证命令：
   ```bash
   find dist/main -name "*.js" -exec grep -h "from ['\"]" {} \; | sed "s/.*from ['\"]//;s/['\"].*//" | grep -v "^\." | grep -v "^node:" | sort -u
