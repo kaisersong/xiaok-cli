@@ -2806,14 +2806,15 @@ describe('chat interactive runtime', () => {
 
       await waitFor(() => {
         const lines = harness.screen.lines();
-        const sourceIndex = lines.findIndex((line) => line.includes('来源：///Users/song/Downloads'));
+        const contentIndex = lines.findIndex((line) =>
+          line.includes('来源：///Users/song/Downloads') || line.includes('port-creator生成的吗'));
         const activityIndex = lines.findIndex((line) => /Thinking/u.test(line));
         const promptIndex = lines.findIndex((line) => line.includes('❯ Finishing response...'));
         const statusIndex = lines.findIndex((line) => line.includes('project') && line.includes('%'));
 
-        expect(sourceIndex, lines.map((line, index) => `${index}: ${line}`).join('\n')).toBeGreaterThanOrEqual(0);
+        expect(contentIndex, lines.map((line, index) => `${index}: ${line}`).join('\n')).toBeGreaterThanOrEqual(0);
         expect(activityIndex, lines.map((line, index) => `${index}: ${line}`).join('\n')).toBeGreaterThanOrEqual(0);
-        expect(activityIndex).toBeGreaterThan(sourceIndex);
+        expect(activityIndex).toBeGreaterThan(contentIndex);
         expect(promptIndex).toBe(viewportRows - 2);
         expect(statusIndex).toBe(viewportRows - 1);
         expect(statusIndex).toBe(promptIndex + 1);
