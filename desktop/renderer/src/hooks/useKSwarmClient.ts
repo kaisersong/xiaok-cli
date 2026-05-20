@@ -74,11 +74,12 @@ export interface KSwarmProject {
   createdAt?: string;
   updatedAt?: string;
   progress?: number;
-  cancelledCount?: number;
+  stoppedCount?: number;
   deliverables?: KSwarmDeliverable[];
   enableSummary?: boolean;
   summary?: string | null;
   summaryScore?: number | null;
+  taskScores?: Array<{ title: string; agent: string; score: number; comment: string }> | null;
   projectIntervention?: ProjectIntervention | null;
 }
 
@@ -237,7 +238,11 @@ export interface ProjectFullDetail {
     waiting?: Array<{ taskId: string; reason: string; agentId?: string }>;
   };
   projectHealth?: {
-    status: 'healthy' | 'running' | 'waiting' | 'blocked' | 'failed' | 'unknown';
+    status?: 'healthy' | 'running' | 'waiting' | 'needs_review' | 'blocked' | 'failed' | 'unknown';
+    state?: 'idle' | 'healthy' | 'running' | 'dispatchable' | 'waiting' | 'needs_review' | 'blocked' | 'failed' | 'complete' | 'closed' | 'unknown';
+    gate?: string | null;
+    counts?: Record<string, number>;
+    reasons?: Array<{ taskId?: string; message?: string; nextActions?: unknown[] }>;
     primaryBlockedTaskId?: string;
     message?: string;
     actions?: Array<{ id: string; label: string; recommended?: boolean }>;
@@ -304,6 +309,7 @@ export interface ContinueProjectResult {
   }>;
   reviewNotification?: 'sent' | 'failed' | 'not_available' | string;
   reviewNotificationError?: string;
+  reviewNotificationNeeded?: boolean;
 }
 
 // ─── Principles Injection ────────────────────────────────────────

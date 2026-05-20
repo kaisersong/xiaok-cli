@@ -22,6 +22,15 @@ export function AppLayout() {
   if (settingsOpen) {
     return (
       <div className="flex h-screen flex-col overflow-hidden bg-[var(--c-bg-page)]">
+        <div
+          style={{
+            height: 52,
+            WebkitAppRegion: 'drag',
+            flexShrink: 0,
+            background: 'var(--c-bg-page)',
+            borderBottom: '1px solid var(--c-border-subtle)',
+          } as React.CSSProperties}
+        />
         <DesktopSettings onClose={() => setSettingsOpen(false)} />
       </div>
     );

@@ -5,11 +5,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { ProjectFullDetail } from '../../renderer/src/hooks/useKSwarmClient';
 
-const { mockGetProjectFullDetail, mockDeleteProject, mockRetryPlan, mockDispatchTasks, mockShowSaveDialog, mockSaveFile } = vi.hoisted(() => ({
+const { mockGetProjectFullDetail, mockDeleteProject, mockRetryPlan, mockDispatchTasks, mockCloseProject, mockShowSaveDialog, mockSaveFile } = vi.hoisted(() => ({
   mockGetProjectFullDetail: vi.fn(),
   mockDeleteProject: vi.fn(),
   mockRetryPlan: vi.fn(),
   mockDispatchTasks: vi.fn(),
+  mockCloseProject: vi.fn(),
   mockShowSaveDialog: vi.fn(),
   mockSaveFile: vi.fn(),
 }));
@@ -23,7 +24,7 @@ vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
     retryPlan: mockRetryPlan,
     dispatchTasks: mockDispatchTasks,
     deliverProject: vi.fn(),
-    closeProject: vi.fn(),
+    closeProject: mockCloseProject,
     deleteProject: mockDeleteProject,
   }),
 }));
@@ -128,6 +129,42 @@ describe('project health status UI', () => {
     expect(screen.getByText('派发未阻塞任务')).toBeInTheDocument();
   });
 
+  it('uses a readable danger surface for the close project confirmation button', async () => {
+    mockCloseProject.mockResolvedValue(true);
+    renderProjectDetail({
+      project: {
+        id: 'proj-close',
+        name: '待关闭项目',
+        goal: '检查完成按钮',
+        status: 'active',
+        poAgent: 'xiaok-po',
+        createdAt: '1779000000000',
+        updatedAt: '1779000000000',
+      },
+      tasks: [],
+      activities: [],
+      humanActions: [],
+      workspace: { path: '/tmp/proj-close', artifacts: [] },
+      plan: null,
+      planProgress: null,
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: '完成项目' }));
+
+    const confirmButton = screen.getByRole('button', { name: '确认完成' });
+    const classes = confirmButton.className.split(/\s+/);
+    expect(classes).toContain('bg-[var(--c-status-error-bg)]');
+    expect(classes).toContain('text-[var(--c-status-error-text)]');
+    expect(classes).not.toContain('bg-[var(--c-status-error-text)]');
+    expect(classes).not.toContain('text-white');
+
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => expect(mockCloseProject).toHaveBeenCalledWith('proj-close'));
+    expect(screen.getByText('已关闭')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '确认完成' })).not.toBeInTheDocument();
+  });
+
   it('shows project health on project list cards', () => {
     renderWithProviders(
       <ProjectCard
@@ -148,6 +185,28 @@ describe('project health status UI', () => {
 
     expect(screen.getByText('失败')).toBeInTheDocument();
     expect(screen.getByText(/最终校验失败/)).toBeInTheDocument();
+  });
+
+  it('shows needs-review project health on project list cards', () => {
+    renderWithProviders(
+      <ProjectCard
+        project={{
+          id: 'proj-1',
+          name: 'OpenAI本月分析',
+          status: 'active',
+          taskCount: 10,
+          doneCount: 6,
+          projectHealth: {
+            state: 'needs_review',
+            message: '撰写报告初稿 已提交，等待 PO 复审。',
+            primaryBlockedTaskId: 'item-6',
+          },
+        } as any}
+      />
+    );
+
+    expect(screen.getByText('待审核')).toBeInTheDocument();
+    expect(screen.getByText(/等待 PO 复审/)).toBeInTheDocument();
   });
 
   it('shows simplified intervention state on project list cards', () => {
@@ -201,6 +260,27 @@ describe('project health status UI', () => {
     expect(screen.getByText('可派发 1')).toBeInTheDocument();
     expect(screen.getByText('阻塞 1')).toBeInTheDocument();
     expect(screen.getByText('等待 1')).toBeInTheDocument();
+  });
+
+  it('shows needs-review health on inline project progress cards', () => {
+    renderWithProviders(
+      <ProjectProgressCard
+        project={{
+          id: 'proj-1',
+          name: 'OpenAI本月分析',
+          status: 'active',
+          taskCount: 10,
+          doneCount: 6,
+          projectHealth: {
+            state: 'needs_review',
+            message: '等待 PO 复审',
+          },
+        } as any}
+      />
+    );
+
+    expect(screen.getByText('待审核')).toBeInTheDocument();
+    expect(screen.getByText('等待 PO 复审')).toBeInTheDocument();
   });
 });
 

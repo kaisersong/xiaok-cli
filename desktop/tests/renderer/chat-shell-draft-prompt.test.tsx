@@ -1,22 +1,43 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockGetThread } = vi.hoisted(() => ({
+const { mockCreateTask, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId } = vi.hoisted(() => ({
+  mockCreateTask: vi.fn(),
   mockGetThread: vi.fn(),
+  mockRecoverTask: vi.fn(),
+  mockSubscribeTask: vi.fn(() => () => {}),
+  mockUpdateThreadTaskId: vi.fn(),
 }));
 
 vi.mock('../../renderer/src/api', () => ({
   api: {
+    createTask: mockCreateTask,
     getThread: mockGetThread,
-    recoverTask: vi.fn(),
-    subscribeTask: vi.fn(() => () => {}),
+    recoverTask: mockRecoverTask,
+    subscribeTask: mockSubscribeTask,
+    updateThreadTaskId: mockUpdateThreadTaskId,
   },
 }));
 
 vi.mock('../../renderer/src/components/ChatView', () => ({
-  ChatView: ({ prompt }: { prompt: string }) => (
-    <textarea aria-label="chat-input" readOnly value={prompt} />
+  ChatView: ({
+    prompt,
+    queuedText,
+    status,
+    onQueue,
+  }: {
+    prompt: string;
+    queuedText?: string | null;
+    status?: string;
+    onQueue?: (text: string) => void;
+  }) => (
+    <div>
+      <textarea aria-label="chat-input" readOnly value={prompt} />
+      <div data-testid="chat-status">{status}</div>
+      <div data-testid="queued-text">{queuedText ?? ''}</div>
+      <button type="button" onClick={() => onQueue?.('第二条输入')}>queue-second</button>
+    </div>
   ),
 }));
 vi.mock('../../renderer/src/components/CanvasPanel', () => ({
@@ -66,6 +87,69 @@ describe('ChatShell draft prompt navigation state', () => {
       expect(screen.getByLabelText('chat-input')).toHaveValue('请诊断外贸趋势分析，并在安全时调用 continue_project。');
     });
     expect(mockGetThread).toHaveBeenCalledWith('thread-draft');
+  });
+
+  it('drains a queued prompt after the running task completes', async () => {
+    let subscribedHandler: ((event: { type: string; result?: { summary: string; artifacts: unknown[] } }) => void) | null = null;
+    mockGetThread.mockResolvedValue({
+      id: 'thread-queued',
+      title: 'Queued prompt thread',
+      status: 'running',
+      mode: 'work',
+      createdAt: 1779000000000,
+      updatedAt: 1779000000000,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: 'task-running',
+      taskIds: ['task-running'],
+    });
+    mockRecoverTask.mockResolvedValue({
+      snapshot: {
+        taskId: 'task-running',
+        sessionId: 'sess-running',
+        status: 'running',
+        prompt: '第一条输入',
+        materials: [],
+        events: [{ type: 'task_started', taskId: 'task-running' }],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    });
+    mockSubscribeTask.mockImplementation((_taskId, handler) => {
+      subscribedHandler = handler as typeof subscribedHandler;
+      return () => {};
+    });
+    mockCreateTask.mockResolvedValue({ taskId: 'task-second' });
+    mockUpdateThreadTaskId.mockResolvedValue(undefined);
+
+    render(
+      <MemoryRouter initialEntries={['/t/thread-queued']}>
+        <Routes>
+          <Route path="/t/:taskId" element={<ChatShell />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-status')).toHaveTextContent('running');
+      expect(mockSubscribeTask).toHaveBeenCalledWith('task-running', expect.any(Function));
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'queue-second' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('queued-text')).toHaveTextContent('第二条输入');
+    });
+
+    act(() => {
+      subscribedHandler?.({ type: 'result', result: { summary: '第一条完成', artifacts: [] } });
+    });
+
+    await waitFor(() => {
+      expect(mockCreateTask).toHaveBeenCalledWith({ prompt: '第二条输入', materials: [] });
+    });
+    expect(mockUpdateThreadTaskId).toHaveBeenCalledWith('thread-queued', 'task-second');
   });
 
   it('restores a stored project-help draft when sidebar navigation has no route state', async () => {

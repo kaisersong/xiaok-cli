@@ -99,6 +99,7 @@ export function ChatShell() {
   const [canvasPreviewContent, setCanvasPreviewContent] = useState<string | undefined>();
   const [planSteps, setPlanSteps] = useState<Array<{ id: string; label: string; status: string }>>([]);
   const [queuedPrompt, setQueuedPrompt] = useState<string | null>(null);
+  const queuedDrainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
   const streamRef = useRef('');
   const currentLoadIdRef = useRef<string | null>(null);
@@ -589,12 +590,34 @@ export function ChatShell() {
     };
   }, [taskId, initialPrompt, draftPrompt, handleEvent, replaySnapshot]);
 
+  const queuePrompt = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    log.info(queuedPrompt ? 'queued_prompt_replace' : 'queued_prompt_submit', JSON.stringify({
+      threadId: taskId,
+      status,
+      length: trimmed.length,
+    }));
+    setQueuedPrompt(trimmed);
+  }, [queuedPrompt, status, taskId]);
+
+  const cancelQueuedPrompt = useCallback(() => {
+    if (queuedPrompt) {
+      log.info('queued_prompt_cancel', JSON.stringify({
+        threadId: taskId,
+        status,
+        length: queuedPrompt.length,
+      }));
+    }
+    setQueuedPrompt(null);
+  }, [queuedPrompt, status, taskId]);
+
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
     if (!taskId) return;
 
     // If streaming is active, queue the message instead of interrupting
     if (status === 'running' && (!files || files.length === 0)) {
-      setQueuedPrompt(text);
+      queuePrompt(text);
       return;
     }
 
@@ -688,11 +711,35 @@ export function ChatShell() {
   useEffect(() => {
     if (queuedPrompt && (status === 'idle' || status === 'completed')) {
       const text = queuedPrompt;
+      log.info('queued_prompt_drain_start', JSON.stringify({
+        threadId: taskId,
+        status,
+        length: text.length,
+      }));
       setQueuedPrompt(null);
-      const timer = setTimeout(() => handleSubmitRef.current(text), 100);
-      return () => clearTimeout(timer);
+      if (queuedDrainTimerRef.current !== null) {
+        clearTimeout(queuedDrainTimerRef.current);
+      }
+      queuedDrainTimerRef.current = setTimeout(() => {
+        queuedDrainTimerRef.current = null;
+        log.info('queued_prompt_execute', JSON.stringify({
+          threadId: taskId,
+          status,
+          length: text.length,
+        }));
+        void handleSubmitRef.current(text);
+      }, 100);
     }
-  }, [status, queuedPrompt]);
+  }, [status, queuedPrompt, taskId]);
+
+  useEffect(() => {
+    return () => {
+      if (queuedDrainTimerRef.current !== null) {
+        clearTimeout(queuedDrainTimerRef.current);
+        queuedDrainTimerRef.current = null;
+      }
+    };
+  }, []);
 
   if (loadError) {
     return (
@@ -776,9 +823,9 @@ export function ChatShell() {
           prompt={prompt}
           onPromptChange={setPrompt}
           onSubmit={handleSubmit}
-          onQueue={setQueuedPrompt}
+          onQueue={queuePrompt}
           queuedText={queuedPrompt}
-          onCancelQueue={() => setQueuedPrompt(null)}
+          onCancelQueue={cancelQueuedPrompt}
           onAnswer={handleAnswer}
           onCancel={handleCancel}
           canvasOpen={canvasOpen}

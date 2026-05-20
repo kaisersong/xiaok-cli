@@ -74,6 +74,40 @@ describe('KSwarm renderer contract', () => {
     });
   });
 
+  it('summarizes project health from the current backend state-shaped payload', () => {
+    const detail: ProjectFullDetail = {
+      project: { id: 'proj-1', name: 'OpenAI本月分析', status: 'active' },
+      tasks: [
+        { id: 'item-6', title: '撰写报告草稿', status: 'submitted' },
+      ],
+      activities: [],
+      humanActions: [],
+      workspace: { path: '/Users/[USER]/projects/proj-1', artifacts: [] },
+      plan: null,
+      planProgress: null,
+      dispatchPlan: {
+        dispatchable: [],
+        blocked: [],
+        waiting: [],
+      },
+      projectHealth: {
+        state: 'needs_review',
+        gate: 'submitted_tasks',
+        counts: { submitted: 1 },
+        reasons: [],
+      } as any,
+    };
+
+    expect(summarizeProjectHealth(detail)).toEqual({
+      status: 'needs_review',
+      message: '等待 PO 复审',
+      primaryTaskId: undefined,
+      dispatchableCount: 0,
+      blockedCount: 0,
+      waitingCount: 0,
+    });
+  });
+
   it('derives agent card states from assigned task context', () => {
     const agent: KSwarmAgent = { id: 'cli-claude', name: 'Claude', status: 'idle' };
     const tasks: KSwarmTask[] = [

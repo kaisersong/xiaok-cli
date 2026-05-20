@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskTool } from '../../electron/desktop-services.js';
+import { createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createTimedActionTools } from '../../electron/desktop-services.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
+import { TimedActionService } from '../../electron/timed-action-service.js';
+import { TimedActionStore } from '../../electron/timed-action-store.js';
 
 function mockKSwarmService(): KSwarmService {
   return {
@@ -795,7 +797,28 @@ describe('desktop services', () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it('repair_project_task submits repaired artifacts through kswarm intervention resolution', async () => {
+  it('repair_project_task refuses inline deliverable content', async () => {
+    const request = vi.fn();
+    const tool = createKSwarmRepairProjectTaskTool({
+      ...mockKSwarmService(),
+      request,
+    });
+
+    const result = await tool.execute({
+      projectId: 'proj-1',
+      taskId: 'proj-1__item-1',
+      filename: 'foreign_trade_trend.md',
+      content: '这是一份人工补齐后的外贸趋势分析报告正文，包含数据源、假设、分析和结论，长度足够提交审核。',
+    });
+
+    expect(JSON.parse(result)).toMatchObject({
+      ok: false,
+      error: 'inline_content_forbidden',
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('repair_project_task_from_file submits repaired artifact paths without inline content', async () => {
     const requests: Array<{ path: string; init?: RequestInit }> = [];
     const kswarmService: KSwarmService = {
       ...mockKSwarmService(),
@@ -814,14 +837,14 @@ describe('desktop services', () => {
       },
     };
 
-    const tool = createKSwarmRepairProjectTaskTool(kswarmService);
+    const tool = createKSwarmRepairProjectTaskFromFileTool(kswarmService);
     const result = await tool.execute({
       projectId: 'proj-1',
       taskId: 'proj-1__item-1',
       expectedTaskUpdatedAt: 1779093510355,
       summary: '已补齐报告',
-      filename: 'foreign_trade_trend.md',
-      content: '这是一份人工补齐后的外贸趋势分析报告正文，包含数据源、假设、分析和结论，长度足够提交审核。',
+      artifactPath: 'artifacts/foreign_trade_trend.md',
+      mimeType: 'text/markdown',
     });
 
     expect(JSON.parse(result)).toMatchObject({
@@ -840,11 +863,12 @@ describe('desktop services', () => {
       summary: '已补齐报告',
       artifacts: [
         {
-          filename: 'foreign_trade_trend.md',
+          path: 'artifacts/foreign_trade_trend.md',
           mimeType: 'text/markdown',
         },
       ],
     });
+    expect(String(requests[0].init?.body)).not.toContain('这是一份人工补齐后的外贸趋势分析报告正文');
   });
 
   it('inspect_project finds a kswarm project by name and returns the blocking context with readable artifacts', async () => {
@@ -969,6 +993,104 @@ describe('desktop services', () => {
     ]);
   });
 
+  it('inspect_project prioritizes artifacts from the current intervention task', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        if (path === '/projects/proj-priority') {
+          return new Response(JSON.stringify({
+            project: { id: 'proj-priority', name: 'OpenAI本月分析', goal: '生成报告', status: 'active' },
+            tasks: [
+              {
+                id: 'proj-priority__item-6',
+                title: '撰写报告草稿',
+                status: 'failed',
+                assignedAgent: 'xiaok-po',
+                updatedAt: 1779201306940,
+                qualityFailureCount: 26,
+                result: {
+                  artifacts: [
+                    {
+                      filename: 'current-report.md',
+                      url: '/projects/proj-priority/artifacts/current-report.md',
+                      mimeType: 'text/markdown',
+                      generatedAt: 100,
+                    },
+                  ],
+                },
+              },
+              {
+                id: 'proj-priority__item-2',
+                title: '旧任务',
+                status: 'done',
+                result: {
+                  artifacts: [
+                    {
+                      filename: 'newer-but-unrelated.md',
+                      url: '/projects/proj-priority/artifacts/newer-but-unrelated.md',
+                      mimeType: 'text/markdown',
+                      generatedAt: 999,
+                    },
+                  ],
+                },
+              },
+            ],
+            workspace: {
+              artifacts: [
+                {
+                  filename: 'newer-but-unrelated.md',
+                  url: '/projects/proj-priority/artifacts/newer-but-unrelated.md',
+                  mimeType: 'text/markdown',
+                  generatedAt: 999,
+                },
+                {
+                  filename: 'current-report.md',
+                  url: '/projects/proj-priority/artifacts/current-report.md',
+                  mimeType: 'text/markdown',
+                  generatedAt: 100,
+                },
+              ],
+            },
+            projectIntervention: {
+              required: true,
+              primaryTaskId: 'proj-priority__item-6',
+              primaryTaskTitle: '撰写报告草稿',
+              primaryAction: {
+                id: 'continue_project',
+                strategy: 'needs_conversation',
+                taskId: 'proj-priority__item-6',
+                taskUpdatedAt: 1779201306940,
+              },
+            },
+          }));
+        }
+        if (path === '/projects/proj-priority/artifacts/current-report.md') {
+          return new Response('# Current report\n\n当前卡住任务的报告草稿');
+        }
+        if (path === '/projects/proj-priority/artifacts/newer-but-unrelated.md') {
+          return new Response('# Unrelated\n\n无关旧任务内容');
+        }
+        return new Response(JSON.stringify({ error: 'unexpected path' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmInspectProjectTool(kswarmService);
+    const result = JSON.parse(await tool.execute({ projectId: 'proj-priority' }));
+
+    expect(result.ok).toBe(true);
+    expect(result.readableArtifacts[0]).toMatchObject({
+      filename: 'current-report.md',
+      content: expect.stringContaining('当前卡住任务'),
+    });
+    expect(requests.map(request => request.path).slice(0, 3)).toEqual([
+      '/projects/proj-priority',
+      '/projects/proj-priority/artifacts/current-report.md',
+      '/projects/proj-priority/artifacts/newer-but-unrelated.md',
+    ]);
+  });
+
   it('inspect_project asks for clarification when a project name matches multiple projects', async () => {
     const kswarmService: KSwarmService = {
       ...mockKSwarmService(),
@@ -998,26 +1120,68 @@ describe('desktop services', () => {
     });
   });
 
-  it('system prompt defaults to reminder_create for scheduled tasks', async () => {
+  it('system prompt separates notification reminders from automatic scheduled tasks', async () => {
     const { readFileSync } = await import('node:fs');
     const { join: pathJoin } = await import('node:path');
     const sourceFile = readFileSync(pathJoin(__dirname, '../../electron/desktop-services.ts'), 'utf-8');
 
-    // System prompt should guide to reminder_create by default
-    expect(sourceFile).toContain('默认使用 reminder_create 工具');
+    expect(sourceFile).toContain('reminder_create 只创建到点通知');
+    expect(sourceFile).toContain('scheduled_task_create');
+    expect(sourceFile).toContain('每隔N分钟检查/执行/直到完成');
     expect(sourceFile).toContain('如果用户明确要求写脚本或使用系统定时，则遵循用户要求');
-    expect(sourceFile).toContain('reminder_create(content=');
+    expect(sourceFile).toContain('不要用 reminder_create 承诺会自动检查项目');
   });
 
-  it('system prompt routes stuck Swarm project recovery through inspect_project and repair_project_task', async () => {
+  it('timed action tools create notification reminders and agent scheduled tasks', async () => {
+    const store = new TimedActionStore(join(rootDir, 'timed-actions.sqlite'));
+    const service = new TimedActionService(store, { now: () => 1_000 });
+    const tools = createTimedActionTools(service, 'Asia/Shanghai');
+
+    const reminderTool = tools.find(tool => tool.definition.name === 'reminder_create');
+    const scheduledTool = tools.find(tool => tool.definition.name === 'scheduled_task_create');
+    expect(reminderTool).toBeTruthy();
+    expect(scheduledTool).toBeTruthy();
+
+    const reminderResult = JSON.parse(await reminderTool!.execute({
+      content: '看项目',
+      schedule_at: 61_000,
+    }));
+    expect(reminderResult).toMatchObject({
+      status: 'pending',
+      content: '看项目',
+      note: 'notification only; will not run AI tasks',
+    });
+    expect(store.getAction(reminderResult.reminderId)?.executor.kind).toBe('notify');
+
+    const scheduledResult = JSON.parse(await scheduledTool!.execute({
+      name: '检查 OpenAI本月分析',
+      prompt: '检查 proj-1779188304918，如果完成调用 scheduled_task_cancel',
+      frequency: 'interval',
+      interval_minutes: 5,
+    }));
+    expect(scheduledResult).toMatchObject({
+      ok: true,
+      name: '检查 OpenAI本月分析',
+      frequency: 'interval',
+      maxRuns: 288,
+    });
+    expect(store.getAction(scheduledResult.taskId)?.executor.kind).toBe('agent_task');
+
+    store.close();
+  });
+
+  it('system prompt routes stuck Swarm project recovery through file-first repair', async () => {
     const { readFileSync } = await import('node:fs');
     const { join: pathJoin } = await import('node:path');
     const sourceFile = readFileSync(pathJoin(__dirname, '../../electron/desktop-services.ts'), 'utf-8');
 
     expect(sourceFile).toContain('先调用 inspect_project');
     expect(sourceFile).toContain('recovery_budget_exceeded');
-    expect(sourceFile).toContain('repair_project_task');
+    expect(sourceFile).toContain('repair_project_task_from_file');
+    expect(sourceFile).toContain('写入 artifacts');
+    expect(sourceFile).toContain('不要在回复、stdout、tool 参数或聊天消息中粘贴完整交付物');
     expect(sourceFile).toContain('不要反复调用 continue_project');
+    expect(sourceFile).toContain('needs_conversation');
   });
 
   it('preserves history for cancelled tasks so subsequent tasks see prior context', async () => {

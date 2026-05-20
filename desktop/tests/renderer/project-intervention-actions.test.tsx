@@ -198,6 +198,20 @@ describe('project intervention actions', () => {
     });
   });
 
+  it('shows PO review notification feedback when continuing a submitted task', async () => {
+    mockContinueProject.mockResolvedValue({
+      ok: true,
+      strategy: 'notify_po_review',
+      outcome: 'submitted_for_review',
+      reviewNotification: 'sent',
+    });
+    renderProjectDetail(interventionDetail());
+
+    fireEvent.click(await screen.findByRole('button', { name: '继续推进' }));
+
+    expect(await screen.findByText('已通知 PO 复审。')).toBeInTheDocument();
+  });
+
   it('opens a xiaok chat draft with project intervention context', async () => {
     mockCreateThread.mockResolvedValue({
       id: 'thread-help',
@@ -237,12 +251,55 @@ describe('project intervention actions', () => {
     expect(stored.projectId).toBe('proj-intervention');
     expect(stored.threadId).toBe('thread-help');
     expect(stored.draftPrompt).toContain('continue_project');
-    expect(stored.availableTools).toContain('repair_project_task');
+    expect(stored.availableTools).toContain('repair_project_task_from_file');
 
     const threadDraft = JSON.parse(window.localStorage.getItem('xiaok.threadDraft.thread-help') || '{}');
     expect(threadDraft.threadId).toBe('thread-help');
     expect(threadDraft.projectId).toBe('proj-intervention');
     expect(threadDraft.draftPrompt).toContain('continue_project');
+  });
+
+  it('opens a repair-first xiaok draft when intervention needs conversation', async () => {
+    mockCreateThread.mockResolvedValue({
+      id: 'thread-repair',
+      title: '让小K帮忙：外贸趋势分析',
+      status: 'idle',
+      mode: 'work',
+      createdAt: 1779000000000,
+      updatedAt: 1779000000000,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: null,
+      taskIds: [],
+    });
+    renderProjectDetail(interventionDetail({
+      message: '撰写报告草稿 无法安全自动推进，需要让小K帮忙确认下一步。',
+      primaryTaskTitle: '撰写报告草稿',
+      primaryAction: {
+        id: 'continue_project',
+        label: '继续推进',
+        strategy: 'needs_conversation',
+        taskId: 'item-1',
+        taskUpdatedAt: 1779093510355,
+      },
+    } as any));
+
+    fireEvent.click(await screen.findByRole('button', { name: '让小K帮忙' }));
+
+    expect(await screen.findByTestId('chat-thread-id')).toHaveTextContent('thread-repair');
+    const state = JSON.parse(screen.getByTestId('chat-state').textContent || '{}');
+    expect(state.draftPrompt).toContain('先调用 inspect_project');
+    expect(state.draftPrompt).toContain('把完整修复产物写入 artifacts 文件');
+    expect(state.draftPrompt).toContain('repair_project_task_from_file');
+    expect(state.draftPrompt).not.toContain('filename/content/summary');
+    expect(state.draftPrompt).toContain('不要反复调用 continue_project');
+    expect(state.draftPrompt).not.toContain('可以安全推进时，调用 continue_project');
+
+    const stored = JSON.parse(window.sessionStorage.getItem('xiaok.swarmContinueContext') || '{}');
+    expect(stored.draftPrompt).toContain('repair_project_task_from_file');
+    expect(stored.draftPrompt).toContain('不要在对话或 tool 参数里粘贴完整正文');
+    expect(stored.draftPrompt).not.toContain('可以安全推进时，调用 continue_project');
   });
 
   it('shows stale-state feedback when continue returns 409', async () => {
@@ -278,7 +335,7 @@ describe('project intervention actions', () => {
       nextActions: [
         {
           id: 'repair_and_submit',
-          toolName: 'repair_project_task',
+          toolName: 'repair_project_task_from_file',
           params: {
             projectId: 'proj-intervention',
             expectedPrimaryTaskId: 'item-1',
@@ -293,7 +350,7 @@ describe('project intervention actions', () => {
 
     expect(await screen.findByText('需要让小K帮忙诊断并提交修复产物。')).toBeInTheDocument();
     const stored = JSON.parse(window.sessionStorage.getItem('xiaok.swarmContinueContext') || '{}');
-    expect(stored.nextActions[0].toolName).toBe('repair_project_task');
+    expect(stored.nextActions[0].toolName).toBe('repair_project_task_from_file');
     expect(stored.nextActions[0].params.expectedPrimaryTaskId).toBe('item-1');
   });
 });

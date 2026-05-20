@@ -40,6 +40,59 @@ const DETAIL_HOVER_DELAY_MS = 500;
 const THREAD_DRAFT_STORAGE_PREFIX = 'xiaok.threadDraft.';
 const SWARM_CONTEXT_STORAGE_KEY = 'xiaok.swarmContinueContext';
 
+function SummaryCollapsible({ summary, score, taskScores }: { summary: string; score?: number | null; taskScores?: Array<{ title: string; agent: string; score: number; comment: string }> | null }) {
+  const [expanded, setExpanded] = useState(false);
+  const { t } = useLocale();
+
+  return (
+    <div className="rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[var(--c-bg-deep)] transition-colors"
+      >
+        <h4 className="text-[13px] font-semibold text-[var(--c-text-heading)]">{t.projectsSummaryTitle}</h4>
+        {score != null && (
+          <span className={`rounded-md px-2 py-0.5 text-xs font-bold ${
+            score >= 8 ? 'bg-[var(--c-status-success-text)]/15 text-[var(--c-status-success-text)]'
+              : score >= 5 ? 'bg-[var(--c-status-warning-text)]/15 text-[var(--c-status-warning-text)]'
+              : 'bg-[var(--c-status-error-text)]/15 text-[var(--c-status-error-text)]'
+          }`}>
+            {score}/10
+          </span>
+        )}
+        <span className="ml-auto text-[11px] text-[var(--c-text-muted)]">{expanded ? '收起' : '展开'}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-[var(--c-border-subtle)]/50">
+          <div className="px-4 py-3 text-[12px] leading-relaxed text-[var(--c-text-secondary)] whitespace-pre-wrap">
+            {summary}
+          </div>
+          {taskScores && taskScores.length > 0 && (
+            <div className="px-4 pb-3">
+              <h5 className="text-[11px] font-semibold text-[var(--c-text-muted)] mb-2">任务评分</h5>
+              <div className="space-y-1.5">
+                {taskScores.map((ts, i) => (
+                  <div key={i} className="flex items-center gap-2 text-[11px]">
+                    <span className={`shrink-0 rounded px-1.5 py-0.5 font-bold ${
+                      ts.score >= 8 ? 'bg-[var(--c-status-success-text)]/10 text-[var(--c-status-success-text)]'
+                        : ts.score >= 5 ? 'bg-[var(--c-status-warning-text)]/10 text-[var(--c-status-warning-text)]'
+                        : 'bg-[var(--c-status-error-text)]/10 text-[var(--c-status-error-text)]'
+                    }`}>{ts.score}/10</span>
+                    <span className="text-[var(--c-text-heading)] font-medium truncate">{ts.title}</span>
+                    <span className="text-[var(--c-text-muted)]">@{ts.agent}</span>
+                    <span className="text-[var(--c-text-tertiary)] truncate ml-auto">{ts.comment}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function storeXiaokThreadDraft(threadId: string, context: Record<string, unknown>) {
   const storedContext = { ...context, threadId };
   window.sessionStorage.setItem(SWARM_CONTEXT_STORAGE_KEY, JSON.stringify(storedContext));
@@ -176,9 +229,9 @@ function buildSwarmContinueContext(detail: ProjectFullDetail, intervention: Proj
     expectedTaskUpdatedAt: primaryAction?.taskUpdatedAt ?? intervention.lastEventAt ?? undefined,
     continueTool: 'continue_project',
     continueEndpoint: `/projects/${projectId}/continue`,
-    repairTool: 'repair_project_task',
+    repairTool: 'repair_project_task_from_file',
     repairEndpoint: `/projects/${projectId}/intervention/resolve`,
-    availableTools: ['continue_project', 'repair_project_task'],
+    availableTools: ['continue_project', 'repair_project_task_from_file'],
   };
 }
 
@@ -199,21 +252,37 @@ function buildXiaokInterventionDraft(context: ReturnType<typeof buildSwarmContin
   lines.push(`后续影响：后续 ${context.downstreamBlockedCount || 0} 个任务正在等待。`);
   lines.push(`建议策略：${context.strategy}`);
   lines.push('');
-  lines.push('请先判断是不是可以安全自动推进。可以安全推进时，调用 continue_project 工具，参数使用：');
-  lines.push(`- projectId: ${context.projectId}`);
-  if (context.expectedPrimaryTaskId) lines.push(`- expectedPrimaryTaskId: ${context.expectedPrimaryTaskId}`);
-  if (context.expectedTaskUpdatedAt !== undefined && context.expectedTaskUpdatedAt !== null) {
-    lines.push(`- expectedTaskUpdatedAt: ${context.expectedTaskUpdatedAt}`);
+  if (context.strategy === 'needs_conversation') {
+    lines.push('当前状态已经不适合继续自动重试。请先调用 inspect_project 读取项目状态、失败反馈和当前任务相关产物。');
+    lines.push(`- projectId: ${context.projectId}`);
+    lines.push('');
+    lines.push('然后把完整修复产物写入 artifacts 文件，并调用 repair_project_task_from_file：');
+    lines.push(`- projectId: ${context.projectId}`);
+    if (context.expectedPrimaryTaskId) lines.push(`- taskId: ${context.expectedPrimaryTaskId}`);
+    if (context.expectedTaskUpdatedAt !== undefined && context.expectedTaskUpdatedAt !== null) {
+      lines.push(`- expectedTaskUpdatedAt: ${context.expectedTaskUpdatedAt}`);
+    }
+    lines.push('- artifactPath: 你刚写入的 artifacts/xxx 文件路径');
+    lines.push('- summary/mimeType: 简短说明和文件类型');
+    lines.push('');
+    lines.push('不要在对话或 tool 参数里粘贴完整正文；不要反复调用 continue_project；repair_project_task_from_file 只是提交复审，不是强制完成。');
+  } else {
+    lines.push('请先判断是不是可以安全自动推进。可以安全推进时，调用 continue_project 工具，参数使用：');
+    lines.push(`- projectId: ${context.projectId}`);
+    if (context.expectedPrimaryTaskId) lines.push(`- expectedPrimaryTaskId: ${context.expectedPrimaryTaskId}`);
+    if (context.expectedTaskUpdatedAt !== undefined && context.expectedTaskUpdatedAt !== null) {
+      lines.push(`- expectedTaskUpdatedAt: ${context.expectedTaskUpdatedAt}`);
+    }
+    lines.push('- idempotencyKey: 由你生成一个本次会话唯一值');
+    lines.push('');
+    lines.push('如果 continue_project 返回 needs_user_action、recovery_budget_exceeded，或发现已有产物为空/不合格，请把完整修复产物写入 artifacts 文件，并调用 repair_project_task_from_file：');
+    lines.push(`- projectId: ${context.projectId}`);
+    if (context.expectedPrimaryTaskId) lines.push(`- taskId: ${context.expectedPrimaryTaskId}`);
+    if (context.expectedTaskUpdatedAt !== undefined && context.expectedTaskUpdatedAt !== null) {
+      lines.push(`- expectedTaskUpdatedAt: ${context.expectedTaskUpdatedAt}`);
+    }
+    lines.push('- artifactPath/summary/mimeType: 只传文件路径和元数据，不要传完整正文');
   }
-  lines.push('- idempotencyKey: 由你生成一个本次会话唯一值');
-  lines.push('');
-  lines.push('如果 continue_project 返回 needs_user_action、recovery_budget_exceeded，或发现已有产物为空/不合格，请生成完整修复产物并调用 repair_project_task：');
-  lines.push(`- projectId: ${context.projectId}`);
-  if (context.expectedPrimaryTaskId) lines.push(`- taskId: ${context.expectedPrimaryTaskId}`);
-  if (context.expectedTaskUpdatedAt !== undefined && context.expectedTaskUpdatedAt !== null) {
-    lines.push(`- expectedTaskUpdatedAt: ${context.expectedTaskUpdatedAt}`);
-  }
-  lines.push('- filename/content/summary: 使用你修复后的实际产物，不要提交占位符');
   lines.push('');
   lines.push('不要跳过必需任务，不要人工放行不合格结果；如果需要调整目标或接受风险，请先向我确认。');
   return lines.join('\n');
@@ -312,6 +381,25 @@ export function ProjectDetailPage() {
     setActionLoading(null);
   };
 
+  const handleCloseProject = async () => {
+    if (!projectId || actionLoading !== null) return;
+    setActionLoading('close');
+    try {
+      const ok = await closeProject(projectId);
+      if (ok) {
+        setDetail(prev => prev ? { ...prev, project: { ...prev.project, status: 'closed' } } : prev);
+        setConfirmClose(false);
+        showNotice({ action: 'close', kind: 'success', message: '项目已关闭。' }, 5_000);
+      } else {
+        showNotice({ action: 'close', kind: 'error', message: '关闭项目失败，请稍后重试。' }, 8_000);
+      }
+    } catch {
+      showNotice({ action: 'close', kind: 'error', message: '关闭项目失败，请稍后重试。' }, 8_000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleRetryPlan = async () => {
     if (!projectId || actionLoading || retryCooldownUntil > Date.now()) return;
     setActionLoading('retry');
@@ -375,7 +463,13 @@ export function ProjectDetailPage() {
       });
       if (result?.ok) {
         const message = result.outcome === 'submitted_for_review'
-          ? (result.reviewNotification === 'failed' ? '已提交审核，但通知失败，请稍后刷新。' : '已提交审核。')
+          ? (result.reviewNotification === 'sent'
+            ? '已通知 PO 复审。'
+            : result.reviewNotification === 'failed'
+              ? '复审通知发送失败，请稍后重试或让小K帮忙。'
+              : result.reviewNotification === 'not_available'
+                ? '暂时无法通知 PO，请稍后重试或让小K帮忙。'
+                : '已提交审核。')
           : '已继续推进项目。';
         showNotice({ action: 'continue', kind: 'success', message }, 5_000);
       } else if (result?.error === 'task_state_changed' || result?.status === 409) {
@@ -528,8 +622,8 @@ export function ProjectDetailPage() {
             )}
             {confirmClose && (
               <div className="flex items-center gap-1">
-                <button type="button" onClick={() => handleAction('close', () => closeProject(projectId!))} disabled={actionLoading !== null}
-                  className="rounded-lg px-2.5 py-1 text-[11px] font-medium bg-[var(--c-status-error-text)] text-white">
+                <button type="button" onClick={handleCloseProject} disabled={actionLoading !== null}
+                  className="rounded-lg border border-[var(--c-status-error-text)]/30 bg-[var(--c-status-error-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--c-status-error-text)] hover:bg-[var(--c-status-error-text)]/10 disabled:opacity-60">
                   {actionLoading === 'close' ? '...' : t.projectsDetailConfirmDone}
                 </button>
                 <button type="button" onClick={() => setConfirmClose(false)} className="rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]">{t.commonCancel}</button>
@@ -733,25 +827,9 @@ export function ProjectDetailPage() {
         )}
         {activeTab === 'deliverables' && (
           <div className="space-y-4">
-            {/* Project Summary */}
+            {/* Project Summary — collapsible capsule */}
             {project.summary && (
-              <div className="rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <h4 className="text-[13px] font-semibold text-[var(--c-text-heading)]">{t.projectsSummaryTitle}</h4>
-                  {project.summaryScore != null && (
-                    <span className={`rounded-md px-2 py-0.5 text-xs font-bold ${
-                      project.summaryScore >= 8 ? 'bg-[var(--c-status-success-text)]/15 text-[var(--c-status-success-text)]'
-                        : project.summaryScore >= 5 ? 'bg-[var(--c-status-warning-text)]/15 text-[var(--c-status-warning-text)]'
-                        : 'bg-[var(--c-status-error-text)]/15 text-[var(--c-status-error-text)]'
-                    }`}>
-                      {project.summaryScore}/10
-                    </span>
-                  )}
-                </div>
-                <div className="text-[12px] leading-relaxed text-[var(--c-text-secondary)] whitespace-pre-wrap">
-                  {project.summary}
-                </div>
-              </div>
+              <SummaryCollapsible summary={project.summary} score={project.summaryScore} taskScores={project.taskScores} />
             )}
             <DeliverableView project={project} tasks={tasks} />
           </div>

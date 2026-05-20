@@ -109,6 +109,26 @@ function computeNextRunAt(
   return undefined;
 }
 
+function toTimedActionTrigger(
+  frequency: ScheduledTask['frequency'],
+  config: ScheduledTask['scheduleConfig'],
+  nextRunAt?: number
+) {
+  if (frequency === 'hourly') {
+    return { kind: 'interval', intervalMinutes: config?.intervalMinutes ?? 60 };
+  }
+  if (frequency === 'daily') {
+    return { kind: 'daily', hour: config?.hour ?? 9, minute: config?.minute ?? 0 };
+  }
+  if (frequency === 'weekdays') {
+    return { kind: 'weekdays', hour: config?.hour ?? 9, minute: config?.minute ?? 0 };
+  }
+  if (frequency === 'weekly') {
+    return { kind: 'weekly', dayOfWeek: config?.dayOfWeek ?? 1, hour: config?.hour ?? 9, minute: config?.minute ?? 0 };
+  }
+  return { kind: 'once', at: nextRunAt ?? Date.now() };
+}
+
 export function ScheduledPage() {
   const navigate = useNavigate();
   const { t } = useLocale();
@@ -168,13 +188,6 @@ export function ScheduledPage() {
   useEffect(() => {
     const desktop = (window as any).xiaokDesktop;
 
-    // Re-sync to main in case localStorage was updated externally
-    const raw = localStorage.getItem('xiaok:scheduled-tasks');
-    const items = raw ? JSON.parse(raw) : [];
-    if (items.length > 0 && desktop?.syncScheduledTasks) {
-      desktop.syncScheduledTasks(items).catch(() => {});
-    }
-
     // Refresh task list when global bootstrap auto-executes a task
     const handleUpdated = () => loadTasks();
     window.addEventListener('xiaok:scheduled-tasks-updated', handleUpdated);
@@ -185,6 +198,17 @@ export function ScheduledPage() {
     try {
       const raw = localStorage.getItem('xiaok:scheduled-tasks');
       const localItems = raw ? JSON.parse(raw) : [];
+      const desktop = (window as any).xiaokDesktop;
+      let scheduledItems: ScheduledTask[] = localItems;
+      if (desktop?.getScheduledTasks) {
+        try {
+          const mainItems = await desktop.getScheduledTasks();
+          if (Array.isArray(mainItems)) {
+            scheduledItems = mainItems as ScheduledTask[];
+            localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify(scheduledItems));
+          }
+        } catch { /* fall back to local cache */ }
+      }
 
       // Also load IPC reminders and merge
       let ipcReminders: ScheduledTask[] = [];
@@ -203,7 +227,7 @@ export function ScheduledPage() {
       } catch { /* ignore */ }
 
       const allMap = new Map<string, ScheduledTask>();
-      for (const t of [...ipcReminders, ...localItems]) {
+      for (const t of [...ipcReminders, ...scheduledItems]) {
         allMap.set(t.id, t);
       }
       setTasks(Array.from(allMap.values()));
@@ -216,11 +240,6 @@ export function ScheduledPage() {
     setTasks(newTasks);
     // Dispatch event so sidebar can update
     window.dispatchEvent(new CustomEvent('xiaok:scheduled-tasks-updated'));
-    // Sync to main process scheduler
-    const desktop = (window as any).xiaokDesktop;
-    if (desktop?.syncScheduledTasks) {
-      desktop.syncScheduledTasks(newTasks).catch(() => {});
-    }
   };
 
   const openCreate = () => {
@@ -256,6 +275,24 @@ export function ScheduledPage() {
     const nextRunAt = computeNextRunAt(formFrequency, formScheduleConfig, now);
 
     if (modalMode === 'create') {
+      const desktop = (window as any).xiaokDesktop;
+      if (desktop?.createScheduledTask && formFrequency !== 'manual') {
+        try {
+          await desktop.createScheduledTask({
+            name: formName.trim(),
+            description: formDesc.trim(),
+            prompt: formPrompt.trim(),
+            trigger: toTimedActionTrigger(formFrequency, formScheduleConfig, nextRunAt),
+            source: 'user',
+          });
+          await loadTasks();
+          setSaving(false);
+          closeModal();
+          return;
+        } catch (e) {
+          console.warn('[Scheduled] main createScheduledTask failed, falling back to local cache:', e);
+        }
+      }
       const newTask: ScheduledTask = {
         id: crypto.randomUUID(),
         name: formName.trim(),
@@ -289,6 +326,7 @@ export function ScheduledPage() {
   const confirmDelete = async () => {
     if (!confirmDeleteId) return;
     // Cancel in main process (IPC reminder) so it won't be re-merged on reload
+    try { await (window as any).xiaokDesktop?.cancelScheduledTask?.(confirmDeleteId); } catch { /* may not exist in IPC */ }
     try { await api.cancelReminder(confirmDeleteId); } catch { /* may not exist in IPC */ }
     saveTasks(tasks.filter(task => task.id !== confirmDeleteId));
     setConfirmDeleteId(null);

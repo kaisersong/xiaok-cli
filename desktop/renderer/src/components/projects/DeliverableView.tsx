@@ -44,6 +44,73 @@ function ArtifactCard({ artifact, taskTitle, onPreview }: { artifact: KSwarmArti
   );
 }
 
+function DeliverableContent({ deliverable }: { deliverable: unknown }) {
+  if (typeof deliverable === 'string') {
+    return <p className="text-[13px] text-[var(--c-text-primary)] whitespace-pre-wrap">{deliverable}</p>;
+  }
+
+  if (typeof deliverable !== 'object' || deliverable === null) {
+    return null;
+  }
+
+  const obj = deliverable as Record<string, unknown>;
+  const description = typeof obj.description === 'string' ? obj.description : null;
+  const fileArrayKeys = ['artifacts', 'files', 'expectedArtifacts', 'deliverables'];
+  const fileArrays: Array<{ label: string; items: string[] }> = [];
+
+  for (const key of fileArrayKeys) {
+    if (Array.isArray(obj[key]) && obj[key].length > 0) {
+      const items = obj[key].map((item: unknown) => {
+        if (typeof item === 'string') return item;
+        if (typeof item === 'object' && item !== null) {
+          const o = item as Record<string, unknown>;
+          return (o.path || o.name || o.title || JSON.stringify(item)) as string;
+        }
+        return String(item);
+      });
+      fileArrays.push({ label: key, items });
+    }
+  }
+
+  if (!description && fileArrays.length === 0) {
+    // Fallback: render all string fields
+    const entries = Object.entries(obj).filter(([, v]) => typeof v === 'string' || typeof v === 'number');
+    if (entries.length === 0) return null;
+    return (
+      <div className="space-y-1">
+        {entries.map(([k, v]) => (
+          <p key={k} className="text-[12px] text-[var(--c-text-secondary)]">
+            <span className="text-[var(--c-text-muted)]">{k}:</span> {String(v)}
+          </p>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {description && (
+        <p className="text-[13px] text-[var(--c-text-primary)] whitespace-pre-wrap">{description}</p>
+      )}
+      {fileArrays.map(({ label, items }) => (
+        <div key={label}>
+          {fileArrays.length > 1 && (
+            <p className="text-[10px] font-medium text-[var(--c-text-muted)] uppercase mb-1">{label}</p>
+          )}
+          <div className="flex flex-col gap-1.5">
+            {items.map((item, i) => (
+              <div key={i} className="flex items-center gap-2 rounded-md border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-deep)] px-3 py-2">
+                <FileText size={13} className="text-[var(--c-text-icon)] shrink-0" />
+                <span className="text-[12px] text-[var(--c-text-primary)] truncate">{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function DeliverableView({ project, tasks: propTasks }: DeliverableViewProps) {
   const { t } = useLocale();
   const [previewArtifact, setPreviewArtifact] = useState<KSwarmArtifact | null>(null);
@@ -57,7 +124,11 @@ export function DeliverableView({ project, tasks: propTasks }: DeliverableViewPr
   }
 
   const deliverables = project.deliverables || [];
-  const deliverable = (project as any).deliverable;
+  const rawDeliverable = (project as any).deliverable;
+  // Filter out bare { synthesis: true } placeholder — it has no displayable content
+  const deliverable = rawDeliverable && !(
+    typeof rawDeliverable === 'object' && rawDeliverable.synthesis && !rawDeliverable.files && !rawDeliverable.artifacts && !rawDeliverable.description
+  ) ? rawDeliverable : null;
 
   if (taskOutputs.length === 0 && deliverables.length === 0 && !deliverable) {
     return (
@@ -73,9 +144,7 @@ export function DeliverableView({ project, tasks: propTasks }: DeliverableViewPr
       {deliverable && (
         <div className="rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-4">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)] mb-3">{t.projectsDeliverableTitle}</h3>
-          <pre className="text-[13px] text-[var(--c-text-primary)] whitespace-pre-wrap font-sans">
-            {typeof deliverable === 'string' ? deliverable : JSON.stringify(deliverable, null, 2)}
-          </pre>
+          <DeliverableContent deliverable={deliverable} />
           {(project as any).deliveredAt && (
             <p className="text-[10px] text-[var(--c-text-muted)] mt-2">
               {t.projectsDeliverableDeliveredAt}: {new Date((project as any).deliveredAt).toLocaleString()}

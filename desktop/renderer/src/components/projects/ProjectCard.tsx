@@ -8,7 +8,12 @@ import { useNavigate } from 'react-router-dom';
 import { FolderKanban, CheckCircle2, Clock, Loader2, Trash2, AlertTriangle } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import { getCompactProjectHealthLabel, shouldShowProjectHealth, type ProjectHealthStatus } from './kswarmStatus';
+import {
+  getCompactProjectHealthLabel,
+  getNormalizedProjectHealthStatus,
+  shouldShowProjectHealth,
+  type ProjectHealthStatus,
+} from './kswarmStatus';
 import type { ProjectIntervention } from '../../hooks/useKSwarmClient';
 
 interface ProjectCardProps {
@@ -19,13 +24,14 @@ interface ProjectCardProps {
     status: string;
     taskCount?: number;
     doneCount?: number;
-    cancelledCount?: number;
+    stoppedCount?: number;
     plan?: { version: number };
     poAgent?: string;
     updatedAt?: number | string;
     createdAt?: number | string;
     projectHealth?: {
-      status: ProjectHealthStatus;
+      status?: ProjectHealthStatus;
+      state?: ProjectHealthStatus;
       primaryBlockedTaskId?: string;
       message?: string;
     };
@@ -51,7 +57,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
   };
 
   const statusConf = STATUS_CONFIG[project.status] || STATUS_CONFIG.draft;
-  const healthStatus = project.projectHealth?.status ?? 'unknown';
+  const healthStatus = getNormalizedProjectHealthStatus(project.projectHealth);
   const hasHealthSignal = shouldShowProjectHealth(healthStatus);
   const hasInterventionSignal = project.projectIntervention?.required === true;
   const visibleStatus = hasInterventionSignal
@@ -72,8 +78,8 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const StatusIcon = visibleStatus.icon;
   const totalTasks = project.taskCount || 0;
   const doneTasks = project.doneCount || 0;
-  const cancelledTasks = project.cancelledCount || 0;
-  const completedTasks = doneTasks + cancelledTasks;
+  const stoppedTasks = project.stoppedCount || 0;
+  const completedTasks = doneTasks + stoppedTasks;
   const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
   const formatTime = (ts?: number | string) => {
@@ -158,7 +164,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
               <div className="h-full rounded-full bg-[var(--c-status-success-text)] transition-all" style={{ width: `${progress}%` }} />
             </div>
             <div className="flex items-center justify-between text-[10px] text-[var(--c-text-muted)]">
-              <span>{cancelledTasks > 0 ? `${doneTasks} 完成 · ${cancelledTasks} 取消` : `${doneTasks}/${totalTasks} 任务`}</span>
+              <span>{stoppedTasks > 0 ? `${doneTasks} 完成 · ${stoppedTasks} 停止` : `${doneTasks}/${totalTasks} 任务`}</span>
               <span>{progress}%</span>
             </div>
           </div>

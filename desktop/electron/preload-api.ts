@@ -77,6 +77,11 @@ export const PRELOAD_API_KEYS = [
   'exportTraceBundle',
   'diagnose',
   'syncScheduledTasks',
+  'getScheduledTasks',
+  'createScheduledTask',
+  'cancelScheduledTask',
+  'getTimedActions',
+  'getTimedActionRuns',
   'onScheduledTaskDue',
   'listMemories',
   'createMemory',
@@ -318,6 +323,11 @@ export interface DesktopApi {
   exportTraceBundle(input: DesktopTraceTarget): Promise<{ ok: boolean; path?: string; error?: string }>;
   diagnose(input: DesktopTraceTarget): Promise<unknown>;
   syncScheduledTasks(tasks: Array<{ id: string; cronExpr: string; enabled: boolean }>): Promise<void>;
+  getScheduledTasks(): Promise<unknown[]>;
+  createScheduledTask(input: unknown): Promise<unknown>;
+  cancelScheduledTask(id: string): Promise<boolean>;
+  getTimedActions(): Promise<unknown[]>;
+  getTimedActionRuns(actionId: string): Promise<unknown[]>;
   onScheduledTaskDue(handler: (event: { taskId: string }) => void): () => void;
   listMemories(): Promise<unknown[]>;
   createMemory(input: { content: string; tags: string[]; source?: string }): Promise<unknown>;
@@ -435,6 +445,11 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     exportTraceBundle: (input) => ipcRenderer.invoke('desktop:trace:export', input) as Promise<{ ok: boolean; path?: string; error?: string }>,
     diagnose: (input) => ipcRenderer.invoke('desktop:diagnose', input) as Promise<unknown>,
     syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks) as Promise<void>,
+    getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks') as Promise<unknown[]>,
+    createScheduledTask: (input) => ipcRenderer.invoke('desktop:createScheduledTask', input) as Promise<unknown>,
+    cancelScheduledTask: (id) => ipcRenderer.invoke('desktop:cancelScheduledTask', id) as Promise<boolean>,
+    getTimedActions: () => ipcRenderer.invoke('desktop:getTimedActions') as Promise<unknown[]>,
+    getTimedActionRuns: (actionId) => ipcRenderer.invoke('desktop:getTimedActionRuns', actionId) as Promise<unknown[]>,
     onScheduledTaskDue(handler) {
       const channel = 'desktop:scheduledTaskDue';
       const listener = (_event: unknown, payload: unknown) => {

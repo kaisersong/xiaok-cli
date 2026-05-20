@@ -3,8 +3,8 @@
  * on app startup and listens for task execution notifications to refresh UI.
  *
  * Architecture: Main process is the Single Source of Truth for task state.
- * Renderer syncs localStorage → main on startup, then trusts notifications from main
- * for state updates (lastRunAt, nextRunAt).
+ * Renderer no longer bulk-syncs localStorage into main. It only listens for
+ * main-process execution notifications and refreshes UI cache.
  *
  * Must be mounted once at the app root level (App.tsx).
  */
@@ -17,16 +17,9 @@ const STORAGE_KEY = 'xiaok:scheduled-tasks';
 export function useScheduledTaskBootstrap(): void {
   useEffect(() => {
     const desktop = (window as any).xiaokDesktop;
-    if (!desktop?.syncScheduledTasks || !desktop?.onScheduledTaskDue) return;
+    if (!desktop?.onScheduledTaskDue) return;
 
-    // 1. Sync tasks from localStorage to main process scheduler on app startup
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const tasks = raw ? JSON.parse(raw) : [];
-    if (tasks.length > 0) {
-      desktop.syncScheduledTasks(tasks).catch(() => {});
-    }
-
-    // 2. Listen for task execution notifications from main — trust main's state
+    // Listen for task execution notifications from main — trust main's state
     const unsub = desktop.onScheduledTaskDue(async (payload: {
       taskId: string;
       runtimeTaskId?: string;

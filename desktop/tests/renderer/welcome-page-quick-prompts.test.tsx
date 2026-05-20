@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 describe('WelcomePage quick prompts', () => {
-  it('keeps the project prompt on a complete two-row quick prompt grid', () => {
+  it('renders quick prompts in a flex-wrap layout with all items visible', () => {
     render(
       <MemoryRouter>
         <WelcomePage />
@@ -37,9 +37,9 @@ describe('WelcomePage quick prompts', () => {
     const projectButton = screen.getByRole('button', { name: projectPrompt });
 
     expect(screen.queryByRole('button', { name: oldProjectPrompt })).not.toBeInTheDocument();
-    expect(promptGrid).toHaveClass('grid', 'grid-cols-4');
-    expect(promptGrid.querySelectorAll('button')).toHaveLength(6);
-    expect(projectButton).toHaveClass('col-span-3', 'whitespace-nowrap', 'overflow-hidden', 'text-ellipsis');
+    expect(promptGrid).toHaveClass('flex', 'flex-wrap', 'justify-center');
+    expect(promptGrid.querySelectorAll('button')).toHaveLength(7);
+    expect(projectButton).toHaveClass('whitespace-nowrap');
     expect(projectButton).toHaveAttribute('title', projectPrompt);
   });
 });

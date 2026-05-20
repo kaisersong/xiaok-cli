@@ -29,7 +29,13 @@ export interface AgentStatusSummary {
   reason?: string;
 }
 
-export type ProjectHealthStatus = NonNullable<ProjectFullDetail['projectHealth']>['status'] | 'unknown';
+type ProjectHealth = NonNullable<ProjectFullDetail['projectHealth']>;
+
+export type ProjectHealthStatus = NonNullable<ProjectHealth['status'] | ProjectHealth['state']> | 'unknown';
+
+export function getNormalizedProjectHealthStatus(health?: Pick<ProjectHealth, 'status' | 'state'> | null): ProjectHealthStatus {
+  return (health?.status ?? health?.state ?? 'unknown') as ProjectHealthStatus;
+}
 
 export function getProjectHealthLabel(status: ProjectHealthStatus): string {
   switch (status) {
@@ -39,6 +45,8 @@ export function getProjectHealthLabel(status: ProjectHealthStatus): string {
       return '项目失败';
     case 'waiting':
       return '等待中';
+    case 'needs_review':
+      return '等待审核';
     case 'running':
       return '执行中';
     case 'healthy':
@@ -56,6 +64,8 @@ export function getCompactProjectHealthLabel(status: ProjectHealthStatus): strin
       return '失败';
     case 'waiting':
       return '等待';
+    case 'needs_review':
+      return '待审核';
     case 'running':
       return '执行中';
     case 'healthy':
@@ -66,7 +76,7 @@ export function getCompactProjectHealthLabel(status: ProjectHealthStatus): strin
 }
 
 export function shouldShowProjectHealth(status: ProjectHealthStatus): boolean {
-  return status === 'blocked' || status === 'failed' || status === 'waiting';
+  return status === 'blocked' || status === 'failed' || status === 'waiting' || status === 'needs_review';
 }
 
 export function assertKnownKSwarmTaskStatus(status: string): KSwarmTask['status'] {
@@ -77,7 +87,7 @@ export function assertKnownKSwarmTaskStatus(status: string): KSwarmTask['status'
 }
 
 export function summarizeProjectHealth(detail: ProjectFullDetail): {
-  status: NonNullable<ProjectFullDetail['projectHealth']>['status'] | 'unknown';
+  status: ProjectHealthStatus;
   message?: string;
   primaryTaskId?: string;
   dispatchableCount: number;
@@ -87,15 +97,31 @@ export function summarizeProjectHealth(detail: ProjectFullDetail): {
   const dispatchableCount = detail.dispatchPlan?.dispatchedTasks?.length
     ?? detail.dispatchPlan?.dispatchable?.length
     ?? 0;
+  const status = getNormalizedProjectHealthStatus(detail.projectHealth);
 
   return {
-    status: detail.projectHealth?.status ?? 'unknown',
-    message: detail.projectHealth?.message,
-    primaryTaskId: detail.projectHealth?.primaryBlockedTaskId,
+    status,
+    message: detail.projectHealth?.message ?? detail.projectHealth?.reasons?.[0]?.message ?? getDefaultProjectHealthMessage(status),
+    primaryTaskId: detail.projectHealth?.primaryBlockedTaskId ?? detail.projectHealth?.reasons?.[0]?.taskId,
     dispatchableCount,
     blockedCount: detail.dispatchPlan?.blocked?.length ?? 0,
     waitingCount: detail.dispatchPlan?.waiting?.length ?? 0,
   };
+}
+
+function getDefaultProjectHealthMessage(status: ProjectHealthStatus): string | undefined {
+  switch (status) {
+    case 'needs_review':
+      return '等待 PO 复审';
+    case 'waiting':
+      return '等待可派发任务或可用智能体';
+    case 'blocked':
+      return '项目存在阻塞任务';
+    case 'failed':
+      return '项目存在失败任务';
+    default:
+      return undefined;
+  }
 }
 
 export function describeKSwarmAgentStatus(agent: KSwarmAgent, tasks: KSwarmTask[]): AgentStatusSummary {

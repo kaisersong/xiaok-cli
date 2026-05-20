@@ -134,10 +134,18 @@ function TaskCard({ task, projectId, onPreviewArtifact }: { task: KSwarmTask; pr
     setActing(false);
   };
 
+  const isDone = task.status === 'done';
+
   return (
     <>
-      <div className={`group rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 transition-colors duration-150 hover:bg-[var(--c-bg-deep)] ${
-        isFailed || isBlocked ? 'border-[var(--c-status-error-text)]/30' : isCancelled ? 'opacity-50' : ''
+      <div className={`group rounded-lg border-[0.5px] border-[var(--c-border-subtle)] p-3 transition-colors duration-150 hover:bg-[var(--c-bg-deep)] ${
+        isFailed || isBlocked
+          ? 'border-l-2 border-l-[var(--c-status-error-text)] bg-[var(--c-status-error-text)]/5'
+          : isCancelled
+            ? 'border-l-2 border-l-[var(--c-text-muted)] bg-[var(--c-bg-deep)] opacity-60'
+            : isDone
+              ? 'border-l-2 border-l-[var(--c-status-success-text)] bg-[var(--c-bg-card)]'
+              : 'bg-[var(--c-bg-card)]'
       }`}>
         <div className="flex items-start justify-between gap-1">
           <p className="text-[12px] font-medium text-[var(--c-text-primary)] line-clamp-2 flex-1">{displayTitle}</p>
@@ -207,6 +215,13 @@ function TaskCard({ task, projectId, onPreviewArtifact }: { task: KSwarmTask; pr
             {failureReason && (
               <p className="text-[10px] leading-snug text-[var(--c-status-error-text)] line-clamp-3">{failureReason}</p>
             )}
+          </div>
+        )}
+        {isDone && (
+          <div className="mt-1.5">
+            <span className="inline-block rounded-full bg-[var(--c-status-success-text)]/10 px-1.5 py-0.5 text-[10px] text-[var(--c-status-success-text)]">
+              已完成
+            </span>
           </div>
         )}
       </div>
@@ -298,8 +313,7 @@ export function KanbanBoard({ project }: KanbanBoardProps) {
     { id: 'pending', label: t.projectsKanbanPending, color: 'border-t-[var(--c-text-muted)]', icon: Circle, statuses: ['pending'] },
     { id: 'active', label: t.projectsKanbanActive, color: 'border-t-[var(--c-status-warning-text)]', icon: Loader2, statuses: ['dispatched', 'accepted', 'in_progress'] },
     { id: 'review', label: t.projectsKanbanReview, color: 'border-t-[var(--c-status-success-text)]', icon: Eye, statuses: ['submitted', 'review'] },
-    { id: 'done', label: t.projectsKanbanDone, color: 'border-t-[var(--c-status-success-text)]', icon: CheckCircle2, statuses: ['done'] },
-    { id: 'stopped', label: t.projectsKanbanStopped, color: 'border-t-[var(--c-status-error-text)]', icon: AlertCircle, statuses: ['failed', 'blocked', 'cancelled'] },
+    { id: 'done', label: t.projectsKanbanDone, color: 'border-t-[var(--c-status-success-text)]', icon: CheckCircle2, statuses: ['done', 'failed', 'blocked', 'cancelled'] },
   ], [t]);
 
   if (tasks.length === 0 && !showAddForm) {
@@ -332,9 +346,18 @@ export function KanbanBoard({ project }: KanbanBoardProps) {
       <div className="flex flex-1 gap-4 overflow-x-auto px-6 pb-6">
         {COLUMNS.map(col => {
           const Icon = col.icon;
-          const colTasks = tasks.filter(t => col.statuses.includes(t.status));
+          const colTasks = tasks.filter(t => col.statuses.includes(t.status))
+            .sort((a, b) => {
+              // In done column: done first, stopped statuses after
+              if (col.id === 'done') {
+                const aIsDone = a.status === 'done' ? 0 : 1;
+                const bIsDone = b.status === 'done' ? 0 : 1;
+                return aIsDone - bIsDone;
+              }
+              return 0;
+            });
           return (
-            <div key={col.id} data-testid={`kanban-column-${col.id}`} className="flex w-60 shrink-0 flex-col">
+            <div key={col.id} data-testid={`kanban-column-${col.id}`} className="flex min-w-[200px] flex-1 flex-col">
               <div className={`mb-3 flex items-center gap-2 border-t-2 ${col.color} pt-2`}>
                 <Icon size={13} className="text-[var(--c-text-muted)]" />
                 <span className="text-[12px] font-medium text-[var(--c-text-primary)]">{col.label}</span>

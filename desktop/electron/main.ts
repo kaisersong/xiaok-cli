@@ -14,11 +14,12 @@ import {
 } from './window-lifecycle.js';
 import { setupMenuBar, destroyMenuBar } from './menubar.js';
 import { setupAutoUpdater, checkForUpdates, quitAndInstall, getUpdateStatus } from './updater.js';
-import { JsonReminderStore } from './reminder-store.js';
-import { ReminderScheduler } from './reminder-scheduler.js';
 import { createKSwarmService } from './kswarm-service.js';
-import { ScheduledTaskScheduler } from './scheduled-task-scheduler.js';
 import { deployBundledPlugins } from './deploy-bundled-plugins.js';
+import { TimedActionStore } from './timed-action-store.js';
+import { TimedActionService } from './timed-action-service.js';
+import { TimedActionScheduler } from './timed-action-scheduler.js';
+import { createAgentTaskExecutor, createNotifyExecutor } from './timed-action-executors.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -75,8 +76,9 @@ async function createWindow(): Promise<BrowserWindow> {
     window.webContents.send('desktop:kswarm:statusChange', status);
   });
 
+  const dataRoot = join(app.getPath('home'), '.xiaok', 'desktop');
   const services = createDesktopServices({
-    dataRoot: join(app.getPath('home'), '.xiaok', 'desktop'),
+    dataRoot,
     kswarmService,
   });
   await registerDesktopIpc(ipcMain, window, services);
@@ -105,15 +107,10 @@ async function createWindow(): Promise<BrowserWindow> {
     }
   });
 
-  // Initialize reminder scheduler
-  const reminderDataDir = join(app.getPath('home'), '.xiaok', 'desktop');
-  const reminderStore = new JsonReminderStore(reminderDataDir);
-  const reminderScheduler = new ReminderScheduler(reminderStore);
-  reminderScheduler.setMainWindow(window);
-  reminderScheduler.start();
-
-  // Register reminder tools with AI runner
-  services.registerReminderScheduler(reminderScheduler);
+  // Unified timed action daemon: notification reminders and automatic AI tasks share one scheduler.
+  const timedActionStore = new TimedActionStore(join(dataRoot, 'timed-actions.sqlite'));
+  const timedActionService = new TimedActionService(timedActionStore);
+  services.registerTimedActionService(timedActionService);
 
   // Register channel tools with AI runner (for sending messages to yunzhijia, discord, etc.)
   services.registerChannelTools();
@@ -138,35 +135,50 @@ async function createWindow(): Promise<BrowserWindow> {
   }).catch(() => {});
   debugMain('createWindow:mcp-registration-started');
 
-  // Scheduled task auto-execution scheduler
-  const taskScheduler = new ScheduledTaskScheduler({
-    dataDir: join(app.getPath('home'), '.xiaok', 'desktop'),
+  const timedActionScheduler = new TimedActionScheduler(timedActionStore, {
+    executors: {
+      notify: createNotifyExecutor({ getMainWindow: () => window }),
+      agent_task: createAgentTaskExecutor({
+        createTask: (input) => services.createTask(input),
+      }),
+    },
   });
-  taskScheduler.setMainWindow(window);
-  taskScheduler.setExecutor(async (prompt: string) => {
-    return services.createTask({ prompt, materials: [] });
-  });
-  taskScheduler.start();
+  timedActionScheduler.start();
+
   ipcMain.handle('desktop:syncScheduledTasks', (_event, tasks) => {
-    taskScheduler.syncTasks(tasks);
+    // Deprecated compatibility endpoint. Renderer must not replace main state.
+    return timedActionService.listScheduledTasks();
   });
   ipcMain.handle('desktop:getScheduledTasks', () => {
-    return taskScheduler.getTasks();
+    return timedActionService.listScheduledTasks();
+  });
+  ipcMain.handle('desktop:createScheduledTask', (_event, input) => {
+    return timedActionService.createScheduledTask(input);
+  });
+  ipcMain.handle('desktop:cancelScheduledTask', (_event, id: string) => {
+    return timedActionService.cancelScheduledTask(id);
+  });
+  ipcMain.handle('desktop:getTimedActions', () => {
+    return timedActionService.getActions();
+  });
+  ipcMain.handle('desktop:getTimedActionRuns', (_event, actionId: string) => {
+    return timedActionService.getRuns(actionId);
   });
 
   app.on('before-quit', () => {
     kswarmService.stop().catch(() => {});
-    taskScheduler.stop();
+    timedActionScheduler.stop();
+    timedActionStore.close();
     mcpDispose?.();
   });
 
   // Reminder IPC handlers
   ipcMain.handle('desktop:createReminder', (_event, input: { content: string; scheduleAt: number; timezone?: string }) => {
-    return reminderScheduler.createReminder(input.content, input.scheduleAt, input.timezone);
+    return timedActionService.createReminder(input.content, input.scheduleAt, input.timezone);
   });
-  ipcMain.handle('desktop:listReminders', () => reminderScheduler.listReminders());
-  ipcMain.handle('desktop:cancelReminder', (_event, id: string) => reminderScheduler.cancelReminder(id));
-  ipcMain.handle('desktop:getReminderStatus', () => reminderScheduler.getStatus());
+  ipcMain.handle('desktop:listReminders', () => timedActionService.listReminders());
+  ipcMain.handle('desktop:cancelReminder', (_event, id: string) => timedActionService.cancelReminder(id));
+  ipcMain.handle('desktop:getReminderStatus', () => timedActionService.getReminderStatus());
 
   // Skill debug config IPC handlers
   ipcMain.handle('desktop:getSkillDebugConfig', () => services.getSkillDebugConfig());

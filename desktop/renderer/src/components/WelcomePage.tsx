@@ -100,19 +100,15 @@ export function WelcomePage() {
         />
       </div>
 
-      <div className="w-full max-w-3xl">
-        <div data-testid="quick-prompts" className="grid grid-cols-4 gap-2">
-          {QUICK_PROMPTS.map((p, index) => (
+      <div className="w-full max-w-2xl">
+        <div data-testid="quick-prompts" className="flex flex-wrap justify-center gap-2">
+          {QUICK_PROMPTS.map((p) => (
             <button
               key={p}
               type="button"
               onClick={() => handleQuickPrompt(p)}
               title={p}
-              className={[
-                'min-w-0 rounded-full border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:border-[var(--c-accent)] hover:text-[var(--c-accent)] hover:bg-[var(--c-bg-card)]',
-                'whitespace-nowrap overflow-hidden text-ellipsis',
-                index === QUICK_PROMPTS.length - 1 ? 'col-span-3' : '',
-              ].filter(Boolean).join(' ')}
+              className="rounded-full border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:border-[var(--c-accent)] hover:text-[var(--c-accent)] hover:bg-[var(--c-bg-card)] whitespace-nowrap"
             >
               {p}
             </button>
