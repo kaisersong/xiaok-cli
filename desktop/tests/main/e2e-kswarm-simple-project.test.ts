@@ -107,26 +107,43 @@ function fakeOpenAiResponse(prompt: string): string {
     ].join('\n');
   }
 
-  if (prompt.includes('请为以下已完成的任务生成交付报告') || prompt.includes('generate a deliverable report')) {
+  if (
+    prompt.includes('请直接完成以下任务并输出核心交付产物')
+    || prompt.includes('Regenerate the task deliverable now')
+    || prompt.includes('generate a deliverable report')
+  ) {
     return [
+      '# 中文测试报告',
+      '',
       '## 摘要',
       '',
-      '本次任务已经完成，产出了一份围绕项目目标展开的具体 markdown 报告。',
+      '本次任务已经完成，产出了一份围绕项目目标展开的具体 markdown 报告。报告严格使用中文，围绕“生成一份简单但具体的中文测试报告”的目标展开，并覆盖摘要、具体工作内容、建议与结论四个核心部分。',
       '',
       '## 具体工作内容',
       '',
       '1. 梳理项目目标与约束。',
       '2. 形成结构化交付内容。',
       '3. 输出后续建议与注意事项。',
+      '4. 检查交付内容是否具备可读结构、明确结论和可复用信息。',
       '',
       '## 技术方案',
       '',
       '- 使用结构化 markdown 组织内容。',
       '- 保持中文输出，便于项目内直接复用。',
+      '- 将任务目标、执行过程和结论分开陈述，避免只给出空泛说明。',
+      '- 在交付物中保留明确标题和分节，便于 PO 审核以及后续汇总。',
       '',
       '## 交付物清单',
       '',
       '- 一份任务报告 markdown 文件。',
+      '',
+      '## 建议',
+      '',
+      '后续如果要把该测试报告扩展为正式项目模板，可以增加背景、范围、风险、验收记录和下一步计划五个固定小节。这样既能保留当前轻量结构，也能为更复杂的项目提供稳定的审核依据。',
+      '',
+      '## 结论',
+      '',
+      '该交付物已经满足项目对中文、markdown 报告和具体内容的要求，可以作为 E2E 项目的 worker 产物进入 PO 验收环节。',
       '',
       '## 注意事项',
       '',
@@ -428,7 +445,7 @@ describe('e2e: kswarm simple project with managed xiaok agents', () => {
         () => fetchJson<{ participants: Array<{ participantId: string }> }>(`${kswarmUrl}/participants`),
         (value) => {
           const ids = new Set(value.participants.map((participant) => participant.participantId));
-          return ids.has('xiaok-po') && ids.has('xiaok-worker');
+          return ids.has(`xiaok-po@proj-${created.project.id}`);
         },
         20_000,
       );
@@ -450,6 +467,19 @@ describe('e2e: kswarm simple project with managed xiaok agents', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({}),
       });
+
+      await waitForCondition(
+        async () => {
+          const [participants, logs, detail] = await Promise.all([
+            fetchJson<{ participants: Array<{ participantId: string }> }>(`${kswarmUrl}/participants`),
+            fetchJson<{ logs: Array<{ level: string; msg: string; data?: unknown }> }>(`${kswarmUrl}/logs?limit=20`),
+            fetchJson<{ tasks: Array<{ id: string; title: string; status: string; assignedAgent?: string; dependencies?: string[]; unresolvedDependencies?: string[] }> }>(`${kswarmUrl}/projects/${created.project.id}`),
+          ]);
+          return { participants: participants.participants, logs: logs.logs, tasks: detail.tasks };
+        },
+        (value) => value.participants.some((participant) => participant.participantId.startsWith('xiaok-worker@')),
+        20_000,
+      );
 
       const completed = await waitForCondition(
         () => fetchJson<{
@@ -473,7 +503,7 @@ describe('e2e: kswarm simple project with managed xiaok agents', () => {
       expect(readFileSync(firstArtifact, 'utf8').length).toBeGreaterThan(120);
 
       expect(fakeOpenAi.requests.some((prompt) => prompt.includes('制定详细的执行计划') || prompt.includes('Create a detailed execution plan'))).toBe(true);
-      expect(fakeOpenAi.requests.some((prompt) => prompt.includes('生成交付报告') || prompt.includes('deliverable report'))).toBe(true);
+      expect(fakeOpenAi.requests.some((prompt) => prompt.includes('请直接完成以下任务并输出核心交付产物') || prompt.includes('deliverable report'))).toBe(true);
     } finally {
       await cleanupKswarmAgents(kswarmUrl, tempHome);
       await kswarm.stop();

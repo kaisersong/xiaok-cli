@@ -30,7 +30,7 @@ import {
 
 type TabId = 'plan' | 'board' | 'agents' | 'activity' | 'deliverables';
 type ActionNotice = {
-  action: 'retry' | 'export' | 'continue';
+  action: 'retry' | 'export' | 'continue' | 'close';
   kind: 'info' | 'success' | 'error';
   message: string;
 };

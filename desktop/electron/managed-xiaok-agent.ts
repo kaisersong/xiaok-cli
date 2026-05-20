@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 
 import { resolveConfiguredModelBinding } from '../../src/ai/providers/model-binding.js';
 import type { Config } from '../../src/types.js';
@@ -46,7 +46,7 @@ function resolveWindowsXiaokRuntimePath(
 ): string | null {
   const candidates = [
     env.KSWARM_XIAOK_PS1_PATH?.trim(),
-    env.APPDATA ? join(env.APPDATA, 'npm', 'xiaok.ps1') : null,
+    env.APPDATA ? win32.join(env.APPDATA, 'npm', 'xiaok.ps1') : null,
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   return candidates.find((candidate) => pathExists(candidate)) ?? null;

@@ -12,9 +12,13 @@ import {
   getCompactProjectHealthLabel,
   getNormalizedProjectHealthStatus,
   shouldShowProjectHealth,
-  type ProjectHealthStatus,
 } from './kswarmStatus';
-import type { ProjectIntervention } from '../../hooks/useKSwarmClient';
+import type { ProjectFullDetail, ProjectIntervention } from '../../hooks/useKSwarmClient';
+
+type ProjectCardHealth = Pick<
+  NonNullable<ProjectFullDetail['projectHealth']>,
+  'status' | 'state' | 'primaryBlockedTaskId' | 'message'
+>;
 
 interface ProjectCardProps {
   project: {
@@ -29,12 +33,7 @@ interface ProjectCardProps {
     poAgent?: string;
     updatedAt?: number | string;
     createdAt?: number | string;
-    projectHealth?: {
-      status?: ProjectHealthStatus;
-      state?: ProjectHealthStatus;
-      primaryBlockedTaskId?: string;
-      message?: string;
-    };
+    projectHealth?: ProjectCardHealth;
     projectIntervention?: ProjectIntervention | null;
   };
 }

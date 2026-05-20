@@ -24,7 +24,9 @@ const SLIDE_FIXTURE = join(
   SLIDE_PLUGIN_SRC,
   'mcp-servers', 'slide-renderer', 'tests', 'fixtures', 'valid-brief.json',
 );
-const MANAGED_PYTHON = join(homedir(), '.xiaok', 'runtime', 'python-env', 'Scripts', 'python.exe');
+const MANAGED_PYTHON = process.platform === 'win32'
+  ? join(homedir(), '.xiaok', 'runtime', 'python-env', 'Scripts', 'python.exe')
+  : join(homedir(), '.xiaok', 'runtime', 'python-env', 'bin', 'python3');
 
 function parseJsonText<T>(payload: string): T {
   return JSON.parse(payload) as T;

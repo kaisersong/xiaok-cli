@@ -8,8 +8,13 @@ import {
   getCompactProjectHealthLabel,
   getNormalizedProjectHealthStatus,
   shouldShowProjectHealth,
-  type ProjectHealthStatus,
 } from './kswarmStatus';
+import type { ProjectFullDetail } from '../../hooks/useKSwarmClient';
+
+type ProjectProgressHealth = Pick<
+  NonNullable<ProjectFullDetail['projectHealth']>,
+  'status' | 'state' | 'message'
+>;
 
 interface ProjectProgressCardProps {
   project: {
@@ -24,11 +29,7 @@ interface ProjectProgressCardProps {
       blocked?: Array<{ taskId: string; reason: string; blockedByTaskId?: string }>;
       waiting?: Array<{ taskId: string; reason: string; agentId?: string }>;
     };
-    projectHealth?: {
-      status?: ProjectHealthStatus;
-      state?: ProjectHealthStatus;
-      message?: string;
-    };
+    projectHealth?: ProjectProgressHealth;
   };
 }
 
