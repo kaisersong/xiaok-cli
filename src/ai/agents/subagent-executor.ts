@@ -30,7 +30,7 @@ export async function executeNamedSubAgent(options: ExecuteNamedSubAgentOptions)
   );
   const cwd = resolved.cwd;
   const registry = options.createRegistry(cwd, options.agentDef.allowedTools, options.agentDef.name);
-  const systemPromptBase = options.forkContext?.systemPrompt ?? await options.buildSystemPrompt(cwd);
+  const systemPromptBase = await options.buildSystemPrompt(cwd);
   const systemPrompt = [systemPromptBase, options.agentDef.systemPrompt].filter(Boolean).join('\n\n');
   const baseAdapter = options.adapter();
   const adapter = resolveSubAgentAdapter(baseAdapter, options.agentDef.model);

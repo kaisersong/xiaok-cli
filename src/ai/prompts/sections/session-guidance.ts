@@ -34,7 +34,7 @@ export function getSessionGuidanceSection(opts: SessionGuidanceOptions): string 
   parts.push('If you do not understand why the user has denied a tool call, use AskUserQuestion to ask them.');
 
   // === 新增：交互式命令执行指导（仅限真正需要用户交互的场景） ===
-  parts.push('CRITICAL: Commands that require interactive input (sudo password, gcloud auth login, vim, top, htop, less) CANNOT be executed via Bash tool because stdin is disabled. The CLI will freeze when sudo prompts for password. For these commands, ALWAYS use `! <command>` format to instruct the user to run them manually in their terminal. NEVER call Bash tool for sudo, killall, or any command that triggers macOS authorization popup.');
+  parts.push('CRITICAL: Commands that require genuine interactive input (sudo password, gcloud auth login, vim, top, htop, less) CANNOT be executed via Bash tool because stdin is disabled. The CLI will freeze when sudo prompts for password. For these commands, ALWAYS use `! <command>` format to instruct the user to run them manually in their terminal. NEVER call Bash tool for sudo, killall, or any command that triggers macOS authorization popup.');
 
   // === 新增：用户授权后的执行指导 ===
   parts.push('CRITICAL: When the user says "允许", "确认", "好的", "行", "yes", "do it", or any other approval, EXECUTE IMMEDIATELY. Do not ask them to type a specific command format. Do not ask for additional confirmation. Their approval means you should call the Bash tool and run the command NOW.');

@@ -224,9 +224,12 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
       const terminalCols = stdout.columns ?? cols;
       const frameLines = renderFrame(params, selectedIdx, checked, terminalCols);
       renderedRowCount = countRenderedTerminalRows(frameLines, terminalCols);
-      if (params.renderFrame?.(frameLines) !== false) {
-        externallyRendered = true;
-        return;
+      if (params.renderFrame) {
+        const handled = params.renderFrame(frameLines);
+        if (handled !== false) {
+          externallyRendered = true;
+          return;
+        }
       }
       externallyRendered = false;
       // Write lines without trailing newline — cursor stays on last line

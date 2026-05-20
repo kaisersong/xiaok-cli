@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSubAgentTool } from '../../../src/ai/tools/subagent.js';
 import type { ModelAdapter, ToolExecutionContext } from '../../../src/types.js';
 
@@ -35,6 +35,9 @@ const baseOptions = {
 };
 
 describe('subagent tool', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   describe('inline agent mode', () => {
     it('creates inline agent with description and prompt', async () => {

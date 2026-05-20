@@ -116,17 +116,14 @@ describe('DesktopTaskEvent projection', () => {
         },
       },
       {
-        type: 'result',
-        result: {
-          summary: '已记录产物：方案大纲.md',
-          artifacts: [{
-            artifactId: 'artifact_1',
-            kind: 'text',
-            title: '方案大纲.md',
-            createdAt: 'turn_1',
-            previewAvailable: false,
-          }],
-        },
+        type: 'artifact_recorded',
+        artifactId: 'artifact_1',
+        kind: 'text',
+        label: '方案大纲.md',
+        filePath: '/tmp/outline.md',
+        previewAvailable: true,
+        turnId: 'turn_1',
+        creator: 'agent',
       },
       {
         type: 'result',

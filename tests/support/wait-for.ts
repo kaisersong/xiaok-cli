@@ -1,15 +1,19 @@
 export async function waitFor(
-  assertion: () => void,
-  options: { timeoutMs?: number; intervalMs?: number } = {},
+  assertion: () => void | boolean | Promise<void | boolean>,
+  options: { timeoutMs?: number; intervalMs?: number } | number = {},
 ): Promise<void> {
-  const timeoutMs = options.timeoutMs ?? 1_000;
-  const intervalMs = options.intervalMs ?? 10;
+  const normalized = typeof options === 'number' ? { timeoutMs: options } : options;
+  const timeoutMs = normalized.timeoutMs ?? 1_000;
+  const intervalMs = normalized.intervalMs ?? 10;
   const startedAt = Date.now();
   let lastError: unknown;
 
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      assertion();
+      const result = await assertion();
+      if (result === false) {
+        throw new Error('waitFor condition returned false');
+      }
       return;
     } catch (error) {
       lastError = error;

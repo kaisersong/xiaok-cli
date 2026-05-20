@@ -56,8 +56,20 @@ describe('buildModelOptions', () => {
       },
     });
 
-    expect(options.map((option) => option.id)).toEqual(['kimi-coding', 'kimi-k2-thinking']);
-    expect(options.map((option) => option.label)).toEqual(['Kimi Coding', 'Kimi K2 Thinking']);
+    expect(options.map((option) => option.id)).toEqual([
+      'kimi-coding',
+      'kimi-k2-thinking',
+      'kimi-k2.6',
+      'kimi-k2.5',
+      'kimi-for-coding',
+    ]);
+    expect(options.map((option) => option.label)).toEqual([
+      'Kimi Coding',
+      'Kimi K2 Thinking',
+      'Kimi K2.6',
+      'Kimi K2.5',
+      'Kimi for Coding',
+    ]);
   });
 
   it('renders the model selector as a multi-line overlay above the footer when a repl renderer is active', async () => {

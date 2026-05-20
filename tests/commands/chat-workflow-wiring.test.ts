@@ -8,13 +8,13 @@ describe('chat workflow wiring', () => {
 
     expect(source).toContain("from '../ai/tools/ask-user.js'");
     expect(source).toContain("from '../ai/tools/intent-delegation.js'");
-    expect(source).toContain("from '../ai/intent-delegation/planner.js'");
+    expect(source).toContain("from '../ai/intent-delegation/boundary-resolver.js'");
     expect(source).toContain("from '../runtime/intent-delegation/store.js'");
     expect(source).toContain("from '../runtime/intent-delegation/runtime-sync.js'");
     expect(source).toContain("from '../runtime/intent-delegation/ownership.js'");
     expect(source).toContain('createAskUserTool');
     expect(source).toContain('createIntentDelegationTools');
-    expect(source).toContain('createIntentPlan');
+    expect(source).toContain('createIntentBoundaryResolver');
     expect(source).toContain('SessionIntentDelegationStore');
     expect(source).toContain('wireIntentDelegationToRuntimeSync');
     expect(source).toMatch(/markSessionOwned|resumeSessionOwnership/);

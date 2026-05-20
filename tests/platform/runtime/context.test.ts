@@ -35,13 +35,16 @@ function writePlugin(
 describe('platform runtime context', () => {
   const tempDirs: string[] = [];
   let originalConfigDir: string | undefined;
+  let originalDisableGlobalPlugins: string | undefined;
 
   beforeEach(() => {
     originalConfigDir = process.env.XIAOK_CONFIG_DIR;
+    originalDisableGlobalPlugins = process.env.XIAOK_DISABLE_GLOBAL_PLUGINS;
     const configDir = join(tmpdir(), `xiaok-platform-config-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     tempDirs.push(configDir);
     mkdirSync(configDir, { recursive: true });
     process.env.XIAOK_CONFIG_DIR = configDir;
+    process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = '1';
   });
 
   afterEach(() => {
@@ -49,6 +52,11 @@ describe('platform runtime context', () => {
       delete process.env.XIAOK_CONFIG_DIR;
     } else {
       process.env.XIAOK_CONFIG_DIR = originalConfigDir;
+    }
+    if (originalDisableGlobalPlugins === undefined) {
+      delete process.env.XIAOK_DISABLE_GLOBAL_PLUGINS;
+    } else {
+      process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = originalDisableGlobalPlugins;
     }
 
     for (const dir of tempDirs.splice(0)) {
