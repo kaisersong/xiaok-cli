@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Play, Square, Settings, Trash2, Wifi, WifiOff, Bot } from 'lucide-react';
+import { Play, Square, Settings, Trash2, Wifi, WifiOff, Bot, Circle, Loader, Clock, AlertTriangle, XCircle, CheckCircle2, CircleOff } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmAgent, AgentProbe } from '../../hooks/useKSwarmClient';
@@ -44,11 +44,11 @@ export function AgentsTab() {
 
   const getStatusStyle = (status: KSwarmAgent['status']) => {
     switch (status) {
-      case 'idle': return { dot: 'bg-[var(--c-status-success-text)]', label: t.projectsAgentStatusIdle };
-      case 'working': return { dot: 'bg-[var(--c-status-warning-text)] animate-pulse', label: t.projectsAgentStatusWorking };
-      case 'blocked': return { dot: 'bg-[var(--c-status-warning-text)]', label: t.projectsAgentStatusBlocked };
-      case 'error': return { dot: 'bg-[var(--c-status-error-text)]', label: t.projectsAgentStatusError };
-      default: return { dot: 'bg-[var(--c-text-muted)]', label: t.projectsAgentStatusOffline };
+      case 'idle': return { Icon: Circle, iconClass: 'text-[var(--c-status-success-text)]', label: t.projectsAgentStatusIdle };
+      case 'working': return { Icon: Loader, iconClass: 'text-[var(--c-accent)] animate-spin', label: t.projectsAgentStatusWorking };
+      case 'blocked': return { Icon: Clock, iconClass: 'text-[var(--c-status-warning-text)]', label: t.projectsAgentStatusBlocked };
+      case 'error': return { Icon: XCircle, iconClass: 'text-[var(--c-status-error-text)]', label: t.projectsAgentStatusError };
+      default: return { Icon: CircleOff, iconClass: 'text-[var(--c-text-muted)]', label: t.projectsAgentStatusOffline };
     }
   };
 
@@ -75,7 +75,7 @@ export function AgentsTab() {
       ) : (
         <div className="flex flex-col gap-3">
           {agents.map(agent => {
-            const { dot, label } = getStatusStyle(agent.status);
+            const { Icon, iconClass, label } = getStatusStyle(agent.status);
             const probe = probes[agent.id];
             const isOnline = agent.status !== 'offline';
             return (
@@ -90,7 +90,7 @@ export function AgentsTab() {
                     {agent.runtimeType && <span className="rounded-full bg-[var(--c-bg-deep)] px-2 py-0.5 text-[10px] text-[var(--c-text-muted)]">{agent.runtimeType}</span>}
                   </div>
                   <div className="mt-1 flex items-center gap-2">
-                    <div className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+                    <Icon size={12} className={iconClass} />
                     <span className="text-[11px] text-[var(--c-text-muted)]">{label}</span>
                     {probe && (
                       <span className="flex items-center gap-1 text-[10px] text-[var(--c-text-muted)]">

@@ -142,6 +142,326 @@ describe('desktop services', () => {
     ]));
   });
 
+  it('runs a kswarm handoff through desktop runtime and returns artifact provenance', async () => {
+    const artifactPath = join(rootDir, 'report.md');
+    let receivedPrompt = '';
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        receivedPrompt = prompt;
+        writeFileSync(artifactPath, '# Report');
+        emitRuntimeEvent({
+          type: 'artifact_recorded',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stageId: 'stage_1',
+          artifactId: 'artifact_1',
+          label: 'report.md',
+          kind: 'markdown',
+          path: artifactPath,
+        });
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '报告已生成。',
+        });
+      },
+    });
+
+    const result = await services.runKSwarmHandoffTask({
+      handoff: {
+        kind: 'kswarm_task_handoff_v1',
+        runId: 'run-1',
+        project: { id: 'proj-1', name: 'Project', goal: 'Write report', requirements: '', artifactsDir: join(rootDir, 'artifacts') },
+        task: { id: 'proj-1__item-1', title: 'Write', brief: 'Write markdown', requiredOutputs: ['markdown'] },
+      },
+      targetParticipantId: 'xiaok-po',
+    });
+
+    expect(receivedPrompt).toContain(`产物目录：${join(rootDir, 'artifacts')}`);
+    expect(result).toMatchObject({
+      summary: '报告已生成。',
+      artifacts: [{ path: artifactPath, kind: 'markdown', label: 'report.md' }],
+      provenance: {
+        runtimeSource: 'desktop-agent-runtime',
+        producingAgent: 'xiaok-po',
+      },
+    });
+  });
+
+  it('discovers kswarm artifacts written directly to the project artifacts directory', async () => {
+    const artifactsDir = join(rootDir, 'artifacts');
+    const artifactPath = join(artifactsDir, 'research-notes.md');
+    let receivedPrompt = '';
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        receivedPrompt = prompt;
+        mkdirSync(artifactsDir, { recursive: true });
+        writeFileSync(artifactPath, '# Research notes\n\n- 来源：https://example.com 2026-05-20');
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '已写入 artifacts/research-notes.md。',
+        });
+      },
+    });
+
+    const result = await services.runKSwarmHandoffTask({
+      handoff: {
+        kind: 'kswarm_task_handoff_v1',
+        runId: 'run-1',
+        project: { id: 'proj-1', name: 'Project', goal: 'Write report', requirements: '', artifactsDir },
+        task: {
+          id: 'proj-1__item-1',
+          title: '收集资料',
+          brief: '收集最新来源并整理为结构化笔记。',
+          acceptanceCriteria: '交付一份结构化笔记（Markdown），每条动态包含日期、来源链接、摘要。',
+          requiredOutputs: [],
+          evidenceContract: { version: 1, kind: 'external_source_v1', required: true },
+        },
+      },
+      targetParticipantId: 'xiaok-worker',
+    });
+
+    expect(receivedPrompt).toContain('验收标准：交付一份结构化笔记');
+    expect(receivedPrompt).toContain('外部来源证据要求');
+    expect(result).toMatchObject({
+      summary: '已写入 artifacts/research-notes.md。',
+      artifacts: [{ path: artifactPath, kind: 'markdown', label: 'research-notes.md' }],
+    });
+  });
+
+  it('handles kswarm assign_po by producing a plan and creating board tasks', async () => {
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    let receivedPrompt = '';
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: {
+        ...mockKSwarmService(),
+        request: async (path: string, init?: RequestInit) => {
+          requests.push({ path, body: JSON.parse(String(init?.body ?? '{}')) });
+          return new Response(JSON.stringify({ ok: true, taskIds: ['proj-1__item-1'] }), { status: 200 });
+        },
+      },
+      now: () => 300,
+      runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        receivedPrompt = prompt;
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            analysis: '项目目标明确，先输出一份报告。',
+            successCriteria: ['完成报告'],
+            phases: [{
+              id: 'phase-1',
+              name: '交付',
+              items: [{
+                id: 'item-1',
+                title: '撰写报告',
+                brief: '写一份 markdown 报告。',
+                rationale: '核心交付物',
+                assignedAgent: 'xiaok-worker',
+                dependencies: [],
+                acceptanceCriteria: '报告结构完整。',
+              }],
+            }],
+          }),
+        });
+      },
+    });
+
+    const result = await services.runKSwarmAssignPo({
+      targetParticipantId: 'xiaok-po',
+      payload: {
+        projectId: 'proj-1',
+        projectName: 'Project',
+        goal: 'Write report',
+        requirements: 'Chinese output',
+        members: ['xiaok-worker'],
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(receivedPrompt).toContain('用户没有明确指定数量时，不要为本月/近期/最新类信息收集任务编造固定条数门槛');
+    expect(requests.map(item => item.path)).toEqual([
+      '/projects/proj-1/plan',
+      '/projects/proj-1/tasks',
+    ]);
+    expect(requests[0].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      plan: expect.objectContaining({ analysis: '项目目标明确，先输出一份报告。' }),
+    });
+    expect(requests[1].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      tasks: [expect.objectContaining({
+        id: 'item-1',
+        title: '撰写报告',
+        assignedAgent: 'xiaok-worker',
+      })],
+    });
+  });
+
+  it('softens generated hard item counts for current-period research when user did not request a count', async () => {
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: {
+        ...mockKSwarmService(),
+        request: async (path: string, init?: RequestInit) => {
+          requests.push({ path, body: JSON.parse(String(init?.body ?? '{}')) });
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        },
+      },
+      now: () => 300,
+      runner: async ({ sessionId, emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            analysis: '收集本月产品动态并输出报告。',
+            successCriteria: ['完成报告'],
+            phases: [{
+              id: 'phase-1',
+              name: '信息收集',
+              items: [{
+                id: 'item-1',
+                title: '收集本月产品动态',
+                brief: '收集截至当前日期的公开产品动态。',
+                assignedAgent: 'xiaok-worker',
+                dependencies: [],
+                acceptanceCriteria: '交付结构化笔记，包含至少10条本月产品动态，每条包含日期、来源链接、摘要。',
+                requiredOutputs: ['markdown'],
+              }],
+            }],
+          }),
+        });
+      },
+    });
+
+    const result = await services.runKSwarmAssignPo({
+      targetParticipantId: 'xiaok-po',
+      payload: {
+        projectId: 'proj-soft-count',
+        projectName: '本月产品分析',
+        goal: '分析本月产品特性并输出报告',
+        requirements: '给高层看',
+        members: ['xiaok-worker'],
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+    const taskRequest = requests.find(item => item.path === '/projects/proj-soft-count/tasks');
+    const task = (taskRequest?.body.tasks as Array<{ acceptanceCriteria: string }>)[0];
+    expect(task.acceptanceCriteria).toContain('尽可能完整覆盖已公开的本期相关动态');
+    expect(task.acceptanceCriteria).toContain('不得编造或用弱相关内容凑数');
+    expect(task.acceptanceCriteria).not.toContain('至少10条');
+  });
+
+  it('handles kswarm review_submission and synthesizes when all tasks are done', async () => {
+    const requests: Array<{ path: string; method: string; body: Record<string, unknown> }> = [];
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: {
+        ...mockKSwarmService(),
+        request: async (path: string, init?: RequestInit) => {
+          const method = init?.method ?? 'GET';
+          const body = init?.body ? JSON.parse(String(init.body)) : {};
+          requests.push({ path, method, body });
+          if (path === '/projects/proj-1' && method === 'GET') {
+            return new Response(JSON.stringify({
+              project: { id: 'proj-1', name: 'Project', goal: 'Write report', status: 'active' },
+              tasks: [{ id: 'task-1', title: '撰写报告', status: 'done' }],
+            }), { status: 200 });
+          }
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        },
+      },
+      now: () => 300,
+      runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: prompt.includes('项目所有任务已经完成')
+            ? '# 项目小结\n\n项目已完成，交付物可用。'
+            : JSON.stringify({ passed: true, feedback: '内容完整，可以通过。', planRevisionNeeded: false }),
+        });
+      },
+    });
+
+    const result = await services.runKSwarmReviewSubmission({
+      targetParticipantId: 'xiaok-po',
+      payload: {
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        fromWorker: 'xiaok-worker',
+        result: { summary: 'done', artifacts: [{ path: '/tmp/report.md', kind: 'markdown' }] },
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(requests.map(item => `${item.method} ${item.path}`)).toEqual([
+      'POST /projects/proj-1/tasks/task-1/review',
+      'GET /projects/proj-1',
+      'POST /projects/proj-1/synthesize',
+    ]);
+    expect(requests[0].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      review: { passed: true, feedback: '内容完整，可以通过。', planRevisionNeeded: false },
+    });
+    expect(requests[2].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      synthesis: '# 项目小结\n\n项目已完成，交付物可用。',
+    });
+  });
+
+  it('handles kswarm plan approval by requesting dispatch as the PO', async () => {
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: {
+        ...mockKSwarmService(),
+        request: async (path: string, init?: RequestInit) => {
+          requests.push({ path, body: JSON.parse(String(init?.body ?? '{}')) });
+          return new Response(JSON.stringify({ ok: true, dispatched: ['proj-1__item-1'] }), { status: 200 });
+        },
+      },
+      now: () => 300,
+      runner: async () => {},
+    });
+
+    const result = await services.runKSwarmPlanApproved({
+      targetParticipantId: 'xiaok-po',
+      payload: { projectId: 'proj-1', decision: 'approved' },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(requests).toEqual([{
+      path: '/projects/proj-1/dispatch',
+      body: { fromAgent: 'xiaok-po' },
+    }]);
+  });
+
   it('reads and writes the same provider/model config catalog as xiaok cli', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
@@ -219,11 +539,13 @@ describe('desktop services', () => {
         name: 'PO-Agent',
         instructions: '负责规划',
         runtimeType: 'xiaok',
+        runtimeSource: 'desktop-agent-runtime',
         roles: ['project_owner'],
-        provider: 'anthropic',
-        model: 'claude-opus-4-7',
         runtimeModel: 'claude-opus-4-7',
-        apiKey: 'sk-anthropic',
+        provider: null,
+        model: null,
+        baseUrl: null,
+        apiKey: null,
         runtimePath: null,
       });
     } finally {
@@ -701,6 +1023,135 @@ describe('desktop services', () => {
       members: ['worker-agent'],
       workFolder: '/tmp/kswarm-demo',
     });
+  });
+
+  it('preserves user goal and requirements while forwarding renderer planning guidance', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'po-agent', name: 'PO', roles: ['project_owner'], status: 'idle' },
+              { id: 'worker-agent', name: 'Worker', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            ok: true,
+            project: { id: 'proj-report', name: 'OpenAI本月分析', status: 'created', createdAt: 123 },
+          }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmCreateProjectTool(kswarmService);
+    expect(tool.definition.description).toMatch(/报告.*report renderer.*HTML/i);
+    expect(tool.definition.description).toMatch(/演示文稿|幻灯片/);
+    expect(tool.definition.description).toMatch(/slide renderer.*HTML/i);
+
+    await tool.execute({
+      name: 'OpenAI本月分析',
+      goal: '输出OpenAI本月分析报告',
+      requirements: '使用中文，保留来源。',
+    });
+
+    const createRequest = requests.find(request => request.path === '/projects');
+    expect(createRequest).toBeTruthy();
+    const body = JSON.parse(String(createRequest?.init?.body));
+    expect(body.goal).toBe('输出OpenAI本月分析报告');
+    expect(body.requirements).toBe('使用中文，保留来源。');
+    expect(body.planningGuidance).toMatch(/report renderer/i);
+    expect(body.planningGuidance).toMatch(/HTML/);
+    expect(body.planningGuidance).not.toContain('Markdown 报告');
+  });
+
+  it('adds report renderer guidance for high-level analysis projects without mutating user fields', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'po-agent', name: 'PO', roles: ['project_owner'], status: 'idle' },
+              { id: 'worker-agent', name: 'Worker', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            ok: true,
+            project: { id: 'proj-analysis', name: '金蝶AI产品分析', status: 'created', createdAt: 123 },
+          }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmCreateProjectTool(kswarmService);
+    await tool.execute({
+      name: '金蝶AI产品分析',
+      goal: '金蝶今年AI产品分析',
+      requirements: '要进行2轮分析，是提供给研发高层看的内容，要有高度',
+    });
+
+    const createRequest = requests.find(request => request.path === '/projects');
+    expect(createRequest).toBeTruthy();
+    const body = JSON.parse(String(createRequest?.init?.body));
+    expect(body.goal).toBe('金蝶今年AI产品分析');
+    expect(body.requirements).toBe('要进行2轮分析，是提供给研发高层看的内容，要有高度');
+    expect(body.planningGuidance).toMatch(/report renderer/i);
+    expect(body.planningGuidance).toMatch(/HTML/);
+    expect(body.planningGuidance).not.toContain('金蝶今年AI产品分析');
+    expect(body.planningGuidance).not.toContain('要进行2轮分析，是提供给研发高层看的内容，要有高度');
+  });
+
+  it('keeps explicit output format details in planningGuidance without rewriting create_project tool fields', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'po-agent', name: 'PO', roles: ['project_owner'], status: 'idle' },
+              { id: 'worker-agent', name: 'Worker', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            ok: true,
+            project: { id: 'proj-explicit', name: 'Explicit', status: 'created', createdAt: 123 },
+          }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmCreateProjectTool(kswarmService);
+    await tool.execute({
+      name: 'OpenAI本月分析',
+      goal: '输出OpenAI本月分析报告，最终用 Markdown 交付',
+      requirements: '不要改写我的目标和要求。',
+    });
+
+    const createRequest = requests.find(request => request.path === '/projects');
+    expect(createRequest).toBeTruthy();
+    const body = JSON.parse(String(createRequest?.init?.body));
+    expect(body.goal).toBe('输出OpenAI本月分析报告，最终用 Markdown 交付');
+    expect(body.requirements).toBe('不要改写我的目标和要求。');
+    expect(body.planningGuidance).toMatch(/Markdown/i);
+    expect(body.planningGuidance).toMatch(/计划|plan/i);
+    expect(body.planningGuidance).not.toContain('输出OpenAI本月分析报告，最终用 Markdown 交付');
+    expect(body.planningGuidance).not.toContain('不要改写我的目标和要求。');
   });
 
   it('prefers the dedicated xiaok PO and worker seeds when chat creates a project', async () => {

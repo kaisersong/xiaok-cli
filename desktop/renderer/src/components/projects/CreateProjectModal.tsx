@@ -21,6 +21,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
   const [goal, setGoal] = useState('');
   const [requirements, setRequirements] = useState('');
   const [poAgent, setPoAgent] = useState('');
+  const [poTouched, setPoTouched] = useState(false);
   const [members, setMembers] = useState<string[]>([]);
   const [membersTouched, setMembersTouched] = useState(false);
   const [workFolder, setWorkFolder] = useState('');
@@ -50,11 +51,11 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
 
   // Auto-select PO agent from the dedicated xiaok seed pair when available.
   useEffect(() => {
-    if (open && !poAgent && agents.length > 0) {
+    if (open && !poTouched && agents.length > 0) {
       const preferredPo = getPreferredPoAgentId(agents);
-      if (preferredPo) setPoAgent(preferredPo);
+      if (preferredPo && preferredPo !== poAgent) setPoAgent(preferredPo);
     }
-  }, [open, agents, poAgent]);
+  }, [open, agents, poAgent, poTouched]);
 
   const defaultWorkerSeedId = getPreferredWorkerSeedId(agents, poAgent);
 
@@ -66,6 +67,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
 
   useEffect(() => {
     if (!open) return;
+    setPoTouched(false);
     setMembersTouched(false);
   }, [open]);
 
@@ -113,6 +115,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
       setGoal('');
       setRequirements('');
       setPoAgent('');
+      setPoTouched(false);
       setMembers([]);
       setMembersTouched(false);
       setWorkFolder('');
@@ -192,7 +195,10 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
                     <button
                       key={agent.id}
                       type="button"
-                      onClick={() => setPoAgent(agent.id)}
+                      onClick={() => {
+                        setPoAgent(agent.id);
+                        setPoTouched(true);
+                      }}
                       className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors duration-150 ${
                         selected
                           ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)] ring-1 ring-[var(--c-border-mid)]'

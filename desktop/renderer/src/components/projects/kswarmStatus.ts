@@ -182,3 +182,27 @@ export function getAgentStatusDotClass(status: AgentCardRuntimeStatus): string {
       return 'bg-[var(--c-status-success-text)]';
   }
 }
+
+export type AgentStatusIconName = 'Circle' | 'Loader' | 'Clock' | 'AlertTriangle' | 'XCircle' | 'CheckCircle2' | 'CircleOff';
+
+export function getAgentStatusIconInfo(status: AgentCardRuntimeStatus): { icon: AgentStatusIconName; className: string } {
+  switch (status) {
+    case 'idle':
+      return { icon: 'Circle', className: 'text-[var(--c-status-success-text)]' };
+    case 'working':
+      return { icon: 'Loader', className: 'text-[var(--c-accent)] animate-spin' };
+    case 'waiting':
+      return { icon: 'Clock', className: 'text-[var(--c-status-warning-text)]' };
+    case 'blocked':
+      return { icon: 'AlertTriangle', className: 'text-[var(--c-status-warning-text)]' };
+    case 'failed':
+    case 'error':
+      return { icon: 'XCircle', className: 'text-[var(--c-status-error-text)]' };
+    case 'completed':
+      return { icon: 'CheckCircle2', className: 'text-[var(--c-status-success-text)]' };
+    case 'offline':
+      return { icon: 'CircleOff', className: 'text-[var(--c-text-muted)]' };
+    default:
+      return { icon: 'Circle', className: 'text-[var(--c-status-success-text)]' };
+  }
+}

@@ -40,7 +40,7 @@ interface ProjectCardProps {
 
 export function ProjectCard({ project }: ProjectCardProps) {
   const navigate = useNavigate();
-  const { deleteProject } = useKSwarm();
+  const { deleteProject, agents } = useKSwarm();
   const { t } = useLocale();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -80,6 +80,9 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const stoppedTasks = project.stoppedCount || 0;
   const completedTasks = doneTasks + stoppedTasks;
   const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  const poAgentName = project.poAgent
+    ? agents.find(agent => agent.id === project.poAgent)?.name || project.poAgent
+    : '';
 
   const formatTime = (ts?: number | string) => {
     if (!ts) return '';
@@ -171,7 +174,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
 
         <div className="flex items-center justify-between mt-3 text-[10px] text-[var(--c-text-muted)]">
           <div className="flex items-center gap-2">
-            {project.poAgent && <span>PO: {project.poAgent}</span>}
+            {poAgentName && <span>PO: {poAgentName}</span>}
             {project.plan && (
               <span className="rounded bg-[var(--c-bg-deep)] px-1.5 py-0.5 text-[9px]">
                 Plan v{project.plan.version}

@@ -5,6 +5,7 @@ import type {
   TimedActionExecutorHandler,
   TimedActionExecutorKind,
   TimedActionRecoveryReason,
+  TimedActionRecord,
 } from './timed-action-types.js';
 
 export interface TimedActionSchedulerOptions {
@@ -15,6 +16,14 @@ export interface TimedActionSchedulerOptions {
   maxClaimPerTick?: number;
   maxAgentConcurrent?: number;
   staleAfterMs?: number;
+  onRunComplete?: (event: {
+    action: TimedActionRecord;
+    runId: string;
+    status: 'success' | 'failed' | 'skipped';
+    finishedAt: number;
+    runtimeTaskId?: string;
+    error?: string;
+  }) => void;
 }
 
 export class TimedActionScheduler {
@@ -106,7 +115,9 @@ export class TimedActionScheduler {
 
     const decision = handler.decideRecovery?.(claimed.action, claimed.context) ?? defaultRecoveryDecision(claimed);
     if (decision.action !== 'execute') {
-      this.store.finishRunSkipped(claimed.action.id, claimed.runId, this.now(), decision);
+      const finishedAt = this.now();
+      this.store.finishRunSkipped(claimed.action.id, claimed.runId, finishedAt, decision);
+      this.notifyRunComplete(claimed, 'skipped', finishedAt, undefined, decision.reason);
       return;
     }
 
@@ -122,15 +133,38 @@ export class TimedActionScheduler {
   ): Promise<void> {
     try {
       const result = await this.withTimeout(Promise.resolve(handler.execute(claimed.action, claimed.context)));
-      this.store.finishRunSuccess(claimed.action.id, claimed.runId, this.now(), {
+      const finishedAt = this.now();
+      this.store.finishRunSuccess(claimed.action.id, claimed.runId, finishedAt, {
         runtimeTaskId: result.runtimeTaskId,
         decision: { recoveryDecision: decision, ...(result.decision ?? {}) },
       });
+      this.notifyRunComplete(claimed, 'success', finishedAt, result.runtimeTaskId);
     } catch (error) {
-      this.store.finishRunFailure(claimed.action.id, claimed.runId, this.now(), (error as Error).message);
+      const finishedAt = this.now();
+      const message = (error as Error).message;
+      this.store.finishRunFailure(claimed.action.id, claimed.runId, finishedAt, message);
+      this.notifyRunComplete(claimed, 'failed', finishedAt, undefined, message);
     } finally {
       this.inFlight.delete(claimed.action.id);
     }
+  }
+
+  private notifyRunComplete(
+    claimed: ClaimedTimedAction,
+    status: 'success' | 'failed' | 'skipped',
+    finishedAt: number,
+    runtimeTaskId?: string,
+    error?: string
+  ): void {
+    const action = this.store.getAction(claimed.action.id) ?? claimed.action;
+    this.options.onRunComplete?.({
+      action,
+      runId: claimed.runId,
+      status,
+      finishedAt,
+      runtimeTaskId,
+      error,
+    });
   }
 
   private withTimeout<T>(promise: Promise<T>): Promise<T> {
@@ -160,4 +194,3 @@ function defaultRecoveryDecision(claimed: ClaimedTimedAction): ExecutorRecoveryD
   }
   return { action: 'execute', reason: 'due' };
 }
-

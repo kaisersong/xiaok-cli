@@ -76,6 +76,16 @@ function renderModal(agent = MOCK_AGENT) {
 }
 
 describe('EditAgentModal: dynamic provider/model from Desktop config', () => {
+  it('uses the same platform-following provider label as create agent', async () => {
+    renderModal();
+
+    await waitFor(() => {
+      const select = screen.getByTestId('provider-select') as HTMLSelectElement;
+      expect(select.options[0].value).toBe('');
+      expect(select.options[0].textContent).toBe('跟随平台配置');
+    });
+  });
+
   it('shows dynamic providers from Desktop config (not hardcoded list)', async () => {
     renderModal();
 

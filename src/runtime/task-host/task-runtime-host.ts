@@ -320,6 +320,9 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     if (!shouldRequireArtifactEvidence(snapshot)) {
       return true;
     }
+    if (hasProjectCreationEvidence(snapshot)) {
+      return true;
+    }
     const artifacts = collectArtifactEvidence(snapshot);
     const decision = evaluateArtifactEvidenceGuard({
       taskId,
@@ -402,7 +405,16 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   }
 
   private async flushMutations(taskId: string): Promise<void> {
-    await (this.mutationChains.get(taskId) ?? Promise.resolve());
+    while (true) {
+      const chain = this.mutationChains.get(taskId);
+      if (!chain) {
+        return;
+      }
+      await chain;
+      if (this.mutationChains.get(taskId) === chain) {
+        return;
+      }
+    }
   }
 
   private async saveSnapshot(snapshot: TaskSnapshot): Promise<void> {
@@ -484,6 +496,29 @@ function collectArtifactEvidence(snapshot: TaskSnapshot): unknown[] {
   const resultArtifacts = snapshot.result?.artifacts ?? [];
   const eventArtifacts = snapshot.events.filter((event) => event.type === 'artifact_recorded');
   return [...resultArtifacts, ...eventArtifacts];
+}
+
+function hasProjectCreationEvidence(snapshot: TaskSnapshot): boolean {
+  return snapshot.events.some((event) => {
+    if (event.type !== 'canvas_tool_result') {
+      return false;
+    }
+    if (event.toolName !== 'create_project' || !event.ok) {
+      return false;
+    }
+    return isProjectCardResponse(event.response);
+  });
+}
+
+function isProjectCardResponse(response: string): boolean {
+  try {
+    const parsed = JSON.parse(response) as { type?: unknown; projectId?: unknown };
+    return parsed.type === 'project_card'
+      && typeof parsed.projectId === 'string'
+      && parsed.projectId.trim().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function shouldRequireArtifactEvidence(snapshot: TaskSnapshot): boolean {

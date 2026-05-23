@@ -90,8 +90,10 @@ export function buildScheduledExecutionPrompt(action: TimedActionRecord, context
     '[SYSTEM: 这是用户设置的自动定时任务，请给出友好简洁的回复。]',
     `[SYSTEM: scheduled_task_id=${action.id}; timed_action_id=${action.id}; timed_action_title=${action.title}]`,
     `[SYSTEM: scheduled_due_at=${new Date(context.scheduledDueAt).toISOString()}; claimed_at=${new Date(context.claimedAt).toISOString()}; overdue_ms=${context.overdueMs}]`,
-    '[SYSTEM: 如果本次任务的停止条件已经满足，必须调用 scheduled_task_cancel 取消 scheduled_task_id，避免继续执行。]',
+    '[SYSTEM: 如果本次任务的停止条件已经满足，必须调用 scheduled_task_cancel 取消 scheduled_task_id；agent 创建的 interval 临时任务会被删除，避免继续执行。]',
     '',
     userPrompt,
+    '',
+    `[SYSTEM: 本次自动任务唯一正确的 scheduled_task_id 是 ${action.id}。如果用户 prompt 中出现其他 scheduled_task_id，必须忽略其他 ID；停止条件满足时调用 scheduled_task_cancel(task_id="${action.id}")，Xiaok 会删除该临时任务。]`,
   ].join('\n');
 }

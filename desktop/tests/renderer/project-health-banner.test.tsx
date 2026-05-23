@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { ProjectFullDetail } from '../../renderer/src/hooks/useKSwarmClient';
 
-const { mockGetProjectFullDetail, mockDeleteProject, mockRetryPlan, mockDispatchTasks, mockCloseProject, mockShowSaveDialog, mockSaveFile } = vi.hoisted(() => ({
+const { mockGetProjectFullDetail, mockDeleteProject, mockRetryPlan, mockDispatchTasks, mockCloseProject, mockShowSaveDialog, mockSaveFile, mockAgents } = vi.hoisted(() => ({
   mockGetProjectFullDetail: vi.fn(),
   mockDeleteProject: vi.fn(),
   mockRetryPlan: vi.fn(),
@@ -13,12 +13,13 @@ const { mockGetProjectFullDetail, mockDeleteProject, mockRetryPlan, mockDispatch
   mockCloseProject: vi.fn(),
   mockShowSaveDialog: vi.fn(),
   mockSaveFile: vi.fn(),
+  mockAgents: [] as Array<{ id: string; name: string; status: string }>,
 }));
 
 vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
   useKSwarm: () => ({
     connected: true,
-    agents: [],
+    agents: mockAgents,
     getProjectFullDetail: mockGetProjectFullDetail,
     approveProject: vi.fn(),
     retryPlan: mockRetryPlan,
@@ -62,6 +63,7 @@ import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  mockAgents.length = 0;
   vi.useRealTimers();
 });
 
@@ -185,6 +187,25 @@ describe('project health status UI', () => {
 
     expect(screen.getByText('失败')).toBeInTheDocument();
     expect(screen.getByText(/最终校验失败/)).toBeInTheDocument();
+  });
+
+  it('resolves the project card PO id to the agent name', () => {
+    mockAgents.push({ id: '33db9546-bfa', name: 'PO', status: 'idle' });
+
+    renderWithProviders(
+      <ProjectCard
+        project={{
+          id: 'proj-kingdee',
+          name: '金蝶本月产品分析',
+          goal: '输出金蝶本月产品分析报告',
+          status: 'planning',
+          poAgent: '33db9546-bfa',
+        }}
+      />
+    );
+
+    expect(screen.getByText('PO: PO')).toBeInTheDocument();
+    expect(screen.queryByText('PO: 33db9546-bfa')).not.toBeInTheDocument();
   });
 
   it('shows needs-review project health on project list cards', () => {

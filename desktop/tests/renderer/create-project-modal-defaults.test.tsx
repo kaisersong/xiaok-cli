@@ -32,6 +32,48 @@ function renderModal(props?: Partial<ComponentProps<typeof CreateProjectModal>>)
 }
 
 describe('CreateProjectModal defaults', () => {
+  it('updates the auto-selected PO to the dedicated xiaok seed when agents load later', async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = render(
+      <LocaleProvider>
+        <CreateProjectModal
+          open={true}
+          agents={[
+            { id: '33db9546-bfa', name: 'PO', status: 'idle', runtimeType: 'xiaok', roles: ['project_owner'] },
+          ]}
+          onClose={() => {}}
+          onCreate={onCreate}
+        />
+      </LocaleProvider>,
+    );
+
+    rerender(
+      <LocaleProvider>
+        <CreateProjectModal
+          open={true}
+          agents={[
+            { id: '33db9546-bfa', name: 'PO', status: 'idle', runtimeType: 'xiaok', roles: ['project_owner'] },
+            { id: 'xiaok-po', name: 'PO-Agent', status: 'idle', runtimeType: 'xiaok', roles: ['project_owner'] },
+            { id: 'xiaok-worker', name: 'Worker-Agent', status: 'idle', runtimeType: 'xiaok', roles: ['worker'] },
+          ]}
+          onClose={() => {}}
+          onCreate={onCreate}
+        />
+      </LocaleProvider>,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('例：竞品分析报告'), { target: { value: '测试项目' } });
+    fireEvent.change(screen.getByPlaceholderText('描述你希望完成什么...'), { target: { value: '验证迟到的种子智能体' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }));
+
+    await waitFor(() => {
+      expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+        poAgent: 'xiaok-po',
+        members: ['xiaok-worker'],
+      }));
+    });
+  });
+
   it('defaults to xiaok-po and includes xiaok-worker when the user does not manually pick members', async () => {
     const { onCreate } = renderModal();
 

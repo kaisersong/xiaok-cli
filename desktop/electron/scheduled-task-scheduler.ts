@@ -10,11 +10,13 @@ import {
 export interface ScheduledTaskRecord {
   id: string;
   name: string;
+  description?: string;
   prompt: string;
-  frequency: 'manual' | 'hourly' | 'daily' | 'weekdays' | 'weekly';
+  frequency: 'manual' | 'hourly' | 'interval' | 'daily' | 'weekdays' | 'weekly';
   status: 'active' | 'paused';
   nextRunAt?: number;
   lastRunAt?: number;
+  runtimeTaskId?: string;
   scheduleConfig?: {
     intervalMinutes?: number;
     hour?: number;
@@ -32,7 +34,7 @@ export function computeNextRunAt(
 ): number | undefined {
   if (frequency === 'manual' || !config) return undefined;
 
-  if (frequency === 'hourly') {
+  if (frequency === 'hourly' || frequency === 'interval') {
     const interval = (config.intervalMinutes || 60) * 60_000;
     return fromTime + interval;
   }

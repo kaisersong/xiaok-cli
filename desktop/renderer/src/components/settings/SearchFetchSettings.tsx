@@ -400,8 +400,6 @@ function runtimeStateInfo(state?: string) {
     return { label: 'Ready', dot: 'bg-green-400', text: 'text-green-400' }
   case 'missing_config':
     return { label: 'Missing config', dot: 'bg-amber-400', text: 'text-amber-400' }
-  case 'decrypt_failed':
-    return { label: 'Decrypt failed', dot: 'bg-rose-400', text: 'text-rose-400' }
   case 'invalid_config':
     return { label: 'Invalid config', dot: 'bg-rose-400', text: 'text-rose-400' }
   default:

@@ -36,12 +36,16 @@ describe('TimedActionService', () => {
   it('creates interval scheduled tasks as agent timed actions with safety defaults', () => {
     const created = service.createScheduledTask({
       name: '检查 OpenAI本月分析',
+      description: '每 5 分钟检查项目状态',
       prompt: '检查项目',
       trigger: { kind: 'interval', intervalMinutes: 5 },
       source: 'agent',
     });
 
     const action = store.getAction(created.id);
+    expect(created.frequency).toBe('interval');
+    expect(service.listScheduledTasks()[0].description).toBe('每 5 分钟检查项目状态');
+    expect(created.scheduleConfig).toEqual({ intervalMinutes: 5 });
     expect(action?.executor.kind).toBe('agent_task');
     expect(action?.nextDueAt).toBe(301_000);
     expect(action?.policy).toMatchObject({
@@ -52,6 +56,44 @@ describe('TimedActionService', () => {
     expect(action?.policy.expiresAt).toBe(1_000 + 24 * 60 * 60_000);
   });
 
+  it('updates scheduled task definition fields without losing runtime linkage', () => {
+    const task = service.createScheduledTask({
+      name: '每日检查',
+      description: '旧描述',
+      prompt: '旧 prompt',
+      trigger: { kind: 'daily', hour: 9, minute: 0 },
+      source: 'user',
+    });
+    const [claimed] = store.claimDueActions(task.nextRunAt!, 1);
+    store.markRunRunning(task.id, claimed.runId, task.nextRunAt!);
+    store.finishRunSuccess(task.id, claimed.runId, task.nextRunAt! + 1_000, { runtimeTaskId: 'task_runtime_1' });
+
+    const updated = service.updateScheduledTask({
+      id: task.id,
+      name: '每周检查',
+      description: '新描述',
+      prompt: '新 prompt',
+      trigger: { kind: 'weekly', dayOfWeek: 5, hour: 18, minute: 30 },
+      now: task.nextRunAt! + 2_000,
+    });
+
+    expect(updated).toMatchObject({
+      id: task.id,
+      name: '每周检查',
+      description: '新描述',
+      prompt: '新 prompt',
+      frequency: 'weekly',
+      scheduleConfig: { dayOfWeek: 5, hour: 18, minute: 30 },
+      runtimeTaskId: 'task_runtime_1',
+    });
+    expect(service.listScheduledTasks()[0]).toMatchObject({
+      id: task.id,
+      description: '新描述',
+      prompt: '新 prompt',
+      runtimeTaskId: 'task_runtime_1',
+    });
+  });
+
   it('rejects agent interval tasks below the minimum interval', () => {
     expect(() => service.createScheduledTask({
       name: '过密检查',
@@ -59,6 +101,45 @@ describe('TimedActionService', () => {
       trigger: { kind: 'interval', intervalMinutes: 1 },
       source: 'agent',
     })).toThrow('intervalMinutes must be at least 5');
+  });
+
+  it('deletes agent-created interval scheduled tasks when they are cancelled after running', () => {
+    const task = service.createScheduledTask({
+      name: '外贸趋势分析项目进度检查',
+      prompt: '检查项目，完成时取消自动任务',
+      trigger: { kind: 'interval', intervalMinutes: 5 },
+      source: 'agent',
+    });
+    const [claimed] = store.claimDueActions(301_000, 1);
+    expect(claimed?.action.id).toBe(task.id);
+    store.markRunRunning(task.id, claimed.runId, 301_000);
+    store.finishRunSuccess(task.id, claimed.runId, 302_000, { runtimeTaskId: 'runtime-task' });
+    expect(store.listRuns(task.id)).toHaveLength(1);
+    expect(service.listScheduledTasks()[0]).toMatchObject({
+      runtimeTaskId: 'runtime-task',
+    });
+    expect((service.listScheduledTasks()[0] as { threadId?: string }).threadId).toBeUndefined();
+
+    expect(service.cancelScheduledTask(task.id, 'project completed')).toBe(true);
+
+    expect(store.getAction(task.id)).toBeUndefined();
+    expect(store.listRuns(task.id)).toEqual([]);
+  });
+
+  it('keeps user-created scheduled tasks as cancelled records instead of deleting them', () => {
+    const task = service.createScheduledTask({
+      name: '用户自己的每小时任务',
+      prompt: '检查',
+      trigger: { kind: 'interval', intervalMinutes: 60 },
+      source: 'user',
+    });
+
+    expect(service.cancelScheduledTask(task.id, 'user cancelled')).toBe(true);
+
+    expect(store.getAction(task.id)).toEqual(expect.objectContaining({
+      id: task.id,
+      status: 'cancelled',
+    }));
   });
 
   it('lists only scheduled task business records for agent actions', () => {

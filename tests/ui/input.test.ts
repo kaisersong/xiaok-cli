@@ -21,6 +21,7 @@ import type { SkillMeta } from '../../src/ai/skills/loader.js';
 import { createTtyHarness } from '../support/tty.js';
 import type { TranscriptLogger } from '../../src/ui/transcript.js';
 import { ReplRenderer } from '../../src/ui/repl-renderer.js';
+import { clearPastedImagePaths, parseInputBlocks } from '../../src/ui/image-input.js';
 
 describe('getSlashCommands', () => {
   it('should return base commands when no skills provided', () => {
@@ -141,6 +142,7 @@ describe('InputReader', () => {
     for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }
+    clearPastedImagePaths();
     vi.restoreAllMocks();
   });
 
@@ -426,6 +428,38 @@ describe('InputReader', () => {
       harness.restore();
     });
 
+    it('imports a clipboard image placeholder on ctrl+v when the terminal forwards it on macOS', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+      const imageDir = join(tmpdir(), `xiaok-input-image-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      tempDirs.push(imageDir);
+      mkdirSync(imageDir, { recursive: true });
+      const imagePath = join(imageDir, 'clipboard-macos.png');
+      writeFileSync(imagePath, Buffer.from('png-bytes'));
+      reader.setClipboardImageSaver(() => imagePath);
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
+
+      const pending = reader.read('> ');
+      harness.send('\x16');
+      harness.send(' describe it');
+      expect(harness.output.normalized).toContain('[image 0] describe it');
+      harness.send('\r');
+
+      const submitted = await pending;
+      expect(submitted).toBe('[image 0] describe it');
+      const blocks = await parseInputBlocks(submitted ?? '', true);
+      expect(blocks[0]).toMatchObject({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+        },
+      });
+      expect(blocks[1]).toEqual({ type: 'text', text: 'describe it' });
+
+      harness.restore();
+    });
+
     it('converts an OSC 1337 pasted image sequence into an image placeholder before submit', async () => {
       const harness = createTtyHarness();
       reader = new InputReader(new ReplRenderer(process.stdout));
@@ -434,6 +468,26 @@ describe('InputReader', () => {
 
       const pending = reader.read('> ');
       harness.send(osc);
+      harness.send(' explain this');
+      expect(harness.output.normalized).toContain('[image 0] explain this');
+      harness.send('\r');
+
+      await expect(pending).resolves.toBe('[image 0] explain this');
+
+      harness.restore();
+    });
+
+    it('buffers a split OSC 1337 pasted image sequence before submit', async () => {
+      const harness = createTtyHarness();
+      reader = new InputReader(new ReplRenderer(process.stdout));
+      const imageBytes = Buffer.from('png-bytes'.repeat(20)).toString('base64');
+      const osc = `\x1b]1337;File=name=${Buffer.from('pasted-image.png').toString('base64')};inline=1:${imageBytes}\x07`;
+      const splitAt = osc.indexOf(imageBytes) + 8;
+
+      const pending = reader.read('> ');
+      harness.send(osc.slice(0, splitAt));
+      expect(harness.output.normalized).not.toContain(']1337;File=');
+      harness.send(osc.slice(splitAt));
       harness.send(' explain this');
       expect(harness.output.normalized).toContain('[image 0] explain this');
       harness.send('\r');

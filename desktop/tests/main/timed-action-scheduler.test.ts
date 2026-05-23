@@ -98,4 +98,44 @@ describe('TimedActionScheduler', () => {
 
     resolveAgent?.();
   });
+
+  it('notifies owner when an agent scheduled task creates a runtime task', async () => {
+    store.createAction({
+      id: 'dream',
+      title: 'Dream',
+      trigger: { kind: 'daily', hour: 5, minute: 0 },
+      executor: { kind: 'agent_task', prompt: '复盘' },
+      source: 'user',
+      nextDueAt: 1_000,
+      now: 0,
+    });
+
+    const onRunComplete = vi.fn();
+    const scheduler = new TimedActionScheduler(store, {
+      executors: {
+        agent_task: {
+          kind: 'agent_task',
+          execute: vi.fn().mockResolvedValue({ runtimeTaskId: 'task_result' }),
+        },
+      },
+      now: () => 2_000,
+      onRunComplete,
+    });
+
+    await scheduler.runOnce('normal_tick');
+
+    await vi.waitFor(() => {
+      expect(onRunComplete).toHaveBeenCalledWith(expect.objectContaining({
+        runId: expect.any(String),
+        status: 'success',
+        runtimeTaskId: 'task_result',
+        finishedAt: 2_000,
+        action: expect.objectContaining({
+          id: 'dream',
+          lastRuntimeTaskId: 'task_result',
+          lastDueAt: 2_000,
+        }),
+      }));
+    });
+  });
 });

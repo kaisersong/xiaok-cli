@@ -193,6 +193,12 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       : updateStatus?.checking
         ? '检查中'
         : `升级到 ${updateVersion}`;
+  const scheduledListClassName = activeNav === 'new'
+    ? 'flex flex-col gap-0 max-h-[90px] overflow-y-auto'
+    : 'flex flex-col gap-0';
+  const projectListClassName = activeNav === 'new'
+    ? 'flex flex-col gap-0 max-h-[150px] overflow-y-auto'
+    : 'flex flex-col gap-0';
 
   const handleUpdateReminderClick = async () => {
     if (!updateStatus || updateStatus.downloading || updateStatus.checking) return;
@@ -264,7 +270,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
           <div className="px-1 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
             {t.sidebarScheduled}
           </div>
-          <div className="flex flex-col gap-0 max-h-[90px] overflow-y-auto">
+          <div className={scheduledListClassName}>
             {sidebarTasks.map(task => (
               <button
                 key={task.id}
@@ -289,7 +295,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
           <div className="px-1 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
             {t.sidebarProjects}
           </div>
-          <div className="flex flex-col gap-0 max-h-[150px] overflow-y-auto">
+          <div className={projectListClassName}>
             {activeProjects.map(project => (
               <button
                 key={project.id}

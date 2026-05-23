@@ -5,6 +5,7 @@ const KSWARM_BASE_URL = 'http://127.0.0.1:4400';
 type ArtifactLike = Partial<KSwarmArtifact> & {
   filename?: string;
   relativePath?: string;
+  projectId?: string;
   createdAt?: number | string;
   updatedAt?: number | string;
   generatedAt?: number | string;
@@ -33,6 +34,12 @@ export function resolveArtifactUrl(artifact: ArtifactLike): string | null {
   if (rawPath) {
     if (rawPath.startsWith('file://')) return rawPath;
     return `file://${rawPath}`;
+  }
+
+  const projectId = artifact.projectId?.trim();
+  const filename = (artifact.filename || artifact.name)?.trim();
+  if (projectId && filename) {
+    return `${KSWARM_BASE_URL}/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(filename)}`;
   }
 
   return null;

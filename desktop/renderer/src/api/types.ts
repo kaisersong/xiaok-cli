@@ -85,9 +85,32 @@ export interface MeResponse {
 // Config types
 export interface CaptchaConfig { enabled: boolean; }
 export interface MemoryConfig { enabled: boolean; }
+export type ConnectorsSearchProvider = 'duckduckgo' | 'tavily' | 'brave' | 'searxng';
+export type ConnectorsFetchProvider = 'basic' | 'jina' | 'firecrawl';
 export interface ConnectorsConfig {
-  fetch: { provider: 'none' };
-  search: { provider: 'none' };
+  search: {
+    provider: ConnectorsSearchProvider;
+    tavilyApiKey?: string;
+    braveApiKey?: string;
+    searxngBaseUrl?: string;
+  };
+  fetch: {
+    provider: ConnectorsFetchProvider;
+    jinaApiKey?: string;
+    firecrawlApiKey?: string;
+    firecrawlBaseUrl?: string;
+  };
+}
+export type ConnectorsLoadStatus = 'ok' | 'missing' | 'parse_failed';
+export interface ConnectorsProviderRuntime {
+  provider_name: string;
+  runtime_state: 'ready' | 'missing_config' | 'invalid_config' | 'inactive' | 'not_implemented';
+  runtime_reason?: string;
+}
+export interface ConnectorsConfigSnapshot {
+  config: ConnectorsConfig;
+  loadStatus: ConnectorsLoadStatus;
+  providers: ConnectorsProviderRuntime[];
 }
 export interface CreditsBalance { balance: number; }
 

@@ -27,6 +27,7 @@ import type {
 interface TimedActionRow {
   id: string;
   title: string;
+  description: string;
   trigger_kind: string;
   trigger_json: string;
   executor_kind: string;
@@ -82,6 +83,7 @@ export class TimedActionStore {
     const record: TimedActionRecord = {
       id,
       title: input.title,
+      description: input.description ?? '',
       trigger: input.trigger,
       executor: input.executor,
       policy,
@@ -99,18 +101,19 @@ export class TimedActionStore {
 
     this.db.prepare(`
       insert into timed_actions (
-        id, title, trigger_kind, trigger_json, executor_kind, executor_json, policy_json,
+        id, title, description, trigger_kind, trigger_json, executor_kind, executor_json, policy_json,
         status, source, created_by_task_id, next_due_at, last_due_at, run_count,
         consecutive_failures, locked_run_id, locked_at, last_runtime_task_id, last_error,
         created_at, updated_at
       ) values (
-        @id, @title, @triggerKind, @triggerJson, @executorKind, @executorJson, @policyJson,
+        @id, @title, @description, @triggerKind, @triggerJson, @executorKind, @executorJson, @policyJson,
         @status, @source, @createdByTaskId, @nextDueAt, @lastDueAt, @runCount,
         @consecutiveFailures, null, null, @lastRuntimeTaskId, null, @createdAt, @updatedAt
       )
     `).run({
       id: record.id,
       title: record.title,
+      description: record.description ?? '',
       triggerKind: record.trigger.kind,
       triggerJson: JSON.stringify(record.trigger),
       executorKind: record.executor.kind,
@@ -128,6 +131,46 @@ export class TimedActionStore {
       updatedAt: record.updatedAt,
     });
     return record;
+  }
+
+  updateActionDefinition(
+    id: string,
+    input: {
+      title: string;
+      description?: string;
+      trigger: TimedActionTrigger;
+      executor: TimedActionExecutor;
+      policy?: TimedActionPolicy;
+      nextDueAt?: number;
+      now?: number;
+    }
+  ): TimedActionRecord | undefined {
+    const current = this.getAction(id);
+    if (!current) return undefined;
+
+    const now = input.now ?? Date.now();
+    const policy = input.policy ?? current.policy;
+    validateTrigger(input.trigger, policy.minIntervalMinutes);
+    const nextDueAt = input.nextDueAt ?? computeInitialDueAt(input.trigger, now);
+    const result = this.db.prepare(`
+      update timed_actions
+      set title = ?, description = ?, trigger_kind = ?, trigger_json = ?,
+          executor_kind = ?, executor_json = ?, policy_json = ?, next_due_at = ?,
+          updated_at = ?
+      where id = ?
+    `).run(
+      input.title,
+      input.description ?? '',
+      input.trigger.kind,
+      JSON.stringify(input.trigger),
+      input.executor.kind,
+      JSON.stringify(input.executor),
+      JSON.stringify(policy),
+      nextDueAt ?? null,
+      now,
+      id
+    );
+    return result.changes === 1 ? this.getAction(id) : undefined;
   }
 
   getAction(id: string): TimedActionRecord | undefined {
@@ -302,6 +345,14 @@ export class TimedActionStore {
     return result.changes === 1;
   }
 
+  deleteAction(id: string): boolean {
+    return this.transaction(() => {
+      this.db.prepare('delete from timed_action_runs where action_id = ?').run(id);
+      const result = this.db.prepare('delete from timed_actions where id = ?').run(id);
+      return result.changes === 1;
+    });
+  }
+
   releaseStaleLocks(now: number, staleAfterMs: number): number {
     return this.transaction(() => {
       const rows = typedRows<TimedActionRow>(this.db.prepare(`
@@ -337,6 +388,7 @@ export class TimedActionStore {
       create table if not exists timed_actions (
         id text primary key,
         title text not null,
+        description text not null default '',
         trigger_kind text not null,
         trigger_json text not null,
         executor_kind text not null,
@@ -373,6 +425,14 @@ export class TimedActionStore {
         foreign key(action_id) references timed_actions(id)
       );
     `);
+    this.ensureTimedActionDescriptionColumn();
+  }
+
+  private ensureTimedActionDescriptionColumn(): void {
+    const columns = typedRows<{ name: string }>(this.db.prepare('pragma table_info(timed_actions)').all());
+    if (!columns.some(column => column.name === 'description')) {
+      this.db.exec("alter table timed_actions add column description text not null default ''");
+    }
   }
 
   private transaction<T>(fn: () => T): T {
@@ -414,6 +474,7 @@ export class TimedActionStore {
     return {
       id: row.id,
       title: row.title,
+      description: row.description ?? '',
       trigger: parseJson<TimedActionTrigger>(row.trigger_json),
       executor: parseJson<TimedActionExecutor>(row.executor_json),
       policy: parseJson<TimedActionPolicy>(row.policy_json),

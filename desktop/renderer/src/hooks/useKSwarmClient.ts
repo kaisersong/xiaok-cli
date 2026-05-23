@@ -46,7 +46,10 @@ export interface KSwarmArtifact {
   name?: string;
   filename?: string;
   mimeType?: string;
+  type?: string;
+  projectId?: string;
   path?: string;
+  relativePath?: string;
   url?: string;
   size?: number;
   previewable?: boolean;
@@ -322,12 +325,75 @@ interface PrincipleEntry {
   createdAt: number;
 }
 
-function injectPrinciples(requirements: string, principles: PrincipleEntry[]): string {
+export function buildCreateProjectPlanningGuidance(input: {
+  goal: string;
+  requirements?: string;
+  principles?: PrincipleEntry[];
+}): { visibleRequirements: string; planningGuidance: string } {
+  const visibleRequirements = input.requirements || '';
+  const blocks = [
+    inferRendererPlanningGuidance(`${input.goal || ''}\n${visibleRequirements}`),
+    formatPrinciplesForPlanningGuidance(input.principles || []),
+  ].filter(Boolean);
+  return {
+    visibleRequirements,
+    planningGuidance: blocks.join('\n\n'),
+  };
+}
+
+function inferRendererPlanningGuidance(text: string): string {
+  const value = String(text || '');
+  const explicitMarkdown = /(\.md\b|\.markdown\b|\bmarkdown\b)/i.test(value);
+  const explicitPptx = /(\.pptx\b|\bpptx\b|\bpowerpoint\b|\bppt\s*(文件|file|deck)?\b)/i.test(value);
+  const slide = /(幻灯片|演示文稿|slide deck|slides|presentation)/i.test(value);
+  const report = /(报告|\breport\b)/i.test(value);
+  const analysisReport = !report && isAnalysisReportLikeProject(value);
+
+  if (slide && explicitPptx) {
+    return [
+      '输出意图：用户明确要求演示文稿/幻灯片交付 PPTX。',
+      '不要改写用户目标或项目要求；计划中细化为最终任务生成 PPTX 文件。',
+      '前序内容任务可以产出素材或草稿，但最终交付物必须符合用户明确格式。',
+    ].join('\n');
+  }
+  if (slide && !explicitPptx) {
+    return [
+      '输出意图：用户要演示文稿/幻灯片。',
+      '计划中必须安排最终任务使用 slide renderer 生成 HTML deck；不要默认改成 PPTX。',
+      '前序内容任务可以产出素材或草稿，但最终交付物必须是 slide renderer HTML。',
+    ].join('\n');
+  }
+  if (report && explicitMarkdown) {
+    return [
+      '输出意图：用户明确要求报告交付 Markdown。',
+      '不要改写用户目标或项目要求；计划中细化为最终任务生成 Markdown 报告。',
+      '前序研究/写作任务可以产出素材或草稿，但最终交付物必须符合用户明确格式。',
+    ].join('\n');
+  }
+  if ((report || analysisReport) && !explicitMarkdown) {
+    return [
+      analysisReport
+        ? '输出意图：用户要分析/研究类交付物，默认按报告交付；最终任务必须使用 report renderer 生成 HTML 报告。'
+        : '输出意图：用户要报告，最终任务必须使用 report renderer 生成 HTML 报告。',
+      '不要把用户目标改写为其他交付格式。',
+      '前序研究/写作任务可以产出素材或中间 Markdown，但最终交付物必须是 report renderer HTML。',
+    ].join('\n');
+  }
+  return '';
+}
+
+function isAnalysisReportLikeProject(text: string): boolean {
+  const analysis = /(分析|研究|调研|评估|研判|洞察|复盘|\banalysis\b|\bresearch\b|\bassessment\b|\bbrief\b)/i.test(text);
+  const deliverableCue = /(高层|管理层|决策|战略|研发|产品|竞品|市场|行业|趋势|动态|情况|内容|汇报|材料|交付|leadership|executive|strategy|market|industry|trend|product|competitive)/i.test(text);
+  return analysis && deliverableCue;
+}
+
+function formatPrinciplesForPlanningGuidance(principles: PrincipleEntry[]): string {
   // Filter: enabled + planning or execution scenarios (Phase 1: only createProject)
   const matched = principles.filter(
     p => p.enabled && (p.scenarios.includes('planning') || p.scenarios.includes('execution'))
   );
-  if (matched.length === 0) return requirements;
+  if (matched.length === 0) return '';
 
   // Format lines: collapse multiline, escape ## headings
   const lines: string[] = [];
@@ -345,8 +411,7 @@ function injectPrinciples(requirements: string, principles: PrincipleEntry[]): s
     : '';
 
   const block = lines.join('\n');
-  const separator = requirements ? '\n\n' : '';
-  return `${requirements}${separator}## 项目原则（必须遵守）\n\n以下原则适用于当前阶段，请严格遵循：\n\n${block}${truncateNote}`;
+  return `项目原则（系统规划指导，不写入用户可见要求）：\n${block}${truncateNote}`;
 }
 
 // ─── HTTP Helpers ─────────────────────────────────────────────────
@@ -541,20 +606,27 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   }, []);
 
   const createProject = useCallback(async (input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string; enableSummary?: boolean }): Promise<KSwarmProject | null> => {
-    // Inject project principles into requirements
-    let requirements = input.requirements || '';
+    let principles: PrincipleEntry[] = [];
     try {
       const api = (window as any).xiaokDesktop;
       if (api?.listPrinciples) {
-        const principles = await api.listPrinciples();
-        if (Array.isArray(principles) && principles.length > 0) {
-          requirements = injectPrinciples(requirements, principles);
-        }
+        const loaded = await api.listPrinciples();
+        if (Array.isArray(loaded)) principles = loaded;
       }
     } catch (e) {
-      console.warn('[principles] Failed to load principles for injection, using original requirements', e);
+      console.warn('[principles] Failed to load principles for planning guidance, using original requirements', e);
     }
-    const result = await httpPost<KSwarmProject>('/projects', { ...input, requirements: requirements || undefined, enableSummary: input.enableSummary ?? true });
+    const guidance = buildCreateProjectPlanningGuidance({
+      goal: input.goal,
+      requirements: input.requirements || '',
+      principles,
+    });
+    const result = await httpPost<KSwarmProject>('/projects', {
+      ...input,
+      requirements: guidance.visibleRequirements || undefined,
+      planningGuidance: guidance.planningGuidance || undefined,
+      enableSummary: input.enableSummary ?? true,
+    });
     if (result) fetchProjects();
     return result;
   }, [fetchProjects]);

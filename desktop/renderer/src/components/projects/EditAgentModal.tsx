@@ -58,7 +58,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
   }, [provider]);
 
   const providerOptions = [
-    { value: '', label: t.commonNoConfig },
+    { value: '', label: '跟随平台配置' },
     ...desktopProviders.map(p => ({
       value: p.id,
       label: `${p.label}${p.apiKeyConfigured ? '' : ' (未配置 API Key)'}`,

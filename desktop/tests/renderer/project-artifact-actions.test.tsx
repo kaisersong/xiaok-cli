@@ -14,6 +14,8 @@ describe('project artifact actions', () => {
   it('normalizes KSwarm relative artifact URLs for desktop file-origin pages', () => {
     expect(resolveArtifactUrl({ name: 'report.md', mimeType: 'text/markdown', url: '/projects/proj-a/artifacts/report.md' }))
       .toBe('http://127.0.0.1:4400/projects/proj-a/artifacts/report.md');
+    expect(resolveArtifactUrl({ filename: 'report.md', mimeType: 'text/markdown', projectId: 'proj-a' }))
+      .toBe('http://127.0.0.1:4400/projects/proj-a/artifacts/report.md');
     expect(artifactDisplayName({ filename: 'report.md', mimeType: 'text/markdown' } as any)).toBe('report.md');
   });
 
@@ -104,5 +106,94 @@ describe('project artifact actions', () => {
       expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:4400/projects/proj-a/artifacts/report.md');
     });
     expect(await screen.findByText(/产物内容/)).toBeInTheDocument();
+  });
+
+  it('keeps report-renderer HTML readable in the scriptless project preview sandbox', async () => {
+    const reportHtml = `<!doctype html>
+<html>
+  <head>
+    <style>.fade-in-up{opacity:0}.fade-in-up.visible{opacity:1}</style>
+  </head>
+  <body class="report-theme">
+    <h1>金蝶报告</h1>
+    <p class="fade-in-up">这段正文不能因为预览禁用脚本而隐藏。</p>
+    <script>document.querySelectorAll('.fade-in-up').forEach((el) => el.classList.add('visible'));</script>
+  </body>
+</html>`;
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => reportHtml,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <LocaleProvider>
+        <DeliverableView
+          project={{ id: 'proj-a', name: '测试项目', status: 'active' } as any}
+          tasks={[
+            {
+              id: 'task-1',
+              title: '生成报告',
+              status: 'done',
+              result: {
+                summary: '已生成报告',
+                artifacts: [
+                  { filename: 'report.html', mimeType: 'text/html', url: '/projects/proj-a/artifacts/report.html' },
+                ],
+              },
+            } as any,
+          ]}
+        />
+      </LocaleProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /report\.html/ }));
+
+    const iframe = await screen.findByTitle('report.html');
+    const srcdoc = (iframe as HTMLIFrameElement).srcdoc || iframe.getAttribute('srcdoc') || '';
+    expect(srcdoc).toContain('body class="report-theme no-animations"');
+    expect(srcdoc).toContain('data-xiaok-preview-fallback');
+    expect(srcdoc).toContain('.fade-in-up');
+    expect(srcdoc).toContain('opacity:1!important');
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-scripts');
+  });
+
+  it('opens a top-level project deliverable file that only has a name', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => '# 最终报告\n\n这里是最终 Markdown。',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <LocaleProvider>
+        <DeliverableView
+          project={{
+            id: 'proj-1779259929302',
+            name: 'Claude 本月动态分析',
+            status: 'delivered',
+            deliverable: {
+              synthesis: true,
+              files: [
+                {
+                  name: 'proj-1779259929302__p4-item1-report.md',
+                  type: 'markdown',
+                  size: 873,
+                  taskId: 'proj-1779259929302__p4-item1',
+                },
+              ],
+            },
+          } as any}
+          tasks={[]}
+        />
+      </LocaleProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /proj-1779259929302__p4-item1-report\.md/ }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:4400/projects/proj-1779259929302/artifacts/proj-1779259929302__p4-item1-report.md');
+    });
+    expect(await screen.findByText(/最终报告/)).toBeInTheDocument();
   });
 });

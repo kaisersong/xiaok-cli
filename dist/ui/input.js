@@ -17,6 +17,8 @@ const DEBUG_LOG = '/tmp/xiaok-debug.log';
 const MAX_MENU_VISIBLE_ITEMS = 8;
 const SAVE_CURSOR = '\x1b[s';
 const RESTORE_CURSOR = '\x1b[u';
+const OSC_1337_IMAGE_PREFIX = '\x1b]1337;File=';
+const OSC_ST_TERMINATOR = '\x1b\\';
 function log(msg) {
     try {
         appendFileSync(DEBUG_LOG, `${new Date().toISOString()} ${msg}\n`);
@@ -28,6 +30,43 @@ function normalizeBatchedInput(raw) {
         .replace(/\r[ \t]*(?:›|❯)\s*/gu, '')
         .replace(/\r\n/gu, '\n')
         .replace(/\r(?!$)/gu, '\n');
+}
+function parseOsc1337ImagePaste(raw) {
+    if (!raw.startsWith(OSC_1337_IMAGE_PREFIX)) {
+        return { kind: 'none' };
+    }
+    const belIndex = raw.indexOf('\x07');
+    const stIndex = raw.indexOf(OSC_ST_TERMINATOR);
+    const endMarker = (() => {
+        if (belIndex === -1)
+            return stIndex;
+        if (stIndex === -1)
+            return belIndex;
+        return Math.min(belIndex, stIndex);
+    })();
+    if (endMarker === -1) {
+        return { kind: 'partial' };
+    }
+    const oscContent = raw.slice(7, endMarker);
+    const base64Start = oscContent.indexOf(':');
+    if (base64Start === -1) {
+        return { kind: 'complete', base64Data: null };
+    }
+    return { kind: 'complete', base64Data: oscContent.slice(base64Start + 1) };
+}
+function handleOsc1337ImagePasteChunk(raw, pending, onImageData) {
+    const candidate = pending ? pending + raw : raw;
+    const parsed = parseOsc1337ImagePaste(candidate);
+    if (parsed.kind === 'none') {
+        return { handled: false, pending };
+    }
+    if (parsed.kind === 'partial') {
+        return { handled: true, pending: candidate };
+    }
+    if (parsed.base64Data) {
+        onImageData(parsed.base64Data);
+    }
+    return { handled: true, pending: '' };
 }
 function createDisabledBusyCapture() {
     const state = createQueuedInputState();
@@ -260,6 +299,8 @@ export class InputReader {
         let attached = false;
         let uiErrorNotified = false;
         let renderedBusyFrame = false;
+        let pastedImageCount = 0;
+        let pendingOsc1337ImagePaste = '';
         const render = () => {
             if (!active || paused)
                 return;
@@ -372,9 +413,33 @@ export class InputReader {
                 render();
             }
         };
-        const swallowBusyImagePaste = (raw) => {
-            if (raw.startsWith('\x1b]1337;File='))
+        const registerPastedImage = (imagePath) => {
+            const index = pastedImageCount;
+            pastedImageCount += 1;
+            setPastedImagePath(index, imagePath);
+            return `[image ${index}]`;
+        };
+        const insertPastedImagePlaceholder = (imagePath) => {
+            state.insertText(registerPastedImage(imagePath));
+            render();
+        };
+        const tryHandleBusyImagePaste = (raw) => {
+            const oscResult = handleOsc1337ImagePasteChunk(raw, pendingOsc1337ImagePaste, (base64Data) => {
+                const tempPath = join(tmpdir(), `xiaok-pasted-${Date.now()}.png`);
+                writeFileSync(tempPath, Buffer.from(base64Data, 'base64'));
+                insertPastedImagePlaceholder(tempPath);
+            });
+            pendingOsc1337ImagePaste = oscResult.pending;
+            if (oscResult.handled) {
                 return true;
+            }
+            if (process.platform === 'win32' && raw === '\x1bv') {
+                const imagePath = this.clipboardImageSaver();
+                if (imagePath) {
+                    insertPastedImagePlaceholder(imagePath);
+                }
+                return true;
+            }
             if (raw.startsWith('\x1b_G'))
                 return true;
             return false;
@@ -432,6 +497,10 @@ export class InputReader {
                 return true;
             }
             if (action === 'paste-image') {
+                const imagePath = this.clipboardImageSaver();
+                if (imagePath) {
+                    insertPastedImagePlaceholder(imagePath);
+                }
                 return true;
             }
             return false;
@@ -445,7 +514,7 @@ export class InputReader {
         const onData = (data) => {
             const key = data.toString('utf8');
             this.transcriptLogger?.record({ type: 'input_key', key, timestamp: Date.now() });
-            if (swallowBusyImagePaste(key)) {
+            if (tryHandleBusyImagePaste(key)) {
                 return;
             }
             const normalizedBatch = key.length > 1 ? normalizeBatchedInput(key) : key;
@@ -571,6 +640,7 @@ export class InputReader {
             let lastRecalledHistoryInput = null;
             let editedRecalledDraft = false;
             let pastedImageCount = 0;
+            let pendingOsc1337ImagePaste = '';
             const degradeUi = (context, error) => {
                 richUiEnabled = false;
                 this.menuOpen = false;
@@ -754,6 +824,15 @@ export class InputReader {
                 }
             };
             const tryHandleSpecialPasteSequence = (raw) => {
+                const oscResult = handleOsc1337ImagePasteChunk(raw, pendingOsc1337ImagePaste, (base64Data) => {
+                    const tempPath = join(tmpdir(), `xiaok-pasted-${Date.now()}.png`);
+                    writeFileSync(tempPath, Buffer.from(base64Data, 'base64'));
+                    insertPastedImagePlaceholder(tempPath);
+                });
+                pendingOsc1337ImagePaste = oscResult.pending;
+                if (oscResult.handled) {
+                    return true;
+                }
                 // Windows terminals commonly consume image clipboard paste before the
                 // CLI sees a Ctrl+V event. Alt+V arrives as ESC + v and gives us a
                 // reliable explicit import gesture on this platform.
@@ -763,22 +842,6 @@ export class InputReader {
                         insertPastedImagePlaceholder(imagePath);
                     }
                     return true;
-                }
-                // OSC 1337: paste image (iTerm2, Terminal.app, some embedded terminals)
-                // Format: \x1b]1337;File=name=...;inline=1:<base64>\x07
-                if (raw.startsWith('\x1b]1337;File=')) {
-                    const endMarker = raw.indexOf('\x07');
-                    if (endMarker !== -1) {
-                        const oscContent = raw.slice(7, endMarker); // skip \x1b]
-                        const base64Start = oscContent.indexOf(':');
-                        if (base64Start !== -1) {
-                            const base64Data = oscContent.slice(base64Start + 1);
-                            const tempPath = join(tmpdir(), `xiaok-pasted-${Date.now()}.png`);
-                            writeFileSync(tempPath, Buffer.from(base64Data, 'base64'));
-                            insertPastedImagePlaceholder(tempPath);
-                            return true;
-                        }
-                    }
                 }
                 // Kitty protocol is more complex; swallow the sequence for now so it
                 // does not render as garbage text while the dedicated parser is missing.
@@ -980,12 +1043,10 @@ export class InputReader {
                                     skipSyncMenuAfterBatch = true;
                                 }
                                 else if (action === 'paste-image') {
-                                    if (process.platform === 'win32') {
-                                        const imagePath = this.clipboardImageSaver();
-                                        if (imagePath) {
-                                            insertPastedImagePlaceholder(imagePath, false);
-                                            needsFinalRedraw = true;
-                                        }
+                                    const imagePath = this.clipboardImageSaver();
+                                    if (imagePath) {
+                                        insertPastedImagePlaceholder(imagePath, false);
+                                        needsFinalRedraw = true;
                                     }
                                 }
                                 // Skip other actions in batch mode for simplicity
@@ -1169,9 +1230,6 @@ export class InputReader {
                         return true;
                     }
                     if (action === 'paste-image') {
-                        if (process.platform !== 'win32') {
-                            return false;
-                        }
                         const imagePath = this.clipboardImageSaver();
                         if (imagePath) {
                             insertPastedImagePlaceholder(imagePath);

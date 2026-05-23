@@ -94,8 +94,9 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
     }
 
     if (isHtml) {
+      const previewContent = prepareHtmlArtifactPreview(content);
       return (
-        <iframe srcDoc={content} className="h-[60vh] w-full rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-white" sandbox="allow-same-origin" title={displayName} />
+        <iframe srcDoc={previewContent} className="h-[60vh] w-full rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-white" sandbox="allow-same-origin" title={displayName} />
       );
     }
 
@@ -137,4 +138,36 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
       </div>
     </div>
   );
+}
+
+function prepareHtmlArtifactPreview(html: string): string {
+  if (!needsNoScriptAnimationFallback(html)) return html;
+  return injectPreviewFallbackStyle(addNoAnimationsBodyClass(html));
+}
+
+function needsNoScriptAnimationFallback(html: string): boolean {
+  return /\bfade-in-up\b|\bstagger-ready\b|body\.no-animations|IntersectionObserver/.test(html);
+}
+
+function addNoAnimationsBodyClass(html: string): string {
+  return html.replace(/<body\b([^>]*)>/i, (_match, attrs: string) => {
+    if (/\bclass\s*=\s*(['"])(.*?)\1/i.test(attrs)) {
+      const nextAttrs = attrs.replace(/\bclass\s*=\s*(['"])(.*?)\1/i, (_classMatch, quote: string, value: string) => {
+        const classes = value.split(/\s+/).filter(Boolean);
+        if (!classes.includes('no-animations')) classes.push('no-animations');
+        return `class=${quote}${classes.join(' ')}${quote}`;
+      });
+      return `<body${nextAttrs}>`;
+    }
+    return `<body${attrs} class="no-animations">`;
+  });
+}
+
+function injectPreviewFallbackStyle(html: string): string {
+  if (html.includes('data-xiaok-preview-fallback')) return html;
+  const style = `<style data-xiaok-preview-fallback>.fade-in-up{opacity:1!important;transform:none!important;transition:none!important}.kpi-grid .kpi-card,.timeline .timeline-item{opacity:1!important;transform:none!important;transition:none!important}</style>`;
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, `${style}</head>`);
+  }
+  return `${style}${html}`;
 }

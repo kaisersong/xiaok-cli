@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, LayoutGrid, Activity, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users, Download, FolderOpen } from 'lucide-react';
+import { ArrowLeft, FileText, LayoutGrid, Activity, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users, Download, FolderOpen, Circle, Loader, Clock, AlertTriangle, CircleOff } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmProject, KSwarmTask, KSwarmActivityEvent, KSwarmHumanAction, ProjectIntervention } from '../../hooks/useKSwarmClient';
@@ -23,6 +23,7 @@ import {
   describeKSwarmAgentStatus,
   formatKSwarmAgentStatus,
   getAgentStatusDotClass,
+  getAgentStatusIconInfo,
   getProjectHealthLabel,
   shouldShowProjectHealth,
   summarizeProjectHealth,
@@ -783,9 +784,12 @@ export function ProjectDetailPage() {
                   poAgentData ?? { id: project.poAgent, name: project.poAgent, status: 'offline' },
                   tasks,
                 );
+                const iconMap = { Circle, Loader, Clock, AlertTriangle, XCircle, CheckCircle2, CircleOff } as const;
+                const { icon, className: iconCls } = getAgentStatusIconInfo(runtimeStatus.status);
+                const StatusIcon = iconMap[icon];
                 return (
                   <div key={project.poAgent} className="flex items-center gap-3 rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-4 py-3">
-                    <div className={`size-2.5 rounded-full ${getAgentStatusDotClass(runtimeStatus.status)}`} />
+                    <StatusIcon size={14} className={iconCls} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-[12px] font-medium text-[var(--c-text-heading)]">{poAgentData?.name || project.poAgent}</span>
@@ -798,13 +802,16 @@ export function ProjectDetailPage() {
               })()}
               {/* Worker Agents */}
               {(() => {
+                const iconMap = { Circle, Loader, Clock, AlertTriangle, XCircle, CheckCircle2, CircleOff } as const;
                 const memberIds = new Set(project.members || []);
                 const workerAgents = agents.filter(a => memberIds.has(a.id));
                 return workerAgents.map(agent => {
                   const runtimeStatus = describeKSwarmAgentStatus(agent, tasks);
+                  const { icon, className: iconCls } = getAgentStatusIconInfo(runtimeStatus.status);
+                  const StatusIcon = iconMap[icon];
                   return (
                     <div key={agent.id} className="flex items-center gap-3 rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-4 py-3">
-                      <div className={`size-2.5 rounded-full ${getAgentStatusDotClass(runtimeStatus.status)}`} />
+                      <StatusIcon size={14} className={iconCls} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-[12px] font-medium text-[var(--c-text-heading)]">{agent.name}</span>

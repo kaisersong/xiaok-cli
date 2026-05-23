@@ -1,11 +1,35 @@
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, win32 } from 'node:path';
 
 import { resolveConfiguredModelBinding } from '../../src/ai/providers/model-binding.js';
 import type { Config } from '../../src/types.js';
 
-const DEFAULT_CAPABILITIES = ['coding', 'testing', 'design', 'planning'];
+const DEFAULT_CAPABILITIES = [
+  'coding',
+  'testing',
+  'qa',
+  'design',
+  'planning',
+  'research',
+  'analysis',
+  'source_research',
+  'web_research',
+  'writing',
+  'documentation',
+  'review',
+  'product',
+  'requirements',
+  'architecture',
+  'system-design',
+  'engineering',
+  'devops',
+  'deployment',
+  'data_analysis',
+  'report_generation',
+  'presentation_generation',
+  'presentation_content',
+  'slide_generation',
+];
+const DEFAULT_OUTPUT_CAPABILITIES = ['markdown', 'html', 'report_html'];
 
 export interface ManagedXiaokAgentInput {
   id?: string;
@@ -23,14 +47,23 @@ export interface ManagedXiaokAgentPayload {
   description: string;
   instructions: string;
   runtimeType: 'xiaok';
+  runtimeSource: 'desktop-agent-runtime';
   runtimePath: string | null;
   runtimeModel: string;
-  provider: 'openai' | 'anthropic';
-  model: string;
-  baseUrl?: string;
-  apiKey?: string;
+  provider: null;
+  model: null;
+  baseUrl: null;
+  apiKey: null;
   roles: string[];
   capabilities: string[];
+  taskCapabilities: string[];
+  outputCapabilities: string[];
+  runtimeHealth: {
+    state: 'unknown';
+    source: 'desktop-agent-runtime';
+    taskCapabilities: string[];
+    outputCapabilities: string[];
+  };
   maxConcurrentTasks: number;
 }
 
@@ -40,48 +73,20 @@ export interface ResolveLocalXiaokRuntimePathOptions {
   exists?: (candidate: string) => boolean;
 }
 
-function resolveWindowsXiaokRuntimePath(
-  env: NodeJS.ProcessEnv,
-  pathExists: (candidate: string) => boolean,
-): string | null {
-  const candidates = [
-    env.KSWARM_XIAOK_PS1_PATH?.trim(),
-    env.APPDATA ? win32.join(env.APPDATA, 'npm', 'xiaok.ps1') : null,
-  ].filter((candidate): candidate is string => Boolean(candidate));
-
-  return candidates.find((candidate) => pathExists(candidate)) ?? null;
-}
-
 export function resolveLocalXiaokRuntimePath(
   options: ResolveLocalXiaokRuntimePathOptions = {},
 ): string | null {
-  const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
   const pathExists = options.exists ?? existsSync;
 
+  // Default desktop-managed xiaok agents must not depend on a separately
+  // installed xiaok CLI. Only an explicit native override is honored.
   const hinted = env.KSWARM_XIAOK_PATH?.trim();
   if (hinted && pathExists(hinted)) {
     return hinted;
   }
 
-  if (platform === 'win32') {
-    // Windows desktop agents run through the PowerShell wrapper in
-    // windows-xiaok-launch.js, so a global npm xiaok.ps1 launcher is valid.
-    return resolveWindowsXiaokRuntimePath(env, pathExists);
-  }
-
-  const candidates = [
-    env.XIAOK_PATH?.trim(),
-    join(homedir(), '.local', 'bin', 'xiaok'),
-    '/usr/local/bin/xiaok',
-    '/opt/homebrew/bin/xiaok',
-  ].filter((candidate): candidate is string => Boolean(candidate));
-
-  return candidates.find((candidate) => pathExists(candidate)) ?? null;
-}
-
-function toKswarmProvider(protocol: string): 'openai' | 'anthropic' {
-  return protocol === 'anthropic' ? 'anthropic' : 'openai';
+  return null;
 }
 
 function arraysEqual(a: string[] | undefined, b: string[] | undefined): boolean {
@@ -94,23 +99,33 @@ export function buildManagedXiaokAgentPayload(
   options: { runtimePath?: string | null; modelId?: string } = {},
 ): ManagedXiaokAgentPayload {
   const binding = resolveConfiguredModelBinding(config, options.modelId ?? config.defaultModelId);
-  const provider = toKswarmProvider(binding.providerConfig.protocol);
   const runtimePath = options.runtimePath === undefined ? null : options.runtimePath;
+  const taskCapabilities = input.capabilities ?? [...DEFAULT_CAPABILITIES];
+  const outputCapabilities = [...DEFAULT_OUTPUT_CAPABILITIES];
 
   return {
     id: input.id,
     name: input.name,
-    description: input.description ?? `xiaok 智能体 (${binding.providerId}/${binding.modelEntry.model})`,
+    description: input.description ?? `xiaok desktop 智能体 (${binding.providerId}/${binding.modelEntry.model})`,
     instructions: input.instructions ?? '',
     runtimeType: 'xiaok',
+    runtimeSource: 'desktop-agent-runtime',
     runtimePath,
     runtimeModel: binding.modelEntry.model,
-    provider,
-    model: binding.modelEntry.model,
-    baseUrl: binding.providerConfig.baseUrl,
-    apiKey: binding.providerConfig.apiKey,
+    provider: null,
+    model: null,
+    baseUrl: null,
+    apiKey: null,
     roles: input.roles ?? ['worker'],
-    capabilities: input.capabilities ?? [...DEFAULT_CAPABILITIES],
+    capabilities: taskCapabilities,
+    taskCapabilities,
+    outputCapabilities,
+    runtimeHealth: {
+      state: 'unknown',
+      source: 'desktop-agent-runtime',
+      taskCapabilities,
+      outputCapabilities,
+    },
     maxConcurrentTasks: input.maxConcurrentTasks ?? 6,
   };
 }
@@ -126,6 +141,7 @@ export function diffManagedXiaokAgentPatch(
     'description',
     'instructions',
     'runtimeType',
+    'runtimeSource',
     'runtimePath',
     'runtimeModel',
     'provider',
@@ -146,6 +162,15 @@ export function diffManagedXiaokAgentPatch(
   }
   if (!arraysEqual(current.capabilities as string[] | undefined, desired.capabilities)) {
     patch.capabilities = desired.capabilities;
+  }
+  if (!arraysEqual(current.taskCapabilities as string[] | undefined, desired.taskCapabilities)) {
+    patch.taskCapabilities = desired.taskCapabilities;
+  }
+  if (!arraysEqual(current.outputCapabilities as string[] | undefined, desired.outputCapabilities)) {
+    patch.outputCapabilities = desired.outputCapabilities;
+  }
+  if (JSON.stringify(current.runtimeHealth ?? null) !== JSON.stringify(desired.runtimeHealth)) {
+    patch.runtimeHealth = desired.runtimeHealth;
   }
 
   return Object.keys(patch).length > 0 ? patch : null;

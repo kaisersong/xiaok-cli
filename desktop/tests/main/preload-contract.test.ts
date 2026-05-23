@@ -62,6 +62,7 @@ describe('preload API contract', () => {
       'syncScheduledTasks',
       'getScheduledTasks',
       'createScheduledTask',
+      'updateScheduledTask',
       'cancelScheduledTask',
       'getTimedActions',
       'getTimedActionRuns',
@@ -79,6 +80,10 @@ describe('preload API contract', () => {
       'memoryClearAll',
       'memoryGetModelId',
       'memorySetModelId',
+      'getConnectorsConfig',
+      'saveConnectorsConfig',
+      'listConnectorRuntimes',
+      'testConnectorProvider',
     ]);
   });
 

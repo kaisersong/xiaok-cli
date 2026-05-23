@@ -26,13 +26,23 @@ import {
   Brain,
   Camera,
   User,
+  Wrench,
+  Search,
+  Link as LinkIcon,
 } from 'lucide-react';
 import { api } from '../api';
 import { LocalMemoryStatsCard } from './settings/LocalMemoryStatsCard';
 import type { DesktopModelConfigSnapshot, DesktopSaveModelConfigInput, TestProviderConnectionResult } from '../../../electron/preload-api';
+import type {
+  ConnectorsConfig,
+  ConnectorsConfigSnapshot,
+  ConnectorsFetchProvider,
+  ConnectorsSearchProvider,
+  ConnectorsProviderRuntime,
+} from '../api/types';
 import { useLocale } from '../contexts/LocaleContext';
 
-type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'general' | 'appearance' | 'data' | 'memory' | 'about';
+type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'tools' | 'general' | 'appearance' | 'data' | 'memory' | 'about';
 
 interface NavItem {
   key: SettingsTab;
@@ -46,6 +56,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'skills', icon: Puzzle, label: '技能管理' },
   { key: 'channels', icon: Globe, label: '消息通道' },
   { key: 'mcp', icon: Plug, label: 'MCP 服务器' },
+  { key: 'tools', icon: Wrench, label: '工具管理' },
   { key: 'appearance', icon: Palette, label: '外观设置' },
   { key: 'data', icon: HardDrive, label: '数据管理' },
   { key: 'memory', icon: Brain, label: '记忆管理' },
@@ -103,6 +114,7 @@ export function DesktopSettings({ onClose }: Props) {
           {activeTab === 'skills' && <SkillsPane />}
           {activeTab === 'channels' && <ChannelsPane />}
           {activeTab === 'mcp' && <McpPane />}
+          {activeTab === 'tools' && <ToolsPane />}
           {activeTab === 'general' && <GeneralPane />}
           {activeTab === 'appearance' && <AppearancePane />}
           {activeTab === 'data' && <DataPane />}
@@ -1908,6 +1920,379 @@ function AboutPane() {
             <div className="mt-1">构建: Electron + React</div>
           </div>
         </Card>
+      </Section>
+    </>
+  );
+}
+
+// ---- Tools Settings (web search / fetch connectors) ----
+
+const SEARCH_PROVIDERS: Array<{
+  key: ConnectorsSearchProvider;
+  label: string;
+  description: string;
+  notImplemented?: boolean;
+}> = [
+  { key: 'duckduckgo', label: 'DuckDuckGo', description: '默认，无需 API Key（兜底）' },
+  { key: 'tavily', label: 'Tavily', description: '高质量搜索，需要 API Key' },
+  { key: 'brave', label: 'Brave Search', description: '注重隐私，需要 API Key' },
+];
+
+const FETCH_PROVIDERS: Array<{
+  key: ConnectorsFetchProvider;
+  label: string;
+  description: string;
+  notImplemented?: boolean;
+}> = [
+  { key: 'basic', label: 'Basic', description: '默认，直接 HTTP 抓取（兜底）' },
+  { key: 'jina', label: 'Jina Reader', description: '清洗为干净 Markdown，可选 API Key' },
+  { key: 'firecrawl', label: 'Firecrawl', description: '高质量爬取（暂未实现）', notImplemented: true },
+];
+
+function maskApiKey(key: string): string {
+  if (key.length <= 8) return '••••••••';
+  return key.slice(0, 4) + '•'.repeat(Math.min(key.length - 8, 12)) + key.slice(-4);
+}
+
+function runtimeStateLabel(state: ConnectorsProviderRuntime['runtime_state']): { text: string; tone: 'ok' | 'warn' | 'err' | 'mute' } {
+  switch (state) {
+    case 'ready': return { text: '可用', tone: 'ok' };
+    case 'inactive': return { text: '未启用', tone: 'mute' };
+    case 'missing_config': return { text: '未配置', tone: 'warn' };
+    case 'invalid_config': return { text: '配置无效', tone: 'err' };
+    case 'not_implemented': return { text: '暂未实现', tone: 'mute' };
+    default: return { text: state, tone: 'mute' };
+  }
+}
+
+function RuntimeBadge({ runtime }: { runtime?: ConnectorsProviderRuntime }) {
+  if (!runtime) return null;
+  const { text, tone } = runtimeStateLabel(runtime.runtime_state);
+  const toneCls =
+    tone === 'ok' ? 'bg-green-50 text-green-600' :
+    tone === 'warn' ? 'bg-yellow-50 text-yellow-600' :
+    tone === 'err' ? 'bg-red-50 text-red-600' :
+    'bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]';
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs ${toneCls}`} title={runtime.runtime_reason || ''}>
+      {text}
+    </span>
+  );
+}
+
+interface ApiKeyInputProps {
+  ariaLabel: string;
+  placeholder: string;
+  storedValue: string; // the actual key from draft (may be empty)
+  onChange: (newValue: string) => void;
+}
+
+function ApiKeyInput({ ariaLabel, placeholder, storedValue, onChange }: ApiKeyInputProps) {
+  const [editing, setEditing] = useState(!storedValue);
+  const [editValue, setEditValue] = useState('');
+
+  const startEdit = () => {
+    setEditValue('');
+    setEditing(true);
+  };
+
+  const commitEdit = () => {
+    // If user typed nothing new, keep storedValue; otherwise onChange was already called
+    setEditing(false);
+    if (!editValue.trim() && storedValue) {
+      // no-op: keep existing stored value
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditValue('');
+    setEditing(false);
+  };
+
+  const handleChange = (v: string) => {
+    setEditValue(v);
+    if (v.trim()) onChange(v.trim());
+  };
+
+  if (!editing && storedValue) {
+    return (
+      <div className="mt-2 flex items-center gap-2">
+        <span
+          className="flex-1 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-deep)] px-3 py-2 text-sm font-mono text-[var(--c-text-secondary)] select-none"
+          aria-label={ariaLabel}
+        >
+          {maskApiKey(storedValue)}
+        </span>
+        <button
+          type="button"
+          onClick={startEdit}
+          className="shrink-0 rounded-lg border border-[var(--c-border)] px-3 py-2 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
+          aria-label={`edit-${ariaLabel}`}
+        >
+          更换
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <input
+        type="password"
+        aria-label={ariaLabel}
+        placeholder={placeholder}
+        className={`flex-1 ${inputCls}`}
+        value={editValue}
+        autoFocus
+        onChange={e => handleChange(e.target.value)}
+        onBlur={commitEdit}
+        onKeyDown={e => {
+          if (e.key === 'Enter') commitEdit();
+          if (e.key === 'Escape') cancelEdit();
+        }}
+      />
+      {storedValue && (
+        <button
+          type="button"
+          onClick={cancelEdit}
+          className="shrink-0 rounded-lg border border-[var(--c-border)] px-3 py-2 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
+          aria-label={`cancel-edit-${ariaLabel}`}
+        >
+          取消
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface TestButtonProps {
+  kind: 'search' | 'fetch';
+}
+
+function TestButton({ kind }: TestButtonProps) {
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; latencyMs: number; detail?: string; error?: string } | null>(null);
+
+  const handleTest = async () => {
+    setTesting(true);
+    setResult(null);
+    try {
+      const r = await api.testConnectorProvider(kind);
+      setResult(r);
+    } catch (e) {
+      setResult({ success: false, latencyMs: 0, error: (e as Error).message });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 mt-3">
+      <button
+        type="button"
+        onClick={handleTest}
+        disabled={testing}
+        className="inline-flex items-center gap-1.5 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors disabled:opacity-50"
+        aria-label={`test-${kind}`}
+      >
+        {testing ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+        测试连接
+      </button>
+      {result && (
+        result.success
+          ? <span className="text-xs text-green-600">{result.latencyMs}ms {result.detail ? `· ${result.detail}` : ''}</span>
+          : <span className="text-xs text-red-500 truncate max-w-[280px]">{result.error}</span>
+      )}
+    </div>
+  );
+}
+
+function ToolsPane() {
+  const [snapshot, setSnapshot] = useState<ConnectorsConfigSnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [draft, setDraft] = useState<ConnectorsConfig | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getConnectorsConfig()
+      .then(snap => {
+        if (cancelled) return;
+        setSnapshot(snap);
+        if (snap?.config) setDraft(snap.config);
+      })
+      .catch(e => { if (!cancelled) setError((e as Error).message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const runtimeOf = useCallback((name: string): ConnectorsProviderRuntime | undefined => {
+    return snapshot?.providers.find(p => p.provider_name === name);
+  }, [snapshot]);
+
+  const handleSave = async () => {
+    if (!draft) return;
+    setSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      const next = await api.saveConnectorsConfig(draft);
+      if (next) {
+        setSnapshot(next);
+        setDraft(next.config);
+        setSuccess('已保存');
+      } else {
+        setError('保存失败：桌面端未连接');
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[200px] items-center justify-center">
+        <Loader2 size={20} className="animate-spin text-[var(--c-text-secondary)]" />
+      </div>
+    );
+  }
+
+  if (!draft) {
+    return (
+      <div className="text-sm text-[var(--c-text-secondary)]">
+        无法加载连接器配置。{error && <div className="mt-2 text-red-500">{error}</div>}
+      </div>
+    );
+  }
+
+  const search = draft.search;
+  const fetchCfg = draft.fetch;
+
+  return (
+    <>
+      <Section>
+        <SectionHeader icon={Wrench}>网络工具</SectionHeader>
+        <div className="text-xs text-[var(--c-text-secondary)] mb-3">
+          配置 web_search 与 web_fetch 使用的 provider。切换时自动 fallback 到默认 provider。
+        </div>
+        {snapshot?.loadStatus === 'parse_failed' && (
+          <div className="mb-3 rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
+            连接器配置文件格式异常已被备份，已恢复为默认值。
+          </div>
+        )}
+      </Section>
+
+      <Section>
+        <SectionHeader icon={Search}>搜索 Provider</SectionHeader>
+        <div className="flex flex-col gap-3">
+          {SEARCH_PROVIDERS.map(opt => {
+            const checked = search.provider === opt.key;
+            const disabled = !!opt.notImplemented;
+            const runtime = runtimeOf(opt.key);
+            return (
+              <Card key={opt.key} className={disabled ? 'opacity-60' : ''}>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="search-provider"
+                    value={opt.key}
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={() => setDraft(d => d ? { ...d, search: { ...d.search, provider: opt.key } } : d)}
+                    className="mt-1"
+                    aria-label={`search-${opt.key}`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium">{opt.label}</span>
+                      <RuntimeBadge runtime={runtime} />
+                    </div>
+                    <div className="mt-1 text-xs text-[var(--c-text-secondary)]">{opt.description}</div>
+                    {checked && opt.key === 'tavily' && (
+                      <ApiKeyInput
+                        ariaLabel="tavily-api-key"
+                        placeholder="Tavily API Key (tvly-...)"
+                        storedValue={search.tavilyApiKey || ''}
+                        onChange={v => setDraft(d => d ? { ...d, search: { ...d.search, tavilyApiKey: v } } : d)}
+                      />
+                    )}
+                    {checked && opt.key === 'brave' && (
+                      <ApiKeyInput
+                        ariaLabel="brave-api-key"
+                        placeholder="Brave Search API Key"
+                        storedValue={search.braveApiKey || ''}
+                        onChange={v => setDraft(d => d ? { ...d, search: { ...d.search, braveApiKey: v } } : d)}
+                      />
+                    )}
+                  </div>
+                </label>
+              </Card>
+            );
+          })}
+        </div>
+        <TestButton kind="search" />
+      </Section>
+
+      <Section>
+        <SectionHeader icon={LinkIcon}>抓取 Provider</SectionHeader>
+        <div className="flex flex-col gap-3">
+          {FETCH_PROVIDERS.map(opt => {
+            const checked = fetchCfg.provider === opt.key;
+            const disabled = !!opt.notImplemented;
+            const runtime = runtimeOf(opt.key);
+            return (
+              <Card key={opt.key} className={disabled ? 'opacity-60' : ''}>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="fetch-provider"
+                    value={opt.key}
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={() => setDraft(d => d ? { ...d, fetch: { ...d.fetch, provider: opt.key } } : d)}
+                    className="mt-1"
+                    aria-label={`fetch-${opt.key}`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium">{opt.label}</span>
+                      <RuntimeBadge runtime={runtime} />
+                    </div>
+                    <div className="mt-1 text-xs text-[var(--c-text-secondary)]">{opt.description}</div>
+                    {checked && opt.key === 'jina' && (
+                      <ApiKeyInput
+                        ariaLabel="jina-api-key"
+                        placeholder="Jina API Key (可选，留空走免费额度)"
+                        storedValue={fetchCfg.jinaApiKey || ''}
+                        onChange={v => setDraft(d => d ? { ...d, fetch: { ...d.fetch, jinaApiKey: v } } : d)}
+                      />
+                    )}
+                  </div>
+                </label>
+              </Card>
+            );
+          })}
+        </div>
+        <TestButton kind="fetch" />
+      </Section>
+
+      <Section>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            className={btnPrimary}
+            disabled={saving}
+            onClick={handleSave}
+          >
+            {saving ? <span className="inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" />保存中</span> : '保存'}
+          </button>
+          {success && <span className="text-xs text-green-600">{success}</span>}
+          {error && <span className="text-xs text-red-500">{error}</span>}
+        </div>
       </Section>
     </>
   );

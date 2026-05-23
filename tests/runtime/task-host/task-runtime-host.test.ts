@@ -470,6 +470,146 @@ describe('InProcessTaskRuntimeHost', () => {
       ]));
     });
 
+    it('allows create_project orchestration completions when project_card evidence exists', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'pre_tool_use',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          toolName: 'create_project',
+          toolInput: {
+            name: 'Claude 本月动态分析',
+            goal: '分析 Anthropic Claude 在 2026年5月的最新动态',
+            memberCount: 2,
+          },
+          toolUseId: 'call_create_project',
+        });
+        emitRuntimeEvent({
+          type: 'post_tool_use',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          toolName: 'create_project',
+          toolInput: {},
+          toolResponse: JSON.stringify({
+            type: 'project_card',
+            projectId: 'proj-1779259929302',
+            name: 'Claude 本月动态分析',
+            status: 'created',
+          }),
+          toolUseId: 'call_create_project',
+        });
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '项目已创建成功，2 个智能体正在分工协作。',
+        });
+      });
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        aheGuards: { artifactEvidence: true },
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: '创建项目, 让2个智能体搞定本月Claude动态分析，输出报告',
+        materials: [],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed', 3000);
+      const recovered = await host.recoverTask('task_1');
+      expect(recovered.snapshot.status).toBe('completed');
+      expect(recovered.snapshot.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'canvas_tool_result',
+          toolName: 'create_project',
+          ok: true,
+          response: expect.stringContaining('proj-1779259929302'),
+        }),
+      ]));
+      expect(recovered.snapshot.events).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'error', message: 'Task is being completed without artifact evidence.' }),
+      ]));
+    });
+
+    it('does not accept spoken project creation without project_card evidence', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '项目已创建成功。',
+        });
+      });
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        aheGuards: { artifactEvidence: true },
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: '创建项目, 让2个智能体搞定本月Claude动态分析，输出报告',
+        materials: [],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'failed', 3000);
+      const recovered = await host.recoverTask('task_1');
+      expect(recovered.snapshot.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'error', message: 'Task is being completed without artifact evidence.' }),
+      ]));
+    });
+
+    it('continues to block direct report completions without artifact evidence', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '报告已经写好。',
+        });
+      });
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        aheGuards: { artifactEvidence: true },
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: '写一份 Claude 本月动态分析报告',
+        materials: [],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'failed', 3000);
+      const recovered = await host.recoverTask('task_1');
+      expect(recovered.snapshot.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'error', message: 'Task is being completed without artifact evidence.' }),
+      ]));
+    });
+
     it('retries runner when built-in plan check detects incomplete steps', async () => {
       let callCount = 0;
       const runner = vi.fn<TaskRunner>(async ({ prompt, emitRuntimeEvent }) => {

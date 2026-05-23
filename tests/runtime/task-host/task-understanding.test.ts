@@ -38,6 +38,24 @@ describe('TaskUnderstanding projection', () => {
       nextAction: 'confirm_outline_direction',
     });
   });
+
+  it('does not reuse sales-deck assumptions for project creation prompts', () => {
+    const understanding = buildTaskUnderstanding({
+      prompt: '创建项目, 让2个智能体搞定本月Claude动态分析，输出报告',
+      materials: [],
+    });
+
+    expect(understanding.taskType).toBe('unknown');
+    expect(understanding.goal).toBe('创建项目, 让2个智能体搞定本月Claude动态分析，输出报告');
+    expect(understanding.deliverable).toBe('Swarm 项目与后续报告产出');
+    expect(understanding.missingInfo).toEqual([]);
+    expect(understanding.assumptions).toEqual([]);
+    expect(understanding.suggestedPlan).toEqual([
+      { id: 'create_project', label: '创建项目并分配智能体', status: 'planned' },
+      { id: 'track_project_delivery', label: '跟踪项目交付物', status: 'planned' },
+    ]);
+    expect(understanding.nextAction).toBe('create_project');
+  });
 });
 
 function createMaterial(

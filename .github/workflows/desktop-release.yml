@@ -36,23 +36,20 @@ jobs:
       - name: Install desktop dependencies
         run: cd desktop && npm ci
 
-      - name: Checkout plugins repo
-        uses: actions/checkout@v4
-        with:
-          repository: kaisersong/kai-xiaok-plugins
-          path: kai-xiaok-plugins
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clone desktop sidecar repositories
+        run: |
+          git clone --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
+          git clone --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
+          git clone --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
 
-      - name: Checkout KSwarm repo
-        uses: actions/checkout@v4
-        with:
-          repository: kaisersong/kswarm
-          path: kswarm
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install sidecar dependencies
+        run: |
+          cd ../kswarm && npm ci --omit=dev
+          cd ../intent-broker && npm ci --omit=dev
 
       - name: Build report-renderer bundle
         run: |
-          cd kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
+          cd ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
           npm ci
           npm run build
           npm run build:bundle
@@ -60,17 +57,17 @@ jobs:
       - name: Download Python wheels (macOS)
         run: |
           pip3 download mcp pydantic jsonschema \
-            -d kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels/ \
+            -d ../kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels/ \
             --only-binary=:all:
 
       - name: Smoke test report-renderer
         run: |
-          echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | timeout 5 node kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.bundle.js || true
+          echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | timeout 5 node ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.bundle.js || true
 
       - name: Build desktop
         run: cd desktop && npm run build
         env:
-          KSWARM_SOURCE_ROOT: ${{ github.workspace }}/kswarm
+          KSWARM_SOURCE_ROOT: ${{ github.workspace }}/../kswarm
 
       - name: Package macOS installer
         run: cd desktop && npx electron-builder --config electron-builder.json --mac --arm64 --publish never
@@ -98,35 +95,32 @@ jobs:
       - name: Install desktop dependencies
         run: cd desktop && npm ci
 
-      - name: Checkout plugins repo
-        uses: actions/checkout@v4
-        with:
-          repository: kaisersong/kai-xiaok-plugins
-          path: kai-xiaok-plugins
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Clone desktop sidecar repositories
+        run: |
+          git clone --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
+          git clone --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
+          git clone --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
 
-      - name: Checkout KSwarm repo
-        uses: actions/checkout@v4
-        with:
-          repository: kaisersong/kswarm
-          path: kswarm
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install sidecar dependencies
+        run: |
+          cd ../kswarm && npm ci --omit=dev
+          cd ../intent-broker && npm ci --omit=dev
 
       - name: Build report-renderer bundle
         run: |
-          cd kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
+          cd ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
           npm ci
           npm run build
           npm run build:bundle
 
       - name: Download Python wheels (Windows)
         run: |
-          pip download mcp pydantic jsonschema -d kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels/ --only-binary=:all:
+          pip download mcp pydantic jsonschema -d ../kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels/ --only-binary=:all:
 
       - name: Build desktop
         run: cd desktop && npm run build
         env:
-          KSWARM_SOURCE_ROOT: ${{ github.workspace }}/kswarm
+          KSWARM_SOURCE_ROOT: ${{ github.workspace }}/../kswarm
 
       - name: Package Windows installer
         run: cd desktop && npx electron-builder --config electron-builder.json --win nsis --publish never

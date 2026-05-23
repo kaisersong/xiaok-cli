@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync, statSync } from 'node:fs';
 import { join, extname, basename, dirname } from 'node:path';
 import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
 import { homedir, platform, arch, type } from 'node:os';
@@ -34,6 +34,8 @@ import type { ReminderScheduler } from './reminder-scheduler.js';
 import type { Tool } from '../../src/types.js';
 import type { TimedActionService } from './timed-action-service.js';
 import type { TimedActionTrigger } from './timed-action-types.js';
+import { ConnectorsService } from './connectors-service.js';
+import { ConnectorsStore } from './connectors-store.js';
 import { maybePersistToolResult, buildViewForAPI, shouldAutoCompact, compactConversation, getContextLimit } from './context-manager.js';
 import { startMcpServerProcess, createStdioMcpTransport } from '../../src/ai/mcp/runtime/server-process.js';
 import { createMcpRuntimeClient } from '../../src/ai/mcp/runtime/client.js';
@@ -44,7 +46,8 @@ import { createNotebookTools } from '../../src/ai/tools/notebook.js';
 import type { MemoryStore } from '../../src/ai/memory/store.js';
 import type { KSwarmService, KSwarmUnavailableError } from './kswarm-service.js';
 import { resolveCreateProjectMembers } from './kswarm-project-tool.js';
-import { getPreferredPoAgentId } from '../shared/kswarm-seed-contract.js';
+import { XIAOK_PO_SEED_ID, getPreferredPoAgentId } from '../shared/kswarm-seed-contract.js';
+import type { KSwarmTaskHandoff } from './kswarm-runtime-bridge.js';
 // NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
 // because they import better-sqlite3 which may not be compatible with the current Electron
 // version's native module ABI.
@@ -368,7 +371,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
           type: 'object',
           properties: {
             name: { type: 'string', description: '任务名称' },
-            prompt: { type: 'string', description: '到期时创建 AI 任务使用的 prompt；停止条件满足时应要求调用 scheduled_task_cancel' },
+            prompt: { type: 'string', description: '到期时创建 AI 任务使用的 prompt；停止条件满足时应要求调用 scheduled_task_cancel；agent 创建的 interval 临时任务取消时会删除' },
             frequency: { type: 'string', enum: ['once', 'interval', 'daily', 'weekdays', 'weekly'] },
             schedule_at: { type: 'number', description: 'once 任务的执行时间戳（毫秒）' },
             interval_minutes: { type: 'number', description: 'interval 任务的分钟间隔，agent 创建时最小 5' },
@@ -411,7 +414,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
             nextRunAt: task.nextRunAt,
             maxRuns: action?.policy.maxRuns,
             expiresAt: action?.policy.expiresAt,
-            note: 'will create AI tasks automatically; call scheduled_task_cancel when stop condition is met',
+            note: 'will create AI tasks automatically; call scheduled_task_cancel when stop condition is met; agent interval tasks are deleted on cancel',
           }, null, 2);
         } catch (error) {
           return `Error: ${(error as Error).message}`;
@@ -433,7 +436,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
       permission: 'write',
       definition: {
         name: 'scheduled_task_cancel',
-        description: '取消一个自动执行 AI 的定时任务。周期任务满足停止条件时必须调用。',
+        description: '取消一个自动执行 AI 的定时任务。agent 创建的 interval 临时任务会直接删除；周期任务满足停止条件时必须调用。',
         inputSchema: {
           type: 'object',
           properties: {
@@ -573,11 +576,173 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     createSessionId: () => `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
   });
 
+  const connectorsService = new ConnectorsService({
+    store: new ConnectorsStore({ dataRoot: options.dataRoot }),
+    toolRegistry: registry,
+  });
+
+  async function runKSwarmHandoffTask({ handoff, targetParticipantId }: { handoff: KSwarmTaskHandoff; targetParticipantId?: string }) {
+    const artifactsDir = handoff.project.artifactsDir || (handoff.project.workFolder ? `${handoff.project.workFolder}/artifacts` : '');
+    const runStartedAt = Date.now();
+    const requiresArtifactEvidence = shouldRequireKSwarmArtifactEvidence(handoff.task);
+    const prompt = [
+      'KSwarm 项目任务执行。',
+      `执行者：${targetParticipantId || 'xiaok-worker'}`,
+      `项目：${handoff.project.name}`,
+      `目标：${handoff.project.goal}`,
+      handoff.project.requirements ? `要求：${handoff.project.requirements}` : '',
+      artifactsDir ? `产物目录：${artifactsDir}` : '',
+      `任务：${handoff.task.title}`,
+      handoff.task.brief ? `任务说明：${handoff.task.brief}` : '',
+      handoff.task.acceptanceCriteria ? `验收标准：${handoff.task.acceptanceCriteria}` : '',
+      handoff.task.requiredOutputs?.length ? `必须产出：${handoff.task.requiredOutputs.join(', ')}` : '',
+      handoff.task.evidenceContract ? `外部来源证据要求：${JSON.stringify(handoff.task.evidenceContract)}` : '',
+      handoff.task.repairInstruction ? `修复反馈：${handoff.task.repairInstruction}` : '',
+      requiresArtifactEvidence ? '本任务必须写入至少一个完整产物文件到产物目录；不要只在摘要里描述文件，最终交接必须能看到文件路径。' : '',
+      '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，把产物文件写入上面的产物目录，使用文件路径作为交接依据，并返回 result manifest。',
+    ].filter(Boolean).join('\n');
+    const created = await host.createTask({ prompt, materials: [] });
+    const deadline = Date.now() + 10 * 60 * 1000;
+    while (Date.now() < deadline) {
+      const recovered = await host.recoverTask(created.taskId);
+      if (recovered.snapshot.status === 'completed') {
+        const resultEvent = [...recovered.snapshot.events].reverse().find(event => event.type === 'result');
+        const artifactEvents = recovered.snapshot.events.filter(event => event.type === 'artifact_recorded');
+        const eventArtifacts = artifactEvents.map(event => ({
+          path: (event as any).filePath || (event as any).path,
+          kind: inferKSwarmArtifactKind((event as any).kind, (event as any).label),
+          label: (event as any).label,
+        })).filter(artifact => artifact.path);
+        const discoveredArtifacts = discoverKSwarmArtifactsFromDirectory({
+          artifactsDir,
+          runStartedAt,
+          knownPaths: eventArtifacts.map(artifact => artifact.path),
+        });
+        const artifacts = [...eventArtifacts, ...discoveredArtifacts];
+        if (artifacts.length === 0 && requiresArtifactEvidence) {
+          throw new Error('artifact_evidence_missing');
+        }
+        return {
+          summary: resultEvent?.type === 'result' ? resultEvent.result.summary : 'completed',
+          artifacts,
+          provenance: {
+            runtimeSource: 'desktop-agent-runtime',
+            producingAgent: targetParticipantId || 'xiaok-worker',
+            desktopTaskId: created.taskId,
+          },
+        };
+      }
+      if (recovered.snapshot.status === 'failed' || recovered.snapshot.status === 'cancelled') {
+        throw new Error(`desktop_task_${recovered.snapshot.status}`);
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    throw new Error('desktop_task_timeout');
+  }
+
+  async function runKSwarmAssignPo({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
+    try {
+      const projectId = readString(payload.projectId) || readString(payload.taskId);
+      if (!projectId) return { ok: false as const, error: 'project_id_missing' };
+      const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
+      const members = readStringArray(payload.members);
+      const fallbackWorkerId = members[0] || 'xiaok-worker';
+      const prompt = buildKSwarmAssignPoPrompt(payload, fallbackWorkerId);
+      const { summary } = await runKSwarmRuntimeTextTask(host, prompt);
+      const parsed = extractKSwarmJsonObject(summary);
+      const plan = normalizeKSwarmPlan(isRecord(parsed.plan) ? parsed.plan : parsed, fallbackWorkerId, {
+        userGoal: readString(payload.goal),
+        userRequirements: readString(payload.requirements),
+        planningGuidance: readString(payload.planningGuidance),
+      });
+      const tasks = buildKSwarmTasksFromPlan(plan);
+
+      await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/plan`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ plan, fromAgent }),
+      });
+      if (tasks.length > 0) {
+        await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/tasks`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ tasks, fromAgent }),
+        });
+      }
+      return { ok: true as const };
+    } catch (error) {
+      return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  async function runKSwarmReviewSubmission({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
+    try {
+      const projectId = readString(payload.projectId);
+      const taskId = readString(payload.taskId);
+      if (!projectId || !taskId) return { ok: false as const, error: 'project_or_task_id_missing' };
+      const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
+      const reviewPrompt = buildKSwarmReviewPrompt(payload);
+      const { summary } = await runKSwarmRuntimeTextTask(host, reviewPrompt);
+      const parsed = extractKSwarmJsonObject(summary);
+      const review = normalizeKSwarmReview(isRecord(parsed.review) ? parsed.review : parsed);
+
+      await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}/review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ review, fromAgent }),
+      });
+
+      if (review.passed) {
+        const detail = await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}`);
+        if (shouldSynthesizeKSwarmProject(detail)) {
+          const synthesisPrompt = buildKSwarmSynthesisPrompt(detail);
+          const synthesis = (await runKSwarmRuntimeTextTask(host, synthesisPrompt)).summary;
+          await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/synthesize`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ synthesis, fromAgent }),
+          });
+        }
+      }
+      return { ok: true as const };
+    } catch (error) {
+      return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  async function runKSwarmPlanApproved({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
+    try {
+      const projectId = readString(payload.projectId) || readString(payload.taskId);
+      if (!projectId) return { ok: false as const, error: 'project_id_missing' };
+      const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
+      await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/dispatch`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ fromAgent }),
+      });
+      return { ok: true as const };
+    } catch (error) {
+      return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   return {
     registerTimedActionService(service: TimedActionService) {
       for (const tool of createTimedActionTools(service)) {
         registry.registerTool(tool);
       }
+    },
+    getConnectorsConfig() {
+      return connectorsService.getConfig();
+    },
+    async setConnectorsConfig(input: unknown) {
+      return connectorsService.setConfig(input);
+    },
+    listConnectorRuntimes() {
+      return connectorsService.listProviders();
+    },
+    async testConnectorProvider(kind: 'search' | 'fetch') {
+      return connectorsService.testProvider(kind);
     },
     registerReminderScheduler(scheduler: ReminderScheduler) {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -1137,6 +1302,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       await saveConfig(config);
     },
     createTask: host.createTask.bind(host),
+    runKSwarmHandoffTask,
+    runKSwarmAssignPo,
+    runKSwarmReviewSubmission,
+    runKSwarmPlanApproved,
     subscribeTask: host.subscribeTask.bind(host),
     answerQuestion: host.answerQuestion.bind(host),
     cancelTask: host.cancelTask.bind(host),
@@ -1308,6 +1477,312 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return options.dataRoot;
     },
   };
+}
+
+function inferKSwarmArtifactKind(kind: string, label: string): string {
+  const normalized = String(kind || '').toLowerCase();
+  const lowerLabel = String(label || '').toLowerCase();
+  if ((normalized === 'text' || normalized === 'other') && lowerLabel.endsWith('.md')) return 'markdown';
+  return normalized || 'file';
+}
+
+function shouldRequireKSwarmArtifactEvidence(task: KSwarmTaskHandoff['task']): boolean {
+  if ((task.requiredOutputs ?? []).length > 0) return true;
+  if (task.evidenceContract && task.evidenceContract.required === true) return true;
+  const text = [
+    task.title,
+    task.brief,
+    task.acceptanceCriteria,
+  ].filter(Boolean).join('\n');
+  return /交付|输出|产物|文件|报告|文档|笔记|清单|表格|Markdown|HTML|来源|链接|调研|收集|整理|撰写|生成/i.test(text);
+}
+
+function discoverKSwarmArtifactsFromDirectory(input: {
+  artifactsDir: string;
+  runStartedAt: number;
+  knownPaths: string[];
+}): Array<{ path: string; kind: string; label: string }> {
+  const { artifactsDir, runStartedAt, knownPaths } = input;
+  if (!artifactsDir || !existsSync(artifactsDir)) return [];
+  const known = new Set(knownPaths.map(item => String(item || '')));
+  const minMtime = runStartedAt - 5_000;
+  const discovered: Array<{ path: string; kind: string; label: string }> = [];
+  for (const entry of readdirSync(artifactsDir, { withFileTypes: true })) {
+    if (!entry.isFile() || entry.name.startsWith('.')) continue;
+    const filePath = join(artifactsDir, entry.name);
+    if (known.has(filePath)) continue;
+    let stat;
+    try {
+      stat = statSync(filePath);
+    } catch {
+      continue;
+    }
+    if (stat.mtimeMs < minMtime) continue;
+    discovered.push({
+      path: filePath,
+      kind: inferKSwarmArtifactKind(kindFromFilename(entry.name), entry.name),
+      label: entry.name,
+    });
+  }
+  return discovered.sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function kindFromFilename(filename: string): string {
+  const extension = extname(filename).toLowerCase();
+  if (extension === '.md' || extension === '.markdown') return 'markdown';
+  if (extension === '.html' || extension === '.htm') return 'html';
+  if (extension === '.json') return 'json';
+  if (extension === '.pptx') return 'pptx';
+  if (extension === '.pdf') return 'pdf';
+  return 'file';
+}
+
+async function runKSwarmRuntimeTextTask(
+  host: InProcessTaskRuntimeHost,
+  prompt: string,
+): Promise<{ taskId: string; summary: string }> {
+  const created = await host.createTask({ prompt, materials: [] });
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const recovered = await host.recoverTask(created.taskId);
+    if (recovered.snapshot.status === 'completed') {
+      return {
+        taskId: created.taskId,
+        summary: recovered.snapshot.result?.summary || '',
+      };
+    }
+    if (recovered.snapshot.status === 'failed' || recovered.snapshot.status === 'cancelled') {
+      throw new Error(`desktop_task_${recovered.snapshot.status}`);
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  throw new Error('desktop_task_timeout');
+}
+
+function buildKSwarmAssignPoPrompt(payload: Record<string, unknown>, fallbackWorkerId: string): string {
+  const members = readStringArray(payload.members);
+  return [
+    'KSwarm PO 规划任务。',
+    `项目 ID：${readString(payload.projectId) || readString(payload.taskId)}`,
+    `项目名称：${readString(payload.projectName) || readString(payload.name) || '未命名项目'}`,
+    `用户目标：${readString(payload.goal)}`,
+    readString(payload.requirements) ? `用户要求：${readString(payload.requirements)}` : '',
+    readString(payload.planningGuidance) ? `规划补充：${readString(payload.planningGuidance)}` : '',
+    `可分配 Worker：${members.length > 0 ? members.join(', ') : fallbackWorkerId}`,
+    '不要改写用户目标或用户要求；细化内容只放入 plan 的 phases/items。',
+    '用户没有明确指定数量时，不要为本月/近期/最新类信息收集任务编造固定条数门槛；验收标准应要求尽可能完整覆盖已公开信息，并在公开信息不足时说明搜索范围、已找到条目和信息缺口，不得凑数。',
+    '请只输出一个 JSON object，不要 Markdown，不要解释。',
+    'JSON schema: {"analysis":"string","successCriteria":["string"],"phases":[{"id":"phase-1","name":"string","items":[{"id":"item-1","title":"string","brief":"string","assignedAgent":"string","dependencies":[],"acceptanceCriteria":"string","requiredOutputs":["markdown"]}]}]}',
+  ].filter(Boolean).join('\n');
+}
+
+function buildKSwarmReviewPrompt(payload: Record<string, unknown>): string {
+  return [
+    'KSwarm PO 验收任务提交。',
+    `项目 ID：${readString(payload.projectId)}`,
+    `任务 ID：${readString(payload.taskId)}`,
+    readString(payload.fromWorker) ? `提交 Worker：${readString(payload.fromWorker)}` : '',
+    '任务结果 JSON：',
+    JSON.stringify(payload.result ?? {}, null, 2),
+    '请基于任务结果和产物证据做标准门禁验收。不要因为是小K帮忙推进就绕过门禁。',
+    '请只输出一个 JSON object，不要 Markdown，不要解释。',
+    'JSON schema: {"passed":true,"feedback":"string","failureClass":null,"planRevisionNeeded":false}',
+  ].filter(Boolean).join('\n');
+}
+
+function buildKSwarmSynthesisPrompt(detail: unknown): string {
+  const record = isRecord(detail) ? detail : {};
+  const project = isRecord(record.project) ? record.project : {};
+  const tasks = Array.isArray(record.tasks) ? record.tasks : [];
+  return [
+    'KSwarm 项目收尾。',
+    '项目所有任务已经完成，请写项目小结。',
+    `项目名称：${readString(project.name)}`,
+    `项目目标：${readString(project.goal)}`,
+    '任务状态 JSON：',
+    JSON.stringify(tasks.map(task => {
+      const taskRecord = isRecord(task) ? task : {};
+      return {
+        id: readString(taskRecord.id),
+        title: readString(taskRecord.title),
+        status: readString(taskRecord.status),
+        result: taskRecord.result ?? null,
+      };
+    }), null, 2),
+    '输出 Markdown。内容只写正式项目小结，不要出现修订说明、评审回应、第二轮、【新增】、修订版等内部过程字样。',
+  ].join('\n');
+}
+
+function extractKSwarmJsonObject(text: string): Record<string, unknown> {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) throw new Error('structured_json_missing');
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (isRecord(parsed)) return parsed;
+  } catch {
+    // Fall through to fenced / embedded JSON extraction.
+  }
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    const parsed = JSON.parse(fenced[1]);
+    if (isRecord(parsed)) return parsed;
+  }
+  const embedded = trimmed.match(/\{[\s\S]*\}/);
+  if (embedded?.[0]) {
+    const parsed = JSON.parse(embedded[0]);
+    if (isRecord(parsed)) return parsed;
+  }
+  throw new Error('structured_json_missing');
+}
+
+function normalizeKSwarmPlan(
+  rawPlan: Record<string, unknown>,
+  fallbackWorkerId: string,
+  context: { userGoal?: string; userRequirements?: string; planningGuidance?: string } = {},
+) {
+  const phasesInput = Array.isArray(rawPlan.phases) ? rawPlan.phases : [];
+  const phases = phasesInput.map((phase, phaseIndex) => {
+    const phaseRecord = isRecord(phase) ? phase : {};
+    const phaseId = readString(phaseRecord.id) || `phase-${phaseIndex + 1}`;
+    const itemsInput = Array.isArray(phaseRecord.items) ? phaseRecord.items : [];
+    const items = itemsInput.map((item, itemIndex) => {
+      const itemRecord = isRecord(item) ? item : {};
+      const itemId = readString(itemRecord.id) || `item-${phaseIndex + 1}.${itemIndex + 1}`;
+      return {
+        id: itemId,
+        title: readString(itemRecord.title) || `任务 ${phaseIndex + 1}.${itemIndex + 1}`,
+        brief: readString(itemRecord.brief),
+        rationale: readString(itemRecord.rationale),
+        assignedAgent: readString(itemRecord.assignedAgent) || fallbackWorkerId,
+        dependencies: readStringArray(itemRecord.dependencies),
+        acceptanceCriteria: softenGeneratedTemporalQuantityCriteria(readString(itemRecord.acceptanceCriteria), context),
+        requiredOutputs: readStringArray(itemRecord.requiredOutputs),
+        status: readString(itemRecord.status) || 'pending',
+      };
+    });
+    return {
+      id: phaseId,
+      name: readString(phaseRecord.name) || `阶段 ${phaseIndex + 1}`,
+      items,
+    };
+  }).filter(phase => phase.items.length > 0);
+
+  if (phases.length === 0) {
+    phases.push({
+      id: 'phase-1',
+      name: '交付',
+      items: [{
+        id: 'item-1',
+        title: '完成项目交付',
+        brief: '根据用户目标和要求完成交付。',
+        rationale: '默认执行项',
+        assignedAgent: fallbackWorkerId,
+        dependencies: [],
+        acceptanceCriteria: '交付内容满足用户目标和要求。',
+        requiredOutputs: [],
+        status: 'pending',
+      }],
+    });
+  }
+
+  return {
+    analysis: readString(rawPlan.analysis),
+    successCriteria: readStringArray(rawPlan.successCriteria),
+    phases,
+  };
+}
+
+function softenGeneratedTemporalQuantityCriteria(
+  acceptanceCriteria: string,
+  context: { userGoal?: string; userRequirements?: string; planningGuidance?: string } = {},
+) {
+  const text = String(acceptanceCriteria || '').trim();
+  if (!text) return text;
+  const userText = [context.userGoal, context.userRequirements, context.planningGuidance].filter(Boolean).join('\n');
+  if (userExplicitlyRequestedItemCount(userText)) return text;
+  if (!hasGeneratedHardItemCount(text)) return text;
+  if (!hasCurrentPeriodResearchContext(text)) return text;
+
+  const softened = text.replace(
+    /(包含|列出|整理)?\s*(至少|不少于|不低于)\s*[0-9一二三四五六七八九十百]+\s*条\s*([^，。；;,.]*)/gu,
+    '尽可能完整覆盖已公开的本期相关动态',
+  );
+  const suffix = '若公开信息不足，应明确列出已找到条目、搜索范围、来源和信息缺口，不得编造或用弱相关内容凑数。';
+  return softened.includes('不得编造或用弱相关内容凑数') ? softened : `${softened}${softened.endsWith('。') ? '' : '。'}${suffix}`;
+}
+
+function userExplicitlyRequestedItemCount(text: string) {
+  return /(至少|不少于|不低于|超过|不少过|约|大约)?\s*[0-9一二三四五六七八九十百]+\s*条/u.test(String(text || ''));
+}
+
+function hasGeneratedHardItemCount(text: string) {
+  return /(至少|不少于|不低于)\s*[0-9一二三四五六七八九十百]+\s*条/u.test(text);
+}
+
+function hasCurrentPeriodResearchContext(text: string) {
+  return /(本月|当月|本周|当周|近期|最新|截至|当前|过去|近[一二三四五六七八九十0-9]+[天周月]|产品动态|产品特性|公开信息|来源链接)/u.test(text);
+}
+
+function buildKSwarmTasksFromPlan(plan: ReturnType<typeof normalizeKSwarmPlan>) {
+  return plan.phases.flatMap(phase => phase.items.map(item => ({
+    id: item.id,
+    title: item.title,
+    brief: item.brief,
+    rationale: item.rationale,
+    assignedAgent: item.assignedAgent,
+    dependencies: item.dependencies,
+    phaseId: phase.id,
+    planItemId: item.id,
+    acceptanceCriteria: item.acceptanceCriteria,
+    requiredOutputs: item.requiredOutputs,
+  })));
+}
+
+function normalizeKSwarmReview(rawReview: Record<string, unknown>) {
+  return {
+    passed: rawReview.passed === true,
+    feedback: readString(rawReview.feedback) || (rawReview.passed === true ? '验收通过。' : '验收未通过。'),
+    failureClass: rawReview.failureClass === null ? null : (readString(rawReview.failureClass) || null),
+    planRevisionNeeded: rawReview.planRevisionNeeded === true,
+  };
+}
+
+function shouldSynthesizeKSwarmProject(detail: unknown): boolean {
+  const record = isRecord(detail) ? detail : {};
+  const project = isRecord(record.project) ? record.project : {};
+  if (readString(project.status) === 'delivered' || readString(project.status) === 'closed') return false;
+  const tasks = Array.isArray(record.tasks) ? record.tasks : [];
+  return tasks.length > 0 && tasks.every(task => {
+    const status = isRecord(task) ? readString(task.status) : '';
+    return status === 'done' || status === 'cancelled';
+  });
+}
+
+async function requestKSwarmJson(kswarmService: KSwarmService, path: string, init?: RequestInit): Promise<unknown> {
+  if (!kswarmService) throw new Error('kswarm_service_missing');
+  const response = await kswarmService.request(path, init);
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  if (!response.ok) {
+    throw new Error(`kswarm_http_${response.status}`);
+  }
+  if (isRecord(body) && body.ok === false) {
+    throw new Error(readString(body.error) || 'kswarm_request_failed');
+  }
+  return body;
+}
+
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => readString(item)).filter(Boolean);
 }
 
 async function buildDesktopSessionTraceBundle(
@@ -2252,7 +2727,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
     permission: 'safe',
     definition: {
       name: 'create_project',
-      description: '创建一个多智能体协作项目（KSwarm）。当用户明确要求创建项目、建项目时调用。用户可能同时指定智能体数量、名称和交付物要求。',
+      description: '创建一个多智能体协作项目（KSwarm）。当用户明确要求创建项目、建项目时调用。用户可能同时指定智能体数量、名称和交付物要求。报告默认作为 report renderer HTML 规划；演示文稿/幻灯片默认作为 slide renderer HTML 规划，除非用户明确要求 Markdown 或 PPTX。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -2328,12 +2803,14 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
         }
 
         // 4. 创建项目
+        const planningGuidance = buildCreateProjectPlanningGuidanceForTool({ goal, requirements: requirements || '' });
         const res = await kswarmService.request('/projects', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name, goal,
             requirements: requirements || '',
+            ...(planningGuidance ? { planningGuidance } : {}),
             poAgent,
             members: resolvedMembers,
             ...(resolvedWorkFolder ? { workFolder: resolvedWorkFolder } : {}),
@@ -2357,6 +2834,52 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
       }
     },
   };
+}
+
+function buildCreateProjectPlanningGuidanceForTool(input: { goal: string; requirements?: string }): string {
+  const text = `${input.goal || ''}\n${input.requirements || ''}`;
+  const explicitMarkdown = /(\.md\b|\.markdown\b|\bmarkdown\b)/i.test(text);
+  const explicitPptx = /(\.pptx\b|\bpptx\b|\bpowerpoint\b|\bppt\s*(文件|file|deck)?\b)/i.test(text);
+  const slide = /(幻灯片|演示文稿|slide deck|slides|presentation)/i.test(text);
+  const report = /(报告|\breport\b)/i.test(text);
+  const analysisReport = !report && isAnalysisReportLikeProject(text);
+  if (slide && explicitPptx) {
+    return [
+      '输出意图：用户明确要求演示文稿/幻灯片交付 PPTX。',
+      '不要改写用户目标或项目要求；计划中细化为最终任务生成 PPTX 文件。',
+      '前序内容任务可以产出素材或草稿，但最终交付物必须符合用户明确格式。',
+    ].join('\n');
+  }
+  if (slide && !explicitPptx) {
+    return [
+      '输出意图：用户要演示文稿/幻灯片。',
+      '计划中必须安排最终任务使用 slide renderer 生成 HTML deck；不要默认改成 PPTX。',
+      '前序内容任务可以产出素材或草稿，但最终交付物必须是 slide renderer HTML。',
+    ].join('\n');
+  }
+  if (report && explicitMarkdown) {
+    return [
+      '输出意图：用户明确要求报告交付 Markdown。',
+      '不要改写用户目标或项目要求；计划中细化为最终任务生成 Markdown 报告。',
+      '前序研究/写作任务可以产出素材或草稿，但最终交付物必须符合用户明确格式。',
+    ].join('\n');
+  }
+  if ((report || analysisReport) && !explicitMarkdown) {
+    return [
+      analysisReport
+        ? '输出意图：用户要分析/研究类交付物，默认按报告交付；最终任务必须使用 report renderer 生成 HTML 报告。'
+        : '输出意图：用户要报告，最终任务必须使用 report renderer 生成 HTML 报告。',
+      '不要把用户目标改写为其他交付格式。',
+      '前序研究/写作任务可以产出素材或中间 Markdown，但最终交付物必须是 report renderer HTML。',
+    ].join('\n');
+  }
+  return '';
+}
+
+function isAnalysisReportLikeProject(text: string): boolean {
+  const analysis = /(分析|研究|调研|评估|研判|洞察|复盘|\banalysis\b|\bresearch\b|\bassessment\b|\bbrief\b)/i.test(text);
+  const deliverableCue = /(高层|管理层|决策|战略|研发|产品|竞品|市场|行业|趋势|动态|情况|内容|汇报|材料|交付|leadership|executive|strategy|market|industry|trend|product|competitive)/i.test(text);
+  return analysis && deliverableCue;
 }
 
 export function createKSwarmContinueProjectTool(kswarmService: KSwarmService): Tool {

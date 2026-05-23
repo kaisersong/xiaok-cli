@@ -25,6 +25,17 @@ export interface CreateScheduledTaskInput {
   lastRuntimeTaskId?: string;
 }
 
+export interface UpdateScheduledTaskInput {
+  id: string;
+  name: string;
+  description?: string;
+  prompt: string;
+  trigger: TimedActionTrigger;
+  policy?: TimedActionPolicy;
+  now?: number;
+  nextDueAt?: number;
+}
+
 export interface TimedActionServiceOptions {
   now?: () => number;
 }
@@ -77,6 +88,7 @@ export class TimedActionService {
     const createInput: CreateTimedActionInput = {
       id: input.id,
       title: input.name,
+      description: input.description ?? '',
       trigger: input.trigger,
       executor: { kind: 'agent_task', prompt: input.prompt },
       policy,
@@ -88,7 +100,7 @@ export class TimedActionService {
       lastRuntimeTaskId: input.lastRuntimeTaskId,
     };
     const action = this.store.createAction(createInput);
-    return this.actionToScheduledTask(action, input.description);
+    return this.actionToScheduledTask(action);
   }
 
   listScheduledTasks(): ScheduledTaskRecord[] {
@@ -98,9 +110,35 @@ export class TimedActionService {
       .map(action => this.actionToScheduledTask(action));
   }
 
+  updateScheduledTask(input: UpdateScheduledTaskInput): ScheduledTaskRecord | undefined {
+    const current = this.store.getAction(input.id);
+    if (!current || current.executor.kind !== 'agent_task') return undefined;
+
+    const now = input.now ?? this.now();
+    const policy = this.withScheduledTaskDefaults(
+      input.trigger,
+      input.policy ?? current.policy,
+      current.source,
+      now
+    );
+    const updated = this.store.updateActionDefinition(input.id, {
+      title: input.name,
+      description: input.description ?? current.description ?? '',
+      trigger: input.trigger,
+      executor: { kind: 'agent_task', prompt: input.prompt },
+      policy,
+      nextDueAt: input.nextDueAt,
+      now,
+    });
+    return updated ? this.actionToScheduledTask(updated) : undefined;
+  }
+
   cancelScheduledTask(id: string, reason?: string): boolean {
     const action = this.store.getAction(id);
     if (!action || action.executor.kind !== 'agent_task') return false;
+    if (this.isTemporaryAgentIntervalTask(action)) {
+      return this.store.deleteAction(id);
+    }
     return this.store.cancelAction(id, reason ?? 'scheduled task cancelled', this.now());
   }
 
@@ -151,7 +189,7 @@ export class TimedActionService {
     };
   }
 
-  private actionToScheduledTask(action: TimedActionRecord, description = ''): ScheduledTaskRecord {
+  private actionToScheduledTask(action: TimedActionRecord): ScheduledTaskRecord {
     const prompt = action.executor.kind === 'agent_task' ? action.executor.prompt : '';
     return {
       id: action.id,
@@ -162,16 +200,20 @@ export class TimedActionService {
       nextRunAt: action.nextDueAt,
       lastRunAt: action.lastDueAt,
       scheduleConfig: triggerToScheduleConfig(action.trigger),
-      description,
+      description: action.description ?? '',
       createdAt: action.createdAt,
       updatedAt: action.updatedAt,
-      threadId: action.lastRuntimeTaskId,
-    } as ScheduledTaskRecord & { description?: string; createdAt?: number; updatedAt?: number; threadId?: string };
+      runtimeTaskId: action.lastRuntimeTaskId,
+    } as ScheduledTaskRecord & { description?: string; createdAt?: number; updatedAt?: number };
+  }
+
+  private isTemporaryAgentIntervalTask(action: TimedActionRecord): boolean {
+    return action.source === 'agent' && action.trigger.kind === 'interval';
   }
 }
 
 function triggerToFrequency(trigger: TimedActionTrigger): ScheduledTaskRecord['frequency'] {
-  if (trigger.kind === 'interval') return 'hourly';
+  if (trigger.kind === 'interval') return 'interval';
   if (trigger.kind === 'once') return 'manual';
   return trigger.kind;
 }
@@ -194,4 +236,3 @@ export function reminderEventFromAction(action: TimedActionRecord): ReminderDeli
     createdAt: action.createdAt,
   };
 }
-

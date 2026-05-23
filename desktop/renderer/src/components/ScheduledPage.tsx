@@ -1,19 +1,20 @@
 import { useState, useEffect } from 'react';
-import { Plus, X, Clock, Edit3, Trash2, Play, ChevronLeft, Settings as SettingsIcon, XCircle } from 'lucide-react';
+import { Plus, X, Clock, Edit3, Trash2, Play, ChevronLeft, XCircle } from 'lucide-react';
 import { api, type ThreadRecord } from '../api';
 import { useNavigate } from 'react-router-dom';
 import { useLocale } from '../contexts/LocaleContext';
 
-interface ScheduledTask {
+export interface ScheduledTask {
   id: string;
   name: string;
   description: string;
   prompt: string;
-  frequency: 'manual' | 'hourly' | 'daily' | 'weekdays' | 'weekly';
+  frequency: 'manual' | 'hourly' | 'interval' | 'daily' | 'weekdays' | 'weekly';
   status: 'active' | 'paused';
   createdAt: number;
   updatedAt: number;
   threadId?: string;       // Latest thread for this task
+  runtimeTaskId?: string;  // Latest runtime task snapshot for this task
   lastRunAt?: number;
   nextRunAt?: number;
   scheduleConfig?: {
@@ -25,6 +26,22 @@ interface ScheduledTask {
 }
 
 type ModalMode = 'create' | 'edit' | null;
+type FormFrequency = 'manual' | 'hourly' | 'daily' | 'weekdays' | 'weekly';
+type ScheduledFrequencyLabels = {
+  scheduledManual: string;
+  scheduledHourly: string;
+  scheduledDaily: string;
+  scheduledWeekdays: string;
+  scheduledWeekly: string;
+  scheduledEvery30Min: string;
+  scheduledEveryHour: string;
+  scheduledEvery2Hours: string;
+  scheduledEvery3Hours: string;
+  scheduledEvery4Hours: string;
+  scheduledEvery6Hours: string;
+  scheduledEvery8Hours: string;
+  scheduledEvery12Hours: string;
+};
 
 const FREQUENCY_OPTIONS = [
   { value: 'manual' as const },
@@ -65,7 +82,7 @@ function computeNextRunAt(
 ): number | undefined {
   if (frequency === 'manual' || !config) return undefined;
 
-  if (frequency === 'hourly') {
+  if (frequency === 'hourly' || frequency === 'interval') {
     const interval = (config.intervalMinutes || 60) * 60_000;
     return fromTime + interval;
   }
@@ -114,7 +131,7 @@ function toTimedActionTrigger(
   config: ScheduledTask['scheduleConfig'],
   nextRunAt?: number
 ) {
-  if (frequency === 'hourly') {
+  if (frequency === 'hourly' || frequency === 'interval') {
     return { kind: 'interval', intervalMinutes: config?.intervalMinutes ?? 60 };
   }
   if (frequency === 'daily') {
@@ -127,6 +144,91 @@ function toTimedActionTrigger(
     return { kind: 'weekly', dayOfWeek: config?.dayOfWeek ?? 1, hour: config?.hour ?? 9, minute: config?.minute ?? 0 };
   }
   return { kind: 'once', at: nextRunAt ?? Date.now() };
+}
+
+export function formatScheduledFrequency(
+  task: Pick<ScheduledTask, 'frequency' | 'scheduleConfig'>,
+  labels: ScheduledFrequencyLabels
+): string {
+  const intervalLabels: Record<number, string> = {
+    30: labels.scheduledEvery30Min,
+    60: labels.scheduledEveryHour,
+    120: labels.scheduledEvery2Hours,
+    180: labels.scheduledEvery3Hours,
+    240: labels.scheduledEvery4Hours,
+    360: labels.scheduledEvery6Hours,
+    480: labels.scheduledEvery8Hours,
+    720: labels.scheduledEvery12Hours,
+  };
+  if (task.frequency === 'interval' || task.frequency === 'hourly') {
+    const minutes = task.scheduleConfig?.intervalMinutes ?? 60;
+    if (intervalLabels[minutes]) return intervalLabels[minutes];
+    const english = labels.scheduledEvery30Min.toLowerCase().startsWith('every ');
+    return english ? `Every ${minutes} minutes` : `每 ${minutes} 分钟`;
+  }
+  const frequencyLabels: Record<string, string> = {
+    manual: labels.scheduledManual,
+    daily: labels.scheduledDaily,
+    weekdays: labels.scheduledWeekdays,
+    weekly: labels.scheduledWeekly,
+  };
+  return frequencyLabels[task.frequency] || task.frequency;
+}
+
+export function isRuntimeTaskId(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('task_');
+}
+
+export function normalizeScheduledTaskRuntimeLink(task: ScheduledTask, local?: ScheduledTask): ScheduledTask {
+  const localRuntimeTaskId = local?.runtimeTaskId ?? (isRuntimeTaskId(local?.threadId) ? local?.threadId : undefined);
+  const runtimeTaskId = task.runtimeTaskId ?? (isRuntimeTaskId(task.threadId) ? task.threadId : undefined) ?? localRuntimeTaskId;
+  const threadId = isRuntimeTaskId(task.threadId)
+    ? (local && !isRuntimeTaskId(local.threadId) ? local.threadId : undefined)
+    : task.threadId ?? (local && !isRuntimeTaskId(local.threadId) ? local.threadId : undefined);
+  return { ...task, runtimeTaskId, threadId };
+}
+
+export function mergeScheduledTaskCache(mainItems: ScheduledTask[], localItems: ScheduledTask[]): ScheduledTask[] {
+  const localById = new Map(localItems.map(item => [item.id, item]));
+  return mainItems.map(item => {
+    const local = localById.get(item.id);
+    const normalized = normalizeScheduledTaskRuntimeLink(item, local);
+    const mainDescription = typeof normalized.description === 'string' ? normalized.description.trim() : '';
+    const localDescription = typeof local?.description === 'string' ? local.description.trim() : '';
+    return !mainDescription && localDescription
+      ? { ...normalized, description: local!.description }
+      : normalized;
+  });
+}
+
+function threadHasRuntimeTask(thread: ThreadRecord, runtimeTaskId: string): boolean {
+  return thread.currentTaskId === runtimeTaskId || (thread.taskIds ?? []).includes(runtimeTaskId);
+}
+
+async function findThreadForRuntimeTask(runtimeTaskId: string): Promise<ThreadRecord | null> {
+  const threads = await api.listThreads({ limit: 1000 });
+  return threads.find(thread => threadHasRuntimeTask(thread, runtimeTaskId)) ?? null;
+}
+
+async function ensureThreadForRuntimeTask(task: ScheduledTask): Promise<ScheduledTask> {
+  const normalized = normalizeScheduledTaskRuntimeLink(task);
+  if (!normalized.runtimeTaskId) return normalized;
+
+  if (normalized.threadId) {
+    const existing = await api.getThread(normalized.threadId).catch(() => null);
+    if (existing && threadHasRuntimeTask(existing, normalized.runtimeTaskId)) {
+      return normalized;
+    }
+  }
+
+  const existing = await findThreadForRuntimeTask(normalized.runtimeTaskId).catch(() => null);
+  if (existing) {
+    return { ...normalized, threadId: existing.id };
+  }
+
+  const thread = await api.createThread({ title: (normalized.name || '').slice(0, 40) });
+  await api.updateThreadTaskId(thread.id, normalized.runtimeTaskId);
+  return { ...normalized, threadId: thread.id };
 }
 
 export function ScheduledPage() {
@@ -144,17 +246,9 @@ export function ScheduledPage() {
   const [formName, setFormName] = useState('');
   const [formDesc, setFormDesc] = useState('');
   const [formPrompt, setFormPrompt] = useState('');
-  const [formFrequency, setFormFrequency] = useState<'manual' | 'hourly' | 'daily' | 'weekdays' | 'weekly'>('manual');
+  const [formFrequency, setFormFrequency] = useState<FormFrequency>('manual');
   const [formScheduleConfig, setFormScheduleConfig] = useState<ScheduledTask['scheduleConfig']>({});
   const [saving, setSaving] = useState(false);
-
-  const frequencyLabels: Record<string, string> = {
-    manual: t.scheduledManual,
-    hourly: t.scheduledHourly,
-    daily: t.scheduledDaily,
-    weekdays: t.scheduledWeekdays,
-    weekly: t.scheduledWeekly,
-  };
 
   const intervalLabels: Record<number, string> = {
     30: t.scheduledEvery30Min,
@@ -165,6 +259,14 @@ export function ScheduledPage() {
     360: t.scheduledEvery6Hours,
     480: t.scheduledEvery8Hours,
     720: t.scheduledEvery12Hours,
+  };
+
+  const frequencyLabels: Record<string, string> = {
+    manual: t.scheduledManual,
+    hourly: t.scheduledHourly,
+    daily: t.scheduledDaily,
+    weekdays: t.scheduledWeekdays,
+    weekly: t.scheduledWeekly,
   };
 
   const dayLabels: Record<number, string> = {
@@ -199,12 +301,17 @@ export function ScheduledPage() {
       const raw = localStorage.getItem('xiaok:scheduled-tasks');
       const localItems = raw ? JSON.parse(raw) : [];
       const desktop = (window as any).xiaokDesktop;
-      let scheduledItems: ScheduledTask[] = localItems;
+      let scheduledItems: ScheduledTask[] = localItems.map((item: ScheduledTask) => normalizeScheduledTaskRuntimeLink(item));
       if (desktop?.getScheduledTasks) {
         try {
           const mainItems = await desktop.getScheduledTasks();
           if (Array.isArray(mainItems)) {
-            scheduledItems = mainItems as ScheduledTask[];
+            scheduledItems = mergeScheduledTaskCache(mainItems as ScheduledTask[], localItems as ScheduledTask[]);
+            const linkedItems: ScheduledTask[] = [];
+            for (const item of scheduledItems) {
+              linkedItems.push(await ensureThreadForRuntimeTask(item).catch(() => item));
+            }
+            scheduledItems = linkedItems;
             localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify(scheduledItems));
           }
         } catch { /* fall back to local cache */ }
@@ -228,7 +335,7 @@ export function ScheduledPage() {
 
       const allMap = new Map<string, ScheduledTask>();
       for (const t of [...ipcReminders, ...scheduledItems]) {
-        allMap.set(t.id, t);
+        allMap.set(t.id, normalizeScheduledTaskRuntimeLink(t));
       }
       setTasks(Array.from(allMap.values()));
     } catch { /* ignore */ }
@@ -254,9 +361,9 @@ export function ScheduledPage() {
 
   const openEdit = (task: ScheduledTask) => {
     setFormName(task.name);
-    setFormDesc(task.description);
+    setFormDesc(task.description ?? '');
     setFormPrompt(task.prompt);
-    setFormFrequency(task.frequency);
+    setFormFrequency(task.frequency === 'interval' ? 'hourly' : task.frequency);
     setFormScheduleConfig(task.scheduleConfig || {});
     setEditingTask(task);
     setModalMode('edit');
@@ -307,6 +414,27 @@ export function ScheduledPage() {
       };
       saveTasks([newTask, ...tasks]);
     } else if (editingTask) {
+      const desktop = (window as any).xiaokDesktop;
+      if (desktop?.updateScheduledTask && formFrequency !== 'manual') {
+        try {
+          const saved = await desktop.updateScheduledTask({
+            id: editingTask.id,
+            name: formName.trim(),
+            description: formDesc.trim(),
+            prompt: formPrompt.trim(),
+            trigger: toTimedActionTrigger(formFrequency, formScheduleConfig, nextRunAt),
+            nextDueAt: nextRunAt,
+          });
+          if (saved) {
+            await loadTasks();
+            setSaving(false);
+            closeModal();
+            return;
+          }
+        } catch (e) {
+          console.warn('[Scheduled] main updateScheduledTask failed, falling back to local cache:', e);
+        }
+      }
       const updated = tasks.map(t =>
         t.id === editingTask.id
           ? { ...t, name: formName.trim(), description: formDesc.trim(), prompt: formPrompt.trim(), frequency: formFrequency, scheduleConfig: formFrequency !== 'manual' ? formScheduleConfig : undefined, nextRunAt, updatedAt: now }
@@ -364,7 +492,9 @@ export function ScheduledPage() {
     setRunningId(task.id);
 
     try {
-      let threadId = task.threadId;
+      const normalizedTask = normalizeScheduledTaskRuntimeLink(task);
+      let threadId = normalizedTask.threadId;
+      let runtimeTaskId = normalizedTask.runtimeTaskId;
 
       if (threadId) {
         // Reuse existing thread — update task ID but keep same thread
@@ -374,6 +504,7 @@ export function ScheduledPage() {
             materials: [],
           });
           await api.updateThreadTaskId(threadId, taskId);
+          runtimeTaskId = taskId;
         } catch (e) {
           // Thread might be deleted or stale — fallback to new thread
           console.warn('[Scheduled] Reuse thread failed, creating new:', e);
@@ -390,13 +521,14 @@ export function ScheduledPage() {
         });
         await api.updateThreadTaskId(thread.id, taskId);
         threadId = thread.id;
+        runtimeTaskId = taskId;
       }
 
       // Update task record — recompute nextRunAt so scheduler continues auto-executing
       const now = Date.now();
       saveTasks(tasks.map(t =>
         t.id === task.id
-          ? { ...t, lastRunAt: now, updatedAt: now, threadId, nextRunAt: computeNextRunAt(t.frequency, t.scheduleConfig, now) }
+          ? { ...t, lastRunAt: now, updatedAt: now, threadId, runtimeTaskId, nextRunAt: computeNextRunAt(t.frequency, t.scheduleConfig, now) }
           : t
       ));
 
@@ -409,9 +541,13 @@ export function ScheduledPage() {
     }
   };
 
-  const handleClickTask = (task: ScheduledTask) => {
-    if (task.threadId) {
-      navigate(`/t/${task.threadId}`);
+  const handleClickTask = async (task: ScheduledTask) => {
+    const linked = await ensureThreadForRuntimeTask(task).catch(() => task);
+    if (linked.threadId && linked.threadId !== task.threadId) {
+      saveTasks(tasks.map(t => t.id === task.id ? linked : t));
+    }
+    if (linked.threadId) {
+      navigate(`/t/${linked.threadId}`);
     }
   };
 
@@ -501,7 +637,7 @@ export function ScheduledPage() {
                         {task.status === 'active' ? t.scheduledActive : t.scheduledPaused}
                       </span>
                       <span className="text-xs text-[var(--c-text-tertiary)]">
-                        {frequencyLabels[task.frequency] || task.frequency}
+                        {formatScheduledFrequency(task, t)}
                       </span>
                     </div>
                     {task.description && (
@@ -526,7 +662,7 @@ export function ScheduledPage() {
                       <Play size={12} />
                       {t.scheduledRun}
                     </button>
-                    {task.threadId && (
+                    {(task.threadId || task.runtimeTaskId) && (
                       <button
                         onClick={() => handleClickTask(task)}
                         className="rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"

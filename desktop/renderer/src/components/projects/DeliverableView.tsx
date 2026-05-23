@@ -44,7 +44,15 @@ function ArtifactCard({ artifact, taskTitle, onPreview }: { artifact: KSwarmArti
   );
 }
 
-function DeliverableContent({ deliverable }: { deliverable: unknown }) {
+function DeliverableContent({
+  deliverable,
+  projectId,
+  onPreview,
+}: {
+  deliverable: unknown;
+  projectId?: string;
+  onPreview(artifact: KSwarmArtifact): void;
+}) {
   if (typeof deliverable === 'string') {
     return <p className="text-[13px] text-[var(--c-text-primary)] whitespace-pre-wrap">{deliverable}</p>;
   }
@@ -56,18 +64,13 @@ function DeliverableContent({ deliverable }: { deliverable: unknown }) {
   const obj = deliverable as Record<string, unknown>;
   const description = typeof obj.description === 'string' ? obj.description : null;
   const fileArrayKeys = ['artifacts', 'files', 'expectedArtifacts', 'deliverables'];
-  const fileArrays: Array<{ label: string; items: string[] }> = [];
+  const fileArrays: Array<{ label: string; items: KSwarmArtifact[] }> = [];
 
   for (const key of fileArrayKeys) {
     if (Array.isArray(obj[key]) && obj[key].length > 0) {
-      const items = obj[key].map((item: unknown) => {
-        if (typeof item === 'string') return item;
-        if (typeof item === 'object' && item !== null) {
-          const o = item as Record<string, unknown>;
-          return (o.path || o.name || o.title || JSON.stringify(item)) as string;
-        }
-        return String(item);
-      });
+      const items = obj[key]
+        .map((item: unknown) => normalizeDeliverableFile(item, projectId))
+        .filter((item): item is KSwarmArtifact => item !== null);
       fileArrays.push({ label: key, items });
     }
   }
@@ -98,11 +101,13 @@ function DeliverableContent({ deliverable }: { deliverable: unknown }) {
             <p className="text-[10px] font-medium text-[var(--c-text-muted)] uppercase mb-1">{label}</p>
           )}
           <div className="flex flex-col gap-1.5">
-            {items.map((item, i) => (
-              <div key={i} className="flex items-center gap-2 rounded-md border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-deep)] px-3 py-2">
-                <FileText size={13} className="text-[var(--c-text-icon)] shrink-0" />
-                <span className="text-[12px] text-[var(--c-text-primary)] truncate">{item}</span>
-              </div>
+            {items.map((artifact, i) => (
+              <ArtifactCard
+                key={`${artifact.url || artifact.path || artifact.filename || artifact.name || label}-${i}`}
+                artifact={artifact}
+                taskTitle={fileArrays.length > 1 ? label : '项目交付物'}
+                onPreview={onPreview}
+              />
             ))}
           </div>
         </div>
@@ -144,7 +149,7 @@ export function DeliverableView({ project, tasks: propTasks }: DeliverableViewPr
       {deliverable && (
         <div className="rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-4">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)] mb-3">{t.projectsDeliverableTitle}</h3>
-          <DeliverableContent deliverable={deliverable} />
+          <DeliverableContent deliverable={deliverable} projectId={project.id} onPreview={setPreviewArtifact} />
           {(project as any).deliveredAt && (
             <p className="text-[10px] text-[var(--c-text-muted)] mt-2">
               {t.projectsDeliverableDeliveredAt}: {new Date((project as any).deliveredAt).toLocaleString()}
@@ -209,4 +214,88 @@ export function DeliverableView({ project, tasks: propTasks }: DeliverableViewPr
       )}
     </div>
   );
+}
+
+function normalizeDeliverableFile(item: unknown, projectId?: string): KSwarmArtifact | null {
+  if (typeof item === 'string' || typeof item === 'number') {
+    const filename = String(item);
+    return {
+      name: filename,
+      filename,
+      mimeType: inferMimeType(filename),
+      projectId,
+      url: artifactUrlFromProject(projectId, filename),
+    };
+  }
+
+  if (typeof item !== 'object' || item === null) return null;
+
+  const obj = item as Record<string, unknown>;
+  const source = item as Partial<KSwarmArtifact>;
+  const rawPath = stringField(obj, 'path');
+  const rawUrl = stringField(obj, 'url');
+  const relativePath = stringField(obj, 'relativePath');
+  const displayName = stringField(obj, 'name', 'filename', 'title') || basename(rawPath) || basename(rawUrl) || basename(relativePath);
+  const filename = stringField(obj, 'filename') || displayName;
+  if (!displayName && !filename && !rawPath && !rawUrl) return null;
+
+  const type = stringField(obj, 'type', 'format');
+  const mimeType = stringField(obj, 'mimeType') || inferMimeType(filename || displayName || type);
+
+  return {
+    ...source,
+    name: displayName || filename,
+    filename: filename || displayName,
+    mimeType,
+    type,
+    projectId: stringField(obj, 'projectId') || projectId,
+    path: rawPath,
+    relativePath,
+    url: rawUrl || artifactUrlFromProject(projectId, filename || displayName),
+    size: numberField(obj, 'size'),
+  };
+}
+
+function stringField(obj: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function numberField(obj: Record<string, unknown>, key: string): number | undefined {
+  const value = obj[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function artifactUrlFromProject(projectId?: string, filename?: string): string | undefined {
+  if (!projectId || !filename) return undefined;
+  return `/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(filename)}`;
+}
+
+function basename(value?: string): string {
+  if (!value) return '';
+  const withoutQuery = value.split(/[?#]/, 1)[0] || '';
+  const normalized = withoutQuery.replace(/\/+$/, '');
+  const idx = normalized.lastIndexOf('/');
+  const name = idx >= 0 ? normalized.slice(idx + 1) : normalized;
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
+
+function inferMimeType(value?: string): string | undefined {
+  const lower = (value || '').toLowerCase();
+  if (!lower) return undefined;
+  if (lower.includes('/')) return value;
+  if (lower === 'markdown' || lower.endsWith('.md') || lower.endsWith('.markdown')) return 'text/markdown';
+  if (lower === 'json' || lower.endsWith('.json')) return 'application/json';
+  if (lower === 'html' || lower.endsWith('.html') || lower.endsWith('.htm')) return 'text/html';
+  if (lower === 'text' || lower.endsWith('.txt')) return 'text/plain';
+  if (lower === 'csv' || lower.endsWith('.csv')) return 'text/csv';
+  if (lower === 'pdf' || lower.endsWith('.pdf')) return 'application/pdf';
+  return value;
 }

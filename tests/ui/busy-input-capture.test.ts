@@ -1,12 +1,22 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { InputReader } from '../../src/ui/input.js';
 import type { TranscriptLogger } from '../../src/ui/transcript.js';
 import { ReplRenderer } from '../../src/ui/repl-renderer.js';
 import { createTtyHarness } from '../support/tty.js';
+import { clearPastedImagePaths, parseInputBlocks } from '../../src/ui/image-input.js';
+
+const tempDirs: string[] = [];
 
 describe('InputReader busy capture', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    clearPastedImagePaths();
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('queues a busy draft without resolving a normal read', () => {
@@ -116,7 +126,7 @@ describe('InputReader busy capture', () => {
     }
   });
 
-  it('swallows image paste sequences while busy instead of polluting the draft', () => {
+  it('queues OSC 1337 pasted image placeholders while busy', async () => {
     const harness = createTtyHarness();
     const reader = new InputReader(new ReplRenderer(process.stdout));
 
@@ -126,8 +136,55 @@ describe('InputReader busy capture', () => {
       harness.send(`\x1b]1337;File=name=${Buffer.from('pasted.png').toString('base64')};inline=1:${imageBytes}\x07`);
       harness.send('文字');
 
-      expect(capture.getSnapshot().draft).toBe('文字');
-      expect(capture.getSnapshot().queued).toBeNull();
+      expect(capture.getSnapshot().draft).toBe('[image 0]文字');
+      harness.send('\r');
+
+      const queued = capture.consumeQueued();
+      expect(queued).toBe('[image 0]文字');
+      const blocks = await parseInputBlocks(queued ?? '', true);
+      expect(blocks[0]).toMatchObject({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+        },
+      });
+      expect(blocks[1]).toEqual({ type: 'text', text: '文字' });
+      capture.stop();
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('imports a clipboard image placeholder while busy', async () => {
+    const harness = createTtyHarness();
+    const reader = new InputReader(new ReplRenderer(process.stdout));
+    const imageDir = mkdtempSync(join(tmpdir(), 'xiaok-busy-image-input-'));
+    tempDirs.push(imageDir);
+    const imagePath = join(imageDir, 'clipboard.png');
+    writeFileSync(imagePath, Buffer.from('png-bytes'));
+    reader.setClipboardImageSaver(() => imagePath);
+
+    try {
+      const capture = reader.startBusyCapture({ placeholder: 'Finishing response...' });
+      harness.send('\x16');
+      harness.send(' explain this');
+
+      expect(capture.getSnapshot().draft).toBe('[image 0] explain this');
+      harness.send('\r');
+
+      const queued = capture.consumeQueued();
+      expect(queued).toBe('[image 0] explain this');
+      const blocks = await parseInputBlocks(queued ?? '', true);
+      expect(blocks).toHaveLength(2);
+      expect(blocks[0]).toMatchObject({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+        },
+      });
+      expect(blocks[1]).toEqual({ type: 'text', text: 'explain this' });
       capture.stop();
     } finally {
       harness.restore();

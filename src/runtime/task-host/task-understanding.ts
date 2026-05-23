@@ -6,6 +6,10 @@ interface BuildTaskUnderstandingInput {
 }
 
 export function buildTaskUnderstanding(input: BuildTaskUnderstandingInput): TaskUnderstanding {
+  if (isProjectCreationPrompt(input.prompt)) {
+    return buildProjectCreationUnderstanding(input);
+  }
+
   return {
     goal: buildGoal(input.prompt),
     deliverable: '可继续编辑的 PPT 初稿',
@@ -30,6 +34,41 @@ export function buildTaskUnderstanding(input: BuildTaskUnderstandingInput): Task
     ],
     nextAction: 'confirm_outline_direction',
   };
+}
+
+function buildProjectCreationUnderstanding(input: BuildTaskUnderstandingInput): TaskUnderstanding {
+  return {
+    goal: input.prompt.trim(),
+    deliverable: inferProjectDeliverable(input.prompt),
+    taskType: 'unknown',
+    audience: '用户',
+    inputs: input.materials.map((material) => ({
+      materialId: material.materialId,
+      name: material.originalName,
+      role: material.role,
+      parseStatus: material.parseStatus,
+      parseSummary: material.parseSummary,
+    })),
+    missingInfo: [],
+    assumptions: [],
+    riskLevel: 'medium',
+    suggestedPlan: [
+      { id: 'create_project', label: '创建项目并分配智能体', status: 'planned' },
+      { id: 'track_project_delivery', label: '跟踪项目交付物', status: 'planned' },
+    ],
+    nextAction: 'create_project',
+  };
+}
+
+function isProjectCreationPrompt(prompt: string): boolean {
+  return /(?:创建|新建).{0,20}项目|create_project|swarm\s*project/iu.test(prompt);
+}
+
+function inferProjectDeliverable(prompt: string): string {
+  if (/报告|markdown|\.md\b/iu.test(prompt)) {
+    return 'Swarm 项目与后续报告产出';
+  }
+  return 'Swarm 项目';
 }
 
 function buildGoal(prompt: string): string {

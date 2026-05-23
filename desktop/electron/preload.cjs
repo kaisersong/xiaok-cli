@@ -109,6 +109,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks),
   getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks'),
   createScheduledTask: (input) => ipcRenderer.invoke('desktop:createScheduledTask', input),
+  updateScheduledTask: (input) => ipcRenderer.invoke('desktop:updateScheduledTask', input),
   cancelScheduledTask: (id) => ipcRenderer.invoke('desktop:cancelScheduledTask', id),
   getTimedActions: () => ipcRenderer.invoke('desktop:getTimedActions'),
   getTimedActionRuns: (actionId) => ipcRenderer.invoke('desktop:getTimedActionRuns', actionId),
@@ -127,4 +128,8 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
       ipcRenderer.off(channel, listener);
     };
   },
+  getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig'),
+  saveConnectorsConfig: (input) => ipcRenderer.invoke('desktop:saveConnectorsConfig', input),
+  listConnectorRuntimes: () => ipcRenderer.invoke('desktop:listConnectorRuntimes'),
+  testConnectorProvider: (kind) => ipcRenderer.invoke('desktop:testConnectorProvider', kind),
 });

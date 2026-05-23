@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, nativeImage, Menu } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, mkdirSync } from 'node:fs';
@@ -20,6 +20,13 @@ import { TimedActionStore } from './timed-action-store.js';
 import { TimedActionService } from './timed-action-service.js';
 import { TimedActionScheduler } from './timed-action-scheduler.js';
 import { createAgentTaskExecutor, createNotifyExecutor } from './timed-action-executors.js';
+import { attachDesktopContextMenu } from './context-menu.js';
+import {
+  createKSwarmRuntimeBridge,
+  createKSwarmRuntimeBridgeBrokerClient,
+  submitKSwarmRuntimeResultToBroker,
+} from './kswarm-runtime-bridge.js';
+import { XIAOK_PO_SEED_ID, XIAOK_WORKER_SEED_ID } from '../shared/kswarm-seed-contract.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -62,10 +69,11 @@ async function createWindow(): Promise<BrowserWindow> {
   }));
   debugMain('createWindow:browserWindow-created');
   removeWindowsWindowMenu(window, process.platform);
+  attachDesktopContextMenu(window, Menu);
   mainWindow = window;
   // KSwarm service — manages kswarm server as a child process
   const kswarmService = createKSwarmService();
-  kswarmService.start().catch((err) => {
+  const kswarmStartPromise = kswarmService.start().catch((err) => {
     console.error('[main] Failed to start kswarm service:', err);
   });
   ipcMain.handle('desktop:kswarm:getStatus', () => kswarmService.getStatus());
@@ -81,8 +89,14 @@ async function createWindow(): Promise<BrowserWindow> {
     dataRoot,
     kswarmService,
   });
+
   await registerDesktopIpc(ipcMain, window, services);
   debugMain('createWindow:ipc-registered');
+
+  ipcMain.handle('desktop:getConnectorsConfig', () => services.getConnectorsConfig());
+  ipcMain.handle('desktop:saveConnectorsConfig', (_event, input) => services.setConnectorsConfig(input));
+  ipcMain.handle('desktop:listConnectorRuntimes', () => services.listConnectorRuntimes());
+  ipcMain.handle('desktop:testConnectorProvider', (_event, kind) => services.testConnectorProvider(kind));
 
   // Register update IPC handlers
   ipcMain.handle('desktop:getUpdateStatus', () => {
@@ -130,9 +144,67 @@ async function createWindow(): Promise<BrowserWindow> {
 
   // Register MCP plugin tools (connects to MCP servers declared in ~/.xiaok/plugins)
   let mcpDispose: (() => void) | undefined;
+  const runtimeBridgeClients: Array<{ start(): Promise<void>; stop(): void }> = [];
+  let runtimeBridgeStarted = false;
+  let runtimeBridgeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  const startRuntimeBridge = () => {
+    if (runtimeBridgeStarted) return;
+    runtimeBridgeStarted = true;
+    if (runtimeBridgeFallbackTimer) {
+      clearTimeout(runtimeBridgeFallbackTimer);
+      runtimeBridgeFallbackTimer = null;
+    }
+    void kswarmStartPromise.then(() => {
+      const brokerUrl = 'http://127.0.0.1:4318';
+      const runtimeBridge = {
+        ...createKSwarmRuntimeBridge({
+        allowedRoots: [join(app.getPath('home'), '.kswarm', 'handoff-packages')],
+        runDesktopTask: (input) => services.runKSwarmHandoffTask(input),
+        submitResult: (input) => submitKSwarmRuntimeResultToBroker({
+          brokerUrl,
+          participantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
+          projectId: input.projectId,
+          taskId: input.taskId,
+          runId: input.runId,
+          result: input.result,
+        }),
+        }),
+        handleAssignPo: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmAssignPo(input),
+        handleReviewSubmission: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmReviewSubmission(input),
+        handlePlanApproved: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmPlanApproved(input),
+      };
+      runtimeBridgeClients.push(
+        createKSwarmRuntimeBridgeBrokerClient({
+          brokerUrl,
+          participantId: XIAOK_PO_SEED_ID,
+          alias: 'PO-Agent',
+          roles: ['project_owner'],
+          capabilities: ['research', 'analysis', 'coding', 'testing', 'design', 'planning', 'reporting', 'slides'],
+          bridge: runtimeBridge,
+        }),
+        createKSwarmRuntimeBridgeBrokerClient({
+          brokerUrl,
+          participantId: XIAOK_WORKER_SEED_ID,
+          alias: 'Worker-Agent',
+          roles: ['worker'],
+          capabilities: ['research', 'analysis', 'coding', 'testing', 'design', 'planning', 'reporting', 'slides'],
+          bridge: runtimeBridge,
+        }),
+      );
+      for (const client of runtimeBridgeClients) {
+        client.start().catch((error) => {
+          console.warn('[main] Failed to start kswarm runtime bridge client:', (error as Error).message);
+        });
+      }
+    });
+  };
+  runtimeBridgeFallbackTimer = setTimeout(startRuntimeBridge, 10_000);
   services.registerMcpTools().then(({ dispose }) => {
     mcpDispose = dispose;
-  }).catch(() => {});
+    startRuntimeBridge();
+  }).catch(() => {
+    startRuntimeBridge();
+  });
   debugMain('createWindow:mcp-registration-started');
 
   const timedActionScheduler = new TimedActionScheduler(timedActionStore, {
@@ -141,6 +213,19 @@ async function createWindow(): Promise<BrowserWindow> {
       agent_task: createAgentTaskExecutor({
         createTask: (input) => services.createTask(input),
       }),
+    },
+    onRunComplete: (event) => {
+      if (event.action.executor.kind !== 'agent_task') return;
+      if (window.isDestroyed()) return;
+      window.webContents.send('desktop:scheduledTaskDue', {
+        taskId: event.action.id,
+        runtimeTaskId: event.runtimeTaskId,
+        completed: true,
+        success: event.status === 'success',
+        lastRunAt: event.action.lastDueAt ?? event.finishedAt,
+        nextRunAt: event.action.nextDueAt,
+        error: event.error,
+      });
     },
   });
   timedActionScheduler.start();
@@ -155,6 +240,9 @@ async function createWindow(): Promise<BrowserWindow> {
   ipcMain.handle('desktop:createScheduledTask', (_event, input) => {
     return timedActionService.createScheduledTask(input);
   });
+  ipcMain.handle('desktop:updateScheduledTask', (_event, input) => {
+    return timedActionService.updateScheduledTask(input);
+  });
   ipcMain.handle('desktop:cancelScheduledTask', (_event, id: string) => {
     return timedActionService.cancelScheduledTask(id);
   });
@@ -167,6 +255,11 @@ async function createWindow(): Promise<BrowserWindow> {
 
   app.on('before-quit', () => {
     kswarmService.stop().catch(() => {});
+    if (runtimeBridgeFallbackTimer) {
+      clearTimeout(runtimeBridgeFallbackTimer);
+      runtimeBridgeFallbackTimer = null;
+    }
+    for (const client of runtimeBridgeClients) client.stop();
     timedActionScheduler.stop();
     timedActionStore.close();
     mcpDispose?.();

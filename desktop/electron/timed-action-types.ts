@@ -24,6 +24,7 @@ export type TimedActionExecutorKind = TimedActionExecutor['kind'];
 export interface TimedActionRecord {
   id: string;
   title: string;
+  description?: string;
   trigger: TimedActionTrigger;
   executor: TimedActionExecutor;
   policy: TimedActionPolicy;
@@ -101,6 +102,7 @@ export interface TimedActionExecutorHandler {
 export interface CreateTimedActionInput {
   id?: string;
   title: string;
+  description?: string;
   trigger: TimedActionTrigger;
   executor: TimedActionExecutor;
   policy?: TimedActionPolicy;
@@ -114,4 +116,3 @@ export interface CreateTimedActionInput {
   consecutiveFailures?: number;
   lastRuntimeTaskId?: string;
 }
-

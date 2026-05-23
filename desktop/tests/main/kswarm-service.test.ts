@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildBackgroundNodeSpawnOptions, KSwarmUnavailableError } from '../../electron/kswarm-service.js';
+import {
+  buildBackgroundNodeSpawnOptions,
+  KSwarmUnavailableError,
+  shouldAdoptExistingKSwarmService,
+} from '../../electron/kswarm-service.js';
 
 // We can't actually spawn kswarm in unit tests, so request() behavior is tested
 // with a mock that mirrors the service gateway contract.
@@ -90,6 +94,17 @@ describe('kswarm service spawn options', () => {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     expect(options.windowsHide).toBeUndefined();
+  });
+});
+
+describe('kswarm service external adoption', () => {
+  it('adopts an already healthy service when desktop does not own a child process', () => {
+    expect(shouldAdoptExistingKSwarmService({ hasOwnedChild: false, healthOk: true })).toBe(true);
+  });
+
+  it('does not treat a desktop-owned child as an external service', () => {
+    expect(shouldAdoptExistingKSwarmService({ hasOwnedChild: true, healthOk: true })).toBe(false);
+    expect(shouldAdoptExistingKSwarmService({ hasOwnedChild: false, healthOk: false })).toBe(false);
   });
 });
 

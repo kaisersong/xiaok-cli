@@ -119,6 +119,10 @@ export function buildBackgroundNodeSpawnOptions(options: {
   };
 }
 
+export function shouldAdoptExistingKSwarmService(input: { hasOwnedChild: boolean; healthOk: boolean }): boolean {
+  return input.healthOk && !input.hasOwnedChild;
+}
+
 export interface KSwarmService {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -335,6 +339,18 @@ export function createKSwarmService(): KSwarmService {
   }
 
   async function spawnServer(): Promise<void> {
+    const existingHealthy = await healthCheck();
+    if (shouldAdoptExistingKSwarmService({ hasOwnedChild: Boolean(child), healthOk: existingHealthy })) {
+      console.log(`[kswarm-service] Adopting existing healthy kswarm service on port ${KSWARM_PORT}`);
+      await reconcileSeedAgents();
+      running = true;
+      lastError = null;
+      restartCount = 0;
+      startHealthCheck();
+      notifyListeners();
+      return;
+    }
+
     const serverPath = resolveServicePath('kswarm', 'src/server/index.js');
     if (!serverPath) {
       lastError = 'kswarm server entry not found';

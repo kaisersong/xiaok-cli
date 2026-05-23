@@ -45,7 +45,7 @@ function makeConfig(overrides?: Partial<Config>): Config {
 }
 
 describe('managed xiaok agent payload', () => {
-  it('maps anthropic desktop config to a kswarm-compatible xiaok agent payload', () => {
+  it('builds desktop-managed xiaok seed payload as a runtime reference without provider secrets', () => {
     const payload = buildManagedXiaokAgentPayload(
       {
         id: 'xiaok-po',
@@ -55,24 +55,41 @@ describe('managed xiaok agent payload', () => {
         roles: ['project_owner'],
       },
       makeConfig(),
-      { runtimePath: 'C:\\Users\\song\\AppData\\Roaming\\npm\\xiaok.cmd' },
+      { runtimePath: null },
     );
 
     expect(payload).toMatchObject({
       id: 'xiaok-po',
       name: 'PO-Agent',
       runtimeType: 'xiaok',
-      runtimePath: 'C:\\Users\\song\\AppData\\Roaming\\npm\\xiaok.cmd',
+      runtimeSource: 'desktop-agent-runtime',
+      runtimePath: null,
       runtimeModel: 'claude-sonnet-4-6',
-      provider: 'anthropic',
-      model: 'claude-sonnet-4-6',
-      apiKey: 'sk-anthropic',
-      baseUrl: 'https://api.anthropic.com',
+      provider: null,
+      model: null,
+      apiKey: null,
+      baseUrl: null,
       roles: ['project_owner'],
     });
+    expect(payload.runtimeHealth).toMatchObject({
+      state: 'unknown',
+      source: 'desktop-agent-runtime',
+    });
+    expect(payload.runtimeHealth.taskCapabilities).toEqual(expect.arrayContaining([
+      'research',
+      'analysis',
+      'web_research',
+      'report_generation',
+      'presentation_generation',
+    ]));
+    expect(payload.runtimeHealth.outputCapabilities).toEqual(expect.arrayContaining([
+      'markdown',
+      'html',
+      'report_html',
+    ]));
   });
 
-  it('maps openai-compatible desktop providers to kswarm openai provider', () => {
+  it('keeps runtime model for desktop while withholding openai-compatible provider config from kswarm', () => {
     const config = makeConfig({
       defaultProvider: 'openai',
       defaultModelId: 'openai-default',
@@ -88,9 +105,12 @@ describe('managed xiaok agent payload', () => {
       { runtimePath: null },
     );
 
-    expect(payload.provider).toBe('openai');
-    expect(payload.model).toBe('gpt-4o');
-    expect(payload.baseUrl).toBe('https://api.openai.com/v1');
+    expect(payload.runtimeSource).toBe('desktop-agent-runtime');
+    expect(payload.runtimeModel).toBe('gpt-4o');
+    expect(payload.provider).toBeNull();
+    expect(payload.model).toBeNull();
+    expect(payload.baseUrl).toBeNull();
+    expect(payload.apiKey).toBeNull();
     expect(payload.runtimePath).toBeNull();
   });
 
@@ -104,7 +124,7 @@ describe('managed xiaok agent payload', () => {
         roles: ['worker'],
       },
       makeConfig(),
-      { runtimePath: 'C:\\Users\\song\\AppData\\Roaming\\npm\\xiaok.cmd' },
+      { runtimePath: null },
     );
 
     const patch = diffManagedXiaokAgentPatch(
@@ -114,11 +134,12 @@ describe('managed xiaok agent payload', () => {
         description: 'worker',
         instructions: 'work',
         runtimeType: 'xiaok',
-        runtimePath: null,
-        provider: null,
-        model: null,
-        baseUrl: null,
-        apiKey: null,
+        runtimePath: 'C:\\Users\\song\\AppData\\Roaming\\npm\\xiaok.cmd',
+        runtimeSource: undefined,
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'sk-anthropic',
         roles: ['worker'],
         capabilities: desired.capabilities,
       },
@@ -126,10 +147,12 @@ describe('managed xiaok agent payload', () => {
     );
 
     expect(patch).toMatchObject({
-      runtimePath: 'C:\\Users\\song\\AppData\\Roaming\\npm\\xiaok.cmd',
-      provider: 'anthropic',
-      model: 'claude-sonnet-4-6',
-      apiKey: 'sk-anthropic',
+      runtimePath: null,
+      runtimeSource: 'desktop-agent-runtime',
+      provider: null,
+      model: null,
+      baseUrl: null,
+      apiKey: null,
     });
   });
 
@@ -166,12 +189,16 @@ describe('managed xiaok agent payload', () => {
 
     expect(patch).toMatchObject({
       runtimePath: null,
+      provider: null,
+      model: null,
+      baseUrl: null,
+      apiKey: null,
     });
   });
 });
 
 describe('resolveLocalXiaokRuntimePath', () => {
-  it('auto-binds the Windows global xiaok PowerShell launcher when available', () => {
+  it('does not auto-bind the Windows global xiaok PowerShell launcher for default desktop agents', () => {
     const runtimePath = resolveLocalXiaokRuntimePath({
       platform: 'win32',
       env: {
@@ -180,7 +207,7 @@ describe('resolveLocalXiaokRuntimePath', () => {
       exists: (candidate) => candidate === 'C:\\Users\\song\\AppData\\Roaming\\npm\\xiaok.ps1',
     });
 
-    expect(runtimePath).toBe('C:\\Users\\song\\AppData\\Roaming\\npm\\xiaok.ps1');
+    expect(runtimePath).toBeNull();
   });
 
   it('still honors an explicit native runtime override when provided', () => {
@@ -195,7 +222,7 @@ describe('resolveLocalXiaokRuntimePath', () => {
     expect(runtimePath).toBe('C:\\Tools\\xiaok.exe');
   });
 
-  it('uses an explicit Windows PowerShell launcher override when provided', () => {
+  it('does not auto-bind an explicit Windows PowerShell launcher shim by default', () => {
     const runtimePath = resolveLocalXiaokRuntimePath({
       platform: 'win32',
       env: {
@@ -204,6 +231,6 @@ describe('resolveLocalXiaokRuntimePath', () => {
       exists: (candidate) => candidate === 'D:\\tools\\xiaok.ps1',
     });
 
-    expect(runtimePath).toBe('D:\\tools\\xiaok.ps1');
+    expect(runtimePath).toBeNull();
   });
 });

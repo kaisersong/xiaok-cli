@@ -10,6 +10,7 @@ import type {
   UserAnswer,
   DesktopTaskEvent,
   ProtocolId,
+  ConnectorTestResult,
 } from '../../../electron/preload-api';
 import type { ThreadRecord } from './types';
 
@@ -556,13 +557,58 @@ export const api = {
   },
 
   // ---------------------
-  // Connectors API (mock)
+  // Connectors API
   // ---------------------
-  async getConnectorsConfig(): Promise<{ fetch: { provider: 'none' }; search: { provider: 'none' } }> {
+  async getConnectorsConfig(): Promise<import('./types').ConnectorsConfigSnapshot | null> {
+    const desktop = (window as unknown as { xiaokDesktop?: { getConnectorsConfig?: () => Promise<import('./types').ConnectorsConfigSnapshot | null> } }).xiaokDesktop;
+    if (desktop?.getConnectorsConfig) {
+      try {
+        return await desktop.getConnectorsConfig();
+      } catch {
+        return null;
+      }
+    }
     return {
-      fetch: { provider: 'none' },
-      search: { provider: 'none' },
+      config: {
+        search: { provider: 'duckduckgo' },
+        fetch: { provider: 'basic' },
+      },
+      loadStatus: 'missing',
+      providers: [],
     };
+  },
+  async saveConnectorsConfig(input: import('./types').ConnectorsConfig): Promise<import('./types').ConnectorsConfigSnapshot | null> {
+    const desktop = (window as unknown as { xiaokDesktop?: { saveConnectorsConfig?: (input: unknown) => Promise<import('./types').ConnectorsConfigSnapshot> } }).xiaokDesktop;
+    if (desktop?.saveConnectorsConfig) {
+      try {
+        return await desktop.saveConnectorsConfig(input);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  },
+  async listConnectorRuntimes(): Promise<import('./types').ConnectorsProviderRuntime[]> {
+    const desktop = (window as unknown as { xiaokDesktop?: { listConnectorRuntimes?: () => Promise<import('./types').ConnectorsProviderRuntime[]> } }).xiaokDesktop;
+    if (desktop?.listConnectorRuntimes) {
+      try {
+        return await desktop.listConnectorRuntimes();
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  },
+  async testConnectorProvider(kind: 'search' | 'fetch'): Promise<ConnectorTestResult> {
+    const desktop = (window as unknown as { xiaokDesktop?: { testConnectorProvider?: (kind: 'search' | 'fetch') => Promise<ConnectorTestResult> } }).xiaokDesktop;
+    if (desktop?.testConnectorProvider) {
+      try {
+        return await desktop.testConnectorProvider(kind);
+      } catch (e) {
+        return { success: false, latencyMs: 0, providerName: 'unknown', error: (e as Error).message };
+      }
+    }
+    return { success: false, latencyMs: 0, providerName: 'none', error: 'not available in browser' };
   },
 
   // ---------------------

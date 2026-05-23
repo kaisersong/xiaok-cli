@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { TimedActionStore } from '../../electron/timed-action-store.js';
 
 describe('TimedActionStore', () => {
@@ -15,7 +16,9 @@ describe('TimedActionStore', () => {
   });
 
   afterEach(() => {
-    store.close();
+    try {
+      store.close();
+    } catch { /* already closed in a migration test */ }
     rmSync(rootDir, { recursive: true, force: true });
   });
 
@@ -110,6 +113,70 @@ describe('TimedActionStore', () => {
     expect(store.listRuns('action_skip')[0]).toMatchObject({
       status: 'complete',
       error: 'too old',
+    });
+  });
+
+  it('migrates legacy timed action databases that do not have a description column', () => {
+    store.close();
+    const dbPath = join(rootDir, 'legacy-timed-actions.sqlite');
+    const legacyDb = new DatabaseSync(dbPath);
+    legacyDb.exec(`
+      create table timed_actions (
+        id text primary key,
+        title text not null,
+        trigger_kind text not null,
+        trigger_json text not null,
+        executor_kind text not null,
+        executor_json text not null,
+        policy_json text not null,
+        status text not null,
+        source text not null,
+        created_by_task_id text,
+        next_due_at integer,
+        last_due_at integer,
+        run_count integer not null default 0,
+        consecutive_failures integer not null default 0,
+        locked_run_id text,
+        locked_at integer,
+        last_runtime_task_id text,
+        last_error text,
+        created_at integer not null,
+        updated_at integer not null
+      );
+
+      create table timed_action_runs (
+        run_id text primary key,
+        action_id text not null,
+        executor_kind text not null,
+        status text not null,
+        started_at integer not null,
+        finished_at integer,
+        runtime_task_id text,
+        error text,
+        decision_json text,
+        foreign key(action_id) references timed_actions(id)
+      );
+    `);
+    legacyDb.prepare(`
+      insert into timed_actions (
+        id, title, trigger_kind, trigger_json, executor_kind, executor_json, policy_json,
+        status, source, created_by_task_id, next_due_at, last_due_at, run_count,
+        consecutive_failures, locked_run_id, locked_at, last_runtime_task_id, last_error,
+        created_at, updated_at
+      ) values (
+        'legacy_action', '历史任务', 'once', '{"kind":"once","at":2000}',
+        'agent_task', '{"kind":"agent_task","prompt":"检查"}', '{}',
+        'active', 'user', null, 2000, null, 0, 0, null, null, null, null, 1000, 1000
+      )
+    `).run();
+    legacyDb.close();
+
+    store = new TimedActionStore(dbPath);
+
+    expect(store.getAction('legacy_action')).toMatchObject({
+      id: 'legacy_action',
+      title: '历史任务',
+      description: '',
     });
   });
 });

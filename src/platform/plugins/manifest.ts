@@ -99,11 +99,14 @@ export function parsePluginManifest(raw: Record<string, unknown>, pluginDir: str
 
         // 根据 type 构建 config
         if (type === 'stdio') {
+          const rawArgs = Array.isArray(entry.args) ? entry.args.filter((a): a is string => typeof a === 'string') : undefined;
+          // Resolve relative paths in args against the plugin directory
+          const resolvedArgs = rawArgs?.map((arg) => arg.startsWith('/') || arg.startsWith('-') ? arg : resolve(pluginDir, arg));
           return {
             name,
             type: 'stdio',
             command: String(entry.command ?? ''),
-            args: Array.isArray(entry.args) ? entry.args.filter((a): a is string => typeof a === 'string') : undefined,
+            args: resolvedArgs,
             env: entry.env && typeof entry.env === 'object' ? entry.env as Record<string, string> : undefined,
           } as PluginManifestMcpServer;
         }

@@ -8,6 +8,12 @@ import type {
   UserAnswer,
 } from '../../src/runtime/task-host/types.js';
 import type { ProtocolId } from '../../src/ai/providers/types.js';
+import type {
+  ConnectorsConfig,
+  ProviderRuntime,
+  SearchProviderName,
+  FetchProviderName,
+} from '../../src/ai/tools/connectors/config.js';
 
 // Re-export types for renderer usage
 export type {
@@ -18,6 +24,10 @@ export type {
   TaskUnderstanding,
   UserAnswer,
   ProtocolId,
+  ConnectorsConfig,
+  ProviderRuntime,
+  SearchProviderName,
+  FetchProviderName,
 };
 
 export const PRELOAD_API_KEYS = [
@@ -79,6 +89,7 @@ export const PRELOAD_API_KEYS = [
   'syncScheduledTasks',
   'getScheduledTasks',
   'createScheduledTask',
+  'updateScheduledTask',
   'cancelScheduledTask',
   'getTimedActions',
   'getTimedActionRuns',
@@ -96,6 +107,10 @@ export const PRELOAD_API_KEYS = [
   'memoryClearAll',
   'memoryGetModelId',
   'memorySetModelId',
+  'getConnectorsConfig',
+  'saveConnectorsConfig',
+  'listConnectorRuntimes',
+  'testConnectorProvider',
 ] as const;
 
 export interface DesktopModelProviderView {
@@ -236,6 +251,14 @@ export interface KSwarmServiceStatus {
   lastError: string | null;
 }
 
+export type ConnectorsLoadStatus = 'ok' | 'missing' | 'parse_failed';
+
+export interface ConnectorsConfigSnapshot {
+  config: ConnectorsConfig;
+  loadStatus: ConnectorsLoadStatus;
+  providers: ProviderRuntime[];
+}
+
 export type DesktopTraceTarget = { kind: 'session' | 'project' | 'task'; id: string };
 
 export interface DesktopApi {
@@ -325,6 +348,7 @@ export interface DesktopApi {
   syncScheduledTasks(tasks: Array<{ id: string; cronExpr: string; enabled: boolean }>): Promise<void>;
   getScheduledTasks(): Promise<unknown[]>;
   createScheduledTask(input: unknown): Promise<unknown>;
+  updateScheduledTask(input: unknown): Promise<unknown>;
   cancelScheduledTask(id: string): Promise<boolean>;
   getTimedActions(): Promise<unknown[]>;
   getTimedActionRuns(actionId: string): Promise<unknown[]>;
@@ -342,6 +366,18 @@ export interface DesktopApi {
   memoryClearAll(): Promise<boolean>;
   memoryGetModelId(): Promise<string | null>;
   memorySetModelId(modelId: string | null): Promise<boolean>;
+  getConnectorsConfig(): Promise<ConnectorsConfigSnapshot | null>;
+  saveConnectorsConfig(input: ConnectorsConfig): Promise<ConnectorsConfigSnapshot>;
+  listConnectorRuntimes(): Promise<ProviderRuntime[]>;
+  testConnectorProvider(kind: 'search' | 'fetch'): Promise<ConnectorTestResult>;
+}
+
+export interface ConnectorTestResult {
+  success: boolean;
+  latencyMs: number;
+  providerName: string;
+  detail?: string;
+  error?: string;
 }
 
 interface IpcRendererLike {
@@ -447,6 +483,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks) as Promise<void>,
     getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks') as Promise<unknown[]>,
     createScheduledTask: (input) => ipcRenderer.invoke('desktop:createScheduledTask', input) as Promise<unknown>,
+    updateScheduledTask: (input) => ipcRenderer.invoke('desktop:updateScheduledTask', input) as Promise<unknown>,
     cancelScheduledTask: (id) => ipcRenderer.invoke('desktop:cancelScheduledTask', id) as Promise<boolean>,
     getTimedActions: () => ipcRenderer.invoke('desktop:getTimedActions') as Promise<unknown[]>,
     getTimedActionRuns: (actionId) => ipcRenderer.invoke('desktop:getTimedActionRuns', actionId) as Promise<unknown[]>,
@@ -473,6 +510,10 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     memoryClearAll: () => ipcRenderer.invoke('desktop:memoryClearAll') as Promise<boolean>,
     memoryGetModelId: () => ipcRenderer.invoke('desktop:memoryGetModelId') as Promise<string | null>,
     memorySetModelId: (modelId: string | null) => ipcRenderer.invoke('desktop:memorySetModelId', modelId) as Promise<boolean>,
+    getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig') as Promise<ConnectorsConfigSnapshot | null>,
+    saveConnectorsConfig: (input) => ipcRenderer.invoke('desktop:saveConnectorsConfig', input) as Promise<ConnectorsConfigSnapshot>,
+    listConnectorRuntimes: () => ipcRenderer.invoke('desktop:listConnectorRuntimes') as Promise<ProviderRuntime[]>,
+    testConnectorProvider: (kind) => ipcRenderer.invoke('desktop:testConnectorProvider', kind) as Promise<ConnectorTestResult>,
   };
 }
 
