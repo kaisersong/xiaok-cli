@@ -1,5 +1,6 @@
 import * as readline from 'readline';
 import { stdin, stdout } from 'process';
+import { StringDecoder } from 'node:string_decoder';
 import { boldCyan, dim } from './render.js';
 import { getSkillCommandNames, type SkillMeta } from '../ai/skills/loader.js';
 import { appendFileSync } from 'fs';
@@ -504,8 +505,10 @@ export class InputReader {
       },
     });
 
+    const decoder = new StringDecoder('utf8');
     const onData = (data: Buffer) => {
-      const key = data.toString('utf8');
+      const key = decoder.write(data);
+      if (!key) return;
       this.transcriptLogger?.record({ type: 'input_key', key, timestamp: Date.now() });
       inputEngine.handleChunk(key);
     };
@@ -995,8 +998,10 @@ export class InputReader {
         resolve(result);
       };
 
+      const inputDecoder = new StringDecoder('utf8');
       const onData = (data: Buffer) => {
-        const key = data.toString('utf8');
+        const key = inputDecoder.write(data);
+        if (!key) return;
         log(`RAW KEY pressed: ${JSON.stringify(key)} bytes=${data.length} hex=${data.toString('hex')} input=${JSON.stringify(input)} cursor=${cursor}`);
         this.transcriptLogger?.record({ type: 'input_key', key, timestamp: Date.now() });
 
