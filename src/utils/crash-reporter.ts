@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getConfigDir } from './config.js';
 
@@ -15,6 +15,8 @@ let crashContext: CrashContext = {};
 let handlersInstalled = false;
 let streamErrorHandler: StreamErrorHandler | null = null;
 
+const CRASH_REPORT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
 export function setCrashContext(ctx: CrashContext): void {
   crashContext = { ...crashContext, ...ctx };
 }
@@ -26,6 +28,7 @@ export function setStreamErrorHandler(handler: StreamErrorHandler | null): void 
 export async function reportCrash(error: unknown): Promise<string> {
   const crashDir = join(getConfigDir(), 'crashes');
   await mkdir(crashDir, { recursive: true });
+  await cleanupExpiredCrashReports(crashDir);
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const fileName = `crash-${timestamp}.json`;
@@ -44,6 +47,30 @@ export async function reportCrash(error: unknown): Promise<string> {
 
   await writeFile(filePath, JSON.stringify(report, null, 2) + '\n', 'utf8');
   return filePath;
+}
+
+async function cleanupExpiredCrashReports(crashDir: string): Promise<void> {
+  try {
+    const entries = await readdir(crashDir, { withFileTypes: true });
+    const now = Date.now();
+    await Promise.all(entries.map(async (entry) => {
+      if (!entry.isFile() || !entry.name.startsWith('crash-') || !entry.name.endsWith('.json')) {
+        return;
+      }
+
+      const filePath = join(crashDir, entry.name);
+      try {
+        const info = await stat(filePath);
+        if (now - info.mtimeMs > CRASH_REPORT_RETENTION_MS) {
+          await unlink(filePath);
+        }
+      } catch {
+        // Cleanup must never mask the crash that is currently being reported.
+      }
+    }));
+  } catch {
+    // Cleanup must never mask the crash that is currently being reported.
+  }
 }
 
 function serializeError(error: unknown): Record<string, unknown> {

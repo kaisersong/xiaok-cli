@@ -1,9 +1,10 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getConfigDir } from './config.js';
 let crashContext = {};
 let handlersInstalled = false;
 let streamErrorHandler = null;
+const CRASH_REPORT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export function setCrashContext(ctx) {
     crashContext = { ...crashContext, ...ctx };
 }
@@ -13,6 +14,7 @@ export function setStreamErrorHandler(handler) {
 export async function reportCrash(error) {
     const crashDir = join(getConfigDir(), 'crashes');
     await mkdir(crashDir, { recursive: true });
+    await cleanupExpiredCrashReports(crashDir);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const fileName = `crash-${timestamp}.json`;
     const filePath = join(crashDir, fileName);
@@ -28,6 +30,30 @@ export async function reportCrash(error) {
     };
     await writeFile(filePath, JSON.stringify(report, null, 2) + '\n', 'utf8');
     return filePath;
+}
+async function cleanupExpiredCrashReports(crashDir) {
+    try {
+        const entries = await readdir(crashDir, { withFileTypes: true });
+        const now = Date.now();
+        await Promise.all(entries.map(async (entry) => {
+            if (!entry.isFile() || !entry.name.startsWith('crash-') || !entry.name.endsWith('.json')) {
+                return;
+            }
+            const filePath = join(crashDir, entry.name);
+            try {
+                const info = await stat(filePath);
+                if (now - info.mtimeMs > CRASH_REPORT_RETENTION_MS) {
+                    await unlink(filePath);
+                }
+            }
+            catch {
+                // Cleanup must never mask the crash that is currently being reported.
+            }
+        }));
+    }
+    catch {
+        // Cleanup must never mask the crash that is currently being reported.
+    }
 }
 function serializeError(error) {
     if (error instanceof Error) {

@@ -1,8 +1,9 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { reportCrash, setCrashContext } from '../../src/utils/crash-reporter.js';
 
 function canSpawnChildProcesses(): boolean {
   const result = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'pipe' });
@@ -163,4 +164,82 @@ describe('crash reporter', () => {
     expect(readFileSync(markerPath, 'utf8')).toBe('EPIPE');
     expect(existsSync(crashDir) ? readdirSync(crashDir) : []).toEqual([]);
   }, 10_000);
+
+  itIfCanSpawn('records command context for a failing top-level CLI command', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'xiaok-crash-reporter-cli-'));
+    tempDirs.push(configDir);
+    const missingTracePath = join(configDir, 'missing-trace.json');
+    const mainPath = join(process.cwd(), '.test-dist', 'src', 'main.js');
+
+    const child = spawn(process.execPath, [mainPath, 'diagnose', '--trace', missingTracePath, '--format', 'json'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        XIAOK_CONFIG_DIR: configDir,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+      child.on('exit', (code, signal) => resolve({ code, signal }));
+    });
+
+    const crashDir = join(configDir, 'crashes');
+    const crashFiles = existsSync(crashDir) ? readdirSync(crashDir) : [];
+    expect(exit).toEqual({ code: 1, signal: null });
+    expect(stderr).toContain('崩溃报告已保存');
+    expect(crashFiles).toHaveLength(1);
+
+    const report = JSON.parse(readFileSync(join(crashDir, crashFiles[0]!), 'utf8')) as {
+      context?: { command?: string; args?: string[]; cwd?: string };
+    };
+    expect(report.context).toMatchObject({
+      command: 'diagnose',
+      args: ['diagnose', '--trace', missingTracePath, '--format', 'json'],
+      cwd: process.cwd(),
+    });
+  }, 10_000);
+
+  it('removes only expired crash report files before writing a new report', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'xiaok-crash-reporter-retention-'));
+    tempDirs.push(configDir);
+    const previousConfigDir = process.env.XIAOK_CONFIG_DIR;
+    process.env.XIAOK_CONFIG_DIR = configDir;
+
+    try {
+      const crashDir = join(configDir, 'crashes');
+      await reportCrash(new Error('create-dir'));
+      const expiredCrash = join(crashDir, 'crash-expired.json');
+      const freshCrash = join(crashDir, 'crash-fresh.json');
+      const unrelated = join(crashDir, 'notes.json');
+      writeFileSync(expiredCrash, '{}\n', 'utf8');
+      writeFileSync(freshCrash, '{}\n', 'utf8');
+      writeFileSync(unrelated, '{}\n', 'utf8');
+
+      const oldTime = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+      const freshTime = new Date();
+      utimesSync(expiredCrash, oldTime, oldTime);
+      utimesSync(freshCrash, freshTime, freshTime);
+      utimesSync(unrelated, oldTime, oldTime);
+
+      setCrashContext({ command: 'doctor', args: ['doctor'], cwd: process.cwd() });
+      await reportCrash(new Error('new crash'));
+
+      const files = readdirSync(crashDir);
+      expect(files).not.toContain('crash-expired.json');
+      expect(files).toContain('crash-fresh.json');
+      expect(files).toContain('notes.json');
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.XIAOK_CONFIG_DIR;
+      } else {
+        process.env.XIAOK_CONFIG_DIR = previousConfigDir;
+      }
+    }
+  });
 });

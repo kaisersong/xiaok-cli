@@ -15,7 +15,7 @@ import { registerPluginCommands } from './commands/plugin.js';
 import { registerMemoryCommands } from './commands/memory.js';
 import { registerDiagnoseCommands } from './commands/diagnose.js';
 import { registerTraceCommands } from './commands/trace-export.js';
-import { installGlobalCrashHandlers } from './utils/crash-reporter.js';
+import { installGlobalCrashHandlers, reportCrash, setCrashContext } from './utils/crash-reporter.js';
 installGlobalCrashHandlers();
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const program = new Command();
@@ -38,6 +38,32 @@ registerPluginCommands(program);
 registerMemoryCommands(program);
 registerTraceCommands(program);
 registerDiagnoseCommands(program);
+program.hook('preAction', (_thisCommand, actionCommand) => {
+    setCrashContext({
+        command: formatCommandPath(actionCommand),
+        args: process.argv.slice(2),
+        cwd: process.cwd(),
+    });
+});
 // chat 命令注册时使用 { isDefault: true }，Commander 自动处理无子命令时的路由
 // 无需额外 program.action() — 会导致双重调用
-program.parse();
+try {
+    await program.parseAsync();
+}
+catch (error) {
+    const path = await reportCrash(error);
+    console.error(`运行中断，崩溃报告已保存: ${path}`);
+    process.exit(1);
+}
+function formatCommandPath(command) {
+    const parts = [];
+    let current = command;
+    while (current) {
+        const name = current.name();
+        if (name && name !== program.name()) {
+            parts.push(name);
+        }
+        current = current.parent ?? null;
+    }
+    return parts.reverse().join(' ') || program.name();
+}
