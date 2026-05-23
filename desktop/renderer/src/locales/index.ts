@@ -1700,12 +1700,18 @@ export interface LocaleStrings {
   projectsPageCreateFirst: string;
   projectsPageOffline: string;
 
-  // projects - principles tab
+  // projects - knowledge and rules tab
   projectsPrinciplesTab: string;
   projectsPrinciplesAdd: string;
   projectsPrinciplesImportMemory: string;
   projectsPrinciplesEmpty: string;
   projectsPrinciplesEmptyDesc: string;
+  projectsKnowledgeBuiltin: string;
+  projectsKnowledgeMine: string;
+  projectsKnowledgeWorkspace: string;
+  projectsKnowledgeConflicts: string;
+  projectsKnowledgeReadOnly: string;
+  projectsKnowledgeNoConflicts: string;
   projectsPrinciplesSource: string;
   projectsPrinciplesSourceManual: string;
   projectsPrinciplesSourceMemory: string;

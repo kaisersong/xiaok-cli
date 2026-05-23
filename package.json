@@ -71,7 +71,7 @@
     "nodejieba": "^3.5.8",
     "onnxruntime-node": "^1.26.0",
     "openai": "^4.77.0",
-    "ws": "^8.18.0"
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
@@ -88,5 +88,8 @@
   "files": [
     "dist",
     "data"
-  ]
+  ],
+  "overrides": {
+    "@mapbox/node-pre-gyp": "^2.0.3"
+  }
 }

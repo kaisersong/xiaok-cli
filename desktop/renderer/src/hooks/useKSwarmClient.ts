@@ -411,7 +411,7 @@ function formatPrinciplesForPlanningGuidance(principles: PrincipleEntry[]): stri
     : '';
 
   const block = lines.join('\n');
-  return `项目原则（系统规划指导，不写入用户可见要求）：\n${block}${truncateNote}`;
+  return `知识与规则（系统规划指导，不写入用户可见要求）：\n${block}${truncateNote}`;
 }
 
 // ─── HTTP Helpers ─────────────────────────────────────────────────

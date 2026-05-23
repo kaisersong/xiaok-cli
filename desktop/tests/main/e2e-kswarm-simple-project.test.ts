@@ -334,7 +334,7 @@ describe('e2e: kswarm simple project with managed xiaok agents', () => {
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  it('creates a project with PO + worker and produces artifact output end-to-end', async () => {
+  it('creates a project with desktop-managed PO + worker refs without KSwarm executing agent work itself', async () => {
     const fakeOpenAi = await startFakeOpenAiServer();
     const brokerPort = await reservePort();
     const kswarmPort = await reservePort();
@@ -393,33 +393,20 @@ describe('e2e: kswarm simple project with managed xiaok agents', () => {
         },
         config,
       );
-      const workerPayload = buildManagedXiaokAgentPayload(
-        {
-          id: 'xiaok-worker',
-          name: 'Worker-Agent',
-          instructions: '负责执行任务并提交高质量 markdown 交付物。',
-          roles: ['worker'],
-        },
-        config,
-      );
-
       expect(poPayload.runtimeType).toBe('xiaok');
-      expect(poPayload.provider).toBe('openai');
+      expect(poPayload.runtimeSource).toBe('desktop-agent-runtime');
+      expect(poPayload.provider).toBeNull();
+      expect(poPayload.model).toBeNull();
+      expect(poPayload.baseUrl).toBeNull();
+      expect(poPayload.apiKey).toBeNull();
       expect(poPayload.runtimePath).toBeNull();
 
-      await fetchJson(`${kswarmUrl}/agents`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(poPayload),
-      });
-      await fetchJson(`${kswarmUrl}/agents`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(workerPayload),
-      });
-
-      const agents = await fetchJson<{ agents: Array<{ id: string; roles?: string[] }> }>(`${kswarmUrl}/agents`);
+      const agents = await fetchJson<{ agents: Array<{ id: string; roles?: string[]; runtimeSource?: string; provider?: string | null }> }>(`${kswarmUrl}/agents`);
       expect(agents.agents.map((agent) => agent.id)).toEqual(expect.arrayContaining(['xiaok-po', 'xiaok-worker']));
+      expect(agents.agents.find((agent) => agent.id === 'xiaok-po')).toMatchObject({
+        runtimeSource: 'desktop-agent-runtime',
+        provider: null,
+      });
 
       const created = await fetchJson<{
         ok: boolean;
@@ -441,69 +428,21 @@ describe('e2e: kswarm simple project with managed xiaok agents', () => {
       expect(created.project.poAgent).toBe('xiaok-po');
       expect(created.project.members).toEqual(['xiaok-worker']);
 
-      await waitForCondition(
-        () => fetchJson<{ participants: Array<{ participantId: string }> }>(`${kswarmUrl}/participants`),
-        (value) => {
-          const ids = new Set(value.participants.map((participant) => participant.participantId));
-          return ids.has(`xiaok-po@proj-${created.project.id}`);
-        },
-        20_000,
-      );
+      const participants = await fetchJson<{ participants: Array<{ participantId: string }> }>(`${kswarmUrl}/participants`);
+      expect(participants.participants.map((participant) => participant.participantId)).toEqual(['kswarm-hub']);
 
-      const planned = await waitForCondition(
-        () => fetchJson<{
-          plan: { phases?: Array<{ items?: Array<{ assignedAgent?: string }> }> } | null;
-          tasks: Array<{ assignedAgent?: string }>;
-          project: { status: string };
-        }>(`${kswarmUrl}/projects/${created.project.id}`),
-        (value) => Boolean(value.plan?.phases?.length) && value.tasks.length > 0,
-        30_000,
-      );
-      expect(planned.project.status === 'planning' || planned.project.status === 'created').toBe(true);
-      expect(planned.tasks.some((task) => task.assignedAgent === 'xiaok-worker')).toBe(true);
+      const detail = await fetchJson<{
+        plan: { phases?: Array<{ items?: Array<{ assignedAgent?: string }> }> } | null;
+        tasks: Array<{ assignedAgent?: string }>;
+        project: { status: string };
+        workspace: { artifacts: Array<{ filename: string }> };
+      }>(`${kswarmUrl}/projects/${created.project.id}`);
 
-      await fetchJson(`${kswarmUrl}/projects/${created.project.id}/approve`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-
-      await waitForCondition(
-        async () => {
-          const [participants, logs, detail] = await Promise.all([
-            fetchJson<{ participants: Array<{ participantId: string }> }>(`${kswarmUrl}/participants`),
-            fetchJson<{ logs: Array<{ level: string; msg: string; data?: unknown }> }>(`${kswarmUrl}/logs?limit=20`),
-            fetchJson<{ tasks: Array<{ id: string; title: string; status: string; assignedAgent?: string; dependencies?: string[]; unresolvedDependencies?: string[] }> }>(`${kswarmUrl}/projects/${created.project.id}`),
-          ]);
-          return { participants: participants.participants, logs: logs.logs, tasks: detail.tasks };
-        },
-        (value) => value.participants.some((participant) => participant.participantId.startsWith('xiaok-worker@')),
-        20_000,
-      );
-
-      const completed = await waitForCondition(
-        () => fetchJson<{
-          project: { status: string };
-          tasks: Array<{ status: string }>;
-          workspace: { artifacts: Array<{ filename: string }> };
-        }>(`${kswarmUrl}/projects/${created.project.id}`),
-        (value) => value.workspace.artifacts.length > 0
-          && value.tasks.every((task) => task.status === 'done' || task.status === 'submitted'),
-        45_000,
-      );
-
-      expect(completed.workspace.artifacts.length).toBeGreaterThan(0);
-      expect(completed.project.status === 'active' || completed.project.status === 'delivered').toBe(true);
-
-      const artifactsDir = join(tempWorkFolder, 'artifacts');
-      const artifactFiles = completed.workspace.artifacts.map((artifact) => artifact.filename);
-      expect(artifactFiles.length).toBeGreaterThan(0);
-      const firstArtifact = join(artifactsDir, artifactFiles[0]);
-      expect(existsSync(firstArtifact)).toBe(true);
-      expect(readFileSync(firstArtifact, 'utf8').length).toBeGreaterThan(120);
-
-      expect(fakeOpenAi.requests.some((prompt) => prompt.includes('制定详细的执行计划') || prompt.includes('Create a detailed execution plan'))).toBe(true);
-      expect(fakeOpenAi.requests.some((prompt) => prompt.includes('请直接完成以下任务并输出核心交付产物') || prompt.includes('deliverable report'))).toBe(true);
+      expect(detail.project.status).toBe('created');
+      expect(detail.plan).toBeNull();
+      expect(detail.tasks).toEqual([]);
+      expect(detail.workspace.artifacts).toEqual([]);
+      expect(fakeOpenAi.requests).toEqual([]);
     } finally {
       await cleanupKswarmAgents(kswarmUrl, tempHome);
       await kswarm.stop();

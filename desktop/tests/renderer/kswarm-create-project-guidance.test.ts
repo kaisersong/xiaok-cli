@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildCreateProjectPlanningGuidance } from '../../renderer/src/hooks/useKSwarmClient';
+import { en } from '../../renderer/src/locales/en';
+import { zh } from '../../renderer/src/locales/zh';
 
 describe('KSwarm create project planning guidance', () => {
   it('never rewrites visible goal or requirements; derived format details stay in planning guidance', () => {
@@ -37,8 +39,18 @@ describe('KSwarm create project planning guidance', () => {
 
     expect(guidance.visibleRequirements).toBe('使用中文，保留来源。');
     expect(guidance.planningGuidance).toMatch(/所有结论必须标注来源/);
+    expect(guidance.planningGuidance).toMatch(/知识与规则（系统规划指导，不写入用户可见要求）/);
     expect(guidance.planningGuidance).toMatch(/报告.*report renderer.*HTML/i);
     expect(guidance.planningGuidance).not.toContain('## 项目原则（必须遵守）\n\n以下原则适用于当前阶段，请严格遵循：\n\n');
+  });
+
+  it('labels the Projects rules surface as Knowledge & Rules instead of project-only principles', () => {
+    expect(zh.projectsPrinciplesTab).toBe('知识与规则');
+    expect(zh.projectsPrinciplesEmpty).toBe('还没有知识与规则');
+    expect(zh.projectsPrinciplesEmptyDesc).toMatch(/项目管理知识与规则/);
+    expect(en.projectsPrinciplesTab).toBe('Knowledge & Rules');
+    expect(en.projectsPrinciplesEmpty).toBe('No knowledge or rules yet');
+    expect(en.projectsPrinciplesEmptyDesc).toMatch(/project-management knowledge and rules/i);
   });
 
   it('treats high-level analysis projects as report-like deliverables without rewriting visible fields', () => {
