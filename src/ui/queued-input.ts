@@ -1,3 +1,15 @@
+import {
+  backspace as editorBackspace,
+  deleteToStart as editorDeleteToStart,
+  insertNewline as editorInsertNewline,
+  insertText as editorInsertText,
+  moveEnd as editorMoveEnd,
+  moveHome as editorMoveHome,
+  moveLeft as editorMoveLeft,
+  moveRight as editorMoveRight,
+  type InputEditorState,
+} from './input-editor.js';
+
 export interface QueuedInputSlot {
   text: string;
   queuedAt: number;
@@ -38,6 +50,13 @@ function clampCursor(text: string, cursor: number): number {
   return Math.max(0, Math.min(cursor, text.length));
 }
 
+function toEditorState(snapshot: QueuedInputSnapshot): InputEditorState {
+  return {
+    draft: snapshot.draft,
+    cursor: snapshot.cursor,
+  };
+}
+
 export function createQueuedInputState(initial?: Partial<QueuedInputSnapshot>): QueuedInputState {
   let snapshot: QueuedInputSnapshot = {
     draft: initial?.draft ?? '',
@@ -57,8 +76,8 @@ export function createQueuedInputState(initial?: Partial<QueuedInputSnapshot>): 
 
   const insertText = (text: string) => {
     if (!text) return;
-    const draft = snapshot.draft.slice(0, snapshot.cursor) + text + snapshot.draft.slice(snapshot.cursor);
-    updateDraft(draft, snapshot.cursor + text.length);
+    const next = editorInsertText(toEditorState(snapshot), text);
+    updateDraft(next.draft, next.cursor);
   };
 
   const editQueued = (): QueuedInputMutation => {
@@ -92,34 +111,38 @@ export function createQueuedInputState(initial?: Partial<QueuedInputSnapshot>): 
     },
 
     moveLeft() {
-      updateDraft(snapshot.draft, snapshot.cursor - 1);
+      const next = editorMoveLeft(toEditorState(snapshot));
+      updateDraft(next.draft, next.cursor);
     },
 
     moveRight() {
-      updateDraft(snapshot.draft, snapshot.cursor + 1);
+      const next = editorMoveRight(toEditorState(snapshot));
+      updateDraft(next.draft, next.cursor);
     },
 
     moveHome() {
-      updateDraft(snapshot.draft, 0);
+      const next = editorMoveHome(toEditorState(snapshot));
+      updateDraft(next.draft, next.cursor);
     },
 
     moveEnd() {
-      updateDraft(snapshot.draft, snapshot.draft.length);
+      const next = editorMoveEnd(toEditorState(snapshot));
+      updateDraft(next.draft, next.cursor);
     },
 
     backspace() {
-      if (snapshot.cursor <= 0) return;
-      const draft = snapshot.draft.slice(0, snapshot.cursor - 1) + snapshot.draft.slice(snapshot.cursor);
-      updateDraft(draft, snapshot.cursor - 1);
+      const next = editorBackspace(toEditorState(snapshot));
+      updateDraft(next.draft, next.cursor);
     },
 
     deleteToStart() {
-      if (snapshot.cursor <= 0) return;
-      updateDraft(snapshot.draft.slice(snapshot.cursor), 0);
+      const next = editorDeleteToStart(toEditorState(snapshot));
+      updateDraft(next.draft, next.cursor);
     },
 
     insertNewline() {
-      insertText('\n');
+      const next = editorInsertNewline(toEditorState(snapshot));
+      updateDraft(next.draft, next.cursor);
     },
 
     submitDraft(now = Date.now()) {

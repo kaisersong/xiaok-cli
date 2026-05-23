@@ -2,71 +2,27 @@ import * as readline from 'readline';
 import { stdin, stdout } from 'process';
 import { boldCyan, dim } from './render.js';
 import { getSkillCommandNames } from '../ai/skills/loader.js';
-import { appendFileSync, writeFileSync } from 'fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { appendFileSync } from 'fs';
 import { buildSlashMenuOverlayLines, MAX_MENU_DESCRIPTION_WIDTH } from './repl-state.js';
 import { getChatSlashCommands } from '../commands/registry.js';
 import { getDisplayWidth } from './display-width.js';
 import { sliceByDisplayColumns } from './text-metrics.js';
 import { identifyKey, loadKeybindingsSync, resolveAction } from './keybindings.js';
-import { clearPastedImagePaths, setPastedImagePath } from './image-input.js';
+import { clearPastedImagePaths } from './image-input.js';
 import { saveClipboardImageToTemp } from '../utils/clipboard.js';
 import { createQueuedInputState } from './queued-input.js';
+import { createInputPasteController } from './input-paste.js';
+import { createInputEngine, normalizeBatchedInput } from './input-engine.js';
+import { insertText as editorInsertText, } from './input-editor.js';
 const DEBUG_LOG = '/tmp/xiaok-debug.log';
 const MAX_MENU_VISIBLE_ITEMS = 8;
 const SAVE_CURSOR = '\x1b[s';
 const RESTORE_CURSOR = '\x1b[u';
-const OSC_1337_IMAGE_PREFIX = '\x1b]1337;File=';
-const OSC_ST_TERMINATOR = '\x1b\\';
 function log(msg) {
     try {
         appendFileSync(DEBUG_LOG, `${new Date().toISOString()} ${msg}\n`);
     }
     catch { }
-}
-function normalizeBatchedInput(raw) {
-    return raw
-        .replace(/\r[ \t]*(?:›|❯)\s*/gu, '')
-        .replace(/\r\n/gu, '\n')
-        .replace(/\r(?!$)/gu, '\n');
-}
-function parseOsc1337ImagePaste(raw) {
-    if (!raw.startsWith(OSC_1337_IMAGE_PREFIX)) {
-        return { kind: 'none' };
-    }
-    const belIndex = raw.indexOf('\x07');
-    const stIndex = raw.indexOf(OSC_ST_TERMINATOR);
-    const endMarker = (() => {
-        if (belIndex === -1)
-            return stIndex;
-        if (stIndex === -1)
-            return belIndex;
-        return Math.min(belIndex, stIndex);
-    })();
-    if (endMarker === -1) {
-        return { kind: 'partial' };
-    }
-    const oscContent = raw.slice(7, endMarker);
-    const base64Start = oscContent.indexOf(':');
-    if (base64Start === -1) {
-        return { kind: 'complete', base64Data: null };
-    }
-    return { kind: 'complete', base64Data: oscContent.slice(base64Start + 1) };
-}
-function handleOsc1337ImagePasteChunk(raw, pending, onImageData) {
-    const candidate = pending ? pending + raw : raw;
-    const parsed = parseOsc1337ImagePaste(candidate);
-    if (parsed.kind === 'none') {
-        return { handled: false, pending };
-    }
-    if (parsed.kind === 'partial') {
-        return { handled: true, pending: candidate };
-    }
-    if (parsed.base64Data) {
-        onImageData(parsed.base64Data);
-    }
-    return { handled: true, pending: '' };
 }
 function createDisabledBusyCapture() {
     const state = createQueuedInputState();
@@ -299,8 +255,9 @@ export class InputReader {
         let attached = false;
         let uiErrorNotified = false;
         let renderedBusyFrame = false;
-        let pastedImageCount = 0;
-        let pendingOsc1337ImagePaste = '';
+        const pasteController = createInputPasteController({
+            clipboardImageSaver: () => this.clipboardImageSaver(),
+        });
         const render = () => {
             if (!active || paused)
                 return;
@@ -413,128 +370,47 @@ export class InputReader {
                 render();
             }
         };
-        const registerPastedImage = (imagePath) => {
-            const index = pastedImageCount;
-            pastedImageCount += 1;
-            setPastedImagePath(index, imagePath);
-            return `[image ${index}]`;
+        const toEngineSnapshot = () => {
+            const snapshot = state.getSnapshot();
+            return {
+                draft: snapshot.draft,
+                cursor: snapshot.cursor,
+            };
         };
-        const insertPastedImagePlaceholder = (imagePath) => {
-            state.insertText(registerPastedImage(imagePath));
-            render();
-        };
-        const tryHandleBusyImagePaste = (raw) => {
-            const oscResult = handleOsc1337ImagePasteChunk(raw, pendingOsc1337ImagePaste, (base64Data) => {
-                const tempPath = join(tmpdir(), `xiaok-pasted-${Date.now()}.png`);
-                writeFileSync(tempPath, Buffer.from(base64Data, 'base64'));
-                insertPastedImagePlaceholder(tempPath);
-            });
-            pendingOsc1337ImagePaste = oscResult.pending;
-            if (oscResult.handled) {
-                return true;
-            }
-            if (process.platform === 'win32' && raw === '\x1bv') {
-                const imagePath = this.clipboardImageSaver();
-                if (imagePath) {
-                    insertPastedImagePlaceholder(imagePath);
-                }
-                return true;
-            }
-            if (raw.startsWith('\x1b_G'))
-                return true;
-            return false;
-        };
-        const handleAction = (action) => {
-            if (action === 'submit') {
-                submitDraft();
-                return true;
-            }
-            if (action === 'newline') {
-                state.insertNewline();
-                render();
-                return true;
-            }
-            if (action === 'cancel' || action === 'escape') {
-                handleEscape();
-                return true;
-            }
-            if (action === 'delete-back') {
-                state.backspace();
-                render();
-                return true;
-            }
-            if (action === 'delete-to-start') {
-                state.deleteToStart();
-                render();
-                return true;
-            }
-            if (action === 'cursor-left' || action === 'word-left') {
-                state.moveLeft();
-                render();
-                return true;
-            }
-            if (action === 'cursor-right' || action === 'word-right') {
-                state.moveRight();
-                render();
-                return true;
-            }
-            if (action === 'cursor-home') {
-                state.moveHome();
-                render();
-                return true;
-            }
-            if (action === 'cursor-end') {
-                state.moveEnd();
-                render();
-                return true;
-            }
-            if (action === 'history-prev') {
-                handleHistoryPrevious();
-                return true;
-            }
-            if (action === 'history-next') {
-                handleHistoryNext();
-                return true;
-            }
-            if (action === 'paste-image') {
-                const imagePath = this.clipboardImageSaver();
-                if (imagePath) {
-                    insertPastedImagePlaceholder(imagePath);
-                }
-                return true;
-            }
-            return false;
-        };
-        const handleText = (text) => {
-            if (!text)
-                return;
-            state.insertText(text);
-            render();
-        };
+        const inputEngine = createInputEngine({
+            initialSnapshot: toEngineSnapshot(),
+            pasteController,
+            policy: {
+                onSubmit: (text) => {
+                    state.setDraft(text, text.length);
+                    submitDraft();
+                    return toEngineSnapshot();
+                },
+                onCancel: () => {
+                    handleEscape();
+                    return toEngineSnapshot();
+                },
+                onChange: (snapshot) => {
+                    state.setDraft(snapshot.draft, snapshot.cursor);
+                    render();
+                },
+                onUnhandledAction: (action) => {
+                    if (action === 'history-prev') {
+                        handleHistoryPrevious();
+                        return toEngineSnapshot();
+                    }
+                    if (action === 'history-next') {
+                        handleHistoryNext();
+                        return toEngineSnapshot();
+                    }
+                    return false;
+                },
+            },
+        });
         const onData = (data) => {
             const key = data.toString('utf8');
             this.transcriptLogger?.record({ type: 'input_key', key, timestamp: Date.now() });
-            if (tryHandleBusyImagePaste(key)) {
-                return;
-            }
-            const normalizedBatch = key.length > 1 ? normalizeBatchedInput(key) : key;
-            let i = 0;
-            while (i < normalizedBatch.length) {
-                const identified = identifyKey(normalizedBatch, i);
-                if (identified && identified.consumed > 0) {
-                    const action = resolveAction(identified.key);
-                    if (action) {
-                        handleAction(action);
-                    }
-                    i += identified.consumed;
-                    continue;
-                }
-                const ch = normalizedBatch[i] ?? '';
-                if (ch >= ' ' && !/[\x1b\x7f]/.test(ch)) {
-                    handleText(ch);
-                }
-                i += 1;
-            }
+            inputEngine.handleChunk(key);
         };
         const attach = () => {
             if (!active || paused || attached)
@@ -639,8 +515,9 @@ export class InputReader {
             let historyDraft = null;
             let lastRecalledHistoryInput = null;
             let editedRecalledDraft = false;
-            let pastedImageCount = 0;
-            let pendingOsc1337ImagePaste = '';
+            const pasteController = createInputPasteController({
+                clipboardImageSaver: () => this.clipboardImageSaver(),
+            });
             const degradeUi = (context, error) => {
                 richUiEnabled = false;
                 this.menuOpen = false;
@@ -805,47 +682,68 @@ export class InputReader {
                 historyDraft = null;
                 lastRecalledHistoryInput = null;
             };
-            const registerPastedImage = (imagePath) => {
-                const index = pastedImageCount;
-                pastedImageCount += 1;
-                setPastedImagePath(index, imagePath);
-                const placeholder = `[image ${index}]`;
-                return placeholder;
+            const getEditorState = () => ({ draft: input, cursor });
+            const applyEditorState = (next) => {
+                input = next.draft;
+                cursor = next.cursor;
             };
-            const insertPastedImagePlaceholder = (imagePath, redrawAfter = true) => {
-                const placeholder = registerPastedImage(imagePath);
-                clearMenuIfLegacy();
-                input = input.slice(0, cursor) + placeholder + input.slice(cursor);
-                cursor += placeholder.length;
+            const applyEditorMutation = (next) => {
+                applyEditorState(next);
                 markInputEdited();
                 historyState = pushInputHistory(historyState, input, cursor);
+            };
+            const inputEngine = createInputEngine({
+                initialSnapshot: getEditorState(),
+                pasteController,
+                policy: {
+                    allowSlashMenu: true,
+                    onSubmit: (text) => {
+                        if (text.length > 0) {
+                            this.transcriptLogger?.record({ type: 'input_submit', value: text, timestamp: Date.now() });
+                            done(text);
+                        }
+                        return getEditorState();
+                    },
+                    onCancel: () => {
+                        done(null);
+                        return getEditorState();
+                    },
+                    onChange: (snapshot, reason) => {
+                        if (reason === 'edit') {
+                            applyEditorMutation(snapshot);
+                        }
+                        else {
+                            applyEditorState(snapshot);
+                        }
+                    },
+                },
+            });
+            const syncInputEngine = () => {
+                inputEngine.setSnapshot(getEditorState());
+            };
+            const applyEngineAction = (action) => {
+                const before = getEditorState();
+                const handled = inputEngine.handleAction(action);
+                const after = getEditorState();
+                return {
+                    handled,
+                    changed: before.draft !== after.draft || before.cursor !== after.cursor,
+                };
+            };
+            const insertPastedImagePlaceholder = (placeholder, redrawAfter = true) => {
+                clearMenuIfLegacy();
+                applyEditorMutation(editorInsertText(getEditorState(), placeholder));
+                syncInputEngine();
                 if (redrawAfter) {
                     redraw();
                 }
             };
             const tryHandleSpecialPasteSequence = (raw) => {
-                const oscResult = handleOsc1337ImagePasteChunk(raw, pendingOsc1337ImagePaste, (base64Data) => {
-                    const tempPath = join(tmpdir(), `xiaok-pasted-${Date.now()}.png`);
-                    writeFileSync(tempPath, Buffer.from(base64Data, 'base64'));
-                    insertPastedImagePlaceholder(tempPath);
-                });
-                pendingOsc1337ImagePaste = oscResult.pending;
-                if (oscResult.handled) {
-                    return true;
+                const result = pasteController.handleChunk(raw);
+                if (result.placeholder) {
+                    insertPastedImagePlaceholder(result.placeholder);
                 }
-                // Windows terminals commonly consume image clipboard paste before the
-                // CLI sees a Ctrl+V event. Alt+V arrives as ESC + v and gives us a
-                // reliable explicit import gesture on this platform.
-                if (process.platform === 'win32' && raw === '\x1bv') {
-                    const imagePath = this.clipboardImageSaver();
-                    if (imagePath) {
-                        insertPastedImagePlaceholder(imagePath);
-                    }
-                    return true;
-                }
-                // Kitty protocol is more complex; swallow the sequence for now so it
-                // does not render as garbage text while the dedicated parser is missing.
-                if (raw.startsWith('\x1b_G')) {
+                if (result.handled) {
                     return true;
                 }
                 return false;
@@ -879,6 +777,7 @@ export class InputReader {
                 cursor = input.length;
                 lastRecalledHistoryInput = input;
                 editedRecalledDraft = false;
+                syncInputEngine();
                 redraw();
                 return true;
             };
@@ -895,6 +794,7 @@ export class InputReader {
                     cursor = input.length;
                     lastRecalledHistoryInput = input;
                     editedRecalledDraft = false;
+                    syncInputEngine();
                     redraw();
                     return true;
                 }
@@ -905,6 +805,7 @@ export class InputReader {
                     historyDraft = null;
                     lastRecalledHistoryInput = null;
                     editedRecalledDraft = false;
+                    syncInputEngine();
                     redraw();
                     return true;
                 }
@@ -917,6 +818,7 @@ export class InputReader {
                 const movedCursor = moveCursorUpLogicalLine(input, cursor);
                 if (movedCursor !== null) {
                     cursor = movedCursor;
+                    syncInputEngine();
                     redraw();
                     return true;
                 }
@@ -929,6 +831,7 @@ export class InputReader {
                 const movedCursor = moveCursorDownLogicalLine(input, cursor);
                 if (movedCursor !== null) {
                     cursor = movedCursor;
+                    syncInputEngine();
                     redraw();
                     return true;
                 }
@@ -990,10 +893,7 @@ export class InputReader {
                                     }
                                 }
                                 else if (action === 'newline') {
-                                    input = input.slice(0, cursor) + '\n' + input.slice(cursor);
-                                    cursor++;
-                                    markInputEdited();
-                                    historyState = pushInputHistory(historyState, input, cursor);
+                                    applyEngineAction(action);
                                     needsFinalRedraw = true;
                                 }
                                 else if (action === 'cancel') {
@@ -1008,22 +908,19 @@ export class InputReader {
                                 }
                                 else if (action === 'delete-back') {
                                     if (cursor > 0) {
-                                        input = input.slice(0, cursor - 1) + input.slice(cursor);
-                                        cursor--;
-                                        markInputEdited();
-                                        historyState = pushInputHistory(historyState, input, cursor);
+                                        applyEngineAction(action);
                                         needsFinalRedraw = true;
                                     }
                                 }
                                 else if (action === 'cursor-left') {
                                     if (cursor > 0) {
-                                        cursor--;
+                                        applyEngineAction(action);
                                         needsFinalRedraw = true;
                                     }
                                 }
                                 else if (action === 'cursor-right') {
                                     if (cursor < input.length) {
-                                        cursor++;
+                                        applyEngineAction(action);
                                         needsFinalRedraw = true;
                                     }
                                 }
@@ -1043,9 +940,8 @@ export class InputReader {
                                     skipSyncMenuAfterBatch = true;
                                 }
                                 else if (action === 'paste-image') {
-                                    const imagePath = this.clipboardImageSaver();
-                                    if (imagePath) {
-                                        insertPastedImagePlaceholder(imagePath, false);
+                                    const result = applyEngineAction(action);
+                                    if (result.changed) {
                                         needsFinalRedraw = true;
                                     }
                                 }
@@ -1060,10 +956,7 @@ export class InputReader {
                                 // Printable character
                                 const shouldSyncMenu = input.startsWith('/') || ch === '/';
                                 clearMenuIfLegacy();
-                                input = input.slice(0, cursor) + ch + input.slice(cursor);
-                                cursor += 1;
-                                markInputEdited();
-                                historyState = pushInputHistory(historyState, input, cursor);
+                                inputEngine.handleChunk(ch);
                                 needsFinalRedraw = true;
                             }
                             i++;
@@ -1103,6 +996,7 @@ export class InputReader {
                         input = selected;
                         cursor = selected.length;
                         markInputEdited();
+                        syncInputEngine();
                         closeMenu();
                     }
                     else if (input.startsWith('/')) {
@@ -1111,6 +1005,7 @@ export class InputReader {
                             input = matches[0].cmd;
                             cursor = matches[0].cmd.length;
                             markInputEdited();
+                            syncInputEngine();
                             redraw();
                         }
                         else if (matches.length > 1) {
@@ -1142,10 +1037,7 @@ export class InputReader {
                     }
                     if (action === 'newline') {
                         // Shift+Enter: insert newline at cursor
-                        input = input.slice(0, cursor) + '\n' + input.slice(cursor);
-                        cursor++;
-                        markInputEdited();
-                        historyState = pushInputHistory(historyState, input, cursor);
+                        applyEngineAction(action);
                         redraw();
                         return true;
                     }
@@ -1153,10 +1045,7 @@ export class InputReader {
                         if (cursor > 0) {
                             const shouldSyncMenu = input.startsWith('/');
                             clearMenuIfLegacy();
-                            input = input.slice(0, cursor - 1) + input.slice(cursor);
-                            cursor--;
-                            markInputEdited();
-                            historyState = pushInputHistory(historyState, input, cursor);
+                            applyEngineAction(action);
                             redraw();
                             if (shouldSyncMenu && input.startsWith('/')) {
                                 syncMenu(input);
@@ -1169,14 +1058,14 @@ export class InputReader {
                     }
                     if (action === 'cursor-left') {
                         if (cursor > 0) {
-                            cursor--;
+                            applyEngineAction(action);
                             redraw();
                         }
                         return true;
                     }
                     if (action === 'cursor-right') {
                         if (cursor < input.length) {
-                            cursor++;
+                            applyEngineAction(action);
                             redraw();
                         }
                         return true;
@@ -1198,12 +1087,12 @@ export class InputReader {
                         return true;
                     }
                     if (action === 'cursor-home') {
-                        cursor = 0;
+                        applyEngineAction(action);
                         redraw();
                         return true;
                     }
                     if (action === 'cursor-end') {
-                        cursor = input.length;
+                        applyEngineAction(action);
                         redraw();
                         return true;
                     }
@@ -1217,6 +1106,7 @@ export class InputReader {
                         input = undone.input;
                         cursor = undone.cursor;
                         markInputEdited();
+                        syncInputEngine();
                         redraw();
                         return true;
                     }
@@ -1226,13 +1116,14 @@ export class InputReader {
                         input = redone.input;
                         cursor = redone.cursor;
                         markInputEdited();
+                        syncInputEngine();
                         redraw();
                         return true;
                     }
                     if (action === 'paste-image') {
-                        const imagePath = this.clipboardImageSaver();
-                        if (imagePath) {
-                            insertPastedImagePlaceholder(imagePath);
+                        const result = applyEngineAction(action);
+                        if (result.changed) {
+                            redraw();
                         }
                         return true;
                     }
@@ -1245,6 +1136,7 @@ export class InputReader {
                             cursor = newCursor;
                             markInputEdited();
                             historyState = pushInputHistory(historyState, input, cursor);
+                            syncInputEngine();
                             redraw();
                             if (shouldSyncMenu && input.startsWith('/') && input.length > 0) {
                                 syncMenu(input);
@@ -1257,11 +1149,13 @@ export class InputReader {
                     }
                     if (action === 'word-left') {
                         cursor = wordBoundaryLeft(input, cursor);
+                        syncInputEngine();
                         redraw();
                         return true;
                     }
                     if (action === 'word-right') {
                         cursor = wordBoundaryRight(input, cursor);
+                        syncInputEngine();
                         redraw();
                         return true;
                     }
@@ -1269,10 +1163,7 @@ export class InputReader {
                         if (cursor > 0) {
                             const shouldSyncMenu = input.startsWith('/');
                             clearMenuIfLegacy();
-                            input = input.slice(cursor);
-                            cursor = 0;
-                            markInputEdited();
-                            historyState = pushInputHistory(historyState, input, cursor);
+                            applyEngineAction(action);
                             redraw();
                             if (shouldSyncMenu && input.startsWith('/')) {
                                 syncMenu(input);
@@ -1287,9 +1178,7 @@ export class InputReader {
                         if (cursor < input.length) {
                             const shouldSyncMenu = input.startsWith('/');
                             clearMenuIfLegacy();
-                            input = input.slice(0, cursor);
-                            markInputEdited();
-                            historyState = pushInputHistory(historyState, input, cursor);
+                            applyEngineAction(action);
                             redraw();
                             if (shouldSyncMenu && input.startsWith('/')) {
                                 syncMenu(input);
@@ -1316,12 +1205,14 @@ export class InputReader {
                 // Alt+Left (ESC b) — 词跳左
                 if (key === '\x1bb') {
                     cursor = wordBoundaryLeft(input, cursor);
+                    syncInputEngine();
                     redraw();
                     return;
                 }
                 // Alt+Right (ESC f) — 词跳右
                 if (key === '\x1bf') {
                     cursor = wordBoundaryRight(input, cursor);
+                    syncInputEngine();
                     redraw();
                     return;
                 }
@@ -1335,10 +1226,7 @@ export class InputReader {
                 if (key.length >= 1 && key >= ' ' && !/[\x1b\x7f]/.test(key)) {
                     const shouldSyncMenu = input.startsWith('/') || key === '/';
                     clearMenuIfLegacy();
-                    input = input.slice(0, cursor) + key + input.slice(cursor);
-                    cursor += key.length;
-                    markInputEdited();
-                    historyState = pushInputHistory(historyState, input, cursor);
+                    inputEngine.handleChunk(key);
                     redraw();
                     if (shouldSyncMenu && input.startsWith('/')) {
                         syncMenu(input);
