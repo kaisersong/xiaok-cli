@@ -72,12 +72,6 @@ function inferModelCapabilities(modelName: string): Partial<ModelCapabilities> {
     };
   }
 
-  if (/^deepseek-v4/i.test(modelName)) {
-    return {
-      supportsImageInput: true,
-    };
-  }
-
   return {};
 }
 

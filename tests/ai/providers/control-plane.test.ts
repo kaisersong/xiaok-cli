@@ -94,7 +94,7 @@ describe('resolveRuntimeModelBinding', () => {
     });
   });
 
-  it('marks DeepSeek V4 default bindings as image capable', () => {
+  it('keeps built-in DeepSeek V4 bindings text-only for the verified OpenAI-compatible endpoint', () => {
     const config: Config = {
       schemaVersion: 2,
       defaultProvider: 'deepseek',
@@ -122,7 +122,7 @@ describe('resolveRuntimeModelBinding', () => {
       modelId: 'deepseek-default',
       wireModel: 'deepseek-v4-pro',
       protocol: 'openai_legacy',
-      capabilities: ['tools', 'image_in'],
+      capabilities: ['tools'],
     });
   });
 });

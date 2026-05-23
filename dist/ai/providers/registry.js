@@ -69,11 +69,11 @@ const PROVIDER_REGISTRY = {
             modelId: 'deepseek-default',
             model: 'deepseek-v4-pro',
             label: 'DeepSeek V4 Pro',
-            capabilities: ['tools', 'image_in'],
+            capabilities: ['tools'],
         },
         availableModels: [
-            { modelId: 'deepseek-v4-pro', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', capabilities: ['tools', 'image_in'] },
-            { modelId: 'deepseek-v4-flash', model: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', capabilities: ['tools', 'image_in'] },
+            { modelId: 'deepseek-v4-pro', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', capabilities: ['tools'] },
+            { modelId: 'deepseek-v4-flash', model: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', capabilities: ['tools'] },
         ],
     },
     glm: {

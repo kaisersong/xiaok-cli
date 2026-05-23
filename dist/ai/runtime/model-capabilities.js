@@ -25,11 +25,6 @@ function inferModelCapabilities(modelName) {
             supportsImageInput: true,
         };
     }
-    if (/^deepseek-v4/i.test(modelName)) {
-        return {
-            supportsImageInput: true,
-        };
-    }
     return {};
 }
 export function resolveModelCapabilities(modelOrAdapter) {
