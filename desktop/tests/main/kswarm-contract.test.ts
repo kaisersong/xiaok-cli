@@ -87,7 +87,7 @@ describe('desktop service path contract', () => {
   it('keeps electron-builder extraResources pointed at repo-sibling services and plugins', async () => {
     const repoRoot = join(__dirname, '..', '..', '..');
     const builderConfig = JSON.parse(await readFile(join(repoRoot, 'desktop', 'electron-builder.json'), 'utf8')) as {
-      extraResources: Array<{ from: string; to: string }>;
+      extraResources: Array<{ from: string; to: string; filter?: string[] }>;
     };
     const fromEntries = builderConfig.extraResources.map((entry) => entry.from);
 
@@ -103,5 +103,11 @@ describe('desktop service path contract', () => {
     expect(fromEntries).toContain('overrides/kswarm/windows-xiaok-launch.js');
     expect(fromEntries).toContain('../../kai-xiaok-plugins/plugins/kai-report-creator');
     expect(fromEntries).toContain('../../kai-xiaok-plugins/plugins/kai-slide-creator');
+
+    const slidePluginEntry = builderConfig.extraResources.find(
+      (entry) => entry.from === '../../kai-xiaok-plugins/plugins/kai-slide-creator',
+    );
+    expect(slidePluginEntry?.filter).toContain('skills/**/*');
+    expect(slidePluginEntry?.filter).not.toContain('SKILL.md');
   });
 });

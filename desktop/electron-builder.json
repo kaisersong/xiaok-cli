@@ -74,7 +74,6 @@
         "skills/**/*",
         "references/**/*",
         "schemas/**/*",
-        "SKILL.md",
         "mcp-servers/slide-renderer/**/*.py",
         "bundled-wheels/**/*"
       ]

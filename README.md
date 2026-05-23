@@ -20,7 +20,7 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
-**What's New in v1.3.3:**
+**What's New in v1.3.4:**
 
 - **Swarm Project Reliability**: KSwarm projects now route Xiaok seed PO/Worker work into the real Desktop agent runtime instead of a reduced sidecar worker, preserving model, tool, MCP, web-search, report, and slide capabilities
 - **File-Based Handoff**: Large task context and artifact contracts are passed through handoff files instead of long broker text payloads, reducing truncation and making project resume/retry auditable
@@ -89,7 +89,7 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 
 xiaok Desktop includes KSwarm project delivery for work that needs planning, parallel execution, review, and final synthesis. A project has a human-approved plan, a PO agent, worker agents, a task board, artifacts, and final deliverables.
 
-The v1.3.3 Swarm path is designed around clear responsibility boundaries:
+The v1.3.4 Swarm path is designed around clear responsibility boundaries:
 
 - **KSwarm owns project lifecycle**: project state, plan approval, phase dispatch, task status, retries, review records, delivery manifests, and recovery decisions.
 - **Agents own task execution**: Xiaok PO/Worker seed agents run through the full Desktop agent runtime, while external agents such as Claude, Codex, or Qoder run through their own broker-compatible adapters.
@@ -272,9 +272,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-1.3.3-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.3.3-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-setup-1.3.3.exe** — Windows installer (x64)
+- **xiaok-1.3.4-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.3.4-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-setup-1.3.4.exe** — Windows installer (x64)
 
 ### Features
 
@@ -534,7 +534,7 @@ npm run dev -- --help  # Run from source
 
 ## Version History
 
-**v1.3.3** — Swarm project reliability release: routes Xiaok seed PO/Worker tasks through the full Desktop agent runtime instead of a reduced sidecar worker; moves KSwarm task handoff to durable files with artifact-first result manifests; calibrates recent/monthly research quality gates around current-date and source evidence instead of arbitrary counts; keeps user goals/requirements intact while putting planning detail into the plan; formalizes final deliverable filenames and hides review/revision notes from submit-ready artifacts; fixes project task states, timestamps, intervention loops, artifact preview/download/export, and release packaging of KSwarm, Intent Broker, and bundled plugins.
+**v1.3.4** — Swarm project reliability release: routes Xiaok seed PO/Worker tasks through the full Desktop agent runtime instead of a reduced sidecar worker; moves KSwarm task handoff to durable files with artifact-first result manifests; calibrates recent/monthly research quality gates around current-date and source evidence instead of arbitrary counts; keeps user goals/requirements intact while putting planning detail into the plan; formalizes final deliverable filenames and hides review/revision notes from submit-ready artifacts; fixes project task states, timestamps, intervention loops, artifact preview/download/export, and release packaging of KSwarm, Intent Broker, and bundled plugins.
 
 **v1.3.2** — Desktop recovery release: fixes the `electron-updater` CJS/ESM import regression that made "Check for Updates" silently no-op in affected builds, adds a clear sidebar upgrade/download/install reminder next to Settings, restores scheduled task execution when `nextRunAt` is missing or tasks are deleted, and makes KSwarm plan retry repair stale PO assignments by reassigning to the best Xiaok PO before sending a full `assign_po` payload. The release gate verifies GitHub Latest plus macOS/Windows updater metadata and assets. Users already on affected desktop `0.5.6` or `1.3.1` builds need a one-time manual install of `1.3.2`; later updates can flow through the repaired in-app updater.
 

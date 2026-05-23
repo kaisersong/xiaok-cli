@@ -4,7 +4,7 @@ Native desktop surface for xiaok task delivery, scheduled automation, and KSwarm
 
 ## Current Release Focus
 
-v1.3.3 focuses on Swarm project reliability:
+v1.3.4 focuses on Swarm project reliability:
 
 - Xiaok seed PO/Worker agents run through the full Desktop agent runtime, so project execution has the same model, tools, MCP plugins, web-search/fetch, report renderer, and slide renderer as normal Xiaok conversations.
 - KSwarm task handoff uses durable files and artifact-first result manifests instead of long broker text payloads.
