@@ -2,12 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockCreateTask, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId } = vi.hoisted(() => ({
+const { mockCreateTask, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle } = vi.hoisted(() => ({
   mockCreateTask: vi.fn(),
   mockGetThread: vi.fn(),
   mockRecoverTask: vi.fn(),
   mockSubscribeTask: vi.fn(() => () => {}),
   mockUpdateThreadTaskId: vi.fn(),
+  mockUpdateThreadTitle: vi.fn(),
 }));
 
 vi.mock('../../renderer/src/api', () => ({
@@ -17,6 +18,7 @@ vi.mock('../../renderer/src/api', () => ({
     recoverTask: mockRecoverTask,
     subscribeTask: mockSubscribeTask,
     updateThreadTaskId: mockUpdateThreadTaskId,
+    updateThreadTitle: mockUpdateThreadTitle,
   },
 }));
 
@@ -26,16 +28,24 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     queuedText,
     status,
     onQueue,
+    onSubmit,
+    messages,
   }: {
     prompt: string;
     queuedText?: string | null;
     status?: string;
     onQueue?: (text: string) => void;
+    onSubmit?: (text: string) => void;
+    messages?: Array<{ id: string; role: string; content: string }>;
   }) => (
     <div>
       <textarea aria-label="chat-input" readOnly value={prompt} />
       <div data-testid="chat-status">{status}</div>
       <div data-testid="queued-text">{queuedText ?? ''}</div>
+      <div data-testid="chat-messages">{messages?.map((message) => (
+        <div key={message.id}>{message.content}</div>
+      ))}</div>
+      <button type="button" onClick={() => onSubmit?.('触发提交')}>submit-now</button>
       <button type="button" onClick={() => onQueue?.('第二条输入')}>queue-second</button>
     </div>
   ),
@@ -221,5 +231,44 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(stored.threadId).toBe('thread-legacy');
     expect(stored.projectId).toBe('proj-legacy');
     expect(stored.draftPrompt).toBe('请帮我诊断这个历史空会话。');
+  });
+
+  it('sanitizes provider authentication errors before rendering submit failures', async () => {
+    mockGetThread.mockResolvedValue({
+      id: 'thread-auth-error',
+      title: 'Auth error thread',
+      status: 'idle',
+      mode: 'work',
+      createdAt: 1779000000000,
+      updatedAt: 1779000000000,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: null,
+      taskIds: [],
+    });
+    mockUpdateThreadTitle.mockResolvedValue(undefined);
+    mockCreateTask.mockRejectedValue(new Error('Error: 401 {"error":{"type":"authentication_error","message":"The API Key appears to be invalid or may have expired. Please verify your credentials and try again."},"type":"error"}'));
+
+    render(
+      <MemoryRouter initialEntries={['/t/thread-auth-error']}>
+        <Routes>
+          <Route path="/t/:taskId" element={<ChatShell />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-status')).toHaveTextContent('idle');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/API Key 无效或已过期/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/authentication_error/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/The API Key appears/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Failed:/)).not.toBeInTheDocument();
   });
 });

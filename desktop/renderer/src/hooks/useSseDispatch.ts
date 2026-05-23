@@ -40,6 +40,7 @@ import {
   finalizeSearchSteps,
   isTerminalRunEventType,
 } from '../lib/chat-helpers'
+import { sanitizeUserFacingErrorMessage } from '../lib/error-display'
 import { extractPartialArtifactFields, extractPartialWidgetFields } from '../components/ArtifactStreamBlock'
 import { getInjectionBlockMessage, shouldSuppressLiveRunEventAfterInjectionBlock } from '../liveRunSecurity'
 import { isWebFetchToolName } from '../runEventProcessing'
@@ -788,7 +789,7 @@ export function useSseDispatch(): void {
           run.setInjectionBlocked(typeof obj?.message === 'string' ? obj.message : 'blocked')
         } else {
           run.setError({
-            message: typeof obj?.message === 'string' ? obj.message : '运行失败',
+            message: sanitizeUserFacingErrorMessage(obj?.message, '运行失败'),
             code: typeof obj?.code === 'string' ? obj.code : errorClass,
             details,
           })
@@ -831,7 +832,7 @@ export function useSseDispatch(): void {
           ? obj.details as Record<string, unknown>
           : undefined
         run.setError({
-          message: typeof obj?.message === 'string' ? obj.message : '运行中断',
+          message: sanitizeUserFacingErrorMessage(obj?.message, '运行中断'),
           code: typeof obj?.code === 'string' ? obj.code : errorClass,
           details,
         })

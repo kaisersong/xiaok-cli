@@ -1,6 +1,6 @@
 import type { AppError } from '../components/ErrorCallout'
 import { isApiError } from '../api'
-import { SSEApiError } from '../sse'
+import { sanitizeUserFacingErrorMessage } from './error-display'
 import {
   buildAssistantTurnFromRunEvents,
   assistantTurnPlainText,
@@ -26,15 +26,23 @@ export function isTerminalRunEventType(type: string): boolean {
 
 export function normalizeError(error: unknown): AppError {
   if (isApiError(error)) {
-    return { message: error.message, traceId: error.traceId, code: error.code }
+    return { message: sanitizeUserFacingErrorMessage(error.message), traceId: error.traceId, code: error.code }
   }
-  if (error instanceof SSEApiError) {
-    return { message: error.message, traceId: error.traceId, code: error.code }
+  if (isSseApiErrorLike(error)) {
+    return {
+      message: sanitizeUserFacingErrorMessage(error.message),
+      traceId: typeof error.traceId === 'string' ? error.traceId : undefined,
+      code: typeof error.code === 'string' ? error.code : undefined,
+    }
   }
   if (error instanceof Error) {
-    return { message: error.message }
+    return { message: sanitizeUserFacingErrorMessage(error.message) }
   }
   return { message: '请求失败' }
+}
+
+function isSseApiErrorLike(error: unknown): error is Error & { traceId?: unknown; code?: unknown; status?: unknown } {
+  return error instanceof Error && ('traceId' in error || 'code' in error || 'status' in error)
 }
 
 export function mergeVisibleSegmentsIntoAssistantTurn(
@@ -77,7 +85,7 @@ export function interruptedErrorFromRunEvents(
       : undefined
     return {
       message: typeof payload.message === 'string' && payload.message.trim() !== ''
-        ? payload.message
+        ? sanitizeUserFacingErrorMessage(payload.message, fallbackMessage)
         : fallbackMessage,
       code: typeof payload.code === 'string'
         ? payload.code
@@ -108,7 +116,7 @@ export function failedErrorFromRunEvents(
       : undefined
     return {
       message: typeof payload.message === 'string' && payload.message.trim() !== ''
-        ? payload.message
+        ? sanitizeUserFacingErrorMessage(payload.message, fallbackMessage)
         : fallbackMessage,
       code: typeof payload.code === 'string'
         ? payload.code

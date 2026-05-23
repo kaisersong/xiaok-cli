@@ -269,7 +269,7 @@ export function ChatView({
                 <svg viewBox="0 0 16 16" className="mt-0.5 size-4 shrink-0 text-red-500" fill="currentColor">
                   <path d="M8 1a7 7 0 100 14A7 7 0 008 1zM7 4.5a1 1 0 112 0v3a1 1 0 11-2 0v-3zm1 7a1 1 0 100-2 1 1 0 000 2z" />
                 </svg>
-                <p className="text-sm text-[var(--c-text-secondary)]">Task failed. Please try again.</p>
+                <p className="text-sm text-[var(--c-text-secondary)]">任务未完成，请检查模型配置或稍后重试。</p>
               </div>
             )}
 

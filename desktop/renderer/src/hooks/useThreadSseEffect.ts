@@ -46,6 +46,7 @@ import {
   finalizeSearchSteps,
   hasRecoverableRunOutput,
 } from '../lib/chat-helpers'
+import { sanitizeUserFacingErrorMessage } from '../lib/error-display'
 import { extractPartialArtifactFields, extractPartialWidgetFields } from '../components/ArtifactStreamBlock'
 import type { MsgRunEvent } from '../storage'
 import { getInjectionBlockMessage, shouldSuppressLiveRunEventAfterInjectionBlock } from '../liveRunSecurity'
@@ -943,7 +944,7 @@ export function useThreadSseEffect({
           setInjectionBlocked(typeof obj?.message === 'string' ? obj.message : 'blocked')
         } else {
           setError({
-            message: typeof obj?.message === 'string' ? obj.message : '运行失败',
+            message: sanitizeUserFacingErrorMessage(obj?.message, '运行失败'),
             code: typeof obj?.code === 'string' ? obj.code : errorClass,
             details,
           })
@@ -1007,7 +1008,7 @@ export function useThreadSseEffect({
           : undefined
 
         setError({
-          message: typeof obj?.message === 'string' ? obj.message : '运行中断',
+          message: sanitizeUserFacingErrorMessage(obj?.message, '运行中断'),
           code: typeof obj?.code === 'string' ? obj.code : errorClass,
           details,
         })

@@ -93,6 +93,38 @@ describe('resolveRuntimeModelBinding', () => {
       capabilities: ['tools', 'thinking'],
     });
   });
+
+  it('marks DeepSeek V4 default bindings as image capable', () => {
+    const config: Config = {
+      schemaVersion: 2,
+      defaultProvider: 'deepseek',
+      defaultModelId: 'deepseek-default',
+      providers: {
+        deepseek: {
+          type: 'first_party',
+          protocol: 'openai_legacy',
+          apiKey: 'sk-deepseek',
+        },
+      },
+      models: {
+        'deepseek-default': {
+          provider: 'deepseek',
+          model: 'deepseek-v4-pro',
+          label: 'DeepSeek V4 Pro',
+        },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+    };
+
+    expect(resolveRuntimeModelBinding(config)).toMatchObject({
+      providerId: 'deepseek',
+      modelId: 'deepseek-default',
+      wireModel: 'deepseek-v4-pro',
+      protocol: 'openai_legacy',
+      capabilities: ['tools', 'image_in'],
+    });
+  });
 });
 
 describe('createAdapterFromBinding', () => {

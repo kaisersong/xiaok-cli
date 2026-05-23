@@ -8,6 +8,7 @@ import { TaskPanel } from './TaskPanel';
 import type { ThreadRecord } from '../api/types';
 import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
 import { useSidebarCollapse } from '../layouts/AppLayout';
+import { sanitizeUserFacingErrorMessage } from '../lib/error-display';
 
 const log = createLogger('ChatShell');
 const ARTIFACT_KINDS = new Set<ArtifactKind>(['pptx', 'pdf', 'docx', 'xlsx', 'html', 'image', 'text', 'other']);
@@ -673,11 +674,12 @@ export function ChatShell() {
       unsubRef.current?.();
       unsubRef.current = api.subscribeTask(newTaskId, handleEvent);
     } catch (e) {
-      log.error('handleSubmit error', JSON.stringify({ message: (e as Error).message }));
+      const displayMessage = sanitizeUserFacingErrorMessage(e, '任务创建失败，请检查模型配置或稍后重试。');
+      log.error('handleSubmit error', JSON.stringify({ message: displayMessage }));
       setMessages(prev => [...prev, {
         id: `msg-${Date.now()}-err`,
         role: 'assistant',
-        content: `Failed: ${e instanceof Error ? e.message : String(e)}`,
+        content: displayMessage,
       }]);
       setStatus('idle');
     }

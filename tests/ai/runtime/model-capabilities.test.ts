@@ -18,6 +18,11 @@ describe('model capabilities', () => {
     expect(resolveModelCapabilities('claude-3-5-haiku-latest').contextLimit).toBe(200_000);
   });
 
+  it('allows image input for DeepSeek V4 model families', () => {
+    expect(resolveModelCapabilities('deepseek-v4-pro').supportsImageInput).toBe(true);
+    expect(resolveModelCapabilities('deepseek-v4-flash').supportsImageInput).toBe(true);
+  });
+
   it('falls back to conservative defaults for unknown models', () => {
     const capabilities = resolveModelCapabilities('custom-model');
 
