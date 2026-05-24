@@ -179,12 +179,19 @@ describe('desktop services', () => {
         kind: 'kswarm_task_handoff_v1',
         runId: 'run-1',
         project: { id: 'proj-1', name: 'Project', goal: 'Write report', requirements: '', artifactsDir: join(rootDir, 'artifacts') },
-        task: { id: 'proj-1__item-1', title: 'Write', brief: 'Write markdown', requiredOutputs: ['markdown'] },
+        task: {
+          id: 'proj-1__item-1',
+          title: 'Write',
+          brief: 'Write markdown',
+          requiredOutputs: [{ type: 'markdown', enforcement: 'hard' }, { kind: 'report_html' }, 'json'],
+        },
       },
       targetParticipantId: 'xiaok-po',
     });
 
     expect(receivedPrompt).toContain(`产物目录：${join(rootDir, 'artifacts')}`);
+    expect(receivedPrompt).toContain('必须产出：markdown, report_html, json');
+    expect(receivedPrompt).not.toContain('[object Object]');
     expect(result).toMatchObject({
       summary: '报告已生成。',
       artifacts: [{ path: artifactPath, kind: 'markdown', label: 'report.md' }],

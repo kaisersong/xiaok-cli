@@ -17,7 +17,7 @@ export interface KSwarmTaskHandoff {
     title: string;
     brief?: string;
     acceptanceCriteria?: string;
-    requiredOutputs?: string[];
+    requiredOutputs?: Array<string | { type?: string; format?: string; kind?: string; mimeType?: string; enforcement?: string }>;
     executionContract?: Record<string, unknown> | null;
     evidenceContract?: Record<string, unknown> | null;
     repairInstruction?: string;

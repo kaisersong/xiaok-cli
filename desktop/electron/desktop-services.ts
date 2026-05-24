@@ -586,6 +586,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const artifactsDir = handoff.project.artifactsDir || (handoff.project.workFolder ? `${handoff.project.workFolder}/artifacts` : '');
     const runStartedAt = Date.now();
     const requiresArtifactEvidence = shouldRequireKSwarmArtifactEvidence(handoff.task);
+    const requiredOutputsText = formatKSwarmRequiredOutputs(handoff.task.requiredOutputs);
     const prompt = [
       'KSwarm 项目任务执行。',
       `执行者：${targetParticipantId || 'xiaok-worker'}`,
@@ -596,7 +597,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       `任务：${handoff.task.title}`,
       handoff.task.brief ? `任务说明：${handoff.task.brief}` : '',
       handoff.task.acceptanceCriteria ? `验收标准：${handoff.task.acceptanceCriteria}` : '',
-      handoff.task.requiredOutputs?.length ? `必须产出：${handoff.task.requiredOutputs.join(', ')}` : '',
+      requiredOutputsText ? `必须产出：${requiredOutputsText}` : '',
       handoff.task.evidenceContract ? `外部来源证据要求：${JSON.stringify(handoff.task.evidenceContract)}` : '',
       handoff.task.repairInstruction ? `修复反馈：${handoff.task.repairInstruction}` : '',
       requiresArtifactEvidence ? '本任务必须写入至少一个完整产物文件到产物目录；不要只在摘要里描述文件，最终交接必须能看到文件路径。' : '',
@@ -1521,6 +1522,19 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return options.dataRoot;
     },
   };
+}
+
+function formatKSwarmRequiredOutputs(outputs: KSwarmTaskHandoff['task']['requiredOutputs']): string {
+  if (!Array.isArray(outputs)) return '';
+  const normalized: string[] = [];
+  for (const output of outputs) {
+    const raw = typeof output === 'string'
+      ? output
+      : output?.type || output?.format || output?.kind || output?.mimeType || '';
+    const value = String(raw || '').trim();
+    if (value && !normalized.includes(value)) normalized.push(value);
+  }
+  return normalized.join(', ');
 }
 
 function inferKSwarmArtifactKind(kind: string, label: string): string {
