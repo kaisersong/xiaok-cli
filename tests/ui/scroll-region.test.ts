@@ -370,7 +370,7 @@ describe('scroll-region prompt frame ownership', () => {
   });
 
   it('compacts queued overlay to keep the queued text visible when only one overlay row fits', () => {
-    const harness = createTtyHarness(48, 7);
+    const harness = createTtyHarness(48, 8);
     const manager = new ScrollRegionManager(process.stdout);
 
     try {
@@ -504,7 +504,7 @@ describe('scroll-region prompt frame ownership', () => {
 
       expect(promptRows).toHaveLength(1);
       expect(statusRows).toHaveLength(1);
-      expect(lines[22]).toContain('❯ Type your message...');
+      expect(lines[21]).toContain('❯ Type your message...');
       expect(lines[23]).toContain('gpt-terminal-e2e · auto · 0% · project');
       expect(lines.some((line) => line.includes('Intent: md -> 报告'))).toBe(true);
       expect(lines.some((line) => line.includes('Wrote report-analysis.report.md'))).toBe(true);
@@ -586,7 +586,7 @@ describe('scroll-region prompt frame ownership', () => {
 
       expect(promptRows).toHaveLength(1);
       expect(statusRows).toHaveLength(1);
-      expect(promptIndex).toBe(6);
+      expect(promptIndex).toBe(5);
       expect(activityIndex).toBeLessThan(promptIndex);
     } finally {
       harness.restore();
@@ -628,7 +628,7 @@ describe('scroll-region prompt frame ownership', () => {
 
       expect(promptRows).toHaveLength(1);
       expect(statusRows).toHaveLength(1);
-      expect(promptIndex).toBe(22);
+      expect(promptIndex).toBe(21);
       expect(activityIndex).toBeLessThan(promptIndex);
       expect(lines.some((line) => line.includes('Wrote report-analysis.report.md'))).toBe(true);
       expect(lines.some((line) => line.includes('Intent: md -> 报告'))).toBe(true);
@@ -670,7 +670,7 @@ describe('scroll-region prompt frame ownership', () => {
 
       expect(promptRows).toHaveLength(1);
       expect(statusRows).toHaveLength(1);
-      expect(lines[22]).toContain('❯ Finishing response...');
+      expect(lines[21]).toContain('❯ Finishing response...');
       expect(lines[23]).toContain('gpt-terminal-e2e · auto · 4% · project');
       expect(lines.some((line) => line.includes('Finalizing response · 1m 47s'))).toBe(true);
     } finally {
@@ -708,7 +708,7 @@ describe('scroll-region prompt frame ownership', () => {
 
       expect(promptRows).toHaveLength(1);
       expect(statusRows).toHaveLength(1);
-      expect(lines[22]).toContain('❯ Finishing response...');
+      expect(lines[21]).toContain('❯ Finishing response...');
       expect(lines[23]).toContain('gpt-terminal-e2e · auto · 6% · project');
     } finally {
       harness.restore();
@@ -773,7 +773,7 @@ describe('scroll-region prompt frame ownership', () => {
       expect(lines.some((line) => line.includes('[xiaok] 这次结果是否满足预期？'))).toBe(false);
       expect(promptRows).toHaveLength(1);
       expect(statusRows).toHaveLength(1);
-      expect(lines[22]).toContain('❯ Type your message...');
+      expect(lines[21]).toContain('❯ Type your message...');
       expect(lines[23]).toContain('gpt-terminal-e2e · 4% · project');
     } finally {
       harness.restore();
@@ -822,7 +822,7 @@ describe('scroll-region prompt frame ownership', () => {
       expect(lines.some((line) => line.includes('/context'))).toBe(true);
       expect(lines.some((line) => line.includes('/doctor'))).toBe(true);
       expect(lines.some((line) => line.includes('gpt-5.4 · 5%'))).toBe(false);
-      expect(lines[22]).toContain('❯ /');
+      expect(lines[21]).toContain('❯ /');
     } finally {
       harness.restore();
     }
@@ -945,8 +945,8 @@ describe('scroll-region prompt frame ownership', () => {
         statusLine: 'gpt-terminal-e2e · auto · 0% · project',
       });
 
-      process.stdout.write('\x1b[21;1H❯ stale prompt row');
-      process.stdout.write('\x1b[22;1Hstale status row');
+      process.stdout.write('\x1b[20;1H❯ stale prompt row');
+      process.stdout.write('\x1b[21;1Hstale status row');
 
       manager.renderFooter({
         inputPrompt: 'Type your message...',
@@ -954,12 +954,12 @@ describe('scroll-region prompt frame ownership', () => {
       });
 
       const lines = harness.screen.lines();
+      expect(lines[19]).toBe('');
       expect(lines[20]).toBe('');
-      expect(lines[21]).toBe('');
-      expect(lines[22]).toContain('❯ Type your message...');
+      expect(lines[21]).toContain('❯ Type your message...');
+      expect(lines[20]).not.toContain('stale prompt row');
       expect(lines[21]).not.toContain('stale prompt row');
-      expect(lines[22]).not.toContain('stale prompt row');
-      expect(lines[21]).not.toContain('stale status row');
+      expect(lines[20]).not.toContain('stale status row');
     } finally {
       harness.restore();
     }
@@ -1087,7 +1087,7 @@ describe('scroll-region prompt frame ownership', () => {
       expect(lines[summaryIndex - 1]).toBe('');
       expect(lines[summaryIndex + 1]).toBe('');
       expect(lines[summaryIndex + 2]).toBe('');
-      expect(statusIndex).toBe(promptIndex + 1);
+      expect(statusIndex).toBe(promptIndex + 2);
     } finally {
       harness.restore();
     }
@@ -1138,8 +1138,8 @@ describe('ANSI compatibility', () => {
     const output = getOutput();
     // Footer uses absolute cursor positioning (\x1b[row;colH) to ensure
     // it renders at exact terminal bottom rows regardless of cursor state.
-    expect(output).toMatch(/\x1b\[22;1H\x1b\[2K\x1b\[48;5;238m +\x1b\[0m/);  // padded background row above the prompt
-    expect(output).toMatch(/\x1b\[23;1H/);  // input bar at row 23
+    expect(output).toMatch(/\x1b\[21;1H\x1b\[2K\x1b\[48;5;238m +\x1b\[0m/);  // padded background row above the prompt
+    expect(output).toMatch(/\x1b\[22;1H/);  // input bar at row 22
     expect(output).toMatch(/\x1b\[24;1H/);  // status bar at row 24
     expect(output).toContain('Type...');
     expect(output).toContain('gpt-5.4');
@@ -1151,7 +1151,7 @@ describe('ANSI compatibility', () => {
     manager.renderFooter({ inputPrompt: 'Type...', statusLine: 'gpt-5.4' });
 
     const output = getOutput();
-    expect(output).toMatch(/\x1b\[1;18r\x1b\[23;3H$/);
+    expect(output).toMatch(/\x1b\[1;17r\x1b\[22;3H$/);
   });
 
   it('does not leave the input background SGR active after footer rendering', () => {
@@ -1160,7 +1160,7 @@ describe('ANSI compatibility', () => {
     manager.renderInput('abc', 3);
 
     const output = getOutput();
-    expect(output).toMatch(/\x1b\[0m\x1b\[24;1H\x1b\[2K(?:\x1b\[2m.*?\x1b\[0m)?\x1b\[1;18r\x1b\[23;6H$/);
+    expect(output).toMatch(/\x1b\[0m\x1b\[24;1H\x1b\[2K(?:\x1b\[2m.*?\x1b\[0m)?\x1b\[1;17r\x1b\[22;6H$/);
     expect(output).not.toMatch(/\x1b\[23;6H\x1b\[48;5;244m$/);
   });
 
@@ -1190,9 +1190,9 @@ describe('ANSI compatibility', () => {
       const promptIndex = lines.findIndex((line) => line.includes('❯'));
       const statusIndex = lines.findIndex((line) => line.includes('kimi-for-coding'));
 
-      expect(promptIndex).toBe(22);
+      expect(promptIndex).toBe(21);
       expect(statusIndex).toBe(23);
-      expect(lines[22]).toContain('❯ Type your message...');
+      expect(lines[21]).toContain('❯ Type your message...');
       expect(lines[23]).toContain('kimi-for-coding');
       expect(lines[23]).not.toContain('xiaok-cli');
     } finally {
@@ -1251,7 +1251,7 @@ describe('ANSI compatibility', () => {
       expect(renderedFooter).toContain('❯ 0123456789');
       expect(renderedFooter).toContain('ijk');
       expect(statusLines).toHaveLength(1);
-      expect(harness.output.raw).toMatch(/\x1b\[23;6H$/);
+      expect(harness.output.raw).toMatch(/\x1b\[22;6H$/);
     } finally {
       harness.restore();
     }
@@ -1289,8 +1289,8 @@ describe('ANSI compatibility', () => {
     const delta = getOutput().slice(before);
 
     expect(delta).toContain('\x1b[19;1H');
-    expect(delta).toContain('\x1b[23;3H');
-    expect(delta.lastIndexOf('\x1b[23;3H')).toBeGreaterThan(delta.indexOf('\x1b[19;1H'));
+    expect(delta).toContain('\x1b[22;3H');
+    expect(delta.lastIndexOf('\x1b[22;3H')).toBeGreaterThan(delta.indexOf('\x1b[19;1H'));
   });
 
     it('renders activity above the input footer with two blank gap rows', () => {
@@ -1303,14 +1303,14 @@ describe('ANSI compatibility', () => {
         manager.renderActivity('⠋ Thinking');
 
         const lines = harness.screen.lines();
-      expect(lines[17]).toContain('Thinking');
+      expect(lines[16]).toContain('Thinking');
+      expect(lines[17]).toBe('');
       expect(lines[18]).toBe('');
       expect(lines[19]).toBe('');
       expect(lines[20]).toBe('');
-      expect(lines[21]).toBe('');
-      expect(lines[22]).not.toContain('Thinking');
-      expect(lines[22]).not.toContain('working');
-      expect(lines[22]).toContain('❯ Type your message...');
+      expect(lines[21]).not.toContain('Thinking');
+      expect(lines[21]).not.toContain('working');
+      expect(lines[21]).toContain('❯ Type your message...');
       expect(lines[23]).toContain('gpt-5.4 · 5%');
     } finally {
       harness.restore();
@@ -1336,7 +1336,7 @@ describe('ANSI compatibility', () => {
       const promptIndex = lines.findIndex((line) => line.includes('❯'));
       expect(activityIndex).toBeGreaterThanOrEqual(0);
       expect(activityIndex).toBeLessThan(promptIndex);
-      expect(lines[22]).toContain('❯');
+      expect(lines[21]).toContain('❯');
       expect(lines[23]).toContain('gpt-5.4 · 5% · project');
     } finally {
       harness.restore();
@@ -1365,7 +1365,7 @@ describe('ANSI compatibility', () => {
       const summaryIndex = lines.findIndex((line) => line.includes('Intent: md -> 报告'));
       const activityIndex = lines.findIndex((line) => line.includes('Working · 11s'));
 
-      expect(promptIndex).toBe(22);
+      expect(promptIndex).toBe(21);
       expect(statusIndex).toBe(23);
       expect(summaryIndex).toBe(promptIndex - 3);
       expect(lines.slice(summaryIndex + 1, promptIndex).filter((line) => line === '')).toHaveLength(2);
@@ -1410,7 +1410,7 @@ describe('ANSI compatibility', () => {
         lines.findIndex((line) => line.includes('Swiss Modern')),
       );
 
-      expect(promptIndex).toBe(22);
+      expect(promptIndex).toBe(21);
       expect(lastContentIndex).toBeGreaterThanOrEqual(0);
       expect(lines.slice(lastContentIndex + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
       expect(lines[23]).toContain('kimi-for-coding · 29% · master');
@@ -1492,9 +1492,9 @@ describe('ANSI compatibility', () => {
       manager.clearLastInput();
 
       const lines = harness.screen.lines();
-      expect(lines[22]).toContain('❯ Type your message...');
-      expect(lines[22]).not.toContain('working');
-      expect(lines[22]).not.toContain('Thinking');
+      expect(lines[21]).toContain('❯ Type your message...');
+      expect(lines[21]).not.toContain('working');
+      expect(lines[21]).not.toContain('Thinking');
     } finally {
       harness.restore();
     }
@@ -1844,7 +1844,7 @@ describe('Bug 10: Content exceeding maxContentRows', () => {
       expect(promptRows).toHaveLength(1);
       expect(statusRows).toHaveLength(1);
       expect(activityRows).toHaveLength(0);
-      expect(lines[22]).toContain('❯');
+      expect(lines[21]).toContain('❯');
       expect(lines[23]).toContain('project');
     } finally {
       harness.restore();
@@ -1883,12 +1883,12 @@ describe('Bug 11: Terminal resize handling', () => {
 
   it('updateSize changes maxContentRows', () => {
     const { manager } = createMock(24, 80);
-    // Before: 3 gap rows + padded input footer keep the scroll region bottom at row 18
-    expect((manager as any).maxContentRows).toBe(18);
+    // Before: 3 gap rows + padded input footer keep the scroll region bottom at row 17
+    expect((manager as any).maxContentRows).toBe(17);
 
     manager.updateSize(30, 100);
-    // After resize the same chrome leaves the scroll region bottom at row 24
-    expect((manager as any).maxContentRows).toBe(24);
+    // After resize the same chrome leaves the scroll region bottom at row 23
+    expect((manager as any).maxContentRows).toBe(23);
   });
 
   it('updateSize changes columns for wrap calculation', () => {
@@ -1927,7 +1927,7 @@ describe('Bug 11: Terminal resize handling', () => {
       const lines = harness.screen.lines();
       expect(lines[22]).not.toContain('Type your message...');
       expect(lines[23]).not.toContain('gpt-5.4');
-      expect(lines[28]).toContain('❯ Type your message...');
+      expect(lines[27]).toContain('❯ Type your message...');
       expect(lines[29]).toContain('gpt-5.4 · 6% · master');
     } finally {
       harness.restore();

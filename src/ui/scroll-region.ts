@@ -63,6 +63,7 @@ const RESET_ALL = '\x1b[0m';
 const DIM = '\x1b[2m';
 const MAX_INPUT_ROWS = 6;
 const INPUT_PADDING_ROWS = 1;
+const INPUT_BOTTOM_PADDING_ROWS = 1;
 
 function shouldCompactSubmittedInputForWindowsTmux(): boolean {
   return process.platform === 'win32' && Boolean(process.env.TMUX);
@@ -135,7 +136,7 @@ export class ScrollRegionManager {
   /** Content row where the current markdown streaming block began. */
   private _streamStartRow = 1;
   /** Number of rows currently occupied by the input editor above status. */
-  private lastInputRenderRows = 1 + INPUT_PADDING_ROWS;
+  private lastInputRenderRows = 1 + INPUT_PADDING_ROWS + INPUT_BOTTOM_PADDING_ROWS;
   /** Last screen rows occupied by footer/overlay chrome, used to clear stale rows after terminal resize. */
   private lastFooterClearStartRow = 0;
   private lastFooterClearEndRow = 0;
@@ -214,7 +215,7 @@ export class ScrollRegionManager {
   }
 
   private getInputFrameRows(inputRows = 1): number {
-    return inputRows + INPUT_PADDING_ROWS;
+    return inputRows + INPUT_PADDING_ROWS + INPUT_BOTTOM_PADDING_ROWS;
   }
 
   private getInputStartRow(frameRows = this.lastInputRenderRows): number {
@@ -685,6 +686,12 @@ export class ScrollRegionManager {
       }
     });
 
+    for (let index = 0; index < INPUT_BOTTOM_PADDING_ROWS; index += 1) {
+      const row = inputTextStartRow + inputLines.length + index;
+      footerOutput += `\x1b[${row};1H${CLEAR_LINE}`;
+      footerOutput += this.padBackgroundRow(cols);
+    }
+
     // Status bar (bottom row) is rendered last so any footer-line wrap quirks
     // in the input editor cannot leave stale status text above it.
     footerOutput += `\x1b[${statusBarRow};1H${CLEAR_LINE}`;
@@ -844,6 +851,12 @@ export class ScrollRegionManager {
         this.stream.write(this.padLineWithBg(`${prefix}${line}`, cols));
       }
     });
+
+    for (let index = 0; index < INPUT_BOTTOM_PADDING_ROWS; index += 1) {
+      const row = inputTextStartRow + inputLines.length + index;
+      this.clearScreenRow(row);
+      this.stream.write(this.padBackgroundRow(cols));
+    }
 
     const effectiveSummaryLine = frame.summaryLine ?? this.lastSummaryLine;
     const summaryStartRow = this.getSummaryStartRow(inputStartRow, effectiveSummaryLine);

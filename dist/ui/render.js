@@ -275,11 +275,12 @@ export function formatSubmittedInput(text) {
     const lines = text
         .split(/\r?\n/)
         .flatMap((line) => wrapDisplayLine(line, textWidth));
-    return lines
+    return [bgDarkGray(' '.repeat(safeWidth))]
+        .concat(lines
         .map((line, index) => {
         const prefix = index === 0 ? firstLinePrefix : continuationPrefix;
         return bgDarkGray(padToDisplayWidth(`${prefix}${line}`, safeWidth));
-    })
+    }))
         .concat(bgDarkGray(' '.repeat(safeWidth)))
         .join('\n') + '\n';
 }
