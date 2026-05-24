@@ -51,11 +51,13 @@ export class OnnxEmbeddingEngine {
       tok.setPadding!({ maxLength: 512, padding: 'LONGEST' });
       this.tokenizer = tok;
 
-      const dims = this.session.outputNames.length > 0
-        ? this.session.outputNames[0]
-        : 'last_hidden_state';
+      const dummyIds = new Tensor('int64', new BigInt64Array([101n, 102n]), [1, 2]);
+      const dummyMask = new Tensor('int64', new BigInt64Array([1n, 1n]), [1, 2]);
+      const dummyTypes = new Tensor('int64', new BigInt64Array([0n, 0n]), [1, 2]);
+      const dummyOut = await this.session.run({ input_ids: dummyIds, attention_mask: dummyMask, token_type_ids: dummyTypes });
+      const actualDims = (dummyOut['last_hidden_state'] as Tensor).dims[2] as number;
 
-      return { engine: 'onnx', dimensions: 384 };
+      return { engine: 'onnx', dimensions: actualDims };
     } catch (err) {
       console.warn('[onnx-engine] Failed to initialize:', (err as Error).message);
       return { engine: 'none', dimensions: 0 };

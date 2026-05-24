@@ -79,6 +79,8 @@ export const PRELOAD_API_KEYS = [
   'getSkillDebugConfig',
   'saveSkillDebugConfig',
   'getSkillStats',
+  'getServiceStatus',
+  'restartRelatedService',
   'kswarmGetStatus',
   'kswarmStart',
   'kswarmStop',
@@ -107,6 +109,9 @@ export const PRELOAD_API_KEYS = [
   'memoryClearAll',
   'memoryGetModelId',
   'memorySetModelId',
+  'getEmbeddingModels',
+  'downloadEmbeddingModel',
+  'setEmbeddingModel',
   'getConnectorsConfig',
   'saveConnectorsConfig',
   'listConnectorRuntimes',
@@ -251,6 +256,25 @@ export interface KSwarmServiceStatus {
   lastError: string | null;
 }
 
+export type DesktopRelatedServiceId = 'kswarm' | 'intent-broker' | 'runtime-bridge';
+
+export interface DesktopRelatedServiceStatus {
+  id: DesktopRelatedServiceId;
+  label: string;
+  running: boolean;
+  reachable: boolean;
+  port: number;
+  pid: number | null;
+  restartCount?: number;
+  lastError: string | null;
+  detail?: string;
+}
+
+export interface DesktopServiceStatusSnapshot {
+  checkedAt: number;
+  services: DesktopRelatedServiceStatus[];
+}
+
 export type ConnectorsLoadStatus = 'ok' | 'missing' | 'parse_failed';
 
 export interface ConnectorsConfigSnapshot {
@@ -338,6 +362,8 @@ export interface DesktopApi {
     lastCalledAt: number;
     firstCalledAt: number;
   }>>;
+  getServiceStatus(): Promise<DesktopServiceStatusSnapshot>;
+  restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void>;
   kswarmGetStatus(): Promise<KSwarmServiceStatus>;
   kswarmStart(): Promise<void>;
   kswarmStop(): Promise<void>;
@@ -366,6 +392,9 @@ export interface DesktopApi {
   memoryClearAll(): Promise<boolean>;
   memoryGetModelId(): Promise<string | null>;
   memorySetModelId(modelId: string | null): Promise<boolean>;
+  getEmbeddingModels(): Promise<{ id: string; name: string; dims: number; size: string; languages: string; downloaded: boolean; active: boolean; manualHint: { urls: { file: string; url: string }[]; targetDir: string } }[]>;
+  downloadEmbeddingModel(modelId: string): Promise<void>;
+  setEmbeddingModel(modelId: string): Promise<void>;
   getConnectorsConfig(): Promise<ConnectorsConfigSnapshot | null>;
   saveConnectorsConfig(input: ConnectorsConfig): Promise<ConnectorsConfigSnapshot>;
   listConnectorRuntimes(): Promise<ProviderRuntime[]>;
@@ -464,6 +493,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     getSkillDebugConfig: () => ipcRenderer.invoke('desktop:getSkillDebugConfig') as Promise<{ enabled: boolean }>,
     saveSkillDebugConfig: (input) => ipcRenderer.invoke('desktop:saveSkillDebugConfig', input) as Promise<{ enabled: boolean }>,
     getSkillStats: () => ipcRenderer.invoke('desktop:getSkillStats') as ReturnType<DesktopApi['getSkillStats']>,
+    getServiceStatus: () => ipcRenderer.invoke('desktop:services:getStatus') as Promise<DesktopServiceStatusSnapshot>,
+    restartRelatedService: (serviceId) => ipcRenderer.invoke('desktop:services:restart', serviceId) as Promise<void>,
     kswarmGetStatus: () => ipcRenderer.invoke('desktop:kswarm:getStatus') as Promise<KSwarmServiceStatus>,
     kswarmStart: () => ipcRenderer.invoke('desktop:kswarm:start') as Promise<void>,
     kswarmStop: () => ipcRenderer.invoke('desktop:kswarm:stop') as Promise<void>,
@@ -510,6 +541,9 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     memoryClearAll: () => ipcRenderer.invoke('desktop:memoryClearAll') as Promise<boolean>,
     memoryGetModelId: () => ipcRenderer.invoke('desktop:memoryGetModelId') as Promise<string | null>,
     memorySetModelId: (modelId: string | null) => ipcRenderer.invoke('desktop:memorySetModelId', modelId) as Promise<boolean>,
+    getEmbeddingModels: () => ipcRenderer.invoke('desktop:getEmbeddingModels') as ReturnType<DesktopApi['getEmbeddingModels']>,
+    downloadEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:downloadEmbeddingModel', modelId) as Promise<void>,
+    setEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:setEmbeddingModel', modelId) as Promise<void>,
     getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig') as Promise<ConnectorsConfigSnapshot | null>,
     saveConnectorsConfig: (input) => ipcRenderer.invoke('desktop:saveConnectorsConfig', input) as Promise<ConnectorsConfigSnapshot>,
     listConnectorRuntimes: () => ipcRenderer.invoke('desktop:listConnectorRuntimes') as Promise<ProviderRuntime[]>,

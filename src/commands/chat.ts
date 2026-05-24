@@ -2429,10 +2429,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       skillCatalogWatcher?.close();
       clearTurnIntentContext();
       await releaseSessionOwnershipForExit();
-      await platform.dispose();
-      for (const ch of embeddedChannels) {
-        await ch.cleanup();
-      }
+      const cleanup = async () => {
+        await platform.dispose();
+        for (const ch of embeddedChannels) {
+          await ch.cleanup();
+        }
+      };
+      await Promise.race([cleanup(), new Promise(r => setTimeout(r, 2000))]);
       statusBar.destroy();
       process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
       process.exit(0);
@@ -3082,10 +3085,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     stopIntentRuntimeSync();
     stopSkillEvalRuntimeSync();
     skillCatalogWatcher?.close();
-    await platform.dispose();
-    for (const ch of embeddedChannels) {
-      await ch.cleanup();
-    }
+    const finalCleanup = async () => {
+      await platform.dispose();
+      for (const ch of embeddedChannels) {
+        await ch.cleanup();
+      }
+    };
+    await Promise.race([finalCleanup(), new Promise(r => setTimeout(r, 2000))]);
   }
 }
 

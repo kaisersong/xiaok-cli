@@ -38,7 +38,7 @@ const UI_COPY = {
             path: '路径',
             pattern: '模式',
         },
-        hint: '↑↓ 选择  Enter 确认  Esc 取消',
+        hint: '数字直选  ↑↓ 切换  Enter 确认  Esc 取消',
     },
     en: {
         approvalTitle: 'xiaok wants to run',
@@ -49,7 +49,7 @@ const UI_COPY = {
             path: 'Path',
             pattern: 'Pattern',
         },
-        hint: 'Up/Down select  Enter confirm  Esc cancel',
+        hint: '1-5 select  Up/Down navigate  Enter confirm  Esc cancel',
     },
 };
 export function getToolActivityLabel(toolName, locale = 'zh-CN') {

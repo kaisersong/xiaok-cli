@@ -100,6 +100,25 @@ export interface KSwarmServiceStatus {
   lastError: string | null;
 }
 
+export type DesktopRelatedServiceId = 'kswarm' | 'intent-broker' | 'runtime-bridge';
+
+export interface DesktopRelatedServiceStatus {
+  id: DesktopRelatedServiceId;
+  label: string;
+  running: boolean;
+  reachable: boolean;
+  port: number;
+  pid: number | null;
+  restartCount?: number;
+  lastError: string | null;
+  detail?: string;
+}
+
+export interface DesktopServiceStatusSnapshot {
+  checkedAt: number;
+  services: DesktopRelatedServiceStatus[];
+}
+
 export function buildBackgroundNodeSpawnOptions(options: {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
@@ -119,8 +138,8 @@ export function buildBackgroundNodeSpawnOptions(options: {
   };
 }
 
-export function shouldAdoptExistingKSwarmService(input: { hasOwnedChild: boolean; healthOk: boolean }): boolean {
-  return input.healthOk && !input.hasOwnedChild;
+export function shouldAdoptExistingKSwarmService(input: { hasOwnedChild: boolean; healthOk: boolean; brokerReady?: boolean }): boolean {
+  return input.healthOk && input.brokerReady !== false && !input.hasOwnedChild;
 }
 
 export interface KSwarmService {
@@ -128,6 +147,8 @@ export interface KSwarmService {
   stop(): Promise<void>;
   restart(): Promise<void>;
   getStatus(): KSwarmServiceStatus;
+  getServiceStatus(): Promise<DesktopServiceStatusSnapshot>;
+  restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void>;
   onStatusChange(cb: (status: KSwarmServiceStatus) => void): () => void;
   /** Make an HTTP request to the KSwarm service. Auto-starts if not running. */
   request(path: string, init?: RequestInit): Promise<Response>;
@@ -174,6 +195,35 @@ export function createKSwarmService(): KSwarmService {
     } catch {
       return false;
     }
+  }
+
+  async function fetchHealthJson(url: string): Promise<{ ok: boolean; body: Record<string, unknown> | null; error: string | null }> {
+    try {
+      const res = await fetch(url);
+      let body: Record<string, unknown> | null = null;
+      try {
+        const parsed = await res.json();
+        body = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+      } catch {
+        body = null;
+      }
+      return {
+        ok: res.ok,
+        body,
+        error: res.ok ? null : `HTTP ${res.status}`,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        body: null,
+        error: error instanceof Error ? error.message : 'health check failed',
+      };
+    }
+  }
+
+  async function brokerHealthCheck(): Promise<boolean> {
+    const result = await fetchHealthJson(`http://127.0.0.1:${BROKER_PORT}/health`);
+    return result.ok;
   }
 
   function startHealthCheck() {
@@ -298,10 +348,7 @@ export function createKSwarmService(): KSwarmService {
 
   async function ensureBroker(): Promise<boolean> {
     // Check if broker is already running
-    try {
-      const res = await fetch(`http://127.0.0.1:${BROKER_PORT}/health`);
-      if (res.ok) return true;
-    } catch {}
+    if (await brokerHealthCheck()) return true;
 
     const brokerLaunch = resolveBrokerLaunchSpec();
     if (!brokerLaunch) {
@@ -340,11 +387,24 @@ export function createKSwarmService(): KSwarmService {
 
   async function spawnServer(): Promise<void> {
     const existingHealthy = await healthCheck();
-    if (shouldAdoptExistingKSwarmService({ hasOwnedChild: Boolean(child), healthOk: existingHealthy })) {
+    let brokerReady = await brokerHealthCheck();
+    if (shouldAdoptExistingKSwarmService({ hasOwnedChild: Boolean(child), healthOk: existingHealthy, brokerReady })) {
       console.log(`[kswarm-service] Adopting existing healthy kswarm service on port ${KSWARM_PORT}`);
       await reconcileSeedAgents();
       running = true;
       lastError = null;
+      restartCount = 0;
+      startHealthCheck();
+      notifyListeners();
+      return;
+    }
+
+    if (existingHealthy && !child) {
+      brokerReady = await ensureBroker();
+      console.log(`[kswarm-service] Adopting existing kswarm service on port ${KSWARM_PORT}${brokerReady ? '' : ' (broker degraded)'}`);
+      await reconcileSeedAgents();
+      running = true;
+      lastError = brokerReady ? null : 'intent-broker health check failed';
       restartCount = 0;
       startHealthCheck();
       notifyListeners();
@@ -360,7 +420,7 @@ export function createKSwarmService(): KSwarmService {
     }
 
     // Ensure broker is up first
-    const brokerReady = await ensureBroker();
+    brokerReady = await ensureBroker();
     if (!brokerReady) {
       console.warn('[kswarm-service] Broker not ready after bootstrap attempt; starting kswarm in degraded mode');
     }
@@ -492,10 +552,7 @@ export function createKSwarmService(): KSwarmService {
         child = null;
       }
     }
-    if (brokerChild) {
-      brokerChild.kill('SIGTERM');
-      brokerChild = null;
-    }
+    await stopOwnedBroker();
     running = false;
     notifyListeners();
   }
@@ -507,5 +564,75 @@ export function createKSwarmService(): KSwarmService {
     await spawnServer();
   }
 
-  return { start, stop, restart, getStatus, onStatusChange, request };
+  async function stopOwnedBroker(): Promise<void> {
+    if (!brokerChild) return;
+    const ownedBroker = brokerChild;
+    const exitPromise = new Promise<void>(resolve => {
+      ownedBroker.on('exit', () => resolve());
+      setTimeout(resolve, 3_000);
+    });
+    ownedBroker.kill('SIGTERM');
+    await exitPromise;
+    if (brokerChild === ownedBroker) {
+      brokerChild.kill('SIGKILL');
+      brokerChild = null;
+    }
+  }
+
+  async function getServiceStatus(): Promise<DesktopServiceStatusSnapshot> {
+    const [kswarmHealth, brokerHealth] = await Promise.all([
+      fetchHealthJson(HEALTH_URL),
+      fetchHealthJson(`http://127.0.0.1:${BROKER_PORT}/health`),
+    ]);
+    const brokerConnected = kswarmHealth.body?.brokerConnected;
+    const kswarmDetail = kswarmHealth.ok
+      ? brokerConnected === false
+        ? 'broker disconnected'
+        : brokerConnected === true
+          ? 'broker connected'
+          : 'health ok'
+      : 'health check failed';
+    return {
+      checkedAt: Date.now(),
+      services: [
+        {
+          id: 'kswarm',
+          label: 'KSwarm',
+          running: running || kswarmHealth.ok,
+          reachable: kswarmHealth.ok,
+          port: KSWARM_PORT,
+          pid: child?.pid ?? null,
+          restartCount,
+          lastError: kswarmHealth.ok ? lastError : (kswarmHealth.error || lastError),
+          detail: kswarmDetail,
+        },
+        {
+          id: 'intent-broker',
+          label: 'Intent Broker',
+          running: Boolean(brokerChild) || brokerHealth.ok,
+          reachable: brokerHealth.ok,
+          port: BROKER_PORT,
+          pid: brokerChild?.pid ?? null,
+          restartCount: 0,
+          lastError: brokerHealth.ok ? null : brokerHealth.error,
+          detail: brokerHealth.ok ? 'health ok' : 'health check failed',
+        },
+      ],
+    };
+  }
+
+  async function restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void> {
+    if (serviceId === 'kswarm') {
+      await restart();
+      return;
+    }
+    await stopOwnedBroker();
+    const ok = await ensureBroker();
+    if (!ok) {
+      throw new Error('intent_broker_restart_failed');
+    }
+    notifyListeners();
+  }
+
+  return { start, stop, restart, getStatus, getServiceStatus, restartRelatedService, onStatusChange, request };
 }

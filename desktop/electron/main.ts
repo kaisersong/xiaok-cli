@@ -80,6 +80,32 @@ async function createWindow(): Promise<BrowserWindow> {
   ipcMain.handle('desktop:kswarm:start', () => kswarmService.start());
   ipcMain.handle('desktop:kswarm:stop', () => kswarmService.stop());
   ipcMain.handle('desktop:kswarm:restart', () => kswarmService.restart());
+  let restartRuntimeBridgeService: () => Promise<void> = async () => {};
+  ipcMain.handle('desktop:services:getStatus', async () => {
+    const snapshot = await kswarmService.getServiceStatus();
+    return {
+      ...snapshot,
+      services: [
+        ...snapshot.services,
+        {
+          id: 'runtime-bridge',
+          label: 'Runtime Bridge',
+          running: runtimeBridgeStarted,
+          reachable: runtimeBridgeStarted,
+          port: 0,
+          pid: null,
+          restartCount: 0,
+          lastError: null,
+          detail: runtimeBridgeStarted ? `${runtimeBridgeClients.length} client(s) registered` : 'not started',
+        },
+      ],
+    };
+  });
+  ipcMain.handle('desktop:services:restart', (_event, serviceId) => (
+    serviceId === 'runtime-bridge'
+      ? restartRuntimeBridgeService()
+      : kswarmService.restartRelatedService(serviceId)
+  ));
   kswarmService.onStatusChange((status) => {
     window.webContents.send('desktop:kswarm:statusChange', status);
   });
@@ -147,6 +173,14 @@ async function createWindow(): Promise<BrowserWindow> {
   const runtimeBridgeClients: Array<{ start(): Promise<void>; stop(): void }> = [];
   let runtimeBridgeStarted = false;
   let runtimeBridgeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  const stopRuntimeBridge = () => {
+    if (runtimeBridgeFallbackTimer) {
+      clearTimeout(runtimeBridgeFallbackTimer);
+      runtimeBridgeFallbackTimer = null;
+    }
+    for (const client of runtimeBridgeClients.splice(0)) client.stop();
+    runtimeBridgeStarted = false;
+  };
   const startRuntimeBridge = () => {
     if (runtimeBridgeStarted) return;
     runtimeBridgeStarted = true;
@@ -172,6 +206,7 @@ async function createWindow(): Promise<BrowserWindow> {
         handleAssignPo: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmAssignPo(input),
         handleReviewSubmission: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmReviewSubmission(input),
         handlePlanApproved: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmPlanApproved(input),
+        handleReadinessProbe: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmReadinessProbe(input),
       };
       runtimeBridgeClients.push(
         createKSwarmRuntimeBridgeBrokerClient({
@@ -197,6 +232,10 @@ async function createWindow(): Promise<BrowserWindow> {
         });
       }
     });
+  };
+  restartRuntimeBridgeService = async () => {
+    stopRuntimeBridge();
+    startRuntimeBridge();
   };
   runtimeBridgeFallbackTimer = setTimeout(startRuntimeBridge, 10_000);
   services.registerMcpTools().then(({ dispose }) => {

@@ -1,17 +1,16 @@
+interface DownloadableFile {
+    filename: string;
+    url: string;
+    mirror?: string;
+}
 export interface ModelEntry {
     id: string;
     name: string;
     dims: number;
     size: string;
     languages: string;
-    files: {
-        model: string;
-        tokenizer: string;
-    };
-    mirrorFiles?: {
-        model: string;
-        tokenizer: string;
-    };
+    downloadFiles: DownloadableFile[];
+    requiredFiles: string[];
 }
 export declare const MODEL_REGISTRY: ModelEntry[];
 export declare function getModelDir(modelId?: string): string;
@@ -25,3 +24,4 @@ export declare function getManualDownloadHint(modelId: string): {
     targetDir: string;
 };
 export declare function downloadModel(modelId: string): Promise<void>;
+export {};

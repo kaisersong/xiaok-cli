@@ -6,6 +6,7 @@ import { basename, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getToolActivityLabel, type UiLocale } from './locale.js';
 import { getDisplayWidth, stripAnsi } from './display-width.js';
+import { BUILD_TIME } from '../build-info.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOGO_PATH = join(__dirname, '../../data/logo.txt');
@@ -269,7 +270,7 @@ export function renderWelcomeScreen(opts: {
 
   const modelInfo = `${opts.model} · ${opts.mode}`;
   const sessionInfo = `Session: ${opts.sessionId}`;
-  const versionInfo = `Version: ${opts.version}`;
+  const versionInfo = `Version: ${opts.version}${BUILD_TIME ? ` (${BUILD_TIME})` : ''}`;
 
   const modelLine = padVisible(" " + dim(modelInfo), leftWidth);
   const sessionLine = padVisible(" " + dim(sessionInfo), rightWidth);

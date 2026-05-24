@@ -121,8 +121,10 @@ export function formatPermissionPromptLines(
     lines.push(`${target.key}: ${dim(target.value)}`);
   }
 
-  for (const option of options) {
-    lines.push(option.selected ? boldCyan(`❯ ${option.label}`) : dim(`  ${option.label}`));
+  for (let i = 0; i < options.length; i++) {
+    const option = options[i];
+    const num = `${i + 1}`;
+    lines.push(option.selected ? boldCyan(`❯ ${num}. ${option.label}`) : dim(`  ${num}. ${option.label}`));
   }
 
   lines.push(dim(copy.hint));
@@ -285,6 +287,18 @@ export async function showPermissionPrompt(
           timestamp: Date.now(),
         });
         done(promptOptions[selectedIdx].choice);
+        return;
+      }
+
+      // Number keys → 直接选择对应项
+      const num = parseInt(key, 10);
+      if (num >= 1 && num <= promptOptions.length) {
+        transcriptLogger?.record({
+          type: 'permission_prompt_decision',
+          action: promptOptions[num - 1].choice.action,
+          timestamp: Date.now(),
+        });
+        done(promptOptions[num - 1].choice);
         return;
       }
 

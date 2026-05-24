@@ -5,6 +5,7 @@ import { basename, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getToolActivityLabel } from './locale.js';
 import { getDisplayWidth, stripAnsi } from './display-width.js';
+import { BUILD_TIME } from '../build-info.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOGO_PATH = join(__dirname, '../../data/logo.txt');
 let colorsEnabled = process.stdout.isTTY !== false &&
@@ -203,7 +204,7 @@ export function renderWelcomeScreen(opts) {
     rowCount += countRows(stripAnsi(midBorder));
     const modelInfo = `${opts.model} · ${opts.mode}`;
     const sessionInfo = `Session: ${opts.sessionId}`;
-    const versionInfo = `Version: ${opts.version}`;
+    const versionInfo = `Version: ${opts.version}${BUILD_TIME ? ` (${BUILD_TIME})` : ''}`;
     const modelLine = padVisible(" " + dim(modelInfo), leftWidth);
     const sessionLine = padVisible(" " + dim(sessionInfo), rightWidth);
     const modelRow = dim(frame.vl) + modelLine + dim(frame.vl) + sessionLine + dim(frame.vr);

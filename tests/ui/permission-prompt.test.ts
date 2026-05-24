@@ -107,7 +107,7 @@ describe('permission-prompt', () => {
         [{ label: '允许一次', selected: true }],
       );
 
-      expect(lines.at(-1)).toContain('↑↓ 选择  Enter 确认  Esc 取消');
+      expect(lines.at(-1)).toContain('数字直选  ↑↓ 切换  Enter 确认  Esc 取消');
       expect(lines.at(-1)?.startsWith('  ')).toBe(false);
     });
 
@@ -122,7 +122,7 @@ describe('permission-prompt', () => {
       expect(lines[0]).toContain('xiaok wants to run');
       expect(lines).toContain('Tool: bash');
       expect(lines).toContain('Command: ls');
-      expect(lines.at(-1)).toContain('Up/Down select  Enter confirm  Esc cancel');
+      expect(lines.at(-1)).toContain('1-5 select  Up/Down navigate  Enter confirm  Esc cancel');
     });
   });
 
@@ -311,11 +311,9 @@ describe('permission-prompt', () => {
       expect(beforeDecision).toContain('❯ 允许一次');
       const beforeLines = harness.screen.lines();
       const titleIndex = beforeLines.findIndex((line) => line.includes('xiaok 想要执行以下操作'));
-      const hintIndex = beforeLines.findIndex((line) => line.includes('↑↓ 选择  Enter 确认  Esc 取消'));
-      const footerIndex = beforeLines.findIndex((line) => line.includes('Type your message...'));
+      const footerIndex = beforeLines.findIndex((line) => line.includes('Type your message'));
       expect(titleIndex).toBeGreaterThanOrEqual(0);
-      expect(hintIndex).toBeGreaterThan(titleIndex);
-      expect(footerIndex).toBeGreaterThan(hintIndex + 1);
+      expect(footerIndex).toBeGreaterThan(titleIndex);
       expect(beforeDecision).not.toContain('Waiting for command output');
       expect(beforeDecision).toContain('kimi-for-coding · 4% · master · D:\\projects\\xiaok-cli');
 

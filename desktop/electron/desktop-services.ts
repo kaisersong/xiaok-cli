@@ -544,6 +544,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
+  registerKSwarmTools(registry, options.kswarmService);
   // [2026-05-10] Intent delegation disabled — passive tracking only, no functional value.
   // See docs/2026-05-10-desktop-intent-delegation-removal.md
   // const intentStore = new InMemoryIntentLedgerStore();
@@ -638,6 +639,48 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       await new Promise(resolve => setTimeout(resolve, 500));
     }
     throw new Error('desktop_task_timeout');
+  }
+
+  async function runKSwarmReadinessProbe({ targetParticipantId }: { targetParticipantId?: string } = {}) {
+    const participantId = targetParticipantId || XIAOK_PO_SEED_ID;
+    const base = {
+      runtimeSource: 'desktop-agent-runtime',
+      participantId,
+      capabilities: [
+        'planning',
+        'research',
+        'analysis',
+        'source_research',
+        'writing',
+        'report_generation',
+      ],
+      outputCapabilities: ['markdown', 'html', 'report_html', 'text', 'json', 'csv'],
+    };
+
+    try {
+      const config = await loadConfig();
+      const model = config.models?.[config.defaultModelId];
+      const provider = config.providers?.[config.defaultProvider];
+      if (!config.defaultProvider || !config.defaultModelId || !model || !provider) {
+        return { ...base, ok: false as const, reason: 'model_config_missing' };
+      }
+
+      const toolNames = new Set(registry.getToolDefinitions().map(tool => tool.name));
+      for (const requiredTool of ['create_project', 'inspect_project', 'continue_project', 'repair_project_task_from_file']) {
+        if (!toolNames.has(requiredTool)) {
+          return { ...base, ok: false as const, reason: 'kswarm_tools_unavailable' };
+        }
+      }
+
+      mkdirSync(join(options.dataRoot, 'runtime-health'), { recursive: true });
+      return { ...base, ok: true as const };
+    } catch (error) {
+      return {
+        ...base,
+        ok: false as const,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   async function runKSwarmAssignPo({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
@@ -1303,6 +1346,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     createTask: host.createTask.bind(host),
     runKSwarmHandoffTask,
+    runKSwarmReadinessProbe,
     runKSwarmAssignPo,
     runKSwarmReviewSubmission,
     runKSwarmPlanApproved,
@@ -2777,6 +2821,11 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
           memberNames,
           memberCount,
         }).members;
+        const explicitlyNamedMemberIds = new Set(
+          (Array.isArray(memberNames) ? memberNames : [])
+            .map(name => agents.find(agent => agent.id === name || agent.name === name)?.id)
+            .filter((id): id is string => Boolean(id))
+        );
 
         // 3a. 自动创建 agent（如果用户明确指定数量且不够，并发创建）
         if (memberCount > 0) {
@@ -2813,6 +2862,13 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
             ...(planningGuidance ? { planningGuidance } : {}),
             poAgent,
             members: resolvedMembers,
+            agentSelection: {
+              poAgent: { agentId: poAgent, source: 'default_seed' },
+              members: resolvedMembers.map(agentId => ({
+                agentId,
+                source: explicitlyNamedMemberIds.has(agentId) ? 'explicit_user' : 'default_seed',
+              })),
+            },
             ...(resolvedWorkFolder ? { workFolder: resolvedWorkFolder } : {}),
           }),
         });
@@ -3358,11 +3414,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
   let skillsLoaded = false;
 
   // Register kswarm create_project tool (allows AI to create multi-agent projects from chat)
-  registry.registerTool(createKSwarmCreateProjectTool(kswarmService));
-  registry.registerTool(createKSwarmInspectProjectTool(kswarmService));
-  registry.registerTool(createKSwarmContinueProjectTool(kswarmService));
-  registry.registerTool(createKSwarmRepairProjectTaskFromFileTool(kswarmService));
-  registry.registerTool(createKSwarmRepairProjectTaskTool(kswarmService));
+  registerKSwarmTools(registry, kswarmService);
 
   // Register report_progress tool (TaskPanel progress reporting)
   const reportProgressTool: Tool = {
@@ -3739,4 +3791,12 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       });
     }
   };
+}
+
+function registerKSwarmTools(registry: ToolRegistry, kswarmService: KSwarmService): void {
+  registry.registerTool(createKSwarmCreateProjectTool(kswarmService));
+  registry.registerTool(createKSwarmInspectProjectTool(kswarmService));
+  registry.registerTool(createKSwarmContinueProjectTool(kswarmService));
+  registry.registerTool(createKSwarmRepairProjectTaskFromFileTool(kswarmService));
+  registry.registerTool(createKSwarmRepairProjectTaskTool(kswarmService));
 }

@@ -13,16 +13,19 @@ describe('model-registry', () => {
       expect(m.dims).toBeGreaterThan(0);
       expect(m.size).toBeTruthy();
       expect(m.languages).toBeTruthy();
-      expect(m.files.model).toBeTruthy();
-      expect(m.files.tokenizer).toBeTruthy();
+      expect(m.requiredFiles).toContain('model.onnx');
+      expect(m.requiredFiles).toContain('tokenizer.json');
+      expect(m.downloadFiles.some((file) => file.filename === 'model.onnx' && file.url)).toBe(true);
+      expect(m.downloadFiles.some((file) => file.filename === 'tokenizer.json' && file.url)).toBe(true);
     }
   });
 
   it('each model has mirror URLs', () => {
     for (const m of MODEL_REGISTRY) {
-      expect(m.mirrorFiles).toBeDefined();
-      expect(m.mirrorFiles!.model).toContain('hf-mirror.com');
-      expect(m.mirrorFiles!.tokenizer).toContain('hf-mirror.com');
+      for (const file of m.downloadFiles) {
+        expect(file.mirror).toBeDefined();
+        expect(file.mirror).toContain('hf-mirror.com');
+      }
     }
   });
 

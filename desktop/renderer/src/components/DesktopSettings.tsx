@@ -29,10 +29,20 @@ import {
   Wrench,
   Search,
   Link as LinkIcon,
+  Server,
+  RefreshCw,
 } from 'lucide-react';
 import { api } from '../api';
 import { LocalMemoryStatsCard } from './settings/LocalMemoryStatsCard';
-import type { DesktopModelConfigSnapshot, DesktopSaveModelConfigInput, TestProviderConnectionResult } from '../../../electron/preload-api';
+import { MemoryModelSettings } from './settings/MemoryModelSettings';
+import type {
+  DesktopModelConfigSnapshot,
+  DesktopRelatedServiceId,
+  DesktopRelatedServiceStatus,
+  DesktopSaveModelConfigInput,
+  DesktopServiceStatusSnapshot,
+  TestProviderConnectionResult,
+} from '../../../electron/preload-api';
 import type {
   ConnectorsConfig,
   ConnectorsConfigSnapshot,
@@ -1377,16 +1387,40 @@ function GeneralPane() {
   const { locale, setLocale, t } = useLocale();
   const [skillDebug, setSkillDebug] = useState(false);
   const [savingSkillDebug, setSavingSkillDebug] = useState(false);
+  const [serviceStatus, setServiceStatus] = useState<DesktopServiceStatusSnapshot | null>(null);
+  const [serviceStatusLoading, setServiceStatusLoading] = useState(true);
+  const [serviceStatusError, setServiceStatusError] = useState('');
+  const [restartingService, setRestartingService] = useState<DesktopRelatedServiceId | null>(null);
   const [displayName, setDisplayName] = useState(() => localStorage.getItem('xiaok_display_name') || '');
   const [avatarUrl, setAvatarUrl] = useState(() => localStorage.getItem('xiaok_avatar_url') || '');
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
+
+  const loadServiceStatus = useCallback(async (silent = false) => {
+    if (!silent) setServiceStatusLoading(true);
+    setServiceStatusError('');
+    try {
+      setServiceStatus(await api.getServiceStatus());
+    } catch (error) {
+      setServiceStatusError(error instanceof Error ? error.message : '服务状态读取失败');
+    } finally {
+      if (!silent) setServiceStatusLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     api.getSkillDebugConfig().then(c => {
       setSkillDebug(c.enabled);
     });
   }, []);
+
+  useEffect(() => {
+    void loadServiceStatus();
+    const timer = window.setInterval(() => {
+      void loadServiceStatus(true);
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [loadServiceStatus]);
 
   const handleSkillDebugToggle = async (enabled: boolean) => {
     setSkillDebug(enabled);
@@ -1395,6 +1429,19 @@ function GeneralPane() {
       await api.saveSkillDebugConfig({ enabled });
     } finally {
       setSavingSkillDebug(false);
+    }
+  };
+
+  const handleRestartService = async (serviceId: DesktopRelatedServiceId) => {
+    setRestartingService(serviceId);
+    setServiceStatusError('');
+    try {
+      await api.restartRelatedService(serviceId);
+      await loadServiceStatus(true);
+    } catch (error) {
+      setServiceStatusError(error instanceof Error ? error.message : '服务重启失败');
+    } finally {
+      setRestartingService(null);
     }
   };
 
@@ -1532,6 +1579,33 @@ function GeneralPane() {
       </Section>
 
       <Section>
+        <SectionHeader icon={Server}>服务状态</SectionHeader>
+        <Card>
+          <div className="flex flex-col gap-3">
+            {serviceStatusLoading && !serviceStatus ? (
+              <div className="flex items-center gap-2 text-xs text-[var(--c-text-secondary)]">
+                <Loader2 size={14} className="animate-spin" />
+                <span>检查中</span>
+              </div>
+            ) : null}
+            {serviceStatus?.services.map(service => (
+              <ServiceStatusRow
+                key={service.id}
+                service={service}
+                restarting={restartingService === service.id}
+                onRestart={handleRestartService}
+              />
+            ))}
+            {serviceStatusError ? (
+              <div className="rounded-md border border-[var(--c-status-error-text)]/20 bg-[var(--c-status-error-bg,#fef2f2)] px-3 py-2 text-xs text-[var(--c-status-error-text)]">
+                {serviceStatusError}
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      </Section>
+
+      <Section>
         <SectionHeader icon={Zap}>Stage 调试输出</SectionHeader>
         <Card>
           <p className="text-xs text-[var(--c-text-secondary)] mb-4">
@@ -1574,6 +1648,81 @@ function GeneralPane() {
   );
 }
 
+function ServiceStatusRow({
+  service,
+  restarting,
+  onRestart,
+}: {
+  service: DesktopRelatedServiceStatus;
+  restarting: boolean;
+  onRestart: (serviceId: DesktopRelatedServiceId) => void;
+}) {
+  const status = getRelatedServiceDisplayStatus(service);
+  const meta = [
+    `:${service.port}`,
+    service.pid ? `PID ${service.pid}` : '',
+    service.restartCount ? `重启 ${service.restartCount}` : '',
+    service.detail || '',
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-[var(--c-border)] px-3 py-2">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${status.dotClass}`} />
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-medium text-[var(--c-text-primary)]">{service.label}</span>
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] ${status.badgeClass}`}>
+              {status.label}
+            </span>
+          </div>
+          <div className="mt-0.5 truncate text-xs text-[var(--c-text-tertiary)]">{meta}</div>
+          {service.lastError ? (
+            <div className="mt-1 truncate text-xs text-[var(--c-status-error-text)]">{service.lastError}</div>
+          ) : null}
+        </div>
+      </div>
+      <button
+        type="button"
+        aria-label={`restart-service-${service.id}`}
+        title={`${service.label} 重启`}
+        onClick={() => onRestart(service.id)}
+        disabled={restarting}
+        className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[var(--c-border)] px-2.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {restarting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+        <span>重启</span>
+      </button>
+    </div>
+  );
+}
+
+function getRelatedServiceDisplayStatus(service: DesktopRelatedServiceStatus): {
+  label: string;
+  dotClass: string;
+  badgeClass: string;
+} {
+  if (service.reachable && service.running) {
+    return {
+      label: '运行中',
+      dotClass: 'bg-[var(--c-status-success-text,#16a34a)]',
+      badgeClass: 'bg-[var(--c-status-ok-bg,#dcfce7)] text-[var(--c-status-ok-text,#166534)]',
+    };
+  }
+  if (service.running) {
+    return {
+      label: '异常',
+      dotClass: 'bg-[var(--c-status-warning-text,#d97706)]',
+      badgeClass: 'bg-[var(--c-status-warning-bg,#fef3c7)] text-[var(--c-status-warning-text,#92400e)]',
+    };
+  }
+  return {
+    label: '不可用',
+    dotClass: 'bg-[var(--c-status-error-text,#dc2626)]',
+    badgeClass: 'bg-[var(--c-status-error-bg,#fee2e2)] text-[var(--c-status-error-text,#991b1b)]',
+  };
+}
+
 // ---- Memory ----
 
 function MemoryPane() {
@@ -1584,6 +1733,9 @@ function MemoryPane() {
         管理你的偏好、工作流和项目知识。新对话会自动加载相关记忆。
       </p>
       <LocalMemoryStatsCard />
+      <div className="mt-6">
+        <MemoryModelSettings />
+      </div>
     </Section>
   );
 }

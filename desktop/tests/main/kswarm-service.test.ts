@@ -102,6 +102,14 @@ describe('kswarm service external adoption', () => {
     expect(shouldAdoptExistingKSwarmService({ hasOwnedChild: false, healthOk: true })).toBe(true);
   });
 
+  it('does not fully adopt an external service as healthy when its broker is disconnected', () => {
+    expect(shouldAdoptExistingKSwarmService({
+      hasOwnedChild: false,
+      healthOk: true,
+      brokerReady: false,
+    })).toBe(false);
+  });
+
   it('does not treat a desktop-owned child as an external service', () => {
     expect(shouldAdoptExistingKSwarmService({ hasOwnedChild: true, healthOk: true })).toBe(false);
     expect(shouldAdoptExistingKSwarmService({ hasOwnedChild: false, healthOk: false })).toBe(false);

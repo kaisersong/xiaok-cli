@@ -303,6 +303,106 @@ describe('kswarm runtime bridge', () => {
     }));
   });
 
+  it('responds to readiness_probe broker intents without running a task handoff', async () => {
+    const handleTaskHandoff = vi.fn().mockResolvedValue({ ok: true });
+    const handleReadinessProbe = vi.fn().mockResolvedValue({
+      ok: true,
+      capabilities: ['planning', 'research'],
+      outputCapabilities: ['markdown', 'report_html'],
+    });
+    const posts: Array<{ body: Record<string, unknown> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      posts.push({ body: JSON.parse(String(init?.body ?? '{}')) });
+      return new Response(JSON.stringify({ ok: true, deliveredCount: 1 }), { status: 200 });
+    });
+    const FakeWebSocket = createFakeWebSocket();
+    const client = createKSwarmRuntimeBridgeBrokerClient({
+      participantId: 'xiaok-po',
+      bridge: {
+        handleTaskHandoff,
+        handleReadinessProbe,
+      },
+      fetchImpl: fetchImpl as never,
+      WebSocketImpl: FakeWebSocket,
+    });
+
+    await client.start();
+    FakeWebSocket.instances[0].emitMessage({
+      type: 'new_intent',
+      event: {
+        kind: 'readiness_probe',
+        fromParticipantId: 'kswarm-hub',
+        taskId: 'probe-1',
+        payload: {
+          probeId: 'probe-1',
+          projectId: 'proj-1',
+          agentId: 'xiaok-po',
+          role: 'project_owner',
+        },
+      },
+    });
+    await nextTick();
+
+    expect(handleTaskHandoff).not.toHaveBeenCalled();
+    expect(handleReadinessProbe).toHaveBeenCalledWith(expect.objectContaining({
+      targetParticipantId: 'xiaok-po',
+      payload: expect.objectContaining({ probeId: 'probe-1' }),
+    }));
+    expect(posts.at(-1)?.body).toMatchObject({
+      kind: 'readiness_probe_result',
+      fromParticipantId: 'xiaok-po',
+      taskId: 'probe-1',
+      payload: expect.objectContaining({
+        ok: true,
+        probeId: 'probe-1',
+        agentId: 'xiaok-po',
+        participantId: 'xiaok-po',
+        runtimeSource: 'desktop-agent-runtime',
+        capabilities: ['planning', 'research'],
+        outputCapabilities: ['markdown', 'report_html'],
+      }),
+    });
+  });
+
+  it('reports readiness probe failures with a stable reason', async () => {
+    const posts: Array<{ body: Record<string, unknown> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      posts.push({ body: JSON.parse(String(init?.body ?? '{}')) });
+      return new Response(JSON.stringify({ ok: true, deliveredCount: 1 }), { status: 200 });
+    });
+    const FakeWebSocket = createFakeWebSocket();
+    const client = createKSwarmRuntimeBridgeBrokerClient({
+      participantId: 'xiaok-po',
+      bridge: {
+        handleTaskHandoff: async () => ({ ok: true }),
+        handleReadinessProbe: async () => ({ ok: false, reason: 'model_config_missing' }),
+      },
+      fetchImpl: fetchImpl as never,
+      WebSocketImpl: FakeWebSocket,
+    });
+
+    await client.start();
+    FakeWebSocket.instances[0].emitMessage({
+      type: 'new_intent',
+      event: {
+        kind: 'readiness_probe',
+        fromParticipantId: 'kswarm-hub',
+        taskId: 'probe-2',
+        payload: { probeId: 'probe-2', agentId: 'xiaok-po' },
+      },
+    });
+    await nextTick();
+
+    expect(posts.at(-1)?.body).toMatchObject({
+      kind: 'readiness_probe_result',
+      payload: expect.objectContaining({
+        ok: false,
+        reason: 'model_config_missing',
+        probeId: 'probe-2',
+      }),
+    });
+  });
+
   it('routes review_submission broker intents to the desktop PO review handler', async () => {
     const handleReviewSubmission = vi.fn().mockResolvedValue({ ok: true });
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true, deliveredCount: 1 }), { status: 200 }));

@@ -100,6 +100,17 @@ export interface KSwarmRuntimeBridge {
     payload: Record<string, unknown>;
     targetParticipantId?: string;
   }): Promise<{ ok: true } | { ok: false; error: string }>;
+  handleReadinessProbe?(input: {
+    payload: Record<string, unknown>;
+    targetParticipantId?: string;
+  }): Promise<{
+    ok: boolean;
+    reason?: string;
+    error?: string;
+    capabilities?: string[];
+    taskCapabilities?: string[];
+    outputCapabilities?: string[];
+  }>;
 }
 
 interface BrokerEvent {
@@ -246,6 +257,10 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
       await handleRequestTask(event);
       return;
     }
+    if (event?.kind === 'readiness_probe') {
+      await handleReadinessProbe(event);
+      return;
+    }
     if (event?.kind === 'assign_po' && typeof options.bridge.handleAssignPo === 'function') {
       await options.bridge.handleAssignPo({
         payload: event.payload ?? {},
@@ -266,6 +281,40 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
         targetParticipantId: options.participantId,
       });
     }
+  }
+
+  async function handleReadinessProbe(event: BrokerEvent): Promise<void> {
+    const payload = event.payload ?? {};
+    const probeId = asNonEmptyString(payload.probeId) || asNonEmptyString(event.taskId) || `probe-${Date.now()}`;
+    const agentId = asNonEmptyString(payload.agentId) || options.participantId;
+    let probeResult: Awaited<ReturnType<NonNullable<KSwarmRuntimeBridge['handleReadinessProbe']>>>;
+    if (typeof options.bridge.handleReadinessProbe === 'function') {
+      try {
+        probeResult = await options.bridge.handleReadinessProbe({
+          payload,
+          targetParticipantId: options.participantId,
+        });
+      } catch (error) {
+        probeResult = {
+          ok: false,
+          reason: error instanceof Error ? error.message : String(error),
+        };
+      }
+    } else {
+      probeResult = { ok: false, reason: 'readiness_handler_missing' };
+    }
+
+    await sendIntent('readiness_probe_result', event, {
+      probeId,
+      agentId,
+      participantId: options.participantId,
+      ok: Boolean(probeResult.ok),
+      ...(probeResult.ok ? {} : { reason: probeResult.reason || probeResult.error || 'readiness_probe_failed' }),
+      runtimeSource: 'desktop-agent-runtime',
+      capabilities: probeResult.capabilities ?? probeResult.taskCapabilities ?? [],
+      outputCapabilities: probeResult.outputCapabilities ?? [],
+      checkedAt: Date.now(),
+    });
   }
 
   async function handleRequestTask(event: BrokerEvent): Promise<void> {

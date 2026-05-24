@@ -195,6 +195,73 @@ describe('desktop services', () => {
     });
   });
 
+  it('runs a side-effect-free kswarm readiness probe', async () => {
+    const runner = vi.fn(async () => {
+      throw new Error('probe_must_not_run_user_task');
+    });
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner,
+    });
+
+    const result = await services.runKSwarmReadinessProbe({ targetParticipantId: 'xiaok-po' });
+
+    expect(result).toMatchObject({
+      ok: true,
+      runtimeSource: 'desktop-agent-runtime',
+      participantId: 'xiaok-po',
+      capabilities: expect.arrayContaining(['planning', 'research']),
+      outputCapabilities: expect.arrayContaining(['markdown', 'report_html']),
+    });
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('reports model_config_missing when kswarm readiness cannot find the configured model', async () => {
+    mkdirSync(process.env.XIAOK_CONFIG_DIR!, { recursive: true });
+    writeFileSync(join(process.env.XIAOK_CONFIG_DIR!, 'config.json'), JSON.stringify({
+      schemaVersion: 2,
+      defaultProvider: 'anthropic',
+      defaultModelId: 'missing-model',
+      providers: {
+        anthropic: {
+          type: 'first_party',
+          protocol: 'anthropic',
+          baseUrl: 'https://api.anthropic.com',
+        },
+      },
+      models: {},
+      defaultMode: 'interactive',
+      skillDebug: false,
+      intentBoundary: {
+        llmClassifier: 'off',
+        ambiguousFallback: 'legacy_validator',
+        confidenceThreshold: 0.75,
+        falseNegativeClarifyThreshold: 0.85,
+        timeoutMs: 1500,
+        maxInputTokens: 200,
+        maxOutputTokens: 100,
+      },
+      channels: {},
+    }));
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner: async () => {},
+    });
+
+    const result = await services.runKSwarmReadinessProbe({ targetParticipantId: 'xiaok-po' });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'model_config_missing',
+      runtimeSource: 'desktop-agent-runtime',
+      participantId: 'xiaok-po',
+    });
+  });
+
   it('discovers kswarm artifacts written directly to the project artifacts directory', async () => {
     const artifactsDir = join(rootDir, 'artifacts');
     const artifactPath = join(artifactsDir, 'research-notes.md');
@@ -1194,6 +1261,53 @@ describe('desktop services', () => {
       goal: 'Verify seed routing',
       poAgent: 'xiaok-po',
       members: ['xiaok-worker'],
+      agentSelection: {
+        poAgent: { agentId: 'xiaok-po', source: 'default_seed' },
+        members: [{ agentId: 'xiaok-worker', source: 'default_seed' }],
+      },
+    });
+  });
+
+  it('marks user-named project members as explicit agent selection', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'xiaok-po', name: 'PO-Agent', runtimeType: 'xiaok', roles: ['project_owner'], status: 'offline' },
+              { id: 'cli-qoder', name: 'Qoder', runtimeType: 'qoder', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            ok: true,
+            project: { id: 'proj-explicit-member', name: 'Explicit Member', status: 'created', createdAt: 456 },
+          }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmCreateProjectTool(kswarmService);
+    await tool.execute({
+      name: 'Explicit Member',
+      goal: 'Use selected member',
+      memberNames: ['Qoder'],
+    });
+
+    const createRequest = requests.find(request => request.path === '/projects');
+    expect(createRequest).toBeTruthy();
+    expect(JSON.parse(String(createRequest?.init?.body))).toMatchObject({
+      poAgent: 'xiaok-po',
+      members: ['cli-qoder'],
+      agentSelection: {
+        poAgent: { agentId: 'xiaok-po', source: 'default_seed' },
+        members: [{ agentId: 'cli-qoder', source: 'explicit_user' }],
+      },
     });
   });
 

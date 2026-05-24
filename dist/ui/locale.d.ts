@@ -9,7 +9,7 @@ export declare function getUiCopy(locale?: UiLocale): {
         readonly path: "路径";
         readonly pattern: "模式";
     };
-    readonly hint: "↑↓ 选择  Enter 确认  Esc 取消";
+    readonly hint: "数字直选  ↑↓ 切换  Enter 确认  Esc 取消";
 } | {
     readonly approvalTitle: "xiaok wants to run";
     readonly toolLabel: "Tool";
@@ -19,5 +19,5 @@ export declare function getUiCopy(locale?: UiLocale): {
         readonly path: "Path";
         readonly pattern: "Pattern";
     };
-    readonly hint: "Up/Down select  Enter confirm  Esc cancel";
+    readonly hint: "1-5 select  Up/Down navigate  Enter confirm  Esc cancel";
 };

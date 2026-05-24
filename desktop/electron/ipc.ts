@@ -339,6 +339,52 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
     } catch (e) { log('error', 'memorySetModelId failed', e); return false; }
   });
 
+  ipcMain.handle('desktop:getEmbeddingModels', async () => {
+    try {
+      const { MODEL_REGISTRY, isModelDownloaded, getManualDownloadHint } = await import('../../src/ai/memory/model-registry.js');
+      const { loadConfig } = await import('../../src/utils/config.js');
+      const config = await loadConfig();
+      const activeModelId = config.memory?.modelId ?? 'all-MiniLM-L6-v2';
+      return MODEL_REGISTRY.map(m => ({
+        id: m.id,
+        name: m.name,
+        dims: m.dims,
+        size: m.size,
+        languages: m.languages,
+        downloaded: isModelDownloaded(m.id),
+        active: m.id === activeModelId,
+        manualHint: getManualDownloadHint(m.id),
+      }));
+    } catch (e) { log('error', 'getEmbeddingModels failed', e); return []; }
+  });
+
+  ipcMain.handle('desktop:downloadEmbeddingModel', async (_event, modelId: string) => {
+    const { downloadModel } = await import('../../src/ai/memory/model-registry.js');
+    await downloadModel(modelId);
+  });
+
+  ipcMain.handle('desktop:setEmbeddingModel', async (_event, modelId: string) => {
+    try {
+      const { loadConfig, saveConfig: saveConfigFn, getConfigDir } = await import('../../src/utils/config.js');
+      const config = await loadConfig();
+      const prevModelId = config.memory?.modelId;
+      if (!config.memory) config.memory = {};
+      config.memory.modelId = modelId;
+      await saveConfigFn(config);
+      if (prevModelId !== modelId) {
+        try {
+          const Database = (await import('better-sqlite3')).default;
+          const path = await import('node:path');
+          const dbPath = path.join(getConfigDir(), 'memory.db');
+          const db = new Database(dbPath);
+          db.prepare('DELETE FROM memory_embeddings').run();
+          db.close();
+          log('info', 'Cleared memory_embeddings after model switch', { from: prevModelId, to: modelId });
+        } catch (e) { log('warn', 'Failed to clear embeddings on model switch', e); }
+      }
+    } catch (e) { log('error', 'setEmbeddingModel failed', e); throw e; }
+  });
+
   // ---- Artifact Editing ----
   const { sessionHash, backupArtifact, revertArtifact, cleanupBackups, watchArtifactFile, unwatchArtifactFile } = await import('./artifact-editing.js');
 

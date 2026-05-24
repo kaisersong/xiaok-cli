@@ -1,6 +1,8 @@
 import { createLogger } from '../lib/logger';
 import type {
   DesktopApi,
+  DesktopRelatedServiceId,
+  DesktopServiceStatusSnapshot,
   DesktopModelConfigSnapshot,
   DesktopSaveModelConfigInput,
   MaterialView,
@@ -756,6 +758,16 @@ export const api = {
     } catch {
       return [];
     }
+  },
+
+  // ---------------------
+  // Related Service Status API (IPC)
+  // ---------------------
+  async getServiceStatus(): Promise<DesktopServiceStatusSnapshot> {
+    return window.xiaokDesktop.getServiceStatus();
+  },
+  async restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void> {
+    return window.xiaokDesktop.restartRelatedService(serviceId);
   },
 
   // ---------------------

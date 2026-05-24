@@ -13,11 +13,7 @@ describe('terminal-frame', () => {
       terminalSize: { columns: 80, rows: 24 },
     });
 
-    // Prompt line now has background color and ❯ symbol
     expect(frame.lines[0]).toMatch(/❯.*为什么没有调用kai-report-creator/);
-    // Cursor column: 2 (for "❯ ") + 32 (display width of Chinese input at offset 25)
-    // Chinese chars are 2 columns each, so 8 Chinese = 16 cols + 17 ASCII = 17 cols = 33 total display width
-    // But cursorOffset 25 means end of string, which is 32 display columns
     expect(frame.cursor).toEqual({ line: 0, column: 34 });
   });
 
@@ -40,7 +36,6 @@ describe('terminal-frame', () => {
     });
 
     expect(frame.lines.some((line) => line.includes('工具:'))).toBe(true);
-    // Note: ❯ is in the prompt line (with background), not a separate indicator
     expect(frame.lines.some((line) => line.includes('❯'))).toBe(true);
   });
 
@@ -56,11 +51,9 @@ describe('terminal-frame', () => {
       terminalSize: { columns: 80, rows: 24 },
     });
 
-    // Prompt line now has background color and ❯ symbol
     expect(frame.lines.length).toBe(2);
     expect(frame.lines[0]).toMatch(/\x1b\[48;5;244m.*❯/);
     expect(frame.lines[1]).toBe('  xiaok-cli · claude-sonnet-4 · 1%');
-    // Cursor should be at column 2 (after "❯ ")
     expect(frame.cursor).toEqual({ line: 0, column: 2 });
   });
 
@@ -107,10 +100,8 @@ describe('terminal-frame', () => {
     });
 
     expect(frame.lines.length).toBe(2);
-    // Prompt line has background and styled ❯, followed by /c
     expect(frame.lines[0]).toMatch(/❯.*\/c/);
     expect(frame.lines[1]).toBe('  /clear  Clear the screen');
-    // Cursor should be at column 4 (after "❯ /c")
     expect(frame.cursor).toEqual({ line: 0, column: 4 });
   });
 
@@ -126,16 +117,10 @@ describe('terminal-frame', () => {
       terminalSize: { columns: 80, rows: 24 },
     });
 
-    // 应该有两行输入
     expect(frame.lines.length).toBe(2);
-    // 第一行包含 prompt
     expect(frame.lines[0]).toMatch(/❯.*第一行/);
-    // 第二行是纯文本（无 prompt）
     expect(frame.lines[1]).toMatch(/第二行/);
-    // 光标应该在第二行（line=1）
     expect(frame.cursor?.line).toBe(1);
-    // 光标列应该是 "❯ " 的宽度 + "第二行" 的显示宽度（3个汉字=6列）
-    // 但实际光标在 offset=9，即 "第一行\n第二行" 的末尾
     // 光标列 = 2 (prefix) + 6 (display width of "第二行") = 8
     expect(frame.cursor?.column).toBe(8);
   });
@@ -152,7 +137,6 @@ describe('terminal-frame', () => {
       terminalSize: { columns: 80, rows: 24 },
     });
 
-    // 光标应该在第二行（line=1）开头
     expect(frame.cursor?.line).toBe(1);
     // 光标列 = 2 (prefix) + 0 (光标在行首) = 2
     expect(frame.cursor?.column).toBe(2);
@@ -170,7 +154,6 @@ describe('terminal-frame', () => {
       terminalSize: { columns: 80, rows: 24 },
     });
 
-    // 光标应该在第一行（line=0）
     expect(frame.cursor?.line).toBe(0);
     // 光标列 = 2 (prefix) + 6 (display width of "第一行") = 8
     expect(frame.cursor?.column).toBe(8);

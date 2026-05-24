@@ -15,7 +15,7 @@ export interface ProjectPrinciple {
 
 const VALID_SCENARIOS: PrincipleScenario[] = ['planning', 'execution', 'review', 'delivery'];
 const MAX_COUNT = 50;
-const MAX_CONTENT_LENGTH = 500;
+const MAX_CONTENT_LENGTH = 4000;
 
 export class PrinciplesStore {
   private filePath: string;
