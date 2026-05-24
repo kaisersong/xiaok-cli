@@ -5,6 +5,13 @@ import { Plus, Search, X, Bolt, Pencil, Download, RefreshCw, Clock, FolderKanban
 import { api, type ThreadRecord } from '../api';
 import { useKSwarm } from '../contexts/KSwarmContext';
 import { useLocale } from '../contexts/LocaleContext';
+import {
+  collectScheduledRuntimeTaskIds,
+  ensureAggregatedScheduledThread,
+  mergeScheduledTaskCache,
+  normalizeScheduledTaskRuntimeLink,
+  threadHasAnyRuntimeTask,
+} from '../lib/scheduled-task-threads';
 
 const log = createLogger('Sidebar');
 
@@ -23,6 +30,7 @@ interface SidebarScheduledTask {
   name: string;
   frequency: string;
   threadId?: string;
+  runtimeTaskId?: string;
 }
 
 type NavSection = 'new' | 'scheduled' | 'projects';
@@ -43,6 +51,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const [activeNav, setActiveNav] = useState<NavSection>('new');
   const [sidebarTasks, setSidebarTasks] = useState<SidebarScheduledTask[]>([]);
   const [scheduledThreadIds, setScheduledThreadIds] = useState<Set<string>>(new Set());
+  const [scheduledRuntimeTaskIds, setScheduledRuntimeTaskIds] = useState<Set<string>>(new Set());
 
   const { projects } = useKSwarm();
   const { t } = useLocale();
@@ -56,56 +65,70 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     return () => clearInterval(interval);
   }, []);
 
-  // Load scheduled tasks for sidebar
+  // Load scheduled tasks for sidebar and keep scheduled runs out of recent history.
   useEffect(() => {
-    const loadScheduled = () => {
-      try {
-        const raw = localStorage.getItem('xiaok:scheduled-tasks');
-        const items = raw ? JSON.parse(raw) : [];
-        setSidebarTasks(items.map((t: any) => ({
-          id: t.id,
-          name: t.name,
-          frequency: t.frequency,
-          threadId: t.threadId,
-        })));
-        // Collect all scheduled thread IDs to exclude from history
-        const threadIds = new Set<string>();
-        for (const t of items) {
-          if (t.threadId) threadIds.add(t.threadId);
-        }
-        setScheduledThreadIds(threadIds);
-      } catch { /* ignore */ }
-    };
-    loadScheduled();
-  }, []);
+    let disposed = false;
 
-  // Listen for scheduled task updates
-  useEffect(() => {
-    const handler = () => {
+    const loadScheduled = async () => {
       try {
         const raw = localStorage.getItem('xiaok:scheduled-tasks');
-        const items = raw ? JSON.parse(raw) : [];
-        setSidebarTasks(items.map((t: any) => ({
+        const localItems: SidebarScheduledTask[] = raw ? JSON.parse(raw) : [];
+        let items = localItems.map(item => normalizeScheduledTaskRuntimeLink(item));
+        const desktop = (window as any).xiaokDesktop;
+        if (desktop?.getScheduledTasks) {
+          try {
+            const mainItems = await desktop.getScheduledTasks();
+            if (Array.isArray(mainItems)) {
+              items = mergeScheduledTaskCache(mainItems as SidebarScheduledTask[], localItems);
+            }
+          } catch { /* keep local cache */ }
+        }
+
+        const runtimeTaskIds = new Set<string>();
+        const linkedItems: SidebarScheduledTask[] = [];
+        for (const item of items) {
+          let runs: unknown[] = [];
+          if (desktop?.getTimedActionRuns && item.id) {
+            runs = await desktop.getTimedActionRuns(item.id).catch(() => []);
+          }
+          const collectedRuntimeTaskIds = collectScheduledRuntimeTaskIds(item, Array.isArray(runs) ? runs : []);
+          for (const runtimeTaskId of collectedRuntimeTaskIds) runtimeTaskIds.add(runtimeTaskId);
+          const linked = collectedRuntimeTaskIds.length > 0
+            ? await ensureAggregatedScheduledThread(item, collectedRuntimeTaskIds).catch(() => item)
+            : item;
+          linkedItems.push(linked);
+        }
+
+        if (disposed) return;
+        localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify(linkedItems));
+        setSidebarTasks(linkedItems.map((t: any) => ({
           id: t.id,
           name: t.name,
           frequency: t.frequency,
           threadId: t.threadId,
+          runtimeTaskId: t.runtimeTaskId,
         })));
         const threadIds = new Set<string>();
-        for (const t of items) {
+        for (const t of linkedItems) {
           if (t.threadId) threadIds.add(t.threadId);
         }
         setScheduledThreadIds(threadIds);
+        setScheduledRuntimeTaskIds(runtimeTaskIds);
       } catch { /* ignore */ }
     };
-    window.addEventListener('storage', (e) => {
-      if (e.key === 'xiaok:scheduled-tasks') handler();
-    });
-    // Also listen for custom event
-    window.addEventListener('xiaok:scheduled-tasks-updated', handler);
+
+    const storageHandler = (e: StorageEvent) => {
+      if (e.key === 'xiaok:scheduled-tasks') void loadScheduled();
+    };
+    const updateHandler = () => void loadScheduled();
+
+    void loadScheduled();
+    window.addEventListener('storage', storageHandler);
+    window.addEventListener('xiaok:scheduled-tasks-updated', updateHandler);
     return () => {
-      window.removeEventListener('storage', () => {});
-      window.removeEventListener('xiaok:scheduled-tasks-updated', handler);
+      disposed = true;
+      window.removeEventListener('storage', storageHandler);
+      window.removeEventListener('xiaok:scheduled-tasks-updated', updateHandler);
     };
   }, []);
 
@@ -137,7 +160,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const filteredThreads = (searchQuery
     ? threads.filter(t => t.title?.toLowerCase().includes(searchQuery.toLowerCase()))
     : threads
-  ).filter(t => !scheduledThreadIds.has(t.id));
+  ).filter(t => !scheduledThreadIds.has(t.id) && !threadHasAnyRuntimeTask(t, scheduledRuntimeTaskIds));
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();

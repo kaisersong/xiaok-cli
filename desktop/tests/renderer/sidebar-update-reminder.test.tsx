@@ -7,6 +7,9 @@ import { SidebarComponent } from '../../renderer/src/components/Sidebar';
 
 const mockApi = vi.hoisted(() => ({
   listThreads: vi.fn(),
+  getThread: vi.fn(),
+  createThread: vi.fn(),
+  updateThreadTaskId: vi.fn(),
   deleteThread: vi.fn(),
   updateThreadTitle: vi.fn(),
   getUpdateStatus: vi.fn(),
@@ -50,8 +53,16 @@ function renderSidebar(status: {
   downloaded: boolean;
   progress: number;
   version?: string;
-}, initialEntry = '/') {
-  mockApi.listThreads.mockResolvedValue([]);
+}, initialEntry = '/', threads: unknown[] = []) {
+  mockApi.listThreads.mockResolvedValue(threads);
+  mockApi.getThread.mockResolvedValue(null);
+  mockApi.createThread.mockResolvedValue({
+    id: 'created-thread',
+    title: null,
+    currentTaskId: null,
+    taskIds: [],
+  });
+  mockApi.updateThreadTaskId.mockResolvedValue(undefined);
   mockApi.getUpdateStatus.mockResolvedValue(status);
   mockApi.onUpdateStatus.mockReturnValue(() => {});
   mockApi.checkForUpdates.mockResolvedValue(undefined);
@@ -69,6 +80,10 @@ afterEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   mockKSwarmState.projects = [];
+  Object.defineProperty(window, 'xiaokDesktop', {
+    value: undefined,
+    configurable: true,
+  });
 });
 
 describe('Sidebar update reminder', () => {
@@ -204,5 +219,82 @@ describe('Sidebar update reminder', () => {
     expect(scheduledList?.className).toContain('overflow-y-auto');
     expect(projectList?.className).toContain('max-h-[150px]');
     expect(projectList?.className).toContain('overflow-y-auto');
+  });
+
+  it('keeps every runtime thread for a scheduled task out of the recent list and shows the scheduled entry', async () => {
+    const oldThread = {
+      id: 'thread-old-dream',
+      title: 'Dream',
+      currentTaskId: 'task_old',
+      taskIds: ['task_old'],
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const latestThread = {
+      id: 'thread-latest-dream',
+      title: 'Dream',
+      currentTaskId: 'task_new',
+      taskIds: ['task_new'],
+      createdAt: 3,
+      updatedAt: 3,
+    };
+    const normalThread = {
+      id: 'thread-normal',
+      title: '普通任务',
+      currentTaskId: null,
+      taskIds: [],
+      createdAt: 2,
+      updatedAt: 2,
+    };
+    localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify([
+      {
+        id: 'scheduled-dream',
+        name: 'Dream',
+        frequency: 'daily',
+        threadId: 'thread-old-dream',
+        runtimeTaskId: 'task_old',
+      },
+    ]));
+    mockApi.getThread.mockImplementation(async (id: string) => {
+      if (id === oldThread.id) return oldThread;
+      if (id === latestThread.id) return latestThread;
+      if (id === normalThread.id) return normalThread;
+      return null;
+    });
+    Object.defineProperty(window, 'xiaokDesktop', {
+      value: {
+        getScheduledTasks: vi.fn(async () => [
+          {
+            id: 'scheduled-dream',
+            name: 'Dream',
+            frequency: 'daily',
+            status: 'active',
+            createdAt: 1,
+            updatedAt: 3,
+            runtimeTaskId: 'task_new',
+          },
+        ]),
+        getTimedActionRuns: vi.fn(async () => [
+          { runtimeTaskId: 'task_new', startedAt: 300 },
+          { runtimeTaskId: 'task_old', startedAt: 100 },
+        ]),
+      },
+      configurable: true,
+    });
+
+    renderSidebar({
+      checking: false,
+      available: false,
+      downloading: false,
+      downloaded: false,
+      progress: 0,
+    }, '/', [latestThread, normalThread, oldThread]);
+
+    expect(await screen.findByText('Dream')).toBeInTheDocument();
+    expect(await screen.findByTestId('thread-item-thread-normal')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByTestId('thread-item-thread-old-dream')).toBeNull();
+      expect(screen.queryByTestId('thread-item-thread-latest-dream')).toBeNull();
+    });
   });
 });

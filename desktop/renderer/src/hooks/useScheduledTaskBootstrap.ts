@@ -10,30 +10,13 @@
  */
 
 import { useEffect } from 'react';
-import { api } from '../api';
+import {
+  collectScheduledRuntimeTaskIds,
+  ensureAggregatedScheduledThread,
+  isRuntimeTaskId,
+} from '../lib/scheduled-task-threads';
 
 const STORAGE_KEY = 'xiaok:scheduled-tasks';
-
-function isRuntimeTaskId(value: unknown): value is string {
-  return typeof value === 'string' && value.startsWith('task_');
-}
-
-async function findOrCreateThreadForRuntimeTask(taskName: string, runtimeTaskId: string, threadId?: string): Promise<string> {
-  if (threadId && !isRuntimeTaskId(threadId)) {
-    const existing = await api.getThread(threadId).catch(() => null);
-    if (existing && (existing.currentTaskId === runtimeTaskId || (existing.taskIds ?? []).includes(runtimeTaskId))) {
-      return threadId;
-    }
-  }
-
-  const threads = await api.listThreads({ limit: 1000 }).catch(() => []);
-  const existing = threads.find(thread => thread.currentTaskId === runtimeTaskId || (thread.taskIds ?? []).includes(runtimeTaskId));
-  if (existing) return existing.id;
-
-  const thread = await api.createThread({ title: (taskName || '').slice(0, 40) });
-  await api.updateThreadTaskId(thread.id, runtimeTaskId);
-  return thread.id;
-}
 
 export function useScheduledTaskBootstrap(): void {
   useEffect(() => {
@@ -76,7 +59,15 @@ export function useScheduledTaskBootstrap(): void {
         // Associate auto-execution result with a thread
         if (runtimeTaskId) {
           try {
-            task.threadId = await findOrCreateThreadForRuntimeTask(task.name, runtimeTaskId, task.threadId);
+            const runs = desktop.getTimedActionRuns
+              ? await desktop.getTimedActionRuns(payload.taskId).catch(() => [])
+              : [];
+            const linked = await ensureAggregatedScheduledThread(
+              { ...task, runtimeTaskId },
+              collectScheduledRuntimeTaskIds({ ...task, runtimeTaskId }, Array.isArray(runs) ? runs : []),
+            );
+            task.threadId = linked.threadId;
+            task.runtimeTaskId = linked.runtimeTaskId;
           } catch { /* ignore thread errors */ }
         }
 

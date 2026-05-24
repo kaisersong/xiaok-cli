@@ -1,8 +1,22 @@
 import { useState, useEffect } from 'react';
 import { Plus, X, Clock, Edit3, Trash2, Play, ChevronLeft, XCircle } from 'lucide-react';
-import { api, type ThreadRecord } from '../api';
+import { api } from '../api';
 import { useNavigate } from 'react-router-dom';
 import { useLocale } from '../contexts/LocaleContext';
+import {
+  collectScheduledRuntimeTaskIds,
+  ensureAggregatedScheduledThread,
+  isRuntimeTaskId,
+  mergeScheduledTaskCache,
+  normalizeScheduledTaskRuntimeLink,
+} from '../lib/scheduled-task-threads';
+
+export {
+  collectScheduledRuntimeTaskIds,
+  isRuntimeTaskId,
+  mergeScheduledTaskCache,
+  normalizeScheduledTaskRuntimeLink,
+};
 
 export interface ScheduledTask {
   id: string;
@@ -175,60 +189,15 @@ export function formatScheduledFrequency(
   return frequencyLabels[task.frequency] || task.frequency;
 }
 
-export function isRuntimeTaskId(value: unknown): value is string {
-  return typeof value === 'string' && value.startsWith('task_');
-}
-
-export function normalizeScheduledTaskRuntimeLink(task: ScheduledTask, local?: ScheduledTask): ScheduledTask {
-  const localRuntimeTaskId = local?.runtimeTaskId ?? (isRuntimeTaskId(local?.threadId) ? local?.threadId : undefined);
-  const runtimeTaskId = task.runtimeTaskId ?? (isRuntimeTaskId(task.threadId) ? task.threadId : undefined) ?? localRuntimeTaskId;
-  const threadId = isRuntimeTaskId(task.threadId)
-    ? (local && !isRuntimeTaskId(local.threadId) ? local.threadId : undefined)
-    : task.threadId ?? (local && !isRuntimeTaskId(local.threadId) ? local.threadId : undefined);
-  return { ...task, runtimeTaskId, threadId };
-}
-
-export function mergeScheduledTaskCache(mainItems: ScheduledTask[], localItems: ScheduledTask[]): ScheduledTask[] {
-  const localById = new Map(localItems.map(item => [item.id, item]));
-  return mainItems.map(item => {
-    const local = localById.get(item.id);
-    const normalized = normalizeScheduledTaskRuntimeLink(item, local);
-    const mainDescription = typeof normalized.description === 'string' ? normalized.description.trim() : '';
-    const localDescription = typeof local?.description === 'string' ? local.description.trim() : '';
-    return !mainDescription && localDescription
-      ? { ...normalized, description: local!.description }
-      : normalized;
-  });
-}
-
-function threadHasRuntimeTask(thread: ThreadRecord, runtimeTaskId: string): boolean {
-  return thread.currentTaskId === runtimeTaskId || (thread.taskIds ?? []).includes(runtimeTaskId);
-}
-
-async function findThreadForRuntimeTask(runtimeTaskId: string): Promise<ThreadRecord | null> {
-  const threads = await api.listThreads({ limit: 1000 });
-  return threads.find(thread => threadHasRuntimeTask(thread, runtimeTaskId)) ?? null;
-}
-
 async function ensureThreadForRuntimeTask(task: ScheduledTask): Promise<ScheduledTask> {
   const normalized = normalizeScheduledTaskRuntimeLink(task);
-  if (!normalized.runtimeTaskId) return normalized;
-
-  if (normalized.threadId) {
-    const existing = await api.getThread(normalized.threadId).catch(() => null);
-    if (existing && threadHasRuntimeTask(existing, normalized.runtimeTaskId)) {
-      return normalized;
-    }
+  const desktop = (window as any).xiaokDesktop;
+  let runs: unknown[] = [];
+  if (normalized.id && desktop?.getTimedActionRuns) {
+    runs = await desktop.getTimedActionRuns(normalized.id).catch(() => []);
   }
-
-  const existing = await findThreadForRuntimeTask(normalized.runtimeTaskId).catch(() => null);
-  if (existing) {
-    return { ...normalized, threadId: existing.id };
-  }
-
-  const thread = await api.createThread({ title: (normalized.name || '').slice(0, 40) });
-  await api.updateThreadTaskId(thread.id, normalized.runtimeTaskId);
-  return { ...normalized, threadId: thread.id };
+  const runtimeTaskIds = collectScheduledRuntimeTaskIds(normalized, Array.isArray(runs) ? runs : []);
+  return ensureAggregatedScheduledThread(normalized, runtimeTaskIds);
 }
 
 export function ScheduledPage() {
