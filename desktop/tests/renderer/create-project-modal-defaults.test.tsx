@@ -87,6 +87,10 @@ describe('CreateProjectModal defaults', () => {
         goal: '验证默认种子智能体',
         poAgent: 'xiaok-po',
         members: ['xiaok-worker'],
+        agentSelection: {
+          poAgent: { agentId: 'xiaok-po', source: 'default_seed' },
+          members: [{ agentId: 'xiaok-worker', source: 'default_seed' }],
+        },
       }));
     });
   });
@@ -103,6 +107,35 @@ describe('CreateProjectModal defaults', () => {
       expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
         poAgent: 'xiaok-po',
         members: ['codex-worker'],
+        agentSelection: {
+          poAgent: { agentId: 'xiaok-po', source: 'default_seed' },
+          members: [{ agentId: 'codex-worker', source: 'explicit_user' }],
+        },
+      }));
+    });
+  });
+
+  it('marks a manually selected PO as explicit user selection', async () => {
+    const { onCreate } = renderModal({
+      agents: [
+        { id: 'xiaok-po', name: 'PO-Agent', status: 'idle', runtimeType: 'xiaok', roles: ['project_owner'] },
+        { id: 'manual-po', name: 'Manual PO', status: 'idle', runtimeType: 'xiaok', roles: ['project_owner'] },
+        { id: 'xiaok-worker', name: 'Worker-Agent', status: 'idle', runtimeType: 'xiaok', roles: ['worker'] },
+      ],
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Manual PO' })[0]);
+    fireEvent.change(screen.getByPlaceholderText('例：竞品分析报告'), { target: { value: '测试项目' } });
+    fireEvent.change(screen.getByPlaceholderText('描述你希望完成什么...'), { target: { value: '验证手工 PO 优先' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }));
+
+    await waitFor(() => {
+      expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+        poAgent: 'manual-po',
+        agentSelection: {
+          poAgent: { agentId: 'manual-po', source: 'explicit_user' },
+          members: [{ agentId: 'xiaok-worker', source: 'default_seed' }],
+        },
       }));
     });
   });

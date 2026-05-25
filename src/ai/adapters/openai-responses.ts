@@ -1,4 +1,5 @@
 import type { ModelAdapter, Message, StreamChunk, ToolDefinition } from '../../types.js';
+import type { ModelCapabilities } from '../runtime/model-capabilities.js';
 
 type ResponsesUsage = {
   input_tokens?: number;
@@ -33,6 +34,7 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
   private readonly apiKey: string;
   private readonly baseUrl?: string;
   private readonly defaultHeaders?: Record<string, string>;
+  private readonly capabilityOverrides?: Partial<ModelCapabilities>;
   private model: string;
 
   constructor(
@@ -40,10 +42,12 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     model = 'gpt-4.1',
     baseUrl?: string,
     defaultHeaders?: Record<string, string>,
+    capabilityOverrides?: Partial<ModelCapabilities>,
   ) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
     this.defaultHeaders = defaultHeaders;
+    this.capabilityOverrides = capabilityOverrides;
     this.model = model;
   }
 
@@ -51,8 +55,12 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     return this.model;
   }
 
+  getCapabilities(): Partial<ModelCapabilities> {
+    return this.capabilityOverrides ?? {};
+  }
+
   cloneWithModel(model: string): OpenAIResponsesAdapter {
-    return new OpenAIResponsesAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders);
+    return new OpenAIResponsesAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders, this.capabilityOverrides);
   }
 
   async *stream(

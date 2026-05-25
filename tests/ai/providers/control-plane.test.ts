@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Config } from '../../../src/types.js';
 import { createAdapterFromBinding } from '../../../src/ai/models.js';
 import { resolveRuntimeModelBinding } from '../../../src/ai/providers/control-plane.js';
+import { resolveModelCapabilities } from '../../../src/ai/runtime/model-capabilities.js';
 
 describe('resolveRuntimeModelBinding', () => {
   const OLD_ENV = process.env;
@@ -94,7 +95,7 @@ describe('resolveRuntimeModelBinding', () => {
     });
   });
 
-  it('keeps built-in DeepSeek V4 bindings text-only for the verified OpenAI-compatible endpoint', () => {
+  it('marks built-in DeepSeek V4 bindings as image-capable for pasted images and CUA screenshots', () => {
     const config: Config = {
       schemaVersion: 2,
       defaultProvider: 'deepseek',
@@ -122,7 +123,7 @@ describe('resolveRuntimeModelBinding', () => {
       modelId: 'deepseek-default',
       wireModel: 'deepseek-v4-pro',
       protocol: 'openai_legacy',
-      capabilities: ['tools'],
+      capabilities: ['tools', 'image_in'],
     });
   });
 });
@@ -143,5 +144,20 @@ describe('createAdapterFromBinding', () => {
     });
 
     expect(adapter.constructor.name).toBe('OpenAIResponsesAdapter');
+  });
+
+  it('propagates explicit image input capability from OpenAI-compatible bindings', () => {
+    const adapter = createAdapterFromBinding({
+      providerId: 'deepseek',
+      modelId: 'deepseek-v4-pro',
+      wireModel: 'deepseek-v4-pro',
+      protocol: 'openai_legacy',
+      apiKey: 'sk-deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      headers: {},
+      capabilities: ['tools', 'image_in'],
+    });
+
+    expect(resolveModelCapabilities(adapter).supportsImageInput).toBe(true);
   });
 });

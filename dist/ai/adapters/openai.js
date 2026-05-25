@@ -119,11 +119,13 @@ export class OpenAIAdapter {
     apiKey;
     baseUrl;
     defaultHeaders;
+    capabilityOverrides;
     model;
-    constructor(apiKey, model = 'gpt-4o', baseUrl, defaultHeaders) {
+    constructor(apiKey, model = 'gpt-4o', baseUrl, defaultHeaders, capabilityOverrides) {
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.defaultHeaders = defaultHeaders;
+        this.capabilityOverrides = capabilityOverrides;
         this.client = new OpenAI({
             apiKey,
             baseURL: baseUrl,
@@ -140,8 +142,11 @@ export class OpenAIAdapter {
     getModelName() {
         return this.model;
     }
+    getCapabilities() {
+        return this.capabilityOverrides ?? {};
+    }
     cloneWithModel(model) {
-        return new OpenAIAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders);
+        return new OpenAIAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders, this.capabilityOverrides);
     }
     async *stream(messages, tools, systemPrompt, _options) {
         const openaiMessages = [

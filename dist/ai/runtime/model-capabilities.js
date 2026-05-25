@@ -25,7 +25,20 @@ function inferModelCapabilities(modelName) {
             supportsImageInput: true,
         };
     }
+    if (/^deepseek-v4/i.test(modelName)) {
+        return {
+            supportsImageInput: true,
+        };
+    }
     return {};
+}
+export function modelCapabilitiesFromFlags(capabilities) {
+    const flags = new Set((capabilities ?? []).map((item) => item.toLowerCase()));
+    const overrides = {};
+    if (flags.has('image_in') || flags.has('vision')) {
+        overrides.supportsImageInput = true;
+    }
+    return overrides;
 }
 export function resolveModelCapabilities(modelOrAdapter) {
     const modelName = typeof modelOrAdapter === 'string'

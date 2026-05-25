@@ -29,12 +29,19 @@ export function resolveCreateProjectMembers(
   const workers = agents.filter((agent) => agent.id !== poAgent);
   const resolved: string[] = [];
 
-  if (memberNames.length === 0 && memberCount <= 0) {
+  if (memberNames.length === 0) {
     const defaultWorkerId = getPreferredWorkerSeedId(agents, poAgent);
     if (defaultWorkerId) {
       uniquePush(resolved, defaultWorkerId);
-    } else {
+    } else if (memberCount <= 0) {
       for (const agent of workers.filter((item) => item.status !== 'offline')) {
+        uniquePush(resolved, agent.id);
+      }
+    } else {
+      const remainingOnline = workers.filter((agent) => agent.status !== 'offline' && !resolved.includes(agent.id));
+      const remainingOffline = workers.filter((agent) => agent.status === 'offline' && !resolved.includes(agent.id));
+      const ordered = [...remainingOnline, ...remainingOffline];
+      for (const agent of ordered.slice(0, memberCount)) {
         uniquePush(resolved, agent.id);
       }
     }

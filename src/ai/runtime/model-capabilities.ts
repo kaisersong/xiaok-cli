@@ -72,7 +72,22 @@ function inferModelCapabilities(modelName: string): Partial<ModelCapabilities> {
     };
   }
 
+  if (/^deepseek-v4/i.test(modelName)) {
+    return {
+      supportsImageInput: true,
+    };
+  }
+
   return {};
+}
+
+export function modelCapabilitiesFromFlags(capabilities?: string[]): Partial<ModelCapabilities> {
+  const flags = new Set((capabilities ?? []).map((item) => item.toLowerCase()));
+  const overrides: Partial<ModelCapabilities> = {};
+  if (flags.has('image_in') || flags.has('vision')) {
+    overrides.supportsImageInput = true;
+  }
+  return overrides;
 }
 
 export function resolveModelCapabilities(model: string): ModelCapabilities;

@@ -21,8 +21,23 @@ export interface McpRuntimeTransport {
         params?: Record<string, unknown>;
     }): void;
 }
+export interface McpRuntimeToolImage {
+    mimeType: string;
+    data?: string;
+    filePath?: string;
+    description?: string;
+}
+export interface McpRuntimeToolResult {
+    text: string;
+    images: McpRuntimeToolImage[];
+    structuredContent?: unknown;
+    isError: boolean;
+    summary: string;
+}
 export declare function createMcpRuntimeClient(transport: McpRuntimeTransport): {
     initialize(): Promise<unknown>;
     listTools(): Promise<McpToolSchema[]>;
+    callToolResult(name: string, input: Record<string, unknown>): Promise<McpRuntimeToolResult>;
     callTool(name: string, input: Record<string, unknown>): Promise<string>;
 };
+export declare function normalizeMcpRuntimeToolResult(result: unknown): McpRuntimeToolResult;

@@ -8,11 +8,18 @@ import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmAgent } from '../../hooks/useKSwarmClient';
 import { getPreferredPoAgentId, getPreferredWorkerSeedId } from '../../../../shared/kswarm-seed-contract.js';
 
+type AgentSelectionSource = 'default_seed' | 'explicit_user';
+
+interface CreateProjectAgentSelection {
+  poAgent: { agentId: string; source: AgentSelectionSource };
+  members: Array<{ agentId: string; source: AgentSelectionSource }>;
+}
+
 interface CreateProjectModalProps {
   open: boolean;
   agents: KSwarmAgent[];
   onClose(): void;
-  onCreate(input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string; enableSummary?: boolean }): Promise<void>;
+  onCreate(input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string; enableSummary?: boolean; agentSelection?: CreateProjectAgentSelection }): Promise<void>;
 }
 
 export function CreateProjectModal({ open, agents, onClose, onCreate }: CreateProjectModalProps) {
@@ -102,12 +109,19 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
     if (!name.trim() || !goal.trim() || !poAgent) return;
     setLoading(true);
     try {
+      const selectedMembers = members.length > 0 ? members : undefined;
+      const poSource: AgentSelectionSource = poTouched ? 'explicit_user' : 'default_seed';
+      const memberSource: AgentSelectionSource = membersTouched ? 'explicit_user' : 'default_seed';
       await onCreate({
         name: name.trim(),
         goal: goal.trim(),
         requirements: requirements.trim() || undefined,
         poAgent,
-        members: members.length > 0 ? members : undefined,
+        members: selectedMembers,
+        agentSelection: {
+          poAgent: { agentId: poAgent, source: poSource },
+          members: (selectedMembers || []).map(agentId => ({ agentId, source: memberSource })),
+        },
         workFolder: workFolder.trim() || undefined,
         enableSummary,
       });

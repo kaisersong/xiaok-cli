@@ -77,6 +77,14 @@
         "mcp-servers/slide-renderer/**/*.py",
         "bundled-wheels/**/*"
       ]
+    },
+    {
+      "from": "../../kai-xiaok-plugins/plugins/cua-computer-use",
+      "to": "bundled-plugins/cua-computer-use",
+      "filter": [
+        "plugin.json",
+        "skills/**/*"
+      ]
     }
   ],
   "publish": {

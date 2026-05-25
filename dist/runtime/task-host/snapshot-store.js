@@ -3,24 +3,26 @@ import { join } from 'node:path';
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 export class FileTaskSnapshotStore {
     rootDir;
+    indexWriteQueue = Promise.resolve();
     constructor(rootDir) {
         this.rootDir = rootDir;
     }
     async save(snapshot) {
         await mkdir(this.snapshotDir(), { recursive: true });
         const target = this.snapshotPath(snapshot.taskId);
-        const tmp = `${target}.tmp`;
+        const tmp = this.tempPath(target);
         await writeFile(tmp, JSON.stringify(snapshot, null, 2), 'utf8');
         await rename(tmp, target);
-        const index = await this.loadIndex();
-        const ids = new Set(index.activeTaskIds);
-        if (TERMINAL_STATUSES.has(snapshot.status)) {
-            ids.delete(snapshot.taskId);
-        }
-        else {
-            ids.add(snapshot.taskId);
-        }
-        await this.saveIndex({ activeTaskIds: [...ids] });
+        await this.updateIndex(index => {
+            const ids = new Set(index.activeTaskIds);
+            if (TERMINAL_STATUSES.has(snapshot.status)) {
+                ids.delete(snapshot.taskId);
+            }
+            else {
+                ids.add(snapshot.taskId);
+            }
+            return { activeTaskIds: [...ids] };
+        });
     }
     async getActiveTasks() {
         const index = await this.loadIndex();
@@ -44,12 +46,19 @@ export class FileTaskSnapshotStore {
         }
     }
     async clearActiveTask(taskId) {
-        const index = await this.loadIndex();
-        const ids = new Set(index.activeTaskIds);
-        if (ids.has(taskId)) {
+        await this.updateIndex(index => {
+            const ids = new Set(index.activeTaskIds);
             ids.delete(taskId);
-            await this.saveIndex({ activeTaskIds: [...ids] });
-        }
+            return { activeTaskIds: [...ids] };
+        });
+    }
+    async updateIndex(mutator) {
+        const run = this.indexWriteQueue.then(async () => {
+            const index = await this.loadIndex();
+            await this.saveIndex(mutator(index));
+        });
+        this.indexWriteQueue = run.catch(() => undefined);
+        return run;
     }
     async loadIndex() {
         try {
@@ -70,7 +79,7 @@ export class FileTaskSnapshotStore {
     async saveIndex(index) {
         await mkdir(this.rootDir, { recursive: true });
         const target = this.indexPath();
-        const tmp = `${target}.tmp`;
+        const tmp = this.tempPath(target);
         await writeFile(tmp, JSON.stringify(index, null, 2), 'utf8');
         await rename(tmp, target);
     }
@@ -82,6 +91,9 @@ export class FileTaskSnapshotStore {
     }
     indexPath() {
         return join(this.rootDir, 'active-task.json');
+    }
+    tempPath(target) {
+        return `${target}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
     }
 }
 function isNodeErrorCode(error, code) {

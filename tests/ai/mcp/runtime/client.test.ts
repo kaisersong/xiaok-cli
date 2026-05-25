@@ -33,4 +33,35 @@ describe('mcp runtime client', () => {
     expect(tools[0].name).toBe('search');
     expect(result).toBe('ok');
   });
+
+  it('preserves text, image content, structuredContent, and isError in a tool result envelope', async () => {
+    const client = createMcpRuntimeClient({
+      send: async (message) => ({
+        jsonrpc: '2.0',
+        id: message.id,
+        result: {
+          isError: true,
+          structuredContent: {
+            windows: [{ app: 'Safari', window_id: 'win-1' }],
+          },
+          content: [
+            { type: 'text', text: 'captured Safari' },
+            { type: 'image', mimeType: 'image/png', data: 'base64-png' },
+          ],
+        },
+      }),
+    });
+
+    const result = await client.callToolResult('capture', { app: 'Safari' });
+
+    expect(result).toEqual({
+      text: 'captured Safari',
+      images: [{ mimeType: 'image/png', data: 'base64-png' }],
+      structuredContent: {
+        windows: [{ app: 'Safari', window_id: 'win-1' }],
+      },
+      isError: true,
+      summary: 'captured Safari',
+    });
+  });
 });

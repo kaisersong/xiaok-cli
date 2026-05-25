@@ -173,6 +173,24 @@ export interface AgentProbe {
   error?: string;
 }
 
+export type KSwarmAgentSelectionSource = 'default_seed' | 'explicit_user' | 'system_migration';
+
+export interface KSwarmProjectAgentSelection {
+  poAgent: { agentId: string; source: KSwarmAgentSelectionSource };
+  members: Array<{ agentId: string; source: KSwarmAgentSelectionSource }>;
+}
+
+export interface CreateKSwarmProjectInput {
+  name: string;
+  goal: string;
+  requirements?: string;
+  poAgent: string;
+  members?: string[];
+  workFolder?: string;
+  enableSummary?: boolean;
+  agentSelection?: KSwarmProjectAgentSelection;
+}
+
 export interface KSwarmClientState {
   connected: boolean;
   projects: KSwarmProject[];
@@ -186,7 +204,7 @@ export interface KSwarmClientActions {
   fetchProjects(): Promise<KSwarmProject[]>;
   getProjectDetail(projectId: string): Promise<KSwarmProject | null>;
   getProjectFullDetail(projectId: string): Promise<ProjectFullDetail | null>;
-  createProject(input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string; enableSummary?: boolean }): Promise<KSwarmProject | null>;
+  createProject(input: CreateKSwarmProjectInput): Promise<KSwarmProject | null>;
   approveProject(projectId: string): Promise<boolean>;
   retryPlan(projectId: string): Promise<{ ok: boolean; retried?: boolean; poReassigned?: boolean; poAgent?: string; previousPoAgent?: string; poResolutionReason?: string } | null>;
   continueProject(projectId: string, request: ContinueProjectRequest): Promise<ContinueProjectResult | null>;
@@ -605,7 +623,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     return await httpGet<ProjectFullDetail>(`/projects/${projectId}`);
   }, []);
 
-  const createProject = useCallback(async (input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string; enableSummary?: boolean }): Promise<KSwarmProject | null> => {
+  const createProject = useCallback(async (input: CreateKSwarmProjectInput): Promise<KSwarmProject | null> => {
     let principles: PrincipleEntry[] = [];
     try {
       const api = (window as any).xiaokDesktop;

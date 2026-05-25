@@ -1826,6 +1826,7 @@ export const en: LocaleStrings = {
   projectsPrinciplesSourceManual: "Manual",
   projectsPrinciplesSourceMemory: "Memory",
   projectsPrinciplesEdit: "Edit",
+  projectsPrincipleMoveToRules: "Move to Rules",
   projectsPrinciplesDelete: "Delete",
   projectsPrinciplesDeleteConfirm: "Confirm Delete",
   projectsPrinciplesDeleteConfirmBody: "This cannot be undone. Are you sure you want to delete this knowledge document?",

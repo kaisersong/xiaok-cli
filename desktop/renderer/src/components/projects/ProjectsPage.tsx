@@ -25,7 +25,7 @@ export function ProjectsPage() {
   const [principleAddTrigger, setPrincipleAddTrigger] = useState(0);
   const [principleImportTrigger, setPrincipleImportTrigger] = useState(0);
 
-  const handleCreate = async (input: { name: string; goal: string; requirements?: string; poAgent: string; members?: string[]; workFolder?: string; enableSummary?: boolean }) => {
+  const handleCreate = async (input: Parameters<typeof createProject>[0]) => {
     await createProject(input);
   };
 

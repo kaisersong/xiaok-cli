@@ -26,10 +26,53 @@ export function createMcpRuntimeClient(transport) {
             const result = await request('tools/list', {});
             return result.tools ?? [];
         },
+        async callToolResult(name, input) {
+            const result = await request('tools/call', { name, arguments: input });
+            return normalizeMcpRuntimeToolResult(result);
+        },
         async callTool(name, input) {
             const result = await request('tools/call', { name, arguments: input });
-            const text = result.content?.find((entry) => entry.type === 'text')?.text;
-            return text ?? '';
+            return normalizeMcpRuntimeToolResult(result).text;
         },
     };
+}
+export function normalizeMcpRuntimeToolResult(result) {
+    const value = isRecord(result) ? result : {};
+    const content = Array.isArray(value.content) ? value.content : [];
+    const textParts = [];
+    const images = [];
+    for (const entry of content) {
+        if (!isRecord(entry))
+            continue;
+        if (entry.type === 'text' && typeof entry.text === 'string') {
+            textParts.push(entry.text);
+            continue;
+        }
+        if (entry.type === 'image') {
+            const mimeType = typeof entry.mimeType === 'string'
+                ? entry.mimeType
+                : typeof entry.mime_type === 'string'
+                    ? entry.mime_type
+                    : 'image/png';
+            images.push({
+                mimeType,
+                ...(typeof entry.data === 'string' ? { data: entry.data } : {}),
+                ...(typeof entry.filePath === 'string' ? { filePath: entry.filePath } : {}),
+                ...(typeof entry.description === 'string' ? { description: entry.description } : {}),
+            });
+        }
+    }
+    const text = textParts.join('\n');
+    return {
+        text,
+        images,
+        ...(Object.prototype.hasOwnProperty.call(value, 'structuredContent')
+            ? { structuredContent: value.structuredContent }
+            : {}),
+        isError: value.isError === true,
+        summary: text || (images.length > 0 ? `[${images.length} image${images.length === 1 ? '' : 's'}]` : ''),
+    };
+}
+function isRecord(value) {
+    return typeof value === 'object' && value !== null;
 }

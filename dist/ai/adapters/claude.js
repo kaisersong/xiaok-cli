@@ -18,18 +18,23 @@ export class ClaudeAdapter {
     client;
     apiKey;
     baseUrl;
+    capabilityOverrides;
     model;
     clientPromise = null;
-    constructor(apiKey, model = 'claude-opus-4-6', baseUrl) {
+    constructor(apiKey, model = 'claude-opus-4-6', baseUrl, capabilityOverrides) {
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
+        this.capabilityOverrides = capabilityOverrides;
         this.model = model;
     }
     getModelName() {
         return this.model;
     }
+    getCapabilities() {
+        return this.capabilityOverrides ?? {};
+    }
     cloneWithModel(model) {
-        return new ClaudeAdapter(this.apiKey, model, this.baseUrl);
+        return new ClaudeAdapter(this.apiKey, model, this.baseUrl, this.capabilityOverrides);
     }
     async getClient() {
         if (this.client) {

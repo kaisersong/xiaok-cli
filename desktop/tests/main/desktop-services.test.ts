@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createTimedActionTools } from '../../electron/desktop-services.js';
+import type { ExternalPluginDependency } from '../../electron/plugin-dependency-service.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 import { TimedActionService } from '../../electron/timed-action-service.js';
 import { TimedActionStore } from '../../electron/timed-action-store.js';
@@ -223,6 +224,203 @@ describe('desktop services', () => {
       outputCapabilities: expect.arrayContaining(['markdown', 'report_html']),
     });
     expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('lists plugin dependency health with resolved binary and rejects unconfirmed installs', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const pluginDir = join(pluginRootDir, 'cua-computer-use');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({ name: 'cua-computer-use' }));
+    const dependency: ExternalPluginDependency = {
+      id: 'cua-driver',
+      kind: 'macos_app_cli',
+      displayName: 'CUA Driver',
+      binaryCandidates: ['~/.local/bin/cua-driver', 'cua-driver'],
+      minVersion: '0.1.0',
+      install: {
+        kind: 'official_installer',
+        sourceUrl: 'https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh',
+        requiresUserConfirmation: true,
+      },
+      health: {
+        version: ['~/.local/bin/cua-driver', '--version'],
+        permissions: ['~/.local/bin/cua-driver', 'check_permissions'],
+      },
+    };
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      pluginRootDir,
+      pluginDependencies: [{ pluginName: 'cua-computer-use', dependency }],
+      pluginDependencyStatusOptions: {
+        platform: 'darwin',
+        homeDir: '/Users/alice',
+        exists: (path) => path === '/Users/alice/.local/bin/cua-driver',
+        runCommand: async (_command, args) => {
+          if (args[0] === '--version') return { exitCode: 0, stdout: 'cua-driver 0.1.7\n', stderr: '' };
+          return { exitCode: 0, stdout: 'Accessibility: granted\nScreen Recording: granted\n', stderr: '' };
+        },
+      },
+    });
+
+    await expect(services.listPluginDependencyStatuses()).resolves.toEqual([
+      expect.objectContaining({
+        pluginName: 'cua-computer-use',
+        dependencyId: 'cua-driver',
+        pluginInstalled: true,
+        state: 'ready',
+        resolvedBinary: '/Users/alice/.local/bin/cua-driver',
+      }),
+    ]);
+
+    await expect(services.installPluginDependency({
+      pluginName: 'cua-computer-use',
+      dependencyId: 'cua-driver',
+      confirmed: false,
+    })).resolves.toMatchObject({
+      success: false,
+      error: expect.stringMatching(/confirm/i),
+    });
+  });
+
+  it('rejects unsafe plugin install names before invoking the xiaok installer', async () => {
+    const binDir = join(rootDir, 'bin');
+    mkdirSync(binDir, { recursive: true });
+    const invokedPath = join(rootDir, 'xiaok-plugin-install-invoked');
+    const fakeXiaokPath = join(binDir, 'xiaok');
+    writeFileSync(fakeXiaokPath, `#!/bin/sh\necho "$@" > "${invokedPath}"\nexit 0\n`);
+    chmodSync(fakeXiaokPath, 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${previousPath ?? ''}`;
+
+    try {
+      const services = createDesktopServices({
+        dataRoot: join(rootDir, 'data'),
+        kswarmService: mockKSwarmService(),
+        now: () => 300,
+      });
+
+      await expect(services.installPlugin('bad name')).resolves.toEqual({
+        success: false,
+        error: 'invalid_plugin_name',
+      });
+      expect(existsSync(invokedPath)).toBe(false);
+    } finally {
+      if (previousPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = previousPath;
+      }
+    }
+  });
+
+  it('registers the Xiaok computer-use wrapper instead of raw CUA MCP tools', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const pluginDir = join(pluginRootDir, 'cua-computer-use');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({
+      name: 'cua-computer-use',
+      version: '0.1.0',
+      mcpServers: [
+        {
+          name: 'cua-driver',
+          type: 'stdio',
+          command: process.execPath,
+          args: [join(process.cwd(), '..', 'tests', 'support', 'cua-mcp-stdio-server.js')],
+        },
+      ],
+    }));
+
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      pluginRootDir,
+      pluginDependencies: [],
+    });
+    const registration = await services.registerMcpTools();
+    const toolNames = services.getToolDefinitions().map(tool => tool.name);
+
+    expect(toolNames).toContain('xiaok_computer_use');
+    expect(toolNames).not.toContain('mcp__cua-driver__search');
+    expect(services.listPluginMcpServers()).toEqual([
+      expect.objectContaining({
+        name: 'cua-driver',
+        pluginName: 'cua-computer-use',
+        toolCount: 1,
+        connected: true,
+      }),
+    ]);
+
+    registration.dispose();
+  });
+
+  it('does not register the computer-use wrapper when CUA driver dependency is not ready', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const pluginDir = join(pluginRootDir, 'cua-computer-use');
+    const serverPath = join(process.cwd(), '..', 'tests', 'support', 'cua-mcp-stdio-server.js');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({
+      name: 'cua-computer-use',
+      version: '0.1.0',
+      mcpServers: [
+        {
+          name: 'cua-driver',
+          type: 'stdio',
+          command: process.execPath,
+          args: [serverPath],
+        },
+      ],
+    }));
+
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      pluginRootDir,
+      pluginDependencies: [{
+        pluginName: 'cua-computer-use',
+        dependency: {
+          id: 'cua-driver',
+          kind: 'macos_app_cli',
+          displayName: 'CUA Driver',
+          binaryCandidates: [process.execPath],
+          health: {
+            permissions: ['cua-driver', 'check_permissions'],
+          },
+          mcp: {
+            serverName: 'cua-driver',
+            command: process.execPath,
+            args: [serverPath],
+          },
+        },
+      }],
+      pluginDependencyStatusOptions: {
+        platform: 'darwin',
+        exists: (path) => path === process.execPath,
+        runCommand: async () => ({
+          exitCode: 0,
+          stdout: 'Accessibility: denied\nScreen Recording: granted\n',
+          stderr: '',
+        }),
+      },
+    });
+
+    const registration = await services.registerMcpTools();
+    const toolNames = services.getToolDefinitions().map(tool => tool.name);
+
+    expect(toolNames).not.toContain('xiaok_computer_use');
+    expect(services.listPluginMcpServers()).toEqual([
+      expect.objectContaining({
+        name: 'cua-driver',
+        pluginName: 'cua-computer-use',
+        toolCount: 0,
+        connected: false,
+      }),
+    ]);
+
+    registration.dispose();
   });
 
   it('reports model_config_missing when kswarm readiness cannot find the configured model', async () => {

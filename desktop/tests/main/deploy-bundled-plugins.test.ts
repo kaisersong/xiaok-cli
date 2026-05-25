@@ -320,5 +320,27 @@ describe('deploy-bundled-plugins', () => {
         existsSync(join(installedPluginDir, 'mcp-servers', 'report-renderer', 'dist', 'css', 'corporate-blue.css')),
       ).toBe(true);
     });
+
+    it('deploys the bundled CUA computer-use plugin from packaged resources', async () => {
+      process.env.HOME = rootDir;
+      process.env.USERPROFILE = rootDir;
+      process.env.PATH = '';
+      mockIsPackaged.mockReturnValue(true);
+      mockResourcesPath.mockReturnValue(rootDir);
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = rootDir;
+
+      createPluginWithFiles(join(bundledDir, 'cua-computer-use'), {
+        name: 'cua-computer-use',
+        version: '0.1.0',
+      }, {
+        'skills/computer-use/SKILL.md': '# Computer Use',
+      });
+
+      const result = await deployBundledPlugins();
+
+      expect(result.deployed).toContain('cua-computer-use');
+      expect(existsSync(join(rootDir, '.xiaok', 'plugins', 'cua-computer-use', 'plugin.json'))).toBe(true);
+      expect(existsSync(join(rootDir, '.xiaok', 'plugins', 'cua-computer-use', 'skills', 'computer-use', 'SKILL.md'))).toBe(true);
+    });
   });
 });

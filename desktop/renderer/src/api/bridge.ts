@@ -419,6 +419,21 @@ export const api = {
   async setPluginMcpServerEnabled(input: { name: string; enabled: boolean }) {
     return window.xiaokDesktop.setPluginMcpServerEnabled(input);
   },
+  async installPlugin(name: string) {
+    return window.xiaokDesktop.installPlugin(name);
+  },
+  async listPluginDependencyStatuses() {
+    return window.xiaokDesktop.listPluginDependencyStatuses();
+  },
+  async installPluginDependency(input: { pluginName: string; dependencyId: string; confirmed?: boolean }) {
+    return window.xiaokDesktop.installPluginDependency(input);
+  },
+  async updatePluginDependency(input: { pluginName: string; dependencyId: string; confirmed?: boolean }) {
+    return window.xiaokDesktop.updatePluginDependency(input);
+  },
+  async diagnosePluginDependency(input: { pluginName: string; dependencyId: string }) {
+    return window.xiaokDesktop.diagnosePluginDependency(input);
+  },
 
   // ---------------------
   // Persona API (mock)

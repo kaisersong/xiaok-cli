@@ -67,6 +67,10 @@ export const PRELOAD_API_KEYS = [
   'setPluginMcpServerEnabled',
   'installPlugin',
   'listAvailablePlugins',
+  'listPluginDependencyStatuses',
+  'installPluginDependency',
+  'updatePluginDependency',
+  'diagnosePluginDependency',
   'getUpdateStatus',
   'checkForUpdates',
   'quitAndInstall',
@@ -223,6 +227,34 @@ export interface PluginMcpServerView {
   enabled: boolean;
 }
 
+export interface PluginDependencyStatusView {
+  pluginName: string;
+  dependencyId: string;
+  displayName: string;
+  pluginInstalled?: boolean;
+  state: 'ready' | 'missing' | 'needs_permission' | 'degraded' | 'unsupported';
+  code: string;
+  resolvedBinary?: string;
+  version?: string;
+  detail?: string;
+  canInstall: boolean;
+  canUpdate: boolean;
+  canDiagnose: boolean;
+}
+
+export interface PluginDependencyActionInput {
+  pluginName: string;
+  dependencyId: string;
+  confirmed?: boolean;
+}
+
+export interface PluginDependencyActionResult {
+  success: boolean;
+  status?: PluginDependencyStatusView;
+  output?: string;
+  error?: string;
+}
+
 export interface UpdateStatus {
   checking: boolean;
   available: boolean;
@@ -335,6 +367,10 @@ export interface DesktopApi {
   setPluginMcpServerEnabled(input: { name: string; enabled: boolean }): Promise<PluginMcpServerView[]>;
   installPlugin(name: string): Promise<{ success: boolean; error?: string }>;
   listAvailablePlugins(): Promise<Array<{ name: string; display_name: string; description: string; version: string; installed: boolean }>>;
+  listPluginDependencyStatuses(): Promise<PluginDependencyStatusView[]>;
+  installPluginDependency(input: PluginDependencyActionInput): Promise<PluginDependencyActionResult>;
+  updatePluginDependency(input: PluginDependencyActionInput): Promise<PluginDependencyActionResult>;
+  diagnosePluginDependency(input: Omit<PluginDependencyActionInput, 'confirmed'>): Promise<PluginDependencyActionResult>;
   getUpdateStatus(): Promise<UpdateStatus>;
   checkForUpdates(): Promise<void>;
   quitAndInstall(): Promise<void>;
@@ -463,6 +499,10 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     setPluginMcpServerEnabled: (input) => ipcRenderer.invoke('desktop:setPluginMcpServerEnabled', input) as Promise<PluginMcpServerView[]>,
     installPlugin: (name) => ipcRenderer.invoke('desktop:installPlugin', name) as Promise<{ success: boolean; error?: string }>,
     listAvailablePlugins: () => ipcRenderer.invoke('desktop:listAvailablePlugins') as Promise<Array<{ name: string; display_name: string; description: string; version: string; installed: boolean }>>,
+    listPluginDependencyStatuses: () => ipcRenderer.invoke('desktop:listPluginDependencyStatuses') as Promise<PluginDependencyStatusView[]>,
+    installPluginDependency: (input) => ipcRenderer.invoke('desktop:installPluginDependency', input) as Promise<PluginDependencyActionResult>,
+    updatePluginDependency: (input) => ipcRenderer.invoke('desktop:updatePluginDependency', input) as Promise<PluginDependencyActionResult>,
+    diagnosePluginDependency: (input) => ipcRenderer.invoke('desktop:diagnosePluginDependency', input) as Promise<PluginDependencyActionResult>,
     getUpdateStatus: () => ipcRenderer.invoke('desktop:getUpdateStatus') as Promise<UpdateStatus>,
     checkForUpdates: () => ipcRenderer.invoke('desktop:checkForUpdates') as Promise<void>,
     quitAndInstall: () => ipcRenderer.invoke('desktop:quitAndInstall') as Promise<void>,

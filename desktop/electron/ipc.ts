@@ -211,6 +211,10 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
   ipcMain.handle('desktop:setPluginMcpServerEnabled', (_event, input) => services.setPluginMcpServerEnabled(input));
   ipcMain.handle('desktop:installPlugin', (_event, name) => services.installPlugin(name));
   ipcMain.handle('desktop:listAvailablePlugins', () => services.listAvailablePlugins());
+  ipcMain.handle('desktop:listPluginDependencyStatuses', () => services.listPluginDependencyStatuses());
+  ipcMain.handle('desktop:installPluginDependency', (_event, input) => services.installPluginDependency(input));
+  ipcMain.handle('desktop:updatePluginDependency', (_event, input) => services.updatePluginDependency(input));
+  ipcMain.handle('desktop:diagnosePluginDependency', (_event, input) => services.diagnosePluginDependency(input));
   ipcMain.handle('desktop:createTaskWithFiles', async (_event, input) => {
     log('info', 'createTaskWithFiles', { prompt: input?.prompt?.slice(0, 50), files: input?.filePaths?.length });
     const r = await services.createTaskWithFiles(input);

@@ -29,6 +29,7 @@ export interface CapabilityAwareAdapter extends ModelAdapter {
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: ModelInvocationOptions): AsyncIterable<import('../../types.js').StreamChunk>;
 }
 export declare const DEFAULT_MODEL_CAPABILITIES: ModelCapabilities;
+export declare function modelCapabilitiesFromFlags(capabilities?: string[]): Partial<ModelCapabilities>;
 export declare function resolveModelCapabilities(model: string): ModelCapabilities;
 export declare function resolveModelCapabilities(adapter: ModelAdapter): ModelCapabilities;
 export declare function buildPromptCacheSegments(systemPromptOrSegments: string | Array<{

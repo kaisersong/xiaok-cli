@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpen, Download, Eye, Pencil, Plus, Sparkles, Trash2, X } from 'lucide-react';
+import { ArrowRight, BookOpen, Download, Eye, Pencil, Plus, Sparkles, Trash2, X } from 'lucide-react';
 import { useLocale } from '../../contexts/LocaleContext';
 import { getDesktopApi } from '../../shared/desktop';
 import { PrincipleEditModal } from './PrincipleEditModal';
@@ -18,6 +18,7 @@ interface ProjectPrinciple {
   content: string;
   scenarios: PrincipleScenario[];
   source: 'manual' | 'memory';
+  kind?: 'knowledge' | 'rule';
   enabled: boolean;
   createdAt: number;
   updatedAt: number;
@@ -129,14 +130,20 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
     if (importTrigger > 0) setShowImport(true);
   }, [importTrigger]);
 
-  const manualKnowledgeDocs = useMemo(() => principles.map(principle => ({
-    id: principle.id,
-    title: deriveKnowledgeTitle(principle.content),
-    source: principle.source,
-    content: principle.content,
-    readOnly: false,
-    principle,
-  } satisfies KnowledgeDocumentView)), [principles]);
+  const manualKnowledgeDocs = useMemo(() => principles
+    .filter(p => !p.kind || p.kind === 'knowledge')
+    .map(principle => ({
+      id: principle.id,
+      title: deriveKnowledgeTitle(principle.content),
+      source: principle.source,
+      content: principle.content,
+      readOnly: false,
+      principle,
+    } satisfies KnowledgeDocumentView)), [principles]);
+
+  const manualRulePrinciples = useMemo(() =>
+    principles.filter(p => p.kind === 'rule'),
+    [principles]);
 
   const builtinKnowledgeDocs = qualityKnowledge?.knowledgeDocuments || [];
   const builtinRuleCount = qualityKnowledge?.builtinPacks.reduce((count, pack) => count + (pack.rules?.length || 0), 0) || 0;
@@ -144,7 +151,8 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
   const hasRules = builtinRuleCount > 0
     || Boolean(qualityKnowledge?.userOverlays.length)
     || Boolean(qualityKnowledge?.workspaceOverlays.length)
-    || Boolean(qualityKnowledge?.conflicts.length);
+    || Boolean(qualityKnowledge?.conflicts.length)
+    || manualRulePrinciples.length > 0;
 
   const handleSaveKnowledge = async (principle: PrincipleFormData) => {
     const api = getDesktopApi() as any;
@@ -192,6 +200,15 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
     const p = principles.find(x => x.id === id);
     if (!p) return;
     await handleSaveKnowledge({ ...p, enabled, updatedAt: Date.now() });
+  };
+
+  const handleReclassify = async (id: string, kind: 'knowledge' | 'rule') => {
+    const api = getDesktopApi() as any;
+    if (!api?.savePrinciple) return;
+    const p = principles.find(x => x.id === id);
+    if (!p) return;
+    await api.savePrinciple({ ...p, kind, updatedAt: Date.now() });
+    await loadPrinciples();
   };
 
   const handleImport = async (entries: Array<{ id: string; content: string }>) => {
@@ -446,13 +463,31 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
           </section>
         )}
 
-        {qualityKnowledge && (
+        {(qualityKnowledge || manualRulePrinciples.length > 0) && (
           <section className="space-y-2">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--c-text-muted)]">{t.projectsRulesMine}</h3>
             <div className="space-y-2">
-              {qualityKnowledge.userOverlays.length > 0
-                ? qualityKnowledge.userOverlays.map(renderRulePill)
-                : <p className="rounded-lg border border-dashed border-[var(--c-border-subtle)] px-4 py-3 text-xs text-[var(--c-text-muted)]">{t.projectsPrinciplesImportEmpty}</p>}
+              {manualRulePrinciples.map(p => (
+                <div key={p.id} className="rounded-md border border-[var(--c-border-subtle)] px-3 py-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="min-w-0 break-words text-xs font-medium text-[var(--c-text-primary)]">{p.content}</p>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteId(p.id)}
+                      className="shrink-0 rounded p-0.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-status-error-text)]"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                  {p.source === 'memory' && (
+                    <span className="mt-1 inline-block text-[10px] text-[var(--c-text-muted)]">memory</span>
+                  )}
+                </div>
+              ))}
+              {qualityKnowledge && qualityKnowledge.userOverlays.map(renderRulePill)}
+              {manualRulePrinciples.length === 0 && (!qualityKnowledge || qualityKnowledge.userOverlays.length === 0) && (
+                <p className="rounded-lg border border-dashed border-[var(--c-border-subtle)] px-4 py-3 text-xs text-[var(--c-text-muted)]">{t.projectsPrinciplesImportEmpty}</p>
+              )}
             </div>
           </section>
         )}
@@ -553,6 +588,14 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
                   className="h-3.5 w-3.5 rounded border-[var(--c-border-subtle)] accent-[var(--c-accent)]"
                   title={principle.enabled ? t.projectsPrinciplesEnabled : t.projectsPrinciplesDisabled}
                 />
+                <button
+                  type="button"
+                  onClick={() => handleReclassify(principle.id, 'rule')}
+                  className="rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]"
+                  title={t.projectsPrincipleMoveToRules ?? '移到规则'}
+                >
+                  <ArrowRight size={13} />
+                </button>
                 <button
                   type="button"
                   onClick={() => openEdit(principle, 'knowledge')}

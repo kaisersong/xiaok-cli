@@ -8,6 +8,7 @@ export interface ProjectPrinciple {
   content: string;
   scenarios: PrincipleScenario[];
   source: 'manual' | 'memory';
+  kind?: 'knowledge' | 'rule';
   enabled: boolean;
   createdAt: number;
   updatedAt: number;

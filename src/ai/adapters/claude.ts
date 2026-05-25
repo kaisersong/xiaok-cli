@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
-import type { CachedToolDefinition, ModelInvocationOptions, SystemPromptBlock } from '../runtime/model-capabilities.js';
+import type { CachedToolDefinition, ModelCapabilities, ModelInvocationOptions, SystemPromptBlock } from '../runtime/model-capabilities.js';
 
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
@@ -23,12 +23,19 @@ export class ClaudeAdapter implements ModelAdapter {
   client?: Anthropic;
   private readonly apiKey: string;
   private readonly baseUrl?: string;
+  private readonly capabilityOverrides?: Partial<ModelCapabilities>;
   private model: string;
   private clientPromise: Promise<Anthropic> | null = null;
 
-  constructor(apiKey: string, model = 'claude-opus-4-6', baseUrl?: string) {
+  constructor(
+    apiKey: string,
+    model = 'claude-opus-4-6',
+    baseUrl?: string,
+    capabilityOverrides?: Partial<ModelCapabilities>,
+  ) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
+    this.capabilityOverrides = capabilityOverrides;
     this.model = model;
   }
 
@@ -36,8 +43,12 @@ export class ClaudeAdapter implements ModelAdapter {
     return this.model;
   }
 
+  getCapabilities(): Partial<ModelCapabilities> {
+    return this.capabilityOverrides ?? {};
+  }
+
   cloneWithModel(model: string): ClaudeAdapter {
-    return new ClaudeAdapter(this.apiKey, model, this.baseUrl);
+    return new ClaudeAdapter(this.apiKey, model, this.baseUrl, this.capabilityOverrides);
   }
 
   private async getClient(): Promise<Anthropic> {

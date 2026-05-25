@@ -16,18 +16,23 @@ export class OpenAIResponsesAdapter {
     apiKey;
     baseUrl;
     defaultHeaders;
+    capabilityOverrides;
     model;
-    constructor(apiKey, model = 'gpt-4.1', baseUrl, defaultHeaders) {
+    constructor(apiKey, model = 'gpt-4.1', baseUrl, defaultHeaders, capabilityOverrides) {
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.defaultHeaders = defaultHeaders;
+        this.capabilityOverrides = capabilityOverrides;
         this.model = model;
     }
     getModelName() {
         return this.model;
     }
+    getCapabilities() {
+        return this.capabilityOverrides ?? {};
+    }
     cloneWithModel(model) {
-        return new OpenAIResponsesAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders);
+        return new OpenAIResponsesAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders, this.capabilityOverrides);
     }
     async *stream(messages, tools, systemPrompt) {
         let attempt = 0;

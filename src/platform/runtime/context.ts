@@ -4,6 +4,8 @@ import { join } from 'path';
 import type { Tool } from '../../types.js';
 import { loadCustomAgents, type CustomAgentDef } from '../../ai/agents/loader.js';
 import { buildMcpRuntimeTools } from '../../ai/mcp/runtime/tools.js';
+import { createComputerUseTool } from '../../ai/tools/computer-use.js';
+import { normalizeMcpRuntimeToolResult } from '../../ai/mcp/runtime/client.js';
 import { createBackgroundRunner, type BackgroundJobRecord } from '../agents/background-runner.js';
 import { createLspManager } from '../lsp/manager.js';
 import { loadPlatformPluginRuntime, connectDeclaredLspServer, type PlatformPluginRuntimeState } from '../plugins/runtime.js';
@@ -269,27 +271,30 @@ async function connectWorkspaceMcpServers(
       const toolsResult = await connection.client.listTools();
       const schemas = toolsResult.tools ?? [];
 
-      // 构建 xiaok Tool 对象
-      tools.push(
-        ...buildMcpRuntimeTools(
-          { name: server.name, command: '' }, // declaration 兼容旧接口
-          {
-            listTools: async () => schemas,
-            callTool: async (name, input) => {
-              const result = await connection.client.callTool({ name, arguments: input });
-              // 提取文本内容
-              const content = result.content as Array<{ type: string; text?: string }> | undefined;
-              const text = content
-                ?.filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-                .map((c) => c.text)
-                .join('\n') ?? '';
-              return text;
-            },
-            dispose: connection.dispose,
+      if (server.name === 'cua-driver') {
+        tools.push(createComputerUseTool({
+          callToolResult: async (name, input) => {
+            const result = await connection.client.callTool({ name, arguments: input });
+            return normalizeMcpRuntimeToolResult(result);
           },
-          schemas,
-        ),
-      );
+        }));
+      } else {
+        // 构建 xiaok Tool 对象
+        tools.push(
+          ...buildMcpRuntimeTools(
+            { name: server.name, command: '' }, // declaration 兼容旧接口
+            {
+              listTools: async () => schemas,
+              callTool: async (name, input) => {
+                const result = await connection.client.callTool({ name, arguments: input });
+                return normalizeMcpRuntimeToolResult(result).text;
+              },
+              dispose: connection.dispose,
+            },
+            schemas,
+          ),
+        );
+      }
 
       disposables.push(connection);
       capabilityHealth.push({

@@ -19,11 +19,27 @@ describe('kswarm create_project defaults', () => {
     expect(result.totalAgentCount).toBe(2);
   });
 
-  it('fills requested worker count with online agents first, then remaining offline agents', () => {
+  it('keeps the dedicated xiaok worker seed when chat asks for a worker count without naming agents', () => {
     const result = resolveCreateProjectMembers({
       agents: [
         { id: 'xiaok-po', name: 'PO-Agent', status: 'idle', roles: ['project_owner'] },
         { id: 'xiaok-worker', name: 'Worker-Agent', status: 'offline', roles: ['worker'] },
+        { id: 'codex-worker', name: 'Codex', status: 'idle', roles: ['worker'] },
+        { id: 'claude-worker', name: 'Claude', status: 'idle', roles: ['worker'] },
+      ],
+      poAgent: 'xiaok-po',
+      memberNames: [],
+      memberCount: 2,
+    });
+
+    expect(result.members).toEqual(['xiaok-worker']);
+    expect(result.totalAgentCount).toBe(2);
+  });
+
+  it('fills requested worker count with online agents when no dedicated xiaok worker seed exists', () => {
+    const result = resolveCreateProjectMembers({
+      agents: [
+        { id: 'xiaok-po', name: 'PO-Agent', status: 'idle', roles: ['project_owner'] },
         { id: 'codex-worker', name: 'Codex', status: 'idle', roles: ['worker'] },
         { id: 'claude-worker', name: 'Claude', status: 'idle', roles: ['worker'] },
       ],

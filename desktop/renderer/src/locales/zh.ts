@@ -1806,6 +1806,7 @@ export const zh: LocaleStrings = {
   projectsPrinciplesSourceManual: "手动",
   projectsPrinciplesSourceMemory: "Memory",
   projectsPrinciplesEdit: "编辑",
+  projectsPrincipleMoveToRules: "移到规则",
   projectsPrinciplesDelete: "删除",
   projectsPrinciplesDeleteConfirm: "确认删除",
   projectsPrinciplesDeleteConfirmBody: "删除后无法恢复，确定要删除这条知识吗？",

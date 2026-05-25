@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, rename
 import { join, extname, basename, dirname } from 'node:path';
 import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
 import { homedir, platform, arch, type } from 'node:os';
-import { spawnSync, exec } from 'node:child_process';
+import { spawnSync, execFile } from 'node:child_process';
 import { createAdapter } from '../../src/ai/models.js';
 import { getProviderProfile, listProviderProfiles } from '../../src/ai/providers/registry.js';
 import type { ProtocolId } from '../../src/ai/providers/types.js';
@@ -41,7 +41,15 @@ import { startMcpServerProcess, createStdioMcpTransport } from '../../src/ai/mcp
 import { createMcpRuntimeClient } from '../../src/ai/mcp/runtime/client.js';
 import { buildMcpRuntimeTools } from '../../src/ai/mcp/runtime/tools.js';
 import { loadPlugins } from '../../src/platform/plugins/loader.js';
+import {
+  buildOfficialInstallerExecution,
+  getPluginDependencyStatus,
+  type ExternalPluginDependency,
+  type PluginDependencyStatusOptions,
+} from './plugin-dependency-service.js';
+import { runCuaMcpReadinessSmoke } from './cua-driver-manager.js';
 import { UserMemoryStore } from './user-memory.js';
+import { createComputerUseTool } from '../../src/ai/tools/computer-use.js';
 import { createNotebookTools } from '../../src/ai/tools/notebook.js';
 import type { MemoryStore } from '../../src/ai/memory/store.js';
 import type { KSwarmService, KSwarmUnavailableError } from './kswarm-service.js';
@@ -286,7 +294,42 @@ export interface DesktopServicesOptions {
   now?: () => number;
   runner?: TaskRunner;
   kswarmService: KSwarmService;
+  pluginRootDir?: string;
+  pluginDependencies?: Array<{ pluginName: string; dependency: ExternalPluginDependency }>;
+  pluginDependencyStatusOptions?: PluginDependencyStatusOptions;
 }
+
+const CUA_DRIVER_DEPENDENCY: ExternalPluginDependency = {
+  id: 'cua-driver',
+  kind: 'macos_app_cli',
+  displayName: 'CUA Driver',
+  envOverride: 'XIAOK_CUA_DRIVER_CMD',
+  binaryCandidates: ['~/.local/bin/cua-driver', '/usr/local/bin/cua-driver', '/opt/homebrew/bin/cua-driver', 'cua-driver'],
+  minVersion: '0.1.0',
+  install: {
+    kind: 'official_installer',
+    sourceUrl: 'https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh',
+    sourceAllowlist: ['https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh'],
+    requiresUserConfirmation: true,
+  },
+  update: {
+    kind: 'command',
+    command: '~/.local/bin/cua-driver',
+    args: ['update'],
+    requiresUserConfirmation: true,
+  },
+  health: {
+    version: ['~/.local/bin/cua-driver', '--version'],
+    status: ['~/.local/bin/cua-driver', 'status'],
+    permissions: ['~/.local/bin/cua-driver', 'check_permissions'],
+    doctor: ['~/.local/bin/cua-driver', 'doctor'],
+  },
+  mcp: {
+    serverName: 'cua-driver',
+    command: '~/.local/bin/cua-driver',
+    args: ['mcp'],
+  },
+};
 
 export function createTimedActionTools(service: TimedActionService, timezone = Intl.DateTimeFormat().resolvedOptions().timeZone): Tool[] {
   return [
@@ -565,6 +608,56 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     enabled: boolean;
   }
   const pluginMcpServers: PluginMcpServerState[] = [];
+  const pluginDependencies = options.pluginDependencies ?? [
+    { pluginName: 'cua-computer-use', dependency: CUA_DRIVER_DEPENDENCY },
+  ];
+  const pluginRootDir = options.pluginRootDir ?? join(homedir(), '.xiaok', 'plugins');
+
+  const findPluginDependency = (pluginName: string, dependencyId: string) =>
+    pluginDependencies.find((entry) => entry.pluginName === pluginName && entry.dependency.id === dependencyId);
+
+  const findPluginDependencyForMcpServer = (pluginName: string, serverName: string) =>
+    pluginDependencies.find((entry) => entry.pluginName === pluginName && entry.dependency.mcp?.serverName === serverName);
+
+  const isPluginInstalled = (pluginName: string) =>
+    existsSync(join(pluginRootDir, pluginName, 'plugin.json'));
+
+  const getDependencyStatusView = async (entry: { pluginName: string; dependency: ExternalPluginDependency }) => ({
+    pluginName: entry.pluginName,
+    pluginInstalled: isPluginInstalled(entry.pluginName),
+    ...(await getPluginDependencyStatus(entry.dependency, options.pluginDependencyStatusOptions)),
+  });
+
+  const resolvePluginMcpLaunch = async (
+    pluginName: string,
+    serverName: string,
+    fallbackCommand: string,
+    fallbackArgs: string[],
+  ): Promise<{ command: string; args: string[] }> => {
+    const dependency = findPluginDependencyForMcpServer(pluginName, serverName);
+    if (!dependency) return { command: fallbackCommand, args: fallbackArgs };
+    const status = await getDependencyStatusView(dependency);
+    if (status.state !== 'ready' || !status.resolvedBinary) {
+      throw new Error(`Plugin dependency is not ready: ${status.code}`);
+    }
+    return {
+      command: status.resolvedBinary,
+      args: dependency.dependency.mcp?.args ?? fallbackArgs,
+    };
+  };
+
+  async function runDependencyCommand(
+    command: string,
+    args: string[],
+    timeout = 300_000,
+  ): Promise<{ success: boolean; output?: string; error?: string }> {
+    const result = spawnSync(command, args, { encoding: 'utf8', timeout });
+    if (result.error) return { success: false, error: result.error.message };
+    if (result.status !== 0) {
+      return { success: false, error: result.stderr?.trim() || result.stdout?.trim() || `exit ${result.status}` };
+    }
+    return { success: true, output: [result.stdout, result.stderr].filter(Boolean).join('\n').trim() };
+  }
 
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
@@ -577,6 +670,21 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     createSessionId: () => `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
   });
 
+  const createKSwarmTaskHost = (workspaceRoot: string) => {
+    if (options.runner) return host;
+    const scopedTools = buildToolList(undefined, { cwd: workspaceRoot });
+    const scopedRegistry = new ToolRegistry({ autoMode: true }, scopedTools);
+    return new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner: createDesktopModelRunnerWithRegistry(scopedRegistry, scopedTools, options.dataRoot, options.kswarmService),
+      now: options.now,
+      aheGuards: { artifactEvidence: true, recoveryContinuity: true },
+      createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      createSessionId: () => `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    });
+  };
+
   const connectorsService = new ConnectorsService({
     store: new ConnectorsStore({ dataRoot: options.dataRoot }),
     toolRegistry: registry,
@@ -584,6 +692,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
 
   async function runKSwarmHandoffTask({ handoff, targetParticipantId }: { handoff: KSwarmTaskHandoff; targetParticipantId?: string }) {
     const artifactsDir = handoff.project.artifactsDir || (handoff.project.workFolder ? `${handoff.project.workFolder}/artifacts` : '');
+    const workspaceRoot = handoff.project.workFolder || (artifactsDir ? dirname(artifactsDir) : process.cwd());
+    const taskHost = createKSwarmTaskHost(workspaceRoot);
     const runStartedAt = Date.now();
     const requiresArtifactEvidence = shouldRequireKSwarmArtifactEvidence(handoff.task);
     const requiredOutputsText = formatKSwarmRequiredOutputs(handoff.task.requiredOutputs);
@@ -603,10 +713,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       requiresArtifactEvidence ? '本任务必须写入至少一个完整产物文件到产物目录；不要只在摘要里描述文件，最终交接必须能看到文件路径。' : '',
       '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，把产物文件写入上面的产物目录，使用文件路径作为交接依据，并返回 result manifest。',
     ].filter(Boolean).join('\n');
-    const created = await host.createTask({ prompt, materials: [] });
+    const created = await taskHost.createTask({ prompt, materials: [] });
     const deadline = Date.now() + 10 * 60 * 1000;
     while (Date.now() < deadline) {
-      const recovered = await host.recoverTask(created.taskId);
+      const recovered = await taskHost.recoverTask(created.taskId);
       if (recovered.snapshot.status === 'completed') {
         const resultEvent = [...recovered.snapshot.events].reverse().find(event => event.type === 'result');
         const artifactEvents = recovered.snapshot.events.filter(event => event.type === 'artifact_recorded');
@@ -1038,20 +1148,20 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     async registerMcpTools(): Promise<{ dispose: () => void }> {
       const disposers: Array<() => void> = [];
       try {
-        const pluginsDir = join(homedir(), '.xiaok', 'plugins');
-        const plugins = await loadPlugins([pluginsDir]);
+        const plugins = await loadPlugins([pluginRootDir]);
         for (const plugin of plugins) {
           if (!plugin.mcpServers?.length) continue;
           for (const server of plugin.mcpServers) {
             if (server.type !== 'stdio') continue;
             try {
+              const launch = await resolvePluginMcpLaunch(plugin.name, server.name, server.command, server.args ?? []);
               // Use managed venv python if available for Python MCP servers
-              const isPythonServer = server.command === 'python3' || server.command === 'python';
+              const isPythonServer = launch.command === 'python3' || launch.command === 'python';
               const command = isPythonServer
-                ? normalizePythonServerCommand(server.command, process.platform, process.env.XIAOK_PYTHON_CMD)
-                : server.command;
+                ? normalizePythonServerCommand(launch.command, process.platform, process.env.XIAOK_PYTHON_CMD)
+                : launch.command;
               const baseEnv = 'env' in server ? (server as { env?: Record<string, string> }).env : undefined;
-              const proc = startMcpServerProcess(command, server.args ?? [], {
+              const proc = startMcpServerProcess(command, launch.args, {
                 cwd: plugin.rootDir,
                 env: isPythonServer ? buildPythonServerEnv(baseEnv) : baseEnv,
               });
@@ -1059,11 +1169,25 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               const client = createMcpRuntimeClient(transport);
               await client.initialize();
               const schemas = await client.listTools();
-              const mcpTools = buildMcpRuntimeTools(
-                { name: server.name, command: server.command },
-                { listTools: () => Promise.resolve(schemas), callTool: (name, input) => client.callTool(name, input), dispose: () => { transport.dispose(); proc.dispose(); } },
-                schemas,
-              );
+              let mcpTools: Tool[];
+              if (server.name === 'cua-driver') {
+                const readiness = await runCuaMcpReadinessSmoke({
+                  schemas,
+                  callToolResult: (name, input) => client.callToolResult(name, input),
+                });
+                if (!readiness.ready) {
+                  transport.dispose();
+                  proc.dispose();
+                  throw new Error(`CUA MCP readiness failed: ${readiness.code}`);
+                }
+                mcpTools = [createComputerUseTool({ callToolResult: (name, input) => client.callToolResult(name, input) })];
+              } else {
+                mcpTools = buildMcpRuntimeTools(
+                  { name: server.name, command: server.command },
+                  { listTools: () => Promise.resolve(schemas), callTool: (name, input) => client.callTool(name, input), dispose: () => { transport.dispose(); proc.dispose(); } },
+                  schemas,
+                );
+              }
               for (const tool of mcpTools) {
                 registry.registerTool(tool);
               }
@@ -1071,7 +1195,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               pluginMcpServers.push({
                 name: server.name,
                 pluginName: plugin.name,
-                toolCount: schemas.length,
+                toolCount: mcpTools.length,
                 connected: true,
                 enabled: true,
               });
@@ -1101,11 +1225,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return pluginMcpServers;
     },
     async installPlugin(name: string): Promise<{ success: boolean; error?: string }> {
-      const xiaokPath = process.execPath.replace(/node$/, 'xiaok');
-      // Fallback: use npx xiaok
-      const cmd = `xiaok plugin install ${name}`;
+      const pluginName = name.trim();
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(pluginName)) {
+        return { success: false, error: 'invalid_plugin_name' };
+      }
       return new Promise((resolve) => {
-        exec(cmd, { timeout: 120_000 }, (error, stdout, stderr) => {
+        execFile('xiaok', ['plugin', 'install', pluginName], { timeout: 120_000 }, (error, stdout, stderr) => {
           if (error) {
             resolve({ success: false, error: stderr || error.message });
             return;
@@ -1115,18 +1240,74 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       });
     },
     async listAvailablePlugins(): Promise<Array<{ name: string; display_name: string; description: string; version: string; installed: boolean }>> {
-      const pluginsDir = join(homedir(), '.xiaok', 'plugins');
       try {
         const res = await fetch('https://raw.githubusercontent.com/kaisersong/kai-xiaok-plugins/main/registry.json');
         if (!res.ok) return [];
         const data = await res.json() as { plugins: Array<{ name: string; display_name: string; description: string; version: string }> };
         return (data.plugins || []).map(p => ({
           ...p,
-          installed: existsSync(join(pluginsDir, p.name, 'plugin.json')),
+          installed: existsSync(join(pluginRootDir, p.name, 'plugin.json')),
         }));
       } catch {
         return [];
       }
+    },
+    async listPluginDependencyStatuses() {
+      return Promise.all(pluginDependencies.map(getDependencyStatusView));
+    },
+    async installPluginDependency(input: { pluginName: string; dependencyId: string; confirmed?: boolean }): Promise<{ success: boolean; status?: unknown; error?: string }> {
+      const entry = findPluginDependency(input.pluginName, input.dependencyId);
+      if (!entry) return { success: false, error: 'plugin_dependency_not_found' };
+      try {
+        const dependency = entry.dependency;
+        if (dependency.install?.kind !== 'official_installer') {
+          return { success: false, error: 'plugin_dependency_installer_not_available' };
+        }
+        if (dependency.install.requiresUserConfirmation && !input.confirmed) {
+          return { success: false, error: 'confirmation_required' };
+        }
+        if (dependency.install.sourceAllowlist && !dependency.install.sourceAllowlist.includes(dependency.install.sourceUrl)) {
+          return { success: false, error: 'installer_source_not_allowed' };
+        }
+        const installerDir = join(options.dataRoot, 'runtime', 'plugin-installers');
+        mkdirSync(installerDir, { recursive: true });
+        const res = await fetch(dependency.install.sourceUrl);
+        if (!res.ok) return { success: false, error: `installer_download_failed_${res.status}` };
+        const installerPath = join(installerDir, `${dependency.id}-${Date.now()}.sh`);
+        await writeFileAsync(installerPath, Buffer.from(await res.arrayBuffer()));
+        const execution = buildOfficialInstallerExecution(dependency, installerPath, { confirmed: Boolean(input.confirmed) });
+        const result = await runDependencyCommand(execution.command, execution.args);
+        if (!result.success) return { success: false, error: result.error };
+        return { success: true, status: await getDependencyStatusView(entry) };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+    async updatePluginDependency(input: { pluginName: string; dependencyId: string; confirmed?: boolean }): Promise<{ success: boolean; status?: unknown; error?: string }> {
+      const entry = findPluginDependency(input.pluginName, input.dependencyId);
+      if (!entry) return { success: false, error: 'plugin_dependency_not_found' };
+      const dependency = entry.dependency;
+      if (!dependency.update) return { success: false, error: 'plugin_dependency_update_not_available' };
+      if (dependency.update.requiresUserConfirmation && !input.confirmed) {
+        return { success: false, error: 'confirmation_required' };
+      }
+      const status = await getDependencyStatusView(entry);
+      if (!status.resolvedBinary) return { success: false, error: 'plugin_dependency_binary_missing' };
+      const result = await runDependencyCommand(status.resolvedBinary, dependency.update.args ?? []);
+      if (!result.success) return { success: false, error: result.error };
+      return { success: true, status: await getDependencyStatusView(entry) };
+    },
+    async diagnosePluginDependency(input: { pluginName: string; dependencyId: string }): Promise<{ success: boolean; output?: string; status?: unknown; error?: string }> {
+      const entry = findPluginDependency(input.pluginName, input.dependencyId);
+      if (!entry) return { success: false, error: 'plugin_dependency_not_found' };
+      const status = await getDependencyStatusView(entry);
+      if (!status.resolvedBinary) return { success: false, error: 'plugin_dependency_binary_missing' };
+      const doctor = entry.dependency.health?.doctor;
+      if (!doctor) return { success: false, error: 'plugin_dependency_diagnose_not_available' };
+      const [, ...args] = doctor;
+      const result = await runDependencyCommand(status.resolvedBinary, args, 120_000);
+      if (!result.success) return { success: false, error: result.error };
+      return { success: true, output: result.output, status: await getDependencyStatusView(entry) };
     },
     async importMaterial(input: { taskId: string; filePath: string; role: MaterialRole }) {
       mkdirSync(options.dataRoot, { recursive: true });

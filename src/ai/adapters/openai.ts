@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
-import type { ModelInvocationOptions } from '../runtime/model-capabilities.js';
+import type { ModelCapabilities, ModelInvocationOptions } from '../runtime/model-capabilities.js';
 import { estimateTokens } from '../runtime/usage.js';
 
 const MAX_RETRIES = 3;
@@ -154,12 +154,20 @@ export class OpenAIAdapter implements ModelAdapter {
   private readonly apiKey: string;
   private readonly baseUrl?: string;
   private readonly defaultHeaders?: Record<string, string>;
+  private readonly capabilityOverrides?: Partial<ModelCapabilities>;
   private model: string;
 
-  constructor(apiKey: string, model = 'gpt-4o', baseUrl?: string, defaultHeaders?: Record<string, string>) {
+  constructor(
+    apiKey: string,
+    model = 'gpt-4o',
+    baseUrl?: string,
+    defaultHeaders?: Record<string, string>,
+    capabilityOverrides?: Partial<ModelCapabilities>,
+  ) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
     this.defaultHeaders = defaultHeaders;
+    this.capabilityOverrides = capabilityOverrides;
     this.client = new OpenAI({
       apiKey,
       baseURL: baseUrl,
@@ -178,8 +186,12 @@ export class OpenAIAdapter implements ModelAdapter {
     return this.model;
   }
 
+  getCapabilities(): Partial<ModelCapabilities> {
+    return this.capabilityOverrides ?? {};
+  }
+
   cloneWithModel(model: string): OpenAIAdapter {
-    return new OpenAIAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders);
+    return new OpenAIAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders, this.capabilityOverrides);
   }
 
   async *stream(

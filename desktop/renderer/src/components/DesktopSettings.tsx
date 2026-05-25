@@ -1194,22 +1194,41 @@ interface MCPInstallConfig {
   createdAt: number;
 }
 
+interface PluginDependencyStatus {
+  pluginName: string;
+  dependencyId: string;
+  displayName: string;
+  pluginInstalled?: boolean;
+  state: 'ready' | 'missing' | 'needs_permission' | 'degraded' | 'unsupported';
+  code: string;
+  resolvedBinary?: string;
+  version?: string;
+  detail?: string;
+  canInstall: boolean;
+  canUpdate: boolean;
+  canDiagnose: boolean;
+}
+
 function McpPane() {
   const [installs, setInstalls] = useState<MCPInstallConfig[]>([]);
   const [pluginServers, setPluginServers] = useState<Array<{ name: string; pluginName: string; toolCount: number; connected: boolean; enabled: boolean }>>([]);
+  const [dependencies, setDependencies] = useState<PluginDependencyStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState('');
   const [newCommand, setNewCommand] = useState('');
   const [newArgs, setNewArgs] = useState('');
+  const [dependencyAction, setDependencyAction] = useState('');
 
   const load = useCallback(() => {
     Promise.all([
       api.listMCPInstalls().catch(() => []),
       api.listPluginMcpServers().catch(() => []),
-    ]).then(([mcpInstalls, plugins]) => {
+      api.listPluginDependencyStatuses().catch(() => []),
+    ]).then(([mcpInstalls, plugins, dependencyStatuses]) => {
       setInstalls(mcpInstalls);
       setPluginServers(plugins);
+      setDependencies(dependencyStatuses);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -1247,6 +1266,92 @@ function McpPane() {
     }
   };
 
+  const handleInstallDependency = async (dependency: PluginDependencyStatus) => {
+    if (!dependency.canInstall) return;
+    const confirmed = window.confirm(`${dependency.displayName} 是本机 macOS 自动化组件。安装前请确认你信任该插件来源。`);
+    if (!confirmed) return;
+    const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:install`;
+    setDependencyAction(actionKey);
+    try {
+      const result = await api.installPluginDependency({
+        pluginName: dependency.pluginName,
+        dependencyId: dependency.dependencyId,
+        confirmed: true,
+      });
+      if (!result.success) alert(result.error || '安装失败');
+      load();
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setDependencyAction('');
+    }
+  };
+
+  const handleSetupPluginDependency = async (dependency: PluginDependencyStatus) => {
+    if (!dependency.canInstall) return;
+    const confirmed = window.confirm(`${formatPluginDependencyTitle(dependency)} 会安装 xiaok 插件，并从官方来源安装 ${dependency.displayName}。继续？`);
+    if (!confirmed) return;
+    const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:setup`;
+    setDependencyAction(actionKey);
+    try {
+      const pluginResult = await api.installPlugin(dependency.pluginName);
+      if (!pluginResult.success) {
+        alert(pluginResult.error || '插件安装失败');
+        return;
+      }
+      const result = await api.installPluginDependency({
+        pluginName: dependency.pluginName,
+        dependencyId: dependency.dependencyId,
+        confirmed: true,
+      });
+      if (!result.success) alert(result.error || '安装失败');
+      load();
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setDependencyAction('');
+    }
+  };
+
+  const handleUpdateDependency = async (dependency: PluginDependencyStatus) => {
+    if (!dependency.canUpdate) return;
+    const confirmed = window.confirm(`更新 ${dependency.displayName} 需要替换本机 driver。继续？`);
+    if (!confirmed) return;
+    const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:update`;
+    setDependencyAction(actionKey);
+    try {
+      const result = await api.updatePluginDependency({
+        pluginName: dependency.pluginName,
+        dependencyId: dependency.dependencyId,
+        confirmed: true,
+      });
+      if (!result.success) alert(result.error || '更新失败');
+      load();
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setDependencyAction('');
+    }
+  };
+
+  const handleDiagnoseDependency = async (dependency: PluginDependencyStatus) => {
+    if (!dependency.canDiagnose) return;
+    const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:diagnose`;
+    setDependencyAction(actionKey);
+    try {
+      const result = await api.diagnosePluginDependency({
+        pluginName: dependency.pluginName,
+        dependencyId: dependency.dependencyId,
+      });
+      if (!result.success) alert(result.error || '诊断失败');
+      load();
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setDependencyAction('');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[200px] items-center justify-center">
@@ -1257,6 +1362,101 @@ function McpPane() {
 
   return (
     <>
+      {dependencies.length > 0 && (
+        <Section>
+          <SectionHeader icon={Package}>插件依赖</SectionHeader>
+          <div className="flex flex-col gap-2">
+            {dependencies.map(dependency => {
+              const statusText = formatPluginDependencyStatus(dependency);
+              const pluginInstalled = dependency.pluginInstalled ?? pluginServers.some(server => server.pluginName === dependency.pluginName);
+              const dependencyServer = pluginServers.find(server => server.pluginName === dependency.pluginName);
+              const dependencyLayerRows = formatPluginDependencyLayerRows(dependency, pluginInstalled, dependencyServer);
+              const isSettingUp = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:setup`;
+              const isInstalling = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:install`;
+              const isUpdating = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:update`;
+              const isDiagnosing = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:diagnose`;
+              return (
+                <Card key={`${dependency.pluginName}:${dependency.dependencyId}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{formatPluginDependencyTitle(dependency)}</span>
+                        <span className={`rounded px-2 py-0.5 text-xs ${pluginDependencyBadgeClass(dependency.state)}`}>
+                          {statusText}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-xs text-[var(--c-text-secondary)]">
+                        {dependency.displayName}
+                        {dependency.version ? ` · ${dependency.version}` : ''}
+                        {dependency.resolvedBinary ? ` · ${dependency.resolvedBinary}` : ''}
+                      </div>
+                      {dependency.detail && dependency.state !== 'ready' && (
+                        <div className="mt-1 line-clamp-2 text-xs text-[var(--c-text-tertiary)]">
+                          {dependency.detail}
+                        </div>
+                      )}
+                      <div className="mt-3 grid grid-cols-1 gap-1 text-xs text-[var(--c-text-secondary)] sm:grid-cols-2">
+                        {dependencyLayerRows.map(row => (
+                          <div key={row.label} className="min-w-0 truncate">
+                            {row.label}：{row.value}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {dependency.canInstall && dependency.state === 'missing' && !pluginInstalled && (
+                        <button
+                          type="button"
+                          disabled={isSettingUp}
+                          onClick={() => void handleSetupPluginDependency(dependency)}
+                          className="inline-flex items-center gap-1 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
+                        >
+                          {isSettingUp ? <Loader2 size={12} className="animate-spin" /> : <Package size={12} />}
+                          安装并启用
+                        </button>
+                      )}
+                      {dependency.canInstall && dependency.state === 'missing' && pluginInstalled && (
+                        <button
+                          type="button"
+                          disabled={isInstalling}
+                          onClick={() => void handleInstallDependency(dependency)}
+                          className="inline-flex items-center gap-1 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
+                        >
+                          {isInstalling ? <Loader2 size={12} className="animate-spin" /> : <Package size={12} />}
+                          安装 Driver
+                        </button>
+                      )}
+                      {dependency.canUpdate && dependency.state !== 'missing' && (
+                        <button
+                          type="button"
+                          disabled={isUpdating}
+                          onClick={() => void handleUpdateDependency(dependency)}
+                          className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
+                        >
+                          {isUpdating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                          更新
+                        </button>
+                      )}
+                      {dependency.canDiagnose && (
+                        <button
+                          type="button"
+                          disabled={isDiagnosing}
+                          onClick={() => void handleDiagnoseDependency(dependency)}
+                          className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
+                        >
+                          {isDiagnosing ? <Loader2 size={12} className="animate-spin" /> : <Wrench size={12} />}
+                          诊断
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        </Section>
+      )}
+
       {pluginServers.length > 0 && (
         <Section>
           <SectionHeader icon={Plug}>插件 MCP 服务</SectionHeader>
@@ -1379,6 +1579,80 @@ function McpPane() {
       </Section>
     </>
   );
+}
+
+function formatPluginDependencyTitle(dependency: PluginDependencyStatus): string {
+  if (dependency.pluginName === 'cua-computer-use') return 'Computer Use for Mac';
+  return dependency.pluginName;
+}
+
+function formatPluginDependencyStatus(dependency: PluginDependencyStatus): string {
+  if (dependency.code === 'binary_missing') return `需要安装 ${dependency.displayName}`;
+  if (dependency.code === 'permission_accessibility_missing') return '需要辅助功能权限';
+  if (dependency.code === 'permission_screen_missing') return '需要屏幕录制权限';
+  if (dependency.code === 'version_too_old') return '需要更新 Driver';
+  if (dependency.state === 'ready') return '可用';
+  if (dependency.state === 'unsupported') return '当前平台不支持';
+  return '需要处理';
+}
+
+function formatPluginDependencyLayerRows(
+  dependency: PluginDependencyStatus,
+  pluginInstalled: boolean,
+  server?: { connected: boolean; toolCount: number },
+): Array<{ label: string; value: string }> {
+  return [
+    { label: '插件', value: pluginInstalled ? '已安装' : '未安装' },
+    { label: dependency.displayName, value: formatDriverLayerStatus(dependency) },
+    { label: '权限', value: formatPermissionLayerStatus(dependency) },
+    { label: 'MCP', value: formatMcpLayerStatus(dependency, server) },
+    { label: '工具', value: formatToolLayerStatus(dependency, server) },
+  ];
+}
+
+function formatDriverLayerStatus(dependency: PluginDependencyStatus): string {
+  if (dependency.state === 'unsupported') return '当前平台不支持';
+  if (dependency.code === 'binary_missing') return '未安装';
+  if (dependency.code === 'version_too_old') return dependency.version ? `${dependency.version}，需要更新` : '需要更新';
+  if (dependency.state === 'ready') return dependency.version || '已安装';
+  if (dependency.resolvedBinary) return '已安装但不可用';
+  return '未确认';
+}
+
+function formatPermissionLayerStatus(dependency: PluginDependencyStatus): string {
+  if (dependency.code === 'permission_accessibility_missing') return '缺辅助功能权限';
+  if (dependency.code === 'permission_screen_missing') return '缺屏幕录制权限';
+  if (dependency.state === 'ready') return '已授权';
+  if (dependency.state === 'missing' || dependency.state === 'unsupported') return '未检查';
+  return '未确认';
+}
+
+function formatMcpLayerStatus(
+  dependency: PluginDependencyStatus,
+  server?: { connected: boolean; toolCount: number },
+): string {
+  if (!dependency.pluginInstalled && dependency.state === 'missing') return '未安装';
+  if (!server) return '未注册';
+  return server.connected ? '已连接' : '未连接';
+}
+
+function formatToolLayerStatus(
+  dependency: PluginDependencyStatus,
+  server?: { connected: boolean; toolCount: number },
+): string {
+  if (dependency.state !== 'ready') return '不可用';
+  if (!server) return '等待注册';
+  if (!server.connected) return 'MCP 未连接';
+  if (dependency.pluginName === 'cua-computer-use' && server.toolCount === 1) return 'wrapper 已注册';
+  if (dependency.pluginName === 'cua-computer-use') return 'raw tools 未隐藏';
+  return `${server.toolCount} tools`;
+}
+
+function pluginDependencyBadgeClass(state: PluginDependencyStatus['state']): string {
+  if (state === 'ready') return 'bg-green-100 text-green-700';
+  if (state === 'missing' || state === 'needs_permission') return 'bg-yellow-100 text-yellow-700';
+  if (state === 'unsupported') return 'bg-gray-100 text-gray-600';
+  return 'bg-red-100 text-red-700';
 }
 
 // ---- General ----

@@ -1744,6 +1744,7 @@ export interface LocaleStrings {
   projectsPrinciplesSourceManual: string;
   projectsPrinciplesSourceMemory: string;
   projectsPrinciplesEdit: string;
+  projectsPrincipleMoveToRules: string;
   projectsPrinciplesDelete: string;
   projectsPrinciplesDeleteConfirm: string;
   projectsPrinciplesDeleteConfirmBody: string;

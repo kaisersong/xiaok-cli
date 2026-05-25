@@ -215,6 +215,41 @@ describe('platform runtime context', () => {
     await context.dispose();
   });
 
+  itIfCanSpawn('wraps CUA MCP servers as xiaok_computer_use instead of exposing raw tools', async () => {
+    const cwd = join(tmpdir(), `xiaok-platform-context-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(cwd);
+    mkdirSync(join(cwd, '.xiaok'), { recursive: true });
+
+    writePlugin(cwd, 'cua-computer-use', {
+      name: 'cua-computer-use',
+      version: '1.0.0',
+      commands: [],
+      mcpServers: [
+        {
+          name: 'cua-driver',
+          type: 'stdio',
+          command: process.execPath,
+          args: [join(process.cwd(), 'tests', 'support', 'cua-mcp-stdio-server.js')],
+        },
+      ],
+    });
+
+    const context = await createPlatformRuntimeContext({
+      cwd,
+      builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
+    });
+
+    expect(context.mcpTools.map((tool) => tool.definition.name)).toEqual(['xiaok_computer_use']);
+    expect(context.capabilityRegistry.get('xiaok_computer_use')).toMatchObject({
+      kind: 'mcp',
+      description: expect.stringContaining('local macOS apps'),
+    });
+    expect(context.capabilityRegistry.get('mcp__cua-driver__search')).toBeUndefined();
+
+    await context.dispose();
+  });
+
   it('degrades failed plugin capabilities without aborting runtime context creation', async () => {
     const cwd = join(tmpdir(), `xiaok-platform-context-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     tempDirs.push(cwd);

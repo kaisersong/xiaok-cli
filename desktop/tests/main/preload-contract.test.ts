@@ -40,6 +40,10 @@ describe('preload API contract', () => {
       'setPluginMcpServerEnabled',
       'installPlugin',
       'listAvailablePlugins',
+      'listPluginDependencyStatuses',
+      'installPluginDependency',
+      'updatePluginDependency',
+      'diagnosePluginDependency',
       'getUpdateStatus',
       'checkForUpdates',
       'quitAndInstall',
@@ -104,7 +108,38 @@ describe('preload API contract', () => {
     expect(api).not.toHaveProperty('readFile');
     expect(api).not.toHaveProperty('readdir');
     expect(api).not.toHaveProperty('shell');
+    expect(api).not.toHaveProperty('runPluginCommand');
     expect(api).not.toHaveProperty('rawRuntimeEvents');
+  });
+
+  it('routes plugin dependency operations through semantic IPC channels', async () => {
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue({ success: true }),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer);
+
+    await api.listPluginDependencyStatuses();
+    await api.installPluginDependency({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver', confirmed: true });
+    await api.updatePluginDependency({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver', confirmed: true });
+    await api.diagnosePluginDependency({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver' });
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:listPluginDependencyStatuses');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:installPluginDependency', {
+      pluginName: 'cua-computer-use',
+      dependencyId: 'cua-driver',
+      confirmed: true,
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:updatePluginDependency', {
+      pluginName: 'cua-computer-use',
+      dependencyId: 'cua-driver',
+      confirmed: true,
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:diagnosePluginDependency', {
+      pluginName: 'cua-computer-use',
+      dependencyId: 'cua-driver',
+    });
   });
 
   it('routes provider connection test through semantic IPC channel', async () => {

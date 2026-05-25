@@ -65,6 +65,19 @@ describe('FileTaskSnapshotStore', () => {
       },
     });
   });
+
+  it('keeps all active task ids when concurrent task snapshots are saved', async () => {
+    const store = new FileTaskSnapshotStore(rootDir);
+
+    await Promise.all([
+      store.save(createSnapshot('task_1', 'running')),
+      store.save(createSnapshot('task_2', 'running')),
+    ]);
+
+    expect(await store.getActiveTasks()).toEqual(
+      expect.arrayContaining([{ taskId: 'task_1' }, { taskId: 'task_2' }]),
+    );
+  });
 });
 
 function createSnapshot(taskId: string, status: TaskSnapshot['status']): TaskSnapshot {
