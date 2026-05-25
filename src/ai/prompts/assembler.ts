@@ -1,7 +1,6 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { spawnSync } from 'child_process';
 import type { DevAppIdentity } from '../../auth/identity.js';
 import type { ToolDefinition } from '../../types.js';
 import type { PromptSegment } from './types.js';
@@ -79,12 +78,6 @@ function truncateToTokens(text: string, maxTokens: number): string {
   const maxChars = maxTokens * 4;
   if (text.length <= maxChars) return text;
   return text.slice(0, maxChars) + '\n...(truncated)';
-}
-
-function loadYzjHelp(): string {
-  const result = spawnSync('yzj', ['--help'], { encoding: 'utf-8', timeout: 3000 });
-  if (result.error || result.status !== 0) return '';
-  return result.stdout?.trim() ?? '';
 }
 
 function shouldInjectYzjContext(opts: AssemblerOptions): boolean {
@@ -221,21 +214,13 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
   if (existsSync(API_OVERVIEW_PATH)) {
     apiOverview = readFileSync(API_OVERVIEW_PATH, 'utf-8');
   }
-  const yzjHelp = loadYzjHelp();
 
   const includeYzjContext = shouldInjectYzjContext(opts);
 
   if (includeYzjContext && apiOverview && remaining > 50) {
-    const reserveForYzj = yzjHelp ? 100 : 0;
-    const maxApiTokens = Math.max(0, remaining - reserveForYzj);
-    const truncated = truncateToTokens(apiOverview, maxApiTokens);
+    const truncated = truncateToTokens(apiOverview, remaining);
     dynamicSections.push(truncated);
     remaining -= estimateTokens(truncated);
-  }
-
-  // 11. yzj CLI help
-  if (includeYzjContext && yzjHelp && remaining > 0) {
-    dynamicSections.push(truncateToTokens(`## yzj CLI usage\n${yzjHelp}`, remaining));
   }
 
   const dynamicText = dynamicSections.filter(Boolean).join('\n\n');

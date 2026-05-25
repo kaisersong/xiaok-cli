@@ -107,6 +107,29 @@ describe('PromptBuilder static/dynamic split', () => {
     expect(source).toContain('includeYzjContext');
   });
 
+  it('does not shell out to the legacy yzj CLI when building yzj prompts', async () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'ai', 'prompts', 'assembler.ts'), 'utf8');
+    expect(source).not.toContain("spawnSync('yzj'");
+    expect(source).not.toContain('## yzj CLI usage');
+
+    const builder = new PromptBuilder();
+    const snapshot = await builder.build({
+      cwd: '/repo',
+      enterpriseId: null,
+      devApp: null,
+      budget: 12000,
+      channel: 'yzj',
+      skills: [],
+      deferredTools: [],
+      agents: [],
+      pluginCommands: [],
+      lspDiagnostics: '',
+      autoContext: { docs: [], git: null },
+    });
+
+    expect(snapshot.rendered).not.toContain('## yzj CLI usage');
+  });
+
   it('marks memory summaries as fenced background memory in both segment metadata and rendered prompt', async () => {
     const rootDir = join(tmpdir(), `xiaok-memory-fence-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     try {

@@ -109,5 +109,11 @@ describe('desktop service path contract', () => {
     );
     expect(slidePluginEntry?.filter).toContain('skills/**/*');
     expect(slidePluginEntry?.filter).not.toContain('SKILL.md');
+
+    const intentBrokerAdaptersEntry = builderConfig.extraResources.find(
+      (entry) => entry.from === '../../intent-broker/adapters',
+    );
+    expect(intentBrokerAdaptersEntry?.filter).toContain('!**/.env');
+    expect(intentBrokerAdaptersEntry?.filter).toContain('!**/.env.*');
   });
 });

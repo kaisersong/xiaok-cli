@@ -49,7 +49,7 @@
     {
       "from": "../../intent-broker/adapters",
       "to": "services/intent-broker/adapters",
-      "filter": ["**/*", "!**/node_modules/**"]
+      "filter": ["**/*", "!**/node_modules/**", "!**/.env", "!**/.env.*"]
     },
     {
       "from": "../../intent-broker/node_modules/ws",
