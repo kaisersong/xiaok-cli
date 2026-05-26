@@ -2,11 +2,16 @@ export type PermissionMode = 'default' | 'auto' | 'plan';
 export type PermissionDecision = 'allow' | 'deny' | 'prompt';
 import { PermissionPolicyEngine, matches } from './policy-engine.js';
 import { isScreenAutomationFallbackInvocation, isSensitiveToolInvocation } from './sensitive-paths.js';
+import { classifyBashCommand } from '../tools/bash-safety.js';
 
 export interface PermissionManagerOptions {
   mode: PermissionMode;
   allowRules?: string[];
   denyRules?: string[];
+}
+
+function readBashCommand(input: Record<string, unknown>): string {
+  return typeof input.command === 'string' ? input.command : '';
 }
 
 export class PermissionManager {
@@ -64,15 +69,29 @@ export class PermissionManager {
       return 'deny';
     }
 
+    if (toolName === 'bash') {
+      const risk = classifyBashCommand(readBashCommand(input));
+      if (risk.level === 'block') {
+        return 'deny';
+      }
+    }
+
     if (isSensitiveToolInvocation(toolName, input) && evaluation.action !== 'allow') {
       return 'deny';
     }
 
-    if (isScreenAutomationFallbackInvocation(toolName, input) && evaluation.action !== 'allow') {
-      return 'prompt';
+    if (isScreenAutomationFallbackInvocation(toolName, input)) {
+      return 'deny';
     }
 
     if (this.mode === 'auto') {
+      if (toolName === 'bash') {
+        const risk = classifyBashCommand(readBashCommand(input));
+        if (risk.level === 'warn' && evaluation.action !== 'allow') {
+          return 'prompt';
+        }
+      }
+
       return 'allow';
     }
 

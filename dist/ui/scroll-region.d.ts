@@ -139,6 +139,11 @@ export declare class ScrollRegionManager {
      * Restores normal terminal scrolling and clears footer area.
      */
     end(): void;
+    resumeAfterExternalCommand(options?: {
+        inputPrompt?: string;
+        summaryLine?: string;
+        statusLine?: string;
+    }): void;
     /**
      * Check if scroll region is active.
      */

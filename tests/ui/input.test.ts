@@ -35,7 +35,7 @@ describe('getSlashCommands', () => {
     expect(commands).toContainEqual({ cmd: '/models', desc: '打开模型选择器' });
     expect(commands).toContainEqual({ cmd: '/mode', desc: '查看当前权限模式' });
     expect(commands).toContainEqual({ cmd: '/mode default', desc: '切到 default：危险操作前询问确认' });
-    expect(commands).toContainEqual({ cmd: '/mode auto', desc: '切到 auto：自动放行工具调用' });
+    expect(commands).toContainEqual({ cmd: '/mode auto', desc: '切到 auto：自动放行低风险工具，高风险仍确认' });
     expect(commands).toContainEqual({ cmd: '/mode plan', desc: '切到 plan：禁止写入和 bash，只做计划' });
     expect(commands).toContainEqual({ cmd: '/reminder', desc: 'Manage reminders: create, list, or cancel' });
     expect(commands).toContainEqual({ cmd: '/skills-reload', desc: '强制刷新 skill 目录（通常不需要，默认会自动热更新）' });

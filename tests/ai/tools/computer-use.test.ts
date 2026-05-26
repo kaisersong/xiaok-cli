@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createComputerUseTool } from '../../../src/ai/tools/computer-use.js';
 
 describe('createComputerUseTool', () => {
@@ -32,6 +32,67 @@ describe('createComputerUseTool', () => {
       waitForUserAction: true,
       repeated: true,
     });
+  });
+
+  it('converts stale CUA daemon errors into sanitized reconnect actions', async () => {
+    const onRecoverableError = vi.fn();
+    const tool = createComputerUseTool({
+      onRecoverableError,
+      callToolResult: async () => ({
+        text: 'Internal error: cua-driver daemon not reachable on /Users/song/Library/Caches/cua-driver/cua-driver.sock. Start it with `open -n -g -a CuaDriver --args serve` and retry.',
+        images: [],
+        isError: true,
+        summary: 'Internal error: cua-driver daemon not reachable on /Users/song/Library/Caches/cua-driver/cua-driver.sock. Start it with `open -n -g -a CuaDriver --args serve` and retry.',
+      }),
+    });
+
+    const result = await tool.execute({ action: 'list_windows', on_screen_only: true });
+    const parsed = JSON.parse(result);
+
+    expect(result).not.toContain('open -n -g -a CuaDriver');
+    expect(parsed).toMatchObject({
+      ok: false,
+      code: 'COMPUTER_USE_MCP_CONNECT_TIMEOUT',
+      message: 'CUA Driver 后台服务不可达，请在小K设置里重新连接 Computer Use。',
+      retryable: true,
+      waitForUserAction: true,
+      userAction: { type: 'reconnect_computer_use', label: '重新连接' },
+    });
+    expect(onRecoverableError).toHaveBeenCalledWith({
+      code: 'COMPUTER_USE_MCP_CONNECT_TIMEOUT',
+      message: 'CUA Driver 后台服务不可达，请在小K设置里重新连接 Computer Use。',
+      userAction: { type: 'reconnect_computer_use', label: '重新连接' },
+    });
+  });
+
+  it('sanitizes stale daemon errors from intermediate window lookup calls', async () => {
+    const onRecoverableError = vi.fn();
+    const tool = createComputerUseTool({
+      onRecoverableError,
+      callToolResult: async (name) => ({
+        text: name === 'list_windows'
+          ? 'Error: Internal error: connect ENOENT /Users/song/Library/Caches/cua-driver/cua-driver.sock. Start it with `open -n -g -a CuaDriver --args serve` and retry.'
+          : 'should not be called',
+        images: [],
+        isError: true,
+        summary: name === 'list_windows'
+          ? 'Error: Internal error: connect ENOENT /Users/song/Library/Caches/cua-driver/cua-driver.sock. Start it with `open -n -g -a CuaDriver --args serve` and retry.'
+          : 'should not be called',
+      }),
+    });
+
+    const result = await tool.execute({ action: 'capture', app: 'Yunzhijia' });
+    const parsed = JSON.parse(result);
+
+    expect(result).not.toContain('open -n -g -a CuaDriver');
+    expect(parsed).toMatchObject({
+      ok: false,
+      code: 'COMPUTER_USE_MCP_CONNECT_TIMEOUT',
+      retryable: true,
+      waitForUserAction: true,
+      userAction: { type: 'reconnect_computer_use', label: '重新连接' },
+    });
+    expect(onRecoverableError).toHaveBeenCalledOnce();
   });
 
   it('wraps CUA observation results without dropping image or structured content', async () => {

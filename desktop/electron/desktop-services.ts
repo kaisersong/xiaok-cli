@@ -331,7 +331,6 @@ const CUA_DRIVER_DEPENDENCY: ExternalPluginDependency = {
   health: {
     version: ['~/.local/bin/cua-driver', '--version'],
     status: ['~/.local/bin/cua-driver', 'status'],
-    doctor: ['~/.local/bin/cua-driver', 'doctor'],
   },
   mcp: {
     serverName: 'cua-driver',
@@ -636,6 +635,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
 
   registry.registerTool(createComputerUseTool({
     getUnavailableError: () => computerUseBackend ? null : computerUseUnavailableError,
+    onRecoverableError: (error) => {
+      markComputerUseRecoverableFailure(error);
+    },
     callToolResult: (name, input) => {
       if (!computerUseBackend) {
         return Promise.resolve({
@@ -749,6 +751,31 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       pluginMcpDisposers.splice(index, 1);
     }
   };
+
+  function markComputerUseRecoverableFailure(error: ComputerUseUnavailableError): void {
+    disposePluginMcpServers((server) => server.name === 'cua-driver' && server.pluginName === 'cua-computer-use');
+    computerUseBackend = null;
+    computerUseUnavailableError = error;
+    recordComputerUseFailure(error.code as ComputerUseFailureCode);
+
+    const existing = pluginMcpServers.find((entry) => entry.name === 'cua-driver' && entry.pluginName === 'cua-computer-use');
+    if (existing) {
+      existing.connected = false;
+      existing.enabled = true;
+      existing.toolCount = 0;
+      existing.lastError = error.message;
+      return;
+    }
+
+    pluginMcpServers.push({
+      name: 'cua-driver',
+      pluginName: 'cua-computer-use',
+      toolCount: 0,
+      connected: false,
+      enabled: true,
+      lastError: error.message,
+    });
+  }
 
   const reconnectPluginMcpServers = async (
     options: { userInitiated?: boolean; targetServerName?: string; autoConnectComputerUse?: boolean } = {},

@@ -78,6 +78,11 @@ describe('sensitive-paths', () => {
       expect(isScreenAutomationFallbackInvocation('bash', { command: 'screencapture -x /tmp/s.png' })).toBe(true);
       expect(isScreenAutomationFallbackInvocation('bash', { command: 'cliclick c:10,10' })).toBe(true);
       expect(isScreenAutomationFallbackInvocation('bash', { command: 'cua-driver mcp' })).toBe(true);
+      expect(isScreenAutomationFallbackInvocation('bash', { command: 'open -n -g -a CuaDriver --args serve' })).toBe(true);
+      expect(isScreenAutomationFallbackInvocation('bash', { command: 'open -n -g /Applications/CuaDriver.app --args serve' })).toBe(true);
+      expect(isScreenAutomationFallbackInvocation('bash', {
+        command: 'rm -f /Users/song/Library/Caches/cua-driver/cua-driver.sock',
+      })).toBe(true);
       expect(isScreenAutomationFallbackInvocation('bash', {
         command: 'osascript -e \'tell application "System Events" to keystroke "q" using command down\'',
       })).toBe(true);

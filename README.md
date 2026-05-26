@@ -20,6 +20,14 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.3.6:**
+
+- **Auto Mode Guardrails**: `/mode auto` now auto-approves only low-risk tool calls. High-risk Bash commands still require confirmation, and catastrophic commands remain blocked
+- **CUA Attribution Fix**: Desktop no longer runs `cua-driver doctor` from Xiaok health checks, preventing Xiaok itself from triggering macOS Screen Recording prompts
+- **Computer Use Shell Lockdown**: Tasks can no longer self-start or repair CUA through Bash commands such as `open -a CuaDriver`, `cua-driver serve`, socket deletion, `screencapture`, `cliclick`, or UI-driving `osascript`
+- **Interactive Shell Handoff**: Local shell escapes pause and resume the terminal UI cleanly so interactive commands do not corrupt the chat input state
+- **CUA Recovery Hardening**: Computer Use daemon stale-state recovery is covered by focused tests and keeps recovery inside the product-managed CUA flow
+
 **What's New in v1.3.5:**
 
 - **Computer Use Enablement**: `xiaok_computer_use` is now a stable product tool. When CUA is not ready it returns structured recoverable errors and the chat UI shows an inline Computer Use action card instead of exposing raw MCP failures
@@ -356,6 +364,8 @@ xiaok yzjchannel serve
 /<skill-name> [args]          Invoke a skill
 ```
 
+`auto` mode auto-approves low-risk tool calls. It still asks for confirmation before high-risk Bash commands such as recursive deletion, hard resets, force pushes, database drops, and screen-automation shell fallbacks. Catastrophic Bash commands remain blocked by the Bash safety classifier.
+
 ### Yunzhijia IM Commands
 
 ```text
@@ -543,6 +553,8 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.3.6** — Auto-mode and Computer Use hardening release: `/mode auto` auto-approves low-risk tool calls while preserving confirmation for high-risk Bash commands and hard blocks for catastrophic commands; Desktop no longer probes CUA with `cua-driver doctor` under Xiaok's TCC attribution; Bash shell fallbacks are denied for CUA self-start/repair, screen capture, pointer automation, and UI-driving AppleScript; interactive shell handoff now pauses and resumes the terminal UI cleanly.
 
 **v1.3.4** — Swarm project reliability release: routes Xiaok seed PO/Worker tasks through the full Desktop agent runtime instead of a reduced sidecar worker; moves KSwarm task handoff to durable files with artifact-first result manifests; calibrates recent/monthly research quality gates around current-date and source evidence instead of arbitrary counts; keeps user goals/requirements intact while putting planning detail into the plan; formalizes final deliverable filenames and hides review/revision notes from submit-ready artifacts; fixes project task states, timestamps, intervention loops, artifact preview/download/export, and release packaging of KSwarm, Intent Broker, and bundled plugins.
 

@@ -19,6 +19,14 @@
 | **重命名任务延迟** | 27.6s | 180.8s | **-85%** |
 | **Token 效率** | 100% | 250% | **-60%** |
 
+**v1.3.6 新特性：**
+
+- **Auto 模式安全边界**：`/mode auto` 只自动批准低风险工具调用；高风险 Bash 命令仍要确认，灾难性命令继续直接阻断
+- **CUA 权限归因修复**：Desktop 不再从 Xiaok 健康检查里运行 `cua-driver doctor`，避免 Xiaok 自己触发 macOS 录屏权限弹窗
+- **Computer Use Shell 绕路封锁**：任务不能再通过 Bash 自行启动或修复 CUA，例如 `open -a CuaDriver`、`cua-driver serve`、删除 socket、`screencapture`、`cliclick` 或驱动 UI 的 `osascript`
+- **交互式 Shell 交接**：本地 shell escape 会正确暂停和恢复终端 UI，交互命令不再污染对话输入状态
+- **CUA 恢复加固**：Computer Use daemon stale-state 恢复有聚焦测试覆盖，并且恢复动作保持在产品管理的 CUA 流程内
+
 **v1.3.5 新特性：**
 
 - **Computer Use 启用闭环**：`xiaok_computer_use` 现在是稳定的产品工具；CUA 未就绪时返回结构化可恢复错误，对话区显示 Computer Use 动作卡片，不再把原始 MCP 失败暴露给用户
@@ -355,6 +363,8 @@ xiaok yzjchannel serve
 /<skill-name> [args]          调用 skill
 ```
 
+`auto` 模式会自动批准低风险工具调用。递归删除、硬重置、强推、数据库删除、屏幕自动化 shell fallback 等高风险 Bash 命令仍会要求确认；灾难性 Bash 命令继续由 Bash 安全分类器直接阻断。
+
 ### 云之家 IM 命令
 
 ```text
@@ -542,6 +552,8 @@ npm run dev -- --help  # 从源码运行
 ---
 
 ## 版本日志
+
+**v1.3.6** — Auto 模式与 Computer Use 加固版本：`/mode auto` 自动批准低风险工具调用，但高风险 Bash 命令仍需确认，灾难性命令继续硬阻断；Desktop 不再以 Xiaok TCC 归因运行 `cua-driver doctor`；CUA 自启动/自修复、录屏、鼠标键盘自动化、驱动 UI 的 AppleScript 等 shell fallback 会被拒绝；交互式 shell handoff 能正确暂停和恢复终端 UI。
 
 **v1.3.4** — Swarm 项目可靠性版本：小K种子 PO/Worker 任务改走完整 Desktop agent runtime，不再用能力残缺的 sidecar worker；KSwarm 任务交接改为文件化 handoff 和 artifact-first result manifest；本月/最近类调研门禁按当前日期与来源证据校准，不再用拍脑袋条数；保留用户原始目标/要求，把细化内容放进计划；最终交付物使用正式文件名，提交用产物不混入评审/修订过程说明；修复项目任务状态、时间显示、人工推进循环、产物预览/下载/导出，以及 KSwarm、Intent Broker、bundled plugins 的 release 打包同步。
 

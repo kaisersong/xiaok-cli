@@ -3,6 +3,7 @@ import type { McpRuntimeToolResult } from '../mcp/runtime/client.js';
 
 export interface ComputerUseBackend {
   getUnavailableError?(): ComputerUseUnavailableError | null;
+  onRecoverableError?(error: ComputerUseUnavailableError): void;
   callToolResult(name: string, input: Record<string, unknown>): Promise<McpRuntimeToolResult>;
 }
 
@@ -49,7 +50,7 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
     permission: 'write',
     definition: {
       name: 'xiaok_computer_use',
-      description: 'Observe and operate local macOS apps through CUA Driver with Xiaok safety checks. If this tool returns COMPUTER_USE_NEEDS_* or COMPUTER_USE_PERMISSION_INVALID, stop using Computer Use and wait for the user action; do not fall back to shell screenshot, osascript, cliclick, or cua-driver commands.',
+      description: 'Observe and operate local macOS apps through CUA Driver with Xiaok safety checks. If this tool returns any COMPUTER_USE_* error, stop using Computer Use and wait for the user action; do not fall back to shell screenshot, osascript, cliclick, open, or cua-driver commands.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -82,19 +83,30 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
       },
     },
     async execute(input) {
-      const unavailable = backend.getUnavailableError?.();
-      if (unavailable) {
-        const repeated = repeatedRecoverableErrors.has(unavailable.code);
-        repeatedRecoverableErrors.add(unavailable.code);
+      const returnRecoverableError = (error: ComputerUseUnavailableError, notifyBackend = false): string => {
+        if (notifyBackend) {
+          try {
+            backend.onRecoverableError?.(error);
+          } catch {
+            // Recovery state updates are best effort; the tool response must still be safe.
+          }
+        }
+        const repeated = repeatedRecoverableErrors.has(error.code);
+        repeatedRecoverableErrors.add(error.code);
         return JSON.stringify({
           ok: false,
-          code: unavailable.code,
-          message: unavailable.message,
+          code: error.code,
+          message: error.message,
           retryable: !repeated,
           waitForUserAction: true,
           ...(repeated ? { repeated: true } : {}),
-          ...(!repeated && unavailable.userAction ? { userAction: unavailable.userAction } : {}),
+          ...(!repeated && error.userAction ? { userAction: error.userAction } : {}),
         });
+      };
+
+      const unavailable = backend.getUnavailableError?.();
+      if (unavailable) {
+        return returnRecoverableError(unavailable);
       }
 
       const action = typeof input.action === 'string' ? input.action : '';
@@ -106,11 +118,31 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
       const blocked = checkBlockedInput(action, input);
       if (blocked) return blocked;
 
-      const prepared = await buildActionInput(backend, action, input);
-      if (typeof prepared === 'string') return prepared;
+      let prepared: Record<string, unknown> | string;
+      try {
+        prepared = await buildActionInput(backend, action, input);
+      } catch (error) {
+        const recoverable = classifyRecoverableComputerUseError(formatUnknownError(error));
+        if (recoverable) return returnRecoverableError(recoverable, true);
+        throw error;
+      }
+      if (typeof prepared === 'string') {
+        const recoverable = classifyRecoverableComputerUseError(prepared);
+        if (recoverable) return returnRecoverableError(recoverable, true);
+        return prepared;
+      }
 
-      const result = await backend.callToolResult(toolName, prepared);
+      let result: McpRuntimeToolResult;
+      try {
+        result = await backend.callToolResult(toolName, prepared);
+      } catch (error) {
+        const recoverable = classifyRecoverableComputerUseError(formatUnknownError(error));
+        if (recoverable) return returnRecoverableError(recoverable, true);
+        throw error;
+      }
       if (result.isError) {
+        const recoverable = classifyRecoverableComputerUseError(result.summary || result.text);
+        if (recoverable) return returnRecoverableError(recoverable, true);
         return `Error: ${result.summary || result.text || 'computer-use action failed'}`;
       }
 
@@ -123,16 +155,43 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
       if (input.capture_after === true && action !== 'capture' && action !== 'list_apps' && action !== 'list_windows') {
         const captureInput = await buildCaptureInput(backend, input);
         if (typeof captureInput === 'string') {
+          const recoverable = classifyRecoverableComputerUseError(captureInput);
+          if (recoverable) return returnRecoverableError(recoverable, true);
           response.captureAfter = { error: captureInput };
           return JSON.stringify(response);
         }
         const capture = await backend.callToolResult('get_window_state', captureInput);
+        if (capture.isError) {
+          const recoverable = classifyRecoverableComputerUseError(capture.summary || capture.text);
+          if (recoverable) return returnRecoverableError(recoverable, true);
+        }
         response.captureAfter = sanitizeToolResult(capture);
       }
 
       return JSON.stringify(response);
     },
   };
+}
+
+function classifyRecoverableComputerUseError(message: string): ComputerUseUnavailableError | null {
+  const normalized = message.toLowerCase();
+  const mentionsCuaSocket = normalized.includes('cua-driver.sock');
+  const daemonUnreachable = normalized.includes('cua-driver daemon not reachable')
+    || (mentionsCuaSocket && normalized.includes('daemon not reachable'))
+    || (mentionsCuaSocket && normalized.includes('connect enoent'))
+    || (mentionsCuaSocket && normalized.includes('econnrefused'));
+
+  if (!daemonUnreachable) return null;
+
+  return {
+    code: 'COMPUTER_USE_MCP_CONNECT_TIMEOUT',
+    message: 'CUA Driver 后台服务不可达，请在小K设置里重新连接 Computer Use。',
+    userAction: { type: 'reconnect_computer_use', label: '重新连接' },
+  };
+}
+
+function formatUnknownError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function checkBlockedInput(action: string, input: Record<string, unknown>): string | null {

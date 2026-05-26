@@ -1,5 +1,11 @@
 const BLOCK_PATTERNS = [
     { pattern: /\bsudo\b/, reason: 'sudo requires password which cannot be provided via Bash tool (stdin disabled). Use `! sudo <command>` to instruct user to run manually' },
+    { pattern: /(^|[\s;&|])screencapture(?:\s|$)/i, reason: 'screen capture must use xiaok_computer_use, not shell fallback' },
+    { pattern: /(^|[\s;&|])cliclick(?:\s|$)/i, reason: 'desktop control must use xiaok_computer_use, not shell fallback' },
+    { pattern: /(^|[\s;&|/])cua-driver(?:\s|$|[/.])/i, reason: 'CUA driver must be managed by Xiaok Computer Use, not shell fallback' },
+    { pattern: /\bCuaDriver(?:\.app)?\b/i, reason: 'CUA driver must be managed by Xiaok Computer Use, not shell fallback' },
+    { pattern: /\bcom\.trycua\.driver\b/i, reason: 'CUA driver must be managed by Xiaok Computer Use, not shell fallback' },
+    { pattern: /\bosascript\b[\s\S]*(?:System Events|AXUIElement|keystroke|key code|click|window|screen|screenshot|capture)/i, reason: 'desktop automation must use xiaok_computer_use, not shell fallback' },
     { pattern: /rm\s+-[^\s]*r[^\s]*f[^\s]*\s+\/\s*$/, reason: 'rm -rf /' },
     { pattern: /rm\s+-[^\s]*r[^\s]*f[^\s]*\s+~\s*$/, reason: 'rm -rf ~' },
     { pattern: /\bmkfs\b/, reason: 'filesystem format' },

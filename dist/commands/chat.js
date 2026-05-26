@@ -47,6 +47,7 @@ import { parseInputBlocks, clearPastedImagePaths } from '../ui/image-input.js';
 import { selectModel } from '../ui/model-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
 import { executeReminderSlashCommand } from './chat-reminder.js';
+import { parseShellEscapeInput, runInteractiveShellCommand } from './chat-shell-escape.js';
 import { buildChatHelpText } from './registry.js';
 import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
@@ -86,6 +87,10 @@ const THINKING_ONLY_TOOL_TURN_NOTICE = '正在执行工具...';
 let intentBoundaryResolverFactoryForTests;
 export function __setIntentBoundaryResolverFactoryForTests(factory) {
     intentBoundaryResolverFactoryForTests = factory;
+}
+let shellEscapeExecutorForTests;
+export function __setShellEscapeExecutorForTests(executor) {
+    shellEscapeExecutorForTests = executor;
 }
 function describeLiveActivity(toolName, input) {
     if (['tool_search', 'grep', 'glob', 'read', 'skill', 'web_fetch', 'web_search'].includes(toolName)) {
@@ -1874,6 +1879,83 @@ async function runChat(initialInput, opts) {
                 suspendInteractiveUi('write_command_output', error);
             }
         };
+        const formatShellCommandResult = (result) => {
+            if (result.error) {
+                return '\n[xiaok] 本地命令启动失败：' + result.error + '\n';
+            }
+            if (result.signal) {
+                return '\n[xiaok] 本地命令被信号中止：' + result.signal + '\n';
+            }
+            if (typeof result.exitCode === 'number' && result.exitCode !== 0) {
+                return '\n[xiaok] 本地命令退出：exit ' + result.exitCode + '\n';
+            }
+            return '\n[xiaok] 本地命令已完成。\n';
+        };
+        const restoreTerminalAfterShellCommand = () => {
+            if (terminalUiSuspended) {
+                return;
+            }
+            try {
+                runtimeState.markInputReady();
+                scrollRegion.resumeAfterExternalCommand({
+                    inputPrompt: getFooterInputPrompt(),
+                    summaryLine: getCurrentIntentSummaryLine(),
+                    statusLine: statusBar.getStatusLine(),
+                });
+                replRenderer.prepareForInput();
+            }
+            catch (error) {
+                suspendInteractiveUi('restore_shell_escape_footer', error);
+            }
+        };
+        const replayShellCommandOutput = (output) => {
+            if (!output) {
+                return;
+            }
+            if (terminalUiSuspended || !scrollRegion.isActive()) {
+                process.stdout.write(output);
+                return;
+            }
+            try {
+                scrollRegion.writeAtContentCursor(output);
+                replRenderer.prepareForInput();
+            }
+            catch (error) {
+                suspendInteractiveUi('replay_shell_escape_output', error);
+            }
+        };
+        const runLocalShellEscape = async (command, commandText) => {
+            dismissWelcomeScreen();
+            stopBusyCapture();
+            stopActivity();
+            runtimeState.markInputReady();
+            try {
+                if (scrollRegion.isActive()) {
+                    scrollRegion.clearLastInput({ renderFooter: false, inputPrompt: getFooterInputPrompt() });
+                    scrollRegion.writeSubmittedInput(formatSubmittedInput(commandText));
+                    scrollRegion.end();
+                }
+                else {
+                    process.stdout.write(formatSubmittedInput(commandText));
+                }
+            }
+            catch (error) {
+                suspendInteractiveUi('release_shell_escape_terminal', error);
+            }
+            try {
+                if (process.stdin.isTTY) {
+                    const ttyStdin = process.stdin;
+                    ttyStdin.setRawMode?.(false);
+                }
+            }
+            catch { }
+            const executor = shellEscapeExecutorForTests
+                ?? ((input) => runInteractiveShellCommand(input.command, { cwd: input.cwd }));
+            const result = await executor({ command, cwd });
+            const replayOutput = (result.output ?? '') + formatShellCommandResult(result);
+            restoreTerminalAfterShellCommand();
+            replayShellCommandOutput(replayOutput);
+        };
         setStreamErrorHandler((error, stream) => {
             log.error('stream_error', JSON.stringify({ stream: stream?.constructor?.name, error: String(error) }));
             if (stream !== process.stdout && stream !== process.stderr) {
@@ -2137,6 +2219,16 @@ async function runChat(initialInput, opts) {
                 renderFooterChrome();
             }
             await refreshSkills();
+            const shellEscape = parseShellEscapeInput(trimmed);
+            if (shellEscape?.kind === 'usage') {
+                dismissWelcomeScreen();
+                writeCommandOutput(trimmed, '用法：! <command>\n\n');
+                continue;
+            }
+            if (shellEscape?.kind === 'command') {
+                await runLocalShellEscape(shellEscape.command, trimmed);
+                continue;
+            }
             // 处理内置命令
             if (trimmed === '/clear') {
                 scrollRegion.end();
@@ -2760,7 +2852,7 @@ export function registerChatCommands(program) {
     program
         .command('chat', { isDefault: true })
         .description('启动 AI skill 任务交付工作台（默认命令）')
-        .option('--auto', '自动执行所有工具，无需确认（适用于 CI）')
+        .option('--auto', '自动批准低风险工具调用，高风险命令仍需确认或被阻断')
         .option('--dry-run', '打印工具调用但不执行')
         .option('-p, --print', '以纯文本模式输出单次结果')
         .option('--json', '以 JSON 模式输出单次结果')

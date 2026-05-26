@@ -2226,3 +2226,30 @@ describe('streaming cursor handoff', () => {
     expect(output).not.toContain('\x1b[19;1H\x1b[0m');
   });
 });
+
+
+describe('ScrollRegionManager external command handoff', () => {
+  it('resumes the fixed footer without clearing a password prompt written while released', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'STATUS_LINE' });
+      manager.end();
+
+      process.stdout.write('[sudo] Password:');
+      manager.resumeAfterExternalCommand({
+        inputPrompt: 'Type your message...',
+        statusLine: 'STATUS_LINE',
+      });
+
+      const screenText = harness.screen.text();
+      expect(screenText).toContain('[sudo] Password:');
+      expect(screenText).toContain('❯ Type your message...');
+      expect(screenText).toContain('STATUS_LINE');
+    } finally {
+      harness.restore();
+    }
+  });
+});

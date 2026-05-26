@@ -365,6 +365,39 @@ describe('desktop services', () => {
     expect(sourceFile).not.toContain('CUA_DRIVER_MCP_NO_RELAUNCH');
   });
 
+  it('does not expose CUA doctor diagnostics that would request Screen Recording from Xiaok', async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      pluginRootDir: join(rootDir, '.xiaok', 'plugins'),
+      pluginDependencyStatusOptions: {
+        platform: 'darwin',
+        homeDir: '/Users/alice',
+        pathEnv: '',
+        exists: (path) => path === '/Users/alice/.local/bin/cua-driver',
+        runCommand: async (command, args) => {
+          calls.push({ command, args });
+          if (args[0] === '--version') return { exitCode: 0, stdout: 'cua-driver 0.2.0\n', stderr: '' };
+          return { exitCode: 99, stdout: '', stderr: `unexpected health command: ${args.join(' ')}` };
+        },
+      },
+    });
+
+    await expect(services.listPluginDependencyStatuses()).resolves.toEqual([
+      expect.objectContaining({
+        pluginName: 'cua-computer-use',
+        dependencyId: 'cua-driver',
+        state: 'ready',
+        canDiagnose: false,
+      }),
+    ]);
+    expect(calls).toEqual([
+      { command: '/Users/alice/.local/bin/cua-driver', args: ['--version'] },
+    ]);
+  });
+
   it('keeps the computer-use wrapper registered with a permission error when CUA driver dependency is not ready', async () => {
     const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
     const pluginDir = join(pluginRootDir, 'cua-computer-use');
@@ -709,6 +742,86 @@ describe('desktop services', () => {
     });
     await expect(services.executeTool('xiaok_computer_use', { action: 'list_windows', on_screen_only: true }))
       .resolves.toContain('"ok":true');
+  });
+
+  it('marks Computer Use failed when a previously ready CUA daemon becomes unreachable', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const cuaPluginDir = join(pluginRootDir, 'cua-computer-use');
+    const serverPath = join(process.cwd(), '..', 'tests', 'support', 'cua-mcp-stdio-server.js');
+    const dataRoot = join(rootDir, 'data');
+    mkdirSync(cuaPluginDir, { recursive: true });
+    mkdirSync(dataRoot, { recursive: true });
+    writeFileSync(join(cuaPluginDir, 'plugin.json'), JSON.stringify({
+      name: 'cua-computer-use',
+      version: '0.1.0',
+      mcpServers: [{
+        name: 'cua-driver',
+        type: 'stdio',
+        command: process.execPath,
+        args: [serverPath],
+        env: { CUA_MCP_FAIL_AFTER_FIRST_TOOL_CALL: '1' },
+      }],
+    }));
+    writeFileSync(join(dataRoot, 'computer-use-state.json'), JSON.stringify({
+      schemaVersion: 1,
+      enabledByUser: true,
+      autoConnectAfterSuccessfulEnablement: true,
+      lastSuccessfulAt: 100,
+      lastSuccessfulAppBundleId: 'com.xiaok.desktop',
+      lastSuccessfulAppPath: '/Applications/xiaok.app',
+      lastSuccessfulTeamId: 'TEAM123',
+    }));
+
+    const services = createDesktopServices({
+      dataRoot,
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      pluginRootDir,
+      pluginDependencies: [{
+        pluginName: 'cua-computer-use',
+        dependency: {
+          id: 'cua-driver',
+          kind: 'macos_app_cli',
+          displayName: 'CUA Driver',
+          binaryCandidates: [process.execPath],
+          health: { version: [process.execPath, '--version'] },
+          mcp: { serverName: 'cua-driver', command: process.execPath, args: [serverPath], requiresUserActivation: true },
+        },
+      }],
+      pluginDependencyStatusOptions: {
+        platform: 'darwin',
+        exists: (path) => path === process.execPath,
+        runCommand: async () => ({ exitCode: 0, stdout: 'v1.2.3\n', stderr: '' }),
+      },
+      computerUseAppIdentity: {
+        appPath: '/Applications/xiaok.app',
+        bundleId: 'com.xiaok.desktop',
+        teamId: 'TEAM123',
+        isPackaged: true,
+        nodeEnv: 'production',
+      },
+    });
+
+    await services.registerMcpTools();
+    expect(services.getComputerUseCapabilityStatus()).toMatchObject({
+      state: 'ready',
+      mcpConnected: true,
+    });
+
+    const result = await services.executeTool('xiaok_computer_use', { action: 'list_windows', on_screen_only: true });
+
+    expect(result).toContain('COMPUTER_USE_MCP_CONNECT_TIMEOUT');
+    expect(result).not.toContain('open -n -g -a CuaDriver');
+    expect(services.getComputerUseCapabilityStatus()).toMatchObject({
+      state: 'failed',
+      mcpConnected: false,
+      lastError: 'CUA Driver 后台服务不可达，请在小K设置里重新连接 Computer Use。',
+    });
+    expect(services.listPluginMcpServers().find(server => server.name === 'cua-driver')).toMatchObject({
+      connected: false,
+      toolCount: 0,
+      lastError: 'CUA Driver 后台服务不可达，请在小K设置里重新连接 Computer Use。',
+    });
   });
 
   it('does not auto-recover Computer Use in development even when a prior success exists', async () => {

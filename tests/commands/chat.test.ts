@@ -182,4 +182,11 @@ describe('chat terminal layout', () => {
     expect(source).toContain('scrollRegion.writeSubmittedInput(formatSubmittedInput(stopResult.message));');
     expect(source).toContain("if (scrollRegion.isActive() && !terminalUiSuspended) {");
   });
+
+  it('describes --auto as low-risk auto approval instead of unconditional execution', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+
+    expect(source).toContain(".option('--auto', '自动批准低风险工具调用，高风险命令仍需确认或被阻断')");
+    expect(source).not.toContain(".option('--auto', '自动执行所有工具，无需确认（适用于 CI）')");
+  });
 });

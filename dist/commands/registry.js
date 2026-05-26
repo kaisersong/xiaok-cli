@@ -59,7 +59,7 @@ const BASE_CHAT_COMMANDS = [
     {
         id: 'mode-auto',
         cmd: '/mode auto',
-        slashDesc: '切到 auto：自动放行工具调用',
+        slashDesc: '切到 auto：自动放行低风险工具，高风险仍确认',
         helpLine: '',
         showInSlash: true,
         showInHelp: false,

@@ -397,6 +397,92 @@ describe('ToolRegistry', () => {
     expect(result).toContain('written by hook-approved path');
   });
 
+  it('auto mode still prompts before warn-level bash commands', async () => {
+    const onPrompt = vi.fn(async () => false);
+    const execute = vi.fn(async () => 'should not run');
+
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      onPrompt,
+    }, [{
+      permission: 'bash',
+      definition: {
+        name: 'bash',
+        description: 'mock bash',
+        inputSchema: {
+          type: 'object',
+          properties: { command: { type: 'string' } },
+          required: ['command'],
+        },
+      },
+      execute,
+    }]);
+
+    const result = await registry.executeTool('bash', { command: 'rm -rf ./build' });
+
+    expect(onPrompt).toHaveBeenCalledWith('bash', { command: 'rm -rf ./build' });
+    expect(execute).not.toHaveBeenCalled();
+    expect(result).toContain('已取消');
+  });
+
+  it('auto mode denies block-level bash commands before prompt and execution', async () => {
+    const onPrompt = vi.fn(async () => true);
+    const execute = vi.fn(async () => 'should not run');
+
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      onPrompt,
+    }, [{
+      permission: 'bash',
+      definition: {
+        name: 'bash',
+        description: 'mock bash',
+        inputSchema: {
+          type: 'object',
+          properties: { command: { type: 'string' } },
+          required: ['command'],
+        },
+      },
+      execute,
+    }]);
+
+    const result = await registry.executeTool('bash', { command: 'rm -rf /' });
+
+    expect(onPrompt).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    expect(result).toContain('权限不足');
+  });
+
+  it('denies CUA shell self-repair commands before prompt and execution', async () => {
+    const onPrompt = vi.fn(async () => true);
+    const execute = vi.fn(async () => 'should not run');
+
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      onPrompt,
+    }, [{
+      permission: 'bash',
+      definition: {
+        name: 'bash',
+        description: 'mock bash',
+        inputSchema: {
+          type: 'object',
+          properties: { command: { type: 'string' } },
+          required: ['command'],
+        },
+      },
+      execute,
+    }]);
+
+    const result = await registry.executeTool('bash', {
+      command: 'pkill -f cua-driver 2>/dev/null; rm -f /Users/song/Library/Caches/cua-driver/cua-driver.sock; open -n -g -a CuaDriver --args serve',
+    });
+
+    expect(onPrompt).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    expect(result).toContain('权限不足');
+  });
+
   it('emits PermissionDenied hooks when policy blocks a tool before any prompt', async () => {
     const runHooks = vi.fn(async () => ({ ok: true }));
 

@@ -62,7 +62,9 @@ const SENSITIVE_TOOLS: ReadonlySet<string> = new Set(['read', 'write', 'edit']);
 const SCREEN_AUTOMATION_COMMAND_PATTERNS: readonly RegExp[] = [
   /(^|[\s;&|])screencapture(?:\s|$)/i,
   /(^|[\s;&|])cliclick(?:\s|$)/i,
-  /(^|[\s;&|])cua-driver(?:\s|$)/i,
+  /(^|[\s;&|/])cua-driver(?:\s|$|[/.])/i,
+  /\bCuaDriver(?:\.app)?\b/i,
+  /\bcom\.trycua\.driver\b/i,
   /(^|[\s;&|])osascript\b[\s\S]*(?:System Events|AXUIElement|keystroke|key code|click|window|screen|screenshot|capture)/i,
 ];
 

@@ -1,5 +1,9 @@
 let buffer = '';
 let transport = null;
+let toolCallCount = 0;
+
+const failAfterFirstToolCall = process.env.CUA_MCP_FAIL_AFTER_FIRST_TOOL_CALL === '1';
+const staleDaemonError = 'Internal error: cua-driver daemon not reachable on /Users/song/Library/Caches/cua-driver/cua-driver.sock. Start it with `open -n -g -a CuaDriver --args serve` and retry.';
 
 function encodeFramed(message) {
   const payload = JSON.stringify(message);
@@ -80,6 +84,18 @@ function respond(message) {
 
   if (message.method === 'tools/call') {
     const name = message.params?.name;
+    toolCallCount += 1;
+    if (failAfterFirstToolCall && toolCallCount > 1) {
+      process.stdout.write(encode({
+        jsonrpc: '2.0',
+        id: message.id,
+        result: {
+          content: [{ type: 'text', text: staleDaemonError }],
+          isError: true,
+        },
+      }));
+      return;
+    }
     process.stdout.write(encode({
       jsonrpc: '2.0',
       id: message.id,

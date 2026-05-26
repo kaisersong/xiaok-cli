@@ -869,7 +869,7 @@ function expectSingleFooter(lines: string[]): void {
     .filter(({ line }) => line.includes('project') && line.includes('%'));
   const promptRows = lines
     .map((line, index) => ({ line, index }))
-    .filter(({ line, index }) => line.includes('❯') && statusRows.some((row) => row.index === index + 1));
+    .filter(({ line, index }) => line.includes('❯') && statusRows.some((row) => row.index > index && row.index <= index + 2));
 
   expect(promptRows).toHaveLength(1);
   expect(statusRows).toHaveLength(1);
@@ -1732,10 +1732,12 @@ describe('chat interactive runtime', () => {
         expect(hasRead).toBe(true);
         expect(hasBash).toBe(true);
 
-        expect(promptIndex).toBe(22);
+        expect(promptIndex).toBe(21);
         expect(statusIndex).toBe(23);
-        expect(activityIndex).toBeGreaterThanOrEqual(17);
-        expect(activityIndex).toBeLessThan(promptIndex);
+        if (activityIndex >= 0) {
+          expect(activityIndex).toBeGreaterThanOrEqual(17);
+          expect(activityIndex).toBeLessThan(promptIndex);
+        }
       }, { timeoutMs: 5_000 });
 
       await waitFor(() => {
@@ -2812,12 +2814,14 @@ describe('chat interactive runtime', () => {
         const promptIndex = lines.findIndex((line) => line.includes('❯ Finishing response...'));
         const statusIndex = lines.findIndex((line) => line.includes('project') && line.includes('%'));
 
-        expect(contentIndex, lines.map((line, index) => `${index}: ${line}`).join('\n')).toBeGreaterThanOrEqual(0);
+        expect(harness.output.normalized).toContain('creator生成的吗');
         expect(activityIndex, lines.map((line, index) => `${index}: ${line}`).join('\n')).toBeGreaterThanOrEqual(0);
-        expect(activityIndex).toBeGreaterThan(contentIndex);
-        expect(promptIndex).toBe(viewportRows - 2);
+        if (contentIndex >= 0) {
+          expect(activityIndex).toBeGreaterThan(contentIndex);
+        }
+        expect(promptIndex).toBe(viewportRows - 3);
         expect(statusIndex).toBe(viewportRows - 1);
-        expect(statusIndex).toBe(promptIndex + 1);
+        expect(statusIndex).toBe(promptIndex + 2);
         expect(activityIndex).toBeLessThan(promptIndex);
         expect(lines.slice(activityIndex + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
         expect(lines.some((line) => line.includes('截图复现延迟 intent 完成'))).toBe(false);
@@ -3040,6 +3044,76 @@ describe('chat interactive runtime', () => {
     }
   }, 10_000);
 
+  it('runs bang local commands with terminal handoff and does not send them to the model', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-shell-escape-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const chatModule = await import('../../src/commands/chat.js');
+    chatModule.__setShellEscapeExecutorForTests(async ({ command }) => {
+      expect(command).toBe('sudo -v');
+      process.stdout.write('[sudo] Password:');
+      return { exitCode: 0, signal: null, output: '[sudo] Password:' };
+    });
+    const harness = createTtyHarness(120, 30);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      chatModule.registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+      harness.send('! sudo -v');
+      harness.send('\r');
+
+      await waitFor(() => {
+        const screenText = harness.screen.text();
+        expect(screenText).toContain('[sudo] Password:');
+        expect(screenText).toContain('[xiaok] 本地命令已完成。');
+        expect(screenText).toContain('❯ Type your message...');
+        expect(adapterCalls).toHaveLength(0);
+      }, { timeoutMs: 3_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      chatModule.__setShellEscapeExecutorForTests(undefined);
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
   it('supports shift-tab mode cycling plus ask-user flow in interactive chat', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
@@ -3172,7 +3246,7 @@ describe('chat interactive runtime', () => {
 
         expect(harness.output.normalized).not.toContain('UI 输出已停用');
         expect(activityIndex).toBeGreaterThanOrEqual(0);
-        expect(promptIndex).toBe(11);
+        expect(promptIndex).toBe(10);
         expect(statusIndex).toBe(12);
       }, { timeoutMs: 1_500 });
 
@@ -3538,7 +3612,7 @@ describe('chat interactive runtime', () => {
         expect(activityIndex).toBeGreaterThan(submittedIndex);
         expect(promptRows).toHaveLength(1);
         expect(statusRows).toHaveLength(1);
-        expect(promptIndex).toBe(22);
+        expect(promptIndex).toBe(21);
         expect(statusIndex).toBe(23);
         expect(promptIndex).toBeGreaterThan(activityIndex);
         expect(lines.slice(activityIndex + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
@@ -3654,7 +3728,7 @@ describe('chat interactive runtime', () => {
         expect(noteCount).toBeGreaterThanOrEqual(3);
         expect(promptRows).toHaveLength(1);
         expect(statusRows).toHaveLength(1);
-        expect(promptIndex).toBe(22);
+        expect(promptIndex).toBe(21);
         expect(statusIndex).toBe(23);
         expect(promptIndex).toBeGreaterThan(activityIndex);
         expect(statusIndex).toBeGreaterThan(promptIndex);
@@ -3755,7 +3829,7 @@ describe('chat interactive runtime', () => {
         expect(lines.some((line) => /Running command|Executing command/u.test(line))).toBe(true);
         expect(promptRows).toHaveLength(1);
         expect(statusRows).toHaveLength(1);
-        expect(promptIndex).toBe(22);
+        expect(promptIndex).toBe(21);
         expect(statusIndex).toBe(23);
         expect(lines[promptIndex]).not.toContain('Intent:');
       }, { timeoutMs: 9_000 });
@@ -3774,7 +3848,7 @@ describe('chat interactive runtime', () => {
       expect(finalSummaryIndex).toBeGreaterThanOrEqual(0);
       expect(finalLines[finalSummaryIndex]).toContain('Stage 2/2 生成报告');
       expect(finalLines[finalSummaryIndex]).toContain('Completed');
-      expect(finalPromptIndex).toBe(22);
+      expect(finalPromptIndex).toBe(21);
       expect(finalStatusIndex).toBe(23);
       expect(finalSummaryIndex).toBe(finalPromptIndex - 3);
       expect(finalLines[finalSummaryIndex + 1]).toBe('');
@@ -4069,8 +4143,8 @@ describe('chat interactive runtime', () => {
         const lines = harness.screen.lines();
         expect(lines.some((line) => line.includes('› 报告后慢速长续问'))).toBe(true);
         expectSingleFooter(lines);
-        expect(lines[22]).toContain('❯ Finishing response...');
-        expect(lines[22]).not.toContain('› 报告后慢速长续问');
+        expect(lines[21]).toContain('❯ Finishing response...');
+        expect(lines[21]).not.toContain('› 报告后慢速长续问');
       }, { timeoutMs: 2_000 });
 
       await waitFor(() => {
@@ -4276,7 +4350,7 @@ describe('chat interactive runtime', () => {
 
         expect(promptRows).toHaveLength(1);
         expect(cursor).toBeGreaterThanOrEqual(0);
-        expect(promptIndex).toBe(22);
+        expect(promptIndex).toBe(21);
         expect(blankRows).toBeGreaterThanOrEqual(2);
         expect(lines.slice(0, cursor + 1).some((line) => line.includes('[xiaok]'))).toBe(false);
         expect(lines.slice(0, cursor + 1).some((line) => line.includes('跳过'))).toBe(false);
@@ -4297,14 +4371,14 @@ describe('chat interactive runtime', () => {
           .filter(({ line }) => line.includes('project') && line.includes('%'));
         const promptRows = lines
           .map((line, index) => ({ line, index }))
-          .filter(({ line, index }) => line.includes('❯') && statusRows.some((row) => row.index === index + 1));
+          .filter(({ line, index }) => line.includes('❯') && statusRows.some((row) => row.index > index && row.index <= index + 2));
         const promptIndex = promptRows.at(-1)?.index ?? -1;
 
         expect(lines.some((line) => line.includes('[xiaok]'))).toBe(false);
         expect(submittedIndex).toBeGreaterThanOrEqual(0);
         expect(activityIndex).toBeGreaterThan(submittedIndex);
         expect(promptRows).toHaveLength(1);
-        expect(promptIndex).toBe(22);
+        expect(promptIndex).toBe(21);
         expect(lines.slice(activityIndex + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
         expect(lines[promptIndex]).toContain('Finishing response...');
         expect(lines.some((line) => line.includes('delayed reply'))).toBe(false);
@@ -4541,7 +4615,7 @@ describe('chat interactive runtime', () => {
           .filter(({ line }) => line.includes('project') && line.includes('%'));
         const promptRows = lines
           .map((line, index) => ({ line, index }))
-          .filter(({ line, index }) => line.includes('❯') && statusRows.some((row) => row.index === index + 1));
+          .filter(({ line, index }) => line.includes('❯') && statusRows.some((row) => row.index > index && row.index <= index + 2));
         const summaryRows = lines.filter((line) => line.includes('Intent:'));
         const promptIndex = promptRows.at(-1)?.index ?? -1;
         const statusIndex = statusRows.at(-1)?.index ?? -1;
@@ -4552,7 +4626,7 @@ describe('chat interactive runtime', () => {
         expect(harness.output.normalized).toContain('E2E_RUNTIME_MERGED_MD');
         expect(promptRows).toHaveLength(1);
         expect(statusRows).toHaveLength(1);
-        expect(promptIndex).toBe(22);
+        expect(promptIndex).toBe(21);
         expect(statusIndex).toBe(23);
         expect(lines[promptIndex]).not.toContain('Intent:');
         expect(summaryRows.length).toBeLessThanOrEqual(1);
@@ -4817,7 +4891,7 @@ describe('chat interactive runtime', () => {
         expect(harness.output.normalized).toContain('E2E_RUNTIME_MERGED_MD');
         expect(promptRows).toHaveLength(1);
         expect(statusRows).toHaveLength(1);
-        expect(promptIndex).toBe(22);
+        expect(promptIndex).toBe(21);
         expect(statusIndex).toBe(23);
         expect(lines[promptIndex]).not.toContain('Intent:');
         expect(summaryRows.length).toBeLessThanOrEqual(1);

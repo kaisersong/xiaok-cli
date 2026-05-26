@@ -475,6 +475,60 @@ export class ScrollRegionManager {
     this.clearActiveOverlayPrompt();
   }
 
+  resumeAfterExternalCommand(options?: {
+    inputPrompt?: string;
+    summaryLine?: string;
+    statusLine?: string;
+  }): void {
+    if (this.active) {
+      this.renderFooter(options);
+      return;
+    }
+
+    this.active = true;
+    this.lastActivityLine = '';
+    this.lastActivityRow = null;
+    this.lastInputPrompt = options?.inputPrompt ?? '';
+    this.lastInputValue = '';
+    this.lastInputCursor = 0;
+    this.lastSummaryLine = options?.summaryLine ?? '';
+    this.lastStatusLine = options?.statusLine ?? '';
+    this.lastOverlayRenderRows = 0;
+    this.lastInputRenderRows = this.getInputFrameRows(1);
+    this.lastFooterClearStartRow = 0;
+    this.lastFooterClearEndRow = 0;
+    this.clearActiveOverlayPrompt();
+
+    this._contentStreaming = false;
+    this._hasStreamedContent = true;
+    this._footerVisible = false;
+    this._pastWelcome = true;
+    this._welcomeRows = 0;
+    this._cursorCol = 0;
+    this._cursorUncertain = false;
+
+    const footerReserveRows = this.getInputFrameRows(1)
+      + this.config.gapHeight
+      + this.getSummaryReserveRows(options?.summaryLine ?? '')
+      + 1;
+    // External commands can leave the terminal cursor inside the rows that the
+    // fixed footer is about to clear. Scroll enough to preserve output even
+    // when the cursor is at the top of that clear band, not only at the bottom.
+    const preservedOutputPaddingRows = footerReserveRows * 2 - 1;
+    this.stream.write(RESET_SCROLL_REGION);
+    for (let row = 0; row < preservedOutputPaddingRows; row += 1) {
+      this.stream.write('\n');
+    }
+
+    const scrollBottom = this.getScrollBottom();
+    this._totalRows = scrollBottom;
+    this._cursorRow = scrollBottom;
+    this._contentEndRow = scrollBottom;
+    this._streamStartRow = scrollBottom;
+
+    this.setScrollRegion();
+    this.renderFooter(options);
+  }
   /**
    * Check if scroll region is active.
    */
