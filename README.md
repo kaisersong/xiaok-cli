@@ -20,6 +20,10 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.3.7:**
+
+- **Slide Renderer Recovery**: Packaged Desktop installs now replace stale symlinked bundled plugins with the packaged `kai-slide-creator`, preventing old development plugin directories or wrong-platform wheelhouses from breaking `slide-renderer` MCP startup
+
 **What's New in v1.3.6:**
 
 - **Auto Mode Guardrails**: `/mode auto` now auto-approves only low-risk tool calls. High-risk Bash commands still require confirmation, and catastrophic commands remain blocked
@@ -553,6 +557,8 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.3.7** — Slide renderer hotfix: packaged Desktop installs now replace stale symlinked bundled plugins with the packaged `kai-slide-creator`, preventing old development plugin directories or wrong-platform wheelhouses from breaking `slide-renderer` MCP startup.
 
 **v1.3.6** — Auto-mode and Computer Use hardening release: `/mode auto` auto-approves low-risk tool calls while preserving confirmation for high-risk Bash commands and hard blocks for catastrophic commands; Desktop no longer probes CUA with `cua-driver doctor` under Xiaok's TCC attribution; Bash shell fallbacks are denied for CUA self-start/repair, screen capture, pointer automation, and UI-driving AppleScript; interactive shell handoff now pauses and resumes the terminal UI cleanly.
 

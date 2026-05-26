@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, lstatSync, readdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -353,6 +353,46 @@ describe('deploy-bundled-plugins', () => {
       expect(
         existsSync(join(installedPluginDir, 'mcp-servers', 'report-renderer', 'dist', 'css', 'corporate-blue.css')),
       ).toBe(true);
+    });
+
+    it('replaces a stale symlinked bundled plugin with packaged resources', async () => {
+      process.env.HOME = rootDir;
+      process.env.USERPROFILE = rootDir;
+      process.env.PATH = '';
+      mockIsPackaged.mockReturnValue(true);
+      mockResourcesPath.mockReturnValue(rootDir);
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = rootDir;
+
+      const bundledPluginDir = join(bundledDir, 'kai-slide-creator');
+      createPluginWithFiles(bundledPluginDir, {
+        name: 'kai-slide-creator',
+        version: '3.2.0',
+      }, {
+        'mcp-servers/slide-renderer/server.py': '# packaged',
+        'bundled-wheels/pydantic_core-2.46.4-cp311-cp311-macosx_11_0_arm64.whl': '',
+        'bundled-wheels/rpds_py-0.30.0-cp311-cp311-macosx_11_0_arm64.whl': '',
+      });
+
+      const stalePluginDir = join(rootDir, 'stale-slide-plugin');
+      createPluginWithFiles(stalePluginDir, {
+        name: 'kai-slide-creator',
+        version: '3.2.0',
+      }, {
+        'mcp-servers/slide-renderer/server.py': '# stale',
+        'bundled-wheels/pydantic_core-2.46.4-cp314-cp314-win_amd64.whl': '',
+      });
+      const installedPluginDir = join(rootDir, '.xiaok', 'plugins', 'kai-slide-creator');
+      mkdirSync(dirname(installedPluginDir), { recursive: true });
+      symlinkSync(stalePluginDir, installedPluginDir);
+
+      const result = await deployBundledPlugins();
+
+      expect(result.deployed).toContain('kai-slide-creator');
+      expect(lstatSync(installedPluginDir).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(installedPluginDir, 'mcp-servers', 'slide-renderer', 'server.py'), 'utf8')).toBe('# packaged');
+      expect(existsSync(join(installedPluginDir, 'bundled-wheels', 'pydantic_core-2.46.4-cp311-cp311-macosx_11_0_arm64.whl'))).toBe(true);
+      const backups = readdirSync(join(rootDir, '.xiaok', '.symlink-backups'));
+      expect(backups.some(name => name.startsWith('kai-slide-creator-'))).toBe(true);
     });
 
     it('deploys the bundled CUA computer-use plugin from packaged resources', async () => {

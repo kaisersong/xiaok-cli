@@ -7,7 +7,7 @@
 
 import { app } from 'electron';
 import { join, dirname } from 'node:path';
-import { existsSync, cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, renameSync, writeFileSync } from 'node:fs';
 import { getConfigDir } from '../../src/utils/config.js';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -146,6 +146,21 @@ function sortedWheelNames(wheelNames: string[]): string[] {
     .sort();
 }
 
+function isSymlink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+function backupExistingPlugin(pluginPath: string, pluginName: string): void {
+  const backupRoot = getConfigDir('.symlink-backups');
+  mkdirSync(backupRoot, { recursive: true });
+  const backupPath = join(backupRoot, `${pluginName}-${Date.now()}`);
+  renameSync(pluginPath, backupPath);
+}
+
 export async function deployBundledPlugins(): Promise<DeployResult> {
   const result: DeployResult = { deployed: [], pythonAvailable: false, venvReady: false };
   const pluginsDir = getConfigDir('plugins');
@@ -163,6 +178,9 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
 
     const srcManifest = join(src, 'plugin.json');
     const destManifest = join(dest, 'plugin.json');
+    if (isSymlink(dest)) {
+      backupExistingPlugin(dest, name);
+    }
 
     if (existsSync(destManifest)) {
       try {

@@ -19,6 +19,10 @@
 | **重命名任务延迟** | 27.6s | 180.8s | **-85%** |
 | **Token 效率** | 100% | 250% | **-60%** |
 
+**v1.3.7 新特性：**
+
+- **Slide Renderer 恢复修复**：Desktop 正式安装包现在会把陈旧的内置插件 symlink 备份并替换为安装包内的 `kai-slide-creator`，避免旧开发目录或错误平台 wheelhouse 继续导致 `slide-renderer` MCP 启动失败
+
 **v1.3.6 新特性：**
 
 - **Auto 模式安全边界**：`/mode auto` 只自动批准低风险工具调用；高风险 Bash 命令仍要确认，灾难性命令继续直接阻断
@@ -552,6 +556,8 @@ npm run dev -- --help  # 从源码运行
 ---
 
 ## 版本日志
+
+**v1.3.7** — Slide renderer 热修复：Desktop 正式安装包现在会把陈旧的内置插件 symlink 备份并替换为安装包内的 `kai-slide-creator`，避免旧开发目录或错误平台 wheelhouse 继续导致 `slide-renderer` MCP 启动失败。
 
 **v1.3.6** — Auto 模式与 Computer Use 加固版本：`/mode auto` 自动批准低风险工具调用，但高风险 Bash 命令仍需确认，灾难性命令继续硬阻断；Desktop 不再以 Xiaok TCC 归因运行 `cua-driver doctor`；CUA 自启动/自修复、录屏、鼠标键盘自动化、驱动 UI 的 AppleScript 等 shell fallback 会被拒绝；交互式 shell handoff 能正确暂停和恢复终端 UI。
 
