@@ -80,8 +80,13 @@ describe('createMcpRuntimeTools', () => {
           inputSchema: { type: 'object' },
         },
         {
-          name: 'get_app_state',
-          description: 'read app state',
+          name: 'get_window_state',
+          description: 'read window state',
+          inputSchema: { type: 'object' },
+        },
+        {
+          name: 'list_windows',
+          description: 'list windows',
           inputSchema: { type: 'object' },
         },
       ],
@@ -91,7 +96,8 @@ describe('createMcpRuntimeTools', () => {
     expect(cuaTools.map((tool) => [tool.definition.name, tool.permission])).toEqual([
       ['mcp__cua-driver__click', 'write'],
       ['mcp__cua-driver__unknown_future_action', 'write'],
-      ['mcp__cua-driver__get_app_state', 'safe'],
+      ['mcp__cua-driver__get_window_state', 'safe'],
+      ['mcp__cua-driver__list_windows', 'safe'],
     ]);
   });
 });

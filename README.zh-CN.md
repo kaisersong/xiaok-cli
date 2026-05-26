@@ -19,6 +19,16 @@
 | **重命名任务延迟** | 27.6s | 180.8s | **-85%** |
 | **Token 效率** | 100% | 250% | **-60%** |
 
+**v1.3.5 新特性：**
+
+- **Computer Use 启用闭环**：`xiaok_computer_use` 现在是稳定的产品工具；CUA 未就绪时返回结构化可恢复错误，对话区显示 Computer Use 动作卡片，不再把原始 MCP 失败暴露给用户
+- **CUA 权限与恢复流程**：Desktop 区分首次用户点击启用和后续自动恢复，通过 `CuaDriver.app` 启动以保证 macOS TCC 归因正确，能识别空截图输出，并且只在可信正式安装包里自动恢复
+- **定向插件重连**：启用 Computer Use 只重连 `cua-driver` MCP server，不再误重启 report/slide renderer 插件
+- **Shell 绕路防护**：`screencapture`、`cliclick`、`cua-driver`、驱动 UI 的 `osascript` 等屏幕自动化绕路命令现在必须进入审批，不会静默绕过 Computer Use
+- **安装包运行时可靠性**：KSwarm 和 Intent Broker 后台服务在打包环境下会使用 Electron runtime 作为 Node，不再依赖用户 shell 里的 `node` PATH
+- **桌面更新与品牌修复**：更新安装会在 `quitAndInstall` 前进入真实退出状态并报告安装错误；macOS Dock 图标优先使用应用 bundle 内的 `icon.icns`
+- **构建循环与烟测覆盖**：Desktop release 仍走 clean build，日常开发保留增量 `build:main`；当前 smoke 覆盖 84 个文件、587 个测试
+
 **v1.3.4 新特性：**
 
 - **Swarm 项目可靠性加固**：KSwarm 项目里的小K种子 PO/Worker 现在进入真正的 Desktop agent runtime，不再交给能力残缺的 sidecar worker；模型、工具、MCP、web-search、report/slide renderer 能力保持一致

@@ -138,6 +138,28 @@ export function buildBackgroundNodeSpawnOptions(options: {
   };
 }
 
+export function resolveBackgroundNodeRuntime(options: {
+  env?: NodeJS.ProcessEnv;
+  execPath?: string;
+  electronVersion?: string;
+} = {}): {
+  command: string;
+  env: NodeJS.ProcessEnv;
+} {
+  const env = { ...(options.env ?? process.env) };
+  const explicitNode = env.XIAOK_NODE_CMD?.trim();
+  if (explicitNode) {
+    return { command: explicitNode, env };
+  }
+
+  const command = options.execPath ?? process.execPath;
+  const electronVersion = options.electronVersion ?? process.versions.electron;
+  if (electronVersion) {
+    env.ELECTRON_RUN_AS_NODE = '1';
+  }
+  return { command, env };
+}
+
 export function shouldAdoptExistingKSwarmService(input: { hasOwnedChild: boolean; healthOk: boolean; brokerReady?: boolean }): boolean {
   return input.healthOk && input.brokerReady !== false && !input.hasOwnedChild;
 }
@@ -356,10 +378,13 @@ export function createKSwarmService(): KSwarmService {
       return true; // May be running externally
     }
 
-    console.log(`[kswarm-service] Spawning broker: ${brokerLaunch.entryPath}`);
-    brokerChild = spawn('node', brokerLaunch.nodeArgs, buildBackgroundNodeSpawnOptions({
-      cwd: brokerLaunch.cwd,
+    const nodeRuntime = resolveBackgroundNodeRuntime({
       env: { ...process.env, PORT: String(BROKER_PORT) },
+    });
+    console.log(`[kswarm-service] Spawning broker: ${brokerLaunch.entryPath}`);
+    brokerChild = spawn(nodeRuntime.command, brokerLaunch.nodeArgs, buildBackgroundNodeSpawnOptions({
+      cwd: brokerLaunch.cwd,
+      env: nodeRuntime.env,
     }));
     brokerChild.stdout?.on('data', (d: Buffer) => {
       const msg = d.toString().trim();
@@ -425,13 +450,16 @@ export function createKSwarmService(): KSwarmService {
       console.warn('[kswarm-service] Broker not ready after bootstrap attempt; starting kswarm in degraded mode');
     }
 
-    console.log(`[kswarm-service] Spawning kswarm server: ${serverPath}`);
-    child = spawn('node', [serverPath], buildBackgroundNodeSpawnOptions({
+    const nodeRuntime = resolveBackgroundNodeRuntime({
       env: {
         ...process.env,
         KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`,
       },
+    });
+    console.log(`[kswarm-service] Spawning kswarm server: ${serverPath}`);
+    child = spawn(nodeRuntime.command, [serverPath], buildBackgroundNodeSpawnOptions({
+      env: nodeRuntime.env,
     }));
 
     child.stdout?.on('data', (data: Buffer) => {
@@ -603,7 +631,7 @@ export function createKSwarmService(): KSwarmService {
           port: KSWARM_PORT,
           pid: child?.pid ?? null,
           restartCount,
-          lastError: kswarmHealth.ok ? lastError : (kswarmHealth.error || lastError),
+          lastError: kswarmHealth.ok ? lastError : (lastError || kswarmHealth.error),
           detail: kswarmDetail,
         },
         {

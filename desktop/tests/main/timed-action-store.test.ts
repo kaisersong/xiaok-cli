@@ -179,4 +179,94 @@ describe('TimedActionStore', () => {
       description: '',
     });
   });
+
+  it('approveAuto sets reviewedAt and userApprovedAuto, revokeAuto leaves reviewedAt intact', () => {
+    const action = store.createAction({
+      id: 'review_action',
+      title: 'plan task',
+      trigger: { kind: 'once', at: 5_000 },
+      executor: { kind: 'agent_task', prompt: '请生成方案' },
+      source: 'user',
+      now: 1_000,
+    });
+
+    expect(action.userApprovedAuto).toBe(false);
+    expect(action.reviewedAt).toBeUndefined();
+
+    const approved = store.approveAuto('review_action', 4_321);
+    expect(approved).toBeDefined();
+    expect(approved?.userApprovedAuto).toBe(true);
+    expect(approved?.reviewedAt).toBe(4_321);
+
+    const revoked = store.revokeAuto('review_action', 9_999);
+    expect(revoked).toBeDefined();
+    expect(revoked?.userApprovedAuto).toBe(false);
+    expect(revoked?.reviewedAt).toBe(4_321);
+
+    expect(store.approveAuto('missing_id')).toBeUndefined();
+  });
+
+  it('migrates legacy databases that lack reviewed_at / user_approved_auto columns', () => {
+    store.close();
+    const dbPath = join(rootDir, 'timed-actions.sqlite');
+    rmSync(dbPath, { force: true });
+
+    const legacyDb = new DatabaseSync(dbPath);
+    legacyDb.exec(`
+      create table if not exists timed_actions (
+        id text primary key,
+        title text not null,
+        description text not null default '',
+        trigger_kind text not null,
+        trigger_json text not null,
+        executor_kind text not null,
+        executor_json text not null,
+        policy_json text not null,
+        status text not null,
+        source text not null,
+        created_by_task_id text,
+        next_due_at integer,
+        last_due_at integer,
+        run_count integer not null default 0,
+        consecutive_failures integer not null default 0,
+        locked_run_id text,
+        locked_at integer,
+        last_runtime_task_id text,
+        last_error text,
+        created_at integer not null,
+        updated_at integer not null
+      );
+      create table if not exists timed_action_runs (
+        run_id text primary key,
+        action_id text not null,
+        executor_kind text not null,
+        status text not null,
+        started_at integer not null,
+        finished_at integer,
+        runtime_task_id text,
+        error text,
+        decision_json text,
+        foreign key(action_id) references timed_actions(id)
+      );
+    `);
+    legacyDb.prepare(`
+      insert into timed_actions (
+        id, title, description, trigger_kind, trigger_json, executor_kind, executor_json, policy_json,
+        status, source, created_by_task_id, next_due_at, last_due_at, run_count,
+        consecutive_failures, locked_run_id, locked_at, last_runtime_task_id, last_error,
+        created_at, updated_at
+      ) values (
+        'pre_review', 'pre review', '', 'once', '{"kind":"once","at":2000}',
+        'agent_task', '{"kind":"agent_task","prompt":"x"}', '{}',
+        'active', 'user', null, 2000, null, 0, 0, null, null, null, null, 1000, 1000
+      )
+    `).run();
+    legacyDb.close();
+
+    store = new TimedActionStore(dbPath);
+    const record = store.getAction('pre_review');
+    expect(record).toBeDefined();
+    expect(record?.userApprovedAuto).toBe(false);
+    expect(record?.reviewedAt).toBeUndefined();
+  });
 });

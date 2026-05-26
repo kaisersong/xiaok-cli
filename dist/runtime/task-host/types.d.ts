@@ -166,6 +166,31 @@ export type DesktopTaskEvent = {
     steps: PlanStep[];
 };
 export type TaskSnapshotStatus = 'understanding' | 'running' | 'waiting_user' | 'completed' | 'failed' | 'cancelled';
+export type TaskPermissionMode = 'plan' | 'auto' | 'default';
+export type TaskContextSkipReason = 'missing' | 'invalid' | 'non_terminal' | 'self' | 'too_old';
+export interface TaskCreateContext {
+    threadId?: string;
+    taskIds?: string[];
+}
+export interface TaskContextSkip {
+    taskId: string;
+    reason: TaskContextSkipReason;
+}
+export interface TaskContextAudit {
+    threadId?: string;
+    taskIds: string[];
+    loadedTaskIds: string[];
+    skipped: TaskContextSkip[];
+}
+export interface TaskCreateInput {
+    prompt: string;
+    materials: Array<{
+        materialId: string;
+        role?: MaterialRole;
+    }>;
+    permissionMode?: TaskPermissionMode;
+    context?: TaskCreateContext;
+}
 export interface TaskSnapshot {
     taskId: string;
     sessionId: string;
@@ -176,6 +201,7 @@ export interface TaskSnapshot {
     understanding?: TaskUnderstanding;
     result?: TaskResult;
     salvage?: SalvageSummary;
+    context?: TaskContextAudit;
     createdAt: number;
     updatedAt: number;
 }
@@ -183,13 +209,7 @@ export interface ActiveTaskRef {
     taskId: string;
 }
 export interface TaskRuntimeHost {
-    createTask(input: {
-        prompt: string;
-        materials: Array<{
-            materialId: string;
-            role?: MaterialRole;
-        }>;
-    }): Promise<{
+    createTask(input: TaskCreateInput): Promise<{
         taskId: string;
         understanding?: TaskUnderstanding;
     }>;

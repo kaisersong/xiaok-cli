@@ -26,6 +26,8 @@ export function resolveYZJConfig(config: Config, overrides: Partial<YZJChannelCo
     webhookPath: normalizeWebhookPath(merged.webhookPath),
     webhookPort: merged.webhookPort ?? 3001,
     secret: merged.secret?.trim() || undefined,
+    disable_safe_default: merged.disable_safe_default,
+    extra_allowed_tools: merged.extra_allowed_tools,
   };
 }
 

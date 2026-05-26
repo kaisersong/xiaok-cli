@@ -1,6 +1,6 @@
 import React from 'react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 // Mock locale context
 vi.mock('../../renderer/src/contexts/LocaleContext', () => ({
@@ -26,6 +26,7 @@ const MOCK_SNAPSHOT = {
   ],
   models: [
     { id: 'anthropic-default', provider: 'anthropic', model: 'claude-opus-4-6', label: 'Claude Opus 4.6', capabilities: ['tools'], isDefault: true },
+    { id: 'anthropic-sonnet', provider: 'anthropic', model: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', capabilities: ['tools'], isDefault: false },
   ],
   providerProfiles: [
     { id: 'openai', label: 'OpenAI', protocol: 'openai_legacy', baseUrl: 'https://api.openai.com/v1', defaultModelId: 'openai-default', defaultModel: 'gpt-4o', defaultModelLabel: 'GPT-4o', capabilities: ['tools'], availableModels: [{ modelId: 'openai-gpt-4o', model: 'gpt-4o', label: 'GPT-4o', capabilities: ['tools'] }, { modelId: 'openai-gpt-4.1', model: 'gpt-4.1', label: 'GPT-4.1', capabilities: ['tools'] }] },
@@ -82,6 +83,33 @@ afterEach(() => {
 })
 
 describe('Model Settings — Add Provider', () => {
+  it('shows the current default model and lets the user switch it', async () => {
+    const switchedSnapshot = {
+      ...MOCK_SNAPSHOT,
+      defaultModelId: 'anthropic-sonnet',
+      models: MOCK_SNAPSHOT.models.map(m => ({ ...m, isDefault: m.id === 'anthropic-sonnet' })),
+    }
+    vi.mocked(api.saveModelConfig).mockResolvedValueOnce(switchedSnapshot as any)
+
+    renderSettings()
+    fireEvent.click(screen.getByText('模型设置'))
+
+    await waitFor(() => {
+      expect(screen.getByText('当前使用模型')).toBeInTheDocument()
+      expect(screen.getAllByText('Claude Opus 4.6').length).toBeGreaterThan(0)
+    })
+
+    const sonnetRow = screen.getByText('Claude Sonnet 4.6').closest('span')!
+    fireEvent.click(within(sonnetRow).getByRole('button', { name: '设为默认' }))
+
+    await waitFor(() => {
+      expect(api.saveModelConfig).toHaveBeenCalledWith({
+        providerId: 'anthropic',
+        modelId: 'anthropic-sonnet',
+      })
+    })
+  })
+
   it('shows provider selection dropdown with unconfigured providers', async () => {
     renderSettings()
 

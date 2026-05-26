@@ -68,4 +68,38 @@ describe('PermissionManager', () => {
     expect(PermissionManager.nextMode('auto')).toBe('plan');
     expect(PermissionManager.nextMode('plan')).toBe('default');
   });
+
+  it('denies read/write/edit on built-in sensitive paths', async () => {
+    const pm = new PermissionManager({ mode: 'auto' });
+    await expect(pm.check('read', { file_path: '/repo/.env' })).resolves.toBe('deny');
+    await expect(pm.check('write', { file_path: '/repo/id_rsa' })).resolves.toBe('deny');
+    await expect(pm.check('edit', { file_path: '/etc/server.pem' })).resolves.toBe('deny');
+  });
+
+  it('allows sensitive paths when user has explicit allow rule', async () => {
+    const pm = new PermissionManager({
+      mode: 'default',
+      allowRules: ['read:/repo/.env'],
+    });
+    await expect(pm.check('read', { file_path: '/repo/.env' })).resolves.toBe('allow');
+  });
+
+  it('still allows benign neighbour files without rule', async () => {
+    const pm = new PermissionManager({ mode: 'default' });
+    await expect(pm.check('read', { file_path: '/repo/.env.example' })).resolves.toBe('allow');
+  });
+
+  it('prompts for screen automation shell fallback even in auto mode', async () => {
+    const pm = new PermissionManager({ mode: 'auto' });
+    await expect(pm.check('bash', { command: 'screencapture -x /tmp/current.png' })).resolves.toBe('prompt');
+    await expect(pm.check('bash', { command: 'osascript -e \'tell application "System Events" to click menu item 1\'' })).resolves.toBe('prompt');
+  });
+
+  it('allows screen automation fallback only with an explicit remembered rule', async () => {
+    const pm = new PermissionManager({
+      mode: 'auto',
+      allowRules: ['bash:screencapture -x /tmp/current.png'],
+    });
+    await expect(pm.check('bash', { command: 'screencapture -x /tmp/current.png' })).resolves.toBe('allow');
+  });
 });

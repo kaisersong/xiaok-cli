@@ -31,6 +31,8 @@ export interface ScheduledTask {
   runtimeTaskId?: string;  // Latest runtime task snapshot for this task
   lastRunAt?: number;
   nextRunAt?: number;
+  reviewedAt?: number;
+  userApprovedAuto?: boolean;
   scheduleConfig?: {
     intervalMinutes?: number;  // hourly: interval in minutes (30/60/120/...)
     hour?: number;             // daily/weekdays/weekly: 0-23
@@ -456,6 +458,36 @@ export function ScheduledPage() {
     ));
   };
 
+  const handleApproveAuto = async (task: ScheduledTask) => {
+    const desktop = (window as any).xiaokDesktop;
+    if (!desktop?.approveTimedActionAuto) return;
+    try {
+      const updated = await desktop.approveTimedActionAuto(task.id);
+      if (updated) {
+        saveTasks(tasks.map(t => t.id === task.id
+          ? { ...t, reviewedAt: updated.reviewedAt ?? Date.now(), userApprovedAuto: true, updatedAt: updated.updatedAt ?? Date.now() }
+          : t));
+      }
+    } catch (e) {
+      console.warn('[Scheduled] approveAuto failed:', e);
+    }
+  };
+
+  const handleRevokeAuto = async (task: ScheduledTask) => {
+    const desktop = (window as any).xiaokDesktop;
+    if (!desktop?.revokeTimedActionAuto) return;
+    try {
+      const updated = await desktop.revokeTimedActionAuto(task.id);
+      if (updated) {
+        saveTasks(tasks.map(t => t.id === task.id
+          ? { ...t, userApprovedAuto: false, updatedAt: updated.updatedAt ?? Date.now() }
+          : t));
+      }
+    } catch (e) {
+      console.warn('[Scheduled] revokeAuto failed:', e);
+    }
+  };
+
   const handleRun = async (task: ScheduledTask) => {
     if (runningId === task.id) return;
     setRunningId(task.id);
@@ -596,7 +628,7 @@ export function ScheduledPage() {
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium text-[var(--c-text-primary)]">{task.name}</span>
                       <span className={`rounded-full px-2 py-0.5 text-xs ${
                         task.status === 'active'
@@ -605,6 +637,14 @@ export function ScheduledPage() {
                       }`}>
                         {task.status === 'active' ? t.scheduledActive : t.scheduledPaused}
                       </span>
+                      {task.userApprovedAuto !== true && (
+                        <span
+                          className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700"
+                          title={t.scheduledPlanModeHint}
+                        >
+                          {t.scheduledPlanModeBadge}
+                        </span>
+                      )}
                       <span className="text-xs text-[var(--c-text-tertiary)]">
                         {formatScheduledFrequency(task, t)}
                       </span>
@@ -647,6 +687,24 @@ export function ScheduledPage() {
                         title={t.scheduledDeleteInstanceTitle}
                       >
                         <XCircle size={14} />
+                      </button>
+                    )}
+                    {task.userApprovedAuto !== true ? (
+                      <button
+                        onClick={() => handleApproveAuto(task)}
+                        disabled={!task.threadId && !task.runtimeTaskId}
+                        title={(!task.threadId && !task.runtimeTaskId) ? t.scheduledApproveAutoNeedsReview : t.scheduledApproveAutoTitle}
+                        className="rounded-lg px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {t.scheduledApproveAuto}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleRevokeAuto(task)}
+                        title={t.scheduledRevokeAutoTitle}
+                        className="rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
+                      >
+                        {t.scheduledRevokeAuto}
                       </button>
                     )}
                     <button

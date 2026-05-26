@@ -315,7 +315,7 @@ export class AgentRuntime {
       .filter((seg) => seg.text)
       .map((seg) => ({ text: seg.text, cacheable: seg.cacheable }));
 
-    const systemPromptInput = systemSegments && systemSegments.length > 1
+    const systemPromptInput = systemSegments && systemSegments.length >= 1
       ? systemSegments
       : this.systemPrompt;
 

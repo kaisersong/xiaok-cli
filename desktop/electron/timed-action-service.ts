@@ -150,6 +150,14 @@ export class TimedActionService {
     return this.store.listRuns(actionId);
   }
 
+  approveAuto(id: string): TimedActionRecord | undefined {
+    return this.store.approveAuto(id);
+  }
+
+  revokeAuto(id: string): TimedActionRecord | undefined {
+    return this.store.revokeAuto(id);
+  }
+
   private withScheduledTaskDefaults(
     trigger: TimedActionTrigger,
     policy: TimedActionPolicy | undefined,
@@ -204,6 +212,8 @@ export class TimedActionService {
       createdAt: action.createdAt,
       updatedAt: action.updatedAt,
       runtimeTaskId: action.lastRuntimeTaskId,
+      reviewedAt: action.reviewedAt,
+      userApprovedAuto: action.userApprovedAuto ?? false,
     } as ScheduledTaskRecord & { description?: string; createdAt?: number; updatedAt?: number };
   }
 

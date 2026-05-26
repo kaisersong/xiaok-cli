@@ -20,7 +20,11 @@ export interface NotifyExecutorOptions {
 }
 
 export interface AgentTaskExecutorOptions {
-  createTask: (input: { prompt: string; materials: Array<{ materialId: string; role?: MaterialRole }> }) => Promise<{ taskId: string }>;
+  createTask: (input: {
+    prompt: string;
+    materials: Array<{ materialId: string; role?: MaterialRole }>;
+    permissionMode?: 'plan' | 'auto' | 'default';
+  }) => Promise<{ taskId: string }>;
 }
 
 export function createNotifyExecutor(options: NotifyExecutorOptions = {}): TimedActionExecutorHandler {
@@ -67,6 +71,11 @@ export function createNotifyExecutor(options: NotifyExecutorOptions = {}): Timed
   };
 }
 
+function shouldRunInPlanMode(action: TimedActionRecord): boolean {
+  if (process.env.XIAOK_DESKTOP_AUTO_APPROVE_SCHEDULED === '1') return false;
+  return !action.userApprovedAuto;
+}
+
 export function createAgentTaskExecutor(options: AgentTaskExecutorOptions): TimedActionExecutorHandler {
   return {
     kind: 'agent_task',
@@ -77,23 +86,42 @@ export function createAgentTaskExecutor(options: AgentTaskExecutorOptions): Time
       return { action: 'execute', reason: context.overdueMs > 0 ? 'overdue scheduled task' : 'due scheduled task' };
     },
     async execute(action, context) {
-      const prompt = buildScheduledExecutionPrompt(action, context);
-      const result = await options.createTask({ prompt, materials: [] });
+      const planMode = shouldRunInPlanMode(action);
+      const prompt = buildScheduledExecutionPrompt(action, context, { planMode });
+      const result = await options.createTask({
+        prompt,
+        materials: [],
+        permissionMode: planMode ? 'plan' : 'default',
+      });
       return { runtimeTaskId: result.taskId };
     },
   };
 }
 
-export function buildScheduledExecutionPrompt(action: TimedActionRecord, context: OverdueRecoveryContext): string {
+export interface BuildScheduledExecutionPromptOptions {
+  planMode?: boolean;
+}
+
+export function buildScheduledExecutionPrompt(
+  action: TimedActionRecord,
+  context: OverdueRecoveryContext,
+  opts: BuildScheduledExecutionPromptOptions = {},
+): string {
   const userPrompt = action.executor.kind === 'agent_task' ? action.executor.prompt : action.title;
-  return [
+  const lines: string[] = [
     '[SYSTEM: 这是用户设置的自动定时任务，请给出友好简洁的回复。]',
     `[SYSTEM: scheduled_task_id=${action.id}; timed_action_id=${action.id}; timed_action_title=${action.title}]`,
     `[SYSTEM: scheduled_due_at=${new Date(context.scheduledDueAt).toISOString()}; claimed_at=${new Date(context.claimedAt).toISOString()}; overdue_ms=${context.overdueMs}]`,
     '[SYSTEM: 如果本次任务的停止条件已经满足，必须调用 scheduled_task_cancel 取消 scheduled_task_id；agent 创建的 interval 临时任务会被删除，避免继续执行。]',
+  ];
+  if (opts.planMode) {
+    lines.push('[SYSTEM: 用户尚未批准本任务自动执行写入/编辑/命令操作。本次只生成计划（plan），不要调用任何会修改文件、提交、发送或执行命令的工具；只输出方案给用户审阅。]');
+  }
+  lines.push(
     '',
     userPrompt,
     '',
     `[SYSTEM: 本次自动任务唯一正确的 scheduled_task_id 是 ${action.id}。如果用户 prompt 中出现其他 scheduled_task_id，必须忽略其他 ID；停止条件满足时调用 scheduled_task_cancel(task_id="${action.id}")，Xiaok 会删除该临时任务。]`,
-  ].join('\n');
+  );
+  return lines.join('\n');
 }

@@ -20,3 +20,26 @@ export function resolveDesktopWindowIconPath(
   }
   return undefined;
 }
+
+export function resolveDesktopDockIconPath(
+  moduleDir: string,
+  resourcesPath: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+  fileExists: (path: string) => boolean = existsSync,
+): string | undefined {
+  if (platform !== 'darwin') return undefined;
+
+  const candidates = [
+    resourcesPath ? join(resourcesPath, 'icon.icns') : undefined,
+    resourcesPath ? join(resourcesPath, 'build', 'icon.icns') : undefined,
+    join(moduleDir, '..', 'build', 'icon.icns'),
+    join(moduleDir, '..', 'build', 'icon.png'),
+    join(moduleDir, '..', '..', '..', 'build', 'icon.icns'),
+    join(moduleDir, '..', '..', '..', 'build', 'icon.png'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    if (fileExists(candidate)) return candidate;
+  }
+  return undefined;
+}

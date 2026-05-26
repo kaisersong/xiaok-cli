@@ -233,6 +233,111 @@ describe('subagent tool', () => {
   });
 });
 
+describe('subagent recursion depth', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.XIAOK_SUBAGENT_MAX_DEPTH;
+  });
+
+  it('passes parentDepth+1 to executeNamedSubAgent', async () => {
+    const tool = createSubAgentTool({ ...baseOptions, agents: [], parentDepth: 0 });
+    await tool.execute(
+      { description: 'task', prompt: 'do' },
+      {} as ToolExecutionContext,
+    );
+
+    const call = (executeNamedSubAgent as any).mock.calls[0][0];
+    expect(call.parentDepth).toBe(1);
+  });
+
+  it('rejects when depth would exceed default max=3', async () => {
+    const tool = createSubAgentTool({ ...baseOptions, agents: [], parentDepth: 3 });
+    const result = await tool.execute(
+      { description: 'task', prompt: 'do' },
+      {} as ToolExecutionContext,
+    );
+
+    expect(result).toContain('Error: subagent recursion depth exceeded');
+    expect(result).toContain('max=3');
+    expect(result).toContain('attempted=4');
+    expect(executeNamedSubAgent).not.toHaveBeenCalled();
+  });
+
+  it('allows depth up to max', async () => {
+    const tool = createSubAgentTool({ ...baseOptions, agents: [], parentDepth: 2 });
+    await tool.execute(
+      { description: 'task', prompt: 'do' },
+      {} as ToolExecutionContext,
+    );
+
+    const call = (executeNamedSubAgent as any).mock.calls[0][0];
+    expect(call.parentDepth).toBe(3);
+  });
+
+  it('honors XIAOK_SUBAGENT_MAX_DEPTH env override', async () => {
+    process.env.XIAOK_SUBAGENT_MAX_DEPTH = '1';
+    const tool = createSubAgentTool({ ...baseOptions, agents: [], parentDepth: 1 });
+    const result = await tool.execute(
+      { description: 'task', prompt: 'do' },
+      {} as ToolExecutionContext,
+    );
+
+    expect(result).toContain('max=1');
+    expect(result).toContain('attempted=2');
+  });
+
+  it('honors explicit maxDepth option over env', async () => {
+    process.env.XIAOK_SUBAGENT_MAX_DEPTH = '99';
+    const tool = createSubAgentTool({
+      ...baseOptions,
+      agents: [],
+      parentDepth: 1,
+      maxDepth: 1,
+    });
+    const result = await tool.execute(
+      { description: 'task', prompt: 'do' },
+      {} as ToolExecutionContext,
+    );
+
+    expect(result).toContain('max=1');
+  });
+
+  it('gates pre-defined agent path by depth', async () => {
+    const agents = [{ name: 'reviewer', systemPrompt: 'You are a reviewer', source: 'builtin' as const }];
+    const tool = createSubAgentTool({
+      ...baseOptions,
+      agents: agents as any[],
+      parentDepth: 3,
+    });
+    const result = await tool.execute(
+      { agent: 'reviewer', prompt: 'review' },
+      {} as ToolExecutionContext,
+    );
+
+    expect(result).toContain('Error: subagent recursion depth exceeded');
+    expect(executeNamedSubAgent).not.toHaveBeenCalled();
+  });
+
+  it('passes parentDepth in background job input payload', async () => {
+    const mockBackgroundRunner = {
+      start: vi.fn().mockResolvedValue({ jobId: 'job-depth' }),
+    };
+    const tool = createSubAgentTool({
+      ...baseOptions,
+      agents: [],
+      parentDepth: 1,
+      backgroundRunner: mockBackgroundRunner as any,
+    });
+    await tool.execute(
+      { description: 'bg', prompt: 'do', background: true },
+      {} as ToolExecutionContext,
+    );
+
+    const call = mockBackgroundRunner.start.mock.calls[0][0];
+    expect(call.input.parentDepth).toBe(2);
+  });
+});
+
 describe('subagent tool description', () => {
   it('includes pre-defined agent names in description', () => {
     const agents = [

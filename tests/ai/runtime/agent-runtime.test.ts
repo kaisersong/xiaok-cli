@@ -312,10 +312,12 @@ describe('AgentRuntime', () => {
     expect(captured).toHaveLength(1);
     expect(captured[0]).toMatchObject({
       promptCache: {
-        systemPrompt: [{ text: 'system', cache_control: { type: 'ephemeral' } }],
+        systemPrompt: [{ type: 'text', text: 'system' }],
         tools: [{ name: 'read', cache_control: { type: 'ephemeral' } }],
       },
     });
+    const promptCache = (captured[0] as { promptCache: { systemPrompt: Array<Record<string, unknown>> } }).promptCache;
+    expect(promptCache.systemPrompt[0]).not.toHaveProperty('cache_control');
   });
 
   it('fails explicitly when the model returns no text, tool call, or usage', async () => {

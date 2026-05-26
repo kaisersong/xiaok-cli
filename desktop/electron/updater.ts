@@ -7,6 +7,7 @@ export interface UpdateStatus {
   available: boolean;
   downloading: boolean;
   downloaded: boolean;
+  installing?: boolean;
   progress: number; // 0-100
   version?: string;
   error?: string;
@@ -75,13 +76,14 @@ function registerAutoUpdaterEvents(): void {
   autoUpdaterEventsRegistered = true;
 
   autoUpdater.on('checking-for-update', () => {
-    setUpdateStatus({ checking: true, error: undefined });
+    setUpdateStatus({ checking: true, installing: false, error: undefined });
   });
 
   autoUpdater.on('update-available', (info: { version: string }) => {
     setUpdateStatus({
       checking: false,
       available: true,
+      installing: false,
       version: info.version,
     });
   });
@@ -90,12 +92,14 @@ function registerAutoUpdaterEvents(): void {
     setUpdateStatus({
       checking: false,
       available: false,
+      installing: false,
     });
   });
 
   autoUpdater.on('download-progress', (progress: { percent: number }) => {
     setUpdateStatus({
       downloading: true,
+      installing: false,
       progress: Math.round(progress.percent),
     });
   });
@@ -104,6 +108,7 @@ function registerAutoUpdaterEvents(): void {
     setUpdateStatus({
       downloading: false,
       downloaded: true,
+      installing: false,
       version: info.version,
       progress: 100,
     });
@@ -113,6 +118,7 @@ function registerAutoUpdaterEvents(): void {
     setUpdateStatus({
       checking: false,
       downloading: false,
+      installing: false,
       error: error.message,
     });
   });
@@ -174,6 +180,7 @@ export function getUpdateStatus(): UpdateStatus {
       available: false,
       downloading: false,
       downloaded: false,
+      installing: false,
       progress: 0,
       error: '开发模式下无法检查更新',
     };
@@ -216,7 +223,26 @@ export async function checkForUpdates(): Promise<void> {
 }
 
 export function quitAndInstall(): void {
-  if (autoUpdater) {
-    autoUpdater.quitAndInstall();
+  setUpdateStatus({ installing: true, error: undefined });
+  try {
+    if (!callAutoUpdaterQuitAndInstall(autoUpdater)) {
+      throw new Error('更新器未初始化，无法安装更新');
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setUpdateStatus({ installing: false, error: message });
+    throw error;
   }
+}
+
+export function callAutoUpdaterQuitAndInstall(updater: unknown): boolean {
+  if (!updater || typeof updater !== 'object') return false;
+  const candidate = updater as {
+    autoInstallOnAppQuit?: boolean;
+    quitAndInstall?: (isSilent?: boolean, isForceRunAfter?: boolean) => void;
+  };
+  if (typeof candidate.quitAndInstall !== 'function') return false;
+  candidate.autoInstallOnAppQuit = true;
+  candidate.quitAndInstall(false, true);
+  return true;
 }

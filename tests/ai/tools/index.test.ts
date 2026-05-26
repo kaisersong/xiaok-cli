@@ -458,4 +458,32 @@ describe('ToolRegistry', () => {
       tool_name: 'write',
     }));
   });
+
+  it('emits PostToolUseFailure hook when tool execute throws', async () => {
+    const runHooks = vi.fn(async () => ({ ok: true }));
+
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      hooksRunner: {
+        runHooks,
+        runPreHooks: async () => ({ ok: true }),
+        runPostHooks: async () => [],
+      },
+    }, [{
+      permission: 'safe',
+      definition: {
+        name: 'failing_tool',
+        description: 'always throws',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      execute: async () => { throw new Error('boom'); },
+    }]);
+
+    const result = await registry.executeTool('failing_tool', {});
+
+    expect(result).toContain('Error:');
+    expect(runHooks).toHaveBeenCalledWith('PostToolUseFailure', expect.objectContaining({
+      tool_name: 'failing_tool',
+    }));
+  });
 });

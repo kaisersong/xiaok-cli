@@ -9,7 +9,7 @@ import { createReminderTools } from '../../ai/tools/reminders.js';
 import { createNotebookTools } from '../../ai/tools/notebook.js';
 import { mergeToolPools, isMcpTool } from '../../ai/tools/tool-pool.js';
 export function createPlatformRegistryFactory(options) {
-    const runNamedSubAgent = async (agentName, prompt, cwd) => {
+    const runNamedSubAgent = async (agentName, prompt, cwd, parentDepth) => {
         const agentDef = options.platform.customAgents.find((agent) => agent.name === agentName);
         if (!agentDef) {
             throw new Error(`unknown subagent: ${agentName}`);
@@ -23,9 +23,10 @@ export function createPlatformRegistryFactory(options) {
             createRegistry: createRegistryForCwd,
             buildSystemPrompt: options.buildSystemPrompt,
             worktreeManager: options.platform.worktreeManager,
+            parentDepth,
         });
     };
-    const backgroundRunner = options.platform.createBackgroundRunner(async ({ agent, prompt, cwd }) => runNamedSubAgent(agent, prompt, cwd), options.notifyBackgroundJob);
+    const backgroundRunner = options.platform.createBackgroundRunner(async ({ agent, prompt, cwd, parentDepth }) => runNamedSubAgent(agent, prompt, cwd, parentDepth), options.notifyBackgroundJob);
     const reminders = options.source === 'chat'
         ? options.platform.createReminderApi(options.sessionId, options.sessionId)
         : undefined;
@@ -35,7 +36,7 @@ export function createPlatformRegistryFactory(options) {
             process.stdout.write(`\n[reminder] ${message}\n`);
         });
     }
-    function createRegistryForCwd(cwd, allowedTools, agentId = 'main') {
+    function createRegistryForCwd(cwd, allowedTools, agentId = 'main', opts) {
         const extraTools = [
             ...(options.workflowTools ?? []),
             ...(reminders
@@ -61,6 +62,7 @@ export function createPlatformRegistryFactory(options) {
                 backgroundRunner,
                 worktreeManager: options.platform.worktreeManager,
                 getTaskId: options.getCurrentTaskId,
+                parentDepth: opts?.parentDepth,
             }),
         ];
         // 构建基础 tool list

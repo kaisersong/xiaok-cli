@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_MODEL_CAPABILITIES,
+  buildPromptCacheSegments,
   resolveModelCapabilities,
 } from '../../../src/ai/runtime/model-capabilities.js';
 
@@ -45,5 +46,62 @@ describe('model capabilities', () => {
     expect(capabilities.contextLimit).toBe(4096);
     expect(capabilities.compactThreshold).toBe(0.5);
     expect(capabilities.supportsPromptCaching).toBe(false);
+  });
+});
+
+describe('buildPromptCacheSegments', () => {
+  it('emits a single text block without cache_control when given a raw string', () => {
+    const result = buildPromptCacheSegments('hello world', [], []);
+    expect(result.systemPrompt).toEqual([{ type: 'text', text: 'hello world' }]);
+    expect(result.systemPrompt[0]).not.toHaveProperty('cache_control');
+  });
+
+  it('marks cacheable single segment with cache_control', () => {
+    const result = buildPromptCacheSegments(
+      [{ text: 'cacheable system', cacheable: true }],
+      [],
+      [],
+    );
+    expect(result.systemPrompt).toEqual([
+      { type: 'text', text: 'cacheable system', cache_control: { type: 'ephemeral' } },
+    ]);
+  });
+
+  it('omits cache_control on a non-cacheable single segment', () => {
+    const result = buildPromptCacheSegments(
+      [{ text: 'dynamic system', cacheable: false }],
+      [],
+      [],
+    );
+    expect(result.systemPrompt).toEqual([{ type: 'text', text: 'dynamic system' }]);
+  });
+
+  it('preserves per-segment cacheable flags across multi-block prompt', () => {
+    const result = buildPromptCacheSegments(
+      [
+        { text: 'static', cacheable: true },
+        { text: 'dynamic', cacheable: false },
+      ],
+      [],
+      [],
+    );
+    expect(result.systemPrompt).toEqual([
+      { type: 'text', text: 'static', cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: 'dynamic' },
+    ]);
+  });
+
+  it('filters out empty segment text', () => {
+    const result = buildPromptCacheSegments(
+      [
+        { text: '', cacheable: true },
+        { text: 'real', cacheable: true },
+      ],
+      [],
+      [],
+    );
+    expect(result.systemPrompt).toEqual([
+      { type: 'text', text: 'real', cache_control: { type: 'ephemeral' } },
+    ]);
   });
 });

@@ -1,6 +1,21 @@
 import { exec } from 'child_process';
 import { request as httpRequest } from 'http';
 import { request as httpsRequest } from 'https';
+const VALID_HOOKS = new Set([
+    'PreToolUse',
+    'PostToolUse',
+    'PostToolUseFailure',
+    'PermissionRequest',
+    'PermissionDenied',
+    'UserPromptSubmit',
+    'SessionStart',
+    'SessionEnd',
+    'Stop',
+    'StopFailure',
+]);
+export function isKnownHookEvent(name) {
+    return VALID_HOOKS.has(name);
+}
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -9,8 +24,7 @@ const TOOL_EVENTS = new Set([
 ]);
 /** Events where exit code 2 blocks execution */
 const BLOCKING_EVENTS = new Set([
-    'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop', 'SubagentStop',
-    'PreCompact', 'PermissionRequest', 'TaskCreated', 'TaskCompleted',
+    'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop', 'PermissionRequest',
 ]);
 /** Per-event: which field the matcher runs against */
 const MATCHER_FIELD = {
@@ -21,14 +35,7 @@ const MATCHER_FIELD = {
     PermissionDenied: 'tool_name',
     SessionStart: 'source',
     SessionEnd: 'reason',
-    Setup: 'trigger',
-    PreCompact: 'trigger',
-    PostCompact: 'trigger',
-    Notification: 'notification_type',
     StopFailure: 'error',
-    SubagentStart: 'agent_type',
-    SubagentStop: 'agent_type',
-    FileChanged: 'file_path',
 };
 // ---------------------------------------------------------------------------
 // Matcher
@@ -98,9 +105,19 @@ function shouldMatch(config, eventName, payload) {
 function normalizeConfig(raw) {
     if (typeof raw === 'string')
         return { type: 'command', command: raw };
-    if (!raw.type)
-        return { ...raw, type: 'command' };
-    return raw;
+    const config = !raw.type ? { ...raw, type: 'command' } : raw;
+    if (config.events && config.events.length > 0) {
+        const filtered = config.events.filter((event) => {
+            if (isKnownHookEvent(event))
+                return true;
+            console.warn(`[hooks-runner] ignoring unknown hook event "${event}". Supported events: ${[...VALID_HOOKS].join(', ')}`);
+            return false;
+        });
+        config.events = (filtered.length > 0
+            ? filtered
+            : ['__none__']);
+    }
+    return config;
 }
 // ---------------------------------------------------------------------------
 // Payload builder
@@ -294,6 +311,10 @@ export function createHooksRunner(config = {}) {
     ];
     async function runHooks(eventName, payload) {
         const merged = { ok: true };
+        if (!isKnownHookEvent(eventName)) {
+            console.warn(`[hooks-runner] runHooks called with unknown event "${eventName}"; ignoring.`);
+            return merged;
+        }
         const payloadJson = buildPayload(eventName, payload, ctx);
         for (const hook of allHooks) {
             if (!shouldMatch(hook, eventName, payload))

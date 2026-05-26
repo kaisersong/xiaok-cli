@@ -52,6 +52,13 @@ describe('desktop icon generation', () => {
 
     expect(Math.abs(logoCenterX - 512)).toBeLessThan(1024 * 0.03);
     expect(Math.abs(logoCenterY - 512)).toBeLessThan(1024 * 0.03);
+
+    const decodedAppIcon = decodePng(appIcon);
+    expect(pixelAlpha(decodedAppIcon, 0, 0)).toBe(0);
+    expect(pixelAlpha(decodedAppIcon, 1023, 0)).toBe(0);
+    expect(pixelAlpha(decodedAppIcon, 0, 1023)).toBe(0);
+    expect(pixelAlpha(decodedAppIcon, 1023, 1023)).toBe(0);
+    expect(pixelAlpha(decodedAppIcon, 512, 512)).toBe(255);
   });
 });
 
@@ -113,4 +120,8 @@ function findForegroundBounds(image: { width: number; height: number; rgba: Buff
 
   expect(maxX).toBeGreaterThan(-1);
   return { minX, maxX, minY, maxY };
+}
+
+function pixelAlpha(image: { width: number; height: number; rgba: Buffer }, x: number, y: number): number {
+  return image.rgba[(y * image.width + x) * 4 + 3];
 }

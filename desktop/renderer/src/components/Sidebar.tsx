@@ -20,6 +20,7 @@ interface UpdateStatus {
   available: boolean;
   downloading: boolean;
   downloaded: boolean;
+  installing?: boolean;
   progress: number;
   version?: string;
   error?: string;
@@ -207,10 +208,13 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     updateStatus.checking ||
     updateStatus.available ||
     updateStatus.downloading ||
-    updateStatus.downloaded
+    updateStatus.downloaded ||
+    updateStatus.installing
   ));
   const updateReminderLabel = updateStatus?.downloaded
-    ? `安装 ${updateVersion}`
+    ? updateStatus.installing
+      ? '安装中'
+      : `安装 ${updateVersion}`
     : updateStatus?.downloading
       ? `${updateStatus.progress}%`
       : updateStatus?.checking
@@ -224,7 +228,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     : 'flex flex-col gap-0';
 
   const handleUpdateReminderClick = async () => {
-    if (!updateStatus || updateStatus.downloading || updateStatus.checking) return;
+    if (!updateStatus || updateStatus.downloading || updateStatus.checking || updateStatus.installing) return;
     if (updateStatus.downloaded) {
       await api.quitAndInstall();
       return;
@@ -435,18 +439,20 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
               <button
                 type="button"
                 onClick={handleUpdateReminderClick}
-                disabled={updateStatus?.downloading || updateStatus?.checking}
+                disabled={updateStatus?.downloading || updateStatus?.checking || updateStatus?.installing}
                 aria-label={updateReminderLabel}
                 className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-[background-color,color,transform] duration-[60ms] active:scale-[0.96] ${
                   updateStatus?.downloaded
                     ? 'bg-green-50 text-green-700 hover:bg-green-100'
-                    : updateStatus?.downloading || updateStatus?.checking
+                    : updateStatus?.downloading || updateStatus?.checking || updateStatus?.installing
                       ? 'cursor-default bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]'
                       : 'bg-[var(--c-accent)] text-white hover:opacity-90'
                 }`}
                 title={
                   updateStatus?.downloaded
-                    ? `更新已就绪: v${updateVersion}，点击安装`
+                    ? updateStatus.installing
+                      ? `正在安装 v${updateVersion}`
+                      : `更新已就绪: v${updateVersion}，点击安装`
                     : updateStatus?.downloading
                       ? `正在下载: ${updateStatus.progress}%`
                       : updateStatus?.checking
@@ -457,7 +463,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                 {updateStatus?.downloaded ? (
                   <Download size={14} />
                 ) : (
-                  <RefreshCw size={14} className={updateStatus?.downloading || updateStatus?.checking ? 'animate-spin' : ''} />
+                  <RefreshCw size={14} className={updateStatus?.downloading || updateStatus?.checking || updateStatus?.installing ? 'animate-spin' : ''} />
                 )}
                 <span>{updateReminderLabel}</span>
               </button>

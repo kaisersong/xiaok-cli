@@ -235,3 +235,51 @@ describe('hooks runner', () => {
     expect(result.message).toBeUndefined();
   });
 });
+
+describe('hooks runner unknown event handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('warns and ignores unknown event names rather than throwing', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      createHooksRunner({
+        hooks: [
+          {
+            type: 'command',
+            command: 'echo deprecated',
+            events: ['Notification', 'PreCompact', 'PreToolUse'] as any,
+          },
+        ],
+      });
+      expect(warnSpy).toHaveBeenCalled();
+      const messages = warnSpy.mock.calls.map((args) => args.join(' '));
+      expect(messages.some((m) => m.includes('Notification'))).toBe(true);
+      expect(messages.some((m) => m.includes('PreCompact'))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('does not invoke hooks for deleted events', async () => {
+    const mockExec = vi.mocked(exec) as any;
+    mockExec.mockImplementation(() => createMockChild({ exitCode: 0 }));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const runner = createHooksRunner({
+        hooks: [
+          {
+            type: 'command',
+            command: 'echo never',
+            events: ['Notification'] as any,
+          },
+        ],
+      });
+      await runner.runHooks('Notification' as any, {});
+      expect(mockExec).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+});

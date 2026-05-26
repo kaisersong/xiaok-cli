@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { loadConfig, saveConfig, getConfigPath } from '../../src/utils/config.js';
+import { loadConfig, saveConfig, getConfigPath, getConfigDir } from '../../src/utils/config.js';
 import { DEFAULT_CONFIG } from '../../src/types.js';
 
 describe('config', () => {
@@ -158,5 +158,33 @@ describe('config', () => {
       maxInputTokens: 200,
       maxOutputTokens: 100,
     });
+  });
+});
+
+describe('getConfigDir', () => {
+  const originalEnv = process.env.XIAOK_CONFIG_DIR;
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.XIAOK_CONFIG_DIR;
+    } else {
+      process.env.XIAOK_CONFIG_DIR = originalEnv;
+    }
+  });
+
+  it('returns base dir when called without args', () => {
+    process.env.XIAOK_CONFIG_DIR = '/tmp/xiaok-base';
+    expect(getConfigDir()).toBe('/tmp/xiaok-base');
+  });
+
+  it('joins subdir under base', () => {
+    process.env.XIAOK_CONFIG_DIR = '/tmp/xiaok-base';
+    expect(getConfigDir('plugins')).toBe(join('/tmp/xiaok-base', 'plugins'));
+    expect(getConfigDir('runtime')).toBe(join('/tmp/xiaok-base', 'runtime'));
+  });
+
+  it('respects XIAOK_CONFIG_DIR override for subdir', () => {
+    process.env.XIAOK_CONFIG_DIR = '/custom/root';
+    expect(getConfigDir('desktop')).toBe(join('/custom/root', 'desktop'));
   });
 });

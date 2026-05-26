@@ -137,6 +137,7 @@ export async function createPlatformRuntimeContext(options) {
                         agent: payload.agent,
                         prompt: payload.prompt,
                         cwd: payload.cwd,
+                        parentDepth: payload.parentDepth,
                     });
                     return { ok: true, summary: result.slice(0, 200) };
                 },

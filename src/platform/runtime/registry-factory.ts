@@ -35,12 +35,17 @@ export interface PlatformRegistryFactoryOptions {
 }
 
 export interface PlatformRegistryFactory {
-  createRegistry(cwd: string, allowedTools?: string[], agentId?: string): ToolRegistry;
+  createRegistry(
+    cwd: string,
+    allowedTools?: string[],
+    agentId?: string,
+    opts?: { parentDepth?: number },
+  ): ToolRegistry;
   getReminderApi(): ReminderApi | undefined;
 }
 
 export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOptions): PlatformRegistryFactory {
-  const runNamedSubAgent = async (agentName: string, prompt: string, cwd?: string): Promise<string> => {
+  const runNamedSubAgent = async (agentName: string, prompt: string, cwd?: string, parentDepth?: number): Promise<string> => {
     const agentDef = options.platform.customAgents.find((agent) => agent.name === agentName);
     if (!agentDef) {
       throw new Error(`unknown subagent: ${agentName}`);
@@ -55,11 +60,12 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
       createRegistry: createRegistryForCwd,
       buildSystemPrompt: options.buildSystemPrompt,
       worktreeManager: options.platform.worktreeManager,
+      parentDepth,
     });
   };
 
   const backgroundRunner = options.platform.createBackgroundRunner(
-    async ({ agent, prompt, cwd }) => runNamedSubAgent(agent, prompt, cwd),
+    async ({ agent, prompt, cwd, parentDepth }) => runNamedSubAgent(agent, prompt, cwd, parentDepth),
     options.notifyBackgroundJob,
   );
   const reminders = options.source === 'chat'
@@ -72,7 +78,12 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
     });
   }
 
-  function createRegistryForCwd(cwd: string, allowedTools?: string[], agentId = 'main'): ToolRegistry {
+  function createRegistryForCwd(
+    cwd: string,
+    allowedTools?: string[],
+    agentId = 'main',
+    opts?: { parentDepth?: number },
+  ): ToolRegistry {
     const extraTools = [
       ...(options.workflowTools ?? []),
       ...(reminders
@@ -98,6 +109,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
         backgroundRunner,
         worktreeManager: options.platform.worktreeManager,
         getTaskId: options.getCurrentTaskId,
+        parentDepth: opts?.parentDepth,
       }),
     ];
 

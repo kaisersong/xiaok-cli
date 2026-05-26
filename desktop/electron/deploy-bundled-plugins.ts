@@ -8,7 +8,7 @@
 import { app } from 'electron';
 import { join, dirname } from 'node:path';
 import { existsSync, cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { getConfigDir } from '../../src/utils/config.js';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -69,7 +69,7 @@ export function ensureReportRendererCssCompat(pluginDir: string): void {
 
 export async function deployBundledPlugins(): Promise<DeployResult> {
   const result: DeployResult = { deployed: [], pythonAvailable: false, venvReady: false };
-  const pluginsDir = join(homedir(), '.xiaok', 'plugins');
+  const pluginsDir = getConfigDir('plugins');
   mkdirSync(pluginsDir, { recursive: true });
 
   const bundledDir = app.isPackaged
@@ -125,14 +125,14 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
   result.pythonAvailable = !!pythonCmd;
 
   if (pythonCmd) {
-    const venvDir = join(homedir(), '.xiaok', 'runtime', 'python-env');
+    const venvDir = getConfigDir(join('runtime', 'python-env'));
     const venvPython = process.platform === 'win32'
       ? join(venvDir, 'Scripts', 'python.exe')
       : join(venvDir, 'bin', 'python3');
 
     if (!existsSync(venvPython)) {
       try {
-        mkdirSync(join(homedir(), '.xiaok', 'runtime'), { recursive: true });
+        mkdirSync(getConfigDir('runtime'), { recursive: true });
         await execFileAsync(pythonCmd, ['-m', 'venv', venvDir], { timeout: 30_000 });
       } catch {
         return result;

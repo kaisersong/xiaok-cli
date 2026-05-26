@@ -1935,6 +1935,13 @@ export interface LocaleStrings {
   scheduledSave: string;
   scheduledSaving: string;
   scheduledCancel: string;
+  scheduledPlanModeBadge: string;
+  scheduledPlanModeHint: string;
+  scheduledApproveAuto: string;
+  scheduledApproveAutoTitle: string;
+  scheduledApproveAutoNeedsReview: string;
+  scheduledRevokeAuto: string;
+  scheduledRevokeAutoTitle: string;
 
   // common
   commonConfirm: string;

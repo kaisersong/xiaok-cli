@@ -38,6 +38,13 @@ describe('preload API contract', () => {
       'deleteMCPInstall',
       'listPluginMcpServers',
       'setPluginMcpServerEnabled',
+      'restartPluginMcpServers',
+      'restartPluginMcpServer',
+      'getComputerUseCapabilityStatus',
+      'enableComputerUse',
+      'reconnectComputerUse',
+      'disableComputerUse',
+      'openPluginDependencyPermissionSettings',
       'installPlugin',
       'listAvailablePlugins',
       'listPluginDependencyStatuses',
@@ -72,6 +79,8 @@ describe('preload API contract', () => {
       'cancelScheduledTask',
       'getTimedActions',
       'getTimedActionRuns',
+      'approveTimedActionAuto',
+      'revokeTimedActionAuto',
       'onScheduledTaskDue',
       'listMemories',
       'createMemory',
@@ -124,6 +133,13 @@ describe('preload API contract', () => {
     await api.installPluginDependency({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver', confirmed: true });
     await api.updatePluginDependency({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver', confirmed: true });
     await api.diagnosePluginDependency({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver' });
+    await api.restartPluginMcpServers();
+    await api.restartPluginMcpServer({ name: 'cua-driver' });
+    await api.getComputerUseCapabilityStatus();
+    await api.enableComputerUse();
+    await api.reconnectComputerUse();
+    await api.disableComputerUse();
+    await api.openPluginDependencyPermissionSettings({ permission: 'accessibility' });
 
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:listPluginDependencyStatuses');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:installPluginDependency', {
@@ -139,6 +155,15 @@ describe('preload API contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:diagnosePluginDependency', {
       pluginName: 'cua-computer-use',
       dependencyId: 'cua-driver',
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:restartPluginMcpServers');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:restartPluginMcpServer', { name: 'cua-driver' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:getComputerUseCapabilityStatus');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:enableComputerUse');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:reconnectComputerUse');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:disableComputerUse');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:openPluginDependencyPermissionSettings', {
+      permission: 'accessibility',
     });
   });
 
@@ -249,7 +274,7 @@ describe('preload API contract', () => {
     });
   });
 
-  it('routes createTaskWithFiles through semantic IPC channel', async () => {
+  it('routes createTask thread context through semantic IPC channel', async () => {
     const result = { taskId: 'task_test' };
     const ipcRenderer = {
       invoke: vi.fn().mockResolvedValue(result),
@@ -257,8 +282,46 @@ describe('preload API contract', () => {
       off: vi.fn(),
     };
     const api = createPreloadApi(ipcRenderer);
+    const input = {
+      prompt: 'test',
+      materials: [],
+      context: { threadId: 'thread-a', taskIds: ['task_1'] },
+    };
 
-    await expect(api.createTaskWithFiles({ prompt: 'test', filePaths: ['/tmp/file.md'] })).resolves.toBe(result);
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:createTaskWithFiles', { prompt: 'test', filePaths: ['/tmp/file.md'] });
+    await expect(api.createTask(input)).resolves.toBe(result);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:createTask', input);
+  });
+
+  it('routes createTaskWithFiles thread context through semantic IPC channel', async () => {
+    const result = { taskId: 'task_test' };
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue(result),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer);
+    const input = {
+      prompt: 'test',
+      filePaths: ['/tmp/file.md'],
+      context: { threadId: 'thread-a', taskIds: ['task_1'] },
+    };
+
+    await expect(api.createTaskWithFiles(input)).resolves.toBe(result);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:createTaskWithFiles', input);
+  });
+
+  it('routes timed action review approve / revoke through semantic IPC channels', async () => {
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue({ id: 'action-1' }),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer);
+
+    await api.approveTimedActionAuto('action-1');
+    await api.revokeTimedActionAuto('action-1');
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:timedAction:approveAuto', 'action-1');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:timedAction:revokeAuto', 'action-1');
   });
 });

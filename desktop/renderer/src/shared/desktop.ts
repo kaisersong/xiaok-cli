@@ -7,7 +7,7 @@ export function getDesktopAccessToken(): string | null { return 'local-token'; }
 export type UpdaterComponent = 'openviking' | 'sandbox_kernel' | 'sandbox_rootfs' | 'rtk' | 'opencli';
 
 export interface AppUpdaterState {
-  phase: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error' | 'unsupported';
+  phase: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'installing' | 'error' | 'unsupported';
   progressPercent?: number;
   currentVersion?: string;
   latestVersion?: string;
@@ -19,6 +19,7 @@ interface PreloadUpdateStatus {
   available: boolean;
   downloading: boolean;
   downloaded: boolean;
+  installing?: boolean;
   progress: number;
   version?: string;
   currentVersion?: string;
@@ -29,6 +30,9 @@ function mapUpdateStatus(s: PreloadUpdateStatus): AppUpdaterState {
   const base = { currentVersion: s.currentVersion, latestVersion: s.version }
   if (s.error) {
     return { ...base, phase: 'error', error: s.error }
+  }
+  if (s.installing) {
+    return { ...base, phase: 'installing', progressPercent: 100 }
   }
   if (s.downloaded) {
     return { ...base, phase: 'downloaded', progressPercent: 100 }

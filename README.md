@@ -20,6 +20,16 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.3.5:**
+
+- **Computer Use Enablement**: `xiaok_computer_use` is now a stable product tool. When CUA is not ready it returns structured recoverable errors and the chat UI shows an inline Computer Use action card instead of exposing raw MCP failures
+- **CUA Permission and Recovery Flow**: Desktop now separates first-time user enablement from later auto-recovery, launches CUA through `CuaDriver.app` for correct macOS TCC attribution, detects empty capture output, and only auto-recovers on trusted packaged installs
+- **Targeted Plugin Reconnect**: Enabling Computer Use only reconnects the `cua-driver` MCP server and no longer restarts report or slide renderer plugins
+- **Shell Fallback Guardrails**: Screen automation fallbacks such as `screencapture`, `cliclick`, `cua-driver`, and UI-driving `osascript` now require approval instead of silently bypassing Computer Use
+- **Packaged Runtime Reliability**: KSwarm and Intent Broker background services now use the packaged Electron runtime as Node when needed, so installed apps do not depend on a user shell `node` in `PATH`
+- **Desktop Update and Branding Fixes**: Update installation now marks the app as quitting before `quitAndInstall`, reports install errors, and packaged macOS dock icons prefer the bundle `icon.icns`
+- **Build Loop and Smoke Coverage**: Desktop packaging keeps clean builds for release while preserving incremental `build:main` for development; the smoke suite covers 84 files and 587 tests
+
 **What's New in v1.3.4:**
 
 - **Swarm Project Reliability**: KSwarm projects now route Xiaok seed PO/Worker work into the real Desktop agent runtime instead of a reduced sidecar worker, preserving model, tool, MCP, web-search, report, and slide capabilities

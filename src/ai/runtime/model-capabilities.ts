@@ -156,7 +156,7 @@ export function buildPromptCacheSegments(
   let systemPromptBlocks: SystemPromptBlock[];
 
   if (typeof systemPromptOrSegments === 'string') {
-    systemPromptBlocks = [{ type: 'text', text: systemPromptOrSegments, cache_control: { type: 'ephemeral' } }];
+    systemPromptBlocks = [{ type: 'text', text: systemPromptOrSegments }];
   } else {
     systemPromptBlocks = systemPromptOrSegments
       .filter((seg) => seg.text)

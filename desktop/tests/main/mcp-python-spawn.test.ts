@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-describe('MCP server spawn python command substitution', () => {
+describe('MCP server spawn command substitution', () => {
   const originalEnv = process.env.XIAOK_PYTHON_CMD;
+  const originalNodeEnv = process.env.XIAOK_NODE_CMD;
 
   beforeEach(() => {
     delete process.env.XIAOK_PYTHON_CMD;
+    delete process.env.XIAOK_NODE_CMD;
   });
 
   afterEach(() => {
@@ -13,13 +15,22 @@ describe('MCP server spawn python command substitution', () => {
     } else {
       delete process.env.XIAOK_PYTHON_CMD;
     }
+    if (originalNodeEnv !== undefined) {
+      process.env.XIAOK_NODE_CMD = originalNodeEnv;
+    } else {
+      delete process.env.XIAOK_NODE_CMD;
+    }
   });
 
   // Replicate the command substitution logic from desktop-services.ts
   function resolveCommand(serverCommand: string): string {
-    return (serverCommand === 'python3' || serverCommand === 'python')
-      ? (process.env.XIAOK_PYTHON_CMD || serverCommand)
-      : serverCommand;
+    if (serverCommand === 'python3' || serverCommand === 'python') {
+      return process.env.XIAOK_PYTHON_CMD || serverCommand;
+    }
+    if (serverCommand === 'node' || serverCommand === 'nodejs') {
+      return process.env.XIAOK_NODE_CMD || process.execPath;
+    }
+    return serverCommand;
   }
 
   it('uses XIAOK_PYTHON_CMD when set and command is python3', () => {
@@ -37,9 +48,15 @@ describe('MCP server spawn python command substitution', () => {
     expect(resolveCommand('python')).toBe('python');
   });
 
-  it('does not substitute node command', () => {
+  it('uses the current runtime executable for node MCP servers so packaged apps do not require PATH node', () => {
     process.env.XIAOK_PYTHON_CMD = '/some/venv/python3';
-    expect(resolveCommand('node')).toBe('node');
+    expect(resolveCommand('node')).toBe(process.execPath);
+    expect(resolveCommand('nodejs')).toBe(process.execPath);
+  });
+
+  it('honors XIAOK_NODE_CMD for node MCP servers', () => {
+    process.env.XIAOK_NODE_CMD = '/opt/node/bin/node';
+    expect(resolveCommand('node')).toBe('/opt/node/bin/node');
   });
 
   it('does not substitute arbitrary commands', () => {

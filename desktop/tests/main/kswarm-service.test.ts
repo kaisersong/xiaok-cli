@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildBackgroundNodeSpawnOptions,
   KSwarmUnavailableError,
+  resolveBackgroundNodeRuntime,
   shouldAdoptExistingKSwarmService,
 } from '../../electron/kswarm-service.js';
 
@@ -94,6 +95,38 @@ describe('kswarm service spawn options', () => {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     expect(options.windowsHide).toBeUndefined();
+  });
+
+  it('uses the current Node executable instead of PATH lookup for background services', () => {
+    const runtime = resolveBackgroundNodeRuntime({
+      env: { PATH: '' },
+      execPath: '/usr/local/bin/node',
+    });
+
+    expect(runtime.command).toBe('/usr/local/bin/node');
+    expect(runtime.env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+  });
+
+  it('runs packaged Electron as Node for background services', () => {
+    const runtime = resolveBackgroundNodeRuntime({
+      env: { PATH: '' },
+      execPath: '/Applications/xiaok.app/Contents/MacOS/xiaok',
+      electronVersion: '39.0.0',
+    });
+
+    expect(runtime.command).toBe('/Applications/xiaok.app/Contents/MacOS/xiaok');
+    expect(runtime.env.ELECTRON_RUN_AS_NODE).toBe('1');
+  });
+
+  it('honors XIAOK_NODE_CMD for background services', () => {
+    const runtime = resolveBackgroundNodeRuntime({
+      env: { XIAOK_NODE_CMD: '/opt/homebrew/bin/node' },
+      execPath: '/Applications/xiaok.app/Contents/MacOS/xiaok',
+      electronVersion: '39.0.0',
+    });
+
+    expect(runtime.command).toBe('/opt/homebrew/bin/node');
+    expect(runtime.env.ELECTRON_RUN_AS_NODE).toBeUndefined();
   });
 });
 

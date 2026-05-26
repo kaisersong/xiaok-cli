@@ -8,7 +8,7 @@
  */
 
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { getConfigDir } from '../../src/utils/config.js';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -34,7 +34,7 @@ export function sessionHash(filePath: string): string {
 const MAX_BACKUPS = 5;
 
 function backupDir(sessionId: string, baseDir?: string): string {
-  const root = baseDir ?? join(homedir(), '.xiaok');
+  const root = baseDir ?? getConfigDir();
   return join(root, 'artifact-backups', sessionId);
 }
 
@@ -122,7 +122,7 @@ export interface ArtifactSession {
 }
 
 function sessionsDir(baseDir?: string): string {
-  const root = baseDir ?? join(homedir(), '.xiaok');
+  const root = baseDir ?? getConfigDir();
   return join(root, 'artifact-sessions');
 }
 

@@ -25,8 +25,9 @@ export interface McpRuntimeToolBuildOptions {
 }
 
 const CUA_READ_ONLY_TOOLS = new Set([
-  'get_app_state',
+  'get_window_state',
   'list_apps',
+  'list_windows',
 ]);
 
 export function resolveDefaultMcpToolPermission(serverName: string, toolName: string): PermissionClass {

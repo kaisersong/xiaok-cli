@@ -15,10 +15,16 @@ export interface ExecuteNamedSubAgentOptions {
   sessionId: string;
   cwd?: string;
   adapter: () => ModelAdapter;
-  createRegistry(cwd: string, allowedTools?: string[], agentId?: string): ToolRegistry;
+  createRegistry(
+    cwd: string,
+    allowedTools?: string[],
+    agentId?: string,
+    opts?: { parentDepth?: number },
+  ): ToolRegistry;
   buildSystemPrompt(cwd: string): Promise<string>;
   worktreeManager?: WorktreeManager;
   forkContext?: ToolExecutionContext;
+  parentDepth?: number;
 }
 
 export async function executeNamedSubAgent(options: ExecuteNamedSubAgentOptions): Promise<string> {
@@ -29,7 +35,12 @@ export async function executeNamedSubAgent(options: ExecuteNamedSubAgentOptions)
     options.cwd,
   );
   const cwd = resolved.cwd;
-  const registry = options.createRegistry(cwd, options.agentDef.allowedTools, options.agentDef.name);
+  const registry = options.createRegistry(
+    cwd,
+    options.agentDef.allowedTools,
+    options.agentDef.name,
+    { parentDepth: options.parentDepth },
+  );
   const systemPromptBase = await options.buildSystemPrompt(cwd);
   const systemPrompt = [systemPromptBase, options.agentDef.systemPrompt].filter(Boolean).join('\n\n');
   const baseAdapter = options.adapter();

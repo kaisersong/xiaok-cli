@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MaterialRegistry } from '../../../src/runtime/task-host/material-registry.js';
 import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-store.js';
-import { InProcessTaskRuntimeHost, type TaskRunner } from '../../../src/runtime/task-host/task-runtime-host.js';
-import type { DesktopTaskEvent, MaterialRecord } from '../../../src/runtime/task-host/types.js';
+import { buildHistoryFromTaskSnapshots, InProcessTaskRuntimeHost, type TaskRunner } from '../../../src/runtime/task-host/task-runtime-host.js';
+import type { DesktopTaskEvent, MaterialRecord, TaskSnapshot } from '../../../src/runtime/task-host/types.js';
 
 describe('InProcessTaskRuntimeHost', () => {
   let rootDir: string;
@@ -306,7 +306,67 @@ describe('InProcessTaskRuntimeHost', () => {
     expect(await host.getActiveTask()).toBeNull();
   });
 
-  it('passes history from completed task to the next runner call', async () => {
+  it('rebuilds history from persisted context task snapshots after host restart', async () => {
+    let callCount = 0;
+    let historyOnSecondCall: Array<{ role: string; content: string }> = [];
+    const runner: TaskRunner = async ({ history, emitRuntimeEvent }) => {
+      callCount++;
+      if (callCount === 2) {
+        historyOnSecondCall = history;
+      }
+      emitRuntimeEvent({
+        type: 'receipt_emitted',
+        sessionId: 'sess_1',
+        turnId: `turn_${callCount}`,
+        intentId: `intent_${callCount}`,
+        stepId: `step_${callCount}`,
+        note: `完成任务${callCount}`,
+      });
+    };
+    let taskOrd = 0;
+    const firstHost = new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner,
+      now: () => 200,
+      createTaskId: () => `task_${++taskOrd}`,
+      createSessionId: () => `sess_${taskOrd}`,
+    });
+
+    const first = await firstHost.createTask({ prompt: '第一个任务', materials: [{ materialId: material.materialId }] });
+    await waitFor(async () => (await firstHost.recoverTask(first.taskId)).snapshot.status === 'completed');
+
+    const restartedHost = new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner,
+      now: () => 200,
+      createTaskId: () => `task_${++taskOrd}`,
+      createSessionId: () => `sess_${taskOrd}`,
+    });
+
+    await restartedHost.createTask({
+      prompt: '第二个任务',
+      materials: [{ materialId: material.materialId }],
+      context: { threadId: 'thread-a', taskIds: [first.taskId] },
+    });
+    await waitFor(async () => callCount === 2);
+    await waitFor(async () => (await restartedHost.recoverTask('task_2')).snapshot.status === 'completed');
+
+    expect(historyOnSecondCall.length).toBe(2);
+    expect(historyOnSecondCall[0]).toEqual({ role: 'user', content: '第一个任务' });
+    expect(historyOnSecondCall[1].role).toBe('assistant');
+    expect(historyOnSecondCall[1].content).toContain('完成任务1');
+    const recovered = await restartedHost.recoverTask('task_2');
+    expect(recovered.snapshot.context).toEqual({
+      threadId: 'thread-a',
+      taskIds: ['task_1'],
+      loadedTaskIds: ['task_1'],
+      skipped: [],
+    });
+  });
+
+  it('does not leak prior task history when context is omitted', async () => {
     let callCount = 0;
     let historyOnSecondCall: Array<{ role: string; content: string }> = [];
     const runner: TaskRunner = async ({ history, emitRuntimeEvent }) => {
@@ -340,13 +400,10 @@ describe('InProcessTaskRuntimeHost', () => {
     await waitFor(async () => callCount === 2);
     await waitFor(async () => (await host.recoverTask('task_2')).snapshot.status === 'completed');
 
-    expect(historyOnSecondCall.length).toBe(2);
-    expect(historyOnSecondCall[0]).toEqual({ role: 'user', content: '第一个任务' });
-    expect(historyOnSecondCall[1].role).toBe('assistant');
-    expect(historyOnSecondCall[1].content).toContain('完成任务1');
+    expect(historyOnSecondCall).toEqual([]);
   });
 
-  it('passes history from cancelled task to the next runner call', async () => {
+  it('passes history from cancelled context task to the next runner call', async () => {
     let callCount = 0;
     let historyOnSecondCall: Array<{ role: string; content: string }> = [];
     const runner: TaskRunner = async ({ signal, history, emitRuntimeEvent }) => {
@@ -384,13 +441,89 @@ describe('InProcessTaskRuntimeHost', () => {
     // Let finally block complete
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    await host.createTask({ prompt: '不是mac定时任务，是xiaok定时任务', materials: [{ materialId: material.materialId }] });
+    await host.createTask({
+      prompt: '不是mac定时任务，是xiaok定时任务',
+      materials: [{ materialId: material.materialId }],
+      context: { threadId: 'thread-a', taskIds: ['task_1'] },
+    });
     await waitFor(async () => callCount === 2, 5000);
     await waitFor(async () => (await host.recoverTask('task_2')).snapshot.status === 'completed', 5000);
 
     expect(historyOnSecondCall.length).toBe(2);
     expect(historyOnSecondCall[0]).toEqual({ role: 'user', content: '每天晚上11点同步mydocs' });
     expect(historyOnSecondCall[1].role).toBe('assistant');
+  });
+
+  it('skips missing non-terminal and self context task ids with an audit trail', async () => {
+    let callCount = 0;
+    let historyOnSecondCall: Array<{ role: string; content: string }> = [];
+    const runner: TaskRunner = async ({ history, emitRuntimeEvent }) => {
+      callCount++;
+      if (callCount === 2) {
+        historyOnSecondCall = history;
+      }
+      emitRuntimeEvent({
+        type: 'receipt_emitted',
+        sessionId: 'sess_1',
+        turnId: `turn_${callCount}`,
+        intentId: `intent_${callCount}`,
+        stepId: `step_${callCount}`,
+        note: `完成任务${callCount}`,
+      });
+    };
+    let taskOrd = 0;
+    const host = new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner,
+      now: () => 200,
+      createTaskId: () => `task_${++taskOrd}`,
+      createSessionId: () => `sess_${taskOrd}`,
+    });
+
+    await host.createTask({ prompt: '第一条可恢复上下文', materials: [{ materialId: material.materialId }] });
+    await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed');
+    await snapshotStore.save(makeSnapshot({ taskId: 'task_running', status: 'running', prompt: '还没结束' }));
+
+    await host.createTask({
+      prompt: '第二条输入',
+      materials: [{ materialId: material.materialId }],
+      context: { threadId: 'thread-a', taskIds: ['task_missing', 'task_running', 'task_2', 'task_1'] },
+    });
+    await waitFor(async () => callCount === 2);
+    await waitFor(async () => (await host.recoverTask('task_2')).snapshot.status === 'completed');
+
+    expect(historyOnSecondCall.map(message => message.content)).toEqual(['第一条可恢复上下文', '完成任务1']);
+    const recovered = await host.recoverTask('task_2');
+    expect(recovered.snapshot.context).toEqual({
+      threadId: 'thread-a',
+      taskIds: ['task_missing', 'task_running', 'task_2', 'task_1'],
+      loadedTaskIds: ['task_1'],
+      skipped: expect.arrayContaining([
+        { taskId: 'task_missing', reason: 'missing' },
+        { taskId: 'task_running', reason: 'non_terminal' },
+        { taskId: 'task_2', reason: 'self' },
+      ]),
+    });
+  });
+
+  it('bounds reconstructed history by task count and text length', () => {
+    const result = buildHistoryFromTaskSnapshots([
+      makeSnapshot({ taskId: 'task_1', createdAt: 1, prompt: '第一条'.repeat(20), summary: '第一条完成'.repeat(20) }),
+      makeSnapshot({ taskId: 'task_2', createdAt: 2, prompt: '第二条'.repeat(20), summary: '第二条完成'.repeat(20) }),
+      makeSnapshot({ taskId: 'task_3', createdAt: 3, prompt: '第三条'.repeat(20), summary: '第三条完成'.repeat(20) }),
+    ], {
+      maxTasks: 2,
+      maxUserChars: 12,
+      maxAssistantChars: 16,
+      maxTotalChars: 200,
+    });
+
+    expect(result.loadedTaskIds).toEqual(['task_2', 'task_3']);
+    expect(result.skipped).toEqual([{ taskId: 'task_1', reason: 'too_old' }]);
+    expect(result.history).toHaveLength(4);
+    expect(result.history[0]).toEqual({ role: 'user', content: '第二条第二条第二条第二条[已截断，保留前 12 字符]' });
+    expect(result.history[1].content).toContain('[已截断，保留前 16 字符]');
   });
 
   describe('deliverable gate integration', () => {
@@ -460,6 +593,41 @@ describe('InProcessTaskRuntimeHost', () => {
 
       await host.createTask({
         prompt: '创建定时任务，每天晚上11点同步mydocs',
+        materials: [],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed', 3000);
+      const recovered = await host.recoverTask('task_1');
+      expect(recovered.snapshot.events).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'error', message: 'Task is being completed without artifact evidence.' }),
+      ]));
+    });
+
+    it('allows CUA validation completions without treating screenshotHasImage as an image deliverable', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '{"usedTool":"xiaok_computer_use","screenshotHasImage":true,"errors":[]}',
+        });
+      });
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        aheGuards: { artifactEvidence: true },
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: '请使用 xiaok_computer_use 验证 CUA，最后汇报 screenshotHasImage',
         materials: [],
       });
 
@@ -766,6 +934,25 @@ describe('InProcessTaskRuntimeHost', () => {
     });
   }
 });
+
+function makeSnapshot(overrides: Partial<TaskSnapshot> & { taskId: string; summary?: string }): TaskSnapshot {
+  const taskId = overrides.taskId;
+  const result = overrides.summary
+    ? { summary: overrides.summary, artifacts: [] }
+    : overrides.result;
+  return {
+    taskId,
+    sessionId: `sess_${taskId}`,
+    status: overrides.status ?? 'completed',
+    prompt: overrides.prompt ?? `prompt ${taskId}`,
+    materials: [],
+    events: result ? [{ type: 'result', result }] : [],
+    result,
+    salvage: overrides.salvage,
+    createdAt: overrides.createdAt ?? 1,
+    updatedAt: overrides.updatedAt ?? overrides.createdAt ?? 1,
+  };
+}
 
 async function takeEvents(iterable: AsyncIterable<DesktopTaskEvent>, count: number): Promise<DesktopTaskEvent[]> {
   const events: DesktopTaskEvent[] = [];

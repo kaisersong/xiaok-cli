@@ -44,6 +44,8 @@ interface TimedActionRow {
   locked_at: number | null;
   last_runtime_task_id: string | null;
   last_error: string | null;
+  reviewed_at: number | null;
+  user_approved_auto: number;
   created_at: number;
   updated_at: number;
 }
@@ -95,6 +97,7 @@ export class TimedActionStore {
       runCount: input.runCount ?? 0,
       consecutiveFailures: input.consecutiveFailures ?? 0,
       lastRuntimeTaskId: input.lastRuntimeTaskId,
+      userApprovedAuto: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -426,12 +429,23 @@ export class TimedActionStore {
       );
     `);
     this.ensureTimedActionDescriptionColumn();
+    this.ensureTimedActionReviewColumns();
   }
 
   private ensureTimedActionDescriptionColumn(): void {
     const columns = typedRows<{ name: string }>(this.db.prepare('pragma table_info(timed_actions)').all());
     if (!columns.some(column => column.name === 'description')) {
       this.db.exec("alter table timed_actions add column description text not null default ''");
+    }
+  }
+
+  private ensureTimedActionReviewColumns(): void {
+    const columns = typedRows<{ name: string }>(this.db.prepare('pragma table_info(timed_actions)').all());
+    if (!columns.some(column => column.name === 'reviewed_at')) {
+      this.db.exec('alter table timed_actions add column reviewed_at integer');
+    }
+    if (!columns.some(column => column.name === 'user_approved_auto')) {
+      this.db.exec('alter table timed_actions add column user_approved_auto integer not null default 0');
     }
   }
 
@@ -470,6 +484,26 @@ export class TimedActionStore {
     `).run(status, finishedAt, runtimeTaskId ?? null, error ?? null, decision ? JSON.stringify(decision) : null, runId);
   }
 
+  approveAuto(id: string, now: number = Date.now()): TimedActionRecord | undefined {
+    const result = this.db.prepare(`
+      update timed_actions
+      set reviewed_at = ?, user_approved_auto = 1, updated_at = ?
+      where id = ?
+    `).run(now, now, id);
+    if (result.changes === 0) return undefined;
+    return this.getAction(id);
+  }
+
+  revokeAuto(id: string, now: number = Date.now()): TimedActionRecord | undefined {
+    const result = this.db.prepare(`
+      update timed_actions
+      set user_approved_auto = 0, updated_at = ?
+      where id = ?
+    `).run(now, id);
+    if (result.changes === 0) return undefined;
+    return this.getAction(id);
+  }
+
   private rowToRecord(row: TimedActionRow): TimedActionRecord {
     return {
       id: row.id,
@@ -489,6 +523,8 @@ export class TimedActionStore {
       lockedAt: row.locked_at ?? undefined,
       lastRuntimeTaskId: row.last_runtime_task_id ?? undefined,
       lastError: row.last_error ?? undefined,
+      reviewedAt: row.reviewed_at ?? undefined,
+      userApprovedAuto: row.user_approved_auto === 1,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

@@ -131,6 +131,26 @@ describe('subagent-executor system prompt isolation', () => {
 });
 
 describe('subagent-executor registry isolation', () => {
+  it('forwards parentDepth to createRegistry opts', async () => {
+    let capturedOpts: { parentDepth?: number } | undefined;
+    const createRegistry = vi.fn().mockImplementation((_cwd, _allowedTools, _agentId, opts) => {
+      capturedOpts = opts;
+      return mockRegistry;
+    });
+
+    await executeNamedSubAgent({
+      agentDef: { name: 'test', systemPrompt: '', source: 'builtin' },
+      prompt: 'test',
+      sessionId: 'session-1',
+      adapter: () => mockAdapter,
+      createRegistry,
+      buildSystemPrompt: async () => 'prompt',
+      parentDepth: 2,
+    });
+
+    expect(capturedOpts).toEqual({ parentDepth: 2 });
+  });
+
   it('passes allowedTools to createRegistry', async () => {
     let capturedAllowedTools: string[] | undefined;
     const createRegistry = vi.fn().mockImplementation((_cwd, allowedTools) => {

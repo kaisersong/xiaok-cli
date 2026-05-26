@@ -2,7 +2,7 @@ import type { RuntimeEvent } from '../events.js';
 import { type DeliverableGateFunction } from './deliverable-gate.js';
 import type { MaterialRegistry } from './material-registry.js';
 import type { FileTaskSnapshotStore } from './snapshot-store.js';
-import type { DesktopTaskEvent, MaterialRecord, MaterialRole, TaskRuntimeHost, TaskSnapshot, TaskUnderstanding, UserAnswer } from './types.js';
+import type { DesktopTaskEvent, MaterialRecord, TaskContextSkip, TaskCreateInput, TaskRuntimeHost, TaskSnapshot, TaskUnderstanding, UserAnswer } from './types.js';
 export interface HistoryMessage {
     role: 'user' | 'assistant';
     content: string;
@@ -15,6 +15,7 @@ export interface TaskRunnerInput {
     understanding: TaskUnderstanding;
     signal: AbortSignal;
     history: HistoryMessage[];
+    permissionMode?: 'plan' | 'auto' | 'default';
     emitRuntimeEvent(event: RuntimeEvent): void;
 }
 export type TaskRunner = (input: TaskRunnerInput) => Promise<void>;
@@ -31,25 +32,33 @@ export interface InProcessTaskRuntimeHostOptions {
         recoveryContinuity?: boolean;
     };
 }
+export interface BuildHistoryFromTaskSnapshotsOptions {
+    currentTaskId?: string;
+    maxTasks?: number;
+    maxUserChars?: number;
+    maxAssistantChars?: number;
+    maxTotalChars?: number;
+}
+export interface BuildHistoryFromTaskSnapshotsResult {
+    history: HistoryMessage[];
+    loadedTaskIds: string[];
+    skipped: TaskContextSkip[];
+}
+export declare function buildHistoryFromTaskSnapshots(snapshots: TaskSnapshot[], options?: BuildHistoryFromTaskSnapshotsOptions): BuildHistoryFromTaskSnapshotsResult;
 export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private readonly options;
     private readonly questions;
     private readonly subscribers;
     private readonly mutationChains;
     private readonly cancellingTaskIds;
-    private readonly history;
+    private readonly taskHistories;
     private readonly activeExecutions;
     private readonly executionPromises;
     private taskOrdinal;
     private sessionOrdinal;
+    private readonly permissionModes;
     constructor(options: InProcessTaskRuntimeHostOptions);
-    createTask(input: {
-        prompt: string;
-        materials: Array<{
-            materialId: string;
-            role?: MaterialRole;
-        }>;
-    }): Promise<{
+    createTask(input: TaskCreateInput): Promise<{
         taskId: string;
         understanding?: TaskUnderstanding;
     }>;
@@ -70,6 +79,7 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     }>;
     isExecutingForTest(taskId: string): boolean;
     private executeTask;
+    private resolveContextHistory;
     private appendRuntimeEvent;
     private applyArtifactEvidenceGuard;
     private appendEvent;

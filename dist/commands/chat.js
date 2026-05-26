@@ -2067,6 +2067,7 @@ async function runChat(initialInput, opts) {
                 skillCatalogWatcher?.close();
                 clearTurnIntentContext();
                 await releaseSessionOwnershipForExit();
+                await lifecycleHooks.runHooks('SessionEnd', { reason: 'sigint' });
                 const cleanup = async () => {
                     await platform.dispose();
                     for (const ch of embeddedChannels) {
@@ -2571,10 +2572,20 @@ async function runChat(initialInput, opts) {
                     process.stdout.write('\n');
                 }
                 // Stop hook — broker 可在此注入新任务（auto-continue）
-                const stopResult = await lifecycleHooks.runHooks('Stop', {
-                    stopHookActive: true,
-                    lastAssistantMessage: lastAssistantText,
-                });
+                let stopResult;
+                try {
+                    stopResult = await lifecycleHooks.runHooks('Stop', {
+                        stopHookActive: true,
+                        lastAssistantMessage: lastAssistantText,
+                    });
+                }
+                catch (stopError) {
+                    await lifecycleHooks.runHooks('StopFailure', {
+                        error: stopError instanceof Error ? stopError.message : String(stopError),
+                        lastAssistantMessage: lastAssistantText,
+                    });
+                    stopResult = { ok: false };
+                }
                 if (stopResult.preventContinuation && stopResult.message) {
                     // broker 返回 block + message：把 message 作为下一轮输入自动继续
                     if (scrollRegion.isActive() && !terminalUiSuspended) {
@@ -2681,6 +2692,7 @@ async function runChat(initialInput, opts) {
         stopIntentRuntimeSync();
         stopSkillEvalRuntimeSync();
         skillCatalogWatcher?.close();
+        await lifecycleHooks.runHooks('SessionEnd', { reason: 'exit' });
         const finalCleanup = async () => {
             await platform.dispose();
             for (const ch of embeddedChannels) {

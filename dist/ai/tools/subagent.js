@@ -1,5 +1,21 @@
 import { executeNamedSubAgent } from '../agents/subagent-executor.js';
+const DEFAULT_SUBAGENT_MAX_DEPTH = 3;
+function resolveMaxDepth(explicit) {
+    if (typeof explicit === 'number' && Number.isFinite(explicit) && explicit > 0) {
+        return explicit;
+    }
+    const envValue = process.env.XIAOK_SUBAGENT_MAX_DEPTH;
+    if (envValue) {
+        const parsed = Number.parseInt(envValue, 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            return parsed;
+        }
+    }
+    return DEFAULT_SUBAGENT_MAX_DEPTH;
+}
 export function createSubAgentTool(options) {
+    const parentDepth = options.parentDepth ?? 0;
+    const maxDepth = resolveMaxDepth(options.maxDepth);
     return {
         permission: 'safe',
         definition: {
@@ -22,6 +38,10 @@ export function createSubAgentTool(options) {
         },
         async execute(input, context) {
             const invocation = input;
+            const nextDepth = parentDepth + 1;
+            if (nextDepth > maxDepth) {
+                return `Error: subagent recursion depth exceeded (max=${maxDepth}, attempted=${nextDepth})`;
+            }
             // Build agent definition: either pre-defined or inline
             const agentDef = buildAgentDef(options.agents, invocation);
             if (!agentDef) {
@@ -48,6 +68,7 @@ export function createSubAgentTool(options) {
                         agent: agentDef.name,
                         prompt: invocation.prompt,
                         cwd: options.cwd,
+                        parentDepth: nextDepth,
                     },
                 });
                 return `background agent queued: ${job.jobId}`;
@@ -62,6 +83,7 @@ export function createSubAgentTool(options) {
                 buildSystemPrompt: options.buildSystemPrompt,
                 worktreeManager: options.worktreeManager,
                 forkContext: context,
+                parentDepth: nextDepth,
             });
         },
     };

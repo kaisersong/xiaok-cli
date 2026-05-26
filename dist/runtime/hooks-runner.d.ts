@@ -1,4 +1,5 @@
-export type HookEventName = 'PreToolUse' | 'PostToolUse' | 'PostToolUseFailure' | 'PermissionRequest' | 'PermissionDenied' | 'Notification' | 'UserPromptSubmit' | 'SessionStart' | 'SessionEnd' | 'Stop' | 'StopFailure' | 'SubagentStart' | 'SubagentStop' | 'PreCompact' | 'PostCompact' | 'Setup' | 'TaskCreated' | 'TaskCompleted' | 'WorktreeCreate' | 'WorktreeRemove' | 'FileChanged';
+export type HookEventName = 'PreToolUse' | 'PostToolUse' | 'PostToolUseFailure' | 'PermissionRequest' | 'PermissionDenied' | 'UserPromptSubmit' | 'SessionStart' | 'SessionEnd' | 'Stop' | 'StopFailure';
+export declare function isKnownHookEvent(name: string): name is HookEventName;
 export interface HookSharedContext {
     session_id: string;
     cwd: string;

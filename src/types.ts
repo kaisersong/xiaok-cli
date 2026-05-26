@@ -88,6 +88,8 @@ export interface YZJChannelConfig {
   webhookPort?: number;
   secret?: string;
   namedChannels?: YZJNamedChannel[];
+  disable_safe_default?: boolean;
+  extra_allowed_tools?: string[];
 }
 
 // legacy config.json schema (schemaVersion 1)

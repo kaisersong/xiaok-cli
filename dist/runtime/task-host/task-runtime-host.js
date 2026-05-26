@@ -4,22 +4,82 @@ import { projectRuntimeEventsToDesktopEvents } from './event-projection.js';
 import { NeedsUserQuestionCorrelator } from './question-correlator.js';
 import { buildTaskUnderstanding } from './task-understanding.js';
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+const DEFAULT_CONTEXT_MAX_TASKS = 12;
+const DEFAULT_CONTEXT_MAX_USER_CHARS = 4000;
+const DEFAULT_CONTEXT_MAX_ASSISTANT_CHARS = 6000;
+const DEFAULT_CONTEXT_MAX_TOTAL_CHARS = 30000;
+export function buildHistoryFromTaskSnapshots(snapshots, options = {}) {
+    const maxTasks = options.maxTasks ?? DEFAULT_CONTEXT_MAX_TASKS;
+    const maxUserChars = options.maxUserChars ?? DEFAULT_CONTEXT_MAX_USER_CHARS;
+    const maxAssistantChars = options.maxAssistantChars ?? DEFAULT_CONTEXT_MAX_ASSISTANT_CHARS;
+    const maxTotalChars = options.maxTotalChars ?? DEFAULT_CONTEXT_MAX_TOTAL_CHARS;
+    const skipped = [];
+    const byTaskId = new Map();
+    for (const snapshot of snapshots) {
+        const taskId = typeof snapshot?.taskId === 'string' ? snapshot.taskId : '';
+        if (!taskId) {
+            skipped.push({ taskId: '', reason: 'invalid' });
+            continue;
+        }
+        if (options.currentTaskId && taskId === options.currentTaskId) {
+            skipped.push({ taskId, reason: 'self' });
+            continue;
+        }
+        if (!isValidContextSnapshot(snapshot)) {
+            skipped.push({ taskId, reason: 'invalid' });
+            continue;
+        }
+        if (!TERMINAL_STATUSES.has(snapshot.status)) {
+            skipped.push({ taskId, reason: 'non_terminal' });
+            continue;
+        }
+        byTaskId.set(taskId, snapshot);
+    }
+    const sorted = [...byTaskId.values()].sort((left, right) => {
+        const byCreatedAt = left.createdAt - right.createdAt;
+        return byCreatedAt !== 0 ? byCreatedAt : left.taskId.localeCompare(right.taskId);
+    });
+    const overTaskBudget = Math.max(0, sorted.length - Math.max(0, maxTasks));
+    for (const snapshot of sorted.slice(0, overTaskBudget)) {
+        skipped.push({ taskId: snapshot.taskId, reason: 'too_old' });
+    }
+    const pairs = sorted.slice(overTaskBudget).map((snapshot) => ({
+        taskId: snapshot.taskId,
+        user: { role: 'user', content: truncateContextText(snapshot.prompt, maxUserChars) },
+        assistant: { role: 'assistant', content: truncateContextText(formatAssistantContext(snapshot), maxAssistantChars) },
+    }));
+    let totalChars = countHistoryChars(pairs);
+    while (pairs.length > 0 && totalChars > maxTotalChars) {
+        const dropped = pairs.shift();
+        skipped.push({ taskId: dropped.taskId, reason: 'too_old' });
+        totalChars = countHistoryChars(pairs);
+    }
+    return {
+        history: pairs.flatMap(pair => [pair.user, pair.assistant]),
+        loadedTaskIds: pairs.map(pair => pair.taskId),
+        skipped,
+    };
+}
 export class InProcessTaskRuntimeHost {
     options;
     questions = new NeedsUserQuestionCorrelator();
     subscribers = new Map();
     mutationChains = new Map();
     cancellingTaskIds = new Set();
-    history = [];
+    taskHistories = new Map();
     activeExecutions = new Map();
     executionPromises = new Map();
     taskOrdinal = 0;
     sessionOrdinal = 0;
+    permissionModes = new Map();
     constructor(options) {
         this.options = options;
     }
     async createTask(input) {
         const taskId = this.createTaskId();
+        if (input.permissionMode) {
+            this.permissionModes.set(taskId, input.permissionMode);
+        }
         const sessionId = this.createSessionId();
         const materials = input.materials.map((item) => {
             const record = this.options.materialRegistry.get(item.materialId);
@@ -29,6 +89,8 @@ export class InProcessTaskRuntimeHost {
             return item.role ? { ...record, role: item.role } : record;
         });
         const understanding = buildTaskUnderstanding({ prompt: input.prompt, materials });
+        const contextHistory = await this.resolveContextHistory(taskId, input.context);
+        this.taskHistories.set(taskId, contextHistory.history);
         const snapshot = {
             taskId,
             sessionId,
@@ -37,6 +99,7 @@ export class InProcessTaskRuntimeHost {
             materials: materials.map((material) => this.options.materialRegistry.toView(material)),
             understanding,
             events: [],
+            context: contextHistory.audit,
             createdAt: this.now(),
             updatedAt: this.now(),
         };
@@ -150,6 +213,7 @@ export class InProcessTaskRuntimeHost {
             return record;
         });
         const controller = new AbortController();
+        const taskHistory = this.taskHistories.get(taskId) ?? [];
         this.activeExecutions.set(taskId, { taskId, controller });
         await this.updateSnapshot(taskId, { status: 'running' });
         try {
@@ -160,7 +224,8 @@ export class InProcessTaskRuntimeHost {
                 materials,
                 understanding: snapshot.understanding,
                 signal: controller.signal,
-                history: [...this.history],
+                history: [...taskHistory],
+                permissionMode: this.permissionModes.get(taskId),
                 emitRuntimeEvent: (event) => {
                     void this.appendRuntimeEvent(taskId, event);
                 },
@@ -179,7 +244,8 @@ export class InProcessTaskRuntimeHost {
                         materials: [],
                         understanding: snapshot.understanding,
                         signal: controller.signal,
-                        history: [...this.history],
+                        history: [...taskHistory],
+                        permissionMode: this.permissionModes.get(taskId),
                         emitRuntimeEvent: (event) => {
                             void this.appendRuntimeEvent(taskId, event);
                         },
@@ -216,15 +282,48 @@ export class InProcessTaskRuntimeHost {
             throw error;
         }
         finally {
-            // Always record history so subsequent tasks see prior context
-            const latest = await this.options.snapshotStore.recoverTask(taskId).catch(() => null);
-            const assistantNote = latest?.result?.summary
-                ?? (this.cancellingTaskIds.has(taskId) ? '任务已取消。' : '模型没有返回内容。');
-            this.history.push({ role: 'user', content: snapshot.prompt }, { role: 'assistant', content: assistantNote });
+            this.taskHistories.delete(taskId);
+            this.permissionModes.delete(taskId);
             this.activeExecutions.delete(taskId);
             this.executionPromises.delete(taskId);
             this.cancellingTaskIds.delete(taskId);
         }
+    }
+    async resolveContextHistory(currentTaskId, context) {
+        if (!context) {
+            return { history: [] };
+        }
+        const requestedTaskIds = dedupeTaskIds(context.taskIds ?? []);
+        const skipped = [];
+        const snapshots = [];
+        for (const taskId of requestedTaskIds) {
+            if (taskId === currentTaskId) {
+                skipped.push({ taskId, reason: 'self' });
+                continue;
+            }
+            try {
+                const snapshot = await this.options.snapshotStore.recoverTask(taskId);
+                if (!snapshot) {
+                    skipped.push({ taskId, reason: 'missing' });
+                    continue;
+                }
+                snapshots.push(snapshot);
+            }
+            catch {
+                skipped.push({ taskId, reason: 'invalid' });
+            }
+        }
+        const built = buildHistoryFromTaskSnapshots(snapshots, { currentTaskId });
+        const threadId = normalizeContextId(context.threadId);
+        return {
+            history: built.history,
+            audit: {
+                ...(threadId ? { threadId } : {}),
+                taskIds: requestedTaskIds,
+                loadedTaskIds: built.loadedTaskIds,
+                skipped: [...skipped, ...built.skipped],
+            },
+        };
     }
     async appendRuntimeEvent(taskId, event) {
         const desktopEvents = projectRuntimeEventsToDesktopEvents({ taskId, events: [event] });
@@ -394,6 +493,72 @@ export class InProcessTaskRuntimeHost {
         return this.options.now?.() ?? Date.now();
     }
 }
+function isValidContextSnapshot(snapshot) {
+    return typeof snapshot.taskId === 'string'
+        && snapshot.taskId.trim().length > 0
+        && typeof snapshot.prompt === 'string'
+        && typeof snapshot.createdAt === 'number'
+        && typeof snapshot.updatedAt === 'number'
+        && typeof snapshot.status === 'string';
+}
+function formatAssistantContext(snapshot) {
+    const explicitSummary = snapshot.result?.summary?.trim();
+    if (explicitSummary) {
+        return explicitSummary;
+    }
+    const resultEvent = [...snapshot.events]
+        .reverse()
+        .find((event) => event.type === 'result');
+    const resultSummary = resultEvent?.result.summary?.trim();
+    if (resultSummary) {
+        return resultSummary;
+    }
+    const assistantText = snapshot.events
+        .filter((event) => event.type === 'assistant_delta')
+        .map(event => event.delta)
+        .join('')
+        .trim();
+    if (assistantText) {
+        return assistantText;
+    }
+    const salvageText = snapshot.salvage?.summary.join('\n').trim();
+    if (snapshot.status === 'cancelled') {
+        return salvageText ? '上一轮已取消：\n' + salvageText : '上一轮已取消：任务已取消。';
+    }
+    if (snapshot.status === 'failed') {
+        const errorEvent = [...snapshot.events]
+            .reverse()
+            .find((event) => event.type === 'error');
+        const failureText = salvageText || errorEvent?.message || '模型没有返回可恢复摘要。';
+        return '上一轮失败：\n' + failureText;
+    }
+    return '模型没有返回内容。';
+}
+function truncateContextText(text, maxChars) {
+    if (maxChars < 0 || text.length <= maxChars) {
+        return text;
+    }
+    return text.slice(0, maxChars) + '[已截断，保留前 ' + maxChars + ' 字符]';
+}
+function countHistoryChars(pairs) {
+    return pairs.reduce((sum, pair) => sum + pair.user.content.length + pair.assistant.content.length, 0);
+}
+function dedupeTaskIds(taskIds) {
+    const seen = new Set();
+    const deduped = [];
+    for (const rawTaskId of taskIds) {
+        const taskId = normalizeContextId(rawTaskId);
+        if (!taskId || seen.has(taskId)) {
+            continue;
+        }
+        seen.add(taskId);
+        deduped.push(taskId);
+    }
+    return deduped;
+}
+function normalizeContextId(value) {
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
 function collectArtifactEvidence(snapshot) {
     const resultArtifacts = snapshot.result?.artifacts ?? [];
     const eventArtifacts = snapshot.events.filter((event) => event.type === 'artifact_recorded');
@@ -433,5 +598,5 @@ function shouldRequireArtifactEvidence(snapshot) {
     }
     return ARTIFACT_PROMPT_PATTERN.test(prompt);
 }
-const OPERATIONAL_PROMPT_PATTERN = /(?:定时任务|提醒我|提醒|闹钟|reminder|schedule|scheduled|继续推进|推进项目|诊断.*项目|项目.*诊断|恢复项目|修复项目|KSwarm|continue_project|让小K帮忙|问小K|卡住|阻塞|stuck project)/iu;
+const OPERATIONAL_PROMPT_PATTERN = /(?:定时任务|提醒我|提醒|闹钟|reminder|schedule|scheduled|继续推进|推进项目|诊断.*项目|项目.*诊断|恢复项目|修复项目|KSwarm|continue_project|让小K帮忙|问小K|卡住|阻塞|stuck project|(?:验证|测试|诊断|检查).*(?:CUA|xiaok_computer_use|cua-driver|Computer Use|computer-use)|(?:CUA|xiaok_computer_use|cua-driver|Computer Use|computer-use).*(?:验证|测试|诊断|检查))/iu;
 const ARTIFACT_PROMPT_PATTERN = /(?:ppt|pptx|幻灯片|演示文稿|slides?|deck|报告|文档|文章|故事|小故事|初稿|草稿|稿件|markdown|\.md\b|pdf|word|docx|excel|xlsx|表格|图表|图片|image|html|网页|文件|导出|保存为|生成.*(?:报告|文档|ppt|幻灯片|故事|文章|文件)|写.*(?:报告|文档|故事|文章|稿))/iu;

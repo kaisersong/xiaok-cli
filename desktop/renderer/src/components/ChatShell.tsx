@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
 import { useParams, useLocation } from 'react-router-dom';
 import { api } from '../api';
-import { ChatView, type ChatMessage, type ToolStep } from './ChatView';
+import { ChatView, type ChatMessage, type ComputerUseActionData, type ToolStep } from './ChatView';
 import { CanvasPanel } from './CanvasPanel';
 import { TaskPanel } from './TaskPanel';
 import type { ThreadRecord } from '../api/types';
@@ -80,6 +80,33 @@ function writeStoredThreadDraft(threadId: string, draft: StoredThreadDraft): voi
   }
 }
 
+function parseComputerUseRecoverableAction(response: string): ComputerUseActionData | null {
+  try {
+    const parsed = JSON.parse(response) as {
+      ok?: unknown;
+      code?: unknown;
+      message?: unknown;
+      userAction?: { type?: unknown; label?: unknown };
+    };
+    if (parsed.ok !== false || typeof parsed.code !== 'string' || !parsed.code.startsWith('COMPUTER_USE_')) {
+      return null;
+    }
+    return {
+      code: parsed.code,
+      message: typeof parsed.message === 'string' ? parsed.message : 'Computer Use 当前不可用。',
+      ...(typeof parsed.userAction?.type === 'string' ? { actionType: parsed.userAction.type } : {}),
+      ...(typeof parsed.userAction?.label === 'string' ? { label: parsed.userAction.label } : {}),
+      status: 'idle',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isComputerUseSettingsAction(actionType: string | undefined): boolean {
+  return actionType === 'open_system_settings';
+}
+
 export function ChatShell() {
   const { taskId } = useParams<{ taskId: string }>();
   const location = useLocation();
@@ -108,6 +135,7 @@ export function ChatShell() {
   const allEventsRef = useRef<DesktopTaskEvent[]>([]);
   const toolStepsMsgIdRef = useRef<string | null>(null);
   const toolStepsActiveRef = useRef(false);
+  const computerUseActionCodesRef = useRef<Set<string>>(new Set());
 
   // Read prompt state from navigation (WelcomePage initial submit or project help draft)
   const state = location.state as { initialPrompt?: string; draftPrompt?: string } | undefined;
@@ -312,6 +340,18 @@ export function ChatShell() {
             }
           } catch { /* response not JSON */ }
         }
+        if (ev.toolName === 'xiaok_computer_use') {
+          const action = parseComputerUseRecoverableAction(ev.response);
+          if (action && !computerUseActionCodesRef.current.has(action.code)) {
+            computerUseActionCodesRef.current.add(action.code);
+            setMessages(prev => [...prev, {
+              id: `msg-computer-use-${action.code}`,
+              role: 'computer_use_action',
+              content: '',
+              computerUseAction: action,
+            }]);
+          }
+        }
         break;
       }
       case 'needs_user': {
@@ -399,6 +439,18 @@ export function ChatShell() {
               }
             } catch { /* not JSON */ }
           }
+          if (evR.toolName === 'xiaok_computer_use') {
+            const action = parseComputerUseRecoverableAction(evR.response);
+            if (action && !computerUseActionCodesRef.current.has(action.code)) {
+              computerUseActionCodesRef.current.add(action.code);
+              msgs.push({
+                id: `msg-computer-use-${action.code}`,
+                role: 'computer_use_action',
+                content: '',
+                computerUseAction: action,
+              });
+            }
+          }
           continue;
         }
         if (ev.type === 'progress') {
@@ -455,6 +507,7 @@ export function ChatShell() {
     allEventsRef.current = [];
     toolStepsMsgIdRef.current = null;
     toolStepsActiveRef.current = false;
+    computerUseActionCodesRef.current = new Set();
 
     // Cleanup previous subscription
     unsubRef.current?.();
@@ -650,15 +703,26 @@ export function ChatShell() {
       api.updateThreadTitle(taskId, text.slice(0, 40)).catch(() => {});
     }
 
+    const contextTaskIds = (thread?.taskIds ?? [])
+      .map(id => id.trim())
+      .filter(Boolean);
+    const submitContext = contextTaskIds.length > 0
+      ? { threadId: thread?.id ?? taskId, taskIds: contextTaskIds }
+      : undefined;
+
     try {
-      // Send raw prompt — backend runner maintains history for multi-turn context
+      // Send prompt plus thread task references; main rebuilds model history from persisted snapshots.
       let newTaskId: string;
       if (files && files.length > 0) {
         const filePaths = files.map(f => f.filePath);
-        const result = await api.createTaskWithFiles({ prompt: text, filePaths });
+        const result = await api.createTaskWithFiles(submitContext
+          ? { prompt: text, filePaths, context: submitContext }
+          : { prompt: text, filePaths });
         newTaskId = result.taskId;
       } else {
-        const result = await api.createTask({ prompt: text, materials: [] });
+        const result = await api.createTask(submitContext
+          ? { prompt: text, materials: [], context: submitContext }
+          : { prompt: text, materials: [] });
         newTaskId = result.taskId;
       }
 
@@ -693,6 +757,51 @@ export function ChatShell() {
     });
     setCurrentQuestion(null);
     setStatus('running');
+  };
+
+  const updateComputerUseActionMessage = (messageId: string, patch: Partial<ComputerUseActionData>) => {
+    setMessages(prev => prev.map(msg => {
+      if (msg.id !== messageId || !msg.computerUseAction) return msg;
+      return {
+        ...msg,
+        computerUseAction: {
+          ...msg.computerUseAction,
+          ...patch,
+        },
+      };
+    }));
+  };
+
+  const handleComputerUseAction = async (messageId: string, action: ComputerUseActionData) => {
+    updateComputerUseActionMessage(messageId, { status: 'working', detail: '正在处理 Computer Use 状态...' });
+    try {
+      if (isComputerUseSettingsAction(action.actionType)) {
+        const permission = action.code === 'COMPUTER_USE_NEEDS_SCREEN_RECORDING' ? 'screen' : 'accessibility';
+        await api.openPluginDependencyPermissionSettings({ permission });
+        updateComputerUseActionMessage(messageId, { status: 'idle', detail: '已打开系统设置。请确认授权对象是 CuaDriver.app。' });
+        return;
+      }
+      const next = await api.enableComputerUse();
+      if (next.state === 'ready') {
+        updateComputerUseActionMessage(messageId, { status: 'ready', detail: 'Computer Use 已启用。你可以继续让 xiaok 截图或查看窗口。' });
+      } else {
+        updateComputerUseActionMessage(messageId, { status: 'failed', detail: next.lastError || 'Computer Use 连接失败。' });
+      }
+    } catch (error) {
+      updateComputerUseActionMessage(messageId, {
+        status: 'failed',
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  const handleComputerUseDismiss = (messageId: string) => {
+    try {
+      window.localStorage.setItem('xiaok.computerUse.declinedUntil', String(Date.now() + 24 * 60 * 60 * 1000));
+    } catch {
+      // Best-effort cooldown only.
+    }
+    updateComputerUseActionMessage(messageId, { status: 'dismissed', detail: '本次会话已暂不启用 Computer Use。' });
   };
 
   const handleCancel = async () => {
@@ -830,6 +939,8 @@ export function ChatShell() {
           onCancelQueue={cancelQueuedPrompt}
           onAnswer={handleAnswer}
           onCancel={handleCancel}
+          onComputerUseAction={handleComputerUseAction}
+          onComputerUseDismiss={handleComputerUseDismiss}
           canvasOpen={canvasOpen}
           onToggleCanvas={() => setCanvasOpen(v => !v)}
           onArtifactClick={async (artifact) => {

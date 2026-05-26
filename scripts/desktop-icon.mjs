@@ -59,7 +59,7 @@ if (usePng) {
 const logo = sourceImage ? null : (await readFile(logoPath, 'utf8')).replace(/\s+$/u, '');
 for (const [name, size] of iconSizes) {
   const png = sourceImage
-    ? encodePng(size, size, resizeRgba(sourceImage, size, size))
+    ? encodePng(size, size, applyRoundedAppIconMask(resizeRgba(sourceImage, size, size), size, size))
     : renderLogoPng(size, logo);
   await writeFile(join(iconsetPath, name), png);
   if (size === 1024) {
@@ -321,6 +321,48 @@ function resizeRgba(image, targetWidth, targetHeight) {
   }
 
   return output;
+}
+
+function applyRoundedAppIconMask(rgba, width, height) {
+  const output = Buffer.from(rgba);
+  const radius = Math.round(Math.min(width, height) * 0.22);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const coverage = roundedRectCoverage(x, y, width, height, radius);
+      if (coverage >= 1) continue;
+
+      const offset = (y * width + x) * 4;
+      if (coverage <= 0) {
+        output[offset] = 0;
+        output[offset + 1] = 0;
+        output[offset + 2] = 0;
+        output[offset + 3] = 0;
+      } else {
+        output[offset + 3] = Math.round(output[offset + 3] * coverage);
+      }
+    }
+  }
+
+  return output;
+}
+
+function roundedRectCoverage(x, y, width, height, radius) {
+  const px = x + 0.5;
+  const py = y + 0.5;
+  const left = radius;
+  const right = width - radius;
+  const top = radius;
+  const bottom = height - radius;
+  const cx = clamp(px, left, right);
+  const cy = clamp(py, top, bottom);
+  const dx = px - cx;
+  const dy = py - cy;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+
+  if (distance <= radius - 0.5) return 1;
+  if (distance >= radius + 0.5) return 0;
+  return radius + 0.5 - distance;
 }
 
 function clamp(value, min, max) {

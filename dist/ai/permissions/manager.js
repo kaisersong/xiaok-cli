@@ -1,4 +1,5 @@
 import { PermissionPolicyEngine, matches } from './policy-engine.js';
+import { isScreenAutomationFallbackInvocation, isSensitiveToolInvocation } from './sensitive-paths.js';
 export class PermissionManager {
     mode;
     allowRules;
@@ -46,6 +47,12 @@ export class PermissionManager {
         }
         if (this.mode === 'plan' && ['write', 'edit', 'bash'].includes(toolName)) {
             return 'deny';
+        }
+        if (isSensitiveToolInvocation(toolName, input) && evaluation.action !== 'allow') {
+            return 'deny';
+        }
+        if (isScreenAutomationFallbackInvocation(toolName, input) && evaluation.action !== 'allow') {
+            return 'prompt';
         }
         if (this.mode === 'auto') {
             return 'allow';

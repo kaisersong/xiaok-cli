@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   listPluginDependencyStatuses: vi.fn(),
   installPlugin: vi.fn(),
   installPluginDependency: vi.fn(),
+  enableComputerUse: vi.fn(),
+  restartPluginMcpServers: vi.fn(),
+  openPluginDependencyPermissionSettings: vi.fn(),
 }));
 
 vi.mock('../../renderer/src/api/bridge', () => ({
@@ -18,8 +21,11 @@ vi.mock('../../renderer/src/api/bridge', () => ({
     listMCPInstalls: vi.fn().mockResolvedValue([]),
     listPluginMcpServers: mocks.listPluginMcpServers,
     listPluginDependencyStatuses: mocks.listPluginDependencyStatuses,
+    restartPluginMcpServers: mocks.restartPluginMcpServers,
+    openPluginDependencyPermissionSettings: mocks.openPluginDependencyPermissionSettings,
     installPlugin: mocks.installPlugin,
     installPluginDependency: mocks.installPluginDependency,
+    enableComputerUse: mocks.enableComputerUse,
     updatePluginDependency: vi.fn(),
     diagnosePluginDependency: vi.fn(),
     createMCPInstall: vi.fn(),
@@ -35,6 +41,9 @@ describe('DesktopSettings MCP pane', () => {
     mocks.listPluginDependencyStatuses.mockReset();
     mocks.installPlugin.mockReset();
     mocks.installPluginDependency.mockReset();
+    mocks.enableComputerUse.mockReset();
+    mocks.restartPluginMcpServers.mockReset();
+    mocks.openPluginDependencyPermissionSettings.mockReset();
     mocks.listPluginMcpServers
       .mockResolvedValueOnce([
         { name: 'report-renderer', pluginName: 'kai-report-creator', toolCount: 1, connected: true, enabled: true },
@@ -46,6 +55,9 @@ describe('DesktopSettings MCP pane', () => {
     mocks.listPluginDependencyStatuses.mockResolvedValue([]);
     mocks.installPlugin.mockResolvedValue({ success: true });
     mocks.installPluginDependency.mockResolvedValue({ success: true });
+    mocks.enableComputerUse.mockResolvedValue({ state: 'ready' });
+    mocks.restartPluginMcpServers.mockResolvedValue([]);
+    mocks.openPluginDependencyPermissionSettings.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -116,7 +128,7 @@ describe('DesktopSettings MCP pane', () => {
     confirmSpy.mockRestore();
   });
 
-  it('renders Computer Use plugin, driver, permission, MCP, and wrapper status separately', async () => {
+  it('renders Computer Use plugin, driver, permission, service connection, and wrapper status separately', async () => {
     mocks.listPluginMcpServers.mockReset();
     mocks.listPluginMcpServers.mockResolvedValue([
       { name: 'cua-driver', pluginName: 'cua-computer-use', toolCount: 1, connected: true, enabled: true },
@@ -150,7 +162,140 @@ describe('DesktopSettings MCP pane', () => {
     expect(screen.getByText('插件：已安装')).toBeInTheDocument();
     expect(screen.getByText('CUA Driver：0.1.7')).toBeInTheDocument();
     expect(screen.getByText('权限：已授权')).toBeInTheDocument();
-    expect(screen.getByText('MCP：已连接')).toBeInTheDocument();
+    expect(screen.getByText('服务连接：已连接')).toBeInTheDocument();
     expect(screen.getByText('工具：wrapper 已注册')).toBeInTheDocument();
+  });
+
+  it('lets the user open missing permission settings from the dependency card', async () => {
+    mocks.listPluginMcpServers.mockReset();
+    mocks.listPluginMcpServers.mockResolvedValue([
+      { name: 'cua-driver', pluginName: 'cua-computer-use', toolCount: 0, connected: false, enabled: true },
+    ]);
+    mocks.listPluginDependencyStatuses.mockResolvedValue([
+      {
+        pluginName: 'cua-computer-use',
+        dependencyId: 'cua-driver',
+        displayName: 'CUA Driver',
+        state: 'needs_permission',
+        code: 'permission_accessibility_missing',
+        pluginInstalled: true,
+        resolvedBinary: '/Users/alice/.local/bin/cua-driver',
+        version: '0.2.0',
+        canInstall: true,
+        canUpdate: true,
+        canDiagnose: true,
+      },
+    ]);
+
+    render(
+      <LocaleProvider>
+        <DesktopSettings onClose={() => {}} />
+      </LocaleProvider>,
+    );
+
+    await screen.findByRole('button', { name: 'MCP 服务器' });
+    fireEvent.click(screen.getByRole('button', { name: 'MCP 服务器' }));
+
+    await screen.findByText('需要辅助功能权限');
+    fireEvent.click(screen.getByRole('button', { name: '打开辅助功能' }));
+
+    await waitFor(() => {
+      expect(mocks.openPluginDependencyPermissionSettings).toHaveBeenCalledWith({ permission: 'accessibility' });
+    });
+  });
+
+  it('lets the user enable Computer Use without exposing MCP wording in the main card', async () => {
+    mocks.listPluginMcpServers.mockReset();
+    mocks.listPluginMcpServers.mockResolvedValue([
+      {
+        name: 'cua-driver',
+        pluginName: 'cua-computer-use',
+        toolCount: 0,
+        connected: false,
+        enabled: true,
+        lastError: 'Plugin dependency is not ready: permission_accessibility_missing',
+      },
+    ]);
+    mocks.listPluginDependencyStatuses.mockResolvedValue([
+      {
+        pluginName: 'cua-computer-use',
+        dependencyId: 'cua-driver',
+        displayName: 'CUA Driver',
+        state: 'ready',
+        code: 'ready',
+        pluginInstalled: true,
+        resolvedBinary: '/Users/alice/.local/bin/cua-driver',
+        version: '0.2.0',
+        canInstall: true,
+        canUpdate: true,
+        canDiagnose: true,
+      },
+    ]);
+
+    render(
+      <LocaleProvider>
+        <DesktopSettings onClose={() => {}} />
+      </LocaleProvider>,
+    );
+
+    await screen.findByRole('button', { name: 'MCP 服务器' });
+    fireEvent.click(screen.getByRole('button', { name: 'MCP 服务器' }));
+
+    await screen.findByText('服务连接：未连接');
+    expect(screen.queryByText('MCP：未连接')).not.toBeInTheDocument();
+    expect(screen.queryByText('MCP 未连接')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '启用 Computer Use' }));
+
+    await waitFor(() => {
+      expect(mocks.enableComputerUse).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.restartPluginMcpServers).not.toHaveBeenCalled();
+  });
+
+  it('shows Computer Use as waiting for explicit enablement without implying permissions are granted', async () => {
+    mocks.listPluginMcpServers.mockReset();
+    mocks.listPluginMcpServers.mockResolvedValue([
+      {
+        name: 'cua-driver',
+        pluginName: 'cua-computer-use',
+        toolCount: 0,
+        connected: false,
+        enabled: false,
+        lastError: '等待用户点击连接，避免自动触发 macOS 权限弹窗',
+      },
+    ]);
+    mocks.listPluginDependencyStatuses.mockResolvedValue([
+      {
+        pluginName: 'cua-computer-use',
+        dependencyId: 'cua-driver',
+        displayName: 'CUA Driver',
+        state: 'ready',
+        code: 'ready',
+        pluginInstalled: true,
+        resolvedBinary: '/Users/alice/.local/bin/cua-driver',
+        version: '0.2.0',
+        canInstall: true,
+        canUpdate: true,
+        canDiagnose: true,
+      },
+    ]);
+
+    render(
+      <LocaleProvider>
+        <DesktopSettings onClose={() => {}} />
+      </LocaleProvider>,
+    );
+
+    await screen.findByRole('button', { name: 'MCP 服务器' });
+    fireEvent.click(screen.getByRole('button', { name: 'MCP 服务器' }));
+
+    await screen.findByText('未启用');
+    expect(screen.getByText('权限：启用后验证')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '启用 Computer Use' }));
+
+    await waitFor(() => {
+      expect(mocks.enableComputerUse).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.restartPluginMcpServers).not.toHaveBeenCalled();
   });
 });

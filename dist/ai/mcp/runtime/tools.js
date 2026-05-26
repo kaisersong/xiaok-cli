@@ -1,7 +1,8 @@
 import { normalizeMcpToolSchema } from '../client.js';
 const CUA_READ_ONLY_TOOLS = new Set([
-    'get_app_state',
+    'get_window_state',
     'list_apps',
+    'list_windows',
 ]);
 export function resolveDefaultMcpToolPermission(serverName, toolName) {
     if (serverName === 'cua-driver') {

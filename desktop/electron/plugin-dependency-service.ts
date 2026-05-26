@@ -45,6 +45,7 @@ export interface ExternalPluginDependency {
     serverName: string;
     command: string;
     args?: string[];
+    requiresUserActivation?: boolean;
   };
 }
 

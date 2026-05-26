@@ -1997,6 +1997,13 @@ export const zh: LocaleStrings = {
   scheduledSave: "保存",
   scheduledSaving: "保存中...",
   scheduledCancel: "取消",
+  scheduledPlanModeBadge: "仅生成计划",
+  scheduledPlanModeHint: "该任务当前以 plan 模式运行；在你确认计划无误后再批准自动执行。",
+  scheduledApproveAuto: "允许自动执行",
+  scheduledApproveAutoTitle: "允许该任务自动执行写入/编辑/命令工具。",
+  scheduledApproveAutoNeedsReview: "请先运行一次并审阅计划，再批准自动执行。",
+  scheduledRevokeAuto: "撤回自动",
+  scheduledRevokeAutoTitle: "切回仅生成计划模式。",
 
   // common
   commonConfirm: "确认",

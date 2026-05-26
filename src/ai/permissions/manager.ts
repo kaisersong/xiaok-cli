@@ -1,6 +1,7 @@
 export type PermissionMode = 'default' | 'auto' | 'plan';
 export type PermissionDecision = 'allow' | 'deny' | 'prompt';
 import { PermissionPolicyEngine, matches } from './policy-engine.js';
+import { isScreenAutomationFallbackInvocation, isSensitiveToolInvocation } from './sensitive-paths.js';
 
 export interface PermissionManagerOptions {
   mode: PermissionMode;
@@ -61,6 +62,14 @@ export class PermissionManager {
 
     if (this.mode === 'plan' && ['write', 'edit', 'bash'].includes(toolName)) {
       return 'deny';
+    }
+
+    if (isSensitiveToolInvocation(toolName, input) && evaluation.action !== 'allow') {
+      return 'deny';
+    }
+
+    if (isScreenAutomationFallbackInvocation(toolName, input) && evaluation.action !== 'allow') {
+      return 'prompt';
     }
 
     if (this.mode === 'auto') {

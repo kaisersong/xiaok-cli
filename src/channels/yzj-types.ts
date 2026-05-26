@@ -29,6 +29,8 @@ export interface YZJResolvedConfig {
   webhookPath: string;
   webhookPort: number;
   secret?: string;
+  disable_safe_default?: boolean;
+  extra_allowed_tools?: string[];
 }
 
 export interface YZJLogger {

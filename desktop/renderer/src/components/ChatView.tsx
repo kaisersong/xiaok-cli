@@ -27,14 +27,24 @@ export interface ProjectCardData {
   memberCount: number;
 }
 
+export interface ComputerUseActionData {
+  code: string;
+  message: string;
+  actionType?: string;
+  label?: string;
+  status?: 'idle' | 'working' | 'ready' | 'failed' | 'dismissed';
+  detail?: string;
+}
+
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card';
+  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'computer_use_action';
   content: string;
   stage?: string;
   steps?: ToolStep[];
   stepsLive?: boolean;
   projectData?: ProjectCardData;
+  computerUseAction?: ComputerUseActionData;
 }
 
 interface GeneratedFile {
@@ -58,6 +68,8 @@ interface ChatViewProps {
   onCancelQueue?: () => void;
   onAnswer: (choiceId: string) => void;
   onCancel: () => void;
+  onComputerUseAction?: (messageId: string, action: ComputerUseActionData) => void;
+  onComputerUseDismiss?: (messageId: string) => void;
   canvasOpen: boolean;
   onToggleCanvas: () => void;
   onArtifactClick?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
@@ -68,6 +80,7 @@ export function ChatView({
   thread, messages, streamingText, status, currentQuestion, result,
   generatedFiles,
   prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
+  onComputerUseAction, onComputerUseDismiss,
   canvasOpen, onToggleCanvas, onArtifactClick, onArtifactOpenExternal,
 }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -147,6 +160,41 @@ export function ChatView({
                     createdAt={msg.projectData.createdAt}
                     memberCount={msg.projectData.memberCount}
                   />
+                ) : msg.role === 'computer_use_action' && msg.computerUseAction ? (
+                  <div className="max-w-[663px] rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-4 text-sm text-[var(--c-text-primary)] shadow-sm">
+                    <div className="font-medium">需要启用 Computer Use</div>
+                    <div className="mt-1 text-[var(--c-text-secondary)]">
+                      {msg.computerUseAction.message || 'xiaok 需要通过 CUA Driver 查看屏幕和窗口内容。'}
+                    </div>
+                    {msg.computerUseAction.detail ? (
+                      <div className="mt-2 text-xs text-[var(--c-text-muted)]">{msg.computerUseAction.detail}</div>
+                    ) : null}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {msg.computerUseAction.status !== 'dismissed' && msg.computerUseAction.actionType ? (
+                        <button
+                          type="button"
+                          disabled={msg.computerUseAction.status === 'working' || msg.computerUseAction.status === 'ready'}
+                          onClick={() => onComputerUseAction?.(msg.id, msg.computerUseAction!)}
+                          className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+                        >
+                          {msg.computerUseAction.status === 'working'
+                            ? '处理中'
+                            : msg.computerUseAction.status === 'ready'
+                              ? '已启用'
+                              : msg.computerUseAction.label || '启用 Computer Use'}
+                        </button>
+                      ) : null}
+                      {msg.computerUseAction.status !== 'ready' ? (
+                        <button
+                          type="button"
+                          onClick={() => onComputerUseDismiss?.(msg.id)}
+                          className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs font-medium text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-hover)]"
+                        >
+                          暂不启用
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
                 ) : (
                   <div className="max-w-[663px] text-sm text-[var(--c-text-primary)] leading-relaxed select-text">
                     <MarkdownRenderer content={msg.content} />

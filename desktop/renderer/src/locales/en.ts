@@ -2017,6 +2017,13 @@ export const en: LocaleStrings = {
   scheduledSave: "Save",
   scheduledSaving: "Saving...",
   scheduledCancel: "Cancel",
+  scheduledPlanModeBadge: "Plan only",
+  scheduledPlanModeHint: "This task runs in plan mode. Approve once you've reviewed a run to enable auto execution.",
+  scheduledApproveAuto: "Approve auto",
+  scheduledApproveAutoTitle: "Allow this task to run write/edit/bash automatically.",
+  scheduledApproveAutoNeedsReview: "Run the task once and review the plan before approving auto execution.",
+  scheduledRevokeAuto: "Revoke auto",
+  scheduledRevokeAutoTitle: "Switch this task back to plan-only mode.",
 
   // common
   commonConfirm: "Confirm",

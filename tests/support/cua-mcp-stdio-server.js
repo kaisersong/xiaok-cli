@@ -69,7 +69,8 @@ function respond(message) {
       result: {
         tools: [
           { name: 'list_apps', description: 'list apps', inputSchema: { type: 'object', properties: {} } },
-          { name: 'get_app_state', description: 'get app state', inputSchema: { type: 'object', properties: { app: { type: 'string' } } } },
+          { name: 'list_windows', description: 'list windows', inputSchema: { type: 'object', properties: { on_screen_only: { type: 'boolean' } } } },
+          { name: 'get_window_state', description: 'get window state', inputSchema: { type: 'object', properties: { pid: { type: 'integer' }, window_id: { type: 'integer' } } } },
           { name: 'click', description: 'click an element', inputSchema: { type: 'object', properties: { app: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } } } },
         ],
       },
@@ -84,7 +85,11 @@ function respond(message) {
       id: message.id,
       result: {
         content: [{ type: 'text', text: name === 'list_apps' ? 'Finder\nSafari' : `cua:${name}` }],
-        structuredContent: name === 'list_apps' ? { apps: ['Finder', 'Safari'] } : { ok: true },
+        structuredContent: name === 'list_apps'
+          ? { apps: ['Finder', 'Safari'] }
+          : name === 'list_windows'
+            ? { windows: [{ app_name: 'Safari', pid: 123, window_id: 456, is_on_screen: true }] }
+            : { ok: true },
       },
     }));
   }

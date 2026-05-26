@@ -17,6 +17,8 @@ export interface ScheduledTaskRecord {
   nextRunAt?: number;
   lastRunAt?: number;
   runtimeTaskId?: string;
+  reviewedAt?: number;
+  userApprovedAuto?: boolean;
   scheduleConfig?: {
     intervalMinutes?: number;
     hour?: number;

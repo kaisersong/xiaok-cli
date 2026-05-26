@@ -5,8 +5,9 @@ import type { Config, LegacyConfig } from '../types.js';
 import { DEFAULT_CONFIG, isValidLegacyProvider } from '../types.js';
 import { normalizeConfig } from '../ai/providers/normalize.js';
 
-export function getConfigDir(): string {
-  return process.env.XIAOK_CONFIG_DIR ?? join(homedir(), '.xiaok');
+export function getConfigDir(subdir?: string): string {
+  const base = process.env.XIAOK_CONFIG_DIR ?? join(homedir(), '.xiaok');
+  return subdir ? join(base, subdir) : base;
 }
 
 export function getConfigPath(): string {

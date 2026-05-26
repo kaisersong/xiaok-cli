@@ -9,10 +9,13 @@ export interface ExecuteNamedSubAgentOptions {
     sessionId: string;
     cwd?: string;
     adapter: () => ModelAdapter;
-    createRegistry(cwd: string, allowedTools?: string[], agentId?: string): ToolRegistry;
+    createRegistry(cwd: string, allowedTools?: string[], agentId?: string, opts?: {
+        parentDepth?: number;
+    }): ToolRegistry;
     buildSystemPrompt(cwd: string): Promise<string>;
     worktreeManager?: WorktreeManager;
     forkContext?: ToolExecutionContext;
+    parentDepth?: number;
 }
 export declare function executeNamedSubAgent(options: ExecuteNamedSubAgentOptions): Promise<string>;
 export declare function resolveSubAgentCwd(manager: WorktreeManager | undefined, agent: CustomAgentDef, sessionId: string, cwd?: string): Promise<{

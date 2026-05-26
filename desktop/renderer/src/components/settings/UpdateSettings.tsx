@@ -45,7 +45,7 @@ type UpdatingState = {
 }
 
 function isAppUpdaterBusy(state: AppUpdaterState | null) {
-  return state?.phase === 'checking' || state?.phase === 'downloading'
+  return state?.phase === 'checking' || state?.phase === 'downloading' || state?.phase === 'installing'
 }
 
 function isSilentUpdateError(message: string | null): boolean {
@@ -239,6 +239,8 @@ export function UpdateSettingsContent() {
         return `${t.desktopSettings.appUpdateDownloading} ${appUpdateState.progressPercent}%`
       case 'downloaded':
         return t.desktopSettings.appUpdateReady
+      case 'installing':
+        return '正在安装并重启'
       case 'error':
         return appUpdateState.error ?? t.desktopSettings.appUpdateError
       default:

@@ -53,7 +53,7 @@ export interface PlatformRuntimeContext {
   dispose(): Promise<void>;
   listBackgroundJobs(sessionId: string): BackgroundJobRecord[];
   createBackgroundRunner(
-    execute: (input: { agent: string; prompt: string; cwd?: string }) => Promise<string>,
+    execute: (input: { agent: string; prompt: string; cwd?: string; parentDepth?: number }) => Promise<string>,
     notify?: (job: BackgroundJobRecord) => Promise<void> | void,
   ): ReturnType<typeof createBackgroundRunner>;
 }
@@ -196,7 +196,7 @@ export async function createPlatformRuntimeContext(
       return createBackgroundRunner({
         rootDir: join(stateRootDir, 'background-jobs'),
         execute: async ({ input }) => {
-          const payload = input as { agent?: string; prompt?: string; cwd?: string };
+          const payload = input as { agent?: string; prompt?: string; cwd?: string; parentDepth?: number };
           if (!payload.agent || !payload.prompt) {
             return { ok: false, errorMessage: 'invalid background subagent payload' };
           }
@@ -205,6 +205,7 @@ export async function createPlatformRuntimeContext(
             agent: payload.agent,
             prompt: payload.prompt,
             cwd: payload.cwd,
+            parentDepth: payload.parentDepth,
           });
           return { ok: true, summary: result.slice(0, 200) };
         },

@@ -12,22 +12,28 @@ export type HookEventName =
   | 'PostToolUseFailure'
   | 'PermissionRequest'
   | 'PermissionDenied'
-  | 'Notification'
   | 'UserPromptSubmit'
   | 'SessionStart'
   | 'SessionEnd'
   | 'Stop'
-  | 'StopFailure'
-  | 'SubagentStart'
-  | 'SubagentStop'
-  | 'PreCompact'
-  | 'PostCompact'
-  | 'Setup'
-  | 'TaskCreated'
-  | 'TaskCompleted'
-  | 'WorktreeCreate'
-  | 'WorktreeRemove'
-  | 'FileChanged';
+  | 'StopFailure';
+
+const VALID_HOOKS: ReadonlySet<string> = new Set<HookEventName>([
+  'PreToolUse',
+  'PostToolUse',
+  'PostToolUseFailure',
+  'PermissionRequest',
+  'PermissionDenied',
+  'UserPromptSubmit',
+  'SessionStart',
+  'SessionEnd',
+  'Stop',
+  'StopFailure',
+]);
+
+export function isKnownHookEvent(name: string): name is HookEventName {
+  return VALID_HOOKS.has(name);
+}
 
 // Shared context injected into every hook payload
 export interface HookSharedContext {
@@ -165,8 +171,7 @@ const TOOL_EVENTS = new Set<HookEventName>([
 
 /** Events where exit code 2 blocks execution */
 const BLOCKING_EVENTS = new Set<HookEventName>([
-  'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop', 'SubagentStop',
-  'PreCompact', 'PermissionRequest', 'TaskCreated', 'TaskCompleted',
+  'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop', 'PermissionRequest',
 ]);
 
 /** Per-event: which field the matcher runs against */
@@ -178,14 +183,7 @@ const MATCHER_FIELD: Partial<Record<HookEventName, string>> = {
   PermissionDenied: 'tool_name',
   SessionStart: 'source',
   SessionEnd: 'reason',
-  Setup: 'trigger',
-  PreCompact: 'trigger',
-  PostCompact: 'trigger',
-  Notification: 'notification_type',
   StopFailure: 'error',
-  SubagentStart: 'agent_type',
-  SubagentStop: 'agent_type',
-  FileChanged: 'file_path',
 };
 
 // ---------------------------------------------------------------------------
@@ -254,8 +252,20 @@ function shouldMatch(config: HookConfig, eventName: HookEventName, payload: Reco
 
 function normalizeConfig(raw: HookConfigOrCommand): HookConfig {
   if (typeof raw === 'string') return { type: 'command', command: raw };
-  if (!raw.type) return { ...raw, type: 'command' } as CommandHookConfig;
-  return raw;
+  const config = !raw.type ? ({ ...raw, type: 'command' } as CommandHookConfig) : raw;
+  if (config.events && config.events.length > 0) {
+    const filtered = config.events.filter((event) => {
+      if (isKnownHookEvent(event)) return true;
+      console.warn(
+        `[hooks-runner] ignoring unknown hook event "${event}". Supported events: ${[...VALID_HOOKS].join(', ')}`,
+      );
+      return false;
+    });
+    config.events = (filtered.length > 0
+      ? filtered
+      : ['__none__']) as HookEventName[];
+  }
+  return config;
 }
 
 // ---------------------------------------------------------------------------
@@ -510,6 +520,12 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
 
   async function runHooks(eventName: HookEventName, payload: Record<string, unknown>): Promise<HookRunResult> {
     const merged: HookRunResult = { ok: true };
+    if (!isKnownHookEvent(eventName)) {
+      console.warn(
+        `[hooks-runner] runHooks called with unknown event "${eventName}"; ignoring.`,
+      );
+      return merged;
+    }
     const payloadJson = buildPayload(eventName, payload, ctx);
 
     for (const hook of allHooks) {

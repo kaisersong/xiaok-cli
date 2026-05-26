@@ -13,5 +13,5 @@ export interface LspPublishDiagnosticsMessage {
 export declare function createLspManager(): {
     applyMessage(message: LspPublishDiagnosticsMessage): void;
     getDiagnostics(uri: string): LspDiagnostic[];
-    getSummary(): string;
+    getSummary(now?: number): string;
 };

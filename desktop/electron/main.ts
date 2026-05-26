@@ -5,7 +5,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { createDesktopServices } from './desktop-services.js';
 import { registerDesktopIpc } from './ipc.js';
 import { buildBrowserWindowOptions, isAllowedNavigationUrl } from './security.js';
-import { resolveDesktopWindowIconPath } from './window-icon.js';
+import { resolveDesktopDockIconPath, resolveDesktopWindowIconPath } from './window-icon.js';
 import {
   attachCloseToMinimize,
   attachWindowRepaintHandlers,
@@ -110,7 +110,8 @@ async function createWindow(): Promise<BrowserWindow> {
     window.webContents.send('desktop:kswarm:statusChange', status);
   });
 
-  const dataRoot = join(app.getPath('home'), '.xiaok', 'desktop');
+  const { getConfigDir } = await import('../../src/utils/config.js');
+  const dataRoot = getConfigDir('desktop');
   const services = createDesktopServices({
     dataRoot,
     kswarmService,
@@ -140,10 +141,12 @@ async function createWindow(): Promise<BrowserWindow> {
     }
   });
   ipcMain.handle('desktop:quitAndInstall', () => {
+    isQuitting = true;
     try {
       quitAndInstall();
     } catch (e) {
-      // Ignore
+      isQuitting = false;
+      throw e;
     }
   });
 
@@ -162,7 +165,7 @@ async function createWindow(): Promise<BrowserWindow> {
   const deployResult = await deployBundledPlugins();
   debugMain('createWindow:plugins-deployed', deployResult);
   if (deployResult.venvReady) {
-    const venvDir = join(app.getPath('home'), '.xiaok', 'runtime', 'python-env');
+    const venvDir = getConfigDir(join('runtime', 'python-env'));
     process.env.XIAOK_PYTHON_CMD = process.platform === 'win32'
       ? join(venvDir, 'Scripts', 'python.exe')
       : join(venvDir, 'bin', 'python3');
@@ -291,6 +294,12 @@ async function createWindow(): Promise<BrowserWindow> {
   ipcMain.handle('desktop:getTimedActionRuns', (_event, actionId: string) => {
     return timedActionService.getRuns(actionId);
   });
+  ipcMain.handle('desktop:timedAction:approveAuto', (_event, actionId: string) => {
+    return timedActionService.approveAuto(actionId) ?? null;
+  });
+  ipcMain.handle('desktop:timedAction:revokeAuto', (_event, actionId: string) => {
+    return timedActionService.revokeAuto(actionId) ?? null;
+  });
 
   app.on('before-quit', () => {
     kswarmService.stop().catch(() => {});
@@ -378,12 +387,8 @@ if (!singleInstanceLock) {
     debugMain('app:whenReady');
     if (process.platform === 'darwin') {
       app.setName('xiaok');
-      // Use .icns for proper macOS dock icon (auto-sizes + rounds corners)
-      const icnsPath = join(__dirname, '..', 'build', 'icon.icns');
-      const pngPath = join(__dirname, '..', 'build', 'icon.png');
-      const { existsSync } = await import('node:fs');
-      const iconPath = existsSync(icnsPath) ? icnsPath : pngPath;
-      if (existsSync(iconPath) && app.dock) {
+      const iconPath = resolveDesktopDockIconPath(__dirname, process.resourcesPath, process.platform);
+      if (iconPath && app.dock) {
         app.dock.setIcon(nativeImage.createFromPath(iconPath));
       }
     }

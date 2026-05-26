@@ -342,5 +342,47 @@ describe('deploy-bundled-plugins', () => {
       expect(existsSync(join(rootDir, '.xiaok', 'plugins', 'cua-computer-use', 'plugin.json'))).toBe(true);
       expect(existsSync(join(rootDir, '.xiaok', 'plugins', 'cua-computer-use', 'skills', 'computer-use', 'SKILL.md'))).toBe(true);
     });
+
+    it('upgrades the bundled CUA plugin so v0.2 window tools replace stale v0.1 metadata', async () => {
+      process.env.HOME = rootDir;
+      process.env.USERPROFILE = rootDir;
+      process.env.PATH = '';
+      mockIsPackaged.mockReturnValue(true);
+      mockResourcesPath.mockReturnValue(rootDir);
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = rootDir;
+
+      createPluginWithFiles(join(bundledDir, 'cua-computer-use'), {
+        name: 'cua-computer-use',
+        version: '0.2.0',
+        toolPolicy: {
+          safeTools: ['get_window_state', 'list_windows', 'screenshot'],
+          productWrapper: 'xiaok_computer_use',
+        },
+      }, {
+        'skills/computer-use/SKILL.md': 'Use xiaok_computer_use.',
+      });
+      createPluginWithFiles(join(rootDir, '.xiaok', 'plugins', 'cua-computer-use'), {
+        name: 'cua-computer-use',
+        version: '0.1.0',
+        source: 'bundled',
+        toolPolicy: {
+          safeTools: ['get_app_state', 'list_apps'],
+          productWrapper: 'xiaok_computer_use',
+        },
+      }, {
+        'skills/computer-use/SKILL.md': 'Old CUA skill.',
+      });
+
+      const result = await deployBundledPlugins();
+
+      expect(result.deployed).toContain('cua-computer-use');
+      const manifest = JSON.parse(readFileSync(join(rootDir, '.xiaok', 'plugins', 'cua-computer-use', 'plugin.json'), 'utf8'));
+      const skill = readFileSync(join(rootDir, '.xiaok', 'plugins', 'cua-computer-use', 'skills', 'computer-use', 'SKILL.md'), 'utf8');
+      expect(manifest.version).toBe('0.2.0');
+      expect(manifest.toolPolicy.safeTools).toContain('get_window_state');
+      expect(manifest.toolPolicy.safeTools).toContain('list_windows');
+      expect(manifest.toolPolicy.safeTools).not.toContain('get_app_state');
+      expect(skill).toContain('xiaok_computer_use');
+    });
   });
 });

@@ -39,6 +39,8 @@ export interface TimedActionRecord {
   lockedAt?: number;
   lastRuntimeTaskId?: string;
   lastError?: string;
+  reviewedAt?: number;
+  userApprovedAuto?: boolean;
   createdAt: number;
   updatedAt: number;
 }

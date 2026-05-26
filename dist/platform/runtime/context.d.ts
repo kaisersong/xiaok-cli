@@ -42,6 +42,7 @@ export interface PlatformRuntimeContext {
         agent: string;
         prompt: string;
         cwd?: string;
+        parentDepth?: number;
     }) => Promise<string>, notify?: (job: BackgroundJobRecord) => Promise<void> | void): ReturnType<typeof createBackgroundRunner>;
 }
 export interface PlatformCapabilityHealth {

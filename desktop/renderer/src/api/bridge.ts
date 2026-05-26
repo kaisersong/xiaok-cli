@@ -7,6 +7,7 @@ import type {
   DesktopSaveModelConfigInput,
   MaterialView,
   MaterialRole,
+  TaskCreateContext,
   TaskSnapshot,
   TaskUnderstanding,
   UserAnswer,
@@ -86,6 +87,7 @@ function setStarredIds(ids: Set<string>): void {
 async function createTaskWithRetry(input: {
   prompt: string;
   materials: Array<{ materialId: string; role?: MaterialRole }>;
+  context?: TaskCreateContext;
   retries?: number;
 }): Promise<{ taskId: string; understanding: TaskUnderstanding }> {
   return await window.xiaokDesktop.createTask(input);
@@ -230,6 +232,7 @@ export const api = {
   async createTask(input: {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
+    context?: TaskCreateContext;
   }): Promise<{ taskId: string; understanding: TaskUnderstanding }> {
     log.info('createTask', JSON.stringify({ prompt: input.prompt, materialsCount: input.materials.length }));
     const result = await createTaskWithRetry(input);
@@ -240,6 +243,7 @@ export const api = {
   async createTaskWithFiles(input: {
     prompt: string;
     filePaths: string[];
+    context?: TaskCreateContext;
   }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
     log.info('createTaskWithFiles', JSON.stringify({ prompt: input.prompt, filesCount: input.filePaths.length }));
     const result = await window.xiaokDesktop.createTaskWithFiles(input);
@@ -418,6 +422,27 @@ export const api = {
   },
   async setPluginMcpServerEnabled(input: { name: string; enabled: boolean }) {
     return window.xiaokDesktop.setPluginMcpServerEnabled(input);
+  },
+  async restartPluginMcpServers() {
+    return window.xiaokDesktop.restartPluginMcpServers();
+  },
+  async restartPluginMcpServer(input: { name: string }) {
+    return window.xiaokDesktop.restartPluginMcpServer(input);
+  },
+  async getComputerUseCapabilityStatus() {
+    return window.xiaokDesktop.getComputerUseCapabilityStatus();
+  },
+  async enableComputerUse() {
+    return window.xiaokDesktop.enableComputerUse();
+  },
+  async reconnectComputerUse() {
+    return window.xiaokDesktop.reconnectComputerUse();
+  },
+  async disableComputerUse() {
+    return window.xiaokDesktop.disableComputerUse();
+  },
+  async openPluginDependencyPermissionSettings(input: { permission: 'accessibility' | 'screen' }) {
+    return window.xiaokDesktop.openPluginDependencyPermissionSettings(input);
   },
   async installPlugin(name: string) {
     return window.xiaokDesktop.installPlugin(name);
@@ -734,7 +759,7 @@ export const api = {
   async quitAndInstall() {
     return window.xiaokDesktop.quitAndInstall();
   },
-  onUpdateStatus(handler: (status: { checking: boolean; available: boolean; downloading: boolean; downloaded: boolean; progress: number; version?: string; error?: string }) => void) {
+  onUpdateStatus(handler: (status: { checking: boolean; available: boolean; downloading: boolean; downloaded: boolean; installing?: boolean; progress: number; version?: string; error?: string }) => void) {
     return window.xiaokDesktop.onUpdateStatus(handler);
   },
 

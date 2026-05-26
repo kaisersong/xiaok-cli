@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockCreateTask, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle } = vi.hoisted(() => ({
+const { mockCreateTask, mockCreateTaskWithFiles, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle } = vi.hoisted(() => ({
   mockCreateTask: vi.fn(),
+  mockCreateTaskWithFiles: vi.fn(),
   mockGetThread: vi.fn(),
   mockRecoverTask: vi.fn(),
   mockSubscribeTask: vi.fn(() => () => {}),
@@ -14,6 +15,7 @@ const { mockCreateTask, mockGetThread, mockRecoverTask, mockSubscribeTask, mockU
 vi.mock('../../renderer/src/api', () => ({
   api: {
     createTask: mockCreateTask,
+    createTaskWithFiles: mockCreateTaskWithFiles,
     getThread: mockGetThread,
     recoverTask: mockRecoverTask,
     subscribeTask: mockSubscribeTask,
@@ -35,7 +37,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     queuedText?: string | null;
     status?: string;
     onQueue?: (text: string) => void;
-    onSubmit?: (text: string) => void;
+    onSubmit?: (text: string, files?: Array<{ filePath: string; name: string }>) => void;
     messages?: Array<{ id: string; role: string; content: string }>;
   }) => (
     <div>
@@ -46,6 +48,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
         <div key={message.id}>{message.content}</div>
       ))}</div>
       <button type="button" onClick={() => onSubmit?.('触发提交')}>submit-now</button>
+      <button type="button" onClick={() => onSubmit?.('带附件提交', [{ filePath: '/tmp/context.md', name: 'context.md' }])}>submit-files</button>
       <button type="button" onClick={() => onQueue?.('第二条输入')}>queue-second</button>
     </div>
   ),
@@ -157,9 +160,121 @@ describe('ChatShell draft prompt navigation state', () => {
     });
 
     await waitFor(() => {
-      expect(mockCreateTask).toHaveBeenCalledWith({ prompt: '第二条输入', materials: [] });
+      expect(mockCreateTask).toHaveBeenCalledWith({
+        prompt: '第二条输入',
+        materials: [],
+        context: { threadId: 'thread-queued', taskIds: ['task-running'] },
+      });
     });
     expect(mockUpdateThreadTaskId).toHaveBeenCalledWith('thread-queued', 'task-second');
+  });
+
+  it('submits existing thread task ids as context when continuing a thread', async () => {
+    mockGetThread.mockResolvedValue({
+      id: 'thread-existing',
+      title: 'Existing thread',
+      status: 'idle',
+      mode: 'work',
+      createdAt: 1779000000000,
+      updatedAt: 1779000000000,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: 'task-old',
+      taskIds: ['task-old'],
+    });
+    mockRecoverTask.mockResolvedValue({
+      snapshot: {
+        taskId: 'task-old',
+        sessionId: 'sess-old',
+        status: 'completed',
+        prompt: '上一轮输入',
+        materials: [],
+        events: [{ type: 'result', result: { summary: '上一轮完成', artifacts: [] } }],
+        result: { summary: '上一轮完成', artifacts: [] },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    });
+    mockCreateTask.mockResolvedValue({ taskId: 'task-new' });
+    mockUpdateThreadTaskId.mockResolvedValue(undefined);
+
+    render(
+      <MemoryRouter initialEntries={['/t/thread-existing']}>
+        <Routes>
+          <Route path="/t/:taskId" element={<ChatShell />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-status')).toHaveTextContent('idle');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+
+    await waitFor(() => {
+      expect(mockCreateTask).toHaveBeenCalledWith({
+        prompt: '触发提交',
+        materials: [],
+        context: { threadId: 'thread-existing', taskIds: ['task-old'] },
+      });
+    });
+    expect(mockUpdateThreadTaskId).toHaveBeenCalledWith('thread-existing', 'task-new');
+  });
+
+  it('submits existing thread task ids as context when continuing with files', async () => {
+    mockGetThread.mockResolvedValue({
+      id: 'thread-files',
+      title: 'Existing thread with files',
+      status: 'idle',
+      mode: 'work',
+      createdAt: 1779000000000,
+      updatedAt: 1779000000000,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: 'task-old',
+      taskIds: ['task-old'],
+    });
+    mockRecoverTask.mockResolvedValue({
+      snapshot: {
+        taskId: 'task-old',
+        sessionId: 'sess-old',
+        status: 'completed',
+        prompt: '上一轮输入',
+        materials: [],
+        events: [{ type: 'result', result: { summary: '上一轮完成', artifacts: [] } }],
+        result: { summary: '上一轮完成', artifacts: [] },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    });
+    mockCreateTaskWithFiles.mockResolvedValue({ taskId: 'task-file-new' });
+    mockUpdateThreadTaskId.mockResolvedValue(undefined);
+
+    render(
+      <MemoryRouter initialEntries={['/t/thread-files']}>
+        <Routes>
+          <Route path="/t/:taskId" element={<ChatShell />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-status')).toHaveTextContent('idle');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'submit-files' }));
+
+    await waitFor(() => {
+      expect(mockCreateTaskWithFiles).toHaveBeenCalledWith({
+        prompt: '带附件提交',
+        filePaths: ['/tmp/context.md'],
+        context: { threadId: 'thread-files', taskIds: ['task-old'] },
+      });
+    });
+    expect(mockUpdateThreadTaskId).toHaveBeenCalledWith('thread-files', 'task-file-new');
   });
 
   it('restores a stored project-help draft when sidebar navigation has no route state', async () => {

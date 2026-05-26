@@ -267,6 +267,27 @@ function ModelPane() {
     }
   };
 
+  const handleSetDefaultModel = async (modelId: string) => {
+    if (!config || config.defaultModelId === modelId) return;
+    const model = config.models.find(m => m.id === modelId);
+    if (!model) return;
+    setSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      const updated = await api.saveModelConfig({
+        providerId: model.provider,
+        modelId,
+      });
+      setConfig(updated);
+      setSuccess(`当前模型已切换为 ${model.label}`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDeleteModel = async (modelId: string) => {
     if (!confirm('确定删除此模型配置？')) return;
     try {
@@ -306,6 +327,35 @@ function ModelPane() {
     <>
       <Section>
         <SectionHeader icon={Cpu}>模型提供商</SectionHeader>
+        {(() => {
+          const currentModel = config?.models.find(m => m.id === config.defaultModelId) ?? config?.models.find(m => m.isDefault);
+          const currentProvider = currentModel ? config?.providers.find(p => p.id === currentModel.provider) : null;
+          if (!currentModel) return null;
+          return (
+            <Card className="mb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs text-[var(--c-text-secondary)]">当前使用模型</div>
+                  <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="truncate text-sm font-semibold text-[var(--c-text-primary)]">{currentModel.label}</span>
+                    <span className="rounded-md bg-[var(--c-bg-deep)] px-2 py-0.5 text-xs text-[var(--c-text-secondary)]">
+                      {currentProvider?.label ?? currentModel.provider}
+                    </span>
+                  </div>
+                  {currentModel.capabilities && currentModel.capabilities.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {currentModel.capabilities.map(capability => (
+                        <span key={capability} className="rounded px-1.5 py-0.5 text-[10px] text-[var(--c-text-tertiary)] bg-[var(--c-bg-deep)]">
+                          {capability}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Card>
+          );
+        })()}
         <div className="flex flex-col gap-3">
           {config?.providers.map(provider => {
             const testResult = testResults[provider.id];
@@ -408,6 +458,15 @@ function ModelPane() {
                           >
                             {m.label}
                             {config.defaultModelId === m.id && ' (默认)'}
+                            {config.defaultModelId !== m.id && (
+                              <button
+                                onClick={() => void handleSetDefaultModel(m.id)}
+                                disabled={saving}
+                                className="ml-1 rounded px-1 text-[10px] text-[var(--c-accent)] hover:bg-[var(--c-accent)]/10 disabled:opacity-50"
+                              >
+                                设为默认
+                              </button>
+                            )}
                             <button
                               onClick={() => handleDeleteModel(m.id)}
                               className="ml-1 hover:text-red-500"
@@ -1211,7 +1270,7 @@ interface PluginDependencyStatus {
 
 function McpPane() {
   const [installs, setInstalls] = useState<MCPInstallConfig[]>([]);
-  const [pluginServers, setPluginServers] = useState<Array<{ name: string; pluginName: string; toolCount: number; connected: boolean; enabled: boolean }>>([]);
+  const [pluginServers, setPluginServers] = useState<Array<{ name: string; pluginName: string; toolCount: number; connected: boolean; enabled: boolean; lastError?: string }>>([]);
   const [dependencies, setDependencies] = useState<PluginDependencyStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -1352,6 +1411,40 @@ function McpPane() {
     }
   };
 
+  const handleOpenPermissionSettings = async (permission: 'accessibility' | 'screen') => {
+    try {
+      await api.openPluginDependencyPermissionSettings({ permission });
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
+
+  const handleRestartPluginMcpServers = async () => {
+    const actionKey = 'plugin-mcp:restart';
+    setDependencyAction(actionKey);
+    try {
+      await api.restartPluginMcpServers();
+      load();
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setDependencyAction('');
+    }
+  };
+
+  const handleEnableComputerUse = async () => {
+    const actionKey = 'computer-use:enable';
+    setDependencyAction(actionKey);
+    try {
+      await api.enableComputerUse();
+      load();
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setDependencyAction('');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[200px] items-center justify-center">
@@ -1367,14 +1460,18 @@ function McpPane() {
           <SectionHeader icon={Package}>插件依赖</SectionHeader>
           <div className="flex flex-col gap-2">
             {dependencies.map(dependency => {
-              const statusText = formatPluginDependencyStatus(dependency);
               const pluginInstalled = dependency.pluginInstalled ?? pluginServers.some(server => server.pluginName === dependency.pluginName);
               const dependencyServer = pluginServers.find(server => server.pluginName === dependency.pluginName);
+              const statusText = formatPluginDependencyStatus(dependency, dependencyServer);
               const dependencyLayerRows = formatPluginDependencyLayerRows(dependency, pluginInstalled, dependencyServer);
               const isSettingUp = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:setup`;
               const isInstalling = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:install`;
               const isUpdating = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:update`;
               const isDiagnosing = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:diagnose`;
+              const isRestartingMcp = dependencyAction === 'plugin-mcp:restart';
+              const isEnablingComputerUse = dependencyAction === 'computer-use:enable';
+              const canReconnectMcp = dependency.state === 'ready' && Boolean(dependencyServer) && dependencyServer?.connected === false;
+              const isComputerUse = dependency.pluginName === 'cua-computer-use';
               return (
                 <Card key={`${dependency.pluginName}:${dependency.dependencyId}`}>
                   <div className="flex items-start justify-between gap-3">
@@ -1404,6 +1501,37 @@ function McpPane() {
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
+                      {dependency.code === 'permission_accessibility_missing' && (
+                        <button
+                          type="button"
+                          onClick={() => void handleOpenPermissionSettings('accessibility')}
+                          className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
+                        >
+                          <Settings size={12} />
+                          打开辅助功能
+                        </button>
+                      )}
+                      {dependency.code === 'permission_screen_missing' && (
+                        <button
+                          type="button"
+                          onClick={() => void handleOpenPermissionSettings('screen')}
+                          className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
+                        >
+                          <Settings size={12} />
+                          打开屏幕录制
+                        </button>
+                      )}
+                      {canReconnectMcp && (
+                        <button
+                          type="button"
+                          disabled={isComputerUse ? isEnablingComputerUse : isRestartingMcp}
+                          onClick={() => void (isComputerUse ? handleEnableComputerUse() : handleRestartPluginMcpServers())}
+                          className="inline-flex items-center gap-1 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
+                        >
+                          {(isComputerUse ? isEnablingComputerUse : isRestartingMcp) ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                          {isComputerUse ? '启用 Computer Use' : (dependencyServer?.enabled === false ? '连接 MCP' : '重连 MCP')}
+                        </button>
+                      )}
                       {dependency.canInstall && dependency.state === 'missing' && !pluginInstalled && (
                         <button
                           type="button"
@@ -1474,6 +1602,11 @@ function McpPane() {
                       <div className="text-xs text-[var(--c-text-secondary)]">
                         {server.pluginName} · {server.toolCount} tools
                       </div>
+                      {!server.connected && server.lastError && (
+                        <div className="mt-1 max-w-[420px] truncate text-xs text-[var(--c-text-tertiary)]">
+                          {server.lastError}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded ${server.connected ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
@@ -1586,11 +1719,15 @@ function formatPluginDependencyTitle(dependency: PluginDependencyStatus): string
   return dependency.pluginName;
 }
 
-function formatPluginDependencyStatus(dependency: PluginDependencyStatus): string {
+function formatPluginDependencyStatus(
+  dependency: PluginDependencyStatus,
+  server?: { connected: boolean; toolCount: number },
+): string {
   if (dependency.code === 'binary_missing') return `需要安装 ${dependency.displayName}`;
   if (dependency.code === 'permission_accessibility_missing') return '需要辅助功能权限';
   if (dependency.code === 'permission_screen_missing') return '需要屏幕录制权限';
   if (dependency.code === 'version_too_old') return '需要更新 Driver';
+  if (dependency.pluginName === 'cua-computer-use' && dependency.state === 'ready' && server?.connected === false) return '未启用';
   if (dependency.state === 'ready') return '可用';
   if (dependency.state === 'unsupported') return '当前平台不支持';
   return '需要处理';
@@ -1604,8 +1741,8 @@ function formatPluginDependencyLayerRows(
   return [
     { label: '插件', value: pluginInstalled ? '已安装' : '未安装' },
     { label: dependency.displayName, value: formatDriverLayerStatus(dependency) },
-    { label: '权限', value: formatPermissionLayerStatus(dependency) },
-    { label: 'MCP', value: formatMcpLayerStatus(dependency, server) },
+    { label: '权限', value: formatPermissionLayerStatus(dependency, server) },
+    { label: dependency.pluginName === 'cua-computer-use' ? '服务连接' : 'MCP', value: formatMcpLayerStatus(dependency, server) },
     { label: '工具', value: formatToolLayerStatus(dependency, server) },
   ];
 }
@@ -1619,9 +1756,13 @@ function formatDriverLayerStatus(dependency: PluginDependencyStatus): string {
   return '未确认';
 }
 
-function formatPermissionLayerStatus(dependency: PluginDependencyStatus): string {
+function formatPermissionLayerStatus(
+  dependency: PluginDependencyStatus,
+  server?: { connected: boolean; toolCount: number },
+): string {
   if (dependency.code === 'permission_accessibility_missing') return '缺辅助功能权限';
   if (dependency.code === 'permission_screen_missing') return '缺屏幕录制权限';
+  if (dependency.pluginName === 'cua-computer-use' && dependency.state === 'ready' && server?.connected === false) return '启用后验证';
   if (dependency.state === 'ready') return '已授权';
   if (dependency.state === 'missing' || dependency.state === 'unsupported') return '未检查';
   return '未确认';
@@ -1642,7 +1783,7 @@ function formatToolLayerStatus(
 ): string {
   if (dependency.state !== 'ready') return '不可用';
   if (!server) return '等待注册';
-  if (!server.connected) return 'MCP 未连接';
+  if (!server.connected) return dependency.pluginName === 'cua-computer-use' ? '等待启用' : 'MCP 未连接';
   if (dependency.pluginName === 'cua-computer-use' && server.toolCount === 1) return 'wrapper 已注册';
   if (dependency.pluginName === 'cua-computer-use') return 'raw tools 未隐藏';
   return `${server.toolCount} tools`;
@@ -2205,7 +2346,7 @@ function DataPane() {
 // ---- About ----
 
 function AboutPane() {
-  const [updateStatus, setUpdateStatus] = useState<{ checking: boolean; available: boolean; downloading: boolean; downloaded: boolean; progress: number; version?: string; error?: string } | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<{ checking: boolean; available: boolean; downloading: boolean; downloaded: boolean; installing?: boolean; progress: number; version?: string; error?: string } | null>(null);
   const [checking, setChecking] = useState(false);
 
   useEffect(() => {
@@ -2250,10 +2391,11 @@ function AboutPane() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium">
-                {updateStatus?.downloaded ? '更新已就绪' : updateStatus?.downloading ? '正在下载' : updateStatus?.available ? '发现新版本' : '当前版本'}
+                {updateStatus?.installing ? '正在安装' : updateStatus?.downloaded ? '更新已就绪' : updateStatus?.downloading ? '正在下载' : updateStatus?.available ? '发现新版本' : '当前版本'}
               </div>
               <div className="text-xs text-[var(--c-text-secondary)] mt-1">
-                {updateStatus?.downloaded ? `v${updateStatus.version || '新版本'} 已下载，点击安装` :
+                {updateStatus?.installing ? `正在安装 v${updateStatus.version || '新版本'}，应用将自动重启` :
+                 updateStatus?.downloaded ? `v${updateStatus.version || '新版本'} 已下载，点击安装` :
                  updateStatus?.downloading ? `下载进度 ${updateStatus.progress}%` :
                  updateStatus?.available ? `v${updateStatus.version || '新版本'} 可用` :
                  updateStatus?.checking || checking ? '正在检查...' :
@@ -2265,8 +2407,8 @@ function AboutPane() {
             </div>
             <div className="flex gap-2">
               {updateStatus?.downloaded ? (
-                <button onClick={handleInstallUpdate} className={btnPrimary}>
-                  安装并重启
+                <button onClick={handleInstallUpdate} disabled={updateStatus.installing} className={btnPrimary}>
+                  {updateStatus.installing ? '安装中...' : '安装并重启'}
                 </button>
               ) : updateStatus?.downloading ? (
                 <div className="flex items-center gap-2 text-[var(--c-accent)]">

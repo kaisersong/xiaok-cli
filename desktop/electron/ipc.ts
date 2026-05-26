@@ -1,4 +1,4 @@
-import { clipboard, dialog, type BrowserWindow, type IpcMain } from 'electron';
+import { clipboard, dialog, shell, type BrowserWindow, type IpcMain } from 'electron';
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
@@ -209,6 +209,19 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
   // Plugin MCP servers
   ipcMain.handle('desktop:listPluginMcpServers', () => services.listPluginMcpServers());
   ipcMain.handle('desktop:setPluginMcpServerEnabled', (_event, input) => services.setPluginMcpServerEnabled(input));
+  ipcMain.handle('desktop:restartPluginMcpServers', () => services.restartPluginMcpServers());
+  ipcMain.handle('desktop:restartPluginMcpServer', (_event, input) => services.restartPluginMcpServer(input));
+  ipcMain.handle('desktop:getComputerUseCapabilityStatus', () => services.getComputerUseCapabilityStatus());
+  ipcMain.handle('desktop:enableComputerUse', () => services.enableComputerUse());
+  ipcMain.handle('desktop:reconnectComputerUse', () => services.reconnectComputerUse());
+  ipcMain.handle('desktop:disableComputerUse', () => services.disableComputerUse());
+  ipcMain.handle('desktop:openPluginDependencyPermissionSettings', async (_event, input) => {
+    const permission = String(input?.permission ?? '');
+    const pane = permission === 'screen'
+      ? 'Privacy_ScreenCapture'
+      : 'Privacy_Accessibility';
+    await shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
+  });
   ipcMain.handle('desktop:installPlugin', (_event, name) => services.installPlugin(name));
   ipcMain.handle('desktop:listAvailablePlugins', () => services.listAvailablePlugins());
   ipcMain.handle('desktop:listPluginDependencyStatuses', () => services.listPluginDependencyStatuses());

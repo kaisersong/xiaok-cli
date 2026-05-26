@@ -33,6 +33,7 @@ import { YZJWebSocketClient } from '../channels/yzj-websocket-client.js';
 import { YZJTransport } from '../channels/yzj-transport.js';
 import { parseYZJMessage, resolveYZJConfig } from '../channels/yzj.js';
 import { deriveYZJWebSocketUrl } from '../channels/yzj-ws-url.js';
+import { resolveYzjAllowedTools } from './yzj-safe-tools.js';
 import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { FileCapabilityHealthStore } from '../platform/runtime/health-store.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
@@ -300,7 +301,10 @@ async function runYZJServe(options) {
                         await deliverText(replyTarget, `后台任务 ${job.jobId} ${job.status}${job.resultSummary ? `：${job.resultSummary}` : ''}`, 'status');
                     },
                 });
-                const registry = registryFactory.createRegistry(cwd);
+                const registry = registryFactory.createRegistry(cwd, resolveYzjAllowedTools({
+                    disableSafeDefault: yzjConfig.disable_safe_default,
+                    extraAllowedTools: yzjConfig.extra_allowed_tools,
+                }));
                 const agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks, memoryStore });
                 agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
                 agent.setPromptSnapshot(initialPromptSnapshot);

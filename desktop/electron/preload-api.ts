@@ -3,6 +3,7 @@ import type {
   DesktopTaskEvent,
   MaterialView,
   MaterialRole,
+  TaskCreateContext,
   TaskSnapshot,
   TaskUnderstanding,
   UserAnswer,
@@ -20,6 +21,7 @@ export type {
   DesktopTaskEvent,
   MaterialView,
   MaterialRole,
+  TaskCreateContext,
   TaskSnapshot,
   TaskUnderstanding,
   UserAnswer,
@@ -65,6 +67,13 @@ export const PRELOAD_API_KEYS = [
   'deleteMCPInstall',
   'listPluginMcpServers',
   'setPluginMcpServerEnabled',
+  'restartPluginMcpServers',
+  'restartPluginMcpServer',
+  'getComputerUseCapabilityStatus',
+  'enableComputerUse',
+  'reconnectComputerUse',
+  'disableComputerUse',
+  'openPluginDependencyPermissionSettings',
   'installPlugin',
   'listAvailablePlugins',
   'listPluginDependencyStatuses',
@@ -99,6 +108,8 @@ export const PRELOAD_API_KEYS = [
   'cancelScheduledTask',
   'getTimedActions',
   'getTimedActionRuns',
+  'approveTimedActionAuto',
+  'revokeTimedActionAuto',
   'onScheduledTaskDue',
   'listMemories',
   'createMemory',
@@ -225,6 +236,7 @@ export interface PluginMcpServerView {
   toolCount: number;
   connected: boolean;
   enabled: boolean;
+  lastError?: string;
 }
 
 export interface PluginDependencyStatusView {
@@ -255,11 +267,19 @@ export interface PluginDependencyActionResult {
   error?: string;
 }
 
+export interface ComputerUseCapabilityStatusView {
+  state: string;
+  mcpConnected: boolean;
+  wrapperReady: boolean;
+  lastError?: string;
+}
+
 export interface UpdateStatus {
   checking: boolean;
   available: boolean;
   downloading: boolean;
   downloaded: boolean;
+  installing?: boolean;
   progress: number;
   version?: string;
   error?: string;
@@ -339,10 +359,12 @@ export interface DesktopApi {
   createTask(input: {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
+    context?: TaskCreateContext;
   }): Promise<{ taskId: string; understanding: TaskUnderstanding }>;
   createTaskWithFiles(input: {
     prompt: string;
     filePaths: string[];
+    context?: TaskCreateContext;
   }): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
   subscribeTask(taskId: string, handler: (event: DesktopTaskEvent) => void): () => void;
   answerQuestion(input: { taskId: string; answer: UserAnswer }): Promise<void>;
@@ -365,6 +387,13 @@ export interface DesktopApi {
   deleteMCPInstall(id: string): Promise<void>;
   listPluginMcpServers(): Promise<PluginMcpServerView[]>;
   setPluginMcpServerEnabled(input: { name: string; enabled: boolean }): Promise<PluginMcpServerView[]>;
+  restartPluginMcpServers(): Promise<PluginMcpServerView[]>;
+  restartPluginMcpServer(input: { name: string }): Promise<PluginMcpServerView[]>;
+  getComputerUseCapabilityStatus(): Promise<ComputerUseCapabilityStatusView>;
+  enableComputerUse(): Promise<ComputerUseCapabilityStatusView>;
+  reconnectComputerUse(): Promise<ComputerUseCapabilityStatusView>;
+  disableComputerUse(): Promise<ComputerUseCapabilityStatusView>;
+  openPluginDependencyPermissionSettings(input: { permission: 'accessibility' | 'screen' }): Promise<void>;
   installPlugin(name: string): Promise<{ success: boolean; error?: string }>;
   listAvailablePlugins(): Promise<Array<{ name: string; display_name: string; description: string; version: string; installed: boolean }>>;
   listPluginDependencyStatuses(): Promise<PluginDependencyStatusView[]>;
@@ -414,6 +443,8 @@ export interface DesktopApi {
   cancelScheduledTask(id: string): Promise<boolean>;
   getTimedActions(): Promise<unknown[]>;
   getTimedActionRuns(actionId: string): Promise<unknown[]>;
+  approveTimedActionAuto(actionId: string): Promise<unknown | null>;
+  revokeTimedActionAuto(actionId: string): Promise<unknown | null>;
   onScheduledTaskDue(handler: (event: { taskId: string }) => void): () => void;
   listMemories(): Promise<unknown[]>;
   createMemory(input: { content: string; tags: string[]; source?: string }): Promise<unknown>;
@@ -497,6 +528,13 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     deleteMCPInstall: (id) => ipcRenderer.invoke('desktop:deleteMCPInstall', id) as Promise<void>,
     listPluginMcpServers: () => ipcRenderer.invoke('desktop:listPluginMcpServers') as Promise<PluginMcpServerView[]>,
     setPluginMcpServerEnabled: (input) => ipcRenderer.invoke('desktop:setPluginMcpServerEnabled', input) as Promise<PluginMcpServerView[]>,
+    restartPluginMcpServers: () => ipcRenderer.invoke('desktop:restartPluginMcpServers') as Promise<PluginMcpServerView[]>,
+    restartPluginMcpServer: (input) => ipcRenderer.invoke('desktop:restartPluginMcpServer', input) as Promise<PluginMcpServerView[]>,
+    getComputerUseCapabilityStatus: () => ipcRenderer.invoke('desktop:getComputerUseCapabilityStatus') as Promise<ComputerUseCapabilityStatusView>,
+    enableComputerUse: () => ipcRenderer.invoke('desktop:enableComputerUse') as Promise<ComputerUseCapabilityStatusView>,
+    reconnectComputerUse: () => ipcRenderer.invoke('desktop:reconnectComputerUse') as Promise<ComputerUseCapabilityStatusView>,
+    disableComputerUse: () => ipcRenderer.invoke('desktop:disableComputerUse') as Promise<ComputerUseCapabilityStatusView>,
+    openPluginDependencyPermissionSettings: (input) => ipcRenderer.invoke('desktop:openPluginDependencyPermissionSettings', input) as Promise<void>,
     installPlugin: (name) => ipcRenderer.invoke('desktop:installPlugin', name) as Promise<{ success: boolean; error?: string }>,
     listAvailablePlugins: () => ipcRenderer.invoke('desktop:listAvailablePlugins') as Promise<Array<{ name: string; display_name: string; description: string; version: string; installed: boolean }>>,
     listPluginDependencyStatuses: () => ipcRenderer.invoke('desktop:listPluginDependencyStatuses') as Promise<PluginDependencyStatusView[]>,
@@ -558,6 +596,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     cancelScheduledTask: (id) => ipcRenderer.invoke('desktop:cancelScheduledTask', id) as Promise<boolean>,
     getTimedActions: () => ipcRenderer.invoke('desktop:getTimedActions') as Promise<unknown[]>,
     getTimedActionRuns: (actionId) => ipcRenderer.invoke('desktop:getTimedActionRuns', actionId) as Promise<unknown[]>,
+    approveTimedActionAuto: (actionId) => ipcRenderer.invoke('desktop:timedAction:approveAuto', actionId) as Promise<unknown | null>,
+    revokeTimedActionAuto: (actionId) => ipcRenderer.invoke('desktop:timedAction:revokeAuto', actionId) as Promise<unknown | null>,
     onScheduledTaskDue(handler) {
       const channel = 'desktop:scheduledTaskDue';
       const listener = (_event: unknown, payload: unknown) => {

@@ -9,7 +9,7 @@ import type { ProtocolId } from '../../src/ai/providers/types.js';
 import { MaterialRegistry } from '../../src/runtime/task-host/material-registry.js';
 import { FileTaskSnapshotStore } from '../../src/runtime/task-host/snapshot-store.js';
 import { InProcessTaskRuntimeHost, type TaskRunner } from '../../src/runtime/task-host/task-runtime-host.js';
-import type { MaterialRecord, MaterialRole, TaskSnapshot, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
+import type { MaterialRecord, MaterialRole, TaskCreateContext, TaskSnapshot, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
 import { diagnoseTraceBundle } from '../../src/runtime/diagnostics/diagnoser.js';
 import { diagnoseProjectSnapshot } from '../../src/runtime/diagnostics/project-diagnoser.js';
 import type { DiagnosisReport } from '../../src/runtime/diagnostics/types.js';
@@ -23,7 +23,7 @@ import type { Config, Message, MessageBlock, StreamChunk, ToolCall } from '../..
 import { buildToolList, ToolRegistry } from '../../src/ai/tools/index.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
-import { getConfigPath, loadConfig, saveConfig } from '../../src/utils/config.js';
+import { getConfigDir, getConfigPath, loadConfig, saveConfig } from '../../src/utils/config.js';
 import { createIntentDelegationTools } from '../../src/ai/tools/intent-delegation.js';
 import { analyzeIntent as analyzeStageIntent } from '../../src/runtime/stage/executor.js';
 import { createEmptySessionIntentLedger, cloneSessionIntentLedger, createIntentLedgerRecord, type SessionIntentLedger, type IntentPlanDraft, type IntentLedgerRecord } from '../../src/runtime/intent-delegation/types.js';
@@ -47,9 +47,17 @@ import {
   type ExternalPluginDependency,
   type PluginDependencyStatusOptions,
 } from './plugin-dependency-service.js';
-import { runCuaMcpReadinessSmoke } from './cua-driver-manager.js';
+import { prelaunchCuaDriverDaemonForMcp, runCuaMcpReadinessSmoke } from './cua-driver-manager.js';
 import { UserMemoryStore } from './user-memory.js';
-import { createComputerUseTool } from '../../src/ai/tools/computer-use.js';
+import { createComputerUseTool, type ComputerUseBackend, type ComputerUseUnavailableError } from '../../src/ai/tools/computer-use.js';
+import {
+  isComputerUseAutoConnectEligibleApp,
+  loadComputerUsePreference,
+  saveComputerUsePreference,
+  type ComputerUseAppIdentity,
+  type ComputerUseFailureCode,
+  type ComputerUsePreference,
+} from './computer-use-capability-service.js';
 import { createNotebookTools } from '../../src/ai/tools/notebook.js';
 import type { MemoryStore } from '../../src/ai/memory/store.js';
 import type { KSwarmService, KSwarmUnavailableError } from './kswarm-service.js';
@@ -297,6 +305,8 @@ export interface DesktopServicesOptions {
   pluginRootDir?: string;
   pluginDependencies?: Array<{ pluginName: string; dependency: ExternalPluginDependency }>;
   pluginDependencyStatusOptions?: PluginDependencyStatusOptions;
+  computerUseAppIdentity?: ComputerUseAppIdentity;
+  computerUsePreferencePath?: string;
 }
 
 const CUA_DRIVER_DEPENDENCY: ExternalPluginDependency = {
@@ -321,13 +331,15 @@ const CUA_DRIVER_DEPENDENCY: ExternalPluginDependency = {
   health: {
     version: ['~/.local/bin/cua-driver', '--version'],
     status: ['~/.local/bin/cua-driver', 'status'],
-    permissions: ['~/.local/bin/cua-driver', 'check_permissions'],
     doctor: ['~/.local/bin/cua-driver', 'doctor'],
   },
   mcp: {
     serverName: 'cua-driver',
     command: '~/.local/bin/cua-driver',
+    // Let cua-driver proxy through CuaDriver.app so macOS TCC attributes
+    // Accessibility and Screen Recording to com.trycua.driver, not xiaok.
     args: ['mcp'],
+    requiresUserActivation: true,
   },
 };
 
@@ -606,12 +618,36 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     toolCount: number;
     connected: boolean;
     enabled: boolean;
+    lastError?: string;
   }
   const pluginMcpServers: PluginMcpServerState[] = [];
+  const pluginMcpDisposers: Array<{ name: string; pluginName: string; dispose: () => void }> = [];
   const pluginDependencies = options.pluginDependencies ?? [
     { pluginName: 'cua-computer-use', dependency: CUA_DRIVER_DEPENDENCY },
   ];
-  const pluginRootDir = options.pluginRootDir ?? join(homedir(), '.xiaok', 'plugins');
+  const pluginRootDir = options.pluginRootDir ?? getConfigDir('plugins');
+  const computerUsePreferencePath = options.computerUsePreferencePath ?? join(options.dataRoot, 'computer-use-state.json');
+  let computerUsePreference = loadComputerUsePreference(computerUsePreferencePath);
+  const computerUseAppIdentity = options.computerUseAppIdentity ?? resolveComputerUseAppIdentity();
+  let computerUseBackend: ComputerUseBackend | null = null;
+  let computerUseUnavailableError: ComputerUseUnavailableError = computerUsePreference.lastFailureCode === 'COMPUTER_USE_DISABLED_BY_USER'
+    ? buildComputerUseDisabledUnavailableError()
+    : buildComputerUseNeedsEnablementError();
+
+  registry.registerTool(createComputerUseTool({
+    getUnavailableError: () => computerUseBackend ? null : computerUseUnavailableError,
+    callToolResult: (name, input) => {
+      if (!computerUseBackend) {
+        return Promise.resolve({
+          text: computerUseUnavailableError.message,
+          images: [],
+          isError: true,
+          summary: computerUseUnavailableError.code,
+        });
+      }
+      return computerUseBackend.callToolResult(name, input);
+    },
+  }));
 
   const findPluginDependency = (pluginName: string, dependencyId: string) =>
     pluginDependencies.find((entry) => entry.pluginName === pluginName && entry.dependency.id === dependencyId);
@@ -658,6 +694,230 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
     return { success: true, output: [result.stdout, result.stderr].filter(Boolean).join('\n').trim() };
   }
+
+  const persistComputerUsePreference = (): void => {
+    try {
+      saveComputerUsePreference(computerUsePreferencePath, computerUsePreference);
+    } catch {
+      // Preference persistence is best-effort; runtime state still drives the current session.
+    }
+  };
+
+  const recordComputerUseReady = (source: 'user_enable' | 'auto_recovery'): void => {
+    const {
+      lastFailureCode: _lastFailureCode,
+      autoConnectSuspendedReason: _autoConnectSuspendedReason,
+      ...preferenceWithoutFailure
+    } = computerUsePreference;
+    computerUsePreference = {
+      ...preferenceWithoutFailure,
+      schemaVersion: 1,
+      enabledByUser: source === 'user_enable' ? true : computerUsePreference.enabledByUser,
+      autoConnectAfterSuccessfulEnablement: true,
+      lastSuccessfulAt: options.now?.() ?? Date.now(),
+      ...(computerUseAppIdentity.bundleId ? { lastSuccessfulAppBundleId: computerUseAppIdentity.bundleId } : {}),
+      ...(computerUseAppIdentity.appPath ? { lastSuccessfulAppPath: computerUseAppIdentity.appPath } : {}),
+      ...(computerUseAppIdentity.teamId ? { lastSuccessfulTeamId: computerUseAppIdentity.teamId } : {}),
+      launchMethod: 'open_app',
+    };
+    persistComputerUsePreference();
+  };
+
+  const recordComputerUseFailure = (code: ComputerUseFailureCode): void => {
+    const suspendsAutoConnect = code === 'COMPUTER_USE_NEEDS_ACCESSIBILITY'
+      || code === 'COMPUTER_USE_NEEDS_SCREEN_RECORDING'
+      || code === 'COMPUTER_USE_ATTRIBUTION_MISMATCH'
+      || code === 'COMPUTER_USE_PERMISSION_INVALID'
+      || code === 'COMPUTER_USE_DRIVER_MISSING'
+      || code === 'COMPUTER_USE_PLUGIN_MISSING';
+    computerUsePreference = {
+      ...computerUsePreference,
+      schemaVersion: 1,
+      lastFailureCode: code,
+      ...(suspendsAutoConnect ? { autoConnectSuspendedReason: code } : {}),
+    };
+    persistComputerUsePreference();
+  };
+
+  const disposePluginMcpServers = (predicate: (server: { name: string; pluginName: string }) => boolean = () => true): void => {
+    for (let index = pluginMcpDisposers.length - 1; index >= 0; index -= 1) {
+      const entry = pluginMcpDisposers[index];
+      if (!predicate(entry)) continue;
+      try {
+        entry.dispose();
+      } catch {}
+      pluginMcpDisposers.splice(index, 1);
+    }
+  };
+
+  const reconnectPluginMcpServers = async (
+    options: { userInitiated?: boolean; targetServerName?: string; autoConnectComputerUse?: boolean } = {},
+  ): Promise<PluginMcpServerState[]> => {
+    const matchesTarget = (server: { name: string; pluginName: string }) =>
+      !options.targetServerName || server.name === options.targetServerName;
+    disposePluginMcpServers(matchesTarget);
+    for (let index = pluginMcpServers.length - 1; index >= 0; index -= 1) {
+      if (matchesTarget(pluginMcpServers[index])) {
+        pluginMcpServers.splice(index, 1);
+      }
+    }
+    if (!options.targetServerName || options.targetServerName === 'cua-driver') {
+      computerUseBackend = null;
+      computerUseUnavailableError = options.userInitiated
+        ? { code: 'COMPUTER_USE_MCP_CONNECT_TIMEOUT', message: 'Computer Use 正在连接或连接失败。', userAction: { type: 'reconnect_computer_use', label: '重新连接' } }
+        : buildComputerUseNeedsEnablementError();
+    }
+    try {
+      const plugins = await loadPlugins([pluginRootDir]);
+      for (const plugin of plugins) {
+        if (!plugin.mcpServers?.length) continue;
+        for (const server of plugin.mcpServers) {
+          if (server.type !== 'stdio') continue;
+          if (!matchesTarget({ name: server.name, pluginName: plugin.name })) continue;
+          const dependency = findPluginDependencyForMcpServer(plugin.name, server.name);
+          const mayConnectUserActivatedServer = options.userInitiated
+            || (server.name === 'cua-driver' && options.autoConnectComputerUse === true);
+          if (dependency?.dependency.mcp?.requiresUserActivation && !mayConnectUserActivatedServer) {
+            if (server.name === 'cua-driver') {
+              computerUseUnavailableError = buildComputerUseNeedsEnablementError();
+            }
+            pluginMcpServers.push({
+              name: server.name,
+              pluginName: plugin.name,
+              toolCount: 0,
+              connected: false,
+              enabled: false,
+              lastError: '等待用户点击连接，避免自动触发 macOS 权限弹窗',
+            });
+            continue;
+          }
+          try {
+            const launch = await resolvePluginMcpLaunch(plugin.name, server.name, server.command, server.args ?? []);
+            // Use managed venv python if available for Python MCP servers
+            const isPythonServer = launch.command === 'python3' || launch.command === 'python';
+            const isNodeServer = launch.command === 'node' || launch.command === 'nodejs';
+            const command = isPythonServer
+              ? normalizePythonServerCommand(launch.command, process.platform, process.env.XIAOK_PYTHON_CMD)
+              : isNodeServer
+                ? (process.env.XIAOK_NODE_CMD || process.execPath)
+                : launch.command;
+            prelaunchCuaDriverDaemonForMcp(server.name, command);
+            const baseEnv = 'env' in server ? (server as { env?: Record<string, string> }).env : undefined;
+            const runtimeEnv = isPythonServer
+              ? buildPythonServerEnv(baseEnv)
+              : isNodeServer && !process.env.XIAOK_NODE_CMD && process.versions.electron
+                ? { ...(baseEnv ?? {}), ELECTRON_RUN_AS_NODE: '1' }
+                : baseEnv;
+            const proc = startMcpServerProcess(command, launch.args, {
+              cwd: plugin.rootDir,
+              env: runtimeEnv,
+            });
+            const transport = createStdioMcpTransport(proc.child);
+            const client = createMcpRuntimeClient(transport);
+            await client.initialize();
+            const schemas = await client.listTools();
+            let mcpTools: Tool[];
+            let toolCount = 0;
+            if (server.name === 'cua-driver') {
+              const readiness = await runCuaMcpReadinessSmoke({
+                schemas,
+                callToolResult: (name, input) => client.callToolResult(name, input),
+              });
+              if (!readiness.ready) {
+                transport.dispose();
+                proc.dispose();
+                throw new Error(`CUA MCP readiness failed: ${readiness.code}`);
+              }
+              computerUseBackend = { callToolResult: (name, input) => client.callToolResult(name, input) };
+              if (options.userInitiated || options.autoConnectComputerUse) {
+                recordComputerUseReady(options.userInitiated ? 'user_enable' : 'auto_recovery');
+              }
+              mcpTools = [];
+              toolCount = 1;
+            } else {
+              mcpTools = buildMcpRuntimeTools(
+                { name: server.name, command: server.command },
+                { listTools: () => Promise.resolve(schemas), callTool: (name, input) => client.callTool(name, input), dispose: () => { transport.dispose(); proc.dispose(); } },
+                schemas,
+              );
+              toolCount = mcpTools.length;
+            }
+            for (const tool of mcpTools) {
+              registry.registerTool(tool);
+            }
+            pluginMcpDisposers.push({
+              name: server.name,
+              pluginName: plugin.name,
+              dispose: () => {
+                if (server.name === 'cua-driver') {
+                  computerUseBackend = null;
+                  computerUseUnavailableError = buildComputerUseNeedsEnablementError();
+                }
+                transport.dispose();
+                proc.dispose();
+              },
+            });
+            pluginMcpServers.push({
+              name: server.name,
+              pluginName: plugin.name,
+              toolCount,
+              connected: true,
+              enabled: true,
+            });
+          } catch (e) {
+            if (server.name === 'cua-driver') {
+              computerUseBackend = null;
+              computerUseUnavailableError = mapComputerUseStartupError(e);
+              if (options.userInitiated || options.autoConnectComputerUse) {
+                recordComputerUseFailure(computerUseUnavailableError.code as ComputerUseFailureCode);
+              }
+            }
+            // MCP server failed to start/connect — record as disconnected
+            pluginMcpServers.push({
+              name: server.name,
+              pluginName: plugin.name,
+              toolCount: 0,
+              connected: false,
+              enabled: true,
+              lastError: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
+      }
+    } catch (e) {
+      // Plugin loading failed — non-fatal
+    }
+    return pluginMcpServers;
+  };
+
+  const getComputerUseCapabilityStatus = (): { state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string } => {
+    const server = pluginMcpServers.find((entry) => entry.name === 'cua-driver' && entry.pluginName === 'cua-computer-use');
+    if (computerUseUnavailableError.code === 'COMPUTER_USE_DISABLED_BY_USER') {
+      return {
+        state: 'disabled_by_user',
+        mcpConnected: false,
+        wrapperReady: true,
+        lastError: computerUseUnavailableError.message,
+      };
+    }
+    if (computerUseBackend && server?.connected) {
+      return { state: 'ready', mcpConnected: true, wrapperReady: true };
+    }
+    if (server?.enabled === false || computerUseUnavailableError.code === 'COMPUTER_USE_NEEDS_ENABLEMENT') {
+      return {
+        state: 'not_enabled',
+        mcpConnected: false,
+        wrapperReady: true,
+        lastError: computerUseUnavailableError.message,
+      };
+    }
+    return {
+      state: 'failed',
+      mcpConnected: false,
+      wrapperReady: true,
+      lastError: server?.lastError ?? computerUseUnavailableError.message,
+    };
+  };
 
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
@@ -1146,78 +1406,50 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
     },
     async registerMcpTools(): Promise<{ dispose: () => void }> {
-      const disposers: Array<() => void> = [];
-      try {
-        const plugins = await loadPlugins([pluginRootDir]);
-        for (const plugin of plugins) {
-          if (!plugin.mcpServers?.length) continue;
-          for (const server of plugin.mcpServers) {
-            if (server.type !== 'stdio') continue;
-            try {
-              const launch = await resolvePluginMcpLaunch(plugin.name, server.name, server.command, server.args ?? []);
-              // Use managed venv python if available for Python MCP servers
-              const isPythonServer = launch.command === 'python3' || launch.command === 'python';
-              const command = isPythonServer
-                ? normalizePythonServerCommand(launch.command, process.platform, process.env.XIAOK_PYTHON_CMD)
-                : launch.command;
-              const baseEnv = 'env' in server ? (server as { env?: Record<string, string> }).env : undefined;
-              const proc = startMcpServerProcess(command, launch.args, {
-                cwd: plugin.rootDir,
-                env: isPythonServer ? buildPythonServerEnv(baseEnv) : baseEnv,
-              });
-              const transport = createStdioMcpTransport(proc.child);
-              const client = createMcpRuntimeClient(transport);
-              await client.initialize();
-              const schemas = await client.listTools();
-              let mcpTools: Tool[];
-              if (server.name === 'cua-driver') {
-                const readiness = await runCuaMcpReadinessSmoke({
-                  schemas,
-                  callToolResult: (name, input) => client.callToolResult(name, input),
-                });
-                if (!readiness.ready) {
-                  transport.dispose();
-                  proc.dispose();
-                  throw new Error(`CUA MCP readiness failed: ${readiness.code}`);
-                }
-                mcpTools = [createComputerUseTool({ callToolResult: (name, input) => client.callToolResult(name, input) })];
-              } else {
-                mcpTools = buildMcpRuntimeTools(
-                  { name: server.name, command: server.command },
-                  { listTools: () => Promise.resolve(schemas), callTool: (name, input) => client.callTool(name, input), dispose: () => { transport.dispose(); proc.dispose(); } },
-                  schemas,
-                );
-              }
-              for (const tool of mcpTools) {
-                registry.registerTool(tool);
-              }
-              disposers.push(() => { transport.dispose(); proc.dispose(); });
-              pluginMcpServers.push({
-                name: server.name,
-                pluginName: plugin.name,
-                toolCount: mcpTools.length,
-                connected: true,
-                enabled: true,
-              });
-            } catch (e) {
-              // MCP server failed to start/connect — record as disconnected
-              pluginMcpServers.push({
-                name: server.name,
-                pluginName: plugin.name,
-                toolCount: 0,
-                connected: false,
-                enabled: true,
-              });
-            }
-          }
-        }
-      } catch (e) {
-        // Plugin loading failed — non-fatal
-      }
-      return { dispose: () => { for (const d of disposers) { try { d(); } catch {} } } };
+      const autoConnectDecision = isComputerUseAutoConnectEligibleApp(computerUsePreference, computerUseAppIdentity);
+      await reconnectPluginMcpServers({
+        userInitiated: false,
+        autoConnectComputerUse: autoConnectDecision.eligible,
+      });
+      return { dispose: disposePluginMcpServers };
     },
     listPluginMcpServers(): PluginMcpServerState[] {
       return pluginMcpServers;
+    },
+    async restartPluginMcpServers(): Promise<PluginMcpServerState[]> {
+      return reconnectPluginMcpServers({ userInitiated: true });
+    },
+    async restartPluginMcpServer(input: { name: string }): Promise<PluginMcpServerState[]> {
+      return reconnectPluginMcpServers({ userInitiated: true, targetServerName: input.name });
+    },
+    async enableComputerUse(): Promise<{ state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string }> {
+      await reconnectPluginMcpServers({ userInitiated: true, targetServerName: 'cua-driver' });
+      return getComputerUseCapabilityStatus();
+    },
+    async reconnectComputerUse(): Promise<{ state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string }> {
+      await reconnectPluginMcpServers({ userInitiated: true, targetServerName: 'cua-driver' });
+      return getComputerUseCapabilityStatus();
+    },
+    async disableComputerUse(): Promise<{ state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string }> {
+      disposePluginMcpServers((server) => server.name === 'cua-driver');
+      for (let index = pluginMcpServers.length - 1; index >= 0; index -= 1) {
+        if (pluginMcpServers[index].name === 'cua-driver') pluginMcpServers.splice(index, 1);
+      }
+      computerUseBackend = null;
+      computerUseUnavailableError = buildComputerUseDisabledUnavailableError();
+      computerUsePreference = {
+        ...computerUsePreference,
+        schemaVersion: 1,
+        enabledByUser: false,
+        autoConnectAfterSuccessfulEnablement: false,
+        lastFailureCode: 'COMPUTER_USE_DISABLED_BY_USER',
+        autoConnectSuspendedReason: 'COMPUTER_USE_DISABLED_BY_USER',
+      };
+      persistComputerUsePreference();
+      return getComputerUseCapabilityStatus();
+    },
+    getComputerUseCapabilityStatus(): { state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string } {
+      return getComputerUseCapabilityStatus();
     },
     setPluginMcpServerEnabled(input: { name: string; enabled: boolean }): PluginMcpServerState[] {
       const server = pluginMcpServers.find(s => s.name === input.name);
@@ -1363,6 +1595,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     async createTaskWithFiles(input: {
       prompt: string;
       filePaths: string[];
+      context?: TaskCreateContext;
     }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
       mkdirSync(options.dataRoot, { recursive: true });
       const taskId = `task_${Date.now().toString(36)}`;
@@ -1379,7 +1612,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         } catch (e) {
         }
       }
-      return host.createTask({ prompt: input.prompt, materials });
+      return host.createTask({ prompt: input.prompt, materials, context: input.context });
     },
     async getModelConfig() {
       return createModelConfigSnapshot(await loadConfig());
@@ -1703,6 +1936,85 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return options.dataRoot;
     },
   };
+}
+
+function buildComputerUseNeedsEnablementError(): ComputerUseUnavailableError {
+  return {
+    code: 'COMPUTER_USE_NEEDS_ENABLEMENT',
+    message: 'Computer Use 尚未启用。',
+    userAction: { type: 'enable_computer_use', label: '启用 Computer Use' },
+  };
+}
+
+function buildComputerUseDisabledUnavailableError(): ComputerUseUnavailableError {
+  return {
+    code: 'COMPUTER_USE_DISABLED_BY_USER',
+    message: 'Computer Use 已被用户禁用。',
+  };
+}
+
+function mapComputerUseStartupError(error: unknown): ComputerUseUnavailableError {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('permission_accessibility_missing')) {
+    return {
+      code: 'COMPUTER_USE_NEEDS_ACCESSIBILITY',
+      message: 'CUA Driver 缺少辅助功能权限。',
+      userAction: { type: 'open_system_settings', label: '打开系统设置' },
+    };
+  }
+  if (message.includes('permission_screen_missing')) {
+    return {
+      code: 'COMPUTER_USE_NEEDS_SCREEN_RECORDING',
+      message: 'CUA Driver 缺少屏幕录制权限。',
+      userAction: { type: 'open_system_settings', label: '打开系统设置' },
+    };
+  }
+  if (message.includes('mcp_content_unsupported')) {
+    return {
+      code: 'COMPUTER_USE_PERMISSION_INVALID',
+      message: 'Computer Use 权限看似已授权，但未返回可用屏幕内容。',
+      userAction: { type: 'open_system_settings', label: '重新设置权限' },
+    };
+  }
+  return {
+    code: 'COMPUTER_USE_MCP_CONNECT_TIMEOUT',
+    message: message || 'Computer Use 连接失败。',
+    userAction: { type: 'reconnect_computer_use', label: '重新连接' },
+  };
+}
+
+function resolveComputerUseAppIdentity(): ComputerUseAppIdentity {
+  const appPath = resolveMacAppBundlePath(process.execPath);
+  const teamId = appPath ? resolveCodeSignatureTeamId(appPath) : undefined;
+  return {
+    isPackaged: process.env.NODE_ENV !== 'development' && Boolean(appPath),
+    ...(appPath ? { appPath } : {}),
+    ...(process.env.XIAOK_DESKTOP_BUNDLE_ID ? { bundleId: process.env.XIAOK_DESKTOP_BUNDLE_ID } : {}),
+    ...(teamId ? { teamId } : {}),
+    ...(process.env.XIAOK_DESKTOP_DEV_SERVER ? { devServerUrl: process.env.XIAOK_DESKTOP_DEV_SERVER } : {}),
+    ...(process.env.NODE_ENV ? { nodeEnv: process.env.NODE_ENV } : {}),
+  };
+}
+
+function resolveMacAppBundlePath(executablePath: string): string | undefined {
+  const marker = '.app/Contents/MacOS/';
+  const index = executablePath.indexOf(marker);
+  if (index === -1) return undefined;
+  return executablePath.slice(0, index + '.app'.length);
+}
+
+function resolveCodeSignatureTeamId(appPath: string): string | undefined {
+  if (process.platform !== 'darwin') return undefined;
+  try {
+    const result = spawnSync('/usr/bin/codesign', ['-dv', '--verbose=4', appPath], {
+      encoding: 'utf8',
+      timeout: 1_000,
+    });
+    const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+    return /TeamIdentifier=([A-Z0-9]+)/.exec(output)?.[1];
+  } catch {
+    return undefined;
+  }
 }
 
 function formatKSwarmRequiredOutputs(outputs: KSwarmTaskHandoff['task']['requiredOutputs']): string {
@@ -2488,7 +2800,7 @@ function toolNameToLabel(name: string, input?: Record<string, unknown>): string 
  * Scans each plugin under ~/.xiaok/plugins for a skills subdirectory.
  */
 function getPluginSkillRoots(): string[] {
-  const pluginsDir = join(homedir(), '.xiaok', 'plugins');
+  const pluginsDir = getConfigDir('plugins');
   if (!existsSync(pluginsDir)) return [];
   const roots: string[] = [];
   try {

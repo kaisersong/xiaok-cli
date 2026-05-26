@@ -232,7 +232,13 @@ export class ToolRegistry {
             return `${result}\nWarning: ${warnings.join('\nWarning: ')}`;
         }
         catch (e) {
-            return `Error: ${formatErrorText(String(e))}`;
+            const errorMessage = formatErrorText(String(e));
+            await this.options.hooksRunner?.runHooks('PostToolUseFailure', {
+                tool_name: tool.definition.name,
+                tool_input: input,
+                error: errorMessage,
+            });
+            return `Error: ${errorMessage}`;
         }
     }
     async evaluateProtectedOutputGuard(toolName, input) {

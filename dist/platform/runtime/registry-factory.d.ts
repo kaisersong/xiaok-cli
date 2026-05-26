@@ -25,7 +25,9 @@ export interface PlatformRegistryFactoryOptions {
     onToolObserved?: (event: ToolObservation) => Promise<void> | void;
 }
 export interface PlatformRegistryFactory {
-    createRegistry(cwd: string, allowedTools?: string[], agentId?: string): ToolRegistry;
+    createRegistry(cwd: string, allowedTools?: string[], agentId?: string, opts?: {
+        parentDepth?: number;
+    }): ToolRegistry;
     getReminderApi(): ReminderApi | undefined;
 }
 export declare function createPlatformRegistryFactory(options: PlatformRegistryFactoryOptions): PlatformRegistryFactory;

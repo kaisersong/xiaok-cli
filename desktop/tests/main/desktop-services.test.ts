@@ -356,7 +356,16 @@ describe('desktop services', () => {
     registration.dispose();
   });
 
-  it('does not register the computer-use wrapper when CUA driver dependency is not ready', async () => {
+  it('starts CUA MCP through CuaDriver.app relaunch path for TCC attribution', () => {
+    const sourceFile = readFileSync(join(__dirname, '../../electron/desktop-services.ts'), 'utf-8');
+
+    expect(sourceFile).toContain("args: ['mcp']");
+    expect(sourceFile).toContain('prelaunchCuaDriverDaemonForMcp(server.name, command)');
+    expect(sourceFile).not.toContain('--no-daemon-relaunch');
+    expect(sourceFile).not.toContain('CUA_DRIVER_MCP_NO_RELAUNCH');
+  });
+
+  it('keeps the computer-use wrapper registered with a permission error when CUA driver dependency is not ready', async () => {
     const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
     const pluginDir = join(pluginRootDir, 'cua-computer-use');
     const serverPath = join(process.cwd(), '..', 'tests', 'support', 'cua-mcp-stdio-server.js');
@@ -410,7 +419,9 @@ describe('desktop services', () => {
     const registration = await services.registerMcpTools();
     const toolNames = services.getToolDefinitions().map(tool => tool.name);
 
-    expect(toolNames).not.toContain('xiaok_computer_use');
+    expect(toolNames).toContain('xiaok_computer_use');
+    await expect(services.executeTool('xiaok_computer_use', { action: 'screenshot', app: 'xiaok' }))
+      .resolves.toContain('COMPUTER_USE_NEEDS_ACCESSIBILITY');
     expect(services.listPluginMcpServers()).toEqual([
       expect.objectContaining({
         name: 'cua-driver',
@@ -421,6 +432,343 @@ describe('desktop services', () => {
     ]);
 
     registration.dispose();
+  });
+
+  it('can reconnect plugin MCP servers after a dependency becomes ready', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const pluginDir = join(pluginRootDir, 'cua-computer-use');
+    const serverPath = join(process.cwd(), '..', 'tests', 'support', 'cua-mcp-stdio-server.js');
+    let permissionsGranted = false;
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({
+      name: 'cua-computer-use',
+      version: '0.1.0',
+      mcpServers: [
+        {
+          name: 'cua-driver',
+          type: 'stdio',
+          command: process.execPath,
+          args: [serverPath],
+        },
+      ],
+    }));
+
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      pluginRootDir,
+      pluginDependencies: [{
+        pluginName: 'cua-computer-use',
+        dependency: {
+          id: 'cua-driver',
+          kind: 'macos_app_cli',
+          displayName: 'CUA Driver',
+          binaryCandidates: [process.execPath],
+          health: {
+            permissions: ['cua-driver', 'check_permissions'],
+          },
+          mcp: {
+            serverName: 'cua-driver',
+            command: process.execPath,
+            args: [serverPath],
+          },
+        },
+      }],
+      pluginDependencyStatusOptions: {
+        platform: 'darwin',
+        exists: (path) => path === process.execPath,
+        runCommand: async () => ({
+          exitCode: 0,
+          stdout: permissionsGranted
+            ? 'Accessibility: granted\nScreen Recording: granted\n'
+            : 'Accessibility: denied\nScreen Recording: granted\n',
+          stderr: '',
+        }),
+      },
+    });
+
+    const registration = await services.registerMcpTools();
+    expect(services.getToolDefinitions().map(tool => tool.name)).toContain('xiaok_computer_use');
+    await expect(services.executeTool('xiaok_computer_use', { action: 'screenshot', app: 'xiaok' }))
+      .resolves.toContain('COMPUTER_USE_NEEDS_ACCESSIBILITY');
+    expect(services.listPluginMcpServers()).toEqual([
+      expect.objectContaining({
+        name: 'cua-driver',
+        pluginName: 'cua-computer-use',
+        toolCount: 0,
+        connected: false,
+      }),
+    ]);
+
+    permissionsGranted = true;
+    await services.restartPluginMcpServers();
+
+    expect(services.getToolDefinitions().map(tool => tool.name)).toContain('xiaok_computer_use');
+    expect(services.listPluginMcpServers()).toEqual([
+      expect.objectContaining({
+        name: 'cua-driver',
+        pluginName: 'cua-computer-use',
+        toolCount: 1,
+        connected: true,
+      }),
+    ]);
+
+    registration.dispose();
+  });
+
+  it('does not auto-start user-activated plugin MCP servers on desktop startup', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const pluginDir = join(pluginRootDir, 'cua-computer-use');
+    const serverPath = join(process.cwd(), '..', 'tests', 'support', 'cua-mcp-stdio-server.js');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({
+      name: 'cua-computer-use',
+      version: '0.1.0',
+      mcpServers: [
+        {
+          name: 'cua-driver',
+          type: 'stdio',
+          command: process.execPath,
+          args: [serverPath],
+        },
+      ],
+    }));
+
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      pluginRootDir,
+      pluginDependencies: [{
+        pluginName: 'cua-computer-use',
+        dependency: {
+          id: 'cua-driver',
+          kind: 'macos_app_cli',
+          displayName: 'CUA Driver',
+          binaryCandidates: [process.execPath],
+          minVersion: '0.1.0',
+          health: {
+            version: [process.execPath, '--version'],
+          },
+          mcp: {
+            serverName: 'cua-driver',
+            command: process.execPath,
+            args: [serverPath],
+            requiresUserActivation: true,
+          },
+        },
+      }],
+      pluginDependencyStatusOptions: {
+        platform: 'darwin',
+        exists: (path) => path === process.execPath,
+        runCommand: async () => ({
+          exitCode: 0,
+          stdout: 'v1.2.3\n',
+          stderr: '',
+        }),
+      },
+    });
+
+    const registration = await services.registerMcpTools();
+
+    expect(services.getToolDefinitions().map(tool => tool.name)).toContain('xiaok_computer_use');
+    await expect(services.executeTool('xiaok_computer_use', { action: 'screenshot', app: 'xiaok' }))
+      .resolves.toContain('COMPUTER_USE_NEEDS_ENABLEMENT');
+    expect(services.listPluginMcpServers()).toEqual([
+      expect.objectContaining({
+        name: 'cua-driver',
+        pluginName: 'cua-computer-use',
+        toolCount: 0,
+        connected: false,
+        enabled: false,
+      }),
+    ]);
+
+    registration.dispose();
+  });
+
+  it('reconnects only the CUA MCP server when enabling Computer Use', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const cuaPluginDir = join(pluginRootDir, 'cua-computer-use');
+    const reportPluginDir = join(pluginRootDir, 'kai-report-creator');
+    const serverPath = join(process.cwd(), '..', 'tests', 'support', 'cua-mcp-stdio-server.js');
+    mkdirSync(cuaPluginDir, { recursive: true });
+    mkdirSync(reportPluginDir, { recursive: true });
+    writeFileSync(join(cuaPluginDir, 'plugin.json'), JSON.stringify({
+      name: 'cua-computer-use',
+      version: '0.1.0',
+      mcpServers: [{ name: 'cua-driver', type: 'stdio', command: process.execPath, args: [serverPath] }],
+    }));
+    writeFileSync(join(reportPluginDir, 'plugin.json'), JSON.stringify({
+      name: 'kai-report-creator',
+      version: '0.1.0',
+      mcpServers: [{ name: 'report-renderer', type: 'stdio', command: '/missing/report-renderer', args: [] }],
+    }));
+
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      pluginRootDir,
+      pluginDependencies: [{
+        pluginName: 'cua-computer-use',
+        dependency: {
+          id: 'cua-driver',
+          kind: 'macos_app_cli',
+          displayName: 'CUA Driver',
+          binaryCandidates: [process.execPath],
+          health: { version: [process.execPath, '--version'] },
+          mcp: { serverName: 'cua-driver', command: process.execPath, args: [serverPath], requiresUserActivation: true },
+        },
+      }],
+      pluginDependencyStatusOptions: {
+        platform: 'darwin',
+        exists: (path) => path === process.execPath,
+        runCommand: async () => ({ exitCode: 0, stdout: 'v1.2.3\n', stderr: '' }),
+      },
+    });
+
+    await services.registerMcpTools();
+    expect(services.listPluginMcpServers().map(server => server.name).sort()).toEqual(['cua-driver', 'report-renderer']);
+    expect(services.listPluginMcpServers().find(server => server.name === 'report-renderer')).toMatchObject({
+      connected: false,
+      enabled: true,
+    });
+
+    await services.enableComputerUse();
+
+    expect(services.listPluginMcpServers().find(server => server.name === 'cua-driver')).toMatchObject({
+      connected: true,
+      toolCount: 1,
+    });
+    expect(services.listPluginMcpServers().find(server => server.name === 'report-renderer')).toMatchObject({
+      connected: false,
+      enabled: true,
+      lastError: expect.stringContaining('/missing/report-renderer'),
+    });
+  });
+
+  it('auto-recovers Computer Use only for a previously enabled packaged Applications app', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const cuaPluginDir = join(pluginRootDir, 'cua-computer-use');
+    const serverPath = join(process.cwd(), '..', 'tests', 'support', 'cua-mcp-stdio-server.js');
+    const dataRoot = join(rootDir, 'data');
+    mkdirSync(cuaPluginDir, { recursive: true });
+    mkdirSync(dataRoot, { recursive: true });
+    writeFileSync(join(cuaPluginDir, 'plugin.json'), JSON.stringify({
+      name: 'cua-computer-use',
+      version: '0.1.0',
+      mcpServers: [{ name: 'cua-driver', type: 'stdio', command: process.execPath, args: [serverPath] }],
+    }));
+    writeFileSync(join(dataRoot, 'computer-use-state.json'), JSON.stringify({
+      schemaVersion: 1,
+      enabledByUser: true,
+      autoConnectAfterSuccessfulEnablement: true,
+      lastSuccessfulAt: 100,
+      lastSuccessfulAppBundleId: 'com.xiaok.desktop',
+      lastSuccessfulAppPath: '/Applications/xiaok.app',
+      lastSuccessfulTeamId: 'TEAM123',
+    }));
+
+    const services = createDesktopServices({
+      dataRoot,
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      pluginRootDir,
+      pluginDependencies: [{
+        pluginName: 'cua-computer-use',
+        dependency: {
+          id: 'cua-driver',
+          kind: 'macos_app_cli',
+          displayName: 'CUA Driver',
+          binaryCandidates: [process.execPath],
+          health: { version: [process.execPath, '--version'] },
+          mcp: { serverName: 'cua-driver', command: process.execPath, args: [serverPath], requiresUserActivation: true },
+        },
+      }],
+      pluginDependencyStatusOptions: {
+        platform: 'darwin',
+        exists: (path) => path === process.execPath,
+        runCommand: async () => ({ exitCode: 0, stdout: 'v1.2.3\n', stderr: '' }),
+      },
+      computerUseAppIdentity: {
+        appPath: '/Applications/xiaok.app',
+        bundleId: 'com.xiaok.desktop',
+        teamId: 'TEAM123',
+        isPackaged: true,
+        nodeEnv: 'production',
+      },
+    });
+
+    await services.registerMcpTools();
+
+    expect(services.listPluginMcpServers().find(server => server.name === 'cua-driver')).toMatchObject({
+      connected: true,
+      toolCount: 1,
+    });
+    await expect(services.executeTool('xiaok_computer_use', { action: 'list_windows', on_screen_only: true }))
+      .resolves.toContain('"ok":true');
+  });
+
+  it('does not auto-recover Computer Use in development even when a prior success exists', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const cuaPluginDir = join(pluginRootDir, 'cua-computer-use');
+    const serverPath = join(process.cwd(), '..', 'tests', 'support', 'cua-mcp-stdio-server.js');
+    const dataRoot = join(rootDir, 'data');
+    mkdirSync(cuaPluginDir, { recursive: true });
+    mkdirSync(dataRoot, { recursive: true });
+    writeFileSync(join(cuaPluginDir, 'plugin.json'), JSON.stringify({
+      name: 'cua-computer-use',
+      version: '0.1.0',
+      mcpServers: [{ name: 'cua-driver', type: 'stdio', command: process.execPath, args: [serverPath] }],
+    }));
+    writeFileSync(join(dataRoot, 'computer-use-state.json'), JSON.stringify({
+      schemaVersion: 1,
+      enabledByUser: true,
+      autoConnectAfterSuccessfulEnablement: true,
+      lastSuccessfulAt: 100,
+      lastSuccessfulTeamId: 'TEAM123',
+    }));
+
+    const services = createDesktopServices({
+      dataRoot,
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      pluginRootDir,
+      pluginDependencies: [{
+        pluginName: 'cua-computer-use',
+        dependency: {
+          id: 'cua-driver',
+          kind: 'macos_app_cli',
+          displayName: 'CUA Driver',
+          binaryCandidates: [process.execPath],
+          health: { version: [process.execPath, '--version'] },
+          mcp: { serverName: 'cua-driver', command: process.execPath, args: [serverPath], requiresUserActivation: true },
+        },
+      }],
+      pluginDependencyStatusOptions: {
+        platform: 'darwin',
+        exists: (path) => path === process.execPath,
+        runCommand: async () => ({ exitCode: 0, stdout: 'v1.2.3\n', stderr: '' }),
+      },
+      computerUseAppIdentity: {
+        appPath: '/Applications/xiaok.app',
+        teamId: 'TEAM123',
+        isPackaged: true,
+        devServerUrl: 'http://127.0.0.1:5173',
+        nodeEnv: 'development',
+      },
+    });
+
+    await services.registerMcpTools();
+
+    expect(services.listPluginMcpServers().find(server => server.name === 'cua-driver')).toMatchObject({
+      connected: false,
+      enabled: false,
+    });
+    await expect(services.executeTool('xiaok_computer_use', { action: 'screenshot', app: 'xiaok' }))
+      .resolves.toContain('COMPUTER_USE_NEEDS_ENABLEMENT');
   });
 
   it('reports model_config_missing when kswarm readiness cannot find the configured model', async () => {
@@ -1954,7 +2302,7 @@ describe('desktop services', () => {
     expect(sourceFile).toContain('needs_conversation');
   });
 
-  it('preserves history for cancelled tasks so subsequent tasks see prior context', async () => {
+  it('preserves history for cancelled context tasks so subsequent tasks see prior context', async () => {
     let runCount = 0;
     let historySeenOnSecondRun: Array<{ role: string; content: string }> = [];
     const services = createDesktopServices({
@@ -1992,13 +2340,14 @@ describe('desktop services', () => {
     await services.cancelTask(task1.taskId);
     await waitFor(async () => (await services.recoverTask(task1.taskId)).snapshot.status === 'cancelled', 5000);
 
-    // Let executeTask finally block finish recording history
+    // Let executeTask finally block finish snapshot persistence
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    // Second task
+    // Second task explicitly references the prior thread task.
     const task2 = await services.createTask({
       prompt: '不是创建mac定时任务，是xiaok定时任务',
       materials: [],
+      context: { threadId: 'thread-a', taskIds: [task1.taskId] },
     });
     await waitFor(async () => runCount === 2, 5000);
     await waitFor(async () => (await services.recoverTask(task2.taskId)).snapshot.status === 'completed', 5000);
@@ -2008,6 +2357,60 @@ describe('desktop services', () => {
     expect(historySeenOnSecondRun[0].role).toBe('user');
     expect(historySeenOnSecondRun[0].content).toContain('每天晚上11点同步mydocs');
     expect(historySeenOnSecondRun[1].role).toBe('assistant');
+    const recovered = await services.recoverTask(task2.taskId);
+    expect(recovered.snapshot.context).toEqual({
+      threadId: 'thread-a',
+      taskIds: [task1.taskId],
+      loadedTaskIds: [task1.taskId],
+      skipped: [],
+    });
+  });
+
+  it('passes createTaskWithFiles thread context through to the runtime host', async () => {
+    let runCount = 0;
+    let historySeenOnSecondRun: Array<{ role: string; content: string }> = [];
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner: async ({ history, emitRuntimeEvent, sessionId }) => {
+        runCount++;
+        if (runCount === 2) {
+          historySeenOnSecondRun = history;
+        }
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: `turn_${runCount}`,
+          intentId: `intent_${runCount}`,
+          stepId: `step_${runCount}`,
+          note: `完成任务${runCount}`,
+        });
+      },
+    });
+
+    const task1 = await services.createTask({
+      prompt: '第一轮带附件任务',
+      materials: [],
+    });
+    await waitFor(async () => (await services.recoverTask(task1.taskId)).snapshot.status === 'completed', 5000);
+
+    const task2 = await services.createTaskWithFiles({
+      prompt: '第二轮继续分析新材料',
+      filePaths: [],
+      context: { threadId: 'thread-files', taskIds: [task1.taskId] },
+    });
+    await waitFor(async () => runCount === 2, 5000);
+    await waitFor(async () => (await services.recoverTask(task2.taskId)).snapshot.status === 'completed', 5000);
+
+    expect(historySeenOnSecondRun.map(message => message.content)).toEqual(['第一轮带附件任务', '完成任务1']);
+    const recovered = await services.recoverTask(task2.taskId);
+    expect(recovered.snapshot.context).toEqual({
+      threadId: 'thread-files',
+      taskIds: [task1.taskId],
+      loadedTaskIds: [task1.taskId],
+      skipped: [],
+    });
   });
 });
 

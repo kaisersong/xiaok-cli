@@ -9,6 +9,9 @@ describe('desktop app branding', () => {
     const desktopPackage = JSON.parse(await readFile(join(repoRoot, 'desktop', 'package.json'), 'utf8')) as {
       scripts?: {
         'build:main'?: string;
+        'build:clean'?: string;
+        'pack:dir'?: string;
+        'pack:release'?: string;
       };
     };
     const builder = JSON.parse(await readFile(join(repoRoot, 'desktop', 'electron-builder.json'), 'utf8')) as {
@@ -35,6 +38,13 @@ describe('desktop app branding', () => {
     expect(builder.mac?.target).toContain('dir');
     expect(builder.win?.icon).toBe('build/icon.ico');
     expect(desktopPackage.scripts?.['build:main']).toContain('generate-desktop-service-overrides.mjs');
+    expect(desktopPackage.scripts?.['build:main']).not.toContain("rmSync('dist/main'");
+    expect(desktopPackage.scripts?.['build:main']).not.toContain("rmSync('.tsbuildinfo'");
+    expect(desktopPackage.scripts?.['build:clean']).toContain("rmSync('dist'");
+    expect(desktopPackage.scripts?.['build:clean']).toContain("rmSync('.tsbuildinfo'");
+    expect(desktopPackage.scripts?.['pack:dir']).toContain('npm run build:clean');
+    expect(desktopPackage.scripts?.['pack:release']).toContain('npm run build:clean');
+    expect(desktopPackage.scripts?.['build:main']).toContain('dist/main/desktop/electron/main.js');
     expect(desktopPackage.scripts?.['build:main']).toContain('build/icon.png');
     expect(builder.nsis?.oneClick).toBe(false);
     expect(builder.nsis?.perMachine).toBe(false);
@@ -47,6 +57,7 @@ describe('desktop app branding', () => {
     expect(renderer).not.toContain('<h1>xiaok</h1>');
     expect(mainProcess).toContain('removeWindowsWindowMenu');
     expect(mainProcess).toContain('attachCloseToMinimize');
+    expect(mainProcess).toContain('resolveDesktopDockIconPath');
     expect(launchScript).toContain("'xiaok.app'");
     expect(installScript).toContain("'xiaok.app'");
     expect(installScript).toContain('LOCALAPPDATA');
