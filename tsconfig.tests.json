@@ -4,7 +4,9 @@
     "rootDir": ".",
     "outDir": ".test-dist",
     "declaration": false,
-    "noCheck": true
+    "noCheck": true,
+    "incremental": true,
+    "tsBuildInfoFile": ".test-dist/.tsbuildinfo"
   },
   "include": ["src", "tests"],
   "exclude": ["node_modules", "dist", ".test-dist"]

@@ -3,7 +3,9 @@
   "compilerOptions": {
     "outDir": "dist/main",
     "rootDir": "..",
-    "types": ["node", "electron"]
+    "types": ["node", "electron"],
+    "incremental": true,
+    "tsBuildInfoFile": ".tsbuildinfo"
   },
   "include": [
     "electron/**/*.ts",

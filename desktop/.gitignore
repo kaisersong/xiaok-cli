@@ -2,6 +2,7 @@ node_modules/
 dist/
 release/
 .generated/
+.tsbuildinfo
 build/*
 !build/icon.icns
 !build/icon.ico

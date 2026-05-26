@@ -9,19 +9,22 @@
   "scripts": {
     "build:icon": "node ../scripts/desktop-icon.mjs",
     "build": "npm run build:main && npm run build:renderer",
-    "build:main": "node ../scripts/generate-desktop-service-overrides.mjs && tsc -p tsconfig.electron.json && node -e \"const fs=require('fs'); fs.mkdirSync('dist/main/desktop/electron',{recursive:true}); fs.copyFileSync('electron/preload.cjs','dist/main/desktop/electron/preload.cjs'); fs.mkdirSync('dist/main/desktop/build',{recursive:true}); if(fs.existsSync('build/tray-icon.png')){ fs.copyFileSync('build/tray-icon.png','dist/main/desktop/electron/tray-icon.png'); fs.copyFileSync('build/tray-icon.png','dist/main/desktop/build/tray-icon.png'); } if(fs.existsSync('build/icon.png')){ fs.copyFileSync('build/icon.png','dist/main/desktop/build/icon.png'); }\"",
+    "build:clean": "node -e \"const fs=require('fs'); fs.rmSync('.tsbuildinfo',{force:true}); fs.rmSync('dist',{recursive:true,force:true});\" && npm run build",
+    "build:main": "node ../scripts/generate-desktop-service-overrides.mjs && tsc -p tsconfig.electron.json && node -e \"const fs=require('fs'); const main='dist/main/desktop/electron/main.js'; if(!fs.existsSync(main)){ throw new Error('missing desktop main output: '+main); } fs.mkdirSync('dist/main/desktop/electron',{recursive:true}); fs.copyFileSync('electron/preload.cjs','dist/main/desktop/electron/preload.cjs'); fs.mkdirSync('dist/main/desktop/build',{recursive:true}); if(fs.existsSync('build/tray-icon.png')){ fs.copyFileSync('build/tray-icon.png','dist/main/desktop/electron/tray-icon.png'); fs.copyFileSync('build/tray-icon.png','dist/main/desktop/build/tray-icon.png'); } if(fs.existsSync('build/icon.png')){ fs.copyFileSync('build/icon.png','dist/main/desktop/build/icon.png'); }\"",
     "build:renderer": "vite build",
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "dev:all": "node scripts/dev-runner.mjs",
     "test": "vitest run",
     "test:smoke": "vitest run --reporter=verbose tests/renderer tests/main",
     "typecheck": "node scripts/typecheck-baseline.mjs",
     "typecheck:raw": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "typecheck:update-baseline": "node scripts/typecheck-baseline.mjs --update",
-    "pack:dir": "npm run build:icon && npm run build && electron-builder --dir --config electron-builder.json -c.win.signAndEditExecutable=false",
-    "pack:release": "npm run build:icon && npm run build && electron-builder --config electron-builder.json -c.win.signAndEditExecutable=false",
+    "pack:dir": "npm run build:icon && npm run build:clean && electron-builder --dir --config electron-builder.json -c.win.signAndEditExecutable=false",
+    "pack:release": "npm run build:icon && npm run build:clean && electron-builder --config electron-builder.json -c.win.signAndEditExecutable=false",
     "postinstall": "cd node_modules/better-sqlite3 && npx prebuild-install --runtime electron --target $(node -e \"console.log(require('electron/package.json').version)\") || true"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "@tanstack/react-query": "^5.100.10",
     "better-sqlite3": "^12.10.0",
     "electron-updater": "^6.8.3",
@@ -29,7 +32,6 @@
     "openai": "^4.77.0"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
     "@pierre/diffs": "^1.1.20",
     "@pierre/trees": "^1.0.0-beta.3",
     "@playwright/test": "^1.59.1",

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,6 +22,16 @@ if (!sourcePath) {
     .map((root) => join(root, 'scripts', 'auto-worker.js'))
     .join(', ');
   throw new Error(`failed to locate kswarm auto-worker.js; checked: ${checkedPaths}`);
+}
+
+const force = process.env.XIAOK_FORCE_REGEN_OVERRIDES === '1';
+if (!force && existsSync(targetPath)) {
+  const sourceMtime = statSync(sourcePath).mtimeMs;
+  const targetMtime = statSync(targetPath).mtimeMs;
+  const generatorMtime = statSync(__filename).mtimeMs;
+  if (targetMtime >= sourceMtime && targetMtime >= generatorMtime) {
+    process.exit(0);
+  }
 }
 
 const source = readFileSync(sourcePath, 'utf8');

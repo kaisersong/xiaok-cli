@@ -19,6 +19,11 @@ export default defineConfig({
   base: './',
   root: 'renderer',
   plugins: [react(), tailwindcss()],
+  server: {
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
+  },
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
     __APP_BUILD__: JSON.stringify(buildNumber),
