@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { deployBundledPlugins, ensureReportRendererCssCompat } from '../../electron/deploy-bundled-plugins.js';
+import { dirname, join } from 'node:path';
+import {
+  deployBundledPlugins,
+  ensureManagedPythonVenv,
+  ensureReportRendererCssCompat,
+  ensureSlideRendererWheelhouseCompat,
+} from '../../electron/deploy-bundled-plugins.js';
 
 // Mock electron app module
 const mockIsPackaged = vi.fn(() => false);
@@ -287,6 +292,35 @@ describe('deploy-bundled-plugins', () => {
       ).toBe(true);
     });
 
+    it('replaces stale same-version bundled slide wheels with current-platform wheels', () => {
+      const installedPluginDir = join(pluginsDir, 'kai-slide-creator');
+      const bundledPluginDir = join(bundledDir, 'kai-slide-creator');
+      const installedWheelsDir = join(installedPluginDir, 'bundled-wheels');
+      const bundledWheelsDir = join(bundledPluginDir, 'bundled-wheels');
+      const compatibleNativeWheel = process.platform === 'win32'
+        ? 'pydantic_core-2.46.4-cp314-cp314-win_amd64.whl'
+        : process.platform === 'darwin'
+          ? `pydantic_core-2.46.4-cp311-cp311-macosx_11_0_${process.arch === 'arm64' ? 'arm64' : 'x86_64'}.whl`
+          : `pydantic_core-2.46.4-cp311-cp311-manylinux_2_17_${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}.whl`;
+      const compatibleRpdsWheel = compatibleNativeWheel.replace('pydantic_core', 'rpds_py');
+      const incompatibleNativeWheel = process.platform === 'win32'
+        ? 'pydantic_core-2.46.4-cp311-cp311-macosx_11_0_arm64.whl'
+        : 'pydantic_core-2.46.4-cp314-cp314-win_amd64.whl';
+
+      mkdirSync(installedWheelsDir, { recursive: true });
+      writeFileSync(join(installedWheelsDir, incompatibleNativeWheel), '');
+      writeFileSync(join(installedWheelsDir, compatibleNativeWheel), '');
+      mkdirSync(bundledWheelsDir, { recursive: true });
+      writeFileSync(join(bundledWheelsDir, compatibleNativeWheel), '');
+      writeFileSync(join(bundledWheelsDir, compatibleRpdsWheel), '');
+
+      ensureSlideRendererWheelhouseCompat(installedPluginDir, bundledPluginDir);
+
+      expect(existsSync(join(installedWheelsDir, compatibleNativeWheel))).toBe(true);
+      expect(existsSync(join(installedWheelsDir, compatibleRpdsWheel))).toBe(true);
+      expect(existsSync(join(installedWheelsDir, incompatibleNativeWheel))).toBe(false);
+    });
+
     it('reconciles report renderer css compatibility even when bundled-managed plugin is already current', async () => {
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
@@ -383,6 +417,55 @@ describe('deploy-bundled-plugins', () => {
       expect(manifest.toolPolicy.safeTools).toContain('list_windows');
       expect(manifest.toolPolicy.safeTools).not.toContain('get_app_state');
       expect(skill).toContain('xiaok_computer_use');
+    });
+  });
+
+  describe('managed Python venv creation', () => {
+    it('uses normal venv creation when ensurepip works', async () => {
+      const venvDir = join(rootDir, 'runtime', 'python-env');
+      const venvPython = join(venvDir, 'Scripts', 'python.exe');
+      const exec = vi.fn(async () => {
+        mkdirSync(dirname(venvPython), { recursive: true });
+        writeFileSync(venvPython, '');
+      });
+
+      await expect(ensureManagedPythonVenv({
+        pythonCmd: 'python',
+        venvDir,
+        venvPython,
+        exec,
+      })).resolves.toBe(true);
+
+      expect(exec).toHaveBeenCalledTimes(1);
+      expect(exec).toHaveBeenCalledWith('python', ['-m', 'venv', venvDir], { timeout: 30_000 });
+    });
+
+    it('falls back to without-pip venv and global pip bootstrap when ensurepip is broken', async () => {
+      const venvDir = join(rootDir, 'runtime', 'python-env');
+      const venvPython = join(venvDir, 'Scripts', 'python.exe');
+      const exec = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('ensurepip failed'))
+        .mockImplementationOnce(async () => {
+          mkdirSync(dirname(venvPython), { recursive: true });
+          writeFileSync(venvPython, '');
+        })
+        .mockResolvedValueOnce(undefined);
+
+      await expect(ensureManagedPythonVenv({
+        pythonCmd: 'python',
+        venvDir,
+        venvPython,
+        exec,
+      })).resolves.toBe(true);
+
+      expect(exec).toHaveBeenNthCalledWith(2, 'python', ['-m', 'venv', '--without-pip', venvDir], { timeout: 30_000 });
+      expect(exec).toHaveBeenNthCalledWith(3, 'python', [
+        '-m', 'pip',
+        '--python', venvPython,
+        'install', 'pip',
+        '--disable-pip-version-check',
+      ], { timeout: 120_000 });
     });
   });
 });

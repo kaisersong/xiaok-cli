@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildPythonServerEnv,
   ensureSlideRendererPythonReady,
+  isCompatibleSlideRendererWheelhouse,
   normalizePythonServerCommand,
   type PythonExecFile,
 } from '../../electron/python-runtime.js';
@@ -82,5 +83,31 @@ describe('python runtime helper', () => {
       PYTHONUTF8: '1',
       PYTHONIOENCODING: 'utf-8',
     });
+  });
+
+  it('rejects macOS native wheels for Windows offline slide-renderer installs', () => {
+    expect(isCompatibleSlideRendererWheelhouse([
+      'mcp-1.27.1-py3-none-any.whl',
+      'pydantic-2.13.4-py3-none-any.whl',
+      'pydantic_core-2.46.4-cp311-cp311-macosx_11_0_arm64.whl',
+      'rpds_py-0.30.0-cp311-cp311-macosx_11_0_arm64.whl',
+    ], 'win32', 'x64')).toBe(false);
+  });
+
+  it('accepts Windows native wheels for Windows offline slide-renderer installs', () => {
+    expect(isCompatibleSlideRendererWheelhouse([
+      'mcp-1.27.1-py3-none-any.whl',
+      'pydantic-2.13.4-py3-none-any.whl',
+      'pydantic_core-2.46.4-cp311-cp311-win_amd64.whl',
+      'rpds_py-0.30.0-cp311-cp311-win_amd64.whl',
+    ], 'win32', 'x64')).toBe(true);
+  });
+
+  it('rejects pure-only wheelhouses because pydantic-core needs a native wheel', () => {
+    expect(isCompatibleSlideRendererWheelhouse([
+      'mcp-1.27.1-py3-none-any.whl',
+      'pydantic-2.13.4-py3-none-any.whl',
+      'jsonschema-4.26.0-py3-none-any.whl',
+    ], 'linux', 'x64')).toBe(false);
   });
 });

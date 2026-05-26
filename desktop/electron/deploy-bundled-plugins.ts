@@ -7,12 +7,12 @@
 
 import { app } from 'electron';
 import { join, dirname } from 'node:path';
-import { existsSync, cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { getConfigDir } from '../../src/utils/config.js';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { ensureSlideRendererPythonReady } from './python-runtime.js';
+import { ensureSlideRendererPythonReady, isCompatibleSlideRendererWheelhouse } from './python-runtime.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -48,10 +48,62 @@ function detectPython(): string | null {
   return null;
 }
 
+function resolveBundledPluginsDir(): string | null {
+  const candidates = app.isPackaged
+    ? [join(process.resourcesPath, 'bundled-plugins')]
+    : [
+        // Built dev main: desktop/dist/main/desktop/electron -> ../../../../../../kai-xiaok-plugins/plugins
+        join(__dirname, '..', '..', '..', '..', '..', '..', 'kai-xiaok-plugins', 'plugins'),
+        // Source-tree dev fallback.
+        join(__dirname, '..', '..', 'kai-xiaok-plugins', 'plugins'),
+        // CWD fallbacks for launching from desktop/ or repo root.
+        join(process.cwd(), '..', '..', 'kai-xiaok-plugins', 'plugins'),
+        join(process.cwd(), '..', 'kai-xiaok-plugins', 'plugins'),
+      ];
+
+  return candidates.find(candidate => existsSync(candidate)) ?? null;
+}
+
 export interface DeployResult {
   deployed: string[];
   pythonAvailable: boolean;
   venvReady: boolean;
+  dependencyInstallMode?: string;
+  bundledWheelsUsable?: boolean;
+}
+
+export interface ManagedPythonVenvOptions {
+  pythonCmd: string;
+  venvDir: string;
+  venvPython: string;
+  exec?: typeof execFileAsync;
+}
+
+export async function ensureManagedPythonVenv(options: ManagedPythonVenvOptions): Promise<boolean> {
+  const exec = options.exec ?? execFileAsync;
+
+  try {
+    await exec(options.pythonCmd, ['-m', 'venv', options.venvDir], { timeout: 30_000 });
+    return existsSync(options.venvPython);
+  } catch {
+    // Some Windows Python installs have a working global pip but a broken
+    // ensurepip payload. Avoid bundling Python by creating the venv without pip
+    // and then asking global pip to bootstrap pip into that venv.
+  }
+
+  try {
+    await exec(options.pythonCmd, ['-m', 'venv', '--without-pip', options.venvDir], { timeout: 30_000 });
+    if (!existsSync(options.venvPython)) return false;
+    await exec(options.pythonCmd, [
+      '-m', 'pip',
+      '--python', options.venvPython,
+      'install', 'pip',
+      '--disable-pip-version-check',
+    ], { timeout: 120_000 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function ensureReportRendererCssCompat(pluginDir: string): void {
@@ -67,16 +119,41 @@ export function ensureReportRendererCssCompat(pluginDir: string): void {
   cpSync(themedCssDir, legacyCssDir, { recursive: true });
 }
 
+export function ensureSlideRendererWheelhouseCompat(pluginDir: string, bundledPluginDir: string): void {
+  const bundledWheelsDir = join(bundledPluginDir, 'bundled-wheels');
+  if (!existsSync(bundledWheelsDir)) return;
+
+  const bundledWheelNames = readdirSync(bundledWheelsDir);
+  if (!isCompatibleSlideRendererWheelhouse(bundledWheelNames, process.platform, process.arch)) {
+    return;
+  }
+
+  const installedWheelsDir = join(pluginDir, 'bundled-wheels');
+  const installedWheelNames = existsSync(installedWheelsDir) ? readdirSync(installedWheelsDir) : [];
+  const installedMatchesBundled = sortedWheelNames(installedWheelNames).join('\n')
+    === sortedWheelNames(bundledWheelNames).join('\n');
+
+  if (installedMatchesBundled) return;
+
+  rmSync(installedWheelsDir, { recursive: true, force: true });
+  cpSync(bundledWheelsDir, installedWheelsDir, { recursive: true });
+}
+
+function sortedWheelNames(wheelNames: string[]): string[] {
+  return wheelNames
+    .filter(name => name.toLowerCase().endsWith('.whl'))
+    .map(name => name.toLowerCase())
+    .sort();
+}
+
 export async function deployBundledPlugins(): Promise<DeployResult> {
   const result: DeployResult = { deployed: [], pythonAvailable: false, venvReady: false };
   const pluginsDir = getConfigDir('plugins');
   mkdirSync(pluginsDir, { recursive: true });
 
-  const bundledDir = app.isPackaged
-    ? join(process.resourcesPath, 'bundled-plugins')
-    : join(__dirname, '..', '..', '..', 'kai-xiaok-plugins', 'plugins');
+  const bundledDir = resolveBundledPluginsDir();
 
-  if (!existsSync(bundledDir)) return result;
+  if (!bundledDir) return result;
 
   // 1. Copy plugin files (version-aware)
   for (const name of BUNDLED_PLUGINS) {
@@ -98,6 +175,9 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
           if (name === 'kai-report-creator') {
             ensureReportRendererCssCompat(dest);
           }
+          if (name === 'kai-slide-creator') {
+            ensureSlideRendererWheelhouseCompat(dest, src);
+          }
           continue;
         }
       } catch {
@@ -108,6 +188,9 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
     cpSync(src, dest, { recursive: true });
     if (name === 'kai-report-creator') {
       ensureReportRendererCssCompat(dest);
+    }
+    if (name === 'kai-slide-creator') {
+      ensureSlideRendererWheelhouseCompat(dest, src);
     }
     // Mark as bundled-managed
     try {
@@ -120,34 +203,43 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
     result.deployed.push(name);
   }
 
-  // 2. Setup Python venv for slide-renderer (if Python available)
+  // 2. Setup Python venv for slide-renderer.
+  // Prefer an existing managed venv even when the launched app cannot see a
+  // global Python on PATH; Explorer-launched Windows apps often inherit a
+  // different PATH than the user's terminal.
   const pythonCmd = detectPython();
-  result.pythonAvailable = !!pythonCmd;
+  const venvDir = getConfigDir(join('runtime', 'python-env'));
+  const venvPython = process.platform === 'win32'
+    ? join(venvDir, 'Scripts', 'python.exe')
+    : join(venvDir, 'bin', 'python3');
+  const hasManagedVenv = existsSync(venvPython);
+  result.pythonAvailable = !!pythonCmd || hasManagedVenv;
 
-  if (pythonCmd) {
-    const venvDir = getConfigDir(join('runtime', 'python-env'));
-    const venvPython = process.platform === 'win32'
-      ? join(venvDir, 'Scripts', 'python.exe')
-      : join(venvDir, 'bin', 'python3');
-
-    if (!existsSync(venvPython)) {
-      try {
-        mkdirSync(getConfigDir('runtime'), { recursive: true });
-        await execFileAsync(pythonCmd, ['-m', 'venv', venvDir], { timeout: 30_000 });
-      } catch {
-        return result;
-      }
+  if (!hasManagedVenv && pythonCmd) {
+    mkdirSync(getConfigDir('runtime'), { recursive: true });
+    const created = await ensureManagedPythonVenv({ pythonCmd, venvDir, venvPython });
+    if (!created) {
+      return result;
     }
+  }
 
-    // Install from bundled wheels (no network)
+  if (existsSync(venvPython)) {
+    // Install from bundled wheels (no network), then fall back to online pip
+    // only if the environment is not already usable.
     const wheelsDir = app.isPackaged
       ? join(process.resourcesPath, 'bundled-plugins', 'kai-slide-creator', 'bundled-wheels')
       : join(bundledDir, 'kai-slide-creator', 'bundled-wheels');
+    const wheelsUsable = existsSync(wheelsDir) && isCompatibleSlideRendererWheelhouse(
+      readdirSync(wheelsDir),
+      process.platform,
+      process.arch,
+    );
+    result.bundledWheelsUsable = wheelsUsable;
 
     const depsMarker = join(venvDir, '.deps-installed');
     const runtimeReady = await ensureSlideRendererPythonReady({
       venvPython,
-      wheelsDir: existsSync(wheelsDir) ? wheelsDir : undefined,
+      wheelsDir: wheelsUsable ? wheelsDir : undefined,
       markerPath: depsMarker,
       markerExists: existsSync(depsMarker),
       writeMarker: (markerPath) => {
@@ -155,6 +247,7 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
       },
     });
     result.venvReady = runtimeReady.ready;
+    result.dependencyInstallMode = runtimeReady.mode;
   }
 
   return result;

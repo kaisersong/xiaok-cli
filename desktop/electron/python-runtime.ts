@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const REQUIRED_MODULES = ['mcp', 'jsonschema', 'pydantic', 'bs4'];
 const REQUIRED_DISTRIBUTIONS = ['mcp==1.27.1', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4'];
+const REQUIRED_NATIVE_WHEEL_PREFIXES = ['pydantic_core-', 'rpds_py-'];
 const IMPORT_CHECK_SNIPPET = `import ${REQUIRED_MODULES.join(', ')}`;
 
 export type PythonExecFile = (
@@ -43,6 +44,47 @@ async function canImportRequiredModules(exec: PythonExecFile, pythonCommand: str
   } catch {
     return false;
   }
+}
+
+export function isCompatibleSlideRendererWheelhouse(
+  wheelNames: string[],
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): boolean {
+  const normalized = wheelNames
+    .filter(name => name.toLowerCase().endsWith('.whl'))
+    .map(name => name.toLowerCase());
+
+  return REQUIRED_NATIVE_WHEEL_PREFIXES.every(prefix =>
+    normalized.some(name => name.startsWith(prefix) && isCompatibleNativeWheelName(name, platform, arch))
+  );
+}
+
+function isCompatibleNativeWheelName(
+  wheelName: string,
+  platform: NodeJS.Platform,
+  arch: string,
+): boolean {
+  if (wheelName.includes('-none-any.whl')) return true;
+
+  if (platform === 'win32') {
+    if (arch === 'arm64') return wheelName.includes('win_arm64');
+    if (arch === 'ia32') return wheelName.includes('win32');
+    return wheelName.includes('win_amd64');
+  }
+
+  if (platform === 'darwin') {
+    if (!wheelName.includes('macosx')) return false;
+    if (wheelName.includes('universal2')) return true;
+    return arch === 'arm64' ? wheelName.includes('arm64') : wheelName.includes('x86_64');
+  }
+
+  if (platform === 'linux') {
+    if (!/(manylinux|musllinux|linux)/.test(wheelName)) return false;
+    return arch === 'arm64' ? /(aarch64|arm64)/.test(wheelName) : /x86_64/.test(wheelName);
+  }
+
+  return false;
 }
 
 export async function ensureSlideRendererPythonReady(

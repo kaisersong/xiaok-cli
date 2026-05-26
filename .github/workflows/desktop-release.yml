@@ -56,8 +56,11 @@ jobs:
 
       - name: Download Python wheels (macOS)
         run: |
-          pip3 download mcp pydantic jsonschema \
-            -d ../kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels/ \
+          wheel_dir="../kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels"
+          rm -rf "$wheel_dir"
+          mkdir -p "$wheel_dir"
+          python3 -m pip download mcp==1.27.1 pydantic==2.13.4 jsonschema==4.26.0 beautifulsoup4 \
+            -d "$wheel_dir" \
             --only-binary=:all:
 
       - name: Smoke test report-renderer
@@ -115,7 +118,10 @@ jobs:
 
       - name: Download Python wheels (Windows)
         run: |
-          pip download mcp pydantic jsonschema -d ../kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels/ --only-binary=:all:
+          $wheelDir = Join-Path (Resolve-Path ..\kai-xiaok-plugins\plugins\kai-slide-creator).Path 'bundled-wheels'
+          Remove-Item -LiteralPath $wheelDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $wheelDir | Out-Null
+          python -m pip download mcp==1.27.1 pydantic==2.13.4 jsonschema==4.26.0 beautifulsoup4 -d $wheelDir --only-binary=:all:
 
       - name: Build desktop
         run: cd desktop && npm run build
