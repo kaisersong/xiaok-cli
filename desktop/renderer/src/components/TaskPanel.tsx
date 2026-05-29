@@ -56,25 +56,31 @@ export function TaskPanel({ planSteps, status, result, generatedFiles, onFileCli
           <div className="task-panel__heading">生成结果</div>
           <ul className="task-panel__results">
             {result?.artifacts?.map((artifact) => (
-              <li
-                key={artifact.artifactId}
-                className="task-panel__result-item"
-                onClick={() => onArtifactClick(artifact)}
-              >
-                <span className="task-panel__result-icon">📄</span>
-                <span className="task-panel__result-name">{artifact.title}</span>
+              <li key={artifact.artifactId}>
+                <button
+                  type="button"
+                  aria-label={artifact.title}
+                  className="task-panel__result-item task-panel__result-button"
+                  onClick={() => onArtifactClick(artifact)}
+                >
+                  <span className="task-panel__result-icon" aria-hidden="true">📄</span>
+                  <span className="task-panel__result-name">{artifact.title}</span>
+                </button>
               </li>
             ))}
             {generatedFiles
               .filter((f) => !result?.artifacts?.some((a) => a.filePath === f.filePath))
               .map((file) => (
-                <li
-                  key={file.filePath}
-                  className="task-panel__result-item"
-                  onClick={() => onFileClick(file)}
-                >
-                  <span className="task-panel__result-icon">📄</span>
-                  <span className="task-panel__result-name">{file.name}</span>
+                <li key={file.filePath}>
+                  <button
+                    type="button"
+                    aria-label={file.name}
+                    className="task-panel__result-item task-panel__result-button"
+                    onClick={() => onFileClick(file)}
+                  >
+                    <span className="task-panel__result-icon" aria-hidden="true">📄</span>
+                    <span className="task-panel__result-name">{file.name}</span>
+                  </button>
                 </li>
               ))}
           </ul>

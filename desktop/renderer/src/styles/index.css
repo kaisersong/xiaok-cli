@@ -158,10 +158,19 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
   padding: 4px 8px;
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s;
+}
+
+.task-panel__result-button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
 
 .task-panel__result-item:hover {

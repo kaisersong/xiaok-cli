@@ -269,17 +269,23 @@ export function WorkspaceResource({ file, runId, projectId, accessToken }: Props
           data-workspace-kind="image"
           style={{ display: 'inline-block', border: '0.5px solid var(--c-border-subtle)', borderRadius: '12px', padding: '8px' }}
         >
-          <img
-            src={loadState.blobUrl}
-            alt={file.filename}
-            draggable={false}
+          <button
+            type="button"
+            aria-label={`Open image preview: ${file.filename}`}
             onClick={openLightbox}
-            style={{ maxWidth: '100%', display: 'block', borderRadius: '6px', cursor: 'default' }}
-          />
+            style={{ border: 0, background: 'transparent', padding: 0, maxWidth: '100%', display: 'block', cursor: 'pointer' }}
+          >
+            <img
+              src={loadState.blobUrl}
+              alt={file.filename}
+              draggable={false}
+              style={{ maxWidth: '100%', display: 'block', borderRadius: '6px' }}
+            />
+          </button>
         </div>
         {visible && createPortal(
           <div
-            onClick={(event) => {
+            onPointerDown={(event) => {
               if (event.target === event.currentTarget) closeLightbox()
             }}
             style={{
@@ -315,24 +321,34 @@ export function WorkspaceResource({ file, runId, projectId, accessToken }: Props
               <X size={16} />
             </button>
 
-            <img
-              src={loadState.blobUrl}
-              alt={file.filename}
-              draggable={false}
+            <button
+              type="button"
+              aria-label={`Close image preview: ${file.filename}`}
               onClick={closeLightbox}
               style={{
-                maxWidth: '90vw',
-                maxHeight: 'calc(90vh - 64px)',
-                borderRadius: '8px',
+                border: 0,
+                background: 'transparent',
+                padding: 0,
                 cursor: 'pointer',
                 transform: show ? 'scale(1)' : 'scale(0.94)',
                 opacity: show ? 1 : 0,
                 transition,
               }}
-            />
+            >
+              <img
+                src={loadState.blobUrl}
+                alt={file.filename}
+                draggable={false}
+                style={{
+                  maxWidth: '90vw',
+                  maxHeight: 'calc(90vh - 64px)',
+                  borderRadius: '8px',
+                  display: 'block',
+                }}
+              />
+            </button>
 
             <div
-              onClick={(event) => event.stopPropagation()}
               style={{
                 marginTop: 16,
                 display: 'flex',

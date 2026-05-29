@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { TaskPanel } from '../../renderer/src/components/TaskPanel';
 
 describe('TaskPanel', () => {
@@ -93,7 +93,7 @@ describe('TaskPanel', () => {
     const { container } = render(
       <TaskPanel {...defaultProps} status="completed" result={result} onArtifactClick={onArtifactClick} />
     );
-    const resultItem = container.querySelector('.task-panel__result-item')!;
+    const resultItem = within(container).getByRole('button', { name: '方案.pptx' });
     fireEvent.click(resultItem);
     expect(onArtifactClick).toHaveBeenCalledWith(result.artifacts[0]);
   });
@@ -122,7 +122,7 @@ describe('TaskPanel', () => {
     const { container } = render(
       <TaskPanel {...defaultProps} status="completed" result={{ summary: '完成', artifacts: [] }} generatedFiles={generatedFiles} onFileClick={onFileClick} />
     );
-    const resultItem = container.querySelector('.task-panel__result-item')!;
+    const resultItem = within(container).getByRole('button', { name: '笔记.md' });
     fireEvent.click(resultItem);
     expect(onFileClick).toHaveBeenCalledWith(generatedFiles[0]);
   });

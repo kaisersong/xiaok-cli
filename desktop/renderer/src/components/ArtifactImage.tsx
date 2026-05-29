@@ -80,7 +80,7 @@ export function ArtifactImage({ artifact, accessToken, pathPrefix = '/v1/artifac
   }, [visible, closeLightbox])
 
   const handleOverlayClick = useCallback(
-    (e: React.MouseEvent) => {
+    (e: React.PointerEvent) => {
       if (e.target === e.currentTarget) closeLightbox()
     },
     [closeLightbox],
@@ -131,23 +131,36 @@ export function ArtifactImage({ artifact, accessToken, pathPrefix = '/v1/artifac
           padding: '8px',
         }}
       >
-        <img
-          src={blobUrl!}
-          alt={artifact.filename}
-          draggable={false}
+        <button
+          type="button"
+          aria-label={`Open image preview: ${artifact.filename}`}
           onClick={openLightbox}
           style={{
+            border: 0,
+            background: 'transparent',
+            padding: 0,
             maxWidth: '100%',
             width: '100%',
             display: 'block',
-            borderRadius: '6px',
-            cursor: 'default',
+            cursor: 'pointer',
           }}
-        />
+        >
+          <img
+            src={blobUrl!}
+            alt={artifact.filename}
+            draggable={false}
+            style={{
+              maxWidth: '100%',
+              width: '100%',
+              display: 'block',
+              borderRadius: '6px',
+            }}
+          />
+        </button>
       </div>
       {visible && createPortal(
         <div
-          onClick={handleOverlayClick}
+          onPointerDown={handleOverlayClick}
           style={{
             position: 'fixed',
             inset: 0,
@@ -181,24 +194,34 @@ export function ArtifactImage({ artifact, accessToken, pathPrefix = '/v1/artifac
             <X size={16} />
           </button>
 
-          <img
-            src={blobUrl!}
-            alt={artifact.filename}
-            draggable={false}
+          <button
+            type="button"
+            aria-label={`Close image preview: ${artifact.filename}`}
             onClick={closeLightbox}
             style={{
-              maxWidth: '90vw',
-              maxHeight: 'calc(90vh - 64px)',
-              borderRadius: '8px',
+              border: 0,
+              background: 'transparent',
+              padding: 0,
               cursor: 'pointer',
               transform: show ? 'scale(1)' : 'scale(0.94)',
               opacity: show ? 1 : 0,
               transition,
             }}
-          />
+          >
+            <img
+              src={blobUrl!}
+              alt={artifact.filename}
+              draggable={false}
+              style={{
+                maxWidth: '90vw',
+                maxHeight: 'calc(90vh - 64px)',
+                borderRadius: '8px',
+                display: 'block',
+              }}
+            />
+          </button>
 
           <div
-            onClick={(e) => e.stopPropagation()}
             style={{
               marginTop: 16,
               display: 'flex',
