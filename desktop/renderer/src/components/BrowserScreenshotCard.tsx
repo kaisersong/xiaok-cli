@@ -76,6 +76,7 @@ export function BrowserScreenshotCard({ artifact, accessToken, command, url }: P
   const [visible, setVisible] = useState(false)
   const [show, setShow] = useState(false)
   const closingTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const filename = artifact.filename || artifact.title || 'screenshot'
 
   useEffect(() => {
     let cancelled = false
@@ -125,7 +126,7 @@ export function BrowserScreenshotCard({ artifact, accessToken, command, url }: P
   }, [visible, closeLightbox])
 
   const handleOverlayClick = useCallback(
-    (e: React.MouseEvent) => { if (e.target === e.currentTarget) closeLightbox() },
+    (e: React.PointerEvent) => { if (e.target === e.currentTarget) closeLightbox() },
     [closeLightbox],
   )
 
@@ -135,10 +136,10 @@ export function BrowserScreenshotCard({ artifact, accessToken, command, url }: P
       if (!blobUrl) return
       const a = document.createElement('a')
       a.href = blobUrl
-      a.download = artifact.filename
+      a.download = filename
       a.click()
     },
-    [blobUrl, artifact.filename],
+    [blobUrl, filename],
   )
 
   const displayUrl = url || extractUrlFromCommand(command)
@@ -179,12 +180,10 @@ export function BrowserScreenshotCard({ artifact, accessToken, command, url }: P
 
         {/* screenshot area - 16:9 aspect ratio */}
         <div
-          onClick={blobUrl ? openLightbox : undefined}
           style={{
             position: 'relative',
             width: '100%',
             paddingBottom: '56.25%', // 16:9
-            cursor: blobUrl ? 'pointer' : 'default',
             background: 'var(--c-bg-deep)',
           }}
         >
@@ -211,19 +210,35 @@ export function BrowserScreenshotCard({ artifact, accessToken, command, url }: P
             }} />
           )}
           {blobUrl && (
-            <img
-              src={blobUrl}
-              alt={artifact.filename}
-              draggable={false}
+            <button
+              type="button"
+              aria-label={`Open screenshot preview: ${filename}`}
+              onClick={openLightbox}
               style={{
                 position: 'absolute',
                 inset: 0,
                 width: '100%',
                 height: '100%',
-                objectFit: 'contain',
-                borderRadius: '0 0 9px 9px',
+                border: 0,
+                background: 'transparent',
+                padding: 0,
+                cursor: 'pointer',
               }}
-            />
+            >
+              <img
+                src={blobUrl}
+                alt={filename}
+                draggable={false}
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  borderRadius: '0 0 9px 9px',
+                }}
+              />
+            </button>
           )}
         </div>
       </div>
@@ -231,7 +246,7 @@ export function BrowserScreenshotCard({ artifact, accessToken, command, url }: P
       {/* lightbox */}
       {visible && createPortal(
         <div
-          onClick={handleOverlayClick}
+          onPointerDown={handleOverlayClick}
           style={{
             position: 'fixed',
             inset: 0,
@@ -248,6 +263,7 @@ export function BrowserScreenshotCard({ artifact, accessToken, command, url }: P
           }}
         >
           <button type="button"
+            aria-label="Close screenshot preview"
             onClick={closeLightbox}
             className="flex size-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--c-bg-deep)]"
             style={{
@@ -265,24 +281,34 @@ export function BrowserScreenshotCard({ artifact, accessToken, command, url }: P
             <X size={16} />
           </button>
 
-          <img
-            src={blobUrl!}
-            alt={artifact.filename}
-            draggable={false}
+          <button
+            type="button"
+            aria-label={`Close screenshot preview: ${filename}`}
             onClick={closeLightbox}
             style={{
-              maxWidth: '90vw',
-              maxHeight: 'calc(90vh - 64px)',
-              borderRadius: '8px',
+              border: 0,
+              background: 'transparent',
+              padding: 0,
               cursor: 'pointer',
               transform: show ? 'scale(1)' : 'scale(0.94)',
               opacity: show ? 1 : 0,
               transition,
             }}
-          />
+          >
+            <img
+              src={blobUrl!}
+              alt={filename}
+              draggable={false}
+              style={{
+                maxWidth: '90vw',
+                maxHeight: 'calc(90vh - 64px)',
+                borderRadius: '8px',
+                display: 'block',
+              }}
+            />
+          </button>
 
           <div
-            onClick={(e) => e.stopPropagation()}
             style={{
               marginTop: 16,
               display: 'flex',
@@ -315,11 +341,12 @@ export function BrowserScreenshotCard({ artifact, accessToken, command, url }: P
               className="bg-[var(--c-bg-sub)] hover:bg-[var(--c-bg-deep)]"
             >
               <span style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {artifact.filename}
+                {filename}
               </span>
               <ExternalLink size={14} style={{ color: 'var(--c-text-icon)', flexShrink: 0 }} />
             </a>
             <button type="button"
+              aria-label={`Download screenshot: ${filename}`}
               onClick={handleDownload}
               style={{
                 display: 'inline-flex',

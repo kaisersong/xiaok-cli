@@ -2,6 +2,7 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ArtifactImage } from '../../renderer/src/components/ArtifactImage';
+import { BrowserScreenshotCard } from '../../renderer/src/components/BrowserScreenshotCard';
 import { WorkspaceResource } from '../../renderer/src/components/WorkspaceResource';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 
@@ -85,6 +86,33 @@ describe('interactive media accessibility', () => {
 
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Close image preview: chart.png' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('opens and closes browser screenshots through labelled buttons', async () => {
+    render(
+      <BrowserScreenshotCard
+        artifact={{
+          artifactId: 'screenshot-1',
+          type: 'browser_screenshot',
+          key: 'screenshot-key',
+          filename: 'browser.png',
+        }}
+        accessToken="token"
+      />,
+    );
+
+    const openButton = await screen.findByRole('button', { name: 'Open screenshot preview: browser.png' });
+    fireEvent.click(openButton);
+
+    expect(await screen.findByRole('button', { name: 'Close screenshot preview' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download screenshot: browser.png' })).toBeInTheDocument();
+
+    const closeImageButton = await screen.findByRole('button', { name: 'Close screenshot preview: browser.png' });
+    fireEvent.click(closeImageButton);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Close screenshot preview: browser.png' })).not.toBeInTheDocument();
     });
   });
 });
