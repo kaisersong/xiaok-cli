@@ -13,16 +13,12 @@ type DateGroup = {
 }
 
 const MS_PER_DAY = 86_400_000
+type DatePartsFormatter = Pick<Intl.DateTimeFormat, 'formatToParts'>
 
-function getZonedMidnight(value: string | Date, timeZone: string): number | null {
+function getZonedMidnight(value: string | Date, formatter: DatePartsFormatter): number | null {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return null
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date)
+  const parts = formatter.formatToParts(date)
   const year = Number(parts.find((part) => part.type === 'year')?.value ?? '')
   const month = Number(parts.find((part) => part.type === 'month')?.value ?? '')
   const day = Number(parts.find((part) => part.type === 'day')?.value ?? '')
@@ -35,9 +31,9 @@ function groupByDate(threads: ThreadResponse[], labels: {
   yesterday: string
   lastWeek: string
   earlier: string
-}, timeZone: string): DateGroup[] {
+}, formatter: DatePartsFormatter): DateGroup[] {
   const now = new Date()
-  const todayStart = getZonedMidnight(now, timeZone)
+  const todayStart = getZonedMidnight(now, formatter)
   const yesterdayStart = todayStart === null ? null : todayStart - MS_PER_DAY
   const weekStart = todayStart === null ? null : todayStart - 6 * MS_PER_DAY
 
@@ -49,7 +45,7 @@ function groupByDate(threads: ThreadResponse[], labels: {
   ]
 
   for (const thread of threads) {
-    const threadStart = getZonedMidnight(thread.created_at, timeZone)
+    const threadStart = getZonedMidnight(thread.created_at, formatter)
     if (threadStart === null) {
       buckets[3][1].push(thread)
       continue
@@ -223,11 +219,20 @@ export function ChatsSearchModal({ threads, mode, accessToken, onClose }: Props)
     lastWeek: t.searchLastWeek,
     earlier: t.searchEarlier,
   }), [t])
+  const datePartsFormatter = useMemo(
+    () => new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }),
+    [timeZone],
+  )
 
   const groups = useMemo(() => {
-    const next = groupByDate(visibleThreads, dateLabels, timeZone)
+    const next = groupByDate(visibleThreads, dateLabels, datePartsFormatter)
     return next
-  }, [dateLabels, timeZone, visibleThreads])
+  }, [dateLabels, datePartsFormatter, visibleThreads])
 
   const handleThreadClick = useCallback(
     (threadId: string) => {

@@ -52,14 +52,16 @@ function firstTimestamp(values: unknown[]): number | null {
   return null;
 }
 
+const TASK_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
 function formatTaskTimestamp(value: number): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(new Date(value)).replace(',', '');
+  return TASK_TIMESTAMP_FORMATTER.format(new Date(value)).replace(',', '');
 }
 
 function getTaskTimeMeta(task: KSwarmTask): { label: string; value: number } | null {

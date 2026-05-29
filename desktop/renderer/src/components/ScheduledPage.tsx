@@ -81,6 +81,14 @@ const INTERVAL_OPTIONS = [
   { value: 720 },
 ];
 
+const SCHEDULED_TASK_TIME_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
 const DAY_OPTIONS = [
   { value: 0 },
   { value: 1 },
@@ -555,13 +563,7 @@ export function ScheduledPage() {
   const formatTime = (ts?: number): string => {
     if (!ts) return '—';
     try {
-      return new Intl.DateTimeFormat('zh-CN', {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }).format(new Date(ts));
+      return SCHEDULED_TASK_TIME_FORMATTER.format(new Date(ts));
     } catch {
       return '—';
     }

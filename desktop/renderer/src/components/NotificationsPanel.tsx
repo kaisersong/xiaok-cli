@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Fragment } from 'react'
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
 import { X } from 'lucide-react'
 import { getActiveTimeZone } from '../shared'
 import { listNotifications, markAllNotificationsRead, type NotificationItem } from '../api'
@@ -10,15 +10,10 @@ type Props = {
   onMarkedRead: () => void
 }
 
-function formatDate(iso: string, locale: string): string {
+function formatDate(iso: string, formatter: Intl.DateTimeFormat): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
-    year: 'numeric',
-    month: locale === 'zh' ? 'numeric' : 'short',
-    day: 'numeric',
-    timeZone: getActiveTimeZone(),
-  }).format(d)
+  return formatter.format(d)
 }
 
 function resolveI18nField(
@@ -37,6 +32,16 @@ const ITEM_GAP_BOTTOM = 24
 
 export function NotificationsPanel({ accessToken, onClose, onMarkedRead }: Props) {
   const { t, locale } = useLocale()
+  const timeZone = getActiveTimeZone()
+  const dateFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+      year: 'numeric',
+      month: locale === 'zh' ? 'numeric' : 'short',
+      day: 'numeric',
+      timeZone,
+    }),
+    [locale, timeZone],
+  )
   const [items, setItems] = useState<NotificationItem[]>([])
   const [loadError, setLoadError] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -157,7 +162,7 @@ export function NotificationsPanel({ accessToken, onClose, onMarkedRead }: Props
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {formatDate(n.created_at, locale)}
+                      {formatDate(n.created_at, dateFormatter)}
                     </span>
 
                     {/* Content */}

@@ -69,6 +69,10 @@ describe('React Doctor low-risk optimization batch', () => {
     expect(diagnosticsForRule('rerender-lazy-state-init')).toEqual([]);
   });
 
+  it('clears repeated Intl formatter construction diagnostics', () => {
+    expect(diagnosticsForRule('js-hoist-intl')).toEqual([]);
+  });
+
   it('has a global reduced-motion fallback for desktop animations', () => {
     expect(diagnosticsForRule('require-reduced-motion')).toEqual([]);
   });

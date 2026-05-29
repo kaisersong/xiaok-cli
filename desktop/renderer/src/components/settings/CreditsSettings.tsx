@@ -7,16 +7,24 @@ import {
 import { useLocale } from '../../contexts/LocaleContext'
 import { formatDateTime, getActiveTimeZone } from '../shared'
 
+const MONTH_LABEL_FORMATTERS = {
+  zh: new Intl.DateTimeFormat('zh-CN', {
+    month: 'long',
+    timeZone: 'UTC',
+  }),
+  en: new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    timeZone: 'UTC',
+  }),
+}
+
 function getCurrentYearMonth(timeZone: string): { year: number; month: number } {
   const parts = formatDateTime(new Date(), { timeZone, includeZone: false }).slice(0, 7).split('-')
   return { year: Number(parts[0]), month: Number(parts[1]) }
 }
 
 function getMonthLabel(month: number, locale: string): string {
-  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
-    month: 'long',
-    timeZone: 'UTC',
-  }).format(new Date(Date.UTC(2000, month - 1, 1)))
+  return MONTH_LABEL_FORMATTERS[locale === 'zh' ? 'zh' : 'en'].format(new Date(Date.UTC(2000, month - 1, 1)))
 }
 
 function formatTransactionDate(value: string): string {

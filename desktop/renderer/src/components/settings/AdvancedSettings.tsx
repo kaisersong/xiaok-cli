@@ -71,6 +71,7 @@ const DESKTOP_EXPORT_SECTIONS: DesktopExportSection[] = [
 
 const AGENT_IMPORT_ITEM_KEYS = ['identity', 'skills', 'mcp', 'providers'] as const
 const AGENT_IMPORT_SOURCE_ORDER: ImportSourceKind[] = ['openclaw', 'hermes']
+const DEFAULT_NUMBER_FORMATTER = new Intl.NumberFormat()
 
 function createDefaultAgentImportSelection(): Record<ImportItemKey, boolean> {
   return {
@@ -93,7 +94,7 @@ function formatUsd(value: number) {
 }
 
 function formatNumber(value: number) {
-  return new Intl.NumberFormat().format(value)
+  return DEFAULT_NUMBER_FORMATTER.format(value)
 }
 
 function formatChartTick(n: number): string {
@@ -165,8 +166,8 @@ function shiftDateStringYears(date: string, deltaYears: number): string {
   return current.toISOString().slice(0, 10)
 }
 
-function getWeekdayInTimeZone(value: string | Date, timeZone: string): number {
-  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(new Date(value))
+function getWeekdayInTimeZone(value: string | Date, formatter: Intl.DateTimeFormat): number {
+  const weekday = formatter.format(new Date(value))
   const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
   return map[weekday] ?? 0
 }
@@ -453,6 +454,10 @@ function UsagePane({
   }, [accessToken, timeZone])
 
   // build heatmap grid: 53 columns x 7 rows
+  const weekdayFormatter = useMemo(
+    () => new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }),
+    [timeZone],
+  )
   const heatmap = useMemo(() => {
     const tokenMap = new Map<string, number>()
     let totalTokens = 0
@@ -463,7 +468,7 @@ function UsagePane({
     }
     const today = getDateStringInTimeZone(new Date(), timeZone)
     // end of current week (Saturday)
-    const dayOfWeek = getWeekdayInTimeZone(new Date(), timeZone)
+    const dayOfWeek = getWeekdayInTimeZone(new Date(), weekdayFormatter)
     const endDay = shiftDateString(today, 6 - dayOfWeek)
     // start: 52 weeks before the start of the week containing today
     const startDay = shiftDateString(endDay, -52 * 7 - 6)
@@ -510,7 +515,7 @@ function UsagePane({
     }
 
     return { weeks, maxVal, monthLabels, totalTokens }
-  }, [heatmapData, timeZone])
+  }, [heatmapData, timeZone, weekdayFormatter])
 
   function heatColor(value: number, max: number): string {
     if (value === 0 || max === 0) return 'var(--c-bg-deep)'

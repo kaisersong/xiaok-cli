@@ -10,6 +10,7 @@ type Props = {
 }
 
 const PAGE_SIZE = 50
+const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
 
 function truncateId(value: string): string {
   return value.length > 8 ? `${value.slice(0, 8)}…` : value
@@ -30,15 +31,14 @@ function formatRelativeTime(value: string): string {
   if (Number.isNaN(date.getTime())) return value
   const diffSeconds = Math.round((date.getTime() - Date.now()) / 1000)
   const abs = Math.abs(diffSeconds)
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
-  if (abs < 60) return rtf.format(diffSeconds, 'second')
+  if (abs < 60) return RELATIVE_TIME_FORMATTER.format(diffSeconds, 'second')
   const diffMinutes = Math.round(diffSeconds / 60)
-  if (Math.abs(diffMinutes) < 60) return rtf.format(diffMinutes, 'minute')
+  if (Math.abs(diffMinutes) < 60) return RELATIVE_TIME_FORMATTER.format(diffMinutes, 'minute')
   const diffHours = Math.round(diffMinutes / 60)
-  if (Math.abs(diffHours) < 24) return rtf.format(diffHours, 'hour')
+  if (Math.abs(diffHours) < 24) return RELATIVE_TIME_FORMATTER.format(diffHours, 'hour')
   const diffDays = Math.round(diffHours / 24)
-  if (Math.abs(diffDays) < 30) return rtf.format(diffDays, 'day')
-  return rtf.format(Math.round(diffDays / 30), 'month')
+  if (Math.abs(diffDays) < 30) return RELATIVE_TIME_FORMATTER.format(diffDays, 'day')
+  return RELATIVE_TIME_FORMATTER.format(Math.round(diffDays / 30), 'month')
 }
 
 function formatAbsoluteTime(value: string): string {
