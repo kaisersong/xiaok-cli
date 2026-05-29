@@ -79,6 +79,7 @@ function EntryCard({
           {editing ? (
             <div className="flex flex-col gap-2">
               <textarea
+                aria-label={titles.viewEdit}
                 ref={textareaRef}
                 value={editValue}
                 onChange={(e) => setEditValue(e.target.value)}
@@ -190,9 +191,13 @@ function NotebookCard({
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={titles.viewEdit}
       className="group/card cursor-pointer rounded-xl"
       style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-menu)' }}
       onClick={onClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); setMiniHovered(false) }}
     >

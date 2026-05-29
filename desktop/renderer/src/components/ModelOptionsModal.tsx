@@ -386,7 +386,9 @@ export function ModelOptionsModal({
       ref={overlayRef}
       className="overlay-fade-in fixed inset-0 z-[60] flex items-center justify-center"
       style={{ background: 'var(--c-overlay)' }}
+      role="presentation"
       onClick={(e) => { if (e.target === overlayRef.current) handleClose() }}
+      onKeyDown={(e) => { if (e.key === 'Escape') handleClose() }}
     >
       <div
         className="modal-enter flex w-full max-w-[760px] flex-col gap-5 rounded-[14px] p-6"
@@ -397,6 +399,7 @@ export function ModelOptionsModal({
           <h3 className="text-[15px] font-semibold text-[var(--c-text-heading)]">{isCreate ? labels.addModelTitle : labels.modelOptionsTitle}</h3>
           <button
             type="button"
+            aria-label="Close model options"
             onClick={handleClose}
             disabled={saving}
             className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)] disabled:opacity-50"

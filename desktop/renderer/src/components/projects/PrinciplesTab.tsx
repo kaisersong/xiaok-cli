@@ -369,7 +369,12 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
       </div>
 
       {confirmDeleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setConfirmDeleteId(null)}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          role="presentation"
+          onClick={() => setConfirmDeleteId(null)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setConfirmDeleteId(null); }}
+        >
           <div className="absolute inset-0 bg-black/20 backdrop-blur-[2px]" />
           <div
             className="relative w-full max-w-sm rounded-xl border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-5 shadow-xl"
@@ -582,6 +587,7 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
             {principle && (
               <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                 <input
+                  aria-label={principle.enabled ? t.projectsPrinciplesEnabled : t.projectsPrinciplesDisabled}
                   type="checkbox"
                   checked={principle.enabled}
                   onChange={e => handleToggle(principle.id, e.target.checked)}
@@ -638,7 +644,12 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
 
   function renderKnowledgeDocumentModal(doc: KnowledgeDocumentView) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setSelectedDoc(null)}>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center"
+        role="presentation"
+        onClick={() => setSelectedDoc(null)}
+        onKeyDown={(e) => { if (e.key === 'Escape') setSelectedDoc(null); }}
+      >
         <div className="absolute inset-0 bg-black/20 backdrop-blur-[2px]" />
         <div
           className="relative w-full max-w-2xl rounded-xl border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-6 shadow-xl"
@@ -650,7 +661,7 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
               <h3 className="text-base font-semibold text-[var(--c-text-primary)]">{doc.title || doc.id}</h3>
               <p className="mt-1 text-xs text-[var(--c-text-muted)]">{doc.source || 'manual'}{doc.packId ? ` · ${doc.packId}` : ''}</p>
             </div>
-            <button type="button" onClick={() => setSelectedDoc(null)} className="rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]">
+            <button type="button" aria-label={`${t.projectsKnowledgeClose} ${t.projectsKnowledgeDocumentLabel}`} onClick={() => setSelectedDoc(null)} className="rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]">
               <X size={16} />
             </button>
           </div>
@@ -674,7 +685,12 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
   function renderExtractionModal(state: ExtractionState) {
     const canSave = state.status === 'ready' && state.rules.length > 0 && Boolean(state.patch);
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setExtraction(null)}>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center"
+        role="presentation"
+        onClick={() => setExtraction(null)}
+        onKeyDown={(e) => { if (e.key === 'Escape') setExtraction(null); }}
+      >
         <div className="absolute inset-0 bg-black/20 backdrop-blur-[2px]" />
         <div
           className="relative w-full max-w-xl rounded-xl border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-6 shadow-xl"

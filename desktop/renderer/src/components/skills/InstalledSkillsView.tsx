@@ -253,8 +253,12 @@ export function InstalledSkillsView(props: Props) {
                       style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-page)' }}
                     >
                       <div
+                        role="button"
+                        tabIndex={0}
+                        aria-label={dir.path}
                         className="flex items-center gap-2 px-3 py-2 cursor-pointer select-none transition-colors hover:bg-[var(--c-bg-deep)]"
                         onClick={() => toggleDir(dir.path)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDir(dir.path); } }}
                       >
                         {open
                           ? <ChevronDown size={12} className="shrink-0 text-[var(--c-text-tertiary)]" />

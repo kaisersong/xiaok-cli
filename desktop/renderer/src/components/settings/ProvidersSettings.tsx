@@ -390,7 +390,9 @@ function AddProviderModal({ accessToken, p, onClose, onCreated }: {
     <div
       className="overlay-fade-in fixed inset-0 z-[60] flex items-center justify-center"
       style={{ background: 'var(--c-overlay)' }}
+      role="presentation"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
     >
       <div
         className="modal-enter flex w-[460px] flex-col gap-5 rounded-[14px] p-6"
@@ -399,6 +401,7 @@ function AddProviderModal({ accessToken, p, onClose, onCreated }: {
         <div className="flex items-center justify-between">
           <h3 className="text-[15px] font-semibold text-[var(--c-text-heading)]">{p.addProvider}</h3>
           <button type="button"
+            aria-label="Close provider modal"
             onClick={onClose}
             className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
           >
@@ -546,7 +549,7 @@ function ProviderDetail({ provider, accessToken, onUpdated, onDeleted, p }: {
           <VendorDropdown value={formPreset} onChange={setFormPreset} p={p} />
         </LabelField>
         <LabelField label={p.providerName}>
-          <input value={formName} onChange={(e) => setFormName(e.target.value)} className={INPUT_CLS} />
+          <input aria-label={p.providerName} value={formName} onChange={(e) => setFormName(e.target.value)} className={INPUT_CLS} />
         </LabelField>
         <LabelField label={p.apiKey}>
           <input aria-label={provider.key_prefix ? `${provider.key_prefix}${'*'.repeat(40)}` : p.apiKeyPlaceholder} type="password" value={formApiKey} onChange={(e) => setFormApiKey(e.target.value)} placeholder={provider.key_prefix ? `${provider.key_prefix}${'*'.repeat(40)}` : p.apiKeyPlaceholder} className={INPUT_CLS} />
@@ -1035,7 +1038,13 @@ function ErrorDetailsButton({ error }: { error: ProviderActionError }) {
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <button
+            type="button"
+            aria-label="Close error details"
+            tabIndex={-1}
+            className="fixed inset-0 z-40 border-0 bg-transparent p-0"
+            onClick={() => setOpen(false)}
+          />
           <div
             className="dropdown-menu absolute right-0 top-[calc(100%+6px)] z-50 max-w-[360px] min-w-[240px]"
             style={{
@@ -1122,7 +1131,13 @@ function ModelTestButton({ accessToken, provider, label, searchPlaceholder }: {
       )}
       {open && (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <button
+            type="button"
+            aria-label="Close menu"
+            tabIndex={-1}
+            className="fixed inset-0 z-10 border-0 bg-transparent p-0"
+            onClick={() => setOpen(false)}
+          />
           <div
             className="absolute right-0 top-[calc(100%+6px)] z-20 min-w-[220px] overflow-hidden dropdown-menu"
             style={{

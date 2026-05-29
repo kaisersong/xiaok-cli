@@ -497,6 +497,7 @@ export function LocalMemoryStatsCard() {
       <Modal open={!!editingEntry} onClose={() => setEditingEntry(null)} title="编辑记忆" width="480px">
         <div className="flex flex-col gap-3">
           <textarea
+            aria-label="编辑记忆"
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
             rows={4}

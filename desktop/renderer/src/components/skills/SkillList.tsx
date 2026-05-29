@@ -107,9 +107,13 @@ export function SkillList({
         return (
           <div
             key={item.id}
+            role="button"
+            tabIndex={0}
+            aria-label={item.display_name}
             className="flex items-start gap-3 rounded-xl p-3 cursor-pointer transition-colors duration-100 bg-[var(--c-bg-menu)] hover:bg-[var(--c-bg-deep)]"
             style={{ border: '0.5px solid var(--c-border-subtle)' }}
             onClick={() => onDetailSkill(item)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onDetailSkill(item); } }}
           >
             <div className="flex min-w-0 flex-1 flex-col gap-1.5">
               <div className="flex flex-wrap items-center gap-2">

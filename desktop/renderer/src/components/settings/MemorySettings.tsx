@@ -132,12 +132,16 @@ function ImpressionCard({
         </div>
       ) : (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label={titles.title}
           className="group/card cursor-pointer rounded-xl"
           style={{
             border: '0.5px solid var(--c-border-subtle)',
             background: 'var(--c-bg-menu)',
           }}
           onClick={() => setModalOpen(true)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setModalOpen(true); } }}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => { setHovered(false); setMiniHovered(false) }}
         >
@@ -470,12 +474,16 @@ function MemoriesCard({
         </div>
       ) : (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label={titles.title}
           className="group/card cursor-pointer rounded-xl"
           style={{
             border: '0.5px solid var(--c-border-subtle)',
             background: 'var(--c-bg-menu)',
           }}
           onClick={() => setModalOpen(true)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setModalOpen(true); } }}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => { setHovered(false); setMiniHovered(false) }}
         >

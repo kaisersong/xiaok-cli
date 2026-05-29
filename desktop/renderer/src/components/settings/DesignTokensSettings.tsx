@@ -710,7 +710,7 @@ function TogglesPreview() {
             </div>
             <div className="flex items-center gap-3">
               <span className="w-9 shrink-0 text-center text-[10px] font-medium uppercase tracking-wide text-[var(--c-text-muted)]">Early</span>
-              <input type="range" min={5} max={100} defaultValue={80} className={RANGE_CLASS} />
+              <input aria-label="Trigger threshold" type="range" min={5} max={100} defaultValue={80} className={RANGE_CLASS} />
               <span className="w-9 shrink-0 text-center text-[10px] font-medium uppercase tracking-wide text-[var(--c-text-muted)]">Late</span>
             </div>
           </div>
@@ -722,6 +722,7 @@ function TogglesPreview() {
               <p className="mt-0.5 text-xs text-[var(--c-text-muted)]">Messages preserved after compaction.</p>
             </div>
             <input
+              aria-label="Keep last N messages"
               type="number"
               min={2}
               max={50}

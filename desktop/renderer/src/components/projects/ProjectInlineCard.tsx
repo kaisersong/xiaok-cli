@@ -15,11 +15,13 @@ export function ProjectInlineCard({ projectId, name, goal, status, createdAt, me
   const statusText = status === 'created' ? 'PO 正在分解...' : status;
 
   return (
-    <div
+    <button
+      type="button"
+      aria-label={name}
       onClick={() => navigate(`/projects/${projectId}`)}
       className="cursor-pointer rounded-xl border border-[var(--c-border-subtle)]
                  bg-[var(--c-bg-card)] p-4 hover:bg-[var(--c-bg-deep)]
-                 transition-colors duration-150 max-w-md"
+                 transition-colors duration-150 max-w-md text-left"
     >
       <div className="flex items-center gap-2 mb-1">
         <FolderKanban size={16} className="text-[var(--c-text-secondary)]" />
@@ -33,6 +35,6 @@ export function ProjectInlineCard({ projectId, name, goal, status, createdAt, me
         <span>·</span>
         <span>{statusText}</span>
       </div>
-    </div>
+    </button>
   );
 }

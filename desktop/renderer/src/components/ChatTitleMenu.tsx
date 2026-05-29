@@ -186,6 +186,7 @@ function ChatTitleMenuContent({ threadId }: { threadId: string | null }) {
             editingTitle !== null ? (
               <input
                 ref={editTitleInputRef}
+                aria-label={t.renameThread}
                 value={editingTitle}
                 onChange={(e) => setEditingTitle(e.target.value)}
                 onKeyDown={(e) => {
@@ -375,7 +376,9 @@ function ChatTitleMenuContent({ threadId }: { threadId: string | null }) {
         <div
           className="overlay-fade-in fixed inset-0 flex items-center justify-center"
           style={{ zIndex: 10000, background: 'rgba(0,0,0,0.12)', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' }}
+          role="presentation"
           onClick={(e) => { if (e.target === e.currentTarget) setDeleteConfirmOpen(false) }}
+          onKeyDown={(e) => { if (e.key === 'Escape') setDeleteConfirmOpen(false) }}
         >
           <div
             className="modal-enter"

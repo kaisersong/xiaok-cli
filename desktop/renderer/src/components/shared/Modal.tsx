@@ -38,7 +38,9 @@ export function Modal({ open, onClose, title, children, width = '480px' }: Props
   return createPortal(
     <div
       ref={overlayRef}
+      role="presentation"
       onClick={handleOverlayClick}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
     >
       <div
@@ -54,6 +56,7 @@ export function Modal({ open, onClose, title, children, width = '480px' }: Props
             <h3 className="text-[15px] font-semibold text-[var(--c-text-heading)]">{title}</h3>
             <button
               type="button"
+              aria-label="Close modal"
               onClick={onClose}
               className="flex size-7 shrink-0 items-center justify-center rounded-lg text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]"
             >

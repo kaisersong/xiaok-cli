@@ -132,7 +132,9 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
     <div
       className="overlay-fade-in fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: 'var(--c-overlay)' }}
+      role="presentation"
       onClick={e => { if (e.target === e.currentTarget) handleClose(); }}
+      onKeyDown={(e) => { if (e.key === 'Escape') handleClose(); }}
     >
       <div
         className="modal-enter flex w-full max-w-lg flex-col rounded-[14px] p-6"
@@ -142,7 +144,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
           <h2 className="text-[15px] font-semibold text-[var(--c-text-heading)]">
             {step === 1 ? t.projectsAgentTypeTitle : '配置智能体'}
           </h2>
-          <button type="button" onClick={handleClose} className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]">
+          <button type="button" aria-label="Close agent modal" onClick={handleClose} className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]">
             <X size={14} />
           </button>
         </div>

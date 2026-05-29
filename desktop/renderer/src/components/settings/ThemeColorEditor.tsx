@@ -67,6 +67,7 @@ function VarRow({ varKey, value, onChange }: VarRowProps) {
           }}
         />
         <input
+          aria-label={label}
           type="color"
           value={toInputColor(value)}
           onChange={handleColorPicker}
@@ -86,6 +87,7 @@ function VarRow({ varKey, value, onChange }: VarRowProps) {
 
       {/* Hex input */}
       <input
+        aria-label={`${label} hex`}
         type="text"
         value={hexInput}
         onChange={handleHexChange}
@@ -527,7 +529,7 @@ export function ThemeColorEditor({ onClose }: Props) {
               <Upload size={12} />
               {t.importTheme}
             </button>
-            <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+            <input ref={fileInputRef} aria-label={t.importTheme} type="file" accept=".json" className="hidden" onChange={handleImport} />
             {/* Export */}
             <button
               type="button"

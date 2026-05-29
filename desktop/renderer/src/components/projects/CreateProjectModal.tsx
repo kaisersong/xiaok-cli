@@ -142,7 +142,12 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/12 backdrop-blur-[2px]" onClick={onClose} />
+      <div
+        className="absolute inset-0 bg-black/12 backdrop-blur-[2px]"
+        role="presentation"
+        onClick={onClose}
+        onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+      />
 
       {/* Modal */}
       <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-page)] p-6 shadow-xl">
@@ -151,6 +156,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
           <h2 className="text-[14px] font-semibold text-[var(--c-text-heading)]">{t.projectsCreateTitle}</h2>
           <button
             type="button"
+            aria-label="Close project modal"
             onClick={onClose}
             className="flex size-7 items-center justify-center rounded-lg text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] transition-colors duration-150"
           >

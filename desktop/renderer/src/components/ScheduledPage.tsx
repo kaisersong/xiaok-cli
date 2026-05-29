@@ -741,7 +741,12 @@ export function ScheduledPage() {
 
       {/* Create/Edit Modal */}
       {modalMode && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={closeModal}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+          role="presentation"
+          onClick={closeModal}
+          onKeyDown={(e) => { if (e.key === 'Escape') closeModal(); }}
+        >
           <div
             className="mx-4 w-full max-w-[600px] rounded-2xl bg-[var(--c-bg-card)] shadow-xl"
             onClick={e => e.stopPropagation()}
@@ -752,6 +757,7 @@ export function ScheduledPage() {
                 {modalMode === 'create' ? t.scheduledCreateTitle : t.scheduledEditTitle}
               </h3>
               <button type="button"
+                aria-label="Close scheduled task modal"
                 onClick={closeModal}
                 className="rounded-lg p-1 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
               >
@@ -854,6 +860,7 @@ export function ScheduledPage() {
                 <div>
                   <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">{t.scheduledRunAt}</label>
                   <input
+                    aria-label={t.scheduledRunAt}
                     type="time"
                     value={`${String(formScheduleConfig?.hour ?? 9).padStart(2, '0')}:${String(formScheduleConfig?.minute ?? 0).padStart(2, '0')}`}
                     onChange={e => {
@@ -889,6 +896,7 @@ export function ScheduledPage() {
                   <div>
                     <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">{t.scheduledRunAt}</label>
                     <input
+                      aria-label={t.scheduledRunAt}
                       type="time"
                       value={`${String(formScheduleConfig?.hour ?? 9).padStart(2, '0')}:${String(formScheduleConfig?.minute ?? 0).padStart(2, '0')}`}
                       onChange={e => {
@@ -927,7 +935,9 @@ export function ScheduledPage() {
         <div
           className="fixed inset-0 flex items-center justify-center"
           style={{ zIndex: 10000, background: 'rgba(0,0,0,0.12)', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' }}
+          role="presentation"
           onClick={(e) => { if (e.target === e.currentTarget) setConfirmDeleteId(null); }}
+          onKeyDown={(e) => { if (e.key === 'Escape') setConfirmDeleteId(null); }}
         >
           <div
             style={{
@@ -970,7 +980,9 @@ export function ScheduledPage() {
         <div
           className="fixed inset-0 flex items-center justify-center"
           style={{ zIndex: 10000, background: 'rgba(0,0,0,0.12)', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' }}
+          role="presentation"
           onClick={(e) => { if (e.target === e.currentTarget) setConfirmDeleteInstanceId(null); }}
+          onKeyDown={(e) => { if (e.key === 'Escape') setConfirmDeleteInstanceId(null); }}
         >
           <div
             style={{

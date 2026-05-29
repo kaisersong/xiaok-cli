@@ -71,7 +71,11 @@ export function MemoryModelSettings() {
           return (
             <div key={model.id}>
               <div
+                role="button"
+                tabIndex={isDownloading ? -1 : 0}
+                aria-label={model.name}
                 onClick={() => !isDownloading && handleRowClick(model)}
+                onKeyDown={(e) => { if (!isDownloading && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleRowClick(model); } }}
                 className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors ${
                   model.active
                     ? 'border-[var(--c-accent)] bg-[var(--c-accent)]/5'
@@ -157,7 +161,12 @@ export function MemoryModelSettings() {
       </div>
 
       {confirmModel && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setConfirmModel(null)}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          role="presentation"
+          onClick={() => setConfirmModel(null)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setConfirmModel(null); }}
+        >
           <div className="rounded-xl border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-5 shadow-xl max-w-sm w-full mx-4" onClick={e => e.stopPropagation()}>
             <div className="text-sm font-medium text-[var(--c-text-primary)] mb-2">
               {confirmModel.downloaded ? '切换模型' : '下载并切换模型'}

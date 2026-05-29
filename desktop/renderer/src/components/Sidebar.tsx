@@ -392,6 +392,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                 {editingId === thread.id ? (
                   <input
                     ref={editRef}
+                    aria-label="Rename thread"
                     type="text"
                     value={editTitle}
                     onChange={e => setEditTitle(e.target.value)}

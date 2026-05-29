@@ -347,7 +347,13 @@ export function GeneralSettings({ me, accessToken, onLogout, onMeUpdated }: Prop
                 </button>
                 {showTestError && (
                   <>
-                    <div className="fixed inset-0 z-40" onClick={() => setShowTestError(false)} />
+                    <button
+                      type="button"
+                      aria-label="Close error details"
+                      tabIndex={-1}
+                      className="fixed inset-0 z-40 border-0 bg-transparent p-0"
+                      onClick={() => setShowTestError(false)}
+                    />
                     <div
                       className="dropdown-menu absolute right-0 top-[calc(100%+6px)] z-50 max-w-[320px] min-w-[200px]"
                       style={{
@@ -504,7 +510,7 @@ function ProfileSection({ displayName, localMode, me, ds, t }: {
           title="更换头像"
         >
           <Camera size={10} />
-          <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
+          <input aria-label="Change avatar" type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
         </label>
       </div>
 
@@ -513,6 +519,7 @@ function ProfileSection({ displayName, localMode, me, ds, t }: {
         {editing ? (
           <div className="flex items-center gap-2">
             <input
+              aria-label={t.profileName}
               type="text"
               value={nameInput}
               onChange={(e) => setNameInput(e.target.value)}

@@ -244,6 +244,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
 
       {/* Input container - pill shaped with shadow */}
       <div
+        role="presentation"
         className={[
           focused && 'is-focused',
         ].filter(Boolean).join(' ')}
@@ -263,6 +264,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
             textareaRef.current?.focus();
           }
         }}
+        onKeyDown={(e) => { if (e.key === 'Enter') textareaRef.current?.focus(); }}
       >
         <form
           onSubmit={(e) => { e.preventDefault(); submit(); }}

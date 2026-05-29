@@ -120,7 +120,12 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/12 backdrop-blur-[2px]" onClick={onClose} />
+      <div
+        className="absolute inset-0 bg-black/12 backdrop-blur-[2px]"
+        role="presentation"
+        onClick={onClose}
+        onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+      />
       <div className="relative w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-2xl border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-page)] shadow-xl flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--c-border-subtle)] px-5 py-3">
@@ -129,8 +134,8 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
             <p className="text-[10px] text-[var(--c-text-muted)]">{artifact.mimeType || t.projectsDeliverableUnknownType}</p>
           </div>
           <div className="flex items-center gap-1">
-            <button type="button" onClick={handleDownload} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title="下载"><Download size={15} /></button>
-            <button type="button" onClick={onClose} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]"><X size={15} /></button>
+            <button type="button" aria-label="Download artifact" onClick={handleDownload} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title="下载"><Download size={15} /></button>
+            <button type="button" aria-label="Close artifact preview" onClick={onClose} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]"><X size={15} /></button>
           </div>
         </div>
         {/* Content */}

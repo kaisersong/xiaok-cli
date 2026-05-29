@@ -200,12 +200,14 @@ function AddProviderModal({ accessToken, onClose, onCreated }: {
   return createPortal(
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45"
+      role="presentation"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
     >
       <div className="flex w-[420px] flex-col gap-4 rounded-xl bg-[var(--c-bg-deep)] p-5 shadow-lg">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-[var(--c-text-primary)]">{m.addProvider}</h3>
-          <button type="button" onClick={onClose} className="rounded p-1 text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]">
+          <button type="button" aria-label="Close provider modal" onClick={onClose} className="rounded p-1 text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]">
             <X size={16} />
           </button>
         </div>
@@ -324,7 +326,7 @@ function ProviderDetail({
       {/* provider form (always visible, like console-lite) */}
       <div className="space-y-4">
         <FormField label={m.providerVendor}>
-          <select value={formPreset} onChange={(e) => setFormPreset(e.target.value as ProviderPresetKey)} className={inputCls}>
+          <select aria-label={m.providerVendor} value={formPreset} onChange={(e) => setFormPreset(e.target.value as ProviderPresetKey)} className={inputCls}>
             {PROVIDER_PRESETS.map((p) => (
               <option key={p.key} value={p.key}>{presetLabel(p.key, m)}</option>
             ))}
@@ -332,7 +334,7 @@ function ProviderDetail({
         </FormField>
 
         <FormField label={m.providerName}>
-          <input value={formName} onChange={(e) => setFormName(e.target.value)} className={inputCls} />
+          <input aria-label={m.providerName} value={formName} onChange={(e) => setFormName(e.target.value)} className={inputCls} />
         </FormField>
 
         <FormField label={m.apiKey}>

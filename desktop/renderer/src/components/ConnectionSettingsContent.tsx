@@ -312,6 +312,7 @@ export function ConnectionSettingsContent({ initialConfig = null }: Props) {
                 <div className="flex flex-col gap-2">
                   <label className="text-sm text-[var(--c-text-secondary)]">{ct.manualPort}</label>
                   <input
+                    aria-label={ct.manualPort}
                     type="number"
                     min={1}
                     max={65535}
@@ -353,6 +354,7 @@ export function ConnectionSettingsContent({ initialConfig = null }: Props) {
         <div className="flex flex-col gap-2">
           <label className="text-sm text-[var(--c-text-secondary)]">{ct.baseUrl}</label>
           <input
+            aria-label={ct.baseUrl}
             type="url"
             value={saasUrl}
             onChange={(event) => setSaasUrl(event.target.value)}

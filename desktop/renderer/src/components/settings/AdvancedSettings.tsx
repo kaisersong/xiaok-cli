@@ -324,6 +324,7 @@ function NetworkPane({ onReloadOverview }: { onReloadOverview: () => Promise<voi
             <div>
               <SettingsLabel>{ds.advancedNetworkTimeout}</SettingsLabel>
               <input
+                aria-label={ds.advancedNetworkTimeout}
                 type="number"
                 min={1000}
                 max={300000}
@@ -335,6 +336,7 @@ function NetworkPane({ onReloadOverview }: { onReloadOverview: () => Promise<voi
             <div>
               <SettingsLabel>{ds.advancedNetworkRetry}</SettingsLabel>
               <input
+                aria-label={ds.advancedNetworkRetry}
                 type="number"
                 min={0}
                 max={10}

@@ -187,6 +187,7 @@ export function ProfileContent({
           <span className="text-sm font-medium text-[var(--c-text-heading)]">{t.profileName}</span>
           <div className="flex gap-2">
             <input
+              aria-label={t.profileName}
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}

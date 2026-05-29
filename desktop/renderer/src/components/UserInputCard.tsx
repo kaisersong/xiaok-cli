@@ -561,6 +561,7 @@ function TextField({ fieldKey, field, value, disabled, onChange }: TextFieldProp
       <FieldLabel title={field.title} description={field.description} />
       <input
         id={`field-${fieldKey}`}
+        aria-label={field.title ?? fieldKey}
         type="text"
         value={value}
         onChange={e => onChange(e.target.value)}
@@ -594,6 +595,7 @@ function NumberField({ fieldKey, field, value, disabled, onChange }: NumberField
       <FieldLabel title={field.title} description={field.description} />
       <input
         id={`field-${fieldKey}`}
+        aria-label={field.title ?? fieldKey}
         type="number"
         value={value ?? ''}
         onChange={e => {

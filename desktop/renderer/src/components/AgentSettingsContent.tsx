@@ -359,6 +359,7 @@ function NumberField({
     <div className="flex flex-col gap-1">
       <label className="text-xs text-[var(--c-text-tertiary)]">{label}</label>
       <input
+        aria-label={label}
         type="number"
         value={local}
         min={min}

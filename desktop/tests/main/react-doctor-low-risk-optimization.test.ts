@@ -54,8 +54,10 @@ describe('React Doctor low-risk optimization batch', () => {
     expect(generatedDiagnostics).toEqual([]);
   });
 
-  it('keeps obvious unlabeled control warnings below the conservative threshold', () => {
-    expect(diagnosticsForRule('control-has-associated-label').length).toBeLessThanOrEqual(80);
+  it('clears mechanical accessibility control semantics diagnostics', () => {
+    expect(diagnosticsForRule('control-has-associated-label')).toEqual([]);
+    expect(diagnosticsForRule('click-events-have-key-events')).toEqual([]);
+    expect(diagnosticsForRule('no-static-element-interactions')).toEqual([]);
   });
 
   it('clears mechanical Tailwind shorthand diagnostics', () => {

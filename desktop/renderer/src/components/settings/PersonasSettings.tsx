@@ -666,6 +666,7 @@ export function PersonasSettings({ accessToken }: Props) {
                 </label>
                 <div className="flex items-center gap-3">
                   <input
+                    aria-label={a.temperature}
                     type="range"
                     min={0}
                     max={2}
@@ -689,6 +690,7 @@ export function PersonasSettings({ accessToken }: Props) {
                   {a.maxOutputTokens}
                 </label>
                 <input
+                  aria-label={a.maxOutputTokens}
                   type="number"
                   className={INPUT_CLS}
                   value={form.maxOutputTokens}

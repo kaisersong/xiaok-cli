@@ -87,7 +87,9 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
     <div
       className="overlay-fade-in fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: 'var(--c-overlay)' }}
+      role="presentation"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
     >
       <div
         className="modal-enter flex w-full max-w-md flex-col rounded-[14px] p-6"

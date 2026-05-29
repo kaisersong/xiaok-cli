@@ -1938,7 +1938,7 @@ function GeneralPane() {
               )}
               <label className="absolute -bottom-0.5 -right-0.5 flex size-5 cursor-pointer items-center justify-center rounded-full bg-[var(--c-bg-card)] shadow" title="更换头像">
                 <Camera size={10} />
-                <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
+                <input aria-label="更换头像" type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
               </label>
             </div>
             {/* Name */}
@@ -2045,6 +2045,7 @@ function GeneralPane() {
               </span>
             </div>
             <button type="button"
+              aria-label="切换 Stage 调试输出"
               onClick={() => handleSkillDebugToggle(!skillDebug)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                 skillDebug ? 'bg-[var(--c-accent)]' : 'bg-[var(--c-border)]'

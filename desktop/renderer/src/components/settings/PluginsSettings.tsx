@@ -109,6 +109,7 @@ export function PluginsSettings() {
                 </div>
                 <button
                   type="button"
+                  aria-label={server.name}
                   disabled={toggling === server.name}
                   onClick={() => handleToggle(server.name, !server.enabled)}
                   className={`relative h-5 w-9 rounded-full transition-colors ${

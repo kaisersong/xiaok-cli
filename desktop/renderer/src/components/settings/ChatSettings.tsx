@@ -277,6 +277,7 @@ export function ChatSettings({
               {st.chatCompactThresholdEarly}
             </span>
             <input
+              aria-label={st.chatCompactThresholdLabel}
               type="range"
               min={5}
               max={100}
@@ -299,6 +300,7 @@ export function ChatSettings({
             <p className="mt-0.5 text-xs text-[var(--c-text-muted)]">{st.chatCompactKeepDesc}</p>
           </div>
           <input
+            aria-label={st.chatCompactKeepLabel}
             type="number"
             min={5}
             max={95}

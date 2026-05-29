@@ -81,6 +81,7 @@ export function SkillDetailModal({
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.12)', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' }}
+      role="presentation"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div

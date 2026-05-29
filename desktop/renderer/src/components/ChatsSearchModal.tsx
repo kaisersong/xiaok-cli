@@ -244,6 +244,7 @@ export function ChatsSearchModal({ threads, mode, accessToken, onClose }: Props)
     <div
       className="overlay-fade-in fixed inset-0 z-50 flex items-start justify-center pt-[120px]"
       style={{ background: 'var(--c-overlay)' }}
+      role="presentation"
       onMouseDown={(e) => {
         if (!allowOutsideCloseRef.current) return
         if (e.target === e.currentTarget) onClose()

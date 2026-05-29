@@ -110,7 +110,9 @@ export function ShareModal({ accessToken, threadId, open, onClose }: Props) {
     <div
       className="overlay-fade-in fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.12)', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' }}
+      role="presentation"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
     >
       <div
         className="modal-enter relative flex w-full max-w-md flex-col overflow-hidden rounded-2xl p-6"
@@ -121,6 +123,7 @@ export function ShareModal({ accessToken, threadId, open, onClose }: Props) {
             {t.shareTitle}
           </h2>
           <button type="button"
+            aria-label="Close share modal"
             onClick={onClose}
             className="flex size-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--c-bg-deep)]"
             style={{ color: 'var(--c-text-muted)' }}

@@ -292,6 +292,7 @@ function ToggleSwitch({
     <button
       type="button"
       role="switch"
+      aria-label="Toggle option"
       aria-checked={checked}
       onClick={onChange}
       disabled={disabled}

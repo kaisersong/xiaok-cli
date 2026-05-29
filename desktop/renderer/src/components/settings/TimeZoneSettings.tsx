@@ -373,6 +373,7 @@ export function TimeZoneSettings({ me, accessToken, onMeUpdated }: Props) {
       <div className="shrink-0 px-1 pb-0.5 pt-0.5">
         <input
           ref={searchRef}
+          aria-label={t.timezone}
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}

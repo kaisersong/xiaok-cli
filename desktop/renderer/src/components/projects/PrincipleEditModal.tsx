@@ -142,7 +142,12 @@ export function PrincipleEditModal({ open, principle, initialMode = 'knowledge',
   const canSwitchMode = !isEditingKnowledge;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      role="presentation"
+      onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+    >
       <div className="absolute inset-0 bg-black/20 backdrop-blur-[2px]" />
       <div
         data-testid="knowledge-rule-modal"
@@ -154,7 +159,7 @@ export function PrincipleEditModal({ open, principle, initialMode = 'knowledge',
           <h3 className="text-base font-semibold text-[var(--c-text-primary)]">
             {isEditingKnowledge ? t.projectsPrinciplesEditTitle : mode === 'rule' ? t.projectsRuleAdd : t.projectsKnowledgeAdd}
           </h3>
-          <button type="button" onClick={onClose} className="rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]">
+          <button type="button" aria-label="Close principle modal" onClick={onClose} className="rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]">
             <X size={16} />
           </button>
         </div>
@@ -190,6 +195,7 @@ export function PrincipleEditModal({ open, principle, initialMode = 'knowledge',
                 <>
                   <input
                     ref={fileInputRef}
+                    aria-label={t.projectsKnowledgeUpload}
                     type="file"
                     accept=".txt,.md,text/plain,text/markdown"
                     className="hidden"

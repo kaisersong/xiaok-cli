@@ -181,7 +181,9 @@ function AddCredentialModal({
     <div
       className="overlay-fade-in fixed inset-0 z-[60] flex items-center justify-center"
       style={{ background: 'var(--c-overlay)' }}
+      role="presentation"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
     >
       <div
         className="modal-enter flex w-[460px] flex-col gap-5 rounded-[14px] p-6"
@@ -190,6 +192,7 @@ function AddCredentialModal({
         <div className="flex items-center justify-between">
           <h3 className="text-[15px] font-semibold text-[var(--c-text-heading)]">{ds.voiceCredsAddTitle}</h3>
           <button type="button"
+            aria-label="Close voice credentials modal"
             onClick={onClose}
             className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
           >
@@ -316,7 +319,9 @@ function DeleteConfirmModal({
     <div
       className="overlay-fade-in fixed inset-0 z-[60] flex items-center justify-center"
       style={{ background: 'var(--c-overlay)' }}
+      role="presentation"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
     >
       <div
         className="modal-enter flex w-[380px] flex-col gap-4 rounded-[14px] p-6"
@@ -395,7 +400,9 @@ function EditCredentialModal({
     <div
       className="overlay-fade-in fixed inset-0 z-[60] flex items-center justify-center"
       style={{ background: 'var(--c-overlay)' }}
+      role="presentation"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
     >
       <div
         className="modal-enter flex w-[460px] flex-col gap-5 rounded-[14px] p-6"
@@ -404,6 +411,7 @@ function EditCredentialModal({
         <div className="flex items-center justify-between">
           <h3 className="text-[15px] font-semibold text-[var(--c-text-heading)]">{ds.voiceCredsEditTitle}</h3>
           <button type="button"
+            aria-label="Close voice credentials modal"
             onClick={onClose}
             className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
           >
@@ -416,6 +424,7 @@ function EditCredentialModal({
           <div>
             <label className={fieldLabelCls}>{ds.voiceCredsName}</label>
             <input
+              aria-label={ds.voiceCredsName}
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full rounded-[10px] bg-[var(--c-bg-input)] text-[13px] font-medium text-[var(--c-text-primary)] outline-none"
@@ -427,6 +436,7 @@ function EditCredentialModal({
           <div>
             <label className={fieldLabelCls}>{ds.voiceCredsProvider}</label>
             <input
+              aria-label={ds.voiceCredsProvider}
               value={provider}
               disabled
               className="w-full cursor-not-allowed rounded-[10px] bg-[var(--c-bg-deep)] text-[13px] font-medium text-[var(--c-text-muted)] outline-none"

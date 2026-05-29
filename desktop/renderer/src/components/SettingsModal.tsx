@@ -86,6 +86,7 @@ export function SettingsModal({ me, accessToken, initialTab = 'account', onClose
     <div
       className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-[2px]"
       style={{ background: 'var(--c-overlay)' }}
+      role="presentation"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div

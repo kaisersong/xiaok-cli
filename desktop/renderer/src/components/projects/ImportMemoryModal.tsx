@@ -76,7 +76,12 @@ export function ImportMemoryModal({ open, onClose, onImport }: Props) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      role="presentation"
+      onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+    >
       <div
         className="flex w-full max-w-lg flex-col rounded-xl border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] shadow-xl"
         style={{ maxHeight: '70vh' }}
@@ -87,7 +92,7 @@ export function ImportMemoryModal({ open, onClose, onImport }: Props) {
           <h3 className="text-base font-semibold text-[var(--c-text-primary)]">
             {t.projectsPrinciplesImportTitle}
           </h3>
-          <button type="button" onClick={onClose} className="rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]">
+          <button type="button" aria-label="Close import modal" onClick={onClose} className="rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]">
             <X size={16} />
           </button>
         </div>
