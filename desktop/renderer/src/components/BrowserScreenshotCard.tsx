@@ -20,7 +20,7 @@ type SummaryProps = {
   exitCode?: number
 }
 
-export function BrowserActionSummaryCard({ command, url, output, exitCode }: SummaryProps) {
+function BrowserActionSummaryCard({ command, url, output, exitCode }: SummaryProps) {
   const displayUrl = url || extractUrlFromCommand(command)
   const failed = typeof exitCode === 'number' && exitCode !== 0
   const statusText = typeof exitCode === 'number'

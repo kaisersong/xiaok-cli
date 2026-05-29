@@ -1957,5 +1957,3 @@ export interface LocaleStrings {
 }
 
 export const locales: Record<Locale, LocaleStrings> = { zh, en };
-
-export const SUPPORTED_LOCALES: Locale[] = ["zh", "en"];

@@ -143,7 +143,7 @@ export function formatKSwarmAgentStatus(summary: AgentStatusSummary): string {
   return parts.join(' · ');
 }
 
-export function getAgentStatusLabel(status: AgentCardRuntimeStatus): string {
+function getAgentStatusLabel(status: AgentCardRuntimeStatus): string {
   switch (status) {
     case 'waiting':
       return '等待';

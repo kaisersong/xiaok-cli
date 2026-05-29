@@ -62,15 +62,6 @@ export function isSearchThreadId(threadId: string): boolean {
 
 // ---- Work folder ----
 
-export function readWorkFolder(): string | null {
-  try { return localStorage.getItem('xiaok:work-folder') } catch { return null }
-}
-export function writeWorkFolder(folder: string): void {
-  try { localStorage.setItem('xiaok:work-folder', folder) } catch { /* noop */ }
-}
-export function clearWorkFolder(): void {
-  try { localStorage.removeItem('xiaok:work-folder') } catch { /* noop */ }
-}
 export function readThreadWorkFolder(threadId: string): string | null {
   try { return localStorage.getItem(`xiaok:thread-work-folder:${threadId}`) } catch { return null }
 }
@@ -79,21 +70,6 @@ export function writeThreadWorkFolder(threadId: string, folder: string): void {
 }
 export function clearThreadWorkFolder(threadId: string): void {
   try { localStorage.removeItem(`xiaok:thread-work-folder:${threadId}`) } catch { /* noop */ }
-}
-export function transferGlobalWorkFolderToThread(_threadId: string): void { /* noop */ }
-export function transferGlobalThinkingToThread(_threadId: string): void { /* noop */ }
-export function readWorkRecentFolders(): string[] { return [] }
-
-// ---- Active thread ----
-
-export function readActiveThreadIdFromStorage(): string | null {
-  try { return localStorage.getItem('xiaok:active-thread-id') } catch { return null }
-}
-export function writeActiveThreadIdToStorage(threadId: string): void {
-  try { localStorage.setItem('xiaok:active-thread-id', threadId) } catch { /* noop */ }
-}
-export function clearActiveThreadIdInStorage(): void {
-  try { localStorage.removeItem('xiaok:active-thread-id') } catch { /* noop */ }
 }
 
 // ---- Run seq tracking ----
@@ -112,9 +88,6 @@ export function clearLastSeqInStorage(runId: string): void {
 
 export function readAppModeFromStorage(): AppMode {
   try { return (localStorage.getItem('xiaok:app-mode') as AppMode) || 'work' } catch { return 'work' }
-}
-export function writeAppModeFromStorage(mode: AppMode): void {
-  try { localStorage.setItem('xiaok:app-mode', mode) } catch { /* noop */ }
 }
 export function readLegacyThreadModesForMigration(): Record<string, AppMode> {
   try { return JSON.parse(localStorage.getItem('xiaok:legacy-thread-modes') || '{}') } catch { return {} }
@@ -147,11 +120,6 @@ export function readDeveloperPipelineTraceEnabled(): boolean { return false }
 export function writeDeveloperPipelineTraceEnabled(_value: boolean): void { /* noop */ }
 export function readDeveloperPromptCacheDebugEnabled(): boolean { return false }
 export function writeDeveloperPromptCacheDebugEnabled(_value: boolean): void { /* noop */ }
-
-// ---- Expanded project paths ----
-
-export function readExpandedProjectPaths(): Set<string> { return readSet('xiaok:expanded-project-paths') }
-export function writeExpandedProjectPaths(paths: Set<string>): void { writeSet('xiaok:expanded-project-paths', paths) }
 
 // ---- Font settings ----
 
@@ -220,11 +188,11 @@ export type ArtifactRef = {
 export type WidgetRef = { widgetId: string; type: string }
 export type BrowserActionRef = { actionId: string; type: string; url?: string }
 export type CodeExecutionRef = { executionId: string; language?: string; status?: string }
-export type ThinkingSegmentRef = { segmentId: string; type?: string }
+type ThinkingSegmentRef = { segmentId: string; type?: string }
 export type MessageThinkingRef = { segments: ThinkingSegmentRef[] }
 export type MessageSearchStepRef = { stepId: string; query?: string }
 export type MemoryActionRef = { actionId: string; type?: string }
-export type FileOpStatus = 'pending' | 'running' | 'completed' | 'failed'
+type FileOpStatus = 'pending' | 'running' | 'completed' | 'failed'
 export type FileOpRef = {
   opId: string
   path?: string
@@ -245,22 +213,15 @@ export type FileOpRef = {
   pattern?: string
   operation?: string
 }
-export type CopBlockRef = { blockId: string; type?: string }
-export type CopBlockItem = { blockId: string; type?: string }
-export type SubAgentStatus = 'spawning' | 'active' | 'completed' | 'failed' | 'closed'
+type SubAgentStatus = 'spawning' | 'active' | 'completed' | 'failed' | 'closed'
 export type SubAgentRef = { agentId: string; name?: string; status?: SubAgentStatus; nickname?: string; personaId?: string; role?: string; input?: string; output?: string; error?: string }
 export type WebFetchRef = { fetchId: string; url?: string }
 export type MessageTerminalStatusRef = 'completed' | 'cancelled' | 'interrupted' | 'failed'
 export type MsgRunEvent = { seq: number; type: string; data?: unknown }
 export type ThreadRunHandoffRef = { runId: string; lastSeq?: number }
-export type TurnToolCallRef = { toolCallId: string; name: string }
+type TurnToolCallRef = { toolCallId: string; name: string }
 export type AssistantTurnSegment = { type: string; text?: string; toolCall?: TurnToolCallRef }
 export type AssistantTurnUi = { segments: AssistantTurnSegment[] }
-
-export type MessageCopBlocksRef = { blocks: CopBlockItem[] }
-
-export type InputDraftScope = { threadId: string; runId?: string }
-export type DraftAttachmentRecord = { attachmentId: string; fileName: string; fileSize: number }
 
 // ---- Message metadata accessors ----
 
@@ -285,13 +246,8 @@ export function readMessageThinking(id: string): MessageThinkingRef | null { ret
 export function writeMessageThinking(id: string, thinking: MessageThinkingRef): void { writeJson(`xiaok:msg:thinking:${id}`, thinking) }
 export function readMessageSearchSteps(id: string): MessageSearchStepRef[] | null { return readJson(`xiaok:msg:search-steps:${id}`) }
 export function writeMessageSearchSteps(id: string, steps: MessageSearchStepRef[]): void { writeJson(`xiaok:msg:search-steps:${id}`, steps) }
-export function readMessageMemoryActions(id: string): MemoryActionRef[] | null { return readJson(`xiaok:msg:memory-actions:${id}`) }
-export function writeMessageMemoryActions(id: string, actions: MemoryActionRef[]): void { writeJson(`xiaok:msg:memory-actions:${id}`, actions) }
-export function readMessageCopBlocks(id: string): MessageCopBlocksRef | null { return readJson(`xiaok:msg:cop-blocks:${id}`) }
-export function writeMessageCopBlocks(id: string, data: MessageCopBlocksRef): void { writeJson(`xiaok:msg:cop-blocks:${id}`, data) }
 export function readMessageAssistantTurn(id: string): AssistantTurnUi | null { return readJson(`xiaok:msg:assistant-turn:${id}`) }
 export function writeMessageAssistantTurn(id: string, data: AssistantTurnUi): void { writeJson(`xiaok:msg:assistant-turn:${id}`, data) }
-export function clearMessageAssistantTurn(id: string): void { try { localStorage.removeItem(`xiaok:msg:assistant-turn:${id}`) } catch { /* noop */ } }
 export function readMessageFileOps(id: string): FileOpRef[] | null { return readJson(`xiaok:msg:file-ops:${id}`) }
 export function writeMessageFileOps(id: string, ops: FileOpRef[]): void { writeJson(`xiaok:msg:file-ops:${id}`, ops) }
 export function readMessageSubAgents(id: string): SubAgentRef[] | null { return readJson(`xiaok:msg:sub-agents:${id}`) }
@@ -300,44 +256,20 @@ export function readMessageWebFetches(id: string): WebFetchRef[] | null { return
 export function writeMessageWebFetches(id: string, fetches: WebFetchRef[]): void { writeJson(`xiaok:msg:web-fetches:${id}`, fetches) }
 export function readMessageCoveredRunIds(id: string): string[] | null { return readJson(`xiaok:msg:covered-run-ids:${id}`) }
 export function writeMessageCoveredRunIds(id: string, ids: string[]): void { writeJson(`xiaok:msg:covered-run-ids:${id}`, ids) }
-export function readMessageTerminalStatus(id: string): MessageTerminalStatusRef | null { try { return localStorage.getItem(`xiaok:msg:terminal-status:${id}`) as MessageTerminalStatusRef | null } catch { return null } }
 export function writeMessageTerminalStatus(id: string, status: MessageTerminalStatusRef): void { try { localStorage.setItem(`xiaok:msg:terminal-status:${id}`, status) } catch { /* noop */ } }
 export function readMsgRunEvents(id: string): MsgRunEvent[] | null { return readJson(`xiaok:msg:run-events:${id}`) }
 export function writeMsgRunEvents(id: string, events: MsgRunEvent[]): void { writeJson(`xiaok:msg:run-events:${id}`, events) }
 
 // ---- Thread run handoff ----
 
-export function readThreadRunHandoff(threadId: string): ThreadRunHandoffRef | null { return readJson(`xiaok:thread-run-handoff:${threadId}`) }
 export function writeThreadRunHandoff(threadId: string, data: ThreadRunHandoffRef): void { writeJson(`xiaok:thread-run-handoff:${threadId}`, data) }
 export function clearThreadRunHandoff(threadId: string): void { try { localStorage.removeItem(`xiaok:thread-run-handoff:${threadId}`) } catch { /* noop */ } }
 
 // ---- Persona/Model selection ----
 
 export function readSelectedPersonaKeyFromStorage(): string { try { return localStorage.getItem('xiaok:selected-persona') || 'normal' } catch { return 'normal' } }
-export function writeSelectedPersonaKeyFromStorage(personaKey: string): void { try { localStorage.setItem('xiaok:selected-persona', personaKey) } catch { /* noop */ } }
 export function readSelectedModelFromStorage(): string | null { try { return localStorage.getItem('xiaok:selected-model') } catch { return null } }
-export function writeSelectedModelToStorage(model: string | null): void { try { if (model) localStorage.setItem('xiaok:selected-model', model); else localStorage.removeItem('xiaok:selected-model') } catch { /* noop */ } }
-export function readSelectedReasoningMode(): string { try { return localStorage.getItem('xiaok:selected-reasoning') || 'auto' } catch { return 'auto' } }
-export function writeSelectedReasoningMode(mode: string): void { try { localStorage.setItem('xiaok:selected-reasoning', mode) } catch { /* noop */ } }
 export function readThreadReasoningMode(threadId: string): string { try { return localStorage.getItem(`xiaok:thread-reasoning:${threadId}`) || 'auto' } catch { return 'auto' } }
-export function writeThreadReasoningMode(threadId: string, mode: string): void { try { localStorage.setItem(`xiaok:thread-reasoning:${threadId}`, mode) } catch { /* noop */ } }
-export function readRunThinkingHint(runId: string): string | null { try { return localStorage.getItem(`xiaok:run-thinking-hint:${runId}`) } catch { return null } }
-export function writeRunThinkingHint(runId: string, hint: string): void { try { localStorage.setItem(`xiaok:run-thinking-hint:${runId}`, hint) } catch { /* noop */ } }
-
-// ---- Input drafts ----
-
-export function readInputDraftText(scope: InputDraftScope): string { try { return localStorage.getItem(`xiaok:input-draft:${scope.threadId}`) || '' } catch { return '' } }
-export function writeInputDraftText(scope: InputDraftScope, text: string): void { try { localStorage.setItem(`xiaok:input-draft:${scope.threadId}`, text) } catch { /* noop */ } }
-export function readInputDraftAttachments(scope: InputDraftScope): DraftAttachmentRecord[] { return readJson(`xiaok:input-draft-attachments:${scope.threadId}`) || [] }
-export function writeInputDraftAttachments(scope: InputDraftScope, attachments: DraftAttachmentRecord[]): void { writeJson(`xiaok:input-draft-attachments:${scope.threadId}`, attachments) }
-export function readInputHistory(scope: InputDraftScope): string[] { return readJson(`xiaok:input-history:${scope.threadId}`) || [] }
-export function appendInputHistory(scope: InputDraftScope, text: string): void {
-  const history = readInputHistory(scope).filter(h => h !== text).slice(-19); history.push(text)
-  writeJson(`xiaok:input-history:${scope.threadId}`, history)
-}
-export function clearInputDraft(scope: InputDraftScope): void {
-  try { localStorage.removeItem(`xiaok:input-draft:${scope.threadId}`); localStorage.removeItem(`xiaok:input-draft-attachments:${scope.threadId}`) } catch { /* noop */ }
-}
 
 // ---- Misc ----
 
@@ -345,11 +277,5 @@ export function migrateMessageMetadata(_mapping: Array<{ old_id: string; new_id:
 
 export const DEFAULT_PERSONA_KEY = 'normal'
 export const SEARCH_PERSONA_KEY = 'extended-search'
-export const WORK_PERSONA_KEY = 'work'
-export const LEARNING_PERSONA_KEY = 'stem-tutor'
-
-export function readAccessTokenFromStorage(): string | null { return null }
-export function writeAccessTokenToStorage(_token: string): void { /* noop */ }
-export function clearAccessTokenFromStorage(): void { /* noop */ }
 
 export type UploadedThreadAttachment = { id: string; fileName: string; fileSize: number }

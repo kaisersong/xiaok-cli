@@ -26,7 +26,7 @@ const SHARED_CAPABILITIES = ['coding', 'testing', 'design', 'planning'];
 
 export const XIAOK_PO_SEED_ID = 'xiaok-po';
 export const XIAOK_WORKER_SEED_ID = 'xiaok-worker';
-export const XIAOK_LEGACY_SEED_ID = 'xiaok';
+const XIAOK_LEGACY_SEED_ID = 'xiaok';
 
 export function createXiaokPoSeed(): KSwarmCreateAgentInput {
   return {
@@ -68,7 +68,7 @@ function isDedicatedWorkerSeed(agent: KSwarmAgentLike): boolean {
   return !isArchived(agent) && agent.id === XIAOK_WORKER_SEED_ID;
 }
 
-export function isLegacyFullRoleXiaokSeed(agent: KSwarmAgentLike): boolean {
+function isLegacyFullRoleXiaokSeed(agent: KSwarmAgentLike): boolean {
   return (
     !isArchived(agent) &&
     agent.id === XIAOK_LEGACY_SEED_ID &&
