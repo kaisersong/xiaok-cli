@@ -45,7 +45,7 @@ export function VerifyEmailPage() {
         {status === 'success' && (
           <>
             <p className="text-base font-semibold text-[var(--c-text-heading)]">{t.emailVerifySuccess}</p>
-            <button
+            <button type="button"
               onClick={() => navigate('/')}
               className="flex h-9 w-fit items-center rounded-lg px-4 text-sm font-medium transition-colors hover:opacity-80"
               style={{ background: 'var(--c-btn-bg)', color: 'var(--c-btn-text)' }}
@@ -58,7 +58,7 @@ export function VerifyEmailPage() {
         {status === 'error' && (
           <>
             <p className="text-base font-semibold text-[var(--c-text-heading)]">{t.emailVerifyFailed}</p>
-            <button
+            <button type="button"
               onClick={() => navigate('/')}
               className="flex h-9 w-fit items-center rounded-lg px-4 text-sm font-medium text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)]"
               style={{ border: '0.5px solid var(--c-border-subtle)' }}

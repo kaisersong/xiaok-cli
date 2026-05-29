@@ -89,7 +89,7 @@ export function RunsSettings({ accessToken }: Props) {
             {ds.runsHistoryDesc}
           </p>
         </div>
-        <button
+        <button type="button"
           onClick={() => void loadPage(offset)}
           disabled={loading}
           className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--c-bg-deep)] px-3 py-1.5 text-xs font-medium text-[var(--c-text-secondary)] transition-colors hover:text-[var(--c-text-primary)] disabled:opacity-50"
@@ -178,7 +178,7 @@ export function RunsSettings({ accessToken }: Props) {
               {currentPage} / {totalPages}
             </span>
             <div className="flex items-center gap-1.5">
-              <button
+              <button type="button"
                 onClick={() => setOffset((prev) => Math.max(0, prev - PAGE_SIZE))}
                 disabled={loading || currentPage <= 1}
                 className="rounded border px-2 py-0.5 text-[11px] text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-sub)] disabled:opacity-40"
@@ -186,7 +186,7 @@ export function RunsSettings({ accessToken }: Props) {
               >
                 {ds.runsHistoryPrev}
               </button>
-              <button
+              <button type="button"
                 onClick={() => setOffset((prev) => prev + PAGE_SIZE)}
                 disabled={loading || currentPage >= totalPages}
                 className="rounded border px-2 py-0.5 text-[11px] text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-sub)] disabled:opacity-40"

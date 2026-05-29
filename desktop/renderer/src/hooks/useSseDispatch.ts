@@ -41,7 +41,7 @@ import {
   isTerminalRunEventType,
 } from '../lib/chat-helpers'
 import { sanitizeUserFacingErrorMessage } from '../lib/error-display'
-import { extractPartialArtifactFields, extractPartialWidgetFields } from '../components/ArtifactStreamBlock'
+import { extractPartialArtifactFields, extractPartialWidgetFields } from '../components/artifact-stream-parser'
 import { getInjectionBlockMessage, shouldSuppressLiveRunEventAfterInjectionBlock } from '../liveRunSecurity'
 import { isWebFetchToolName } from '../runEventProcessing'
 import type { UserInputRequest, RequestedSchema } from '../userInputTypes'

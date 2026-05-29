@@ -91,7 +91,7 @@ export function AgentSettingsContent({ accessToken }: Props) {
           <h3 className="text-sm font-medium text-[var(--c-text-heading)]">{a.title}</h3>
           <p className="mt-0.5 text-xs text-[var(--c-text-tertiary)]">{a.subtitle}</p>
         </div>
-        <button
+        <button type="button"
           onClick={handleResetAll}
           disabled={resetting || personas.length === 0}
           className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--c-bg-sub)] disabled:opacity-50"
@@ -211,7 +211,7 @@ function PersonaRow({
           <span className="text-xs text-[var(--c-text-muted)]">{a.streamThinking}</span>
           <input
             type="checkbox"
-            className="h-4 w-4 rounded border-[var(--c-border-subtle)]"
+            className="size-4 rounded border-[var(--c-border-subtle)]"
             checked={persona.stream_thinking !== false}
             onChange={(e) => void handleStreamThinking(e.target.checked)}
           />

@@ -55,10 +55,10 @@ export function DesktopQQSettingsPanel({
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [enabled, setEnabled] = useState(channel?.is_active ?? false)
-  const [personaID, setPersonaID] = useState(resolvePersonaID(personas, channel?.persona_id))
-  const [allowedUserIDs, setAllowedUserIDs] = useState(readStringArrayConfig(channel, 'allowed_user_ids'))
+  const [personaID, setPersonaID] = useState(() => resolvePersonaID(personas, channel?.persona_id))
+  const [allowedUserIDs, setAllowedUserIDs] = useState(() => readStringArrayConfig(channel, 'allowed_user_ids'))
   const [allowedUserInput, setAllowedUserInput] = useState('')
-  const [allowedGroupIDs, setAllowedGroupIDs] = useState(readStringArrayConfig(channel, 'allowed_group_ids'))
+  const [allowedGroupIDs, setAllowedGroupIDs] = useState(() => readStringArrayConfig(channel, 'allowed_group_ids'))
   const [allowedGroupInput, setAllowedGroupInput] = useState('')
   const [defaultModel, setDefaultModel] = useState((channel?.config_json?.default_model as string | undefined) ?? '')
   const [bindCode, setBindCode] = useState<string | null>(null)
@@ -358,7 +358,7 @@ export function DesktopQQSettingsPanel({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
+                <span className="flex size-9 items-center justify-center rounded-xl bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
                   <MessageCircle size={18} />
                 </span>
                 <div className="min-w-0">
@@ -375,7 +375,7 @@ export function DesktopQQSettingsPanel({
 
           {/* NapCat login flow */}
           <div
-            className="rounded-xl px-4 py-4"
+            className="rounded-xl p-4"
             style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-page)' }}
           >
             <QQLoginFlow accessToken={accessToken} channelId={channel?.id ?? ''} onStatusChange={handleNapCatStatus} />
@@ -384,7 +384,7 @@ export function DesktopQQSettingsPanel({
           {/* Auto re-login (Windows only) */}
           {isWindows && (
           <div
-            className="rounded-xl px-4 py-4"
+            className="rounded-xl p-4"
             style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-page)' }}
           >
             <label className="mb-1.5 block text-xs font-medium text-[var(--c-text-secondary)]">
@@ -403,11 +403,11 @@ export function DesktopQQSettingsPanel({
 
           {/* OneBot API config */}
           <div
-            className="rounded-xl px-4 py-4"
+            className="rounded-xl p-4"
             style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-page)' }}
           >
             <div className="mb-4 flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
+              <span className="flex size-7 items-center justify-center rounded-lg bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
                 <Zap size={14} />
               </span>
               <div className="text-sm font-medium text-[var(--c-text-heading)]">{ct.qqOneBotTitle}</div>
@@ -420,7 +420,7 @@ export function DesktopQQSettingsPanel({
                 <label className="mb-1.5 block text-xs font-medium text-[var(--c-text-secondary)]">
                   {ct.qqOneBotWSUrl}
                 </label>
-                <input
+                <input aria-label={ct.qqOneBotWSUrlPlaceholder}
                   type="text"
                   value={onebotWSUrl}
                   onChange={(e) => { setOnebotWSUrl(e.target.value); setSaved(false) }}
@@ -433,7 +433,7 @@ export function DesktopQQSettingsPanel({
                 <label className="mb-1.5 block text-xs font-medium text-[var(--c-text-secondary)]">
                   {ct.qqOneBotHTTPUrl}
                 </label>
-                <input
+                <input aria-label={ct.qqOneBotHTTPUrlPlaceholder}
                   type="text"
                   value={onebotHTTPUrl}
                   onChange={(e) => { setOnebotHTTPUrl(e.target.value); setSaved(false) }}
@@ -455,7 +455,7 @@ export function DesktopQQSettingsPanel({
             {/* access control card */}
             <div className="md:col-span-2">
               <div
-                className="rounded-xl px-4 py-4"
+                className="rounded-xl p-4"
                 style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-page)' }}
               >
                 <div className="mb-4">

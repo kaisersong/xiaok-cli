@@ -62,7 +62,7 @@ export function AboutSettings({ accessToken: _accessToken }: { accessToken: stri
       <SettingsSection>
         <div className="flex flex-wrap items-start gap-4">
           <div
-            className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-[var(--c-bg-deep)]"
+            className="flex size-14 items-center justify-center overflow-hidden rounded-2xl bg-[var(--c-bg-deep)]"
             style={{ border: '0.5px solid var(--c-border-subtle)' }}
           >
             {iconDataUrl ? (

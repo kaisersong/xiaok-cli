@@ -10,7 +10,7 @@ import {
 } from 'react'
 import { useSSE, type UseSSEResult } from '../hooks/useSSE'
 import { type AppError } from '../shared'
-import { apiBaseUrl } from '../shared/api'
+import { apiBaseUrl } from '../shared/api/client'
 import type { UserInputRequest } from '../userInputTypes'
 import { useAuth } from './auth'
 import { useChatSession } from './chat-session'

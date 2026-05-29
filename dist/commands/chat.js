@@ -129,6 +129,16 @@ function countTerminalRowsForOutput(output, columns) {
     return lines.reduce((sum, line) => sum + countTerminalRowsForLine(line, columns), 0);
 }
 const log = createLogger('chat');
+async function disposeModelAdapter(adapter) {
+    const disposable = adapter;
+    await disposable?.dispose?.();
+}
+async function flushStandardStreams() {
+    await Promise.all([
+        new Promise((resolve) => process.stdout.write('', () => resolve())),
+        new Promise((resolve) => process.stderr.write('', () => resolve())),
+    ]);
+}
 async function runChat(initialInput, opts) {
     if ((opts.print || opts.json) && !initialInput) {
         writeError('print/json 模式需要提供单次输入');
@@ -1685,10 +1695,13 @@ async function runChat(initialInput, opts) {
             clearTurnIntentContext();
             await releaseSessionOwnershipForExit();
             await platform.dispose();
+            await disposeModelAdapter(adapter);
         }
         if (!opts.print && !opts.json) {
             process.stdout.write('\n');
         }
+        await flushStandardStreams();
+        process.exit(0);
         return;
     }
     // 交互模式 - 显示欢迎界面
@@ -2152,6 +2165,7 @@ async function runChat(initialInput, opts) {
                 await lifecycleHooks.runHooks('SessionEnd', { reason: 'sigint' });
                 const cleanup = async () => {
                     await platform.dispose();
+                    await disposeModelAdapter(adapter);
                     for (const ch of embeddedChannels) {
                         await ch.cleanup();
                     }
@@ -2787,6 +2801,7 @@ async function runChat(initialInput, opts) {
         await lifecycleHooks.runHooks('SessionEnd', { reason: 'exit' });
         const finalCleanup = async () => {
             await platform.dispose();
+            await disposeModelAdapter(adapter);
             for (const ch of embeddedChannels) {
                 await ch.cleanup();
             }

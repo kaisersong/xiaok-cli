@@ -232,7 +232,7 @@ function ProviderCard({
         className="flex w-full items-start gap-3 rounded-xl p-4 text-left transition-colors duration-100 hover:bg-[var(--c-bg-deep)]/40"
       >
         <div
-          className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center transition-colors duration-150"
+          className="mt-0.5 flex size-5 shrink-0 items-center justify-center transition-colors duration-150"
           style={{ color: selected ? 'var(--c-accent)' : 'var(--c-text-muted)' }}
         >
           {icon}
@@ -246,7 +246,7 @@ function ProviderCard({
         </div>
         {/* Radio knob */}
         <div
-          className="mt-0.5 h-4 w-4 shrink-0 rounded-full transition-[border-width,border-color] duration-150"
+          className="mt-0.5 size-4 shrink-0 rounded-full transition-[border-width,border-color] duration-150"
           style={{
             border: selected
               ? '4px solid var(--c-accent)'
@@ -263,8 +263,7 @@ function ProviderCard({
 // Shared style constants — copied verbatim from each settings file
 // ---------------------------------------------------------------------------
 
-import { settingsInputCls } from './_SettingsInput'
-import { settingsLabelCls } from './_SettingsLabel'
+import { settingsInputCls, settingsLabelCls } from './_settingsClasses'
 import { settingsSectionCls } from './_SettingsSection'
 
 // ProvidersSettings / ConnectorsSettings
@@ -373,13 +372,13 @@ function ButtonsPreview() {
         <div className="flex flex-col gap-1.5">
           <span className={LABEL_CLS}>Primary · rounded-lg bg-[--c-btn-bg] px-4 py-1.5 text-sm (ProvidersSettings)</span>
           <div className="flex flex-wrap gap-2">
-            <button
+            <button type="button"
               className="flex items-center gap-2 rounded-lg px-4 py-1.5 text-sm font-medium transition-[filter] duration-150 hover:[filter:brightness(1.12)] active:[filter:brightness(0.95)]"
               style={{ background: 'var(--c-btn-bg)', color: 'var(--c-btn-text)' }}
             >
               Save
             </button>
-            <button
+            <button type="button"
               onClick={simulateLoad}
               className="flex items-center justify-center rounded-lg px-4 py-1.5 text-sm font-medium transition-[filter] duration-150 hover:[filter:brightness(1.12)] active:[filter:brightness(0.95)]"
               style={{ background: 'var(--c-btn-bg)', color: 'var(--c-btn-text)' }}
@@ -392,7 +391,7 @@ function ButtonsPreview() {
                 </span>
               </span>
             </button>
-            <button
+            <button type="button"
               className="flex items-center gap-2 rounded-lg px-4 py-1.5 text-sm font-medium opacity-50 cursor-not-allowed"
               style={{ background: 'var(--c-btn-bg)', color: 'var(--c-btn-text)' }}
               disabled
@@ -406,13 +405,13 @@ function ButtonsPreview() {
         <div className="flex flex-col gap-1.5">
           <span className={LABEL_CLS}>Secondary · rounded-lg border-[--c-border-subtle] px-4 py-1.5 text-sm</span>
           <div className="flex flex-wrap gap-2">
-            <button
+            <button type="button"
               className="rounded-lg px-4 py-1.5 text-sm font-medium text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)]"
               style={{ border: '0.5px solid var(--c-border-subtle)' }}
             >
               Cancel
             </button>
-            <button
+            <button type="button"
               className="flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)]"
               style={{ border: '0.5px solid var(--c-border-subtle)' }}
             >
@@ -425,8 +424,8 @@ function ButtonsPreview() {
         {/* ProvidersSettings left list add button */}
         <div className="flex flex-col gap-1.5">
           <span className={LABEL_CLS}>Add item · flex h-10 w-full rounded-lg text-[13px] --c-text-secondary (ProvidersSettings sidebar)</span>
-          <div className="w-[200px] border-t border-[var(--c-border-subtle)] px-3 py-3" style={{ background: 'var(--c-bg-sidebar)' }}>
-            <button className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)]" style={{ border: '0.5px solid var(--c-border-subtle)' }}>
+          <div className="w-[200px] border-t border-[var(--c-border-subtle)] p-3" style={{ background: 'var(--c-bg-sidebar)' }}>
+            <button type="button" className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)]" style={{ border: '0.5px solid var(--c-border-subtle)' }}>
               <Plus size={14} />
               Add provider
             </button>
@@ -438,12 +437,12 @@ function ButtonsPreview() {
           <span className={LABEL_CLS}>Destructive — unified: rounded-lg bg-red-600 (fill) or border+text-red-500 (ghost)</span>
           <div className="flex flex-wrap gap-2">
             {/* fill: confirm delete */}
-            <button className="flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-700">
+            <button type="button" className="flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-700">
               <Trash2 size={14} />
               Delete (confirm)
             </button>
             {/* ghost: trigger delete */}
-            <button className="flex items-center gap-1.5 rounded-lg border border-[var(--c-border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--c-text-muted)] transition-colors hover:border-red-500/30 hover:text-red-500">
+            <button type="button" className="flex items-center gap-1.5 rounded-lg border border-[var(--c-border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--c-text-muted)] transition-colors hover:border-red-500/30 hover:text-red-500">
               <Trash2 size={12} />
               Delete all
             </button>
@@ -454,10 +453,10 @@ function ButtonsPreview() {
         <div className="flex flex-col gap-1.5">
           <span className={LABEL_CLS}>Icon buttons · BTN_ICON · rounded p-1 (ConnectorsSettings)</span>
           <div className="flex items-center gap-1">
-            <button className={BTN_ICON}><Settings size={14} /></button>
-            <button className={BTN_ICON}><Trash2 size={14} /></button>
-            <button className={BTN_ICON}><Plus size={14} /></button>
-            <button className={BTN_ICON} disabled><Settings size={14} /></button>
+            <button type="button" className={BTN_ICON}><Settings size={14} /></button>
+            <button type="button" className={BTN_ICON}><Trash2 size={14} /></button>
+            <button type="button" className={BTN_ICON}><Plus size={14} /></button>
+            <button type="button" className={BTN_ICON} disabled><Settings size={14} /></button>
           </div>
         </div>
 
@@ -465,13 +464,13 @@ function ButtonsPreview() {
         <div className="flex flex-col gap-1.5">
           <span className={LABEL_CLS}>Small action · rounded-lg px-3 py-1.5 text-xs</span>
           <div className="flex flex-wrap gap-2">
-            <button
+            <button type="button"
               className="rounded-lg bg-[var(--c-bg-page)] px-3 py-1.5 text-xs font-medium text-[var(--c-text-secondary)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)]"
               style={{ border: '0.5px solid var(--c-border-subtle)' }}
             >
               查看
             </button>
-            <button
+            <button type="button"
               className="rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--c-btn-text)] transition-[filter] duration-150 hover:[filter:brightness(1.12)] active:[filter:brightness(0.95)]"
               style={{ background: 'var(--c-btn-bg)' }}
             >
@@ -486,7 +485,7 @@ function ButtonsPreview() {
           <div className="flex flex-wrap items-start gap-4">
             <div className="flex flex-col gap-1.5">
               <span className="text-xs text-[var(--c-text-muted)]">Locale trigger</span>
-              <button
+              <button type="button"
                 className="flex h-9 w-[240px] items-center justify-between rounded-lg px-3 text-sm text-[var(--c-text-secondary)]"
                 style={{
                   border: '0.5px solid var(--c-border-mid)',
@@ -517,8 +516,8 @@ function ButtonsPreview() {
         <div className="flex flex-col gap-1.5">
           <span className={LABEL_CLS}>Inline save result · fixed-height row with opacity fade</span>
           <div className="flex items-center gap-2">
-            <button onClick={() => simulateExecResult('ok')} className={BTN_ICON + ' text-xs'}>Simulate ok</button>
-            <button onClick={() => simulateExecResult('error')} className={BTN_ICON + ' text-xs'}>Simulate error</button>
+            <button type="button" onClick={() => simulateExecResult('ok')} className={BTN_ICON + ' text-xs'}>Simulate ok</button>
+            <button type="button" onClick={() => simulateExecResult('error')} className={BTN_ICON + ' text-xs'}>Simulate error</button>
             <span
               className="flex items-center gap-1 text-xs transition-opacity duration-200"
               style={{
@@ -570,27 +569,28 @@ function InputsPreview() {
 
         {/* INPUT_CLS — ProvidersSettings / ConnectorsSettings · rounded-md py-1.5 */}
         <div>
-          <label className={LABEL_CLS}>TEXT · INPUT_CLS · rounded-lg border py-1.5 (ProvidersSettings, ConnectorsSettings)</label>
-          <input className={INPUT_CLS} placeholder="e.g. https://api.openai.com/v1" value={textSm} onChange={e => setTextSm(e.target.value)} />
+          <label htmlFor="design-token-input-text-sm" className={LABEL_CLS}>TEXT · INPUT_CLS · rounded-lg border py-1.5 (ProvidersSettings, ConnectorsSettings)</label>
+          <input id="design-token-input-text-sm" className={INPUT_CLS} placeholder="e.g. https://api.openai.com/v1" value={textSm} onChange={e => setTextSm(e.target.value)} />
         </div>
 
         {/* INPUT_CLS_LG — SearchFetchSettings · rounded-lg py-2 */}
         <div>
-          <label className={LABEL_CLS}>TEXT LARGER · INPUT_CLS_LG · rounded-lg py-2 (SearchFetchSettings)</label>
-          <input className={INPUT_CLS_LG} placeholder="API key…" value={textLg} onChange={e => setTextLg(e.target.value)} />
+          <label htmlFor="design-token-input-text-lg" className={LABEL_CLS}>TEXT LARGER · INPUT_CLS_LG · rounded-lg py-2 (SearchFetchSettings)</label>
+          <input id="design-token-input-text-lg" className={INPUT_CLS_LG} placeholder="API key…" value={textLg} onChange={e => setTextLg(e.target.value)} />
         </div>
 
         {/* FIELD_INPUT_CLS — ProvidersSettings AddProviderModal · rounded-[10px] h-36px border-auth */}
         <div>
-          <label className={LABEL_CLS}>TEXT MODAL · now same as INPUT_CLS (ProvidersSettings modal)</label>
-          <input className={FIELD_INPUT_CLS} placeholder="My Provider" value={textModal} onChange={e => setTextModal(e.target.value)} />
+          <label htmlFor="design-token-input-text-modal" className={LABEL_CLS}>TEXT MODAL · now same as INPUT_CLS (ProvidersSettings modal)</label>
+          <input id="design-token-input-text-modal" className={FIELD_INPUT_CLS} placeholder="My Provider" value={textModal} onChange={e => setTextModal(e.target.value)} />
         </div>
 
         {/* Password input — ConnectorsSettings Eye toggle */}
         <div>
-          <label className={LABEL_CLS}>PASSWORD · Eye/EyeOff toggle · INPUT_CLS + pr-9 (ConnectorsSettings)</label>
+          <label htmlFor="design-token-input-password" className={LABEL_CLS}>PASSWORD · Eye/EyeOff toggle · INPUT_CLS + pr-9 (ConnectorsSettings)</label>
           <div className="relative">
             <input
+              id="design-token-input-password"
               className={INPUT_CLS + ' pr-9'}
               type={showPw ? 'text' : 'password'}
               placeholder="sk-proj-xxxxxxxxxxxxxxxx"
@@ -607,8 +607,9 @@ function InputsPreview() {
 
         {/* Number input — ChatSettings · h-9 w-14 */}
         <div>
-          <label className={LABEL_CLS}>NUMBER · h-9 w-14 rounded-lg border (ChatSettings)</label>
+          <label htmlFor="design-token-input-number" className={LABEL_CLS}>NUMBER · h-9 w-14 rounded-lg border (ChatSettings)</label>
           <input
+            id="design-token-input-number"
             type="number"
             min={2}
             max={50}
@@ -620,10 +621,11 @@ function InputsPreview() {
 
         {/* Range — ChatSettings · RANGE_CLASS */}
         <div>
-          <label className={LABEL_CLS}>RANGE · RANGE_CLASS · h-2 rounded-full bg-[--c-bg-deep] thumb bg-[--c-accent] (ChatSettings)</label>
+          <label htmlFor="design-token-input-range" className={LABEL_CLS}>RANGE · RANGE_CLASS · h-2 rounded-full bg-[--c-bg-deep] thumb bg-[--c-accent] (ChatSettings)</label>
           <div className="flex items-center gap-3">
             <span className="w-9 shrink-0 text-center text-[10px] font-medium uppercase tracking-wide text-[var(--c-text-muted)]">Early</span>
             <input
+              id="design-token-input-range"
               type="range"
               min={5}
               max={100}
@@ -641,7 +643,7 @@ function InputsPreview() {
 
         {/* ModelDropdown — RoutingSettings · flex h-9 rounded-lg */}
         <div>
-          <label className={LABEL_CLS}>DROPDOWN (ModelDropdown) · flex h-9 rounded-lg bg-page border-subtle (RoutingSettings)</label>
+          <div className={LABEL_CLS}>DROPDOWN (ModelDropdown) · flex h-9 rounded-lg bg-page border-subtle (RoutingSettings)</div>
           <div className="flex items-center gap-3">
             <span className="w-20 shrink-0 text-sm text-[var(--c-text-secondary)]">explore</span>
             <ModelDropdown
@@ -655,7 +657,7 @@ function InputsPreview() {
 
         {/* VendorDropdown — ProvidersSettings · rounded-md bg-input border py-1.5 */}
         <div>
-          <label className={LABEL_CLS}>DROPDOWN (VendorDropdown) · rounded-lg bg-input border-1px py-1.5 (ProvidersSettings modal)</label>
+          <div className={LABEL_CLS}>DROPDOWN (VendorDropdown) · rounded-lg bg-input border-1px py-1.5 (ProvidersSettings modal)</div>
           <VendorDropdown
             value={vendorVal}
             options={VENDOR_OPTIONS}
@@ -685,7 +687,7 @@ function TogglesPreview() {
           <div
             role="button"
             tabIndex={0}
-            className="flex cursor-pointer items-center justify-between gap-4 px-4 py-4 outline-none transition-colors hover:bg-[var(--c-bg-deep)]/25"
+            className="flex cursor-pointer items-center justify-between gap-4 p-4 outline-none transition-colors hover:bg-[var(--c-bg-deep)]/25"
             onClick={() => setAutoOn(v => !v)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAutoOn(v => !v) } }}
           >
@@ -699,7 +701,7 @@ function TogglesPreview() {
           </div>
 
           {/* Dependent section — disabled when toggle is off */}
-          <div className={`flex flex-col gap-3 border-t border-[var(--c-border-subtle)] px-4 py-4 transition-opacity ${autoOn ? '' : 'pointer-events-none opacity-40'}`}>
+          <div className={`flex flex-col gap-3 border-t border-[var(--c-border-subtle)] p-4 transition-opacity ${autoOn ? '' : 'pointer-events-none opacity-40'}`}>
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-medium text-[var(--c-text-heading)]">Trigger threshold</span>
               <span className="shrink-0 rounded-md bg-[var(--c-bg-deep)] px-2.5 py-0.5 text-xs font-medium tabular-nums text-[var(--c-text-secondary)]">
@@ -714,7 +716,7 @@ function TogglesPreview() {
           </div>
 
           {/* Number input row */}
-          <div className={`flex items-center justify-between gap-4 border-t border-[var(--c-border-subtle)] px-4 py-4 transition-opacity ${autoOn ? '' : 'pointer-events-none opacity-40'}`}>
+          <div className={`flex items-center justify-between gap-4 border-t border-[var(--c-border-subtle)] p-4 transition-opacity ${autoOn ? '' : 'pointer-events-none opacity-40'}`}>
             <div className="min-w-0 flex-1 pr-2">
               <p className="text-sm font-medium text-[var(--c-text-heading)]">Keep last N messages</p>
               <p className="mt-0.5 text-xs text-[var(--c-text-muted)]">Messages preserved after compaction.</p>
@@ -729,7 +731,7 @@ function TogglesPreview() {
           </div>
 
           {/* Execution mode row with loading pulse skeleton */}
-          <div className="flex items-center justify-between gap-4 border-t border-[var(--c-border-subtle)] px-4 py-4">
+          <div className="flex items-center justify-between gap-4 border-t border-[var(--c-border-subtle)] p-4">
             <div className="min-w-0 flex-1 pr-2">
               <p className="text-sm font-medium text-[var(--c-text-heading)]">Sandbox mode</p>
               <p className="mt-0.5 text-xs text-[var(--c-text-muted)]">
@@ -740,7 +742,7 @@ function TogglesPreview() {
           </div>
 
           {/* Show run detail row — inline toggle (DeveloperSettings pattern) */}
-          <div className="flex items-center justify-between gap-4 border-t border-[var(--c-border-subtle)] px-4 py-4">
+          <div className="flex items-center justify-between gap-4 border-t border-[var(--c-border-subtle)] p-4">
             <div className="min-w-0 flex-1 pr-2">
               <p className="text-sm font-medium text-[var(--c-text-heading)]">Show run detail button</p>
               <p className="mt-0.5 text-xs text-[var(--c-text-muted)]">Add a debug button on AI messages.</p>
@@ -775,8 +777,8 @@ function ProviderCardPreview() {
         >
           <div className="flex flex-col gap-3">
             <div>
-              <label className={LABEL_CLS_LG}>API Key</label>
-              <input className={INPUT_CLS_LG} placeholder="BSA…" value={braveKey} onChange={e => setBraveKey(e.target.value)} />
+              <label htmlFor="design-token-brave-api-key" className={LABEL_CLS_LG}>API Key</label>
+              <input id="design-token-brave-api-key" className={INPUT_CLS_LG} placeholder="BSA…" value={braveKey} onChange={e => setBraveKey(e.target.value)} />
             </div>
           </div>
         </ProviderCard>
@@ -791,8 +793,8 @@ function ProviderCardPreview() {
         >
           <div className="flex flex-col gap-3">
             <div>
-              <label className={LABEL_CLS_LG}>API Key</label>
-              <input className={INPUT_CLS_LG} placeholder="tvly-…" value={tavilyKey} onChange={e => setTavilyKey(e.target.value)} />
+              <label htmlFor="design-token-tavily-api-key" className={LABEL_CLS_LG}>API Key</label>
+              <input id="design-token-tavily-api-key" className={INPUT_CLS_LG} placeholder="tvly-…" value={tavilyKey} onChange={e => setTavilyKey(e.target.value)} />
             </div>
           </div>
         </ProviderCard>
@@ -826,7 +828,7 @@ function ListNavPreview() {
           <div className="flex-1 overflow-y-auto px-2 py-1">
             <div className="flex flex-col gap-[3px]">
               {items.map(name => (
-                <button
+                <button type="button"
                   key={name}
                   onClick={() => setActive(name)}
                   className={[
@@ -841,8 +843,8 @@ function ListNavPreview() {
               ))}
             </div>
           </div>
-          <div className="border-t border-[var(--c-border-subtle)] px-3 py-3">
-            <button className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md text-[13px] text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]">
+          <div className="border-t border-[var(--c-border-subtle)] p-3">
+            <button type="button" className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md text-[13px] text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]">
               <Plus size={14} />
               Add provider
             </button>
@@ -871,11 +873,11 @@ function ModalFieldsPreview() {
       <div className={SECTION_CLS}>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           <div>
-            <label className={LABEL_CLS}>Provider name</label>
-            <input className={FIELD_INPUT_CLS} placeholder="My Provider" value={modalName} onChange={e => setModalName(e.target.value)} />
+            <label htmlFor="design-token-provider-name" className={LABEL_CLS}>Provider name</label>
+            <input id="design-token-provider-name" className={FIELD_INPUT_CLS} placeholder="My Provider" value={modalName} onChange={e => setModalName(e.target.value)} />
           </div>
           <div>
-            <label className={LABEL_CLS}>Vendor</label>
+            <div className={LABEL_CLS}>Vendor</div>
             <VendorDropdown
               value={modalVendor}
               options={[
@@ -887,12 +889,12 @@ function ModalFieldsPreview() {
             />
           </div>
           <div className="col-span-2">
-            <label className={LABEL_CLS}>API Key</label>
-            <input type="password" className={FIELD_INPUT_CLS} placeholder="sk-proj-…" value={modalKey} onChange={e => setModalKey(e.target.value)} />
+            <label htmlFor="design-token-modal-api-key" className={LABEL_CLS}>API Key</label>
+            <input id="design-token-modal-api-key" type="password" className={FIELD_INPUT_CLS} placeholder="sk-proj-…" value={modalKey} onChange={e => setModalKey(e.target.value)} />
           </div>
           <div className="col-span-2">
-            <label className={LABEL_CLS}>Base URL</label>
-            <input className={FIELD_INPUT_CLS} placeholder="https://api.example.com/v1" value={modalBase} onChange={e => setModalBase(e.target.value)} />
+            <label htmlFor="design-token-modal-base-url" className={LABEL_CLS}>Base URL</label>
+            <input id="design-token-modal-base-url" className={FIELD_INPUT_CLS} placeholder="https://api.example.com/v1" value={modalBase} onChange={e => setModalBase(e.target.value)} />
           </div>
         </div>
       </div>
@@ -923,7 +925,7 @@ function SectionCardPreview() {
               <span className="text-sm text-[var(--c-text-primary)]">{name}</span>
               <div className="flex items-center gap-2">
                 <StatusBadge variant={badge} />
-                <button className={BTN_ICON}><Settings size={14} /></button>
+                <button type="button" className={BTN_ICON}><Settings size={14} /></button>
               </div>
             </div>
           ))}

@@ -55,7 +55,7 @@ export function DesktopWeixinSettingsPanel({
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [enabled, setEnabled] = useState(channel?.is_active ?? false)
-  const [personaID, setPersonaID] = useState(resolvePersonaID(personas, channel?.persona_id))
+  const [personaID, setPersonaID] = useState(() => resolvePersonaID(personas, channel?.persona_id))
 
   // Private chat access
   const persistedPrivateIDs = useMemo(() => {
@@ -413,7 +413,7 @@ export function DesktopWeixinSettingsPanel({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
+                <span className="flex size-9 items-center justify-center rounded-xl bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
                   <svg width={18} height={18} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 0 0 .167-.054l1.903-1.114a.864.864 0 0 1 .717-.098 10.16 10.16 0 0 0 2.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178A1.17 1.17 0 0 1 4.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178 1.17 1.17 0 0 1-1.162-1.178c0-.651.52-1.18 1.162-1.18zm5.34 2.867c-3.95-.093-7.332 2.836-7.332 6.547 0 3.622 3.263 6.572 7.242 6.572a7.1 7.1 0 0 0 2.07-.296.592.592 0 0 1 .518.074l1.388.812a.23.23 0 0 0 .12.039.215.215 0 0 0 .212-.215c0-.051-.02-.1-.035-.155l-.285-1.08a.43.43 0 0 1 .155-.484C22.048 19.708 23.2 18.158 23.2 16.41c0-3.622-2.855-6.434-6.262-7.552zm-3.215 3.98c.468 0 .848.386.848.86a.854.854 0 0 1-.848.86.854.854 0 0 1-.848-.86c0-.475.38-.86.848-.86zm4.804 0c.468 0 .848.386.848.86a.854.854 0 0 1-.848.86.854.854 0 0 1-.848-.86c0-.475.38-.86.848-.86z" />
                   </svg>
@@ -483,7 +483,7 @@ export function DesktopWeixinSettingsPanel({
                     <img
                       src={qrCodeDataURL ?? ''}
                       alt="WeChat QR Code"
-                      className="h-[200px] w-[200px]"
+                      className="size-[200px]"
                     />
                   </div>
                   <div className="flex items-center gap-3">

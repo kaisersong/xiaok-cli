@@ -38,7 +38,7 @@ import { MarketplaceView } from './skills/MarketplaceView'
 import { BuiltinSkillsView } from './skills/BuiltinSkillsView'
 import { SkillDetailModal } from './skills/SkillDetailModal'
 import { primaryButtonSmCls, secondaryButtonBorderStyle, secondaryButtonSmCls } from './buttonStyles'
-import { api } from '../api/bridge'
+import { api } from '../api'
 
 type Props = {
   accessToken: string
@@ -423,7 +423,7 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
         <div className="flex-1" />
         <div className="relative min-w-[220px]">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--c-text-tertiary)]" />
-          <input
+          <input aria-label={viewMode === 'marketplace' ? skillText.searchPlaceholderMarketplace : skillText.searchPlaceholder}
             ref={searchInputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -539,7 +539,7 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
               type="checkbox"
               checked={installAfterImport}
               onChange={(e) => setInstallAfterImport(e.target.checked)}
-              className="h-3.5 w-3.5 rounded"
+              className="size-3.5 rounded"
               style={{ accentColor: 'var(--c-text-heading)' }}
             />
             {skillText.uploadImmediateInstall}
@@ -577,7 +577,7 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
             <span className="text-sm font-medium text-[var(--c-text-heading)]">{skillText.githubUrlLabel}</span>
-            <input
+            <input aria-label={skillText.githubUrlPlaceholder}
               value={githubUrl}
               onChange={(e) => setGitHubUrl(e.target.value)}
               placeholder={skillText.githubUrlPlaceholder}
@@ -587,7 +587,7 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
           </div>
           <div className="flex flex-col gap-2">
             <span className="text-sm font-medium text-[var(--c-text-heading)]">{skillText.githubRefLabel}</span>
-            <input
+            <input aria-label="main"
               value={githubRef}
               onChange={(e) => setGitHubRef(e.target.value)}
               placeholder="main"

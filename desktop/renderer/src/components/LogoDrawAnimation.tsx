@@ -86,7 +86,6 @@ export function LogoDrawAnimation({
   brandName = "Xiaok",
 }: Props) {
   const [phase, setPhase] = useState<Phase>("drawing");
-  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const onCompleteRef = useRef(onComplete);
 
   useEffect(() => {
@@ -94,29 +93,27 @@ export function LogoDrawAnimation({
   }, [onComplete]);
 
   useEffect(() => {
-    const timers = timersRef.current;
-    const t = (ms: number, fn: () => void) => {
-      const id = setTimeout(fn, ms);
-      timers.push(id);
-    };
-
     const fillAt = DRAW_TOTAL;
     const brandAt = fillAt + FILL_DUR;
     const holdAt = brandAt + BRAND_DUR;
     const exitAt = holdAt + HOLD_DUR;
     const doneAt = exitAt + EXIT_DUR;
 
-    t(fillAt, () => setPhase("filling"));
-    t(brandAt, () => setPhase("branding"));
-    t(holdAt, () => setPhase("holding"));
-    t(exitAt, () => setPhase("exiting"));
-    t(doneAt, () => {
+    const fillTimer = setTimeout(() => setPhase("filling"), fillAt);
+    const brandTimer = setTimeout(() => setPhase("branding"), brandAt);
+    const holdTimer = setTimeout(() => setPhase("holding"), holdAt);
+    const exitTimer = setTimeout(() => setPhase("exiting"), exitAt);
+    const doneTimer = setTimeout(() => {
       setPhase("done");
       onCompleteRef.current();
-    });
+    }, doneAt);
 
     return () => {
-      timers.forEach(clearTimeout);
+      clearTimeout(fillTimer);
+      clearTimeout(brandTimer);
+      clearTimeout(holdTimer);
+      clearTimeout(exitTimer);
+      clearTimeout(doneTimer);
     };
   }, []);
 

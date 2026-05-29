@@ -106,8 +106,7 @@ function flattenConfig(
 // Styles
 // ---------------------------------------------------------------------------
 
-import { settingsInputCls } from './_SettingsInput'
-import { settingsLabelCls } from './_SettingsLabel'
+import { settingsInputCls, settingsLabelCls } from './_settingsClasses'
 import { settingsSectionCls } from './_SettingsSection'
 import { SettingsSectionHeader } from './_SettingsSectionHeader'
 
@@ -438,7 +437,7 @@ export function ConnectorsSettings({ accessToken, nestedUnderTabs = false }: Pro
           style={{ border: '0.5px solid var(--c-border-subtle)' }}
         >
           <p className="text-sm text-[var(--c-text-muted)]">{error}</p>
-          <button
+          <button type="button"
             onClick={() => void fetchAll()}
             className="mt-3 text-xs text-[var(--c-text-secondary)] underline"
           >
@@ -480,7 +479,7 @@ export function ConnectorsSettings({ accessToken, nestedUnderTabs = false }: Pro
               {groupTabs.map((group) => {
                 const active = group === selectedGroup
                 return (
-                  <button
+                  <button type="button"
                     key={group}
                     onClick={() => setSelectedGroup(group)}
                     className={[
@@ -526,7 +525,7 @@ export function ConnectorsSettings({ accessToken, nestedUnderTabs = false }: Pro
                       </div>
                       <div className="flex items-center gap-1">
                         {!p.is_active ? (
-                          <button
+                          <button type="button"
                             disabled={mutating}
                             onClick={() =>
                               handleActivate(p.group_name, p.provider_name)
@@ -537,7 +536,7 @@ export function ConnectorsSettings({ accessToken, nestedUnderTabs = false }: Pro
                             <Power size={14} />
                           </button>
                         ) : (
-                          <button
+                          <button type="button"
                             disabled={mutating}
                             onClick={() =>
                               handleDeactivate(p.group_name, p.provider_name)
@@ -548,7 +547,7 @@ export function ConnectorsSettings({ accessToken, nestedUnderTabs = false }: Pro
                             <Ban size={14} />
                           </button>
                         )}
-                        <button
+                        <button type="button"
                           disabled={mutating}
                           onClick={() =>
                             openCredentialModal(activeGroup.group_name, p)
@@ -558,7 +557,7 @@ export function ConnectorsSettings({ accessToken, nestedUnderTabs = false }: Pro
                         >
                           <Key size={14} />
                         </button>
-                        <button
+                        <button type="button"
                           disabled={mutating}
                           onClick={() =>
                             setClearTarget({
@@ -625,7 +624,7 @@ export function ConnectorsSettings({ accessToken, nestedUnderTabs = false }: Pro
                             ))}
                           </select>
                         ) : (
-                          <input
+                          <input aria-label={field.placeholder ?? field.default ?? ''}
                             type={inputType}
                             inputMode={field.type === 'number' ? 'numeric' : undefined}
                             placeholder={field.placeholder ?? field.default ?? ''}
@@ -644,7 +643,7 @@ export function ConnectorsSettings({ accessToken, nestedUnderTabs = false }: Pro
                   })}
                 </div>
                 <div className="mt-4 flex items-center gap-2">
-                  <button
+                  <button type="button"
                     onClick={handleSaveConfig}
                     disabled={configSaving || !configDirty}
                     className="inline-flex items-center gap-1.5 rounded-md border border-[var(--c-border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
@@ -710,7 +709,7 @@ export function ConnectorsSettings({ accessToken, nestedUnderTabs = false }: Pro
               <div>
                 <label className={labelCls}>{tt.apiKey}</label>
                 <div className="relative">
-                  <input
+                  <input aria-label={credentialModal.provider.key_prefix || tt.apiKeyPlaceholder}
                     type={showApiKey ? 'text' : 'password'}
                     className={inputCls}
                     placeholder={credentialModal.provider.key_prefix || tt.apiKeyPlaceholder}
@@ -735,7 +734,7 @@ export function ConnectorsSettings({ accessToken, nestedUnderTabs = false }: Pro
             {(credentialModal.provider.requires_base_url || credentialModal.provider.base_url != null) && (
               <div>
                 <label className={labelCls}>{tt.baseUrl}</label>
-                <input
+                <input aria-label={tt.baseUrlPlaceholder}
                   type="text"
                   className={inputCls}
                   placeholder={tt.baseUrlPlaceholder}
@@ -875,7 +874,7 @@ function ToolRow({
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <button
+        <button type="button"
           onClick={onToggleDisabled}
           disabled={togglingDisabled}
           className={btnIcon}
@@ -887,11 +886,11 @@ function ToolRow({
             <Ban size={12} />
           )}
         </button>
-        <button onClick={onEdit} className={btnIcon} title={tt.editDescription}>
+        <button type="button" onClick={onEdit} className={btnIcon} title={tt.editDescription}>
           <Pencil size={12} />
         </button>
         {tool.has_override && (
-          <button
+          <button type="button"
             onClick={onReset}
             className={btnIcon}
             title={tt.resetDescription}

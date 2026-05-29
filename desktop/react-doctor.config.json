@@ -1,0 +1,25 @@
+{
+  "ignore": {
+    "rules": [
+      "react-doctor/no-barrel-import"
+    ],
+    "files": [
+      "release/**",
+      "dist/**",
+      ".generated/**",
+      "e2e-*.js",
+      "e2e-*.jsx",
+      "e2e-*.ts",
+      "e2e-*.tsx",
+      "e2e-*.mjs",
+      "e2e-*.cjs"
+    ]
+  },
+  "surfaces": {
+    "ciFailure": {
+      "excludeRules": [
+        "react-doctor/require-reduced-motion"
+      ]
+    }
+  }
+}

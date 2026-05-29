@@ -63,7 +63,7 @@ export function RunErrorNotice({ error, onDismiss }: { error: AppError; onDismis
           type="button"
           aria-label={toggleLabel}
           onClick={() => setExpanded((value) => !value)}
-          className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded transition-opacity hover:opacity-80"
+          className="flex size-6 flex-shrink-0 items-center justify-center rounded transition-opacity hover:opacity-80"
           style={{
             background: 'transparent',
             border: 'none',
@@ -78,7 +78,7 @@ export function RunErrorNotice({ error, onDismiss }: { error: AppError; onDismis
           type="button"
           aria-label={dismissLabel}
           onClick={onDismiss}
-          className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded transition-opacity hover:opacity-80"
+          className="flex size-6 flex-shrink-0 items-center justify-center rounded transition-opacity hover:opacity-80"
           style={{
             background: 'transparent',
             border: 'none',

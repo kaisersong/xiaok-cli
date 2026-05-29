@@ -105,7 +105,7 @@ export function MermaidBlock({ content }: Props) {
         >
           mermaid
         </span>
-        <button
+        <button type="button"
           onClick={() => setExpanded(prev => !prev)}
           style={{
             display: 'flex',

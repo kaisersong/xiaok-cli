@@ -73,7 +73,7 @@ export function LocalMemoryStats() {
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <div
-            className="flex h-9 w-9 items-center justify-center rounded-xl"
+            className="flex size-9 items-center justify-center rounded-xl"
             style={{ background: 'var(--c-bg-elevated)' }}
           >
             <Brain size={18} />

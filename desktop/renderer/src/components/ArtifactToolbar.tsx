@@ -15,7 +15,7 @@ export function ArtifactToolbar({ state, onToggleAnnotate, onRevert, onFinish, o
 
   return (
     <div className="artifact-toolbar">
-      <button
+      <button type="button"
         className={`artifact-toolbar-btn ${isAnnotating ? 'active' : ''}`}
         onClick={onToggleAnnotate}
         title={isAnnotating ? '完成修订' : '开启修订'}
@@ -24,7 +24,7 @@ export function ArtifactToolbar({ state, onToggleAnnotate, onRevert, onFinish, o
         <span>{isAnnotating ? '完成修订' : '修订'}</span>
       </button>
       {onRefresh && (
-        <button
+        <button type="button"
           className="artifact-toolbar-btn"
           onClick={onRefresh}
           title="刷新预览"
@@ -34,7 +34,7 @@ export function ArtifactToolbar({ state, onToggleAnnotate, onRevert, onFinish, o
       )}
       {showRevertAndFinish && (
         <>
-          <button
+          <button type="button"
             className="artifact-toolbar-btn"
             onClick={onRevert}
             title="撤回修改"
@@ -42,7 +42,7 @@ export function ArtifactToolbar({ state, onToggleAnnotate, onRevert, onFinish, o
             <span className="artifact-toolbar-icon">↩</span>
             <span>撤回</span>
           </button>
-          <button
+          <button type="button"
             className="artifact-toolbar-btn"
             onClick={onFinish}
             title="完成编辑"

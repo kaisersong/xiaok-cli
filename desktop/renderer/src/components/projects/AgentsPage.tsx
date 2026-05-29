@@ -88,7 +88,7 @@ export function AgentsPage() {
       <div className="flex-1 overflow-y-auto p-6">
         {agents.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-[var(--c-bg-deep)]">
+            <div className="flex size-16 items-center justify-center rounded-xl bg-[var(--c-bg-deep)]">
               <Bot size={28} className="text-[var(--c-text-secondary)]" />
             </div>
             <div className="text-center">
@@ -119,7 +119,7 @@ export function AgentsPage() {
                   className="flex items-center gap-4 rounded-xl border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-4 transition-colors duration-150 hover:bg-[var(--c-bg-deep)]"
                 >
                   {/* Avatar */}
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
                     <span className="text-sm font-bold text-[var(--c-text-secondary)]">
                       {agent.name.charAt(0).toUpperCase()}
                     </span>
@@ -141,7 +141,7 @@ export function AgentsPage() {
                       )}
                     </div>
                     <div className="mt-1 flex items-center gap-2">
-                      <div className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+                      <div className={`size-1.5 rounded-full ${dot}`} />
                       <span className="text-[11px] text-[var(--c-text-muted)]">{label}</span>
                       {probe && (
                         <span className="flex items-center gap-1 text-[10px] text-[var(--c-text-muted)]">

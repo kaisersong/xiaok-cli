@@ -43,8 +43,13 @@ export class ReplRenderer {
   ): ScrollPromptFrame {
     const state = this.controller.getState();
     const scrollFrame = this.scrollRegion?.getPromptFrameState();
-    const inputValue = state.input.value || scrollFrame?.inputValue || '';
-    const cursor = state.input.value ? state.input.cursorOffset : (scrollFrame?.cursor ?? 0);
+    const hasRendererInputFrame = state.prompt !== '';
+    const inputValue = hasRendererInputFrame
+      ? state.input.value
+      : state.input.value || scrollFrame?.inputValue || '';
+    const cursor = hasRendererInputFrame
+      ? state.input.cursorOffset
+      : (state.input.value ? state.input.cursorOffset : (scrollFrame?.cursor ?? 0));
     const placeholder = state.prompt || scrollFrame?.placeholder || 'Type your message...';
     const summaryLine = state.footerLines && state.footerLines.length > 1
       ? state.footerLines[0] ?? ''

@@ -126,7 +126,7 @@ function SystemFontPicker({
             style={{ borderBottom: '0.5px solid var(--c-border-subtle)' }}
           >
             <Search size={13} className="shrink-0 text-[var(--c-text-muted)]" />
-            <input
+            <input aria-label="Search fonts..."
               ref={inputRef}
               type="text"
               placeholder="Search fonts..."

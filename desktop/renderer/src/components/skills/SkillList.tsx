@@ -205,7 +205,7 @@ export function SkillList({
               <button
                 type="button"
                 onClick={() => setMenuSkillId(menuSkillId === item.id ? null : item.id)}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
+                className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
               >
                 {busy ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={14} />}
               </button>

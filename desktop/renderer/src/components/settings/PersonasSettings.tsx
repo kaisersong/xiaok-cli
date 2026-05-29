@@ -127,7 +127,7 @@ function CheckboxField({
       />
       <span
         className={[
-          'flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors',
+          'flex size-4 shrink-0 items-center justify-center rounded border transition-colors',
           checked
             ? 'border-[var(--c-accent)] bg-[var(--c-accent)]'
             : 'border-[var(--c-border-subtle)] bg-[var(--c-bg-input)]',
@@ -492,7 +492,7 @@ export function PersonasSettings({ accessToken }: Props) {
         {/* Header bar */}
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <button
+            <button type="button"
               onClick={goBack}
               className="flex items-center text-[var(--c-text-muted)] transition-colors hover:text-[var(--c-text-secondary)]"
             >
@@ -518,7 +518,7 @@ export function PersonasSettings({ accessToken }: Props) {
           </div>
           <div className="flex items-center gap-2">
             {!isRepoAgent && (
-              <button
+              <button type="button"
                 onClick={() => setDeleteOpen(true)}
                 className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-menu)] hover:text-red-500"
               >
@@ -526,7 +526,7 @@ export function PersonasSettings({ accessToken }: Props) {
                 {a.deleteAgent}
               </button>
             )}
-            <button
+            <button type="button"
               onClick={handleSave}
               disabled={saving || !form.name.trim()}
               className="rounded-md bg-[var(--c-accent)] px-3.5 py-1.5 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
@@ -539,7 +539,7 @@ export function PersonasSettings({ accessToken }: Props) {
         {error && (
           <div className="rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-500">
             {error}
-            <button
+            <button type="button"
               className="ml-2 underline"
               onClick={() => setError(null)}
             >
@@ -551,7 +551,7 @@ export function PersonasSettings({ accessToken }: Props) {
         {/* Tabs */}
         <div className="flex gap-1 border-b border-[var(--c-border-subtle)]">
           {tabs.map((item) => (
-            <button
+            <button type="button"
               key={item.key}
               onClick={() => setDetailTab(item.key)}
               className={[
@@ -575,7 +575,7 @@ export function PersonasSettings({ accessToken }: Props) {
                 <label className="text-xs font-medium text-[var(--c-text-muted)]">
                   {a.displayName} *
                 </label>
-                <input
+                <input aria-label={a.displayNamePlaceholder}
                   className={INPUT_CLS}
                   placeholder={a.displayNamePlaceholder}
                   value={form.name}
@@ -751,7 +751,7 @@ export function PersonasSettings({ accessToken }: Props) {
                           size={14}
                           className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--c-text-muted)]"
                         />
-                        <input
+                        <input aria-label={a.toolSearch}
                           className={`${INPUT_CLS} pl-8`}
                           placeholder={a.toolSearch}
                           value={toolSearch}
@@ -912,7 +912,7 @@ export function PersonasSettings({ accessToken }: Props) {
             {a.subtitle}
           </p>
         </div>
-        <button
+        <button type="button"
           onClick={() => {
             setCreateOpen(true)
             setCreateName('')
@@ -928,7 +928,7 @@ export function PersonasSettings({ accessToken }: Props) {
       {error && (
         <div className="rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-500">
           {error}
-          <button className="ml-2 underline" onClick={() => setError(null)}>
+          <button type="button" className="ml-2 underline" onClick={() => setError(null)}>
             ✕
           </button>
         </div>
@@ -952,7 +952,7 @@ export function PersonasSettings({ accessToken }: Props) {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {sortedAgents.map((agent) => (
-            <button
+            <button type="button"
               key={agent.id}
               onClick={() => selectAgent(agent)}
               className="flex flex-col gap-3 rounded-xl bg-[var(--c-bg-menu)] px-5 py-4 text-left transition-colors hover:ring-1 hover:ring-[var(--c-border)]"
@@ -998,7 +998,7 @@ export function PersonasSettings({ accessToken }: Props) {
             <label className="text-xs font-medium text-[var(--c-text-muted)]">
               {a.displayName} *
             </label>
-            <input
+            <input aria-label={a.displayNamePlaceholder}
               className={INPUT_CLS}
               placeholder={a.displayNamePlaceholder}
               value={createName}
@@ -1022,13 +1022,13 @@ export function PersonasSettings({ accessToken }: Props) {
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
-            <button
+            <button type="button"
               onClick={() => setCreateOpen(false)}
               className="rounded-md border border-[var(--c-border-subtle)] px-3.5 py-1.5 text-sm text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-menu)]"
             >
               Cancel
             </button>
-            <button
+            <button type="button"
               onClick={handleCreate}
               disabled={creating || !createName.trim() || !createModel.trim()}
               className="rounded-md bg-[var(--c-accent)] px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"

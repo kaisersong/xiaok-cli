@@ -399,7 +399,7 @@ export function ModelOptionsModal({
             type="button"
             onClick={handleClose}
             disabled={saving}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)] disabled:opacity-50"
+            className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)] disabled:opacity-50"
           >
             <X size={14} />
           </button>
@@ -409,7 +409,7 @@ export function ModelOptionsModal({
           <div className="space-y-5">
             {isCreate ? (
               <FormField label={labels.modelNameLabel}>
-                <input
+                <input aria-label={labels.modelNamePlaceholder}
                   value={draft.modelName}
                   onChange={(e) => setDraft((prev) => ({ ...prev, modelName: e.target.value }))}
                   placeholder={labels.modelNamePlaceholder}
@@ -477,7 +477,7 @@ export function ModelOptionsModal({
 
               <div className="grid gap-3 md:grid-cols-2">
                 <FormField label={labels.contextWindow}>
-                  <input
+                  <input aria-label="e.g. 128000"
                     value={draft.contextWindow}
                     onChange={(e) => setDraft((prev) => ({ ...prev, contextWindow: e.target.value }))}
                     placeholder="e.g. 128000"
@@ -486,7 +486,7 @@ export function ModelOptionsModal({
                   />
                 </FormField>
                 <FormField label={labels.maxOutputTokens}>
-                  <input
+                  <input aria-label="e.g. 32768"
                     value={draft.maxOutputTokens}
                     onChange={(e) => setDraft((prev) => ({ ...prev, maxOutputTokens: e.target.value }))}
                     placeholder="e.g. 32768"
@@ -497,7 +497,7 @@ export function ModelOptionsModal({
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <FormField label={labels.defaultTemperature ?? 'Default Temperature'}>
-                  <input
+                  <input aria-label="e.g. 0.7"
                     value={draft.defaultTemperature}
                     onChange={(e) => setDraft((prev) => ({ ...prev, defaultTemperature: e.target.value }))}
                     placeholder="e.g. 0.7"

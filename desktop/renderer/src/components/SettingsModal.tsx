@@ -107,7 +107,7 @@ export function SettingsModal({ me, accessToken, initialTab = 'account', onClose
 
           <nav className="flex flex-col gap-[2px] px-2">
             {navItems.map(({ key, icon: Icon }) => (
-              <button
+              <button type="button"
                 key={key}
                 onClick={() => handleTabChange(key)}
                 className={[
@@ -132,9 +132,9 @@ export function SettingsModal({ me, accessToken, initialTab = 'account', onClose
           >
             {profileView ? (
               <div className="flex items-center gap-2">
-                <button
+                <button type="button"
                   onClick={() => setProfileView(false)}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
+                  className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
                 >
                   <ChevronLeft size={16} />
                 </button>
@@ -143,9 +143,9 @@ export function SettingsModal({ me, accessToken, initialTab = 'account', onClose
             ) : (
               <h2 className="text-base font-medium text-[var(--c-text-heading)]">{activeLabel}</h2>
             )}
-            <button
+            <button type="button"
               onClick={onClose}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
+              className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
             >
               <X size={16} />
             </button>

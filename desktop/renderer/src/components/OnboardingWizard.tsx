@@ -1271,7 +1271,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                         <label style={labelStyle}>
                           {ob.localProviderApiKey}
                         </label>
-                        <input
+                        <input aria-label={ob.localProviderApiKeyPlaceholder}
                           ref={apiKeyRef}
                           className={inputCls}
                           style={inputStyle}
@@ -1290,7 +1290,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                         <label style={labelStyle}>
                           {ob.localProviderBaseUrl}
                         </label>
-                        <input
+                        <input aria-label={ob.localProviderBaseUrlPlaceholder}
                           className={inputCls}
                           style={inputStyle}
                           type="text"
@@ -1850,7 +1850,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                   style={{ marginBottom: "8px", flexShrink: 0 }}
                 >
                   <Search size={14} />
-                  <input
+                  <input aria-label={ob.localSearchModels}
                     className={`${inputCls} onb-search-input`}
                     style={{ ...inputStyle, height: "34px", fontSize: "13px" }}
                     type="text"
@@ -1982,7 +1982,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                     </div>
                   )}
                   <div className="flex gap-2">
-                    <input
+                    <input aria-label={ob.localManualModelPlaceholder}
                       ref={manualModelRef}
                       className={inputCls}
                       style={{

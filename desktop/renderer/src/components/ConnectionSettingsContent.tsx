@@ -39,7 +39,7 @@ function StatusBadge({ status, t }: { status: SidecarRuntime['status']; t: Recor
   const { color, label } = map[status]
   return (
     <span className="inline-flex items-center gap-1.5 text-xs">
-      <span className="h-2 w-2 rounded-full" style={{ background: color }} />
+      <span className="size-2 rounded-full" style={{ background: color }} />
       <span style={{ color }}>{label}</span>
     </span>
   )
@@ -291,7 +291,7 @@ export function ConnectionSettingsContent({ initialConfig = null }: Props) {
 
           {showAdvanced && (
             <div
-              className="flex flex-col gap-4 rounded-xl bg-[var(--c-bg-menu)] px-4 py-4"
+              className="flex flex-col gap-4 rounded-xl bg-[var(--c-bg-menu)] p-4"
               style={{ border: '0.5px solid var(--c-border-subtle)' }}
             >
               <div className="text-sm text-[var(--c-text-secondary)]">{ct.advancedDesc}</div>
@@ -365,7 +365,7 @@ export function ConnectionSettingsContent({ initialConfig = null }: Props) {
       {mode === 'self-hosted' && (
         <div className="flex flex-col gap-2">
           <label className="text-sm text-[var(--c-text-secondary)]">{ct.baseUrl}</label>
-          <input
+          <input aria-label="https://your-server.com"
             type="url"
             value={selfHostedUrl}
             onChange={(event) => setSelfHostedUrl(event.target.value)}

@@ -209,6 +209,18 @@ function countTerminalRowsForOutput(output: string, columns: number): number {
 
 const log = createLogger('chat');
 
+async function disposeModelAdapter(adapter: ModelAdapter | undefined): Promise<void> {
+  const disposable = adapter as (ModelAdapter & { dispose?: () => void | Promise<void> }) | undefined;
+  await disposable?.dispose?.();
+}
+
+async function flushStandardStreams(): Promise<void> {
+  await Promise.all([
+    new Promise<void>((resolve) => process.stdout.write('', () => resolve())),
+    new Promise<void>((resolve) => process.stderr.write('', () => resolve())),
+  ]);
+}
+
 async function runChat(initialInput: string | undefined, opts: ChatOptions): Promise<void> {
   if ((opts.print || opts.json) && !initialInput) {
     writeError('print/json 模式需要提供单次输入');
@@ -2029,10 +2041,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       clearTurnIntentContext();
       await releaseSessionOwnershipForExit();
       await platform.dispose();
+      await disposeModelAdapter(adapter);
     }
     if (!opts.print && !opts.json) {
       process.stdout.write('\n');
     }
+    await flushStandardStreams();
+    process.exit(0);
     return;
   }
 
@@ -2520,6 +2535,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       await lifecycleHooks.runHooks('SessionEnd', { reason: 'sigint' });
       const cleanup = async () => {
         await platform.dispose();
+        await disposeModelAdapter(adapter);
         for (const ch of embeddedChannels) {
           await ch.cleanup();
         }
@@ -3197,6 +3213,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     await lifecycleHooks.runHooks('SessionEnd', { reason: 'exit' });
     const finalCleanup = async () => {
       await platform.dispose();
+      await disposeModelAdapter(adapter);
       for (const ch of embeddedChannels) {
         await ch.cleanup();
       }

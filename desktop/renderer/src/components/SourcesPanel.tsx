@@ -39,7 +39,7 @@ export function SourcesPanel({ sources, userQuery, onClose }: Props) {
         <span style={{ fontSize: '16px', fontWeight: 600, color: 'var(--c-text-primary)' }}>
           {sources.length} sources
         </span>
-        <button
+        <button type="button"
           onClick={onClose}
           style={{
             display: 'flex',

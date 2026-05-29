@@ -160,7 +160,7 @@ export function PlanView({ plan, planProgress, tasks }: PlanViewProps) {
             <button type="button" onClick={() => togglePhase(phase.id)}
               className="w-full flex items-center gap-3 p-4 hover:bg-[var(--c-bg-deep)] transition-colors text-left">
               {isExpanded ? <ChevronDown size={14} className="text-[var(--c-text-muted)] shrink-0" /> : <ChevronRight size={14} className="text-[var(--c-text-muted)] shrink-0" />}
-              <div className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold shrink-0 ${
+              <div className={`flex size-5 items-center justify-center rounded-full text-[10px] font-bold shrink-0 ${
                 isCompleted ? 'bg-[var(--c-bg-deep)] text-[var(--c-status-success-text)]' :
                 isActive ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]' :
                 'bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]'

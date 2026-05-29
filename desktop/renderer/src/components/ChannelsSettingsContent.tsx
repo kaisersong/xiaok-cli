@@ -302,7 +302,7 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
           <p className="mt-0.5 text-xs text-[var(--c-text-tertiary)]">{ct.subtitle}</p>
         </div>
         {!showForm && (
-          <button
+          <button type="button"
             onClick={() => setShowForm(true)}
             className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--c-text-heading)] transition-colors hover:bg-[var(--c-bg-deep)]"
             style={{ border: '0.5px solid var(--c-border-subtle)' }}
@@ -366,7 +366,7 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
           {formType === 'qqbot' && (
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-[var(--c-text-secondary)]">{ct.qqBotAppID}</label>
-              <input
+              <input aria-label={ct.qqBotAppIDPlaceholder}
                 type="text"
                 value={formAppID}
                 onChange={(e) => setFormAppID(e.target.value)}
@@ -384,7 +384,9 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
             {formType === 'qq' ? (
               <p className="text-xs text-[var(--c-text-tertiary)]">{ct.qqChannelCreateHint}</p>
             ) : (
-              <input
+              <input aria-label={
+                  formType === 'feishu' ? ct.feishuAppSecretPlaceholder : formType === 'qqbot' ? ct.qqBotClientSecretPlaceholder : ct.botTokenPlaceholder
+                }
                 type="password"
                 value={formToken}
                 onChange={(e) => setFormToken(e.target.value)}
@@ -400,7 +402,7 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
           {formType === 'qqbot' && (
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-[var(--c-text-secondary)]">{ds.connectorDefaultModel}</label>
-              <input
+              <input aria-label={ds.connectorDefaultModelPlaceholder}
                 type="text"
                 value={formDefaultModel}
                 onChange={(e) => setFormDefaultModel(e.target.value)}
@@ -464,7 +466,7 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-[var(--c-text-secondary)]">{ct.feishuAppID}</label>
-                  <input
+                  <input aria-label={ct.feishuAppIDPlaceholder}
                     value={formFeishuAppID}
                     onChange={(e) => setFormFeishuAppID(e.target.value)}
                     placeholder={ct.feishuAppIDPlaceholder}
@@ -489,7 +491,7 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-[var(--c-text-secondary)]">{ct.feishuVerificationToken}</label>
-                  <input
+                  <input aria-label={ct.feishuVerificationTokenPlaceholder}
                     type="password"
                     value={formFeishuVerificationToken}
                     onChange={(e) => setFormFeishuVerificationToken(e.target.value)}
@@ -500,7 +502,7 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-[var(--c-text-secondary)]">{ct.feishuEncryptKey}</label>
-                  <input
+                  <input aria-label={ct.feishuEncryptKeyPlaceholder}
                     type="password"
                     value={formFeishuEncryptKey}
                     onChange={(e) => setFormFeishuEncryptKey(e.target.value)}
@@ -570,7 +572,7 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
           )}
 
           <div className="flex items-center gap-2 pt-1">
-            <button
+            <button type="button"
               onClick={handleCreate}
               disabled={createDisabled}
               className="rounded-lg px-4 py-1.5 text-xs font-medium text-white transition-colors disabled:opacity-50"
@@ -578,7 +580,7 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
             >
               {saving ? ct.saving : ct.save}
             </button>
-            <button
+            <button type="button"
               onClick={resetCreateForm}
               className="rounded-lg px-4 py-1.5 text-xs font-medium text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)]"
               style={{ border: '0.5px solid var(--c-border-subtle)' }}
@@ -631,14 +633,14 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
-                  <button
+                  <button type="button"
                     onClick={() => handleToggle(ch)}
                     className="rounded-lg px-3 py-1 text-xs text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)]"
                     style={{ border: '0.5px solid var(--c-border-subtle)' }}
                   >
                     {ch.is_active ? ct.inactive : ct.active}
                   </button>
-                  <button
+                  <button type="button"
                     onClick={() => handleDelete(ch)}
                     className="text-[var(--c-text-muted)] hover:text-[var(--c-status-error,#ef4444)]"
                   >
@@ -653,7 +655,7 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
 
               {ch.channel_type === 'telegram' && (
                 <div className="flex gap-2">
-                  <input
+                  <input aria-label={ch.has_credentials && !(tokenDrafts[ch.id] ?? '') ? ct.tokenAlreadyConfigured : ct.botTokenPlaceholder}
                     type="password"
                     value={tokenDrafts[ch.id] ?? ''}
                     onChange={(e) => setTokenDrafts(prev => ({ ...prev, [ch.id]: e.target.value }))}
@@ -662,7 +664,7 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
                     style={{ border: '0.5px solid var(--c-border-subtle)' }}
                   />
                   {(tokenDrafts[ch.id] ?? '').trim() && (
-                    <button
+                    <button type="button"
                       onClick={() => handleUpdateToken(ch.id, tokenDrafts[ch.id])}
                       className="rounded-lg px-3 text-xs font-medium text-white"
                       style={{ background: 'var(--c-accent, #3b82f6)' }}
@@ -695,7 +697,7 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
                       {verifyResults[ch.id].message}
                     </div>
                   )}
-                  <button
+                  <button type="button"
                     onClick={() => void handleVerify(ch)}
                     disabled={!ch.has_credentials || verifyingChannelId === ch.id}
                     className="self-start rounded-lg px-3 py-1 text-xs font-medium text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
@@ -714,7 +716,7 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
       <div className="flex flex-col gap-3 pt-2" style={{ borderTop: '0.5px solid var(--c-border-subtle)' }}>
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium text-[var(--c-text-heading)]">{ct.bindingsTitle}</h3>
-          <button
+          <button type="button"
             onClick={handleGenerateBindCode}
             disabled={generating}
             className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--c-text-heading)] transition-colors hover:bg-[var(--c-bg-deep)]"
@@ -749,7 +751,7 @@ export function ChannelsSettingsContent({ accessToken }: Props) {
                   <span className="text-sm text-[var(--c-text-heading)]">{id.display_name || id.platform_subject_id}</span>
                   <span className="text-xs text-[var(--c-text-tertiary)]">{channelLabel(id.channel_type)}</span>
                 </div>
-                <button
+                <button type="button"
                   onClick={() => handleUnbind(id.id)}
                   className="text-xs text-[var(--c-text-muted)] hover:text-[var(--c-status-error,#ef4444)]"
                 >

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { FileDown } from 'lucide-react'
-import { apiBaseUrl } from '../shared/api'
+import { apiBaseUrl } from '../shared/api/client'
 import type { ArtifactRef } from '../storage'
 
 function formatSize(bytes: number): string {
@@ -44,7 +44,7 @@ export function ArtifactDownload({ artifact, accessToken, pathPrefix = '/v1/arti
   }, [artifact, accessToken, downloading, pathPrefix])
 
   return (
-    <button
+    <button type="button"
       onClick={handleDownload}
       disabled={downloading}
       style={{

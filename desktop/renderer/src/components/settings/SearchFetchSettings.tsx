@@ -19,8 +19,7 @@ import { ProviderSelectCard } from './ProviderSelectCard'
 // Shared styles — all colours use CSS variables so they adapt to dark/light
 // ---------------------------------------------------------------------------
 
-import { settingsInputCls } from './_SettingsInput'
-import { settingsLabelCls } from './_SettingsLabel'
+import { settingsInputCls, settingsLabelCls } from './_settingsClasses'
 
 const inputCls =
   settingsInputCls('md') + ' transition-colors duration-150'
@@ -91,7 +90,7 @@ function PasswordInput({ value, onChange, placeholder }: {
   const [show, setShow] = useState(false)
   return (
     <div className="relative">
-      <input
+      <input aria-label={placeholder}
         type={show ? 'text' : 'password'}
         className={inputCls}
         placeholder={placeholder}
@@ -315,7 +314,7 @@ export function SearchFetchSettings() {
             </div>
             <div>
               <label className={labelCls}><span className="flex items-center gap-1.5"><Link size={11} />{ds.baseUrlLabel}</span></label>
-              <input type="text" className={inputCls} placeholder="https://api.firecrawl.dev"
+              <input aria-label="https://api.firecrawl.dev" type="text" className={inputCls} placeholder="https://api.firecrawl.dev"
                 value={config.fetch.firecrawlBaseUrl ?? ''}
                 onChange={(e) => patchFetch({ firecrawlBaseUrl: e.target.value || undefined })}
               />
@@ -365,7 +364,7 @@ export function SearchFetchSettings() {
         >
           <div>
             <label className={labelCls}><span className="flex items-center gap-1.5"><Link size={11} />{ds.baseUrlLabel}</span></label>
-            <input type="text" className={inputCls} placeholder="http://localhost:4000"
+            <input aria-label="http://localhost:4000" type="text" className={inputCls} placeholder="http://localhost:4000"
               value={config.search.searxngBaseUrl ?? ''}
               onChange={(e) => patchSearch({ searxngBaseUrl: e.target.value || undefined })}
             />
@@ -386,7 +385,7 @@ function RuntimeStatusLabel({ state, reason }: { state?: string; reason?: string
   const info = runtimeStateInfo(state)
   return (
     <span className={`inline-flex items-center gap-1 text-[10px] font-medium ${info.text}`}>
-      <span className={`inline-block h-1.5 w-1.5 rounded-full ${info.dot}`} />
+      <span className={`inline-block size-1.5 rounded-full ${info.dot}`} />
       <span>{info.label}</span>
       {reason ? <span className="text-[var(--c-text-muted)]">({formatRuntimeReason(reason)})</span> : null}
     </span>

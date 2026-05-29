@@ -55,7 +55,7 @@ export function DesktopTelegramSettingsPanel({
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [enabled, setEnabled] = useState(channel?.is_active ?? false)
-  const [personaID, setPersonaID] = useState(resolvePersonaID(personas, channel?.persona_id))
+  const [personaID, setPersonaID] = useState(() => resolvePersonaID(personas, channel?.persona_id))
 
   // Private chat access
   const persistedPrivateIDs = useMemo(() => {
@@ -352,7 +352,7 @@ export function DesktopTelegramSettingsPanel({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
+                <span className="flex size-9 items-center justify-center rounded-xl bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
                   <Radio size={18} />
                 </span>
                 <div className="min-w-0">

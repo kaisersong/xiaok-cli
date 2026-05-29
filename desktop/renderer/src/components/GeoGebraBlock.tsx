@@ -161,7 +161,7 @@ export function GeoGebraBlock({ content }: Props) {
           geogebra
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-          <button
+          <button type="button"
             onClick={handleReset}
             style={{
               display: 'flex',
@@ -180,7 +180,7 @@ export function GeoGebraBlock({ content }: Props) {
           >
             <RotateCcw size={11} />
           </button>
-          <button
+          <button type="button"
             onClick={() => setExpanded(prev => !prev)}
             style={{
               display: 'flex',

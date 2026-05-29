@@ -151,7 +151,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
   if (runsOpen && accessToken) {
     return (
       <div className="flex flex-col gap-5">
-        <button
+        <button type="button"
           onClick={() => setRunsOpen(false)}
           className="flex items-center gap-1 self-start text-sm text-[var(--c-text-secondary)] hover:text-[var(--c-text-primary)] transition-colors"
         >

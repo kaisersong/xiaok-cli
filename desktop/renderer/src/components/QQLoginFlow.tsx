@@ -157,7 +157,7 @@ export function QQLoginFlow({ accessToken, channelId: _channelId, onStatusChange
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-3 py-2">
           <div
-            className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium"
+            className="flex size-8 items-center justify-center rounded-full text-xs font-medium"
             style={{ background: 'var(--c-status-success-bg, rgba(34,197,94,0.1))', color: 'var(--c-status-success-text, #22c55e)' }}
           >
             QQ
@@ -186,7 +186,7 @@ export function QQLoginFlow({ accessToken, channelId: _channelId, onStatusChange
 
           <div className="flex flex-col gap-1.5">
             {quickLoginList.map(account => (
-              <button
+              <button type="button"
                 key={account.uin}
                 onClick={() => handleQuickLogin(account.uin)}
                 disabled={quickLoginLoading !== null}
@@ -194,7 +194,7 @@ export function QQLoginFlow({ accessToken, channelId: _channelId, onStatusChange
                 style={{ border: '0.5px solid var(--c-border-subtle)' }}
               >
                 <div
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-medium"
+                  className="flex size-8 shrink-0 items-center justify-center rounded-full text-[10px] font-medium"
                   style={{ background: 'var(--c-bg-deep)', color: 'var(--c-text-muted)' }}
                 >
                   QQ
@@ -212,7 +212,7 @@ export function QQLoginFlow({ accessToken, channelId: _channelId, onStatusChange
             ))}
           </div>
 
-          <button
+          <button type="button"
             onClick={() => setShowQRCode(true)}
             className="flex items-center gap-1.5 self-start rounded px-2 py-1 text-xs text-[var(--c-text-muted)] transition-colors hover:text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
           >
@@ -244,14 +244,14 @@ export function QQLoginFlow({ accessToken, channelId: _channelId, onStatusChange
           <span className="text-xs font-medium text-[var(--c-text-secondary)]">{ct.qqScanToLogin}</span>
           <div className="flex items-center gap-2">
             {hasQuickLogin && (
-              <button
+              <button type="button"
                 onClick={() => setShowQRCode(false)}
                 className="flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--c-text-muted)] transition-colors hover:text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
               >
                 {ct.qqQuickLogin}
               </button>
             )}
-            <button
+            <button type="button"
               onClick={handleRefreshQR}
               className="flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--c-text-muted)] transition-colors hover:text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
             >
@@ -266,11 +266,11 @@ export function QQLoginFlow({ accessToken, channelId: _channelId, onStatusChange
             <img
               src={qrBlobUrl}
               alt="QQ Login QR Code"
-              className="h-48 w-48"
+              className="size-48"
               style={{ imageRendering: 'pixelated' }}
             />
           ) : (
-            <div className="flex items-center justify-center h-48 w-48">
+            <div className="flex items-center justify-center size-48">
               <Loader2 size={20} className="animate-spin text-[var(--c-text-muted)]" />
             </div>
           )}
@@ -340,7 +340,7 @@ export function QQLoginFlow({ accessToken, channelId: _channelId, onStatusChange
         </div>
       )}
 
-      <button
+      <button type="button"
         onClick={handleSetup}
         disabled={isSetupInProgress}
         className={`${secondaryButtonSmCls} self-start`}

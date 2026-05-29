@@ -12,6 +12,20 @@ import type { ReminderApi } from '../../runtime/reminder/service.js';
 import type { PlatformRuntimeContext } from './context.js';
 import { mergeToolPools, isMcpTool } from '../../ai/tools/tool-pool.js';
 
+const CC_RUNTIME_ONLY_TOOLS = new Set([
+  'Agent',
+  'Skill',
+  'EnterPlanMode',
+  'ExitPlanMode',
+  'EnterWorktree',
+  'ExitWorktree',
+]);
+
+function isCcRuntimeOnlyTool(tool: Tool): boolean {
+  const name = tool.definition.name;
+  return CC_RUNTIME_ONLY_TOOLS.has(name) || /^Task(?:Create|Update|List|Get|Output|Stop)$/.test(name);
+}
+
 export interface PlatformRegistryFactoryOptions {
   platform: PlatformRuntimeContext;
   source: string;
@@ -125,7 +139,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
     const orderedTools = mergeToolPools(
       sandboxedTools.filter((t) => !isMcpTool(t)),
       sandboxedTools.filter(isMcpTool),
-    );
+    ).filter((tool) => !isCcRuntimeOnlyTool(tool));
 
     // 过滤 allowedTools
     const filteredTools = allowedTools?.length

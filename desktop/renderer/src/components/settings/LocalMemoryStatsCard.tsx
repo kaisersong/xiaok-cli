@@ -355,7 +355,7 @@ export function LocalMemoryStatsCard() {
         style={{ border: '1px solid var(--c-border-subtle)', background: 'var(--c-bg-input)' }}
       >
         <Search size={16} className="shrink-0 text-[var(--c-text-muted)]" />
-        <input
+        <input aria-label={ds.memorySearch}
           type="text"
           placeholder={ds.memorySearch}
           value={searchQuery}
@@ -438,7 +438,7 @@ export function LocalMemoryStatsCard() {
       {/* Add Modal */}
       <Modal open={addModalOpen} onClose={() => setAddModalOpen(false)} title={ds.memoryAdd} width="480px">
         <div className="flex flex-col gap-3">
-          <textarea
+          <textarea aria-label={ds.memoryAddPlaceholder}
             value={addContent}
             onChange={(e) => setAddContent(e.target.value)}
             placeholder={ds.memoryAddPlaceholder}
@@ -446,7 +446,7 @@ export function LocalMemoryStatsCard() {
             className="w-full rounded-lg px-3 py-2 text-sm"
             style={{ border: '1px solid var(--c-border-subtle)', background: 'var(--c-bg-input)', color: 'var(--c-text-primary)', resize: 'vertical' }}
           />
-          <input
+          <input aria-label={ds.memoryTagsPlaceholder}
             type="text"
             value={addTags}
             onChange={(e) => setAddTags(e.target.value)}
@@ -470,7 +470,7 @@ export function LocalMemoryStatsCard() {
       <Modal open={importModalOpen} onClose={() => { setImportModalOpen(false); setImportResult(null) }} title={ds.memoryImport} width="520px">
         <div className="flex flex-col gap-3">
           <p className="text-xs text-[var(--c-text-muted)]">{ds.memoryImportDesc}</p>
-          <textarea
+          <textarea aria-label={ds.memoryImportPlaceholder}
             value={importText}
             onChange={(e) => setImportText(e.target.value)}
             placeholder={ds.memoryImportPlaceholder}
@@ -503,7 +503,7 @@ export function LocalMemoryStatsCard() {
             className="w-full rounded-lg px-3 py-2 text-sm"
             style={{ border: '1px solid var(--c-border-subtle)', background: 'var(--c-bg-input)', color: 'var(--c-text-primary)', resize: 'vertical' }}
           />
-          <input
+          <input aria-label={ds.memoryTagsPlaceholder}
             type="text"
             value={editTags}
             onChange={(e) => setEditTags(e.target.value)}

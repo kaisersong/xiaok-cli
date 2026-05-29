@@ -102,9 +102,9 @@ export function ReportModal({ accessToken, threadId, open, onClose }: Props) {
           <h2 className="text-base font-semibold" style={{ color: 'var(--c-text-primary)' }}>
             {t.reportTitle}
           </h2>
-          <button
+          <button type="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--c-bg-deep)]"
+            className="flex size-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--c-bg-deep)]"
             style={{ color: 'var(--c-text-muted)' }}
           >
             <X size={16} />
@@ -150,7 +150,7 @@ export function ReportModal({ accessToken, threadId, open, onClose }: Props) {
               {categories.map(cat => {
                 const isSelected = selected.has(cat.key)
                 return (
-                  <button
+                  <button type="button"
                     key={cat.key}
                     onClick={() => toggle(cat.key)}
                     className="flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors"
@@ -197,14 +197,14 @@ export function ReportModal({ accessToken, threadId, open, onClose }: Props) {
 
             {/* actions */}
             <div className="flex items-center justify-end gap-2">
-              <button
+              <button type="button"
                 onClick={onClose}
                 className="rounded-lg px-4 py-2 text-sm font-medium transition-colors hover:bg-[var(--c-bg-deep)]"
                 style={{ color: 'var(--c-text-primary)', background: 'var(--c-bg-sub)', cursor: 'pointer', border: 'none' }}
               >
                 {t.reportCancel}
               </button>
-              <button
+              <button type="button"
                 onClick={handleSubmit}
                 disabled={selected.size === 0 || submitting}
                 className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors"

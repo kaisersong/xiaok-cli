@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 
 describe('plugin commands', () => {
@@ -32,7 +33,7 @@ describe('plugin commands', () => {
   });
 
   async function getPluginModule() {
-    return import('../../../dist/commands/plugin.js');
+    return import(pathToFileURL(join(process.cwd(), 'dist', 'commands', 'plugin.js')).href);
   }
 
   describe('plugin list', () => {

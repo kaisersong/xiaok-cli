@@ -176,7 +176,7 @@ export default function UserInputCard({ request, onSubmit, onDismiss, disabled }
           onClick={handleDismiss}
           disabled={submitting || !!disabled}
           aria-label={t.userInput.dismiss}
-          className="flex h-6 w-6 items-center justify-center rounded-md border-none bg-transparent cursor-pointer disabled:opacity-30 transition-[background-color] duration-[60ms] hover:bg-[var(--c-bg-deep)] flex-shrink-0 mt-0.5"
+          className="flex size-6 items-center justify-center rounded-md border-none bg-transparent cursor-pointer disabled:opacity-30 transition-[background-color] duration-[60ms] hover:bg-[var(--c-bg-deep)] flex-shrink-0 mt-0.5"
           style={{ color: 'var(--c-text-muted)' }}
         >
           <X size={13} />

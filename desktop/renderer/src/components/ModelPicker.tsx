@@ -96,15 +96,19 @@ export function ModelPicker({ accessToken, value, onChange, onAddApiKey, variant
 
   // 打开时：有缓存则静默刷新，无缓存则显示 loading
   useEffect(() => {
+    let focusTimer: ReturnType<typeof setTimeout> | null = null
     if (open) {
       const hasCached = accessToken ? providersCache.has(accessToken) : false
       void load(!hasCached ? false : true)
       setSearch('')
-      setTimeout(() => searchRef.current?.focus(), 30)
+      focusTimer = setTimeout(() => searchRef.current?.focus(), 30)
     } else {
       setOptionsFor(null)
       setOptionsAnchorY(null)
       setOptionsTop(null)
+    }
+    return () => {
+      if (focusTimer !== null) clearTimeout(focusTimer)
     }
   }, [open, load, accessToken])
 
@@ -247,7 +251,7 @@ export function ModelPicker({ accessToken, value, onChange, onAddApiKey, variant
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
               <div style={{ padding: '4px 4px 2px' }}>
-                <input
+                <input aria-label={mp.searchPlaceholder}
                   ref={searchRef}
                   type="text"
                   value={search}

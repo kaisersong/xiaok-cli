@@ -59,14 +59,14 @@ export function DesktopQQBotSettingsPanel({
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [enabled, setEnabled] = useState(channel?.is_active ?? false)
-  const [appID, setAppID] = useState(readStringConfig(channel, 'app_id'))
+  const [appID, setAppID] = useState(() => readStringConfig(channel, 'app_id'))
   const [clientSecretDraft, setClientSecretDraft] = useState('')
-  const [personaID, setPersonaID] = useState(resolvePersonaID(personas, channel?.persona_id))
-  const [allowedUserIDs, setAllowedUserIDs] = useState(readStringArrayConfig(channel, 'allowed_user_ids'))
+  const [personaID, setPersonaID] = useState(() => resolvePersonaID(personas, channel?.persona_id))
+  const [allowedUserIDs, setAllowedUserIDs] = useState(() => readStringArrayConfig(channel, 'allowed_user_ids'))
   const [allowedUserInput, setAllowedUserInput] = useState('')
-  const [allowedGroupIDs, setAllowedGroupIDs] = useState(readStringArrayConfig(channel, 'allowed_group_ids'))
+  const [allowedGroupIDs, setAllowedGroupIDs] = useState(() => readStringArrayConfig(channel, 'allowed_group_ids'))
   const [allowedGroupInput, setAllowedGroupInput] = useState('')
-  const [defaultModel, setDefaultModel] = useState(readStringConfig(channel, 'default_model'))
+  const [defaultModel, setDefaultModel] = useState(() => readStringConfig(channel, 'default_model'))
   const [bindCode, setBindCode] = useState<string | null>(null)
   const [generatingCode, setGeneratingCode] = useState(false)
   const [bindings, setBindings] = useState<ChannelBindingResponse[]>([])
@@ -325,7 +325,7 @@ export function DesktopQQBotSettingsPanel({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
+                <span className="flex size-9 items-center justify-center rounded-xl bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
                   <MessageCircle size={18} />
                 </span>
                 <div className="min-w-0">
@@ -371,7 +371,7 @@ export function DesktopQQBotSettingsPanel({
               <label className="mb-1.5 block text-xs font-medium text-[var(--c-text-secondary)]">
                 {ct.qqBotAppID}
               </label>
-              <input
+              <input aria-label={ct.qqBotAppIDPlaceholder}
                 type="text"
                 value={appID}
                 onChange={(event) => {

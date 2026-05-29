@@ -59,7 +59,7 @@ export function ProjectProgressCard({ project }: ProjectProgressCardProps) {
       tabIndex={0}
       onKeyDown={e => { if (e.key === 'Enter') navigate(`/projects/${project.id}`); }}
     >
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
+      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
         <FolderKanban size={16} className="text-[var(--c-text-icon)]" />
       </div>
       <div className="flex-1 min-w-0">

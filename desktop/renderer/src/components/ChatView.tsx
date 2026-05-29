@@ -232,7 +232,7 @@ export function ChatView({
                           className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)] cursor-pointer"
                           data-testid={`generated-file-${a.title}`}
                         >
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
+                          <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
                             {'</>'}
                           </div>
                           <div className="flex min-w-0 flex-1 flex-col items-start">
@@ -261,7 +261,7 @@ export function ChatView({
                           className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)] cursor-pointer"
                           data-testid={`generated-file-${f.name}`}
                         >
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
+                          <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
                             {'</>'}
                           </div>
                           <div className="flex min-w-0 flex-1 flex-col items-start">

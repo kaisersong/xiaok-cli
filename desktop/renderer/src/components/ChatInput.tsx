@@ -270,7 +270,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
         >
           {/* Textarea */}
           <div style={{ position: 'relative', marginBottom: '8px' }}>
-            <textarea
+            <textarea aria-label={placeholder}
               ref={textareaRef}
               rows={1}
               className="w-full resize-none bg-transparent outline-none"
@@ -333,7 +333,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
               <button
                 type="button"
                 onClick={handleAttach}
-                className="flex h-[33.5px] w-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] transition-[opacity,background] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:opacity-100 opacity-70"
+                className="flex size-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] transition-[opacity,background] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:opacity-100 opacity-70"
               >
                 <Plus size={18} />
               </button>
@@ -344,7 +344,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
               <button
                 type="button"
                 onClick={onStop}
-                className="flex h-[33.5px] w-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] transition-[opacity,background] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:opacity-100 opacity-70"
+                className="flex size-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] transition-[opacity,background] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:opacity-100 opacity-70"
               >
                 <Square size={14} />
               </button>
@@ -352,7 +352,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
               <button
                 type="submit"
                 disabled={disabled || (!internalValue.trim() && files.length === 0)}
-                className="flex h-[33.5px] w-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-accent-send)] text-[var(--c-accent-send-text)] transition-[background-color,opacity] duration-[60ms] hover:bg-[var(--c-accent-send-hover)] active:opacity-[0.75] active:scale-[0.93] disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex size-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-accent-send)] text-[var(--c-accent-send-text)] transition-[background-color,opacity] duration-[60ms] hover:bg-[var(--c-accent-send-hover)] active:opacity-[0.75] active:scale-[0.93] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Send size={18} />
               </button>

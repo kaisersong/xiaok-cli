@@ -8,7 +8,7 @@ import { useState, useEffect } from 'react';
 import { X, Bot, Crown, Zap } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import { api } from '../../api/bridge';
+import { api } from '../../api';
 import type { CreateAgentInput } from '../../hooks/useKSwarmClient';
 
 interface ModelInfo {
@@ -142,7 +142,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
           <h2 className="text-[15px] font-semibold text-[var(--c-text-heading)]">
             {step === 1 ? t.projectsAgentTypeTitle : '配置智能体'}
           </h2>
-          <button type="button" onClick={handleClose} className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]">
+          <button type="button" onClick={handleClose} className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]">
             <X size={14} />
           </button>
         </div>
@@ -157,7 +157,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
                   className={`flex items-center gap-3 rounded-xl p-4 text-left transition-colors border ${
                     selected ? 'border-[var(--c-btn-bg)] bg-[var(--c-btn-bg)]/10' : 'border-[var(--c-border-subtle)] hover:bg-[var(--c-bg-sub)]'
                   }`}>
-                  <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${selected ? 'bg-[var(--c-btn-bg)]' : 'bg-[var(--c-bg-sub)]'}`}>
+                  <div className={`flex size-9 items-center justify-center rounded-lg ${selected ? 'bg-[var(--c-btn-bg)]' : 'bg-[var(--c-bg-sub)]'}`}>
                     <Icon size={18} className={selected ? 'text-[var(--c-btn-text)]' : 'text-[var(--c-text-secondary)]'} />
                   </div>
                   <div>
@@ -174,14 +174,14 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
         ) : (
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsAgentName}</label>
-              <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例：研究员、编码专家"
+              <label htmlFor="create-agent-name" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsAgentName}</label>
+              <input id="create-agent-name" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例：研究员、编码专家"
                 className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]"
                 autoFocus />
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">本机智能体平台</label>
+              <div className="text-[12px] font-medium text-[var(--c-text-secondary)]">本机智能体平台</div>
               <div className="flex flex-wrap gap-1.5">
                 {runtimeOptions.map(rt => (
                   <button key={rt.type} type="button" onClick={() => { setRuntimeType(rt.type); setProvider(''); setModel(''); }}
@@ -199,7 +199,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
             </div>
 
             {isXiaok ? (
-              <div className="rounded-xl border border-[var(--c-border-subtle)] bg-[var(--c-bg-sub)] px-3 py-3">
+              <div className="rounded-xl border border-[var(--c-border-subtle)] bg-[var(--c-bg-sub)] p-3">
                 <p className="text-[12px] font-medium text-[var(--c-text-primary)]">将直接使用 xiaok 当前桌面环境运行</p>
                 <p className="mt-1 text-[10px] text-[var(--c-text-muted)]">
                   provider、模型和本地 runtime 由桌面端自动绑定，无需手动填写。
@@ -251,8 +251,8 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
             )}
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">指令 <span className="text-[var(--c-text-muted)]">(可选)</span></label>
-              <textarea value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="系统提示词或行为指令..." rows={2}
+              <label htmlFor="create-agent-instructions" className="text-[12px] font-medium text-[var(--c-text-secondary)]">指令 <span className="text-[var(--c-text-muted)]">(可选)</span></label>
+              <textarea id="create-agent-instructions" value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="系统提示词或行为指令..." rows={2}
                 className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)] resize-none" />
             </div>
 

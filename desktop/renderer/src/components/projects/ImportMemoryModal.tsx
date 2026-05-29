@@ -96,7 +96,7 @@ export function ImportMemoryModal({ open, onClose, onImport }: Props) {
         <div className="border-b border-[var(--c-border-subtle)] px-5 py-3">
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--c-text-muted)]" />
-            <input
+            <input aria-label={t.projectsPrinciplesImportSearch}
               type="text"
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -127,7 +127,7 @@ export function ImportMemoryModal({ open, onClose, onImport }: Props) {
                     type="checkbox"
                     checked={selected.has(m.id)}
                     onChange={() => toggleItem(m.id)}
-                    className="mt-0.5 h-3.5 w-3.5 rounded border-[var(--c-border-subtle)] accent-[var(--c-accent)]"
+                    className="mt-0.5 size-3.5 rounded border-[var(--c-border-subtle)] accent-[var(--c-accent)]"
                   />
                   <span className="text-xs leading-relaxed text-[var(--c-text-secondary)]">{m.content}</span>
                 </label>

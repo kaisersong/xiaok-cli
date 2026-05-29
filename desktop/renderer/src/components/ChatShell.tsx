@@ -827,12 +827,14 @@ export function ChatShell() {
         status,
         length: text.length,
       }));
-      setQueuedPrompt(null);
       if (queuedDrainTimerRef.current !== null) {
         clearTimeout(queuedDrainTimerRef.current);
       }
-      queuedDrainTimerRef.current = setTimeout(() => {
-        queuedDrainTimerRef.current = null;
+      const timerId = setTimeout(() => {
+        if (queuedDrainTimerRef.current === timerId) {
+          queuedDrainTimerRef.current = null;
+        }
+        setQueuedPrompt(null);
         log.info('queued_prompt_execute', JSON.stringify({
           threadId: taskId,
           status,
@@ -840,6 +842,13 @@ export function ChatShell() {
         }));
         void handleSubmitRef.current(text);
       }, 100);
+      queuedDrainTimerRef.current = timerId;
+      return () => {
+        if (queuedDrainTimerRef.current === timerId) {
+          clearTimeout(timerId);
+          queuedDrainTimerRef.current = null;
+        }
+      };
     }
   }, [status, queuedPrompt, taskId]);
 

@@ -34,7 +34,7 @@ import { useLocale } from '../../contexts/LocaleContext'
 import type { ThemeDefinition } from '../../themes/types'
 import { SettingsSection } from './_SettingsSection'
 import { SettingsSectionHeader } from './_SettingsSectionHeader'
-import { settingsInputCls } from './_SettingsInput'
+import { settingsInputCls } from './_settingsClasses'
 import { SettingsLabel } from './_SettingsLabel'
 import { SettingsSelect } from './_SettingsSelect'
 import { ConnectionSettings } from './ConnectionSettings'
@@ -120,7 +120,7 @@ function primaryBtnCls(disabled?: boolean) {
 function AgentImportSourceIcon({ source }: { source: ImportSourceKind }) {
   if (source === 'hermes') {
     return (
-      <svg viewBox="0 0 64 64" aria-hidden="true" className="block h-4 w-4">
+      <svg viewBox="0 0 64 64" aria-hidden="true" className="block size-4">
         <path d="M30 10h4v44h-4z" fill="currentColor" opacity="0.9" />
         <path d="M30 18c-7-5-15-5-20-1 6-1 13 0 19 5zM34 18c7-5 15-5 20-1-6-1-13 0-19 5z" fill="currentColor" opacity="0.72" />
         <path d="M30 24c-5-3-11-3-16 0 5-1 10 0 15 4zM34 24c5-3 11-3 16 0-5-1-10 0-15 4z" fill="currentColor" opacity="0.48" />
@@ -131,7 +131,7 @@ function AgentImportSourceIcon({ source }: { source: ImportSourceKind }) {
   }
 
   return (
-    <svg viewBox="0 0 120 120" aria-hidden="true" className="block h-4 w-4">
+    <svg viewBox="0 0 120 120" aria-hidden="true" className="block size-4">
       <path d="M60 12c-25 0-43 18-43 43 0 19 12 35 28 42v10h10v-7c3 1 7 1 10 0v7h10V97c16-7 28-23 28-42 0-25-18-43-43-43Z" fill="currentColor" opacity="0.9" />
       <path d="M23 47C9 43 1 51 7 62c6 10 17 6 22-7 2-5-1-8-6-8Zm74 0c14-4 22 4 16 15-6 10-17 6-22-7-2-5 1-8 6-8Z" fill="currentColor" opacity="0.72" />
       <circle cx="45" cy="36" r="5" fill="var(--c-bg-page)" />
@@ -314,7 +314,7 @@ function NetworkPane({ onReloadOverview }: { onReloadOverview: () => Promise<voi
             </div>
             <div>
               <SettingsLabel>{ds.advancedNetworkProxyUrl}</SettingsLabel>
-              <input
+              <input aria-label="http://127.0.0.1:7890"
                 value={config.proxyUrl}
                 onChange={(e) => setConfig((p) => ({ ...p, proxyUrl: e.target.value }))}
                 placeholder="http://127.0.0.1:7890"
@@ -346,7 +346,7 @@ function NetworkPane({ onReloadOverview }: { onReloadOverview: () => Promise<voi
           </div>
           <div>
             <SettingsLabel>{ds.advancedNetworkUserAgent}</SettingsLabel>
-            <input
+            <input aria-label="Xiaok Desktop"
               value={config.userAgent}
               onChange={(e) => setConfig((p) => ({ ...p, userAgent: e.target.value }))}
               placeholder="Xiaok Desktop"
@@ -1440,7 +1440,7 @@ function LogsPane() {
             ]}
             onChange={(v) => setLevel(v as DesktopLogQuery['level'])}
           />
-          <input
+          <input aria-label={ds.advancedLogsSearchPlaceholder}
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}

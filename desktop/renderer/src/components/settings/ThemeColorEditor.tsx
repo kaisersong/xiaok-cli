@@ -423,7 +423,7 @@ export function ThemeColorEditor({ onClose }: Props) {
           <button
             type="button"
             onClick={onClose}
-            className="flex h-6 w-6 items-center justify-center rounded text-[var(--c-text-tertiary)] hover:text-[var(--c-text-primary)] transition-colors"
+            className="flex size-6 items-center justify-center rounded text-[var(--c-text-tertiary)] hover:text-[var(--c-text-primary)] transition-colors"
           >
             <X size={14} />
           </button>
@@ -470,7 +470,7 @@ export function ThemeColorEditor({ onClose }: Props) {
           className="flex items-center gap-2 px-4 py-2"
           style={{ borderTop: '0.5px solid var(--c-border-subtle)' }}
         >
-          <input
+          <input aria-label={t.customThemeNamePlaceholder}
             type="text"
             placeholder={t.customThemeNamePlaceholder}
             value={themeName}

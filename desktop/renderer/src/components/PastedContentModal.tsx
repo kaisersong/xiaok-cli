@@ -65,7 +65,7 @@ export function PastedContentModal({ text, size, lineCount, onClose, title, subt
               {displaySubtitle}
             </p>
           </div>
-          <button
+          <button type="button"
             onClick={onClose}
             style={{
               width: '32px',

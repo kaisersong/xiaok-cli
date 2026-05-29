@@ -1,75 +1,18 @@
 import { useState, useEffect, useCallback } from 'react'
 import { X, FileText, Download, Eye, Code } from 'lucide-react'
-import { apiBaseUrl } from '../shared/api'
+import { apiBaseUrl } from '../shared/api/client'
 import type { ArtifactRef } from '../storage'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ArtifactIframe } from './ArtifactIframe'
 import { AnimatedCheck } from './AnimatedCheck'
 import { useLocale } from '../contexts/LocaleContext'
+import { canPreviewDocumentAsText, shouldRenderAsIframe } from './document-preview'
 
 const toggleButtonWidth = 36
 const toggleButtonHeight = 30
 const toggleButtonGap = 2
 const toggleButtonOffset = toggleButtonWidth + toggleButtonGap
 const actionButtonSize = 30
-
-const textLikeMimeTypes = new Set([
-  'application/json',
-  'application/ld+json',
-  'application/xml',
-  'application/javascript',
-  'application/ecmascript',
-  'application/typescript',
-  'application/yaml',
-  'application/x-yaml',
-  'application/toml',
-  'application/x-toml',
-  'application/markdown',
-  'application/x-markdown',
-])
-
-const textFallbackExtensions = new Set([
-  'md', 'markdown', 'txt', 'log', 'json', 'jsonl', 'xml', 'yml', 'yaml', 'toml', 'ini', 'cfg', 'conf',
-  'csv', 'tsv', 'js', 'jsx', 'mjs', 'cjs', 'ts', 'tsx', 'css', 'html', 'htm', 'sh', 'bash', 'zsh',
-  'py', 'go', 'rs', 'java', 'c', 'cc', 'cpp', 'h', 'hpp', 'sql',
-])
-
-function normalizeMime(mime: string | null | undefined): string {
-  return (mime ?? '').split(';', 1)[0]?.trim().toLowerCase() ?? ''
-}
-
-function getFilenameExtension(filename: string): string {
-  const dot = filename.lastIndexOf('.')
-  if (dot < 0 || dot === filename.length - 1) return ''
-  return filename.slice(dot + 1).trim().toLowerCase()
-}
-
-function isTextMime(mime: string | null | undefined): boolean {
-  const normalized = normalizeMime(mime)
-  return normalized.startsWith('text/') || textLikeMimeTypes.has(normalized)
-}
-
-const iframeRenderableMimes = new Set(['text/html', 'image/svg+xml'])
-const iframeRenderableExtensions = new Set(['html', 'htm', 'svg'])
-
-function shouldRenderAsIframe(artifact: ArtifactRef): boolean {
-  if (iframeRenderableMimes.has(normalizeMime(artifact.mime_type))) return true
-  return iframeRenderableExtensions.has(getFilenameExtension(artifact.filename))
-}
-
-export function canPreviewDocumentAsText(serverMime: string | null | undefined, artifactMime: string | null | undefined, filename: string): boolean {
-  if (isTextMime(serverMime) || isTextMime(artifactMime)) return true
-
-  const normalizedServerMime = normalizeMime(serverMime)
-  const normalizedArtifactMime = normalizeMime(artifactMime)
-  const shouldUseExtensionFallback = normalizedServerMime === ''
-    || normalizedServerMime === 'application/octet-stream'
-    || normalizedArtifactMime === ''
-    || normalizedArtifactMime === 'application/octet-stream'
-
-  if (!shouldUseExtensionFallback) return false
-  return textFallbackExtensions.has(getFilenameExtension(filename))
-}
 
 type ViewMode = 'preview' | 'source'
 
@@ -204,7 +147,7 @@ export function DocumentPanel({ artifact, artifacts, accessToken, runId, onClose
                   pointerEvents: 'none',
                 }}
               />
-              <button
+              <button type="button"
                 onClick={() => setMode('preview')}
                 title={t.documentPanel.preview}
                 style={{
@@ -225,7 +168,7 @@ export function DocumentPanel({ artifact, artifacts, accessToken, runId, onClose
               >
                 <Eye size={14} />
               </button>
-              <button
+              <button type="button"
                 onClick={() => setMode('source')}
                 title={t.documentPanel.source}
                 style={{
@@ -248,7 +191,7 @@ export function DocumentPanel({ artifact, artifacts, accessToken, runId, onClose
               </button>
             </div>
           )}
-          <button
+          <button type="button"
             onClick={() => void handleDownload()}
             disabled={downloading}
             title={t.documentPanel.download}
@@ -279,7 +222,7 @@ export function DocumentPanel({ artifact, artifacts, accessToken, runId, onClose
           >
             {downloadDone ? <AnimatedCheck size={16} /> : <Download size={16} />}
           </button>
-          <button
+          <button type="button"
             onClick={onClose}
             onPointerDown={() => setClosePressed(true)}
             onPointerUp={() => setClosePressed(false)}
@@ -376,7 +319,7 @@ export function DocumentPanel({ artifact, artifacts, accessToken, runId, onClose
             }}
           >
             <span>{t.documentPanel.previewUnsupported}</span>
-            <button
+            <button type="button"
               onClick={() => void handleDownload()}
               disabled={downloading}
               onPointerDown={() => setDownloadPressed(true)}

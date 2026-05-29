@@ -54,18 +54,18 @@ export function DesktopFeishuSettingsPanel({
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [enabled, setEnabled] = useState(channel?.is_active ?? false)
-  const [personaID, setPersonaID] = useState(resolvePersonaID(personas, channel?.persona_id))
-  const [appID, setAppID] = useState(readStringConfig(channel, 'app_id'))
+  const [personaID, setPersonaID] = useState(() => resolvePersonaID(personas, channel?.persona_id))
+  const [appID, setAppID] = useState(() => readStringConfig(channel, 'app_id'))
   const [domain, setDomain] = useState(readStringConfig(channel, 'domain') || 'feishu')
   const [appSecretDraft, setAppSecretDraft] = useState('')
   const [verificationTokenDraft, setVerificationTokenDraft] = useState('')
   const [encryptKeyDraft, setEncryptKeyDraft] = useState('')
-  const [defaultModel, setDefaultModel] = useState(readStringConfig(channel, 'default_model'))
-  const [allowedUserIDs, setAllowedUserIDs] = useState(readStringArrayConfig(channel, 'allowed_user_ids'))
+  const [defaultModel, setDefaultModel] = useState(() => readStringConfig(channel, 'default_model'))
+  const [allowedUserIDs, setAllowedUserIDs] = useState(() => readStringArrayConfig(channel, 'allowed_user_ids'))
   const [allowedUserInput, setAllowedUserInput] = useState('')
-  const [allowedChatIDs, setAllowedChatIDs] = useState(readStringArrayConfig(channel, 'allowed_chat_ids'))
+  const [allowedChatIDs, setAllowedChatIDs] = useState(() => readStringArrayConfig(channel, 'allowed_chat_ids'))
   const [allowedChatInput, setAllowedChatInput] = useState('')
-  const [triggerKeywords, setTriggerKeywords] = useState(readStringArrayConfig(channel, 'trigger_keywords'))
+  const [triggerKeywords, setTriggerKeywords] = useState(() => readStringArrayConfig(channel, 'trigger_keywords'))
   const [triggerKeywordInput, setTriggerKeywordInput] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<{ ok: boolean; message: string } | null>(null)
@@ -283,7 +283,7 @@ export function DesktopFeishuSettingsPanel({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
+                <span className="flex size-9 items-center justify-center rounded-xl bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
                   <Send size={18} />
                 </span>
                 <div className="min-w-0">
@@ -342,7 +342,7 @@ export function DesktopFeishuSettingsPanel({
               <label className="mb-1.5 block text-xs font-medium text-[var(--c-text-secondary)]">
                 {ct.feishuAppID}
               </label>
-              <input
+              <input aria-label={ct.feishuAppIDPlaceholder}
                 value={appID}
                 onChange={(event) => {
                   setAppID(event.target.value)
@@ -433,7 +433,7 @@ export function DesktopFeishuSettingsPanel({
             </div>
 
             <div
-              className="md:col-span-2 rounded-xl px-4 py-4"
+              className="md:col-span-2 rounded-xl p-4"
               style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-page)' }}
             >
               <div className="mb-4 text-sm font-medium text-[var(--c-text-heading)]">{ct.accessControl}</div>

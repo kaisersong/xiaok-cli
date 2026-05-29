@@ -25,13 +25,13 @@ export function ConfirmDialog({
     <Modal open={open} onClose={onClose} title={title} width="400px">
       <p className="text-sm text-[var(--c-text-secondary)]">{message}</p>
       <div className="mt-5 flex justify-end gap-2">
-        <button
+        <button type="button"
           onClick={onClose}
           className="rounded-lg border border-[var(--c-border)] px-3.5 py-1.5 text-sm text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-sub)]"
         >
           {cancelLabel}
         </button>
-        <button
+        <button type="button"
           onClick={onConfirm}
           disabled={loading}
           className="rounded-lg bg-red-600 px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"

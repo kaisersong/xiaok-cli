@@ -580,7 +580,7 @@ export function ScheduledPage() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--c-border)] px-8 py-4">
         <div className="flex items-center gap-4">
-          <button
+          <button type="button"
             onClick={() => navigate('/')}
             className="rounded-lg p-1 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
           >
@@ -593,7 +593,7 @@ export function ScheduledPage() {
             </p>
           </div>
         </div>
-        <button
+        <button type="button"
           onClick={openCreate}
           className="flex items-center gap-1.5 rounded-lg bg-[var(--c-btn-bg)] px-3.5 py-1.5 text-sm font-medium text-[var(--c-btn-text)] transition-[filter] duration-150 hover:brightness-[1.12] active:brightness-[0.95]"
         >
@@ -611,7 +611,7 @@ export function ScheduledPage() {
             <p className="mt-2 text-xs text-[var(--c-text-tertiary)]">
               {t.scheduledEmptyDesc}
             </p>
-            <button
+            <button type="button"
               onClick={openCreate}
               className="mt-4 flex items-center gap-2 rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
             >
@@ -658,7 +658,7 @@ export function ScheduledPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    <button
+                    <button type="button"
                       onClick={() => handleRun(task)}
                       disabled={runningId === task.id}
                       className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs transition-colors ${
@@ -672,7 +672,7 @@ export function ScheduledPage() {
                       {t.scheduledRun}
                     </button>
                     {(task.threadId || task.runtimeTaskId) && (
-                      <button
+                      <button type="button"
                         onClick={() => handleClickTask(task)}
                         className="rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
                         title={t.scheduledView}
@@ -681,7 +681,7 @@ export function ScheduledPage() {
                       </button>
                     )}
                     {task.threadId && (
-                      <button
+                      <button type="button"
                         onClick={() => handleDeleteInstance(task.id)}
                         className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 hover:bg-red-50 transition-colors"
                         title={t.scheduledDeleteInstanceTitle}
@@ -690,7 +690,7 @@ export function ScheduledPage() {
                       </button>
                     )}
                     {task.userApprovedAuto !== true ? (
-                      <button
+                      <button type="button"
                         onClick={() => handleApproveAuto(task)}
                         disabled={!task.threadId && !task.runtimeTaskId}
                         title={(!task.threadId && !task.runtimeTaskId) ? t.scheduledApproveAutoNeedsReview : t.scheduledApproveAutoTitle}
@@ -699,7 +699,7 @@ export function ScheduledPage() {
                         {t.scheduledApproveAuto}
                       </button>
                     ) : (
-                      <button
+                      <button type="button"
                         onClick={() => handleRevokeAuto(task)}
                         title={t.scheduledRevokeAutoTitle}
                         className="rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
@@ -707,7 +707,7 @@ export function ScheduledPage() {
                         {t.scheduledRevokeAuto}
                       </button>
                     )}
-                    <button
+                    <button type="button"
                       onClick={() => handleToggle(task)}
                       className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
                         task.status === 'active'
@@ -717,14 +717,14 @@ export function ScheduledPage() {
                     >
                       {task.status === 'active' ? t.scheduledPause : t.scheduledResume}
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => openEdit(task)}
                       className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-[var(--c-text-primary)] hover:bg-[var(--c-bg-deep)] transition-colors"
                       title={t.commonEdit}
                     >
                       <Edit3 size={14} />
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => handleDelete(task.id)}
                       className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 hover:bg-red-50 transition-colors"
                       title={t.commonDelete}
@@ -751,7 +751,7 @@ export function ScheduledPage() {
               <h3 className="text-base font-medium text-[var(--c-text-primary)]">
                 {modalMode === 'create' ? t.scheduledCreateTitle : t.scheduledEditTitle}
               </h3>
-              <button
+              <button type="button"
                 onClick={closeModal}
                 className="rounded-lg p-1 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
               >
@@ -767,7 +767,7 @@ export function ScheduledPage() {
                   <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">
                     {t.scheduledName} <span className="text-red-500">*</span>
                   </label>
-                  <input
+                  <input aria-label="每日简报"
                     type="text"
                     value={formName}
                     onChange={e => setFormName(e.target.value)}
@@ -779,7 +779,7 @@ export function ScheduledPage() {
                   <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">
                     {t.scheduledDescription} <span className="text-red-500">*</span>
                   </label>
-                  <input
+                  <input aria-label="汇总日历和收件箱"
                     type="text"
                     value={formDesc}
                     onChange={e => setFormDesc(e.target.value)}
@@ -794,7 +794,7 @@ export function ScheduledPage() {
                 <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">
                   {t.scheduledInstructions} <span className="text-red-500">*</span>
                 </label>
-                <textarea
+                <textarea aria-label="查看今天的日历会议并汇总未读邮件，标记紧急事项。"
                   value={formPrompt}
                   onChange={e => setFormPrompt(e.target.value)}
                   placeholder="查看今天的日历会议并汇总未读邮件，标记紧急事项。"
@@ -820,7 +820,7 @@ export function ScheduledPage() {
                     ))}
                   </select>
                   <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center">
-                    <svg className="h-4 w-4 text-[var(--c-text-tertiary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="size-4 text-[var(--c-text-tertiary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                   </div>
@@ -842,7 +842,7 @@ export function ScheduledPage() {
                       ))}
                     </select>
                     <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center">
-                      <svg className="h-4 w-4 text-[var(--c-text-tertiary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="size-4 text-[var(--c-text-tertiary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
                     </div>
@@ -904,13 +904,13 @@ export function ScheduledPage() {
 
             {/* Modal footer */}
             <div className="flex items-center justify-end gap-3 border-t border-[var(--c-border)] px-6 py-4">
-              <button
+              <button type="button"
                 onClick={closeModal}
                 className="rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
               >
                 {t.scheduledCancel}
               </button>
-              <button
+              <button type="button"
                 onClick={handleSave}
                 disabled={saving || !formName.trim() || !formPrompt.trim()}
                 className="rounded-lg bg-[var(--c-accent)] px-5 py-2 text-sm text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
@@ -946,14 +946,14 @@ export function ScheduledPage() {
               {t.scheduledDeleteBody}
             </p>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button
+              <button type="button"
                 onClick={() => setConfirmDeleteId(null)}
                 className="hover:bg-[var(--c-bg-deep)]"
                 style={{ padding: '7px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: 'var(--c-text-secondary)', background: 'transparent', border: '0.5px solid var(--c-border-subtle)', cursor: 'pointer' }}
               >
                 {t.scheduledCancel}
               </button>
-              <button
+              <button type="button"
                 onClick={confirmDelete}
                 className="hover:opacity-85 active:opacity-70"
                 style={{ padding: '7px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: '#fff', background: '#ef4444', border: 'none', cursor: 'pointer' }}
@@ -989,14 +989,14 @@ export function ScheduledPage() {
               {t.scheduledDeleteInstanceBody}
             </p>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button
+              <button type="button"
                 onClick={() => setConfirmDeleteInstanceId(null)}
                 className="hover:bg-[var(--c-bg-deep)]"
                 style={{ padding: '7px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: 'var(--c-text-secondary)', background: 'transparent', border: '0.5px solid var(--c-border-subtle)', cursor: 'pointer' }}
               >
                 {t.scheduledCancel}
               </button>
-              <button
+              <button type="button"
                 onClick={confirmDeleteInstance}
                 className="hover:opacity-85 active:opacity-70"
                 style={{ padding: '7px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: '#fff', background: '#ef4444', border: 'none', cursor: 'pointer' }}

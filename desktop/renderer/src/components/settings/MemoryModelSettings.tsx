@@ -80,14 +80,14 @@ export function MemoryModelSettings() {
               >
                 {/* Radio indicator */}
                 <div
-                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
+                  className={`flex size-4 shrink-0 items-center justify-center rounded-full border-2 ${
                     model.active
                       ? 'border-[var(--c-accent)]'
                       : 'border-[var(--c-text-muted)]'
                   }`}
                 >
                   {model.active && (
-                    <div className="h-2 w-2 rounded-full bg-[var(--c-accent)]" />
+                    <div className="size-2 rounded-full bg-[var(--c-accent)]" />
                   )}
                 </div>
 
@@ -104,28 +104,28 @@ export function MemoryModelSettings() {
                 <div className="flex shrink-0 items-center gap-2">
                   {isDownloading ? (
                     <span className="flex items-center gap-1.5 text-xs text-[var(--c-text-muted)]">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <Loader2 className="size-3.5 animate-spin" />
                       <span>下载中…</span>
                     </span>
                   ) : model.downloaded ? (
                     <span className="flex items-center gap-1 text-xs text-green-600">
-                      <Check className="h-3.5 w-3.5" />
+                      <Check className="size-3.5" />
                       <span>已下载</span>
                     </span>
                   ) : (
                     <span className="flex items-center gap-1 text-xs text-[var(--c-text-muted)]">
-                      <Download className="h-3.5 w-3.5" />
+                      <Download className="size-3.5" />
                       <span>点击下载</span>
                     </span>
                   )}
 
                   {!model.downloaded && !isDownloading && (
-                    <button
+                    <button type="button"
                       onClick={(e) => { e.stopPropagation(); setExpandedId(isExpanded ? null : model.id) }}
-                      className="flex h-6 w-6 items-center justify-center rounded text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]"
+                      className="flex size-6 items-center justify-center rounded text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]"
                       title="手动下载指引"
                     >
-                      {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      {isExpanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
                     </button>
                   )}
                 </div>
@@ -168,13 +168,13 @@ export function MemoryModelSettings() {
                 : `确定下载并切换到「${confirmModel.name}」？（约 ${confirmModel.size}）`}
             </div>
             <div className="flex justify-end gap-2">
-              <button
+              <button type="button"
                 onClick={() => setConfirmModel(null)}
                 className="rounded-md border border-[var(--c-border-subtle)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
               >
                 取消
               </button>
-              <button
+              <button type="button"
                 onClick={handleConfirm}
                 className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white hover:opacity-90"
               >

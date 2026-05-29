@@ -138,7 +138,7 @@ export function DesktopChannelsSettings({ accessToken }: Props) {
       >
         <div className="flex flex-col gap-[3px] px-2">
           {tabItems.map(({ key, label, channel }) => (
-            <button
+            <button type="button"
               key={key}
               onClick={() => setActiveTab(key)}
               className={[
@@ -151,7 +151,7 @@ export function DesktopChannelsSettings({ accessToken }: Props) {
               <span className="shrink-0 text-[var(--c-text-muted)]">{PLATFORM_ICONS[key]}</span>
               <span className="min-w-0 flex-1 truncate">{label}</span>
               {channel?.is_active && (
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--c-status-success-text)]" />
+                <span className="size-1.5 shrink-0 rounded-full bg-[var(--c-status-success-text)]" />
               )}
             </button>
           ))}

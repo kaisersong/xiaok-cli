@@ -30,7 +30,7 @@ export function AccountContent({
         style={{ border: '0.5px solid var(--c-border-subtle)' }}
       >
         <div
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-lg font-medium"
+          className="flex size-12 shrink-0 items-center justify-center rounded-full text-lg font-medium"
           style={{ background: 'var(--c-avatar-bg)', color: 'var(--c-avatar-text)' }}
         >
           {userInitial}
@@ -61,16 +61,16 @@ export function AccountContent({
         </div>
 
         <div className="flex items-center gap-1">
-          <button
+          <button type="button"
             onClick={onEditProfile}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
+            className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
             title={t.editProfile}
           >
             <Pencil size={14} />
           </button>
-          <button
+          <button type="button"
             onClick={onLogout}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
+            className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
             title={t.logout}
           >
             <LogOut size={15} />
@@ -178,7 +178,7 @@ export function ProfileContent({
       {/* avatar + name edit */}
       <div className="flex items-start gap-4">
         <div
-          className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-2xl font-medium"
+          className="flex size-16 shrink-0 items-center justify-center rounded-full text-2xl font-medium"
           style={{ background: 'var(--c-avatar-bg)', color: 'var(--c-avatar-text)' }}
         >
           {userInitial}
@@ -218,7 +218,7 @@ export function ProfileContent({
               onCopy={() => void handleCopyId()}
               size={12}
               tooltip={t.copyAction}
-              className="flex h-6 w-6 items-center justify-center rounded text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
+              className="flex size-6 items-center justify-center rounded text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
             />
           )}
         </div>
@@ -250,7 +250,7 @@ export function ProfileContent({
             </div>
             {!me.email_verified && (
               <>
-                <button
+                <button type="button"
                   onClick={() => void handleSendVerify()}
                   disabled={sendingVerify || verifySent}
                   className="mt-1 flex h-8 w-fit items-center rounded-lg px-3 text-xs font-medium text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
@@ -261,7 +261,7 @@ export function ProfileContent({
                 {verifySent && (
                   <div className="mt-2 flex flex-col gap-2">
                     <div className="flex items-center gap-2">
-                      <input
+                      <input aria-label={t.emailVerifyCodePlaceholder}
                         type="text"
                         inputMode="numeric"
                         maxLength={6}
@@ -276,7 +276,7 @@ export function ProfileContent({
                           letterSpacing: verifyCode ? '4px' : 'normal',
                         }}
                       />
-                      <button
+                      <button type="button"
                         onClick={() => void handleConfirmVerify()}
                         disabled={verifyCode.length !== 6 || verifying}
                         className="flex h-8 items-center rounded-lg px-3 text-xs font-medium transition-colors disabled:opacity-50"

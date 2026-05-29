@@ -856,13 +856,16 @@ def assert_footer_chrome_is_singular(
     assert_no_truncated_footer_status(content)
     prompt_index = prompt_indices[0]
     status_index = status_indices[0]
+    rows_between_prompt_and_status = lines[prompt_index + 1:status_index]
     assert_true(
-        status_index == prompt_index + 1,
-        f"footer status must be directly below the input prompt:\n{content}",
+        status_index > prompt_index
+        and all(line.strip() == "" for line in rows_between_prompt_and_status),
+        f"footer status must be below the input prompt with only footer padding rows between them:\n{content}",
     )
     assert_true(
-        prompt_index == len(lines) - 2 and status_index == len(lines) - 1,
-        f"input prompt and status must occupy the final two terminal rows:\n{content}",
+        status_index == len(lines) - 1
+        and all(line.strip() == "" for line in lines[prompt_index + 1:status_index]),
+        f"input prompt and status must occupy the final footer block:\n{content}",
     )
     assert_true(
         all(index < prompt_index for index in summary_indices),
@@ -899,13 +902,16 @@ def assert_activity_frame_keeps_footer(content: str, expected_status: str = "gpt
     assert_single_footer_status(content, expected_status)
     prompt_index = prompt_indices[0]
     status_index = status_indices[0]
+    rows_between_prompt_and_status = lines[prompt_index + 1 : status_index]
     assert_true(
-        status_index == prompt_index + 1,
-        f"activity frame did not keep status directly below the prompt:\n{content}",
+        status_index > prompt_index
+        and all(line.strip() == "" for line in rows_between_prompt_and_status),
+        f"activity frame did not keep status below the prompt with only footer padding rows between them:\n{content}",
     )
     assert_true(
-        prompt_index == len(lines) - 2 and status_index == len(lines) - 1,
-        f"activity frame did not keep prompt/status pinned to the final two rows:\n{content}",
+        status_index == len(lines) - 1
+        and all(line.strip() == "" for line in rows_between_prompt_and_status),
+        f"activity frame did not keep prompt/status pinned to the final footer block:\n{content}",
     )
     assert_true(
         all(index < prompt_index for index, line in enumerate(lines) if "Intent:" in line),
@@ -2521,17 +2527,10 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
             timeout=20,
         )
         wrapped_footer_lines = visible_lines(wrapped_footer_final)
+        assert_footer_chrome_is_singular(wrapped_footer_final, narrow_footer_model)
         assert_true(
-            is_input_prompt_line(wrapped_footer_lines[-2]),
-            f"ready prompt was not pinned to the penultimate row in the narrow footer flow:\n{wrapped_footer_final}",
-        )
-        assert_true(
-            narrow_footer_model in wrapped_footer_lines[-1],
-            f"narrow footer status line was not pinned to the last row:\n{wrapped_footer_final}",
-        )
-        assert_true(
-            sum(1 for line in wrapped_footer_lines if narrow_footer_model in line) == 1,
-            f"narrow footer status line duplicated or wrapped in the ready state:\n{wrapped_footer_final}",
+            any(is_input_prompt_line(line) for line in wrapped_footer_lines),
+            f"ready prompt was not visible in the final footer block for the narrow footer flow:\n{wrapped_footer_final}",
         )
         final_tail = line_before_prompt_with_gap(wrapped_footer_final, min_blank_rows=2)
         assert_true(
@@ -2557,21 +2556,15 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
             timeout=12,
         )
         pending_lines = visible_lines(wrapped_footer_pending)
+        pending_prompt_rows = [line for line in pending_lines if is_input_prompt_line(line)]
+        assert_footer_chrome_is_singular(wrapped_footer_pending, narrow_footer_model)
         assert_true(
-            is_input_prompt_line(pending_lines[-2]),
-            f"pending prompt disappeared from the penultimate row in the narrow footer flow:\n{wrapped_footer_pending}",
+            len(pending_prompt_rows) == 1,
+            f"pending prompt disappeared from the final footer block in the narrow footer flow:\n{wrapped_footer_pending}",
         )
         assert_true(
-            "Finishing response..." in pending_lines[-2],
+            "Finishing response..." in pending_prompt_rows[0],
             f"pending prompt row did not keep the busy footer text in the narrow footer flow:\n{wrapped_footer_pending}",
-        )
-        assert_true(
-            narrow_footer_model in pending_lines[-1],
-            f"pending status line was not pinned to the last row in the narrow footer flow:\n{wrapped_footer_pending}",
-        )
-        assert_true(
-            sum(1 for line in pending_lines if narrow_footer_model in line) == 1,
-            f"pending status line duplicated or wrapped in the narrow footer flow:\n{wrapped_footer_pending}",
         )
 
         wrapped_footer_followup = tmux.wait_for(
@@ -2584,17 +2577,10 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
             f"echo:{wrapped_footer_followup_prompt}",
             "follow-up input did not submit after the narrow footer regression flow",
         )
+        assert_footer_chrome_is_singular(wrapped_footer_followup, narrow_footer_model)
         assert_true(
-            is_input_prompt_line(followup_lines[-2]),
+            any(is_input_prompt_line(line) for line in followup_lines),
             f"ready prompt disappeared after the narrow footer follow-up turn:\n{wrapped_footer_followup}",
-        )
-        assert_true(
-            narrow_footer_model in followup_lines[-1],
-            f"ready status line was not pinned to the last row after the narrow footer follow-up turn:\n{wrapped_footer_followup}",
-        )
-        assert_true(
-            sum(1 for line in followup_lines if narrow_footer_model in line) == 1,
-            f"ready status line duplicated or wrapped after the narrow footer follow-up turn:\n{wrapped_footer_followup}",
         )
         print("PASS: narrow footer status stays singular and the next Enter keeps the prompt visible")
 
@@ -2735,15 +2721,11 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
             timeout=12,
         )
         file_url_lines = visible_lines(file_url_thinking)
-        assert_true(
-            is_input_prompt_line(file_url_lines[-2]),
-            f"file-url intent Thinking frame did not keep the prompt pinned to the penultimate row:\n{file_url_thinking}",
-        )
-        assert_true(
-            "gpt-terminal-e2e" in file_url_lines[-1],
-            f"file-url intent Thinking frame did not keep the status pinned to the final row:\n{file_url_thinking}",
-        )
         assert_footer_chrome_is_singular(file_url_thinking)
+        assert_true(
+            any(is_input_prompt_line(line) for line in file_url_lines),
+            f"file-url intent Thinking frame did not keep the prompt in the final footer block:\n{file_url_thinking}",
+        )
 
         file_url_final = tmux.wait_for_checked(
             lambda text: (
@@ -2811,7 +2793,8 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
 
         long_markdown_final = tmux.wait_for_checked(
             lambda text: (
-                "长 Markdown 报告和幻灯片链路已完成。" in text
+                "kingdee-lingji-long-source-report.html" in text
+                and "kingdee-lingji-long-source-slides.html" in text
                 and "● Intent: 报告 -> 幻灯片 · Stage 2/2 生成幻灯片" in latest_intent_summary_line(text)
                 and "Completed" in latest_intent_summary_line(text)
                 and has_ready_input_prompt(text)

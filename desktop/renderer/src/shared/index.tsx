@@ -26,7 +26,7 @@ export function FormField(props: Record<string, unknown>) {
 }
 
 export function Button({ children, ...props }: Record<string, unknown> & { children?: React.ReactNode }) {
-  return <button {...props}>{children}</button>;
+  return <button type="button" {...props}>{children}</button>;
 }
 
 // Modal
@@ -77,13 +77,13 @@ export function ConfirmDialog({
         {title && <h3 className="mb-2 text-sm font-semibold text-[var(--c-text-heading)]">{title}</h3>}
         {message && <p className="mb-4 text-sm text-[var(--c-text-secondary)]">{message}</p>}
         <div className="flex justify-end gap-2">
-          <button
+          <button type="button"
             onClick={onCancel}
             className="rounded-lg px-3 py-1.5 text-sm text-[var(--c-text-secondary)] hover:bg-gray-100"
           >
             {cancelLabel || 'Cancel'}
           </button>
-          <button
+          <button type="button"
             onClick={onConfirm}
             className="rounded-lg bg-red-500 px-3 py-1.5 text-sm text-white hover:bg-red-600"
           >
@@ -172,7 +172,7 @@ export function LoadingPage({
       <div className="p-5">
         {error.title}: {error.message}
         {onRetry && (
-          <button onClick={onRetry} className="ml-2 text-[var(--c-accent)]">
+          <button type="button" onClick={onRetry} className="ml-2 text-[var(--c-accent)]">
             {retryLabel || 'Retry'}
           </button>
         )}

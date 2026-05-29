@@ -241,7 +241,7 @@ export function ChatSettings({
         <div
           role="button"
           tabIndex={0}
-          className="flex cursor-pointer items-center justify-between gap-4 px-4 py-4 outline-none transition-colors hover:bg-[var(--c-bg-deep)]/25 focus-visible:ring-2 focus-visible:ring-[var(--c-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--c-bg-page)]"
+          className="flex cursor-pointer items-center justify-between gap-4 p-4 outline-none transition-colors hover:bg-[var(--c-bg-deep)]/25 focus-visible:ring-2 focus-visible:ring-[var(--c-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--c-bg-page)]"
           onMouseEnter={() => setCompactCardHovered(true)}
           onMouseLeave={() => setCompactCardHovered(false)}
           onClick={() => setAutoOn((v) => !v)}
@@ -262,7 +262,7 @@ export function ChatSettings({
         </div>
 
         <div
-          className={`flex flex-col gap-3 border-t border-[var(--c-border-subtle)] px-4 py-4 transition-opacity ${autoOn ? '' : 'pointer-events-none opacity-40'}`}
+          className={`flex flex-col gap-3 border-t border-[var(--c-border-subtle)] p-4 transition-opacity ${autoOn ? '' : 'pointer-events-none opacity-40'}`}
         >
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm font-medium text-[var(--c-text-heading)]">
@@ -292,7 +292,7 @@ export function ChatSettings({
         </div>
 
         <div
-          className={`flex items-center justify-between gap-4 border-t border-[var(--c-border-subtle)] px-4 py-4 transition-opacity ${autoOn ? '' : 'pointer-events-none opacity-40'}`}
+          className={`flex items-center justify-between gap-4 border-t border-[var(--c-border-subtle)] p-4 transition-opacity ${autoOn ? '' : 'pointer-events-none opacity-40'}`}
         >
           <div className="min-w-0 flex-1 pr-2">
             <p className="text-sm font-medium text-[var(--c-text-heading)]">{st.chatCompactKeepLabel}</p>
@@ -318,7 +318,7 @@ export function ChatSettings({
         <div
           role="button"
           tabIndex={0}
-          className="flex cursor-pointer items-center justify-between gap-4 px-4 py-4 outline-none transition-colors hover:bg-[var(--c-bg-deep)]/25 focus-visible:ring-2 focus-visible:ring-[var(--c-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--c-bg-page)]"
+          className="flex cursor-pointer items-center justify-between gap-4 p-4 outline-none transition-colors hover:bg-[var(--c-bg-deep)]/25 focus-visible:ring-2 focus-visible:ring-[var(--c-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--c-bg-page)]"
           onMouseEnter={() => setExecCardHovered(true)}
           onMouseLeave={() => setExecCardHovered(false)}
           onClick={() => { if (!execModeLoading) void handleExecutionModeToggle(executionMode !== 'vm') }}

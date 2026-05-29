@@ -269,7 +269,7 @@ export function UpdateSettingsContent() {
       )}
 
       <div
-        className="flex flex-col gap-3 rounded-xl px-4 py-4"
+        className="flex flex-col gap-3 rounded-xl p-4"
         style={{ border: '1px solid var(--c-border-subtle)' }}
       >
         <SettingsSectionHeader title={t.desktopSettings.appUpdateTitle} />

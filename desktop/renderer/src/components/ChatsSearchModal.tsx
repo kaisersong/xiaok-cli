@@ -264,7 +264,7 @@ export function ChatsSearchModal({ threads, mode, accessToken, onClose }: Props)
           style={{ borderBottom: '1px solid var(--c-border)' }}
         >
           <Search size={16} style={{ color: 'var(--c-text-muted)', flexShrink: 0 }} />
-          <input
+          <input aria-label={t.searchChatsPlaceholder}
             ref={inputRef}
             type="text"
             value={query}
@@ -277,7 +277,7 @@ export function ChatsSearchModal({ threads, mode, accessToken, onClose }: Props)
             }}
           />
           {query ? (
-            <button
+            <button type="button"
               onClick={() => setQuery('')}
               className="flex items-center justify-center transition-opacity hover:opacity-70"
               style={{ color: 'var(--c-text-muted)' }}
@@ -285,7 +285,7 @@ export function ChatsSearchModal({ threads, mode, accessToken, onClose }: Props)
               <X size={14} />
             </button>
           ) : (
-            <button
+            <button type="button"
               onClick={onClose}
               className="flex items-center justify-center transition-opacity hover:opacity-70"
               style={{ color: 'var(--c-text-muted)' }}
@@ -298,13 +298,13 @@ export function ChatsSearchModal({ threads, mode, accessToken, onClose }: Props)
         {/* 结果区 */}
         <div className="flex-1 overflow-y-auto">
           <div className="p-2">
-            <button
+            <button type="button"
               onClick={handleNewChat}
               className="flex w-full items-center gap-3 rounded-lg px-3 py-[9px] text-sm transition-colors hover:bg-[var(--c-bg-deep)]"
               style={{ color: 'var(--c-text-secondary)' }}
             >
               <span
-                className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full"
+                className="flex size-[22px] shrink-0 items-center justify-center rounded-full"
                 style={{ background: 'var(--c-bg-plus)' }}
               >
                 <SquarePen size={11} />
@@ -325,7 +325,7 @@ export function ChatsSearchModal({ threads, mode, accessToken, onClose }: Props)
                   </div>
                   <div className="flex flex-col gap-[2px] px-2">
                     {groupItems.map((thread) => (
-                      <button
+                      <button type="button"
                         key={thread.id}
                         onClick={() => handleThreadClick(thread.id)}
                         className="flex w-full items-center rounded-lg px-3 py-[8px] text-left text-sm transition-colors hover:bg-[var(--c-bg-deep)]"

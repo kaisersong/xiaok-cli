@@ -169,7 +169,7 @@ function TaskCard({ task, projectId, onPreviewArtifact }: { task: KSwarmTask; pr
         {/* Agent */}
         {task.assignedAgent && (
           <div className="mt-2 flex items-center gap-1.5">
-            <div className="h-4 w-4 rounded-full bg-[var(--c-bg-deep)] flex items-center justify-center">
+            <div className="size-4 rounded-full bg-[var(--c-bg-deep)] flex items-center justify-center">
               <span className="text-[8px] font-bold text-[var(--c-text-secondary)]">{task.assignedAgent.charAt(0).toUpperCase()}</span>
             </div>
             <span className="text-[10px] text-[var(--c-text-muted)] truncate">{agentName(task.assignedAgent)}</span>
@@ -262,7 +262,7 @@ function AddTaskForm({ projectId, onDone }: { projectId: string; onDone(): void 
       <div className="flex flex-col gap-2">
         {rows.map((row, idx) => (
           <div key={idx} className="flex items-center gap-1.5">
-            <input
+            <input aria-label={t.projectsKanbanRequirementPlaceholder}
               type="text"
               value={row.title}
               onChange={e => updateRow(idx, 'title', e.target.value)}

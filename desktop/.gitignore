@@ -3,6 +3,11 @@ dist/
 release/
 .generated/
 .tsbuildinfo
+.agents/
+.codebuddy/
+.factory/
+.trae/
+.windsurf/
 build/*
 !build/icon.icns
 !build/icon.ico

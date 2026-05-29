@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, FolderOpen, Loader2, Plus, Trash2 } from 'lucide-react'
 import { discoverExternalSkills, getExternalDirs, setExternalDirs, type ExternalSkillDir } from '../../api'
-import { api } from '../../api/bridge'
+import { api } from '../../api'
 import type { ViewSkill } from './types'
 import { SkillList } from './SkillList'
 import { secondaryButtonBorderStyle, secondaryButtonXsCls } from '../buttonStyles'
@@ -273,7 +273,7 @@ export function InstalledSkillsView(props: Props) {
                           type="button"
                           disabled={saving}
                           onClick={(e) => { e.stopPropagation(); void handleRemoveDir(dir.path) }}
-                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--c-error-bg)]"
+                          className="flex size-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--c-error-bg)]"
                           style={{ color: 'var(--c-status-error-text)' }}
                         >
                           {saving ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
@@ -315,7 +315,7 @@ export function InstalledSkillsView(props: Props) {
             )}
 
             <div className="flex items-center gap-2 pt-1">
-              <input
+              <input aria-label={skillText.externalAddPlaceholder}
                 value={newDir}
                 onChange={(e) => setNewDir(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') void handleAddDir() }}

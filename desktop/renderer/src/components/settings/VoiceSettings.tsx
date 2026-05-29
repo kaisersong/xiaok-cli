@@ -189,9 +189,9 @@ function AddCredentialModal({
       >
         <div className="flex items-center justify-between">
           <h3 className="text-[15px] font-semibold text-[var(--c-text-heading)]">{ds.voiceCredsAddTitle}</h3>
-          <button
+          <button type="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
+            className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
           >
             <X size={14} />
           </button>
@@ -201,7 +201,7 @@ function AddCredentialModal({
           {/* Name */}
           <div>
             <label className={fieldLabelCls}>{ds.voiceCredsName}</label>
-            <input
+            <input aria-label={ds.voiceCredsNamePlaceholder}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={ds.voiceCredsNamePlaceholder}
@@ -236,7 +236,7 @@ function AddCredentialModal({
           <div className="col-span-2">
             <label className={fieldLabelCls}>{ds.voiceCredsApiKey}</label>
             <div className="relative">
-              <input
+              <input aria-label={ds.voiceCredsApiKeyPlaceholder}
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
@@ -269,7 +269,7 @@ function AddCredentialModal({
         </div>
 
         <div className="flex items-center justify-end gap-2">
-          <button
+          <button type="button"
             onClick={onClose}
             disabled={saving}
             className="rounded-[9px] px-4 py-1.5 text-sm text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-sub)] disabled:opacity-50"
@@ -277,7 +277,7 @@ function AddCredentialModal({
           >
             {ds.voiceCredsCancel}
           </button>
-          <button
+          <button type="button"
             onClick={() => void handleSave()}
             disabled={saving || !name.trim() || !apiKey.trim()}
             className="rounded-[9px] px-4 py-1.5 text-sm font-medium text-[var(--c-btn-text)] transition-opacity hover:opacity-90 disabled:opacity-50"
@@ -327,7 +327,7 @@ function DeleteConfirmModal({
           <span className="font-medium">{cred.name}</span>
         </p>
         <div className="flex justify-end gap-2">
-          <button
+          <button type="button"
             onClick={onClose}
             disabled={deleting}
             className="rounded-[9px] px-4 py-1.5 text-sm text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-sub)] disabled:opacity-50"
@@ -335,7 +335,7 @@ function DeleteConfirmModal({
           >
             {ds.voiceCredsCancel}
           </button>
-          <button
+          <button type="button"
             onClick={() => void handleConfirm()}
             disabled={deleting}
             className="rounded-[9px] px-4 py-1.5 text-sm font-medium text-[var(--c-status-error)] transition-opacity hover:opacity-90 disabled:opacity-50"
@@ -403,9 +403,9 @@ function EditCredentialModal({
       >
         <div className="flex items-center justify-between">
           <h3 className="text-[15px] font-semibold text-[var(--c-text-heading)]">{ds.voiceCredsEditTitle}</h3>
-          <button
+          <button type="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
+            className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
           >
             <X size={14} />
           </button>
@@ -460,7 +460,7 @@ function EditCredentialModal({
         </div>
 
         <div className="flex items-center justify-end gap-2">
-          <button
+          <button type="button"
             onClick={onClose}
             disabled={saving}
             className="rounded-[9px] px-4 py-1.5 text-sm text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-sub)] disabled:opacity-50"
@@ -468,7 +468,7 @@ function EditCredentialModal({
           >
             {ds.voiceCredsCancel}
           </button>
-          <button
+          <button type="button"
             onClick={() => void handleSave()}
             disabled={saving || !name.trim()}
             className="rounded-[9px] px-4 py-1.5 text-sm font-medium text-[var(--c-btn-text)] transition-opacity hover:opacity-90 disabled:opacity-50"
@@ -653,7 +653,7 @@ export function VoiceSettings({ accessToken, initialConfig = null }: Props) {
       <div className={sectionCls}>
         <div className="flex items-center justify-between">
           <h4 className="text-sm font-medium text-[var(--c-text-heading)]">{ds.voiceCredsTitle}</h4>
-          <button
+          <button type="button"
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-1.5 rounded-[9px] px-3 py-1 text-[13px] font-medium text-[var(--c-btn-text)] transition-opacity hover:opacity-90"
             style={{ background: 'var(--c-btn-bg)' }}
@@ -697,7 +697,7 @@ export function VoiceSettings({ accessToken, initialConfig = null }: Props) {
                 </div>
                 <div className="flex items-center gap-1">
                   {!cred.is_default && (
-                    <button
+                    <button type="button"
                       onClick={() => void handleSetDefault(cred.id)}
                       className="rounded p-1 text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]"
                       title={ds.voiceCredsSetDefault}
@@ -705,14 +705,14 @@ export function VoiceSettings({ accessToken, initialConfig = null }: Props) {
                       <Star size={13} />
                     </button>
                   )}
-                  <button
+                  <button type="button"
                     onClick={() => setEditTarget(cred)}
                     className="rounded p-1 text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]"
                     title={ds.voiceCredsEdit}
                   >
                     <Pencil size={13} />
                   </button>
-                  <button
+                  <button type="button"
                     onClick={() => setDeleteTarget(cred)}
                     className="rounded p-1 text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-status-error)]"
                     title={ds.voiceCredsDelete}

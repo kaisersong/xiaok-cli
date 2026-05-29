@@ -88,7 +88,7 @@ export function DesktopSettings({ onClose }: Props) {
         style={{ borderRight: '0.5px solid var(--c-border)', paddingTop: 12 }}
       >
         <div className="p-3">
-          <button
+          <button type="button"
             onClick={onClose}
             className="flex h-[36px] w-full items-center gap-2 rounded-lg px-3 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
           >
@@ -99,7 +99,7 @@ export function DesktopSettings({ onClose }: Props) {
         <div className="px-3">
           <div className="flex flex-col gap-[2px]">
             {NAV_ITEMS.map(({ key, icon: Icon, label }) => (
-              <button
+              <button type="button"
                 key={key}
                 onClick={() => setActiveTab(key)}
                 className={[
@@ -380,7 +380,7 @@ function ModelPane() {
                       {provider.baseUrl && ` · ${provider.baseUrl}`}
                     </div>
                     <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                      <button
+                      <button type="button"
                         onClick={() => handleTest(provider.id)}
                         disabled={testing[provider.id]}
                         className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors disabled:opacity-50"
@@ -388,7 +388,7 @@ function ModelPane() {
                         {testing[provider.id] ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
                         测试连接
                       </button>
-                      <button
+                      <button type="button"
                         onClick={() => { setSelectedProvider(prev => prev === provider.id ? '' : provider.id); setApiKey(''); }}
                         className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
                       >
@@ -402,7 +402,7 @@ function ModelPane() {
                         </span>
                       )}
                       {provider.type === 'custom' && (
-                        <button
+                        <button type="button"
                           onClick={() => handleDeleteProvider(provider.id)}
                           className="inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1 text-xs text-red-500 hover:bg-red-50 transition-colors"
                         >
@@ -414,7 +414,7 @@ function ModelPane() {
                     {selectedProvider === provider.id && (
                       <div className="mt-2 flex items-center gap-2">
                         <div className="relative flex-1">
-                          <input
+                          <input aria-label="sk-..."
                             type={showKey ? 'text' : 'password'}
                             value={apiKey}
                             onChange={e => setApiKey(e.target.value)}
@@ -429,7 +429,7 @@ function ModelPane() {
                             {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
                           </button>
                         </div>
-                        <button
+                        <button type="button"
                           onClick={handleSave}
                           disabled={saving || !apiKey.trim()}
                           className="shrink-0 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white hover:opacity-90 disabled:opacity-50"
@@ -459,7 +459,7 @@ function ModelPane() {
                             {m.label}
                             {config.defaultModelId === m.id && ' (默认)'}
                             {config.defaultModelId !== m.id && (
-                              <button
+                              <button type="button"
                                 onClick={() => void handleSetDefaultModel(m.id)}
                                 disabled={saving}
                                 className="ml-1 rounded px-1 text-[10px] text-[var(--c-accent)] hover:bg-[var(--c-accent)]/10 disabled:opacity-50"
@@ -467,7 +467,7 @@ function ModelPane() {
                                 设为默认
                               </button>
                             )}
-                            <button
+                            <button type="button"
                               onClick={() => handleDeleteModel(m.id)}
                               className="ml-1 hover:text-red-500"
                               title="删除模型"
@@ -486,7 +486,7 @@ function ModelPane() {
                       if (addable.length === 0) return null;
                       return (
                         <div className="mt-2">
-                          <button
+                          <button type="button"
                             onClick={() => setShowAddModel(prev => prev === provider.id ? '' : provider.id)}
                             className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
                           >
@@ -495,7 +495,7 @@ function ModelPane() {
                           {showAddModel === provider.id && (
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               {addable.map(m => (
-                                <button
+                                <button type="button"
                                   key={m.modelId}
                                   onClick={() => handleAddModel(m.modelId)}
                                   disabled={saving}
@@ -619,8 +619,9 @@ function AddProviderCard({
     <Card>
       <div className="flex flex-col gap-3">
         <div>
-          <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">选择提供商</label>
+          <label htmlFor="desktop-model-provider-profile" className="block text-xs text-[var(--c-text-secondary)] mb-1.5">选择提供商</label>
           <select
+            id="desktop-model-provider-profile"
             value={selectedProfileId}
             onChange={e => handleProfileChange(e.target.value)}
             className={inputCls}
@@ -637,8 +638,9 @@ function AddProviderCard({
 
         {isCustom && (
           <div>
-            <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">提供商名称</label>
+            <label htmlFor="desktop-custom-provider-name" className="block text-xs text-[var(--c-text-secondary)] mb-1.5">提供商名称</label>
             <input
+              id="desktop-custom-provider-name"
               value={customName}
               onChange={e => setCustomName(e.target.value)}
               placeholder="my-provider"
@@ -650,8 +652,9 @@ function AddProviderCard({
         {selectedProfileId && (
           <>
             <div>
-              <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">Base URL</label>
+              <label htmlFor="desktop-provider-base-url" className="block text-xs text-[var(--c-text-secondary)] mb-1.5">Base URL</label>
               <input
+                id="desktop-provider-base-url"
                 value={baseUrl}
                 onChange={e => setBaseUrl(e.target.value)}
                 placeholder="https://api.example.com/v1"
@@ -659,9 +662,10 @@ function AddProviderCard({
               />
             </div>
             <div>
-              <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">API Key</label>
+              <label htmlFor="desktop-provider-api-key" className="block text-xs text-[var(--c-text-secondary)] mb-1.5">API Key</label>
               <div className="relative">
                 <input
+                  id="desktop-provider-api-key"
                   type={showKey ? 'text' : 'password'}
                   value={providerApiKey}
                   onChange={e => setProviderApiKey(e.target.value)}
@@ -681,7 +685,7 @@ function AddProviderCard({
             {/* Available models preview */}
             {selectedProfile?.availableModels && selectedProfile.availableModels.length > 0 && (
               <div>
-                <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">可用模型</label>
+                <div className="block text-xs text-[var(--c-text-secondary)] mb-1.5">可用模型</div>
                 <div className="flex flex-wrap gap-1.5">
                   {selectedProfile.availableModels.map(m => (
                     <span
@@ -703,7 +707,7 @@ function AddProviderCard({
             )}
 
             <div className="flex gap-2 pt-1">
-              <button
+              <button type="button"
                 onClick={handleAdd}
                 disabled={saving}
                 className={btnPrimary}
@@ -804,7 +808,7 @@ function SkillsPane() {
           <div className="mb-3 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-600">
             <Check size={16} />
             {success}
-            <button onClick={() => setSuccess('')} className="ml-auto text-green-600 hover:text-green-700">
+            <button type="button" onClick={() => setSuccess('')} className="ml-auto text-green-600 hover:text-green-700">
               <X size={14} />
             </button>
           </div>
@@ -813,7 +817,7 @@ function SkillsPane() {
           <div className="mb-3 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
             <AlertCircle size={16} />
             {error}
-            <button onClick={() => setError('')} className="ml-auto text-red-600 hover:text-red-700">
+            <button type="button" onClick={() => setError('')} className="ml-auto text-red-600 hover:text-red-700">
               <X size={14} />
             </button>
           </div>
@@ -823,7 +827,7 @@ function SkillsPane() {
         </p>
 
         {/* Install button */}
-        <button
+        <button type="button"
           onClick={() => setShowInstall(!showInstall)}
           className="inline-flex items-center gap-2 mb-4 rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
         >
@@ -836,8 +840,9 @@ function SkillsPane() {
           <Card className="mb-4">
             <div className="flex flex-col gap-3">
               <div>
-                <label className="block text-xs text-[var(--c-text-secondary)] mb-1">技能名称</label>
+                <label htmlFor="desktop-install-skill-name" className="block text-xs text-[var(--c-text-secondary)] mb-1">技能名称</label>
                 <input
+                  id="desktop-install-skill-name"
                   type="text"
                   value={installName}
                   onChange={e => setInstallName(e.target.value)}
@@ -849,10 +854,10 @@ function SkillsPane() {
                 安装命令: <code className="bg-[var(--c-bg-deep)] px-1.5 py-0.5 rounded">clawhub install {installName || '<技能名>'}</code>
               </div>
               <div className="flex gap-2">
-                <button onClick={handleInstall} disabled={installing || !installName.trim()} className={btnPrimary}>
+                <button type="button" onClick={handleInstall} disabled={installing || !installName.trim()} className={btnPrimary}>
                   {installing ? '安装中...' : '确认安装'}
                 </button>
-                <button onClick={() => setShowInstall(false)} className={btnSecondary}>取消</button>
+                <button type="button" onClick={() => setShowInstall(false)} className={btnSecondary}>取消</button>
               </div>
             </div>
           </Card>
@@ -909,7 +914,7 @@ function SkillsPane() {
                         </div>
                       )}
                     </div>
-                    <button
+                    <button type="button"
                       onClick={() => handleUninstall(skill.name)}
                       className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 transition-colors"
                       title="卸载"
@@ -1095,7 +1100,7 @@ function ChannelsPane() {
           <div className="mb-3 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-600">
             <Check size={16} />
             {success}
-            <button onClick={() => setSuccess('')} className="ml-auto text-green-600 hover:text-green-700">
+            <button type="button" onClick={() => setSuccess('')} className="ml-auto text-green-600 hover:text-green-700">
               <X size={14} />
             </button>
           </div>
@@ -1104,7 +1109,7 @@ function ChannelsPane() {
           <div className="mb-3 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
             <AlertCircle size={16} />
             {error}
-            <button onClick={() => setError('')} className="ml-auto text-red-600 hover:text-red-700">
+            <button type="button" onClick={() => setError('')} className="ml-auto text-red-600 hover:text-red-700">
               <X size={14} />
             </button>
           </div>
@@ -1114,7 +1119,7 @@ function ChannelsPane() {
         </p>
 
         {/* Add button */}
-        <button
+        <button type="button"
           onClick={() => setShowAdd(!showAdd)}
           className="inline-flex items-center gap-2 mb-4 rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
         >
@@ -1127,8 +1132,9 @@ function ChannelsPane() {
           <Card className="mb-4">
             <div className="flex flex-col gap-3">
               <div>
-                <label className="block text-xs text-[var(--c-text-secondary)] mb-1">名称</label>
+                <label htmlFor="desktop-channel-name" className="block text-xs text-[var(--c-text-secondary)] mb-1">名称</label>
                 <input
+                  id="desktop-channel-name"
                   type="text"
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
@@ -1137,8 +1143,9 @@ function ChannelsPane() {
                 />
               </div>
               <div>
-                <label className="block text-xs text-[var(--c-text-secondary)] mb-1">类型</label>
+                <label htmlFor="desktop-channel-type" className="block text-xs text-[var(--c-text-secondary)] mb-1">类型</label>
                 <select
+                  id="desktop-channel-type"
                   value={newType}
                   onChange={e => setNewType(e.target.value)}
                   className={inputCls}
@@ -1151,10 +1158,11 @@ function ChannelsPane() {
               {/* Type-specific fields */}
               {CHANNEL_TYPE_CONFIG[newType].fields.map(field => (
                 <div key={field.key}>
-                  <label className="block text-xs text-[var(--c-text-secondary)] mb-1">
+                  <label htmlFor={`desktop-channel-field-${field.key}`} className="block text-xs text-[var(--c-text-secondary)] mb-1">
                     {field.label} {field.required && <span className="text-red-500">*</span>}
                   </label>
-                  <input
+                  <input aria-label={field.placeholder}
+                    id={`desktop-channel-field-${field.key}`}
                     type="text"
                     value={newFields[field.key] || ''}
                     onChange={e => setNewFields(prev => ({ ...prev, [field.key]: e.target.value }))}
@@ -1164,8 +1172,8 @@ function ChannelsPane() {
                 </div>
               ))}
               <div className="flex gap-2">
-                <button onClick={handleCreate} className={btnPrimary}>创建</button>
-                <button onClick={() => setShowAdd(false)} className={btnSecondary}>取消</button>
+                <button type="button" onClick={handleCreate} className={btnPrimary}>创建</button>
+                <button type="button" onClick={() => setShowAdd(false)} className={btnSecondary}>取消</button>
               </div>
             </div>
           </Card>
@@ -1185,7 +1193,7 @@ function ChannelsPane() {
               <Card key={ch.id}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${ch.enabled ? 'bg-green-500' : 'bg-gray-300'}`} />
+                    <div className={`size-2 rounded-full ${ch.enabled ? 'bg-green-500' : 'bg-gray-300'}`} />
                     <div>
                       <div className="text-sm font-medium">{ch.name}</div>
                       <div className="text-xs text-[var(--c-text-secondary)]">
@@ -1194,7 +1202,7 @@ function ChannelsPane() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <button
+                    <button type="button"
                       onClick={async () => {
                         setTestingChannel(ch.id);
                         try {
@@ -1216,7 +1224,7 @@ function ChannelsPane() {
                       {testingChannel === ch.id ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
                       测试
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => handleToggle(ch)}
                       className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
                         ch.enabled ? 'bg-green-50 text-green-600' : 'bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]'
@@ -1224,7 +1232,7 @@ function ChannelsPane() {
                     >
                       {ch.enabled ? '启用中' : '已禁用'}
                     </button>
-                    <button
+                    <button type="button"
                       onClick={() => handleDelete(ch.id)}
                       className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 transition-colors"
                     >
@@ -1596,7 +1604,7 @@ function McpPane() {
               <Card key={server.name}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${server.connected ? 'bg-green-500' : server.enabled ? 'bg-yellow-500' : 'bg-gray-300'}`} />
+                    <div className={`size-2 rounded-full ${server.connected ? 'bg-green-500' : server.enabled ? 'bg-yellow-500' : 'bg-gray-300'}`} />
                     <div>
                       <div className="text-sm font-medium">{server.name}</div>
                       <div className="text-xs text-[var(--c-text-secondary)]">
@@ -1625,7 +1633,7 @@ function McpPane() {
           通过 Model Context Protocol (MCP) 扩展 xiaok 的工具能力
         </p>
 
-        <button
+        <button type="button"
           onClick={() => setShowAdd(!showAdd)}
           className="inline-flex items-center gap-2 mb-4 rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
         >
@@ -1637,8 +1645,9 @@ function McpPane() {
           <Card className="mb-4">
             <div className="flex flex-col gap-3">
               <div>
-                <label className="block text-xs text-[var(--c-text-secondary)] mb-1">名称</label>
+                <label htmlFor="desktop-mcp-server-name" className="block text-xs text-[var(--c-text-secondary)] mb-1">名称</label>
                 <input
+                  id="desktop-mcp-server-name"
                   type="text"
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
@@ -1647,8 +1656,9 @@ function McpPane() {
                 />
               </div>
               <div>
-                <label className="block text-xs text-[var(--c-text-secondary)] mb-1">命令</label>
+                <label htmlFor="desktop-mcp-server-command" className="block text-xs text-[var(--c-text-secondary)] mb-1">命令</label>
                 <input
+                  id="desktop-mcp-server-command"
                   type="text"
                   value={newCommand}
                   onChange={e => setNewCommand(e.target.value)}
@@ -1657,8 +1667,9 @@ function McpPane() {
                 />
               </div>
               <div>
-                <label className="block text-xs text-[var(--c-text-secondary)] mb-1">参数 (空格分隔，可选)</label>
+                <label htmlFor="desktop-mcp-server-args" className="block text-xs text-[var(--c-text-secondary)] mb-1">参数 (空格分隔，可选)</label>
                 <input
+                  id="desktop-mcp-server-args"
                   type="text"
                   value={newArgs}
                   onChange={e => setNewArgs(e.target.value)}
@@ -1667,8 +1678,8 @@ function McpPane() {
                 />
               </div>
               <div className="flex gap-2">
-                <button onClick={handleCreate} className={btnPrimary}>创建</button>
-                <button onClick={() => setShowAdd(false)} className={btnSecondary}>取消</button>
+                <button type="button" onClick={handleCreate} className={btnPrimary}>创建</button>
+                <button type="button" onClick={() => setShowAdd(false)} className={btnSecondary}>取消</button>
               </div>
             </div>
           </Card>
@@ -1687,7 +1698,7 @@ function McpPane() {
               <Card key={install.id}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${install.enabled ? 'bg-green-500' : 'bg-gray-300'}`} />
+                    <div className={`size-2 rounded-full ${install.enabled ? 'bg-green-500' : 'bg-gray-300'}`} />
                     <div>
                       <div className="text-sm font-medium">{install.name}</div>
                       <code className="text-xs text-[var(--c-text-secondary)] font-mono">
@@ -1698,7 +1709,7 @@ function McpPane() {
                       </div>
                     </div>
                   </div>
-                  <button
+                  <button type="button"
                     onClick={() => handleDelete(install.id)}
                     className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 transition-colors"
                   >
@@ -1916,16 +1927,16 @@ function GeneralPane() {
             {/* Avatar */}
             <div className="relative shrink-0">
               {avatarUrl ? (
-                <img src={avatarUrl} alt="avatar" className="h-12 w-12 rounded-full object-cover" />
+                <img src={avatarUrl} alt="avatar" className="size-12 rounded-full object-cover" />
               ) : (
                 <div
-                  className="flex h-12 w-12 items-center justify-center rounded-full text-base font-semibold"
+                  className="flex size-12 items-center justify-center rounded-full text-base font-semibold"
                   style={{ background: 'var(--c-avatar-bg, #e2e8f0)', color: 'var(--c-avatar-text, #475569)' }}
                 >
                   {initial}
                 </div>
               )}
-              <label className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full bg-[var(--c-bg-card)] shadow" title="更换头像">
+              <label className="absolute -bottom-0.5 -right-0.5 flex size-5 cursor-pointer items-center justify-center rounded-full bg-[var(--c-bg-card)] shadow" title="更换头像">
                 <Camera size={10} />
                 <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
               </label>
@@ -1934,7 +1945,7 @@ function GeneralPane() {
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               {editingName ? (
                 <div className="flex items-center gap-2">
-                  <input
+                  <input aria-label="输入你的名字"
                     type="text"
                     value={nameInput}
                     onChange={(e) => setNameInput(e.target.value)}
@@ -1967,7 +1978,7 @@ function GeneralPane() {
             选择界面显示语言
           </p>
           <div className="flex gap-3">
-            <button
+            <button type="button"
               onClick={() => setLocale('zh')}
               className={`flex-1 rounded-lg px-4 py-3 text-sm transition-colors border ${
                 locale === 'zh'
@@ -1978,7 +1989,7 @@ function GeneralPane() {
               <div className="font-medium">中文</div>
               <div className="text-xs text-[var(--c-text-tertiary)] mt-0.5">Chinese</div>
             </button>
-            <button
+            <button type="button"
               onClick={() => setLocale('en')}
               className={`flex-1 rounded-lg px-4 py-3 text-sm transition-colors border ${
                 locale === 'en'
@@ -2033,14 +2044,14 @@ function GeneralPane() {
                 {skillDebug ? '已开启' : '已关闭'}
               </span>
             </div>
-            <button
+            <button type="button"
               onClick={() => handleSkillDebugToggle(!skillDebug)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                 skillDebug ? 'bg-[var(--c-accent)]' : 'bg-[var(--c-border)]'
               }`}
             >
               <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                className={`inline-block size-4 transform rounded-full bg-white transition-transform ${
                   skillDebug ? 'translate-x-6' : 'translate-x-1'
                 }`}
               />
@@ -2083,7 +2094,7 @@ function ServiceStatusRow({
   return (
     <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-[var(--c-border)] px-3 py-2">
       <div className="flex min-w-0 items-center gap-3">
-        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${status.dotClass}`} />
+        <span className={`size-2.5 shrink-0 rounded-full ${status.dotClass}`} />
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <span className="truncate text-sm font-medium text-[var(--c-text-primary)]">{service.label}</span>
@@ -2197,7 +2208,7 @@ function AppearancePane() {
         <SectionHeader icon={Palette}>字体大小</SectionHeader>
         <div className="flex gap-2">
           {['small', 'default', 'large'].map(size => (
-            <button
+            <button type="button"
               key={size}
               onClick={() => {
                 setFontSize(size);
@@ -2220,7 +2231,7 @@ function AppearancePane() {
         <SectionHeader>密度</SectionHeader>
         <div className="flex gap-2">
           {['default', 'compact'].map(d => (
-            <button
+            <button type="button"
               key={d}
               onClick={() => {
                 setDensity(d);
@@ -2243,7 +2254,7 @@ function AppearancePane() {
         <SectionHeader>主题</SectionHeader>
         <div className="flex gap-2">
           {['light', 'dark', 'system'].map(mode => (
-            <button
+            <button type="button"
               key={mode}
               onClick={() => {
                 setThemeMode(mode);
@@ -2329,7 +2340,7 @@ function DataPane() {
                 删除所有对话历史、设置和缓存数据
               </div>
             </div>
-            <button
+            <button type="button"
               onClick={handleClear}
               disabled={clearing}
               className={btnDanger}
@@ -2407,7 +2418,7 @@ function AboutPane() {
             </div>
             <div className="flex gap-2">
               {updateStatus?.downloaded ? (
-                <button onClick={handleInstallUpdate} disabled={updateStatus.installing} className={btnPrimary}>
+                <button type="button" onClick={handleInstallUpdate} disabled={updateStatus.installing} className={btnPrimary}>
                   {updateStatus.installing ? '安装中...' : '安装并重启'}
                 </button>
               ) : updateStatus?.downloading ? (
@@ -2416,7 +2427,7 @@ function AboutPane() {
                   <span className="text-sm">{updateStatus.progress}%</span>
                 </div>
               ) : (
-                <button onClick={handleCheckUpdate} disabled={checking || updateStatus?.checking} className={btnSecondary}>
+                <button type="button" onClick={handleCheckUpdate} disabled={checking || updateStatus?.checking} className={btnSecondary}>
                   {checking || updateStatus?.checking ? '检查中...' : '检查更新'}
                 </button>
               )}

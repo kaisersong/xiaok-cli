@@ -223,7 +223,7 @@ function ChatTitleMenuContent({ threadId }: { threadId: string | null }) {
                 className="title-group flex items-stretch gap-[3px]"
                 style={{ transform: 'translateY(-3px)' }}
               >
-                <button
+                <button type="button"
                   onClick={openTitleMenu}
                   className="title-part"
                   style={{
@@ -239,7 +239,7 @@ function ChatTitleMenuContent({ threadId }: { threadId: string | null }) {
                 >
                   {currentTitle}
                 </button>
-                <button
+                <button type="button"
                   ref={titleChevronRef}
                   onClick={openTitleMenu}
                   className="title-part"
@@ -279,16 +279,16 @@ function ChatTitleMenuContent({ threadId }: { threadId: string | null }) {
             />
           )}
           {!isDesktop() && threadId && !privateThreadIds.has(threadId) && (
-            <button
+            <button type="button"
               onClick={() => panels.openShareModal()}
               title={t.shareTitle}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
+              className="flex size-8 items-center justify-center rounded-lg text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
             >
               <Share2 size={18} />
             </button>
           )}
           {!isDesktop() && (
-            <button
+            <button type="button"
               onClick={
                 threadId && privateThreadIds.has(threadId)
                   ? undefined
@@ -296,7 +296,7 @@ function ChatTitleMenuContent({ threadId }: { threadId: string | null }) {
               }
               title={threadId && privateThreadIds.has(threadId) ? t.thisThreadIsIncognito : t.toggleIncognito}
               className={[
-                'flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
+                'flex size-8 items-center justify-center rounded-lg transition-colors',
                 threadId && privateThreadIds.has(threadId) || pendingIncognito
                   ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]'
                   : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]',
@@ -328,14 +328,14 @@ function ChatTitleMenuContent({ threadId }: { threadId: string | null }) {
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <button
+            <button type="button"
               onClick={startRename}
               className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-[13px] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
             >
               <Pencil size={13} style={{ flexShrink: 0 }} />
               {t.renameThread}
             </button>
-            <button
+            <button type="button"
               onClick={toggleStar}
               className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-[13px] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
             >
@@ -349,7 +349,7 @@ function ChatTitleMenuContent({ threadId }: { threadId: string | null }) {
               {starredIds.includes(threadId) ? t.unstarThread : t.starThread}
             </button>
             {!isDesktop() && !privateThreadIds.has(threadId) && (
-              <button
+              <button type="button"
                 onClick={handleShareFromMenu}
                 className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-[13px] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
               >
@@ -358,7 +358,7 @@ function ChatTitleMenuContent({ threadId }: { threadId: string | null }) {
               </button>
             )}
             <div style={{ height: '1px', background: 'var(--c-border-subtle)', margin: '2px 0' }} />
-            <button
+            <button type="button"
               onClick={confirmDelete}
               className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-[13px] text-[#ef4444] hover:bg-[rgba(239,68,68,0.08)] hover:text-[#f87171]"
             >
@@ -395,7 +395,7 @@ function ChatTitleMenuContent({ threadId }: { threadId: string | null }) {
               {t.deleteThreadConfirmBody}
             </p>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button
+              <button type="button"
                 onClick={() => setDeleteConfirmOpen(false)}
                 className="hover:bg-[var(--c-bg-deep)]"
                 style={{
@@ -411,7 +411,7 @@ function ChatTitleMenuContent({ threadId }: { threadId: string | null }) {
               >
                 {t.deleteThreadCancel}
               </button>
-              <button
+              <button type="button"
                 onClick={handleDeleteThread}
                 className="hover:opacity-85 active:opacity-70"
                 style={{

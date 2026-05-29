@@ -156,7 +156,7 @@ function RequestThreadTurnCard({ turn, index }: { turn: RequestThreadTurn; index
 
 export function RunDetailPanel({ runId, accessToken, onClose }: Props) {
   const { t, locale } = useLocale()
-  const location = useLocation()
+  const routerLocation = useLocation()
   const ds = t.desktopSettings
   const [activeTab, setActiveTab] = useState<TabKey>('thread')
   const [detail, setDetail] = useState<RunDetail | null>(null)
@@ -175,7 +175,7 @@ export function RunDetailPanel({ runId, accessToken, onClose }: Props) {
   const locationRef = useRef<string | null>(null)
 
   useEffect(() => {
-    const signature = `${location.pathname}?${location.search}#${location.hash}`
+    const signature = `${routerLocation.pathname}?${routerLocation.search}#${routerLocation.hash}`
     if (locationRef.current == null) {
       locationRef.current = signature
       return
@@ -184,7 +184,7 @@ export function RunDetailPanel({ runId, accessToken, onClose }: Props) {
       locationRef.current = signature
       onClose()
     }
-  }, [location.hash, location.pathname, location.search, onClose])
+  }, [routerLocation.hash, routerLocation.pathname, routerLocation.search, onClose])
 
   const load = useCallback(async () => {
     requestIdRef.current = runId
@@ -276,9 +276,9 @@ export function RunDetailPanel({ runId, accessToken, onClose }: Props) {
               {runId}
             </p>
           </div>
-          <button
+          <button type="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
+            className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
           >
             <X size={14} />
           </button>

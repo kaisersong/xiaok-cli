@@ -271,7 +271,7 @@ function OVModuleCard({
     >
       <div className="flex items-center gap-2">
         <div
-          className="h-2 w-2 rounded-full"
+          className="size-2 rounded-full"
           style={{ background: bridgeOnline === null ? 'var(--c-text-muted)' : bridgeOnline ? '#22c55e' : '#ef4444' }}
         />
         <span className="text-xs text-[var(--c-text-muted)]">
@@ -402,7 +402,7 @@ function OVConfigForm({ ov, providers, loadingProviders, onChange, onSave, savin
       </div>
 
       <div className="flex items-center justify-end gap-3">
-        <button
+        <button type="button"
           onClick={onSave}
           disabled={saving}
           className="flex items-center gap-2 rounded-lg bg-[var(--c-btn-bg)] px-4 py-2 text-sm font-medium text-[var(--c-btn-text)] transition-opacity hover:opacity-90 disabled:opacity-50"

@@ -91,7 +91,7 @@ function EntryCard({
                 style={{ border: '1px solid var(--c-border)', background: 'var(--c-bg-input)' }}
               />
               <div className="flex items-center gap-2">
-                <button
+                <button type="button"
                   onClick={() => void saveEdit()}
                   disabled={saving || !editValue.trim()}
                   className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[var(--c-btn-bg)] px-4 py-1.5 text-sm font-medium text-[var(--c-btn-text)] transition-[filter] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
@@ -99,7 +99,7 @@ function EntryCard({
                   {saving && <SpinnerIcon />}
                   Save
                 </button>
-                <button
+                <button type="button"
                   onClick={cancelEdit}
                   className={secondaryButtonSmCls}
                   style={secondaryButtonBorderStyle}
@@ -128,13 +128,13 @@ function EntryCard({
             </div>
             <div className="flex items-center gap-0.5">
               <span className="text-[10px] text-[var(--c-text-muted)]">{formatDate(entry.created_at)}</span>
-              <button
+              <button type="button"
                 onClick={startEdit}
                 className="rounded-lg p-1 text-[var(--c-text-muted)] transition-colors hover:text-[var(--c-text-secondary)]"
               >
                 <Pencil size={12} />
               </button>
-              <button
+              <button type="button"
                 onClick={() => onDelete(entry.id)}
                 className="rounded-lg p-1 text-[var(--c-text-muted)] transition-colors hover:text-red-400"
               >
@@ -377,7 +377,7 @@ export function NotebookSettings() {
         className="flex flex-col gap-3 rounded-xl p-4"
         style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-menu)' }}
       >
-        <textarea
+        <textarea aria-label={ds.notebookAddPlaceholder}
           value={addContent}
           onChange={(e) => setAddContent(e.target.value)}
           onKeyDown={(e) => {
@@ -391,7 +391,7 @@ export function NotebookSettings() {
           className="w-full resize-none rounded-lg px-3 py-2.5 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none"
           style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-input)' }}
         />
-        <button
+        <button type="button"
           onClick={() => void handleAdd()}
           disabled={adding || !addContent.trim()}
           className="flex w-full items-center justify-center gap-1.5 rounded-lg py-2.5 text-sm font-medium transition-[filter] hover:[filter:brightness(1.08)] disabled:opacity-40"
@@ -432,7 +432,7 @@ export function NotebookSettings() {
               )}
             </div>
             <div className="flex items-center gap-1">
-              <button
+              <button type="button"
                 onClick={() => void loadEntries(true)}
                 disabled={refreshing}
                 className="shrink-0 rounded-lg p-1.5 text-[var(--c-text-muted)] transition-colors hover:text-[var(--c-text-secondary)] disabled:opacity-40"
@@ -440,7 +440,7 @@ export function NotebookSettings() {
                 <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
               </button>
               {entries.length > 0 && (
-                <button
+                <button type="button"
                   onClick={() => setConfirmClearAll(true)}
                   className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-red-400 transition-colors hover:bg-red-500/10"
                 >
@@ -457,7 +457,7 @@ export function NotebookSettings() {
               style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-input)' }}
             >
               <Search size={14} className="shrink-0 text-[var(--c-text-muted)]" />
-              <input
+              <input aria-label={ds.notebookSearchPlaceholder}
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}

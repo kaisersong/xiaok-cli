@@ -176,7 +176,7 @@ export function BuiltinSkillsView({
                           setBusySkillId(null)
                         }
                       }}
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[var(--c-error-bg)]"
+                      className="flex size-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[var(--c-error-bg)]"
                       style={{ color: 'var(--c-status-error-text)' }}
                     >
                       {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}

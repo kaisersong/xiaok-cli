@@ -64,7 +64,7 @@ export function AgentsTab() {
     <div className="p-6">
       {agents.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-4 py-16">
-          <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-[var(--c-bg-deep)]">
+          <div className="flex size-16 items-center justify-center rounded-xl bg-[var(--c-bg-deep)]">
             <Bot size={28} className="text-[var(--c-text-secondary)]" />
           </div>
           <div className="text-center">
@@ -80,7 +80,7 @@ export function AgentsTab() {
             const isOnline = agent.status !== 'offline';
             return (
               <div key={agent.id} className="flex items-center gap-4 rounded-xl border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-4 hover:bg-[var(--c-bg-deep)]">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
                   <span className="text-sm font-bold text-[var(--c-text-secondary)]">{agent.name.charAt(0).toUpperCase()}</span>
                 </div>
                 <div className="flex-1 min-w-0">

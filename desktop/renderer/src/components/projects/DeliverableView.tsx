@@ -28,7 +28,7 @@ function ArtifactCard({ artifact, taskTitle, onPreview }: { artifact: KSwarmArti
       disabled={!hasPath}
       className={`flex w-full items-center gap-3 rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-4 py-3 text-left ${hasPath ? 'cursor-pointer hover:bg-[var(--c-bg-deep)]' : 'cursor-default opacity-70'}`}
     >
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
+      <div className="flex size-8 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
         <FileText size={15} className="text-[var(--c-text-icon)]" />
       </div>
       <div className="flex-1 min-w-0">
@@ -165,7 +165,7 @@ export function DeliverableView({ project, tasks: propTasks }: DeliverableViewPr
           <div className="flex flex-col gap-2">
             {deliverables.map(d => (
               <div key={d.id} className="flex items-center gap-3 rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-4 py-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
+                <div className="flex size-8 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
                   <FileText size={15} className="text-[var(--c-status-success-text)]" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -188,7 +188,7 @@ export function DeliverableView({ project, tasks: propTasks }: DeliverableViewPr
                 {/* Task header with summary */}
                 <div className="px-4 py-3 border-b border-[var(--c-border-subtle)]/50">
                   <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${task.status === 'done' ? 'bg-[var(--c-status-success-text)]' : task.status === 'review' ? 'bg-[var(--c-status-warning-text)]' : 'bg-[var(--c-text-muted)]'}`} />
+                    <div className={`size-2 rounded-full ${task.status === 'done' ? 'bg-[var(--c-status-success-text)]' : task.status === 'review' ? 'bg-[var(--c-status-warning-text)]' : 'bg-[var(--c-text-muted)]'}`} />
                     <span className="text-[12px] font-medium text-[var(--c-text-primary)]">{task.title}</span>
                     {task.assignedAgent && <span className="text-[10px] text-[var(--c-text-muted)]">@{task.assignedAgent}</span>}
                   </div>

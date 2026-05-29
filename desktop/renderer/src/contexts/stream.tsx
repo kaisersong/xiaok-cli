@@ -9,7 +9,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react'
-import type { CodeExecutionRef, FileOpRef, SubAgentRef, ThreadRunHandoffRef, WebFetchRef } from '../storage'
+import type { CodeExecutionRef, FileOpRef, SubAgentRef, WebFetchRef } from '../storage'
 import type { StreamingArtifactEntry } from '../components/ArtifactStreamBlock'
 import type { WebSearchPhaseStep } from '../components/CopTimeline'
 import type {
@@ -336,38 +336,6 @@ export function StreamProvider({ children }: { children: ReactNode }) {
       {children}
     </StreamContext.Provider>
   )
-}
-
-export function buildStreamingArtifactsFromHandoff(handoff: ThreadRunHandoffRef): StreamingArtifactEntry[] {
-  const entries: StreamingArtifactEntry[] = []
-  let toolCallIndex = 0
-  for (const widget of handoff.widgets) {
-    entries.push({
-      toolCallIndex,
-      toolCallId: widget.id,
-      toolName: 'show_widget',
-      argumentsBuffer: '',
-      title: widget.title,
-      content: widget.html,
-      complete: true,
-    })
-    toolCallIndex += 1
-  }
-  for (const artifact of handoff.artifacts) {
-    entries.push({
-      toolCallIndex,
-      toolCallId: artifact.key,
-      toolName: 'create_artifact',
-      argumentsBuffer: '',
-      title: artifact.title,
-      filename: artifact.filename,
-      display: artifact.display,
-      complete: true,
-      artifactRef: artifact,
-    })
-    toolCallIndex += 1
-  }
-  return entries
 }
 
 export function useStream(): StreamContextValue {

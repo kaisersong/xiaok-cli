@@ -1,6 +1,6 @@
 import { X, Bot } from 'lucide-react'
 import type { SubAgentRef } from '../storage'
-import { AssistantThinkingMarkdown } from './cop-timeline'
+import { AssistantThinkingMarkdown } from './cop-timeline/ThinkingBlock'
 
 const MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace'
 
@@ -43,7 +43,7 @@ export function AgentPanel({ agent, onClose }: Props) {
             </span>
           </div>
         </div>
-        <button
+        <button type="button"
           onClick={onClose}
           className="hover:bg-[var(--c-bg-deep)]"
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 8, border: 'none', color: 'var(--c-text-secondary)', cursor: 'pointer' }}

@@ -103,7 +103,7 @@ function mergeProviderAdvancedJSON(
   return next
 }
 
-import { settingsInputCls } from './_SettingsInput'
+import { settingsInputCls } from './_settingsClasses'
 
 const INPUT_CLS = settingsInputCls('sm')
 
@@ -280,7 +280,7 @@ export function ProvidersSettings({ accessToken }: Props) {
         <div className="flex-1 overflow-y-auto px-2 py-1">
           <div className="flex flex-col gap-[3px]">
             {providers.map((pv) => (
-              <button
+              <button type="button"
                 key={pv.id}
                 onClick={() => setSelectedId(pv.id)}
                 className={[
@@ -295,8 +295,8 @@ export function ProvidersSettings({ accessToken }: Props) {
             ))}
           </div>
         </div>
-        <div className="border-t border-[var(--c-border-subtle)] px-3 py-3">
-          <button
+        <div className="border-t border-[var(--c-border-subtle)] p-3">
+          <button type="button"
             onClick={() => setShowAddProvider(true)}
             className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)]"
             style={{ border: '0.5px solid var(--c-border-subtle)' }}
@@ -322,7 +322,7 @@ export function ProvidersSettings({ accessToken }: Props) {
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3">
             <p className="text-sm text-[var(--c-text-muted)]">{p.noProviders}</p>
-            <button
+            <button type="button"
               onClick={() => setShowAddProvider(true)}
               className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-[var(--c-btn-text)] transition-[filter] duration-150 hover:[filter:brightness(1.12)] active:[filter:brightness(0.95)]"
               style={{ background: 'var(--c-btn-bg)' }}
@@ -398,9 +398,9 @@ function AddProviderModal({ accessToken, p, onClose, onCreated }: {
       >
         <div className="flex items-center justify-between">
           <h3 className="text-[15px] font-semibold text-[var(--c-text-heading)]">{p.addProvider}</h3>
-          <button
+          <button type="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
+            className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
           >
             <X size={14} />
           </button>
@@ -409,7 +409,7 @@ function AddProviderModal({ accessToken, p, onClose, onCreated }: {
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           <div>
             <label className={fieldLabelCls}>{p.providerName}</label>
-            <input
+            <input aria-label="My Provider"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="My Provider"
@@ -422,7 +422,7 @@ function AddProviderModal({ accessToken, p, onClose, onCreated }: {
           </div>
           <div className="col-span-2">
             <label className={fieldLabelCls}>{p.apiKey}</label>
-            <input
+            <input aria-label={p.apiKeyPlaceholder}
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
@@ -432,7 +432,7 @@ function AddProviderModal({ accessToken, p, onClose, onCreated }: {
           </div>
           <div className="col-span-2">
             <label className={fieldLabelCls}>{p.baseUrl}</label>
-            <input
+            <input aria-label={p.baseUrlPlaceholder ?? 'https://api.example.com/v1'}
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value.slice(0, 500))}
               placeholder={p.baseUrlPlaceholder ?? 'https://api.example.com/v1'}
@@ -448,14 +448,14 @@ function AddProviderModal({ accessToken, p, onClose, onCreated }: {
         {err && <p className="mt-3 text-xs text-[var(--c-status-error-text)]">{err}</p>}
 
         <div className="flex items-center justify-end gap-2">
-          <button
+          <button type="button"
             onClick={onClose}
             className="rounded-lg px-4 py-1.5 text-sm text-[var(--c-text-secondary)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)]"
             style={{ border: '0.5px solid var(--c-border-subtle)' }}
           >
             {p.cancel}
           </button>
-          <button
+          <button type="button"
             onClick={() => void handleSave()}
             disabled={saving || !name.trim() || !apiKey.trim()}
             className="flex items-center justify-center rounded-lg px-4 py-1.5 text-sm font-medium text-[var(--c-btn-text)] transition-[filter] duration-150 hover:[filter:brightness(1.12)] active:[filter:brightness(0.95)] disabled:opacity-50"
@@ -485,7 +485,7 @@ function ProviderDetail({ provider, accessToken, onUpdated, onDeleted, p }: {
   onDeleted: () => void
   p: ReturnType<typeof useLocale>['t']['adminProviders']
 }) {
-  const [formPreset, setFormPreset] = useState<VendorPresetKey>(toVendorKey(provider.provider, provider.openai_api_mode))
+  const [formPreset, setFormPreset] = useState<VendorPresetKey>(() => toVendorKey(provider.provider, provider.openai_api_mode))
   const [formName, setFormName] = useState(provider.name)
   const [formApiKey, setFormApiKey] = useState('')
   const [formBaseUrl, setFormBaseUrl] = useState(provider.base_url ?? '')
@@ -549,11 +549,11 @@ function ProviderDetail({ provider, accessToken, onUpdated, onDeleted, p }: {
           <input value={formName} onChange={(e) => setFormName(e.target.value)} className={INPUT_CLS} />
         </LabelField>
         <LabelField label={p.apiKey}>
-          <input type="password" value={formApiKey} onChange={(e) => setFormApiKey(e.target.value)} placeholder={provider.key_prefix ? `${provider.key_prefix}${'*'.repeat(40)}` : p.apiKeyPlaceholder} className={INPUT_CLS} />
+          <input aria-label={provider.key_prefix ? `${provider.key_prefix}${'*'.repeat(40)}` : p.apiKeyPlaceholder} type="password" value={formApiKey} onChange={(e) => setFormApiKey(e.target.value)} placeholder={provider.key_prefix ? `${provider.key_prefix}${'*'.repeat(40)}` : p.apiKeyPlaceholder} className={INPUT_CLS} />
           {provider.key_prefix && <p className="mt-1 text-xs text-[var(--c-text-muted)]">{provider.key_prefix}{'*'.repeat(8)}</p>}
         </LabelField>
         <LabelField label={p.baseUrl}>
-          <input
+          <input aria-label={p.baseUrlPlaceholder ?? 'https://api.example.com/v1'}
             value={formBaseUrl}
             onChange={(e) => setFormBaseUrl(e.target.value.slice(0, 500))}
             placeholder={p.baseUrlPlaceholder ?? 'https://api.example.com/v1'}
@@ -572,15 +572,15 @@ function ProviderDetail({ provider, accessToken, onUpdated, onDeleted, p }: {
         {confirmDelete ? (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-[var(--c-text-tertiary)]">{p.deleteProviderConfirm}</span>
-            <button onClick={() => void handleDelete()} disabled={deleting} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50">{p.deleteProvider}</button>
-            <button onClick={() => setConfirmDelete(false)} className="rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-sub)]">{p.cancel}</button>
+            <button type="button" onClick={() => void handleDelete()} disabled={deleting} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50">{p.deleteProvider}</button>
+            <button type="button" onClick={() => setConfirmDelete(false)} className="rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-sub)]">{p.cancel}</button>
           </div>
         ) : (
-          <button onClick={() => setConfirmDelete(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--c-border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--c-text-muted)] transition-colors duration-150 hover:border-red-500/30 hover:text-red-500">
+          <button type="button" onClick={() => setConfirmDelete(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--c-border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--c-text-muted)] transition-colors duration-150 hover:border-red-500/30 hover:text-red-500">
             <Trash2 size={12} />
           </button>
         )}
-        <button onClick={() => void handleSave()} disabled={saving || !formName.trim()} className="flex items-center justify-center rounded-lg px-4 py-1.5 text-sm font-medium text-[var(--c-btn-text)] transition-[filter] duration-150 hover:[filter:brightness(1.12)] active:[filter:brightness(0.95)] disabled:opacity-50" style={{ background: 'var(--c-btn-bg)' }}>
+        <button type="button" onClick={() => void handleSave()} disabled={saving || !formName.trim()} className="flex items-center justify-center rounded-lg px-4 py-1.5 text-sm font-medium text-[var(--c-btn-text)] transition-[filter] duration-150 hover:[filter:brightness(1.12)] active:[filter:brightness(0.95)] disabled:opacity-50" style={{ background: 'var(--c-btn-bg)' }}>
           <span className="relative flex items-center justify-center">
             <span className={`flex items-center gap-1.5 transition-opacity duration-150 ${saving ? 'opacity-0' : 'opacity-100'}`}>{p.save}</span>
             <span className={`absolute inset-0 flex items-center justify-center gap-1.5 transition-opacity duration-150 ${saving ? 'opacity-100' : 'opacity-0'}`}>
@@ -828,7 +828,7 @@ function ModelsSection({ provider, accessToken, onChanged, p }: {
             label={p.testModel ?? 'Test'}
             searchPlaceholder={p.searchProviders}
           />
-          <button onClick={() => setCreatingModel(true)} className="button-primary inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-medium text-[var(--c-btn-text)] transition-[filter] disabled:cursor-not-allowed disabled:opacity-40" style={{ background: 'var(--c-btn-bg)' }}>
+          <button type="button" onClick={() => setCreatingModel(true)} className="button-primary inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-medium text-[var(--c-btn-text)] transition-[filter] disabled:cursor-not-allowed disabled:opacity-40" style={{ background: 'var(--c-btn-bg)' }}>
             {p.addModel}
           </button>
         </div>
@@ -840,7 +840,7 @@ function ModelsSection({ provider, accessToken, onChanged, p }: {
 
       {provider.models.length > 0 && (
         <div className="mt-3">
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={p.searchProviders} className={INPUT_CLS + ' w-full'} />
+          <input aria-label={p.searchProviders} value={search} onChange={(e) => setSearch(e.target.value)} placeholder={p.searchProviders} className={INPUT_CLS + ' w-full'} />
         </div>
       )}
 
@@ -994,13 +994,13 @@ const ModelRow = memo(function ModelRow({ pm, onToggle, onEdit, onDelete }: {
       </div>
       <div className="flex w-full shrink-0 items-center justify-end gap-1.5 sm:w-auto">
         <PillToggle checked={pm.show_in_picker} onChange={() => onToggle(pm.id, pm.show_in_picker)} />
-        <button
+        <button type="button"
           onClick={() => onEdit(pm)}
           className="rounded-md p-1.5 text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
         >
           <SlidersHorizontal size={14} />
         </button>
-        <button
+        <button type="button"
           onClick={() => onDelete(pm.id)}
           className="rounded-md p-1.5 text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-red-500"
         >
@@ -1134,7 +1134,7 @@ function ModelTestButton({ accessToken, provider, label, searchPlaceholder }: {
             }}
           >
             <div style={{ padding: '4px 4px 2px' }}>
-              <input
+              <input aria-label={searchPlaceholder}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={searchPlaceholder}

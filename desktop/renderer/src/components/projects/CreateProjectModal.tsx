@@ -152,7 +152,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
           <button
             type="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] transition-colors duration-150"
+            className="flex size-7 items-center justify-center rounded-lg text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] transition-colors duration-150"
           >
             <X size={16} />
           </button>
@@ -162,7 +162,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{t.projectsCreateName}</label>
-            <input
+            <input aria-label="例：竞品分析报告"
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
@@ -174,7 +174,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
 
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{t.projectsCreateGoal}</label>
-            <input
+            <input aria-label="描述你希望完成什么..."
               type="text"
               value={goal}
               onChange={e => setGoal(e.target.value)}
@@ -187,7 +187,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
             <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">
               {t.projectsCreateRequirements}
             </label>
-            <textarea
+            <textarea aria-label="格式要求、参考资料、限制条件、期望的产出物形式..."
               value={requirements}
               onChange={e => setRequirements(e.target.value)}
               placeholder="格式要求、参考资料、限制条件、期望的产出物形式..."
@@ -266,7 +266,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
               {t.projectsCreateWorkDir} <span className="text-[var(--c-text-muted)]">(可选，留空自动创建)</span>
             </label>
             <div className="flex items-center gap-2">
-              <input
+              <input aria-label="~/projects/my-project"
                 type="text"
                 value={workFolder}
                 onChange={e => setWorkFolder(e.target.value)}
@@ -290,7 +290,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
               type="checkbox"
               checked={enableSummary}
               onChange={e => setEnableSummary(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-[var(--c-border-subtle)] accent-[var(--c-accent)]"
+              className="size-3.5 rounded border-[var(--c-border-subtle)] accent-[var(--c-accent)]"
               id="enableSummary"
             />
             <label htmlFor="enableSummary" className="text-xs text-[var(--c-text-secondary)]">

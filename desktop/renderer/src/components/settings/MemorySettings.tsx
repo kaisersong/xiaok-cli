@@ -872,7 +872,7 @@ export function MemorySettings({ accessToken }: Props) {
         <div
           role="button"
           tabIndex={0}
-          className="flex cursor-pointer items-center justify-between gap-4 px-4 py-4 outline-none transition-colors hover:bg-[var(--c-bg-deep)]/25 focus-visible:ring-2 focus-visible:ring-[var(--c-accent)]"
+          className="flex cursor-pointer items-center justify-between gap-4 p-4 outline-none transition-colors hover:bg-[var(--c-bg-deep)]/25 focus-visible:ring-2 focus-visible:ring-[var(--c-accent)]"
           onMouseEnter={() => setEnableCardHovered(true)}
           onMouseLeave={() => setEnableCardHovered(false)}
           onClick={() => { if (memConfig) void saveConfig({ ...memConfig, enabled: !enabled }) }}
@@ -900,7 +900,7 @@ export function MemorySettings({ accessToken }: Props) {
           <div
             role="button"
             tabIndex={0}
-            className={`flex cursor-pointer items-center justify-between gap-4 border-t border-[var(--c-border-subtle)] px-4 py-4 outline-none transition-all hover:bg-[var(--c-bg-deep)]/25 focus-visible:ring-2 focus-visible:ring-[var(--c-accent)] ${enabled ? '' : 'pointer-events-none opacity-40'}`}
+            className={`flex cursor-pointer items-center justify-between gap-4 border-t border-[var(--c-border-subtle)] p-4 outline-none transition-all hover:bg-[var(--c-bg-deep)]/25 focus-visible:ring-2 focus-visible:ring-[var(--c-accent)] ${enabled ? '' : 'pointer-events-none opacity-40'}`}
             onMouseEnter={() => setSummarizeCardHovered(true)}
             onMouseLeave={() => setSummarizeCardHovered(false)}
             onClick={() => { if (enabled) void saveConfig({ ...memConfig, memoryCommitEachTurn: memConfig.memoryCommitEachTurn === false }) }}
@@ -1020,7 +1020,7 @@ export function MemorySettings({ accessToken }: Props) {
                   </button>
                 )}
                 <div className="flex items-center gap-1.5">
-                  <div className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: statusDotColor(health) }} />
+                  <div className="size-1.5 shrink-0 rounded-full" style={{ background: statusDotColor(health) }} />
                   <span className="text-xs" style={{ color: health === 'ok' ? 'var(--c-text-muted)' : statusDotColor(health) }}>
                     {healthLabel}
                   </span>

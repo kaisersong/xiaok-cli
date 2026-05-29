@@ -47,7 +47,7 @@ import {
   hasRecoverableRunOutput,
 } from '../lib/chat-helpers'
 import { sanitizeUserFacingErrorMessage } from '../lib/error-display'
-import { extractPartialArtifactFields, extractPartialWidgetFields } from '../components/ArtifactStreamBlock'
+import { extractPartialArtifactFields, extractPartialWidgetFields } from '../components/artifact-stream-parser'
 import type { MsgRunEvent } from '../storage'
 import { getInjectionBlockMessage, shouldSuppressLiveRunEventAfterInjectionBlock } from '../liveRunSecurity'
 import type { RequestedSchema } from '../userInputTypes'

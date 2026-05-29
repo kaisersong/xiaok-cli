@@ -7,7 +7,7 @@ import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import { api } from '../../api/bridge';
+import { api } from '../../api';
 import type { KSwarmAgent } from '../../hooks/useKSwarmClient';
 
 interface DesktopProvider {
@@ -98,7 +98,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
           <button
             type="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
+            className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
           >
             <X size={14} />
           </button>
@@ -106,8 +106,9 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
 
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsEditAgentName}</label>
+            <label htmlFor="edit-agent-name" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsEditAgentName}</label>
             <input
+              id="edit-agent-name"
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
@@ -117,8 +118,9 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">ID</label>
+            <label htmlFor="edit-agent-id" className="text-[12px] font-medium text-[var(--c-text-secondary)]">ID</label>
             <input
+              id="edit-agent-id"
               type="text"
               value={agent.id}
               disabled
@@ -127,8 +129,9 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">LLM 提供商</label>
+            <label htmlFor="edit-agent-provider" className="text-[12px] font-medium text-[var(--c-text-secondary)]">LLM 提供商</label>
             <select
+              id="edit-agent-provider"
               data-testid="provider-select"
               value={provider}
               onChange={e => { setProvider(e.target.value); setModel(''); }}
@@ -155,7 +158,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
                     {desktopModels.map(m => <option key={m.modelId} value={m.model}>{m.label}</option>)}
                   </select>
                 ) : (
-                  <input
+                  <input aria-label="e.g. gpt-4o"
                     data-testid="model-input"
                     type="text"
                     value={model}
@@ -168,7 +171,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
 
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.commonBaseUrl}</label>
-                <input
+                <input aria-label="https://api.example.com/v1"
                   data-testid="baseurl-input"
                   type="text"
                   value={baseUrl}
@@ -180,7 +183,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
 
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.commonApiKey}</label>
-                <input
+                <input aria-label={t.projectsEditAgentModelHint}
                   data-testid="apikey-input"
                   type="password"
                   value={apiKey}
@@ -194,7 +197,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
 
           <div className="flex flex-col gap-1.5">
             <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsEditAgentInstructions}</label>
-            <textarea
+            <textarea aria-label="系统提示词..."
               value={instructions}
               onChange={e => setInstructions(e.target.value)}
               placeholder="系统提示词..."

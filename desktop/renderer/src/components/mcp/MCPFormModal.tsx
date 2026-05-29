@@ -1,7 +1,8 @@
 import { Loader2 } from 'lucide-react'
 import { AutoResizeTextarea, Modal } from '../shared'
 import { SettingsLabel } from '../settings/_SettingsLabel'
-import { SettingsInput, settingsInputCls } from '../settings/_SettingsInput'
+import { SettingsInput } from '../settings/_SettingsInput'
+import { settingsInputCls } from '../settings/_settingsClasses'
 import { SettingsSelect } from '../settings/_SettingsSelect'
 import {
   type FormState,

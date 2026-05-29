@@ -283,7 +283,7 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
     return (
       <>
         <div className="flex h-full flex-col items-center justify-center gap-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-[var(--c-bg-deep)]">
+          <div className="flex size-16 items-center justify-center rounded-xl bg-[var(--c-bg-deep)]">
             <BookOpen size={28} className="text-[var(--c-text-secondary)]" />
           </div>
           <div className="text-center">
@@ -585,7 +585,7 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
                   type="checkbox"
                   checked={principle.enabled}
                   onChange={e => handleToggle(principle.id, e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-[var(--c-border-subtle)] accent-[var(--c-accent)]"
+                  className="size-3.5 rounded border-[var(--c-border-subtle)] accent-[var(--c-accent)]"
                   title={principle.enabled ? t.projectsPrinciplesEnabled : t.projectsPrinciplesDisabled}
                 />
                 <button

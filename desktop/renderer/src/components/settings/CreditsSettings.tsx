@@ -117,7 +117,7 @@ export function CreditsContent({ accessToken, onCreditsChanged }: { accessToken:
       <div className="flex flex-col gap-2">
         <span className="text-sm font-medium text-[var(--c-text-heading)]">{t.creditsRedeem}</span>
         <div className="flex gap-2">
-          <input
+          <input aria-label={t.creditsRedeemPlaceholder}
             type="text"
             value={redeemInput}
             onChange={(e) => setRedeemInput(e.target.value)}
@@ -127,7 +127,7 @@ export function CreditsContent({ accessToken, onCreditsChanged }: { accessToken:
             style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-page)' }}
             disabled={redeemLoading}
           />
-          <button
+          <button type="button"
             onClick={() => void handleRedeem()}
             disabled={redeemLoading || !redeemInput.trim()}
             className="flex h-9 items-center rounded-lg px-3 text-sm font-medium text-[var(--c-text-heading)] transition-colors hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
@@ -180,7 +180,7 @@ export function CreditsContent({ accessToken, onCreditsChanged }: { accessToken:
                 <option key={m} value={m}>{getMonthLabel(m, locale)}</option>
               ))}
             </select>
-            <button
+            <button type="button"
               onClick={() => void handleQueryUsage()}
               disabled={txLoading}
               className="flex h-8 items-center rounded-lg px-3 text-sm font-medium text-[var(--c-text-heading)] transition-colors hover:bg-[var(--c-bg-deep)] disabled:opacity-50"

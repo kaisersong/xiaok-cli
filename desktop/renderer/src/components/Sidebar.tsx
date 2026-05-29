@@ -42,7 +42,7 @@ interface SidebarProps {
 
 export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const navigate = useNavigate();
-  const location = useLocation();
+  const routerLocation = useLocation();
   const [threads, setThreads] = useState<ThreadRecord[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -142,14 +142,14 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
 
   // Sync activeNav with route
   useEffect(() => {
-    if (location.pathname === '/scheduled') {
+    if (routerLocation.pathname === '/scheduled') {
       setActiveNav('scheduled');
-    } else if (location.pathname.startsWith('/projects')) {
+    } else if (routerLocation.pathname.startsWith('/projects')) {
       setActiveNav('projects');
     } else {
       setActiveNav('new');
     }
-  }, [location.pathname]);
+  }, [routerLocation.pathname]);
 
   useEffect(() => {
     if (editingId && editRef.current) {
@@ -294,7 +294,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       {/* Scheduled tasks list (Claude-style) */}
       {sidebarTasks.length > 0 && (activeNav === 'new' || activeNav === 'scheduled') && (
         <div className="px-3 py-2">
-          <div className="px-1 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
+          <div className="p-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
             {t.sidebarScheduled}
           </div>
           <div className={scheduledListClassName}>
@@ -306,7 +306,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                 className="flex items-center justify-between rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-card)] transition-colors"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="h-1.5 w-1.5 rounded-full bg-[var(--c-accent)]/40 shrink-0" />
+                  <div className="size-1.5 rounded-full bg-[var(--c-accent)]/40 shrink-0" />
                   <span className="truncate">{task.name}</span>
                 </div>
                 <span className="shrink-0 text-[var(--c-text-tertiary)] ml-2">{task.frequency}</span>
@@ -319,7 +319,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       {/* Active projects list */}
       {activeProjects.length > 0 && (activeNav === 'new' || activeNav === 'projects') && (
         <div className="px-3 py-2">
-          <div className="px-1 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
+          <div className="p-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
             {t.sidebarProjects}
           </div>
           <div className={projectListClassName}>
@@ -331,7 +331,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                 className="flex items-center justify-between rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-card)] transition-colors"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                  <div className={`size-1.5 rounded-full shrink-0 ${
                     project.status === 'active' ? 'bg-green-500' :
                     project.status === 'delivered' ? 'bg-blue-500' :
                     'bg-yellow-500'
@@ -352,7 +352,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
           <div className="px-3 py-2">
             <div className="flex items-center gap-2 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5">
               <Search className="size-3.5 text-[var(--c-text-secondary)]" />
-              <input
+              <input aria-label={t.sidebarSearch}
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
@@ -378,7 +378,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
               </p>
             )}
             {filteredThreads.map(thread => {
-              const isSelected = location.pathname === `/t/${thread.id}`;
+              const isSelected = routerLocation.pathname === `/t/${thread.id}`;
               return (
               <div
                 key={thread.id}
@@ -472,7 +472,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
               <button
                 type="button"
                 onClick={onOpenSettings}
-                className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--c-text-icon)] transition-[background-color,color,transform] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] active:scale-[0.96]"
+                className="flex size-8 items-center justify-center rounded-md text-[var(--c-text-icon)] transition-[background-color,color,transform] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] active:scale-[0.96]"
               >
                 <Bolt size={18} />
               </button>
@@ -503,10 +503,10 @@ function SidebarUserProfile() {
   return (
     <div className="flex items-center gap-2 min-w-0">
       {avatar ? (
-        <img src={avatar} alt="" className="h-6 w-6 rounded-full object-cover shrink-0" />
+        <img src={avatar} alt="" className="size-6 rounded-full object-cover shrink-0" />
       ) : (
         <div
-          className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold shrink-0"
+          className="flex size-6 items-center justify-center rounded-full text-[10px] font-semibold shrink-0"
           style={{ background: 'var(--c-avatar-bg, #e2e8f0)', color: 'var(--c-avatar-text, #475569)' }}
         >
           {initial}

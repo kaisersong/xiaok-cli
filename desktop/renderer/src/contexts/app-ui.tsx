@@ -220,7 +220,7 @@ function AppUIProviders({
 
 export function AppUIProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
-  const location = useLocation()
+  const routerLocation = useLocation()
   const { me } = useAuth()
   const desktop = isDesktop()
   const usesHashRouting = window.location.protocol === 'file:'
@@ -238,7 +238,7 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('account')
   const [desktopSettingsSection, setDesktopSettingsSection] = useState<DesktopSettingsKey>('general')
   const [notificationsOpen, setNotificationsOpen] = useState(
-    () => new URLSearchParams(location.search).has('notices'),
+    () => new URLSearchParams(routerLocation.search).has('notices'),
   )
   const [notificationVersion, setNotificationVersion] = useState(0)
   const [appMode, setAppModeState] = useState<AppMode>(readAppModeFromStorage)
@@ -278,7 +278,7 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
         collapsed,
         nextCollapsed,
         appMode,
-        pathname: location.pathname,
+        pathname: routerLocation.pathname,
       }
       sidebarLifecycleRef.current = {
         startedAt: performance.now(),
@@ -295,7 +295,7 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
     manualSidebarCollapsedRef.current = nextCollapsed
     sidebarCollapsedRef.current = nextCollapsed
     setSidebarCollapsed(nextCollapsed)
-  }, [appMode, location.pathname])
+  }, [appMode, routerLocation.pathname])
 
   const enterSearchMode = useCallback(() => {
     pushSearchModeState()
@@ -332,7 +332,7 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
         source: 'sidebar',
         requestedTab: tab,
         section,
-        pathname: location.pathname,
+        pathname: routerLocation.pathname,
       }
       recordPerfDuration('desktop_settings_open_request', 0, sample)
       settingsOpenTraceRef.current = beginPerfTrace('desktop_settings_open', sample)
@@ -348,7 +348,7 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
     }
     setSettingsInitialTab(tab as SettingsTab)
     setSettingsOpen(true)
-  }, [desktop, location.pathname])
+  }, [desktop, routerLocation.pathname])
 
   const closeSettings = useCallback(() => {
     setSettingsOpen(false)
@@ -379,10 +379,10 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
   const handleSetAppMode = useCallback((mode: AppMode) => {
     writeAppModeToStorage(mode)
     setAppModeState(mode)
-    if (/^\/t\//.test(location.pathname)) {
+    if (/^\/t\//.test(routerLocation.pathname)) {
       navigate('/')
     }
-  }, [location.pathname, navigate])
+  }, [routerLocation.pathname, navigate])
 
   const queueSkillPrompt = useCallback((prompt: string) => {
     setPendingSkillPrompt(prompt)
@@ -461,10 +461,10 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (location.pathname === '/') return
+    if (routerLocation.pathname === '/') return
     const id = requestAnimationFrame(() => setIsSearchMode(false))
     return () => cancelAnimationFrame(id)
-  }, [location.pathname])
+  }, [routerLocation.pathname])
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
@@ -472,13 +472,13 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
       if (notificationsOpen) closeNotifications()
     })
     return () => cancelAnimationFrame(id)
-  }, [location.pathname]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [routerLocation.pathname]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!(desktop && settingsOpen && /^\/t\//.test(location.pathname))) return
+    if (!(desktop && settingsOpen && /^\/t\//.test(routerLocation.pathname))) return
     const id = requestAnimationFrame(() => setSettingsOpen(false))
     return () => cancelAnimationFrame(id)
-  }, [location.pathname]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [routerLocation.pathname]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!desktop) return
@@ -486,7 +486,7 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
       const sample = {
         source: 'window-event',
         requestedSection: 'general',
-        pathname: location.pathname,
+        pathname: routerLocation.pathname,
       }
       settingsOpenTraceRef.current = beginPerfTrace('desktop_settings_open', sample)
       if (isPerfDebugEnabled() && typeof performance !== 'undefined') {
@@ -500,7 +500,7 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
     }
     window.addEventListener('xiaok:app:open-settings', handler as EventListener)
     return () => window.removeEventListener('xiaok:app:open-settings', handler as EventListener)
-  }, [desktop, location.pathname])
+  }, [desktop, routerLocation.pathname])
 
   useEffect(() => {
     if (!(desktop && settingsOpen)) return
@@ -509,7 +509,7 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
       recordPerfDuration('desktop_settings_state_commit', performance.now() - lifecycle.startedAt, {
         ...lifecycle.sample,
         section: desktopSettingsSection,
-        pathname: location.pathname,
+        pathname: routerLocation.pathname,
         phase: 'commit',
       })
     }
@@ -518,20 +518,20 @@ export function AppUIProvider({ children }: { children: ReactNode }) {
         recordPerfDuration('desktop_settings_first_frame', performance.now() - lifecycle.startedAt, {
           ...lifecycle.sample,
           section: desktopSettingsSection,
-          pathname: location.pathname,
+          pathname: routerLocation.pathname,
           phase: 'frame',
         })
       }
       endPerfTrace(settingsOpenTraceRef.current, {
         phase: 'visible',
         section: desktopSettingsSection,
-        pathname: location.pathname,
+        pathname: routerLocation.pathname,
       })
       settingsOpenTraceRef.current = null
       settingsLifecycleRef.current = null
     })
     return () => cancelAnimationFrame(frameId)
-  }, [desktop, settingsOpen, desktopSettingsSection, location.pathname])
+  }, [desktop, settingsOpen, desktopSettingsSection, routerLocation.pathname])
 
 
   useEffect(() => {

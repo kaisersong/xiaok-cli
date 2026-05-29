@@ -21,7 +21,10 @@
     "typecheck:update-baseline": "node scripts/typecheck-baseline.mjs --update",
     "pack:dir": "npm run build:icon && npm run build:clean && electron-builder --dir --config electron-builder.json -c.win.signAndEditExecutable=false",
     "pack:release": "npm run build:icon && npm run build:clean && electron-builder --config electron-builder.json -c.win.signAndEditExecutable=false",
-    "postinstall": "cd node_modules/better-sqlite3 && npx prebuild-install --runtime electron --target $(node -e \"console.log(require('electron/package.json').version)\") || true"
+    "postinstall": "cd node_modules/better-sqlite3 && npx prebuild-install --runtime electron --target $(node -e \"console.log(require('electron/package.json').version)\") || true",
+    "doctor": "react-doctor",
+    "doctor:json": "react-doctor --json --no-score --fail-on none",
+    "doctor:staged": "react-doctor --staged --no-score --fail-on error"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -50,6 +53,7 @@
     "lucide-react": "^0.575.0",
     "mermaid": "^11.15.0",
     "react": "^19.2.3",
+    "react-doctor": "^0.2.10",
     "react-dom": "^19.2.3",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.13.0",

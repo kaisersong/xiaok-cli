@@ -8,6 +8,18 @@ import { createTeamTools } from '../teams/tools.js';
 import { createReminderTools } from '../../ai/tools/reminders.js';
 import { createNotebookTools } from '../../ai/tools/notebook.js';
 import { mergeToolPools, isMcpTool } from '../../ai/tools/tool-pool.js';
+const CC_RUNTIME_ONLY_TOOLS = new Set([
+    'Agent',
+    'Skill',
+    'EnterPlanMode',
+    'ExitPlanMode',
+    'EnterWorktree',
+    'ExitWorktree',
+]);
+function isCcRuntimeOnlyTool(tool) {
+    const name = tool.definition.name;
+    return CC_RUNTIME_ONLY_TOOLS.has(name) || /^Task(?:Create|Update|List|Get|Output|Stop)$/.test(name);
+}
 export function createPlatformRegistryFactory(options) {
     const runNamedSubAgent = async (agentName, prompt, cwd, parentDepth) => {
         const agentDef = options.platform.customAgents.find((agent) => agent.name === agentName);
@@ -72,7 +84,7 @@ export function createPlatformRegistryFactory(options) {
             onSandboxDenied: options.onSandboxDenied,
         });
         // 合并 built-in 和 MCP tools（保证 ordering）
-        const orderedTools = mergeToolPools(sandboxedTools.filter((t) => !isMcpTool(t)), sandboxedTools.filter(isMcpTool));
+        const orderedTools = mergeToolPools(sandboxedTools.filter((t) => !isMcpTool(t)), sandboxedTools.filter(isMcpTool)).filter((tool) => !isCcRuntimeOnlyTool(tool));
         // 过滤 allowedTools
         const filteredTools = allowedTools?.length
             ? orderedTools.filter((tool) => allowedTools.includes(tool.definition.name))

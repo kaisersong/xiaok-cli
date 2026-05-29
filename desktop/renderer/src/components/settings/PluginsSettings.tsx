@@ -97,10 +97,10 @@ export function PluginsSettings() {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-[var(--c-text-heading)]">{server.name}</span>
                     {server.connected && (
-                      <span className="inline-block h-2 w-2 rounded-full bg-green-500" title="Connected" />
+                      <span className="inline-block size-2 rounded-full bg-green-500" title="Connected" />
                     )}
                     {!server.connected && server.enabled && (
-                      <span className="inline-block h-2 w-2 rounded-full bg-yellow-500" title="Not connected" />
+                      <span className="inline-block size-2 rounded-full bg-yellow-500" title="Not connected" />
                     )}
                   </div>
                   <span className="text-xs text-[var(--c-text-tertiary)]">
@@ -118,7 +118,7 @@ export function PluginsSettings() {
                   } ${toggling === server.name ? 'opacity-50' : ''}`}
                 >
                   <span
-                    className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                    className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform ${
                       server.enabled ? 'translate-x-4' : 'translate-x-0.5'
                     }`}
                   />

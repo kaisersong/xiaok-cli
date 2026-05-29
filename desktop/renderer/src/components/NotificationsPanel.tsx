@@ -86,7 +86,7 @@ export function NotificationsPanel({ accessToken, onClose, onMarkedRead }: Props
     >
       {/* Close */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 16px' }}>
-        <button
+        <button type="button"
           onClick={onClose}
           style={{
             display: 'flex',

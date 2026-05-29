@@ -104,7 +104,7 @@ export function ModelConfigContent({ accessToken }: Props) {
         <div className="flex-1 overflow-y-auto px-2 py-1">
           <div className="flex flex-col gap-[3px]">
             {providers.map((p) => (
-              <button
+              <button type="button"
                 key={p.id}
                 onClick={() => setSelectedId(p.id)}
                 className={[
@@ -119,8 +119,8 @@ export function ModelConfigContent({ accessToken }: Props) {
             ))}
           </div>
         </div>
-        <div className="border-t border-[var(--c-border-subtle)] px-3 py-3">
-          <button
+        <div className="border-t border-[var(--c-border-subtle)] p-3">
+          <button type="button"
             onClick={() => setShowAddProvider(true)}
             className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md text-sm text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
           >
@@ -205,14 +205,14 @@ function AddProviderModal({ accessToken, onClose, onCreated }: {
       <div className="flex w-[420px] flex-col gap-4 rounded-xl bg-[var(--c-bg-deep)] p-5 shadow-lg">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-[var(--c-text-primary)]">{m.addProvider}</h3>
-          <button onClick={onClose} className="rounded p-1 text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]">
+          <button type="button" onClick={onClose} className="rounded p-1 text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]">
             <X size={16} />
           </button>
         </div>
 
         <div className="space-y-3">
           <FormField label={m.providerName}>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="My Provider" className={inputCls} />
+            <input aria-label="My Provider" value={name} onChange={(e) => setName(e.target.value)} placeholder="My Provider" className={inputCls} />
           </FormField>
 
           <FormField label={m.providerVendor}>
@@ -228,24 +228,24 @@ function AddProviderModal({ accessToken, onClose, onCreated }: {
           </FormField>
 
           <FormField label={m.apiKey}>
-            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={m.apiKeyPlaceholder} className={inputCls} />
+            <input aria-label={m.apiKeyPlaceholder} type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={m.apiKeyPlaceholder} className={inputCls} />
           </FormField>
 
           <FormField label={m.baseUrl}>
-            <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={m.baseUrlPlaceholder} className={inputCls} />
+            <input aria-label={m.baseUrlPlaceholder} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={m.baseUrlPlaceholder} className={inputCls} />
           </FormField>
         </div>
 
         {err && <p className="mt-3 text-xs text-red-400">{err}</p>}
 
         <div className="flex items-center justify-end gap-2 pt-1">
-          <button
+          <button type="button"
             onClick={onClose}
             className="rounded-md border border-[var(--c-border-subtle)] px-3.5 py-1.5 text-sm text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-sub)]"
           >
             {m.cancel}
           </button>
-          <button
+          <button type="button"
             onClick={handleSave}
             disabled={saving || !name.trim() || !apiKey.trim()}
             className="rounded-md bg-[var(--c-btn-bg)] px-4 py-1.5 text-sm font-medium text-[var(--c-btn-text)] transition-colors hover:opacity-90 disabled:opacity-50"
@@ -277,7 +277,7 @@ function ProviderDetail({
   const [formName, setFormName] = useState(provider.name)
   const [formApiKey, setFormApiKey] = useState('')
   const [formBaseUrl, setFormBaseUrl] = useState(provider.base_url ?? '')
-  const [formPreset, setFormPreset] = useState<ProviderPresetKey>(toPresetKey(provider.provider, provider.openai_api_mode))
+  const [formPreset, setFormPreset] = useState<ProviderPresetKey>(() => toPresetKey(provider.provider, provider.openai_api_mode))
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
   const [deleting, setDeleting] = useState(false)
@@ -336,7 +336,7 @@ function ProviderDetail({
         </FormField>
 
         <FormField label={m.apiKey}>
-          <input
+          <input aria-label={provider.key_prefix ? `${provider.key_prefix}${'*'.repeat(40)}` : m.apiKeyPlaceholder}
             type="password"
             value={formApiKey}
             onChange={(e) => setFormApiKey(e.target.value)}
@@ -351,7 +351,7 @@ function ProviderDetail({
         </FormField>
 
         <FormField label={m.baseUrl}>
-          <input value={formBaseUrl} onChange={(e) => setFormBaseUrl(e.target.value)} placeholder={m.baseUrlPlaceholder} className={inputCls} />
+          <input aria-label={m.baseUrlPlaceholder} value={formBaseUrl} onChange={(e) => setFormBaseUrl(e.target.value)} placeholder={m.baseUrlPlaceholder} className={inputCls} />
         </FormField>
       </div>
 
@@ -362,26 +362,26 @@ function ProviderDetail({
         {confirmDelete ? (
           <div className="flex items-center gap-2">
             <span className="text-xs text-[var(--c-text-tertiary)]">{m.deleteProviderConfirm}</span>
-            <button
+            <button type="button"
               onClick={handleDelete}
               disabled={deleting}
               className="rounded-md bg-red-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
             >
               {m.deleteProvider}
             </button>
-            <button onClick={() => setConfirmDelete(false)} className="rounded-md px-3 py-1 text-xs text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-sub)]">
+            <button type="button" onClick={() => setConfirmDelete(false)} className="rounded-md px-3 py-1 text-xs text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-sub)]">
               {m.cancel}
             </button>
           </div>
         ) : (
-          <button
+          <button type="button"
             onClick={() => setConfirmDelete(true)}
             className="inline-flex items-center gap-1.5 rounded-md border border-[var(--c-border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--c-text-muted)] transition-colors hover:border-red-500/30 hover:text-red-500"
           >
             <Trash2 size={12} />
           </button>
         )}
-        <button
+        <button type="button"
           onClick={handleSave}
           disabled={saving || !formName.trim()}
           className="rounded-md bg-[var(--c-btn-bg)] px-4 py-1.5 text-sm font-medium text-[var(--c-btn-text)] transition-colors hover:opacity-90 disabled:opacity-50"
@@ -571,7 +571,7 @@ function ModelsSection({
         <h4 className="text-sm font-medium text-[var(--c-text-primary)]">{m.modelsSection}</h4>
         <div className="flex items-center gap-2">
           {provider.models.length > 0 && (
-            <button
+            <button type="button"
               onClick={() => void handleDeleteAll()}
               disabled={deletingAll}
               className="inline-flex items-center gap-1.5 rounded-md border border-[var(--c-border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--c-text-muted)] transition-colors hover:border-red-500/30 hover:text-red-500 disabled:opacity-50"
@@ -584,7 +584,7 @@ function ModelsSection({
             <Loader2 size={12} className="animate-spin text-[var(--c-text-muted)]" />
           )}
           {unconfiguredCount > 0 && (
-            <button
+            <button type="button"
               onClick={() => void handleImportAll()}
               disabled={importing}
               className="inline-flex items-center gap-1.5 rounded-md border border-[var(--c-border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-sub)] disabled:opacity-50"
@@ -593,7 +593,7 @@ function ModelsSection({
               {importing ? m.importing : `${m.importAll} (${unconfiguredCount})`}
             </button>
           )}
-          <button
+          <button type="button"
             onClick={() => setCreatingModel(true)}
             className="rounded-md bg-[var(--c-btn-bg)] px-3 py-1.5 text-xs font-medium text-[var(--c-btn-text)] transition-colors hover:opacity-90"
           >
@@ -609,7 +609,7 @@ function ModelsSection({
 
       {provider.models.length > 0 && (
         <div className="mt-3">
-          <input
+          <input aria-label={m.searchPlaceholder}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={m.searchPlaceholder}
@@ -637,14 +637,14 @@ function ModelsSection({
               </div>
               <div className="flex items-center gap-1.5 flex-shrink-0">
                 <PillToggle checked={pm.show_in_picker} onChange={() => void handleTogglePicker(pm.id, pm.show_in_picker)} />
-                <button
+                <button type="button"
                   onClick={() => setEditingModel(pm)}
                   className="rounded p-1.5 text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]"
                   title={m.modelOptionsTitle}
                 >
                   <SlidersHorizontal size={14} />
                 </button>
-                <button
+                <button type="button"
                   onClick={() => void handleDeleteModel(pm.id)}
                   className="rounded p-1.5 text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-red-500"
                 >

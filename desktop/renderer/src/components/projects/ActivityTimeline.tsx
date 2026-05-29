@@ -88,7 +88,7 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
             <div key={idx} className="flex gap-3 group">
               {/* Timeline line + dot */}
               <div className="flex flex-col items-center">
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--c-bg-deep)]">
+                <div className="flex size-6 items-center justify-center rounded-full bg-[var(--c-bg-deep)]">
                   <Icon size={13} className={meta.color} />
                 </div>
                 {idx < activities.length - 1 && <div className="w-px flex-1 bg-[var(--c-border-subtle)]" />}
@@ -149,7 +149,7 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
           <div className="flex flex-col gap-1">
             {humanActions.map((action, i) => (
               <div key={i} className="flex items-center gap-2 py-1">
-                <div className="flex h-4 w-4 items-center justify-center rounded-full bg-[var(--c-btn-bg)]">
+                <div className="flex size-4 items-center justify-center rounded-full bg-[var(--c-btn-bg)]">
                   <span className="text-[7px] font-bold text-[var(--c-btn-text)]">H</span>
                 </div>
                 <span className="text-[12px] text-[var(--c-text-primary)]">{action.action}</span>

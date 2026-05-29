@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Download, ExternalLink, Globe, Loader2 } from 'lucide-react'
-import { apiBaseUrl } from '../shared/api'
+import { apiBaseUrl } from '../shared/api/client'
 import type { ArtifactRef } from '../storage'
 
 const ANIM_MS = 120
@@ -247,9 +247,9 @@ export function BrowserScreenshotCard({ artifact, accessToken, command, url }: P
             transition,
           }}
         >
-          <button
+          <button type="button"
             onClick={closeLightbox}
-            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--c-bg-deep)]"
+            className="flex size-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--c-bg-deep)]"
             style={{
               position: 'absolute',
               top: 16,
@@ -319,7 +319,7 @@ export function BrowserScreenshotCard({ artifact, accessToken, command, url }: P
               </span>
               <ExternalLink size={14} style={{ color: 'var(--c-text-icon)', flexShrink: 0 }} />
             </a>
-            <button
+            <button type="button"
               onClick={handleDownload}
               style={{
                 display: 'inline-flex',

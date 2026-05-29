@@ -44,7 +44,7 @@ const Ctx = createContext<MessageStoreContextValue | null>(null)
 
 const LOCAL_TERMINAL_MESSAGE_PREFIX = 'local-terminal-run:'
 
-export function isLocalTerminalMessage(message: Pick<MessageResponse, 'id'>): boolean {
+function isLocalTerminalMessage(message: Pick<MessageResponse, 'id'>): boolean {
   return message.id.startsWith(LOCAL_TERMINAL_MESSAGE_PREFIX)
 }
 

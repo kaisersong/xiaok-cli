@@ -54,12 +54,12 @@ export function DesktopDiscordSettingsPanel({
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [enabled, setEnabled] = useState(channel?.is_active ?? false)
-  const [personaID, setPersonaID] = useState(resolvePersonaID(personas, channel?.persona_id))
+  const [personaID, setPersonaID] = useState(() => resolvePersonaID(personas, channel?.persona_id))
   const [tokenDraft, setTokenDraft] = useState('')
   const [defaultModel, setDefaultModel] = useState((channel?.config_json?.default_model as string | undefined) ?? '')
-  const [allowedServerIDs, setAllowedServerIDs] = useState(readStringArrayConfig(channel, 'allowed_server_ids'))
+  const [allowedServerIDs, setAllowedServerIDs] = useState(() => readStringArrayConfig(channel, 'allowed_server_ids'))
   const [allowedServerInput, setAllowedServerInput] = useState('')
-  const [allowedChannelIDs, setAllowedChannelIDs] = useState(readStringArrayConfig(channel, 'allowed_channel_ids'))
+  const [allowedChannelIDs, setAllowedChannelIDs] = useState(() => readStringArrayConfig(channel, 'allowed_channel_ids'))
   const [allowedChannelInput, setAllowedChannelInput] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<{ ok: boolean; message: string } | null>(null)
@@ -335,7 +335,7 @@ export function DesktopDiscordSettingsPanel({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
+                <span className="flex size-9 items-center justify-center rounded-xl bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]">
                   <MessageCircleMore size={18} />
                 </span>
                 <div className="min-w-0">
@@ -426,7 +426,7 @@ export function DesktopDiscordSettingsPanel({
 
             <div className="md:col-span-2">
               <div
-                className="rounded-xl px-4 py-4"
+                className="rounded-xl p-4"
                 style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-page)' }}
               >
                 <div className="mb-4">

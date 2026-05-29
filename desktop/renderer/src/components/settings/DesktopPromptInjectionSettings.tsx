@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
-import { isApiError } from '../shared/api'
+import { isApiError } from '../shared/api/client'
 import { useLocale } from '../../contexts/LocaleContext'
 import {
   listPlatformSettings,

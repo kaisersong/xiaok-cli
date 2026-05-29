@@ -92,7 +92,7 @@ export function ReportFeedbackContent({ accessToken }: { accessToken: string }) 
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
+                className="flex size-7 items-center justify-center rounded-lg text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)]"
               >
                 <X size={16} />
               </button>

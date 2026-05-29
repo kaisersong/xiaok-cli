@@ -126,6 +126,10 @@ export class ReminderClientService implements ReminderApi {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    const connectPromise = this.connectPromise;
+    if (connectPromise) {
+      await connectPromise.catch(() => undefined);
+    }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -205,7 +209,16 @@ export class ReminderClientService implements ReminderApi {
 
     await spawnXiaokDaemonDetached(this.socketPath);
     await new Promise((resolve) => setTimeout(resolve, 300));
+    if (this.disposed) {
+      throw new Error('xiaok daemon unavailable');
+    }
     await this.openSocket();
+    if (this.disposed) {
+      const socket = this.socket;
+      this.socket = null;
+      socket?.destroy();
+      throw new Error('xiaok daemon unavailable');
+    }
   }
 
   private async openSocket(): Promise<void> {

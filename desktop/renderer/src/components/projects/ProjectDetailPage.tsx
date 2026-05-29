@@ -531,7 +531,7 @@ export function ProjectDetailPage() {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--c-text-muted)] border-t-transparent" />
+        <div className="size-5 animate-spin rounded-full border-2 border-[var(--c-text-muted)] border-t-transparent" />
       </div>
     );
   }

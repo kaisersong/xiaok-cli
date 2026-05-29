@@ -45,10 +45,10 @@ export function NotificationBell({ accessToken, onClick, refreshKey, title }: Pr
   const unreadCount = items.length
 
   return (
-    <button
+    <button type="button"
       onClick={onClick}
       title={title}
-      className="relative flex h-8 w-8 items-center justify-center rounded-lg text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
+      className="relative flex size-8 items-center justify-center rounded-lg text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
     >
       <Bell size={18} />
       {unreadCount > 0 && (

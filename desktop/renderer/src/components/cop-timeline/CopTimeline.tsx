@@ -14,10 +14,9 @@ import {
   extractThinkingTitles,
 } from './utils'
 import {
-  useThinkingElapsedSeconds,
-  formatThinkingHeaderLabel,
   CopTimelineHeaderLabel,
 } from './CopTimelineHeader'
+import { formatThinkingHeaderLabel, useThinkingElapsedSeconds } from './thinking-header-utils'
 import { AssistantThinkingMarkdown } from './ThinkingBlock'
 import { CopTimelineSegment } from './CopTimelineSegment'
 import { CopTimelineUnifiedRow } from './CopUnifiedRow'

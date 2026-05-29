@@ -206,7 +206,7 @@ export function PrincipleEditModal({ open, principle, initialMode = 'knowledge',
                 </>
               )}
             </div>
-            <textarea
+            <textarea aria-label={mode === 'rule' ? t.projectsRuleContentPlaceholder : t.projectsPrinciplesEditContentPlaceholder}
               value={content}
               onChange={e => setContent(e.target.value)}
               placeholder={mode === 'rule' ? t.projectsRuleContentPlaceholder : t.projectsPrinciplesEditContentPlaceholder}
@@ -275,7 +275,7 @@ export function PrincipleEditModal({ open, principle, initialMode = 'knowledge',
               type="checkbox"
               checked={enabled}
               onChange={e => setEnabled(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-[var(--c-border-subtle)] accent-[var(--c-accent)]"
+              className="size-3.5 rounded border-[var(--c-border-subtle)] accent-[var(--c-accent)]"
             />
             <span className="text-xs text-[var(--c-text-secondary)]">{t.projectsPrinciplesEditEnabled}</span>
           </label>

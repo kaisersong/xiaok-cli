@@ -90,7 +90,7 @@ export function CodeExecutionPanel({ execution, onClose }: Props) {
             </span>
           </div>
         </div>
-        <button
+        <button type="button"
           onClick={onClose}
           style={{
             display: 'flex',

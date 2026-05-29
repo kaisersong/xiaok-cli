@@ -113,7 +113,7 @@ export function ProjectsPage() {
         {activeTab === 'projects' && (
           projects.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-4">
-              <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-[var(--c-bg-deep)]">
+              <div className="flex size-16 items-center justify-center rounded-xl bg-[var(--c-bg-deep)]">
                 <FolderKanban size={28} className="text-[var(--c-text-secondary)]" />
               </div>
               <div className="text-center">

@@ -114,16 +114,16 @@ export function ProjectCard({ project }: ProjectCardProps) {
           <div className="flex items-center gap-1 bg-[var(--c-bg-page)] rounded-lg border-[0.5px] border-[var(--c-status-error-text)]/30 shadow-lg px-2 py-1.5">
             <AlertTriangle size={12} className="text-[var(--c-status-error-text)]" />
             <span className="text-[10px] text-[var(--c-text-tertiary)] whitespace-nowrap">{t.projectsCardDeleteConfirm}</span>
-            <button onClick={handleDelete} disabled={deleting}
+            <button type="button" onClick={handleDelete} disabled={deleting}
               className="text-[10px] px-1.5 py-0.5 rounded font-medium text-white disabled:opacity-50"
               style={{ backgroundColor: 'var(--c-status-error-text, #ef4444)' }}>
               {deleting ? '...' : t.commonConfirm}
             </button>
-            <button onClick={() => setConfirmDelete(false)} disabled={deleting}
+            <button type="button" onClick={() => setConfirmDelete(false)} disabled={deleting}
               className="text-[10px] px-1.5 py-0.5 rounded text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50">{t.commonCancel}</button>
           </div>
         ) : (
-          <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
+          <button type="button" onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
             className="rounded-md p-1 text-[var(--c-text-muted)] hover:text-[var(--c-status-error-text)] hover:bg-[var(--c-bg-page)]" title="删除项目">
             <Trash2 size={14} />
           </button>
@@ -135,7 +135,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
         className="text-left w-full pr-16"
       >
         <div className="flex items-start gap-2.5">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
             <FolderKanban size={16} className="text-[var(--c-text-icon)]" />
           </div>
           <div className="flex-1 min-w-0">

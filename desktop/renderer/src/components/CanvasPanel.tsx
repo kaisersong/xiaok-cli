@@ -168,7 +168,7 @@ export function CanvasPanel({ events, onClose, initialPreviewFile, initialPrevie
             key={key}
             type="button"
             onClick={() => setActiveTab(key)}
-            className={`flex flex-1 items-center justify-center gap-1.5 px-2 py-2 text-xs transition-colors ${
+            className={`flex flex-1 items-center justify-center gap-1.5 p-2 text-xs transition-colors ${
               activeTab === key
                 ? 'border-b-2 border-[var(--c-accent)] font-medium text-[var(--c-text-heading)]'
                 : 'text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)]'

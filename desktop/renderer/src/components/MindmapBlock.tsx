@@ -63,7 +63,17 @@ export function MindmapBlock({ content }: Props) {
   useEffect(() => {
     if (!markmapRef.current) return
     if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(() => updateData(content), DEBOUNCE_MS)
+    const timer = setTimeout(() => {
+      if (timerRef.current === timer) timerRef.current = null
+      updateData(content)
+    }, DEBOUNCE_MS)
+    timerRef.current = timer
+    return () => {
+      if (timerRef.current === timer) {
+        clearTimeout(timer)
+        timerRef.current = null
+      }
+    }
   }, [content, updateData])
 
   useEffect(() => {
@@ -107,7 +117,7 @@ export function MindmapBlock({ content }: Props) {
         >
           mindmap
         </span>
-        <button
+        <button type="button"
           onClick={() => setExpanded(prev => !prev)}
           style={{
             display: 'flex',

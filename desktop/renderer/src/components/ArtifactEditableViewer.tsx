@@ -164,7 +164,8 @@ export function ArtifactEditableViewer({
       <iframe
         ref={iframeRef}
         src={blobUrl}
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
+        title="Artifact preview"
+        sandbox="allow-scripts allow-forms allow-popups allow-downloads"
         onLoad={handleIframeLoad}
         className="artifact-editable-iframe"
       />

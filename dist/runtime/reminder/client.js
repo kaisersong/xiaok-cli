@@ -82,6 +82,10 @@ export class ReminderClientService {
     }
     async dispose() {
         this.disposed = true;
+        const connectPromise = this.connectPromise;
+        if (connectPromise) {
+            await connectPromise.catch(() => undefined);
+        }
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
             this.reconnectTimer = null;
@@ -158,7 +162,16 @@ export class ReminderClientService {
         }
         await spawnXiaokDaemonDetached(this.socketPath);
         await new Promise((resolve) => setTimeout(resolve, 300));
+        if (this.disposed) {
+            throw new Error('xiaok daemon unavailable');
+        }
         await this.openSocket();
+        if (this.disposed) {
+            const socket = this.socket;
+            this.socket = null;
+            socket?.destroy();
+            throw new Error('xiaok daemon unavailable');
+        }
     }
     async openSocket() {
         const socket = createConnection(this.socketPath);

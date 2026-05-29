@@ -120,9 +120,9 @@ export function ShareModal({ accessToken, threadId, open, onClose }: Props) {
           <h2 className="text-base font-semibold" style={{ color: 'var(--c-text-primary)' }}>
             {t.shareTitle}
           </h2>
-          <button
+          <button type="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--c-bg-deep)]"
+            className="flex size-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--c-bg-deep)]"
             style={{ color: 'var(--c-text-muted)' }}
           >
             <X size={16} />
@@ -204,7 +204,7 @@ export function ShareModal({ accessToken, threadId, open, onClose }: Props) {
                             transition={{ duration: 0.18, ease: 'easeOut' }}
                             style={{ overflow: 'hidden' }}
                           >
-                            <input
+                            <input aria-label={t.sharePasswordPlaceholder}
                               type="password"
                               value={password}
                               onChange={(e) => setPassword(e.target.value)}
@@ -236,7 +236,7 @@ export function ShareModal({ accessToken, threadId, open, onClose }: Props) {
                           style={{ background: liveUpdate ? 'var(--c-btn-bg)' : 'var(--c-bg-deep)' }}
                         >
                           <span
-                            className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform"
+                            className="absolute top-0.5 left-0.5 size-4 rounded-full bg-white transition-transform"
                             style={{ transform: liveUpdate ? 'translateX(16px)' : 'translateX(0)' }}
                           />
                         </button>
@@ -246,7 +246,7 @@ export function ShareModal({ accessToken, threadId, open, onClose }: Props) {
                         <p className="mb-3 text-xs" style={{ color: 'var(--c-destructive, #ef4444)' }}>{error}</p>
                       )}
 
-                      <button
+                      <button type="button"
                         onClick={() => void handleCreate()}
                         disabled={creating || (accessType === 'password' && !password.trim())}
                         className="flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
@@ -261,7 +261,7 @@ export function ShareModal({ accessToken, threadId, open, onClose }: Props) {
               </AnimatePresence>
 
               {!showCreateForm && (
-                <button
+                <button type="button"
                   onClick={() => { setError(null); setShowCreateForm(true) }}
                   className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-[var(--c-bg-sub)]"
                   style={{ color: 'var(--c-text-primary)', border: '0.5px dashed var(--c-border-subtle)' }}
@@ -315,7 +315,7 @@ function ShareItem({ share, deleting, onCopy, onDelete, t }: ShareItemProps) {
             {share.access_type === 'password' ? t.sharePassword : t.sharePublic}
           </span>
           {share.access_type === 'password' && share.password && (
-            <button
+            <button type="button"
               onClick={() => setShowPassword(v => !v)}
               className="flex items-center gap-1 text-xs transition-colors hover:opacity-70"
               style={{ color: 'var(--c-text-muted)' }}
@@ -332,7 +332,7 @@ function ShareItem({ share, deleting, onCopy, onDelete, t }: ShareItemProps) {
               : `${t.shareFrozen} \u00b7 ${t.shareTurnCount(share.snapshot_turn_count)}`}
           </span>
         </div>
-        <button
+        <button type="button"
           onClick={onDelete}
           disabled={deleting}
           className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors hover:bg-red-500/10 disabled:opacity-50"

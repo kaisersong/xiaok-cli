@@ -1,9 +1,7 @@
-import { useState, useRef, useEffect, createContext, useContext } from 'react'
+import { useState, useRef, useEffect, useContext } from 'react'
 import { createPortal } from 'react-dom'
-import type { WebSource } from '../storage'
 import { handleExternalAnchorClick } from '../openExternal'
-
-export const WebSourcesContext = createContext<WebSource[]>([])
+import { WebSourcesContext } from '../contexts/web-sources'
 
 // 用于 favicon 请求（需要完整域名）
 function getDomain(url: string): string {
@@ -121,7 +119,7 @@ export function CitationBadge({ indices }: Props) {
 
   return (
     <span style={{ position: 'relative', display: 'inline-block' }}>
-      <button
+      <button type="button"
         ref={badgeRef}
         onMouseEnter={openPopover}
         onMouseLeave={scheduleClose}
@@ -190,7 +188,7 @@ export function CitationBadge({ indices }: Props) {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <button
+                <button type="button"
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
                   disabled={page === 0}
                   style={{
@@ -213,7 +211,7 @@ export function CitationBadge({ indices }: Props) {
                 <span style={{ fontSize: '12px', color: 'var(--c-text-secondary)', minWidth: '36px', textAlign: 'center' }}>
                   {page + 1} / {validSources.length}
                 </span>
-                <button
+                <button type="button"
                   onClick={() => setPage((p) => Math.min(validSources.length - 1, p + 1))}
                   disabled={page === validSources.length - 1}
                   style={{

@@ -3,6 +3,25 @@ import { createPlatformRegistryFactory } from '../../../src/platform/runtime/reg
 import type { PlatformRuntimeContext } from '../../../src/platform/runtime/context.js';
 import type { ModelAdapter, Tool, ToolDefinition } from '../../../src/types.js';
 
+const mockState = vi.hoisted(() => ({
+  tools: [
+    { definition: { name: 'Read', description: 'Read file', inputSchema: {} }, execute: async () => '', permission: 'safe' },
+    { definition: { name: 'Write', description: 'Write file', inputSchema: {} }, execute: async () => '', permission: 'safe' },
+    { definition: { name: 'Edit', description: 'Edit file', inputSchema: {} }, execute: async () => '', permission: 'safe' },
+    { definition: { name: 'Bash', description: 'Run bash', inputSchema: {} }, execute: async () => '', permission: 'bash' },
+    { definition: { name: 'Grep', description: 'Search', inputSchema: {} }, execute: async () => '', permission: 'safe' },
+    { definition: { name: 'Glob', description: 'Find files', inputSchema: {} }, execute: async () => '', permission: 'safe' },
+    { definition: { name: 'WebFetch', description: 'Fetch URL', inputSchema: {} }, execute: async () => '', permission: 'safe' },
+    { definition: { name: 'WebSearch', description: 'Search web', inputSchema: {} }, execute: async () => '', permission: 'safe' },
+    // Simulate CC tools leaking into registry
+    { definition: { name: 'Agent', description: 'CC agent', inputSchema: {} }, execute: async () => '', permission: 'safe' },
+    { definition: { name: 'TaskCreate', description: 'CC task', inputSchema: {} }, execute: async () => '', permission: 'safe' },
+    { definition: { name: 'TaskUpdate', description: 'CC task', inputSchema: {} }, execute: async () => '', permission: 'safe' },
+    { definition: { name: 'TaskList', description: 'CC task', inputSchema: {} }, execute: async () => '', permission: 'safe' },
+    { definition: { name: 'ExitPlanMode', description: 'CC plan', inputSchema: {} }, execute: async () => '', permission: 'safe' },
+  ] as Tool[],
+}));
+
 // Mock dependencies
 vi.mock('./context.js', () => ({
   createPlatformRuntimeContext: vi.fn(),
@@ -16,37 +35,20 @@ function mockRegistry(tools: Tool[]) {
   };
 }
 
-const mockTools: Tool[] = [
-  { definition: { name: 'Read', description: 'Read file', inputSchema: {} }, execute: vi.fn(), permission: 'safe' },
-  { definition: { name: 'Write', description: 'Write file', inputSchema: {} }, execute: vi.fn(), permission: 'safe' },
-  { definition: { name: 'Edit', description: 'Edit file', inputSchema: {} }, execute: vi.fn(), permission: 'safe' },
-  { definition: { name: 'Bash', description: 'Run bash', inputSchema: {} }, execute: vi.fn(), permission: 'bash' },
-  { definition: { name: 'Grep', description: 'Search', inputSchema: {} }, execute: vi.fn(), permission: 'safe' },
-  { definition: { name: 'Glob', description: 'Find files', inputSchema: {} }, execute: vi.fn(), permission: 'safe' },
-  { definition: { name: 'WebFetch', description: 'Fetch URL', inputSchema: {} }, execute: vi.fn(), permission: 'safe' },
-  { definition: { name: 'WebSearch', description: 'Search web', inputSchema: {} }, execute: vi.fn(), permission: 'safe' },
-  // Simulate CC tools leaking into registry
-  { definition: { name: 'Agent', description: 'CC agent', inputSchema: {} }, execute: vi.fn(), permission: 'safe' },
-  { definition: { name: 'TaskCreate', description: 'CC task', inputSchema: {} }, execute: vi.fn(), permission: 'safe' },
-  { definition: { name: 'TaskUpdate', description: 'CC task', inputSchema: {} }, execute: vi.fn(), permission: 'safe' },
-  { definition: { name: 'TaskList', description: 'CC task', inputSchema: {} }, execute: vi.fn(), permission: 'safe' },
-  { definition: { name: 'ExitPlanMode', description: 'CC plan', inputSchema: {} }, execute: vi.fn(), permission: 'safe' },
-];
-
-vi.mock('../tools/index.js', () => ({
-  buildToolList: vi.fn(() => mockTools),
+vi.mock('../../../src/ai/tools/index.js', () => ({
+  buildToolList: vi.fn(() => mockState.tools),
   ToolRegistry: vi.fn().mockImplementation((_opts, tools) => mockRegistry(tools)),
 }));
 
-vi.mock('../sandbox/tool-wrappers.js', () => ({
+vi.mock('../../../src/platform/sandbox/tool-wrappers.js', () => ({
   applySandboxToTools: vi.fn((tools) => tools),
 }));
 
-vi.mock('../../runtime/hooks-runner.js', () => ({
+vi.mock('../../../src/runtime/hooks-runner.js', () => ({
   createHooksRunner: vi.fn(() => ({})),
 }));
 
-vi.mock('../tools/tool-pool.js', () => ({
+vi.mock('../../../src/ai/tools/tool-pool.js', () => ({
   mergeToolPools: vi.fn((nonMcp, mcp) => [...nonMcp, ...mcp]),
   isMcpTool: vi.fn(() => false),
 }));

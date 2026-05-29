@@ -324,7 +324,7 @@ export function GeneralSettings({ me, accessToken, onLogout, onMeUpdated }: Prop
                 void handleTestToolModel()
               }}
               disabled={testingToolModel || (!toolModelSelection && !toolModelTestResult)}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)] disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--c-text-muted)] transition-colors hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)] disabled:cursor-not-allowed disabled:opacity-40"
               style={secondaryButtonBorderStyle}
             >
               {testingToolModel
@@ -378,14 +378,14 @@ export function GeneralSettings({ me, accessToken, onLogout, onMeUpdated }: Prop
         <button
             type="button"
             onClick={() => openExternal(docsUrl)}
-            className="flex w-fit items-center gap-1.5 rounded-lg px-1 py-1 text-sm text-[var(--c-text-secondary)] hover:text-[var(--c-text-primary)]"
+            className="flex w-fit items-center gap-1.5 rounded-lg p-1 text-sm text-[var(--c-text-secondary)] hover:text-[var(--c-text-primary)]"
           >
             <HelpCircle size={14} /> {t.getHelp} <ArrowUpRight size={11} />
           </button>
         {!isLocalMode() && (
-          <button
+          <button type="button"
             onClick={onLogout}
-            className="flex w-fit items-center gap-1.5 rounded-lg px-1 py-1 text-sm text-[#ef4444] hover:text-[#f87171]"
+            className="flex w-fit items-center gap-1.5 rounded-lg p-1 text-sm text-[#ef4444] hover:text-[#f87171]"
           >
             <LogOut size={14} /> {t.logout}
           </button>
@@ -490,17 +490,17 @@ function ProfileSection({ displayName, localMode, me, ds, t }: {
           <img
             src={avatarUrl}
             alt="avatar"
-            className="h-12 w-12 rounded-full object-cover"
+            className="size-12 rounded-full object-cover"
           />
         ) : (
           <div
-            className="flex h-12 w-12 items-center justify-center rounded-full text-base font-semibold"
+            className="flex size-12 items-center justify-center rounded-full text-base font-semibold"
             style={{ background: 'var(--c-avatar-bg, #e2e8f0)', color: 'var(--c-avatar-text, #475569)' }}
           >
             {initial}
           </div>
         )}
-        <label className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full bg-[var(--c-bg-card)] shadow"
+        <label className="absolute -bottom-0.5 -right-0.5 flex size-5 cursor-pointer items-center justify-center rounded-full bg-[var(--c-bg-card)] shadow"
           title="更换头像"
         >
           <Camera size={10} />

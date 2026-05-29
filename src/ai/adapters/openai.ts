@@ -1,3 +1,5 @@
+import { Agent as HttpAgent } from 'node:http';
+import { Agent as HttpsAgent } from 'node:https';
 import OpenAI from 'openai';
 import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
 import type { ModelCapabilities, ModelInvocationOptions } from '../runtime/model-capabilities.js';
@@ -7,6 +9,16 @@ const MAX_RETRIES = 3;
 const KIMI_CODING_COMPAT_USER_AGENT = 'claude-code/1.0';
 const RAW_THINK_OPEN_TAG = '<think>';
 const RAW_THINK_CLOSE_TAG = '</think>';
+const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
+
+type OpenAIHttpAgent = HttpAgent | HttpsAgent;
+
+function createOpenAIHttpAgent(baseUrl?: string): OpenAIHttpAgent {
+  const protocol = new URL(baseUrl ?? DEFAULT_OPENAI_BASE_URL).protocol;
+  return protocol === 'http:'
+    ? new HttpAgent({ keepAlive: true })
+    : new HttpsAgent({ keepAlive: true });
+}
 
 function isKimiCodingEndpoint(baseUrl?: string): boolean {
   if (!baseUrl) return false;
@@ -155,6 +167,7 @@ export class OpenAIAdapter implements ModelAdapter {
   private readonly baseUrl?: string;
   private readonly defaultHeaders?: Record<string, string>;
   private readonly capabilityOverrides?: Partial<ModelCapabilities>;
+  private readonly httpAgent: OpenAIHttpAgent;
   private model: string;
 
   constructor(
@@ -168,10 +181,12 @@ export class OpenAIAdapter implements ModelAdapter {
     this.baseUrl = baseUrl;
     this.defaultHeaders = defaultHeaders;
     this.capabilityOverrides = capabilityOverrides;
+    this.httpAgent = createOpenAIHttpAgent(baseUrl);
     this.client = new OpenAI({
       apiKey,
       baseURL: baseUrl,
       maxRetries: MAX_RETRIES,
+      httpAgent: this.httpAgent,
       defaultHeaders: {
         ...(defaultHeaders ?? {}),
         ...(isKimiCodingEndpoint(baseUrl)
@@ -188,6 +203,10 @@ export class OpenAIAdapter implements ModelAdapter {
 
   getCapabilities(): Partial<ModelCapabilities> {
     return this.capabilityOverrides ?? {};
+  }
+
+  dispose(): void {
+    this.httpAgent.destroy();
   }
 
   cloneWithModel(model: string): OpenAIAdapter {

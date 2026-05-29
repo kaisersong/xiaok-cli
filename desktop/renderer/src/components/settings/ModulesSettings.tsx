@@ -210,7 +210,7 @@ export function ModulesSettings() {
       >
         <div className="flex items-center gap-2">
           <div
-            className="h-2 w-2 rounded-full"
+            className="size-2 rounded-full"
             style={{
               background:
                 bridgeOnline === null
@@ -265,7 +265,7 @@ export function ModulesSettings() {
                 style={{ border: "0.5px solid var(--c-border-subtle)" }}
               >
                 <div
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                  className="flex size-10 shrink-0 items-center justify-center rounded-xl"
                   style={{
                     background:
                       status === "running"
@@ -297,7 +297,7 @@ export function ModulesSettings() {
                     {statusLabel(status)}
                   </span>
                   {action && (
-                    <button
+                    <button type="button"
                       onClick={() => void handleAction(id, action)}
                       disabled={isActing || actionInProgress !== null}
                       className={`${secondaryButtonXsCls} rounded-md`}

@@ -127,7 +127,7 @@ export function EmailVerificationGate({ accessToken, email, onVerified, onPollVe
 
         {!showOtp ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <button
+            <button type="button"
               onClick={handleResend}
               disabled={resending || resendCountdown > 0}
               style={{
@@ -144,7 +144,7 @@ export function EmailVerificationGate({ accessToken, email, onVerified, onPollVe
                   : t.emailGateResend}
             </button>
 
-            <button
+            <button type="button"
               onClick={handleCheckNow}
               disabled={checking}
               style={{
@@ -157,7 +157,7 @@ export function EmailVerificationGate({ accessToken, email, onVerified, onPollVe
               {t.emailGateAlreadyVerified}
             </button>
 
-            <button
+            <button type="button"
               onClick={handleSwitchToOtp}
               style={{
                 height: '28px', borderRadius: '8px', border: 'none',
@@ -170,7 +170,7 @@ export function EmailVerificationGate({ accessToken, email, onVerified, onPollVe
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <input
+            <input aria-label={t.otpCodePlaceholder}
               type="text"
               inputMode="numeric"
               maxLength={6}
@@ -190,7 +190,7 @@ export function EmailVerificationGate({ accessToken, email, onVerified, onPollVe
             {otpError && (
               <p style={{ margin: 0, fontSize: '12px', color: 'var(--c-danger, #ef4444)' }}>{otpError}</p>
             )}
-            <button
+            <button type="button"
               onClick={handleVerifyOtp}
               disabled={otpCode.length !== 6 || otpSubmitting}
               style={{
@@ -202,7 +202,7 @@ export function EmailVerificationGate({ accessToken, email, onVerified, onPollVe
             >
               {t.otpVerifyBtn}
             </button>
-            <button
+            <button type="button"
               onClick={() => {
                 if (otpCountdown > 0 || otpSending) return
                 setOtpSending(true)
@@ -224,7 +224,7 @@ export function EmailVerificationGate({ accessToken, email, onVerified, onPollVe
         )}
 
         <div style={{ borderTop: '0.5px solid var(--c-border-subtle)', paddingTop: '12px' }}>
-          <button
+          <button type="button"
             onClick={onLogout}
             style={{
               width: '100%', height: '32px', borderRadius: '8px', border: 'none',

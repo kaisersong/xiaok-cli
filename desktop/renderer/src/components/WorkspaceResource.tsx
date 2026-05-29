@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Download, ExternalLink, FileCode2, X } from 'lucide-react'
-import { apiBaseUrl } from '../shared/api'
+import { apiBaseUrl } from '../shared/api/client'
 import { useLocale } from '../contexts/LocaleContext'
 import { ArtifactIframe } from './ArtifactIframe'
 
@@ -297,9 +297,9 @@ export function WorkspaceResource({ file, runId, projectId, accessToken }: Props
               transition,
             }}
           >
-            <button
+            <button type="button"
               onClick={closeLightbox}
-              className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--c-bg-deep)]"
+              className="flex size-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--c-bg-deep)]"
               style={{
                 position: 'absolute',
                 top: 16,
@@ -367,7 +367,7 @@ export function WorkspaceResource({ file, runId, projectId, accessToken }: Props
                 </span>
                 <ExternalLink size={14} />
               </a>
-              <button
+              <button type="button"
                 onClick={downloadCurrentFile}
                 style={{
                   display: 'inline-flex',
@@ -395,7 +395,7 @@ export function WorkspaceResource({ file, runId, projectId, accessToken }: Props
   }
 
   return (
-    <button
+    <button type="button"
       data-workspace-kind="binary"
       onClick={downloadCurrentFile}
       style={{

@@ -79,12 +79,12 @@ export function InviteCodeContent({ accessToken }: { accessToken: string }) {
               onCopy={handleCopy}
               size={13}
               tooltip={t.inviteCodeCopy}
-              className="flex h-6 w-6 items-center justify-center rounded text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]"
+              className="flex size-6 items-center justify-center rounded text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]"
             />
-            <button
+            <button type="button"
               onClick={handleReset}
               disabled={resetting}
-              className="flex h-6 w-6 items-center justify-center rounded text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)] disabled:opacity-50"
+              className="flex size-6 items-center justify-center rounded text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)] disabled:opacity-50"
               title={t.inviteCodeReset}
             >
               <RefreshCw size={13} className={resetting ? 'animate-spin' : ''} />

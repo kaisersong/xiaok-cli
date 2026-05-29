@@ -133,7 +133,7 @@ export function StatusBadge({
       }}
     >
       <span
-        className="inline-block h-1.5 w-1.5 rounded-full"
+        className="inline-block size-1.5 rounded-full"
         style={{ background: active ? 'currentColor' : 'var(--c-text-muted)' }}
       />
       {label}
@@ -250,7 +250,7 @@ export function ListField({
         </div>
       )}
       <div className="flex gap-2">
-        <input
+        <input aria-label={placeholder}
           type="text"
           value={inputValue}
           onChange={(event) => onInputChange(event.target.value)}
@@ -329,7 +329,7 @@ function BindingHeartbeatEditor({
   return (
     <div
       data-binding-id={binding.binding_id}
-      className="rounded-xl px-4 py-4"
+      className="rounded-xl p-4"
       style={{ border: '0.5px solid var(--c-border-subtle)', background: 'var(--c-bg-page)' }}
     >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -580,7 +580,7 @@ export function TokenField({
         {label}
       </label>
       <div className="relative">
-        <input
+        <input aria-label={placeholder}
           type={showToken ? 'text' : 'password'}
           value={value}
           onChange={(event) => onChange(event.target.value)}
