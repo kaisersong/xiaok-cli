@@ -1,38 +1,10 @@
-import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-
-const desktopRoot = join(__dirname, '..', '..');
-
-type ReactDoctorDiagnostic = {
-  severity: string;
-  category: string;
-  rule: string;
-  filePath: string;
-  line: number;
-  message: string;
-};
-
-type ReactDoctorReport = {
-  projects: Array<{
-    diagnostics: ReactDoctorDiagnostic[];
-  }>;
-};
+import { readReactDoctorDiagnostics, type ReactDoctorDiagnostic } from './react-doctor-report';
 
 let diagnostics: ReactDoctorDiagnostic[] = [];
 
-beforeAll(() => {
-  const output = execFileSync(
-    join(desktopRoot, 'node_modules', '.bin', 'react-doctor'),
-    ['--json', '--no-score', '--fail-on', 'none'],
-    {
-      cwd: desktopRoot,
-      encoding: 'utf8',
-      maxBuffer: 120 * 1024 * 1024,
-    },
-  );
-  const report = JSON.parse(output) as ReactDoctorReport;
-  diagnostics = report.projects.flatMap((project) => project.diagnostics);
+beforeAll(async () => {
+  diagnostics = await readReactDoctorDiagnostics(120 * 1024 * 1024);
 }, 90_000);
 
 function diagnosticsForRule(rule: string): ReactDoctorDiagnostic[] {
@@ -71,6 +43,14 @@ describe('React Doctor low-risk optimization batch', () => {
 
   it('clears repeated Intl formatter construction diagnostics', () => {
     expect(diagnosticsForRule('js-hoist-intl')).toEqual([]);
+  });
+
+  it('clears mechanical map/filter compaction diagnostics', () => {
+    expect(diagnosticsForRule('js-flatmap-filter')).toEqual([]);
+  });
+
+  it('keeps repeated collection lookup diagnostics limited to reviewed low-risk leftovers', () => {
+    expect(diagnosticsForRule('js-set-map-lookups').length).toBeLessThanOrEqual(4);
   });
 
   it('has a global reduced-motion fallback for desktop animations', () => {

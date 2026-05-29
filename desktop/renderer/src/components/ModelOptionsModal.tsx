@@ -163,17 +163,21 @@ function buildCatalog(model: LlmProviderModel, draft: DraftState): Record<string
   const inputModalities = new Set<string>(
     Array.isArray(currentCatalog.input_modalities)
       ? currentCatalog.input_modalities
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => item.trim())
-        .filter(Boolean)
+        .flatMap((item) => {
+          if (typeof item !== 'string') return []
+          const trimmed = item.trim()
+          return trimmed ? [trimmed] : []
+        })
       : [],
   )
   const outputModalities = new Set<string>(
     Array.isArray(currentCatalog.output_modalities)
       ? currentCatalog.output_modalities
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => item.trim())
-        .filter(Boolean)
+        .flatMap((item) => {
+          if (typeof item !== 'string') return []
+          const trimmed = item.trim()
+          return trimmed ? [trimmed] : []
+        })
       : [],
   )
 

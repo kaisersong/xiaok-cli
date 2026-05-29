@@ -298,7 +298,10 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
                 for (const item of items) {
                   if (item.type === 'text/plain') {
                     const text = await new Promise<string>(r => item.getAsString(r));
-                    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+                    const lines = text.split(/\r?\n/).flatMap(l => {
+                      const trimmed = l.trim();
+                      return trimmed ? [trimmed] : [];
+                    });
                     const paths = lines.filter(l => l.startsWith('/'));
                     if (paths.length > 0) {
                       e.preventDefault();

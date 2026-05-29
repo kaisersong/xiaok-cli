@@ -32,8 +32,10 @@ type ChannelType = (typeof CHANNEL_TYPES)[number]
 function parseAllowedUserIds(input: string): string[] {
   return input
     .split(/[\n,\s]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
+    .flatMap((item) => {
+      const trimmed = item.trim()
+      return trimmed ? [trimmed] : []
+    })
 }
 
 function readChannelConfigString(channel: ChannelResponse, key: string): string {

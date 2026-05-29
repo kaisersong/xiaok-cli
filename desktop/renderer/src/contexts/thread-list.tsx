@@ -67,6 +67,7 @@ export interface ThreadListContextValue {
 const ThreadListContext = createContext<ThreadListContextValue | null>(null)
 const THREAD_RUN_STATE_RECONNECT_DELAY_MS = 1000
 const GTD_BUCKETS: readonly ThreadGtdBucket[] = ['inbox', 'todo', 'waiting', 'someday', 'archived']
+const GTD_BUCKET_SET = new Set<ThreadGtdBucket>(GTD_BUCKETS)
 
 function sortThreadsByActivity(threads: ThreadResponse[]): ThreadResponse[] {
   return [...threads].sort((a, b) => {
@@ -136,7 +137,7 @@ function mirrorSidebarStateToLocal(threads: ThreadResponse[], skipThreadIds = ne
       gtdIds[bucket].delete(thread.id)
     }
     const bucket = thread.sidebar_gtd_bucket
-    if (bucket && GTD_BUCKETS.includes(bucket)) gtdIds[bucket].add(thread.id)
+    if (bucket && GTD_BUCKET_SET.has(bucket)) gtdIds[bucket].add(thread.id)
   }
 
   writePinnedThreadIds(pinnedIds)

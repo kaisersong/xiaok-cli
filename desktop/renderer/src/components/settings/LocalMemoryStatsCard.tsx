@@ -157,7 +157,12 @@ export function LocalMemoryStatsCard() {
   const handleAdd = useCallback(async () => {
     if (!memoryApi?.add || !addContent.trim()) return
     try {
-      const tags = addTags.trim() ? addTags.split(',').map(s => s.trim()).filter(Boolean) : undefined
+      const tags = addTags.trim()
+        ? addTags.split(',').flatMap(s => {
+          const trimmed = s.trim()
+          return trimmed ? [trimmed] : []
+        })
+        : undefined
       await memoryApi.add(addContent.trim(), tags?.[0])
       setAddContent('')
       setAddTags('')
@@ -186,7 +191,13 @@ export function LocalMemoryStatsCard() {
         const lines = trimmed.split('\n').filter(l => l.trim())
         const jsonLines = lines.every(l => l.trim().startsWith('{'))
         if (jsonLines) {
-          items = lines.map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+          items = lines.flatMap(l => {
+            try {
+              return [JSON.parse(l)]
+            } catch {
+              return []
+            }
+          })
         }
       }
 
@@ -224,7 +235,12 @@ export function LocalMemoryStatsCard() {
     if (!editingEntry || !memoryApi?.deleteEntry || !memoryApi?.add) return
     try {
       await memoryApi.deleteEntry(editingEntry.id, 0)
-      const tags = editTags.trim() ? editTags.split(',').map(s => s.trim()).filter(Boolean) : undefined
+      const tags = editTags.trim()
+        ? editTags.split(',').flatMap(s => {
+          const trimmed = s.trim()
+          return trimmed ? [trimmed] : []
+        })
+        : undefined
       await memoryApi.add(editContent.trim(), tags?.[0])
       setEditingEntry(null)
       void loadData()

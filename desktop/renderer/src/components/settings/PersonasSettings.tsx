@@ -74,7 +74,10 @@ function agentToForm(agent: LiteAgent): DetailForm {
 }
 
 function uniq(names: string[]): string[] {
-  return Array.from(new Set(names.map((n) => n.trim()).filter(Boolean)))
+  return Array.from(new Set(names.flatMap((name) => {
+    const trimmed = name.trim()
+    return trimmed ? [trimmed] : []
+  })))
 }
 
 function buildModelOptions(providers: LlmProvider[]): ModelOption[] {

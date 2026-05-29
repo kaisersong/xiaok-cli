@@ -678,7 +678,7 @@ export function ChatShell() {
     toolStepsMsgIdRef.current = null;
 
     // Add user message immediately (include file names in content)
-    const fileNames = files?.map(f => f.name).filter(Boolean);
+    const fileNames = files?.flatMap(f => f.name ? [f.name] : []);
     const displayContent = fileNames && fileNames.length > 0
       ? `${text}\n\n附件: ${fileNames.join(', ')}`
       : text;
@@ -704,8 +704,10 @@ export function ChatShell() {
     }
 
     const contextTaskIds = (thread?.taskIds ?? [])
-      .map(id => id.trim())
-      .filter(Boolean);
+      .flatMap(id => {
+        const trimmed = id.trim();
+        return trimmed ? [trimmed] : [];
+      });
     const submitContext = contextTaskIds.length > 0
       ? { threadId: thread?.id ?? taskId, taskIds: contextTaskIds }
       : undefined;

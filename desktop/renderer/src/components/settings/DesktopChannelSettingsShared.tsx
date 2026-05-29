@@ -161,8 +161,10 @@ export function readStringArrayConfig(channel: ChannelResponse | null, key: stri
 export function parseListValues(input: string): string[] {
   return input
     .split(/[\n,\s]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
+    .flatMap((item) => {
+      const trimmed = item.trim()
+      return trimmed ? [trimmed] : []
+    })
 }
 
 export function mergeListValues(existing: string[], pendingInput: string): string[] {
