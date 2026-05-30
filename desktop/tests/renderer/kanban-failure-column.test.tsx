@@ -16,10 +16,10 @@ afterEach(() => {
   cleanup();
 });
 
-function renderKanban(tasks: any[], onStartTaskWorkflow?: (taskId: string) => void) {
+function renderKanban(tasks: any[], onStartTaskWorkflow?: (taskId: string) => void, projectOverrides: Record<string, unknown> = {}) {
   return render(
     <LocaleProvider>
-      <KanbanBoard project={{ id: 'proj-story', name: '写一个AI工作小故事', status: 'active', tasks } as any} onStartTaskWorkflow={onStartTaskWorkflow} />
+      <KanbanBoard project={{ id: 'proj-story', name: '写一个AI工作小故事', status: 'active', tasks, ...projectOverrides } as any} onStartTaskWorkflow={onStartTaskWorkflow} />
     </LocaleProvider>
   );
 }
@@ -163,5 +163,20 @@ describe('KSwarm kanban failure visibility', () => {
     expect(within(active).getByText('工作流执行')).toBeInTheDocument();
     expect(within(active).getByText('交付复核')).toBeInTheDocument();
     expect(within(pending).getByText('快速执行')).toBeInTheDocument();
+  });
+
+  it('shows the project workflow-preferred execution preview before task dispatch records execution', () => {
+    renderKanban([
+      {
+        id: 'workflow-preview-task',
+        title: '验证任务级工作流',
+        status: 'pending',
+        assignedAgent: 'worker',
+      },
+    ], undefined, { executionMode: 'workflow_preferred' });
+
+    const pending = screen.getByTestId('kanban-column-pending');
+    expect(within(pending).getByText('工作流执行')).toBeInTheDocument();
+    expect(within(pending).getByText('高质量')).toBeInTheDocument();
   });
 });

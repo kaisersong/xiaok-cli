@@ -11,6 +11,8 @@ const {
   mockStartWorkflowRunFromProposal,
   mockCancelWorkflowRun,
   mockUpdateProjectExecutionMode,
+  mockApproveProject,
+  mockDispatchTasks,
   mockServiceStatus,
 } = vi.hoisted(() => ({
   mockGetProjectFullDetail: vi.fn(),
@@ -20,6 +22,8 @@ const {
   mockStartWorkflowRunFromProposal: vi.fn(),
   mockCancelWorkflowRun: vi.fn(),
   mockUpdateProjectExecutionMode: vi.fn(),
+  mockApproveProject: vi.fn(),
+  mockDispatchTasks: vi.fn(),
   mockServiceStatus: { current: null as null | { running: boolean; port: number; pid: number | null; restartCount: number; lastError: string | null } },
 }));
 
@@ -28,10 +32,10 @@ vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
     connected: true,
     agents: [],
     getProjectFullDetail: mockGetProjectFullDetail,
-    approveProject: vi.fn(),
+    approveProject: mockApproveProject,
     retryPlan: vi.fn(),
     continueProject: vi.fn(),
-    dispatchTasks: vi.fn(),
+    dispatchTasks: mockDispatchTasks,
     deliverProject: vi.fn(),
     closeProject: vi.fn(),
     deleteProject: vi.fn(),
@@ -461,6 +465,8 @@ describe('WorkflowStatusStrip', () => {
     expect(dialog).toBeInTheDocument();
     expect(dialog.className).toContain('bg-[var(--c-bg-card)]');
     expect(dialog.className).not.toContain('/10');
+    expect(dialog.className).toContain('left-0');
+    expect(dialog.className).not.toContain('right-0');
     expect(screen.getByText('执行方式：工作流执行')).toBeInTheDocument();
     expect(screen.getByText('参与 Agent：xiaok-worker / xiaok-po')).toBeInTheDocument();
     expect(screen.getByText('Worker 项目诊断')).toBeInTheDocument();
@@ -543,6 +549,90 @@ describe('WorkflowStatusStrip', () => {
 });
 
 describe('ProjectDetailPage workflow action', () => {
+  it('shows a success notice when project approval succeeds', async () => {
+    const initial = workflowDetail({
+      project: {
+        ...workflowDetail().project,
+        status: 'planning',
+      },
+    });
+    const refreshed = workflowDetail({
+      project: {
+        ...workflowDetail().project,
+        status: 'active',
+      },
+    });
+    mockGetProjectFullDetail.mockResolvedValueOnce(initial).mockResolvedValueOnce(refreshed);
+    mockApproveProject.mockResolvedValue(true);
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
+      </Routes>,
+      '/projects/proj-workflow'
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '审批' }));
+
+    await waitFor(() => expect(mockApproveProject).toHaveBeenCalledWith('proj-workflow'));
+    expect(await screen.findByRole('status')).toHaveTextContent('审批已通过，可分发任务。');
+  });
+
+  it('shows a visible error when project approval is blocked', async () => {
+    const detail = workflowDetail({
+      project: {
+        ...workflowDetail().project,
+        status: 'planning',
+      },
+    });
+    mockGetProjectFullDetail.mockResolvedValue(detail);
+    mockApproveProject.mockResolvedValue(false);
+
+    renderProjectDetail(detail);
+
+    fireEvent.click(await screen.findByRole('button', { name: '审批' }));
+
+    await waitFor(() => expect(mockApproveProject).toHaveBeenCalledWith('proj-workflow'));
+    expect(await screen.findByText('审批失败：项目准备未完成，请检查智能体状态或重新制定计划。')).toBeInTheDocument();
+  });
+
+  it('shows a success notice when dispatch starts task workflows', async () => {
+    const initial = workflowDetail({
+      project: {
+        ...workflowDetail().project,
+        status: 'active',
+        executionMode: 'workflow_preferred',
+      },
+      workflowRuns: [],
+    });
+    const refreshed = workflowDetail({
+      project: {
+        ...workflowDetail().project,
+        status: 'active',
+        executionMode: 'workflow_preferred',
+      },
+      workflowRuns: [taskWorkflowRun()],
+    });
+    mockGetProjectFullDetail.mockResolvedValueOnce(initial).mockResolvedValueOnce(refreshed);
+    mockDispatchTasks.mockResolvedValue({
+      dispatched: [],
+      workflowRuns: [{ id: 'wf-proj-workflow-po-generated-task-workflow-1770000000000' }],
+      workflowNodeDispatches: [{ workflowRunId: 'wf-proj-workflow-po-generated-task-workflow-1770000000000', nodeId: 'worker-produce-deliverable' }],
+    });
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
+      </Routes>,
+      '/projects/proj-workflow'
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '分发任务' }));
+
+    await waitFor(() => expect(mockDispatchTasks).toHaveBeenCalledWith('proj-workflow', 'xiaok-po'));
+    expect(await screen.findByRole('status')).toHaveTextContent('已启动任务工作流，正在生成交付物。');
+  });
+
   it('starts project diagnose workflow and refreshes project detail', async () => {
     const initial = workflowDetail({ workflowRuns: [] });
     const refreshed = workflowDetail();
@@ -599,6 +689,8 @@ describe('ProjectDetailPage workflow action', () => {
     const dialog = await screen.findByRole('dialog', { name: '工作流执行确认' });
     expect(dialog.className).toContain('bg-[var(--c-bg-card)]');
     expect(dialog.className).not.toContain('/10');
+    expect(dialog.className).toContain('left-0');
+    expect(dialog.className).not.toContain('right-0');
     expect(dialog).toHaveTextContent('Agent 复核诊断');
     expect(dialog).toHaveTextContent('目标');
     expect(dialog).toHaveTextContent('Agent 复核诊断验收标准');

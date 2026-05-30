@@ -203,6 +203,68 @@ describe('desktop services', () => {
     });
   });
 
+  it('runs a task workflow node without reporting system plan artifacts as deliverables', async () => {
+    const workFolder = join(rootDir, 'workflow-project');
+    const artifactsDir = join(workFolder, 'artifacts');
+    const finalArtifactPath = join(artifactsDir, 'workflow-final-report.md');
+    const planArtifactPath = join(artifactsDir, 'plan-v1.md');
+    let receivedPrompt = '';
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner: async ({ prompt, emitRuntimeEvent, sessionId }) => {
+        receivedPrompt = prompt;
+        mkdirSync(artifactsDir, { recursive: true });
+        writeFileSync(planArtifactPath, '# System plan');
+        writeFileSync(finalArtifactPath, '# Final report');
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            output: {
+              summary: '最终报告已生成。',
+              artifacts: [{ path: finalArtifactPath, kind: 'markdown', label: 'workflow-final-report.md' }],
+              evidenceRefs: [`artifact:${finalArtifactPath}`],
+            },
+          }),
+        });
+      },
+    });
+
+    const result = await services.runKSwarmWorkflowNode({
+      handoff: {
+        projectId: 'proj-workflow',
+        workflowRunId: 'wf-proj-workflow-po-generated-task-workflow-1',
+        workflowId: 'po-generated-task-workflow',
+        nodeId: 'worker-produce-deliverable',
+        nodeKind: 'agent_task',
+        nodeTitle: 'Worker 生成任务交付物',
+        attempt: 1,
+        handoffId: 'wfhd-1',
+        project: { id: 'proj-workflow', name: 'Workflow project', goal: 'Verify workflow', status: 'active', workFolder },
+        input: {
+          sourceTask: {
+            id: 'proj-workflow__item-1',
+            title: 'Write final report',
+            acceptanceCriteria: '必须包含真实 workflow run ID。',
+            requiredOutputs: ['markdown'],
+          },
+        },
+      },
+      targetParticipantId: 'xiaok-worker',
+    });
+
+    expect(receivedPrompt).toContain('真实 workflow run ID 是 wf-proj-workflow-po-generated-task-workflow-1');
+    expect(result.output?.artifacts).toEqual([
+      { path: finalArtifactPath, kind: 'markdown', label: 'workflow-final-report.md' },
+    ]);
+    expect(result.output?.evidenceRefs).toEqual([`artifact:${finalArtifactPath}`]);
+  });
+
   it('runs a side-effect-free kswarm readiness probe', async () => {
     const runner = vi.fn(async () => {
       throw new Error('probe_must_not_run_user_task');

@@ -100,9 +100,22 @@ function getTaskTimeMeta(task: KSwarmTask): { label: string; value: number } | n
   return null;
 }
 
-function getTaskExecutionView(task: KSwarmTask): { label: string; reason?: string; tone: 'direct' | 'workflow' } | null {
+function getProjectExecutionPreview(mode?: KSwarmProject['executionMode']): { label: string; reason?: string; tone: 'direct' | 'workflow' } | null {
+  if (mode === 'workflow_preferred') {
+    return { label: '工作流执行', reason: '高质量', tone: 'workflow' };
+  }
+  if (mode === 'auto') {
+    return { label: '智能选择', tone: 'direct' };
+  }
+  if (mode === 'direct') {
+    return { label: '快速执行', tone: 'direct' };
+  }
+  return null;
+}
+
+function getTaskExecutionView(task: KSwarmTask, projectExecutionMode?: KSwarmProject['executionMode']): { label: string; reason?: string; tone: 'direct' | 'workflow' } | null {
   const execution = task.execution;
-  if (!execution?.strategy) return null;
+  if (!execution?.strategy) return getProjectExecutionPreview(projectExecutionMode);
   if (execution.strategy === 'workflow') {
     return {
       label: '工作流执行',
@@ -136,11 +149,13 @@ function formatExecutionReason(reasonCode?: string): string {
 function TaskCard({
   task,
   projectId,
+  projectExecutionMode,
   onPreviewArtifact,
   onStartTaskWorkflow,
 }: {
   task: KSwarmTask;
   projectId: string;
+  projectExecutionMode?: KSwarmProject['executionMode'];
   onPreviewArtifact: (art: KSwarmArtifact) => void;
   onStartTaskWorkflow?: (taskId: string) => void;
 }) {
@@ -159,7 +174,7 @@ function TaskCard({
   const review = (task as any).reviewResult;
   const hasArtifacts = result.artifacts && result.artifacts.length > 0;
   const failureReason = task.blockedReason || task.failureReason || task.lastFailureClass || task.failureClass || review?.feedback || '';
-  const executionView = getTaskExecutionView(task);
+  const executionView = getTaskExecutionView(task, projectExecutionMode);
 
   const agentName = (id?: string) => {
     if (!id) return '';
@@ -438,6 +453,7 @@ export function KanbanBoard({ project, onStartTaskWorkflow }: KanbanBoardProps) 
                     key={task.id}
                     task={task}
                     projectId={project.id}
+                    projectExecutionMode={project.executionMode || 'direct'}
                     onPreviewArtifact={setPreviewArtifact}
                     onStartTaskWorkflow={onStartTaskWorkflow}
                   />

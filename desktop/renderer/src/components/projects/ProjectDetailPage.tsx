@@ -8,7 +8,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, LayoutGrid, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users, Download, FolderOpen, Circle, Loader, Clock, AlertTriangle, CircleOff } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import type { KSwarmProject, KSwarmProjectExecutionMode, ProjectIntervention, KSwarmWorkflowProposal, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
+import type { DispatchTasksResult, KSwarmProject, KSwarmProjectExecutionMode, ProjectIntervention, KSwarmWorkflowProposal, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
 import type { ProjectFullDetail } from '../../hooks/useKSwarmClient';
 import { PlanView } from './PlanView';
 import { KanbanBoard } from './KanbanBoard';
@@ -32,7 +32,7 @@ import {
 
 type TabId = 'plan' | 'board' | 'agents' | 'activity' | 'deliverables';
 type ActionNotice = {
-  action: 'retry' | 'export' | 'continue' | 'close' | 'workflow' | 'execution_mode';
+  action: 'approve' | 'dispatch' | 'retry' | 'export' | 'continue' | 'close' | 'workflow' | 'execution_mode';
   kind: 'info' | 'success' | 'error';
   message: string;
 };
@@ -449,6 +449,14 @@ export function ProjectDetailPage() {
     }
   };
 
+  const describeDispatchResult = (result: DispatchTasksResult | null | undefined) => {
+    const workflowCount = (result?.workflowRuns?.length ?? 0) + (result?.workflowNodeDispatches?.length ?? 0);
+    if (workflowCount > 0) return '已启动任务工作流，正在生成交付物。';
+    const dispatchedCount = result?.dispatched?.length ?? 0;
+    if (dispatchedCount > 0) return `已分发 ${dispatchedCount} 个任务。`;
+    return '没有可分发任务，项目状态已刷新。';
+  };
+
   const startRetryCooldown = () => {
     if (retryCooldownRef.current) clearTimeout(retryCooldownRef.current);
     setRetryCooldownUntil(Date.now() + RETRY_PLAN_COOLDOWN_MS);
@@ -458,9 +466,25 @@ export function ProjectDetailPage() {
   const handleAction = async (action: string, fn: () => Promise<any>) => {
     if (!projectId) return;
     setActionLoading(action);
-    await fn();
-    await refreshOnce();
-    setActionLoading(null);
+    try {
+      const result = await fn();
+      await refreshOnce();
+      if (action === 'approve' && !result) {
+        showNotice({ action: 'approve', kind: 'error', message: '审批失败：项目准备未完成，请检查智能体状态或重新制定计划。' }, 8_000);
+      } else if (action === 'approve') {
+        showNotice({ action: 'approve', kind: 'success', message: '审批已通过，可分发任务。' }, 5_000);
+      } else if (action === 'dispatch') {
+        showNotice({ action: 'dispatch', kind: 'success', message: describeDispatchResult(result) }, 5_000);
+      }
+    } catch {
+      if (action === 'approve') {
+        showNotice({ action: 'approve', kind: 'error', message: '审批失败：项目准备未完成，请检查智能体状态或重新制定计划。' }, 8_000);
+      } else if (action === 'dispatch') {
+        showNotice({ action: 'dispatch', kind: 'error', message: '分发任务失败，请稍后重试。' }, 8_000);
+      }
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const handleExecutionModeChange = async (executionMode: KSwarmProjectExecutionMode) => {

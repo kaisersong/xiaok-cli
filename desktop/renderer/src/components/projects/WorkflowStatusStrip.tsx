@@ -171,7 +171,7 @@ export function WorkflowStatusStrip({
         <div
           role="dialog"
           aria-label={dialogLabel}
-          className="absolute right-0 top-full z-50 mt-2 w-[min(560px,calc(100vw-48px))] rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-secondary)] shadow-xl"
+          className="absolute left-0 top-full z-50 mt-2 w-[min(560px,calc(100vw-48px))] rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-secondary)] shadow-xl"
         >
           <div className="flex flex-wrap items-start gap-2">
             <span className="flex min-w-0 items-center gap-1.5 text-[12px] font-semibold">
@@ -229,7 +229,7 @@ export function WorkflowStatusStrip({
         <div
           role="dialog"
           aria-label="工作流执行确认"
-          className="absolute right-0 top-full z-50 mt-2 w-[min(620px,calc(100vw-48px))] rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-secondary)] shadow-xl"
+          className="absolute left-0 top-full z-50 mt-2 w-[min(620px,calc(100vw-48px))] rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-secondary)] shadow-xl"
         >
           <div className="flex items-start gap-2">
             <div className="min-w-0">

@@ -1083,9 +1083,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
 
   async function runKSwarmWorkflowNode({ handoff, targetParticipantId }: { handoff: KSwarmWorkflowNodeHandoff; targetParticipantId?: string }) {
     const workspaceRoot = handoff.project?.workFolder || process.cwd();
+    const artifactsDir = handoff.project?.workFolder ? join(handoff.project.workFolder, 'artifacts') : '';
+    const taskDeliverableNode = isKSwarmTaskDeliverableWorkflowNode(handoff);
+    if (taskDeliverableNode && artifactsDir) mkdirSync(artifactsDir, { recursive: true });
     const taskHost = createKSwarmTaskHost(workspaceRoot);
-    const prompt = buildKSwarmWorkflowNodePrompt(handoff, targetParticipantId || 'xiaok-worker');
-    const { summary } = await runKSwarmRuntimeTextTask(taskHost, prompt);
+    const runStartedAt = Date.now();
+    const prompt = buildKSwarmWorkflowNodePrompt(handoff, targetParticipantId || 'xiaok-worker', { artifactsDir });
+    const { summary, artifacts } = await runKSwarmRuntimeTextTask(taskHost, prompt, {
+      artifactsDir,
+      runStartedAt,
+    });
     const parsed = extractKSwarmJsonObject(summary);
 
     if (handoff.nodeKind === 'review') {
@@ -1095,8 +1102,25 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return { output, reviewDecision };
     }
 
+    const output = normalizeKSwarmWorkflowNodeOutput(isRecord(parsed.output) ? parsed.output : parsed, summary);
+    if (taskDeliverableNode) {
+      const mergedArtifacts = mergeKSwarmArtifacts(output.artifacts, artifacts);
+      if (mergedArtifacts.length === 0) {
+        throw new Error('workflow_artifact_evidence_missing');
+      }
+      return {
+        output: {
+          ...output,
+          artifacts: mergedArtifacts,
+          ...(artifactsDir ? { workFolder: workspaceRoot, workspacePath: workspaceRoot } : {}),
+          evidenceRefs: mergeKSwarmEvidenceRefs(output.evidenceRefs, mergedArtifacts),
+        },
+        reviewDecision: null,
+      };
+    }
+
     return {
-      output: normalizeKSwarmWorkflowNodeOutput(isRecord(parsed.output) ? parsed.output : parsed, summary),
+      output,
       reviewDecision: null,
     };
   }
@@ -2108,6 +2132,7 @@ function discoverKSwarmArtifactsFromDirectory(input: {
   const discovered: Array<{ path: string; kind: string; label: string }> = [];
   for (const entry of readdirSync(artifactsDir, { withFileTypes: true })) {
     if (!entry.isFile() || entry.name.startsWith('.')) continue;
+    if (isKSwarmSystemArtifactFilename(entry.name)) continue;
     const filePath = join(artifactsDir, entry.name);
     if (known.has(filePath)) continue;
     let stat;
@@ -2126,6 +2151,10 @@ function discoverKSwarmArtifactsFromDirectory(input: {
   return discovered.sort((left, right) => left.label.localeCompare(right.label));
 }
 
+function isKSwarmSystemArtifactFilename(filename: string): boolean {
+  return filename === 'plan-v1.md' || filename === 'synthesis.md';
+}
+
 function kindFromFilename(filename: string): string {
   const extension = extname(filename).toLowerCase();
   if (extension === '.md' || extension === '.markdown') return 'markdown';
@@ -2139,15 +2168,29 @@ function kindFromFilename(filename: string): string {
 async function runKSwarmRuntimeTextTask(
   host: InProcessTaskRuntimeHost,
   prompt: string,
-): Promise<{ taskId: string; summary: string }> {
+  options: { artifactsDir?: string; runStartedAt?: number } = {},
+): Promise<{ taskId: string; summary: string; artifacts: Array<{ path: string; kind: string; label?: string }> }> {
   const created = await host.createTask({ prompt, materials: [] });
+  const runStartedAt = options.runStartedAt || Date.now();
   const deadline = Date.now() + 10 * 60 * 1000;
   while (Date.now() < deadline) {
     const recovered = await host.recoverTask(created.taskId);
     if (recovered.snapshot.status === 'completed') {
+      const artifactEvents = recovered.snapshot.events.filter(event => event.type === 'artifact_recorded');
+      const eventArtifacts = artifactEvents.map(event => ({
+        path: (event as any).filePath || (event as any).path,
+        kind: inferKSwarmArtifactKind((event as any).kind, (event as any).label),
+        label: (event as any).label,
+      })).filter(artifact => artifact.path);
+      const discoveredArtifacts = discoverKSwarmArtifactsFromDirectory({
+        artifactsDir: options.artifactsDir || '',
+        runStartedAt,
+        knownPaths: eventArtifacts.map(artifact => artifact.path),
+      });
       return {
         taskId: created.taskId,
         summary: recovered.snapshot.result?.summary || '',
+        artifacts: [...eventArtifacts, ...discoveredArtifacts],
       };
     }
     if (recovered.snapshot.status === 'failed' || recovered.snapshot.status === 'cancelled') {
@@ -2158,12 +2201,13 @@ async function runKSwarmRuntimeTextTask(
   throw new Error('desktop_task_timeout');
 }
 
-function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, participantId: string): string {
+function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, participantId: string, options: { artifactsDir?: string } = {}): string {
   const project = handoff.project || { id: handoff.projectId };
   const base = [
     'KSwarm 动态工作流节点执行。',
     `执行者：${participantId}`,
     `工作流：${handoff.workflowId}`,
+    `真实 workflow run ID：${handoff.workflowRunId}`,
     `节点：${handoff.nodeTitle} (${handoff.nodeId})`,
     `项目：${project.name || project.id}`,
     project.goal ? `目标：${project.goal}` : '',
@@ -2174,11 +2218,29 @@ function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, parti
   if (handoff.nodeKind === 'review') {
     return [
       ...base,
-      '你是 reviewer / adversarial agent。请审查 worker 输出是否足够可靠、是否存在明显遗漏、是否能支撑下一步行动。',
+      '你是 reviewer / adversarial agent。请审查 worker 输出是否足够可靠、是否存在明显遗漏、是否包含可复核交付物证据、是否能支撑下一步行动。',
+      '如果节点输入包含 sourceTask，则 sourceTask 是唯一验收范围；项目 plan、plan-v1 或其他任务只能作为背景证据，不能要求源任务以外的任务先完成。',
+      `如果交付物需要 workflow run ID，必须检查它是否使用真实 workflow run ID：${handoff.workflowRunId}；不能接受自行推导或占位 ID。`,
       '只返回一个 JSON 对象，不要返回 Markdown 包裹：',
       '{"reviewDecision":{"status":"passed|needs_rework|blocked","reason":"一句明确原因","evidenceRefs":["可选证据引用"]},"output":{"summary":"复核摘要"}}',
       'status 只能是 passed、needs_rework、blocked。reason 不能为空。',
     ].join('\n');
+  }
+
+  if (isKSwarmTaskDeliverableWorkflowNode(handoff)) {
+    return [
+      ...base,
+      options.artifactsDir ? `产物目录：${options.artifactsDir}` : '',
+      '你是 worker agent。请执行节点输入中的 sourceTask，产出当前任务的最终交付物，而不是只写诊断或计划。',
+      `真实 workflow run ID 是 ${handoff.workflowRunId}；如果正文需要 workflow run ID，只能使用这个值，不要自行推导、缩写或伪造。`,
+      'sourceTask 是唯一工作范围；项目 plan、plan-v1 或 taskSnapshot 中的其他任务只能作为背景，不是本节点必须完成的额外任务。',
+      '必须逐条满足 sourceTask.description、sourceTask.acceptanceCriteria 和 sourceTask.requiredOutputs；如果验收标准要求项目 ID、任务 ID、workflow run ID 或 artifact 路径，正文中必须明确写出这些值。',
+      '必须把完整、可复核的交付物文件写入产物目录；推荐 markdown 文件，文件名使用英文小写和连字符。',
+      'JSON 输出只放 manifest，不要把完整正文塞进 JSON。',
+      '只返回一个 JSON 对象，不要返回 Markdown 包裹：',
+      '{"output":{"summary":"交付物摘要，说明文件内容和完成范围","artifacts":[{"path":"绝对路径或相对产物路径","kind":"markdown","label":"文件名"}],"workFolder":"项目工作区路径","evidenceRefs":["artifact:文件路径"]}}',
+      '如果不能生成可读文件，status 不能假装完成；请在 summary 说明阻塞原因。',
+    ].filter(Boolean).join('\n');
   }
 
   return [
@@ -2187,6 +2249,40 @@ function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, parti
     '只返回一个 JSON 对象，不要返回 Markdown 包裹：',
     '{"output":{"summary":"诊断摘要","findings":["发现"],"recommendedActions":["建议"],"evidenceRefs":["证据引用"]}}',
   ].join('\n');
+}
+
+function isKSwarmTaskDeliverableWorkflowNode(handoff: KSwarmWorkflowNodeHandoff): boolean {
+  return handoff.workflowId === 'po-generated-task-workflow' && handoff.nodeId === 'worker-produce-deliverable';
+}
+
+function mergeKSwarmArtifacts(
+  rawArtifacts: unknown,
+  discoveredArtifacts: Array<{ path: string; kind: string; label?: string }> = [],
+) {
+  const merged = new Map<string, { path: string; kind: string; label?: string }>();
+  const add = (artifact: unknown) => {
+    if (!isRecord(artifact)) return;
+    const path = readString(artifact.path) || readString(artifact.relativePath) || readString(artifact.filename);
+    if (!path) return;
+    merged.set(path, {
+      path,
+      kind: inferKSwarmArtifactKind(readString(artifact.kind) || readString(artifact.type), readString(artifact.label) || readString(artifact.filename) || path),
+      label: readString(artifact.label) || readString(artifact.filename) || basename(path),
+    });
+  };
+  if (Array.isArray(rawArtifacts)) {
+    for (const artifact of rawArtifacts) add(artifact);
+  }
+  for (const artifact of discoveredArtifacts) add(artifact);
+  return [...merged.values()];
+}
+
+function mergeKSwarmEvidenceRefs(rawEvidenceRefs: unknown, artifacts: Array<{ path: string }>) {
+  const refs = new Set(readStringArray(rawEvidenceRefs));
+  for (const artifact of artifacts) {
+    if (artifact.path) refs.add(`artifact:${artifact.path}`);
+  }
+  return [...refs];
 }
 
 function buildKSwarmAssignPoPrompt(payload: Record<string, unknown>, fallbackWorkerId: string): string {
@@ -2377,7 +2473,7 @@ function normalizeKSwarmReview(rawReview: Record<string, unknown>) {
   };
 }
 
-function normalizeKSwarmWorkflowNodeOutput(rawOutput: Record<string, unknown>, fallbackSummary: string) {
+function normalizeKSwarmWorkflowNodeOutput(rawOutput: Record<string, unknown>, fallbackSummary: string): Record<string, unknown> & { summary: string } {
   return {
     ...rawOutput,
     summary: readString(rawOutput.summary) || fallbackSummary || 'workflow node completed',
