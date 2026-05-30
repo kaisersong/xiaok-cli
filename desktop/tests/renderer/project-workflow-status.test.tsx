@@ -3,9 +3,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { ProjectFullDetail } from '../../renderer/src/hooks/useKSwarmClient';
 
-const { mockGetProjectFullDetail, mockStartProjectDiagnoseWorkflow } = vi.hoisted(() => ({
+const { mockGetProjectFullDetail, mockStartProjectDiagnoseWorkflow, mockStartProjectAgentReviewSmokeWorkflow } = vi.hoisted(() => ({
   mockGetProjectFullDetail: vi.fn(),
   mockStartProjectDiagnoseWorkflow: vi.fn(),
+  mockStartProjectAgentReviewSmokeWorkflow: vi.fn(),
 }));
 
 vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
@@ -21,6 +22,7 @@ vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
     closeProject: vi.fn(),
     deleteProject: vi.fn(),
     startProjectDiagnoseWorkflow: mockStartProjectDiagnoseWorkflow,
+    startProjectAgentReviewSmokeWorkflow: mockStartProjectAgentReviewSmokeWorkflow,
   }),
 }));
 
@@ -63,6 +65,94 @@ function renderWithProviders(ui: React.ReactNode, initialPath = '/') {
       </MemoryRouter>
     </LocaleProvider>
   );
+}
+
+function agentWorkflowRun() {
+  return {
+    id: 'wf-proj-workflow-agent-review-smoke-1770000000000',
+    projectId: 'proj-workflow',
+    workflowId: 'agent-review-smoke',
+    title: 'Agent 工作流 smoke',
+    strategy: 'workflow' as const,
+    source: 'builtin-smoke',
+    status: 'completed' as const,
+    createdAt: 1770000000000,
+    updatedAt: 1770000002000,
+    startedAt: 1770000000000,
+    completedAt: 1770000002000,
+    cancelledAt: null,
+    requestedBy: 'human',
+    approval: { required: false, status: 'not_required', budget: null, approvedBy: null, decidedAt: null },
+    phases: [
+      { id: 'inspect', title: 'Agent 诊断', status: 'completed' as const, nodeIds: ['worker-diagnose-project'] },
+      { id: 'review', title: '对抗性复核', status: 'completed' as const, nodeIds: ['reviewer-adversarial-check'] },
+      { id: 'reduce', title: '门禁归约', status: 'completed' as const, nodeIds: ['reduce-review-gate'] },
+    ],
+    nodes: [
+      {
+        id: 'worker-diagnose-project',
+        phaseId: 'inspect',
+        title: 'Worker 项目诊断',
+        status: 'completed' as const,
+        kind: 'agent_task',
+        dependsOn: [],
+        assignedAgent: 'xiaok-worker',
+        attempt: 1,
+        output: { summary: '发现 1 个待执行任务' },
+        error: null,
+        startedAt: 1770000000000,
+        completedAt: 1770000001000,
+      },
+      {
+        id: 'reviewer-adversarial-check',
+        phaseId: 'review',
+        title: 'Reviewer 对抗性检查',
+        status: 'completed' as const,
+        kind: 'review',
+        dependsOn: ['worker-diagnose-project'],
+        assignedAgent: 'xiaok-po',
+        attempt: 1,
+        output: { summary: '通过对抗性检查' },
+        reviewDecision: { status: 'passed', reason: '诊断材料可用', evidenceRefs: ['task:item-1'] },
+        error: null,
+        startedAt: 1770000001000,
+        completedAt: 1770000002000,
+      },
+      {
+        id: 'reduce-review-gate',
+        phaseId: 'reduce',
+        title: '归约 review gate',
+        status: 'completed' as const,
+        kind: 'control',
+        dependsOn: ['reviewer-adversarial-check'],
+        assignedAgent: null,
+        output: { decision: { status: 'passed', reason: '诊断材料可用' } },
+        error: null,
+        startedAt: 1770000002000,
+        completedAt: 1770000002000,
+      },
+    ],
+    summary: { total: 3, completed: 3, failed: 0, blocked: 0, running: 0, pending: 0, progress: 1, primaryMessage: 'Review gate passed' },
+    gateDecision: { status: 'passed', reason: '诊断材料可用', evidenceRefs: ['task:item-1'] },
+  };
+}
+
+function runningAgentWorkflowRun() {
+  const run = agentWorkflowRun();
+  return {
+    ...run,
+    status: 'running' as const,
+    completedAt: null,
+    summary: { total: 3, completed: 0, failed: 0, blocked: 0, running: 1, pending: 2, progress: 0, primaryMessage: null },
+    gateDecision: null,
+    nodes: run.nodes.map((node, index) => ({
+      ...node,
+      status: index === 0 ? 'running' as const : 'pending' as const,
+      output: null,
+      reviewDecision: null,
+      completedAt: null,
+    })),
+  };
 }
 
 function workflowDetail(overrides: Partial<ProjectFullDetail> = {}): ProjectFullDetail {
@@ -170,6 +260,48 @@ describe('WorkflowStatusStrip', () => {
     expect(screen.getByText(/存在可派发任务/)).toBeInTheDocument();
     expect(screen.getByText(/诊断依据：收集项目状态 ✓/)).toBeInTheDocument();
   });
+
+  it('renders agent workflow node agents and review gate decision', () => {
+    renderWithProviders(
+      <WorkflowStatusStrip
+        workflowRun={agentWorkflowRun()}
+        busy={false}
+        onStartDiagnose={vi.fn()}
+        onStartAgentWorkflow={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Agent 工作流 smoke')).toBeInTheDocument();
+    expect(screen.getByText('Review gate passed')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Agent 工作流 smoke/ }));
+
+    const dialog = screen.getByRole('dialog', { name: '工作流详情' });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog.className).toContain('bg-[var(--c-bg-card)]');
+    expect(dialog.className).not.toContain('/10');
+    expect(screen.getByText('Agent 工作流')).toBeInTheDocument();
+    expect(screen.getByText('Worker 项目诊断')).toBeInTheDocument();
+    expect(screen.getByText('xiaok-worker')).toBeInTheDocument();
+    expect(screen.getByText('Reviewer 对抗性检查')).toBeInTheDocument();
+    expect(screen.getByText('xiaok-po')).toBeInTheDocument();
+    expect(screen.getByText(/Gate：passed/)).toBeInTheDocument();
+    expect(screen.getByText(/诊断材料可用/)).toBeInTheDocument();
+  });
+
+  it('labels running agent workflow progress as executing', () => {
+    renderWithProviders(
+      <WorkflowStatusStrip
+        workflowRun={runningAgentWorkflowRun()}
+        busy={false}
+        onStartDiagnose={vi.fn()}
+        onStartAgentWorkflow={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Agent 工作流 smoke')).toBeInTheDocument();
+    expect(screen.getByText('执行中 0/3')).toBeInTheDocument();
+  });
 });
 
 describe('ProjectDetailPage workflow action', () => {
@@ -206,5 +338,20 @@ describe('ProjectDetailPage workflow action', () => {
     fireEvent.click(screen.getByRole('button', { name: /系统诊断完成/ }));
     expect(screen.getByText('系统内置，未调用智能体')).toBeInTheDocument();
     expect(screen.getAllByText('派发可执行任务').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('starts agent-backed workflow smoke from project detail', async () => {
+    const initial = workflowDetail({ workflowRuns: [] });
+    const smokeRun = agentWorkflowRun();
+    mockGetProjectFullDetail.mockResolvedValueOnce(initial).mockResolvedValueOnce(initial);
+    mockStartProjectAgentReviewSmokeWorkflow.mockResolvedValue(smokeRun);
+
+    renderProjectDetail(initial);
+
+    fireEvent.click(await screen.findByRole('button', { name: '运行 Agent 工作流' }));
+
+    await waitFor(() => expect(mockStartProjectAgentReviewSmokeWorkflow).toHaveBeenCalledWith('proj-workflow'));
+    expect(await screen.findByText('Agent 工作流已启动。')).toBeInTheDocument();
+    expect(await screen.findByText('Agent 工作流 smoke')).toBeInTheDocument();
   });
 });

@@ -24,6 +24,25 @@ export interface KSwarmTaskHandoff {
   };
 }
 
+export interface KSwarmWorkflowNodeHandoff {
+  projectId: string;
+  workflowRunId: string;
+  workflowId: string;
+  nodeId: string;
+  nodeKind: 'agent_task' | 'review' | 'control' | string;
+  nodeTitle: string;
+  attempt: number;
+  handoffId: string;
+  input?: Record<string, unknown> | null;
+  project?: {
+    id: string;
+    name?: string;
+    goal?: string;
+    status?: string;
+    workFolder?: string | null;
+  };
+}
+
 export interface KSwarmRuntimeBridgeOptions {
   allowedRoots?: string[];
   runDesktopTask(input: { handoff: KSwarmTaskHandoff; targetParticipantId?: string }): Promise<{
@@ -31,12 +50,22 @@ export interface KSwarmRuntimeBridgeOptions {
     artifacts?: Array<{ path: string; kind: string; label?: string }>;
     provenance?: Record<string, unknown>;
   }>;
+  runWorkflowNode?(input: { handoff: KSwarmWorkflowNodeHandoff; targetParticipantId?: string }): Promise<{
+    output?: Record<string, unknown> | null;
+    reviewDecision?: { status: string; reason: string; evidenceRefs?: string[] } | null;
+  }>;
   submitResult(input: {
     projectId: string;
     taskId: string;
     runId: string;
     targetParticipantId?: string;
     result: Record<string, unknown>;
+  }): Promise<Response>;
+  submitWorkflowNodeResult?(input: {
+    handoff: KSwarmWorkflowNodeHandoff;
+    targetParticipantId?: string;
+    output?: Record<string, unknown> | null;
+    reviewDecision?: { status: string; reason: string; evidenceRefs?: string[] } | null;
   }): Promise<Response>;
 }
 
@@ -77,7 +106,25 @@ export function createKSwarmRuntimeBridge(options: KSwarmRuntimeBridgeOptions) {
     return { ok: true };
   }
 
-  return { handleTaskHandoff };
+  async function handleWorkflowNodeHandoff(input: {
+    handoff: KSwarmWorkflowNodeHandoff;
+    targetParticipantId?: string;
+  }): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (typeof options.runWorkflowNode !== 'function' || typeof options.submitWorkflowNodeResult !== 'function') {
+      return { ok: false, error: 'workflow_node_handler_missing' };
+    }
+    const executed = await options.runWorkflowNode(input);
+    const response = await options.submitWorkflowNodeResult({
+      handoff: input.handoff,
+      targetParticipantId: input.targetParticipantId,
+      output: executed.output ?? null,
+      reviewDecision: executed.reviewDecision ?? null,
+    });
+    if (!response.ok) return { ok: false, error: `workflow_submit_failed:${response.status}` };
+    return { ok: true };
+  }
+
+  return { handleTaskHandoff, handleWorkflowNodeHandoff };
 }
 
 export interface KSwarmRuntimeBridge {
@@ -86,6 +133,10 @@ export interface KSwarmRuntimeBridge {
     projectId: string;
     taskId: string;
     runId: string;
+    targetParticipantId?: string;
+  }): Promise<{ ok: true } | { ok: false; error: string }>;
+  handleWorkflowNodeHandoff?(input: {
+    handoff: KSwarmWorkflowNodeHandoff;
     targetParticipantId?: string;
   }): Promise<{ ok: true } | { ok: false; error: string }>;
   handleAssignPo?(input: {
@@ -155,6 +206,15 @@ export interface KSwarmRuntimeResultBrokerInput {
   fetchImpl?: FetchLike;
 }
 
+export interface KSwarmWorkflowNodeResultBrokerInput {
+  brokerUrl?: string;
+  participantId: string;
+  handoff: KSwarmWorkflowNodeHandoff;
+  output?: Record<string, unknown> | null;
+  reviewDecision?: { status: string; reason: string; evidenceRefs?: string[] } | null;
+  fetchImpl?: FetchLike;
+}
+
 export async function submitKSwarmRuntimeResultToBroker(input: KSwarmRuntimeResultBrokerInput): Promise<Response> {
   const brokerUrl = normalizeBrokerUrl(input.brokerUrl ?? 'http://127.0.0.1:4318');
   const fetchImpl = input.fetchImpl ?? fetch;
@@ -179,6 +239,39 @@ export async function submitKSwarmRuntimeResultToBroker(input: KSwarmRuntimeResu
       fromParticipantId: input.participantId,
       taskId: input.taskId,
       threadId: `thread-${input.taskId}`,
+      to: { mode: 'participant', participants: ['kswarm-hub'] },
+      payload,
+    }),
+  });
+}
+
+export async function submitKSwarmWorkflowNodeResultToBroker(input: KSwarmWorkflowNodeResultBrokerInput): Promise<Response> {
+  const brokerUrl = normalizeBrokerUrl(input.brokerUrl ?? 'http://127.0.0.1:4318');
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const payload = {
+    projectId: input.handoff.projectId,
+    workflowRunId: input.handoff.workflowRunId,
+    workflowId: input.handoff.workflowId,
+    nodeId: input.handoff.nodeId,
+    attempt: input.handoff.attempt,
+    handoffId: input.handoff.handoffId,
+    output: input.output ?? null,
+    ...(input.reviewDecision ? { reviewDecision: input.reviewDecision } : {}),
+    provenance: {
+      runtimeSource: 'desktop-agent-runtime',
+      participantId: input.participantId,
+      producedAt: Date.now(),
+    },
+  };
+  return fetchImpl(`${brokerUrl}/intents`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      intentId: `${input.participantId}-workflow_node_result-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      kind: 'workflow_node_result',
+      fromParticipantId: input.participantId,
+      taskId: input.handoff.workflowRunId,
+      threadId: `thread-${input.handoff.workflowRunId}`,
       to: { mode: 'participant', participants: ['kswarm-hub'] },
       payload,
     }),
@@ -255,6 +348,10 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
     const event = message.event as BrokerEvent | undefined;
     if (event?.kind === 'request_task') {
       await handleRequestTask(event);
+      return;
+    }
+    if (event?.kind === 'workflow_node_handoff') {
+      await handleWorkflowNodeHandoff(event);
       return;
     }
     if (event?.kind === 'readiness_probe') {
@@ -368,6 +465,73 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
     }
   }
 
+  async function handleWorkflowNodeHandoff(event: BrokerEvent): Promise<void> {
+    const payload = event.payload ?? {};
+    const handoff = normalizeWorkflowNodeHandoff(payload);
+    if (!handoff) {
+      await sendIntent('workflow_node_failed', event, {
+        projectId: asNonEmptyString(payload.projectId),
+        workflowRunId: asNonEmptyString(payload.workflowRunId),
+        nodeId: asNonEmptyString(payload.nodeId),
+        attempt: payload.attempt,
+        handoffId: asNonEmptyString(payload.handoffId),
+        failureReason: 'workflow_handoff_missing',
+        errorMessage: 'workflow_node_handoff_missing_identity',
+      });
+      return;
+    }
+
+    await sendIntent('workflow_node_progress', event, {
+      projectId: handoff.projectId,
+      workflowRunId: handoff.workflowRunId,
+      nodeId: handoff.nodeId,
+      attempt: handoff.attempt,
+      handoffId: handoff.handoffId,
+      stage: 'started',
+    });
+
+    if (typeof options.bridge.handleWorkflowNodeHandoff !== 'function') {
+      await sendIntent('workflow_node_failed', event, {
+        projectId: handoff.projectId,
+        workflowRunId: handoff.workflowRunId,
+        nodeId: handoff.nodeId,
+        attempt: handoff.attempt,
+        handoffId: handoff.handoffId,
+        failureReason: 'workflow_node_handler_missing',
+        errorMessage: 'workflow_node_handler_missing',
+      });
+      return;
+    }
+
+    try {
+      const result = await options.bridge.handleWorkflowNodeHandoff({
+        handoff,
+        targetParticipantId: options.participantId,
+      });
+      if (!result.ok) {
+        await sendIntent('workflow_node_failed', event, {
+          projectId: handoff.projectId,
+          workflowRunId: handoff.workflowRunId,
+          nodeId: handoff.nodeId,
+          attempt: handoff.attempt,
+          handoffId: handoff.handoffId,
+          failureReason: result.error || 'workflow_node_failed',
+          errorMessage: result.error || 'workflow_node_failed',
+        });
+      }
+    } catch (error) {
+      await sendIntent('workflow_node_failed', event, {
+        projectId: handoff.projectId,
+        workflowRunId: handoff.workflowRunId,
+        nodeId: handoff.nodeId,
+        attempt: handoff.attempt,
+        handoffId: handoff.handoffId,
+        failureReason: 'workflow_node_error',
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   function startTaskHeartbeat(event: BrokerEvent, payload: { projectId: string; taskId: string; runId: string }): () => void {
     const intervalMs = options.taskHeartbeatIntervalMs ?? 30_000;
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return () => {};
@@ -436,8 +600,42 @@ function parseBrokerMessage(data: unknown): { type?: string; event?: unknown } |
   return null;
 }
 
+function normalizeWorkflowNodeHandoff(payload: Record<string, unknown>): KSwarmWorkflowNodeHandoff | null {
+  const projectId = asNonEmptyString(payload.projectId);
+  const workflowRunId = asNonEmptyString(payload.workflowRunId);
+  const workflowId = asNonEmptyString(payload.workflowId);
+  const nodeId = asNonEmptyString(payload.nodeId);
+  const nodeTitle = asNonEmptyString(payload.nodeTitle) || nodeId;
+  const nodeKind = asNonEmptyString(payload.nodeKind) || 'agent_task';
+  const handoffId = asNonEmptyString(payload.handoffId);
+  const attempt = Number(payload.attempt);
+  if (!projectId || !workflowRunId || !workflowId || !nodeId || !handoffId || !Number.isFinite(attempt)) return null;
+  return {
+    projectId,
+    workflowRunId,
+    workflowId,
+    nodeId,
+    nodeKind,
+    nodeTitle,
+    attempt,
+    handoffId,
+    input: isRecord(payload.input) ? payload.input : null,
+    project: isRecord(payload.project) ? {
+      id: asNonEmptyString(payload.project.id) || projectId,
+      name: asNonEmptyString(payload.project.name),
+      goal: asNonEmptyString(payload.project.goal),
+      status: asNonEmptyString(payload.project.status),
+      workFolder: asNonEmptyString(payload.project.workFolder) || null,
+    } : { id: projectId },
+  };
+}
+
 function asNonEmptyString(value: unknown): string {
   return typeof value === 'string' && value.trim() ? value : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function waitForSocketOpen(socket: WebSocketLike): Promise<void> {

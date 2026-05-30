@@ -213,6 +213,7 @@ export interface KSwarmClientActions {
   deleteProject(projectId: string): Promise<boolean>;
   deliverProject(projectId: string): Promise<boolean>;
   startProjectDiagnoseWorkflow(projectId: string): Promise<KSwarmWorkflowRun | null>;
+  startProjectAgentReviewSmokeWorkflow(projectId: string): Promise<KSwarmWorkflowRun | null>;
   // Task actions
   humanAddTasks(projectId: string, tasks: Array<{ title: string; description?: string }>): Promise<boolean>;
   createTasks(projectId: string, tasks: Array<{ title: string; description?: string; phase?: number }>): Promise<boolean>;
@@ -325,6 +326,7 @@ export interface KSwarmWorkflowRun {
     primaryMessage?: string | null;
   };
   diagnosis?: KSwarmWorkflowDiagnosis | null;
+  gateDecision?: KSwarmWorkflowReviewDecision | null;
 }
 
 export interface KSwarmWorkflowNode {
@@ -335,10 +337,26 @@ export interface KSwarmWorkflowNode {
   kind: 'control' | 'review' | 'agent_task' | string;
   dependsOn: string[];
   assignedAgent?: string | null;
+  attempt?: number;
+  input?: Record<string, unknown> | null;
   output?: Record<string, unknown> | null;
+  reviewDecision?: KSwarmWorkflowReviewDecision | null;
+  runtime?: {
+    handoffId?: string;
+    runId?: string;
+    participantId?: string;
+    lastProgressAt?: number;
+  } | null;
+  producerAgent?: string | null;
   error?: string | null;
   startedAt?: number | null;
   completedAt?: number | null;
+}
+
+export interface KSwarmWorkflowReviewDecision {
+  status: 'passed' | 'needs_rework' | 'blocked' | string;
+  reason: string;
+  evidenceRefs?: string[];
 }
 
 export interface KSwarmWorkflowDiagnosis {
@@ -770,6 +788,14 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     return result?.workflowRun || null;
   }, [fetchProjects]);
 
+  const startProjectAgentReviewSmokeWorkflow = useCallback(async (projectId: string): Promise<KSwarmWorkflowRun | null> => {
+    const result = await httpPost<{ ok: boolean; workflowRun?: KSwarmWorkflowRun }>(`/projects/${projectId}/workflows/agent-review-smoke`, {
+      requestedBy: 'human',
+    });
+    if (result?.ok) fetchProjects();
+    return result?.workflowRun || null;
+  }, [fetchProjects]);
+
   // ─── Task Actions ─────────────────────────────────────────────
 
   const humanAddTasks = useCallback(async (projectId: string, tasks: Array<{ title: string; description?: string }>): Promise<boolean> => {
@@ -892,6 +918,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     deleteProject,
     deliverProject,
     startProjectDiagnoseWorkflow,
+    startProjectAgentReviewSmokeWorkflow,
     // Task actions
     humanAddTasks,
     createTasks,

@@ -6,6 +6,7 @@ interface WorkflowStatusStripProps {
   workflowRun?: KSwarmWorkflowRun | null;
   busy: boolean;
   onStartDiagnose: () => void;
+  onStartAgentWorkflow?: () => void;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -26,29 +27,35 @@ const BUILTIN_DIAGNOSE_STATUS_LABELS: Record<string, string> = {
   cancelled: '系统诊断已取消',
 };
 
-export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose }: WorkflowStatusStripProps) {
+export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose, onStartAgentWorkflow }: WorkflowStatusStripProps) {
   const [open, setOpen] = useState(false);
   const status = workflowRun?.status || 'idle';
   const isBuiltinDiagnose = workflowRun?.workflowId === 'project-diagnose' && workflowRun.source === 'builtin';
   const label = workflowRun
     ? isBuiltinDiagnose
       ? (BUILTIN_DIAGNOSE_STATUS_LABELS[status] || status)
-      : (STATUS_LABELS[status] || status)
+      : (workflowRun.title || STATUS_LABELS[status] || status)
     : '尚未运行系统诊断';
   const summary = workflowRun?.summary;
   const action = workflowRun?.diagnosis?.recommendedActions?.[0];
   const completed = summary?.completed ?? 0;
   const total = summary?.total ?? 0;
-  const progressText = workflowRun ? `已完成 ${completed}/${total}` : '可运行控制层诊断';
+  const progressText = workflowRun
+    ? isBuiltinDiagnose
+      ? `已完成 ${completed}/${total}`
+      : (summary?.primaryMessage || formatWorkflowProgress(status, completed, total))
+    : '可运行控制层诊断';
   const sourceText = workflowRun
     ? isBuiltinDiagnose
       ? '系统内置，未调用智能体'
       : 'Agent 工作流'
     : '读取项目状态，不调用智能体';
   const diagnosis = isBuiltinDiagnose && workflowRun ? buildSystemDiagnosisView(workflowRun) : null;
+  const genericWorkflow = workflowRun && !diagnosis ? buildGenericWorkflowView(workflowRun) : null;
   const compact = diagnosis ? buildCompactDiagnosisSummary(diagnosis) : null;
   const StatusIcon = getStatusIcon(status);
   const toneClass = getToneClass(status);
+  const dialogLabel = diagnosis ? '系统诊断详情' : '工作流详情';
 
   return (
     <div className="relative flex items-center gap-1.5 text-[11px]">
@@ -88,10 +95,23 @@ export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose }: Work
         <span>{busy ? '诊断中' : '运行'}</span>
       </button>
 
-      {diagnosis && open && (
+      {onStartAgentWorkflow && (
+        <button
+          type="button"
+          onClick={onStartAgentWorkflow}
+          aria-label="运行 Agent 工作流"
+          disabled={busy}
+          className="inline-flex items-center gap-1 rounded-md bg-[var(--c-bg-page)] px-2 py-1 font-medium text-[var(--c-text-primary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-60"
+        >
+          <Workflow size={12} />
+          <span>{busy ? '运行中' : 'Agent'}</span>
+        </button>
+      )}
+
+      {workflowRun && open && (
         <div
           role="dialog"
-          aria-label="系统诊断详情"
+          aria-label={dialogLabel}
           className="absolute right-0 top-full z-50 mt-2 w-[min(560px,calc(100vw-48px))] rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-secondary)] shadow-xl"
         >
           <div className="flex flex-wrap items-start gap-2">
@@ -111,52 +131,98 @@ export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose }: Work
             <button
               type="button"
               onClick={() => setOpen(false)}
-              aria-label="关闭系统诊断详情"
+              aria-label={`关闭${dialogLabel}`}
               className="ml-auto rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-page)] hover:text-[var(--c-text-primary)]"
             >
               <X size={12} />
             </button>
           </div>
 
-          <div className="mt-2 border-t border-current/10 pt-2 text-[10px] text-[var(--c-text-secondary)]">
-            <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
-              <DiagnosisMetric label="项目状态" value={diagnosis.projectStatus} />
-              <DiagnosisMetric label="健康状态" value={diagnosis.healthState} />
-              <DiagnosisMetric label="任务" value={String(diagnosis.taskCount)} />
-              <DiagnosisMetric label="阻塞" value={String(diagnosis.blockedCount)} />
-              <DiagnosisMetric label="等待" value={String(diagnosis.waitingCount)} />
-              <DiagnosisMetric label="可派发" value={String(diagnosis.dispatchableCount)} />
-            </div>
-            {diagnosis.gate && (
-              <p className="mt-2 leading-relaxed">
-                <span className="font-medium text-[var(--c-text-primary)]">门禁：</span>{diagnosis.gate}
-              </p>
-            )}
-            {diagnosis.actionLabel && (
-              <p className="mt-2 leading-relaxed">
-                <span className="font-medium text-[var(--c-text-primary)]">建议：</span>{diagnosis.actionLabel}
-                {diagnosis.actionReason && <span className="text-[var(--c-text-muted)]"> · {diagnosis.actionReason}</span>}
-              </p>
-            )}
-            {diagnosis.blockedTasks.length > 0 && (
-              <div className="mt-2 space-y-1">
-                <p className="font-medium text-[var(--c-text-primary)]">阻塞任务</p>
-                {diagnosis.blockedTasks.map((task) => (
-                  <p key={`${task.taskId}-${task.message}`} className="leading-relaxed">
-                    <span className="font-mono text-[var(--c-text-primary)]">{task.taskId || 'unknown'}</span>
-                    <span className="text-[var(--c-text-muted)]"> · {task.message || '任务已阻塞'}</span>
-                  </p>
-                ))}
-              </div>
-            )}
-            {diagnosis.evidence.length > 0 && (
-              <p className="mt-2 leading-relaxed text-[var(--c-text-muted)]">
-                诊断依据：{diagnosis.evidence.join(' / ')}
-              </p>
-            )}
-          </div>
+          {diagnosis && <SystemDiagnosisDetails diagnosis={diagnosis} />}
+          {genericWorkflow && <GenericWorkflowDetails workflow={genericWorkflow} />}
         </div>
       )}
+    </div>
+  );
+}
+
+function SystemDiagnosisDetails({ diagnosis }: { diagnosis: ReturnType<typeof buildSystemDiagnosisView> }) {
+  return (
+    <div className="mt-2 border-t border-current/10 pt-2 text-[10px] text-[var(--c-text-secondary)]">
+      <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+        <DiagnosisMetric label="项目状态" value={diagnosis.projectStatus} />
+        <DiagnosisMetric label="健康状态" value={diagnosis.healthState} />
+        <DiagnosisMetric label="任务" value={String(diagnosis.taskCount)} />
+        <DiagnosisMetric label="阻塞" value={String(diagnosis.blockedCount)} />
+        <DiagnosisMetric label="等待" value={String(diagnosis.waitingCount)} />
+        <DiagnosisMetric label="可派发" value={String(diagnosis.dispatchableCount)} />
+      </div>
+      {diagnosis.gate && (
+        <p className="mt-2 leading-relaxed">
+          <span className="font-medium text-[var(--c-text-primary)]">门禁：</span>{diagnosis.gate}
+        </p>
+      )}
+      {diagnosis.actionLabel && (
+        <p className="mt-2 leading-relaxed">
+          <span className="font-medium text-[var(--c-text-primary)]">建议：</span>{diagnosis.actionLabel}
+          {diagnosis.actionReason && <span className="text-[var(--c-text-muted)]"> · {diagnosis.actionReason}</span>}
+        </p>
+      )}
+      {diagnosis.blockedTasks.length > 0 && (
+        <div className="mt-2 space-y-1">
+          <p className="font-medium text-[var(--c-text-primary)]">阻塞任务</p>
+          {diagnosis.blockedTasks.map((task) => (
+            <p key={`${task.taskId}-${task.message}`} className="leading-relaxed">
+              <span className="font-mono text-[var(--c-text-primary)]">{task.taskId || 'unknown'}</span>
+              <span className="text-[var(--c-text-muted)]"> · {task.message || '任务已阻塞'}</span>
+            </p>
+          ))}
+        </div>
+      )}
+      {diagnosis.evidence.length > 0 && (
+        <p className="mt-2 leading-relaxed text-[var(--c-text-muted)]">
+          诊断依据：{diagnosis.evidence.join(' / ')}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function GenericWorkflowDetails({ workflow }: { workflow: ReturnType<typeof buildGenericWorkflowView> }) {
+  return (
+    <div className="mt-2 border-t border-current/10 pt-2 text-[10px] text-[var(--c-text-secondary)]">
+      {workflow.gateText && (
+        <p className="leading-relaxed text-[var(--c-text-primary)]">
+          {workflow.gateText}
+        </p>
+      )}
+      <div className="mt-2 space-y-1.5">
+        {workflow.nodes.map((node) => (
+          <div
+            key={node.id}
+            className="rounded-md border border-[var(--c-border-subtle)] bg-[var(--c-bg-page)] px-2 py-1.5"
+          >
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate font-medium text-[var(--c-text-primary)]">{node.title}</span>
+              <span className="shrink-0 text-[var(--c-text-muted)]">{node.status}</span>
+              {node.agent && (
+                <span className="ml-auto shrink-0 rounded bg-[var(--c-bg-card)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--c-text-secondary)]">
+                  {node.agent}
+                </span>
+              )}
+            </div>
+            {node.summary && (
+              <p className="mt-1 leading-relaxed text-[var(--c-text-secondary)]">{node.summary}</p>
+            )}
+            {node.reviewText && (
+              <p className="mt-1 leading-relaxed text-[var(--c-text-muted)]">{node.reviewText}</p>
+            )}
+            {node.error && (
+              <p className="mt-1 leading-relaxed text-[var(--c-status-error-text)]">{node.error}</p>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -168,6 +234,15 @@ function DiagnosisMetric({ label, value }: { label: string; value: string }) {
       <span className="truncate font-medium text-[var(--c-text-primary)]">{value}</span>
     </span>
   );
+}
+
+function formatWorkflowProgress(status: string, completed: number, total: number) {
+  const progress = `${completed}/${total}`;
+  if (status === 'running') return `执行中 ${progress}`;
+  if (status === 'blocked') return `已阻塞 ${progress}`;
+  if (status === 'failed') return `失败 ${progress}`;
+  if (status === 'cancelled') return `已取消 ${progress}`;
+  return `已完成 ${progress}`;
 }
 
 function buildCompactDiagnosisSummary(diagnosis: ReturnType<typeof buildSystemDiagnosisView>) {
@@ -199,6 +274,49 @@ function buildSystemDiagnosisView(workflowRun: KSwarmWorkflowRun) {
     actionReason: action?.reason || '',
     blockedTasks,
     evidence: workflowRun.nodes.map((node) => `${node.title}${node.status === 'completed' ? ' ✓' : ` ${labelNodeStatus(node.status)}`}`),
+  };
+}
+
+function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
+  const gateDecision = workflowRun.gateDecision ?? readDecisionFromOutput(getNodeOutput(workflowRun, 'reduce-review-gate'));
+  const gateText = gateDecision?.status
+    ? `Gate：${gateDecision.status}${gateDecision.reason ? ` · ${gateDecision.reason}` : ''}`
+    : '';
+  return {
+    gateText,
+    nodes: workflowRun.nodes.map((node) => {
+      const output = node.output && typeof node.output === 'object' ? node.output : {};
+      const summary = readString(output.summary || output.result || output.message);
+      const reviewDecision = node.reviewDecision;
+      const reviewText = reviewDecision?.status
+        ? `Review：${reviewDecision.status}`
+        : '';
+      return {
+        id: node.id,
+        title: node.title,
+        status: labelNodeStatus(node.status),
+        agent: node.assignedAgent || node.producerAgent || '',
+        summary,
+        reviewText,
+        error: node.error || '',
+      };
+    }),
+  };
+}
+
+function readDecisionFromOutput(output: Record<string, unknown>) {
+  const raw = output.decision;
+  if (!raw || typeof raw !== 'object') return null;
+  const decision = raw as { status?: unknown; reason?: unknown; evidenceRefs?: unknown };
+  const status = readString(decision.status);
+  if (!status) return null;
+  const evidenceRefs = Array.isArray(decision.evidenceRefs)
+    ? decision.evidenceRefs.filter((ref): ref is string => typeof ref === 'string')
+    : undefined;
+  return {
+    status,
+    reason: readString(decision.reason),
+    evidenceRefs,
   };
 }
 

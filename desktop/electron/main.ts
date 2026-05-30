@@ -25,6 +25,7 @@ import {
   createKSwarmRuntimeBridge,
   createKSwarmRuntimeBridgeBrokerClient,
   submitKSwarmRuntimeResultToBroker,
+  submitKSwarmWorkflowNodeResultToBroker,
 } from './kswarm-runtime-bridge.js';
 import { XIAOK_PO_SEED_ID, XIAOK_WORKER_SEED_ID } from '../shared/kswarm-seed-contract.js';
 
@@ -197,6 +198,7 @@ async function createWindow(): Promise<BrowserWindow> {
         ...createKSwarmRuntimeBridge({
         allowedRoots: [join(app.getPath('home'), '.kswarm', 'handoff-packages')],
         runDesktopTask: (input) => services.runKSwarmHandoffTask(input),
+        runWorkflowNode: (input) => services.runKSwarmWorkflowNode(input),
         submitResult: (input) => submitKSwarmRuntimeResultToBroker({
           brokerUrl,
           participantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
@@ -204,6 +206,13 @@ async function createWindow(): Promise<BrowserWindow> {
           taskId: input.taskId,
           runId: input.runId,
           result: input.result,
+        }),
+        submitWorkflowNodeResult: (input) => submitKSwarmWorkflowNodeResultToBroker({
+          brokerUrl,
+          participantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
+          handoff: input.handoff,
+          output: input.output,
+          reviewDecision: input.reviewDecision,
         }),
         }),
         handleAssignPo: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmAssignPo(input),

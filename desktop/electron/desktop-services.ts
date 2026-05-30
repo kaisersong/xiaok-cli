@@ -63,7 +63,7 @@ import type { MemoryStore } from '../../src/ai/memory/store.js';
 import type { KSwarmService, KSwarmUnavailableError } from './kswarm-service.js';
 import { resolveCreateProjectMembers } from './kswarm-project-tool.js';
 import { XIAOK_PO_SEED_ID, getPreferredPoAgentId } from '../shared/kswarm-seed-contract.js';
-import type { KSwarmTaskHandoff } from './kswarm-runtime-bridge.js';
+import type { KSwarmTaskHandoff, KSwarmWorkflowNodeHandoff } from './kswarm-runtime-bridge.js';
 // NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
 // because they import better-sqlite3 which may not be compatible with the current Electron
 // version's native module ABI.
@@ -1081,6 +1081,26 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
   }
 
+  async function runKSwarmWorkflowNode({ handoff, targetParticipantId }: { handoff: KSwarmWorkflowNodeHandoff; targetParticipantId?: string }) {
+    const workspaceRoot = handoff.project?.workFolder || process.cwd();
+    const taskHost = createKSwarmTaskHost(workspaceRoot);
+    const prompt = buildKSwarmWorkflowNodePrompt(handoff, targetParticipantId || 'xiaok-worker');
+    const { summary } = await runKSwarmRuntimeTextTask(taskHost, prompt);
+    const parsed = extractKSwarmJsonObject(summary);
+
+    if (handoff.nodeKind === 'review') {
+      const rawDecision = isRecord(parsed.reviewDecision) ? parsed.reviewDecision : parsed;
+      const reviewDecision = normalizeKSwarmWorkflowReviewDecision(rawDecision);
+      const output = normalizeKSwarmWorkflowNodeOutput(isRecord(parsed.output) ? parsed.output : {}, summary);
+      return { output, reviewDecision };
+    }
+
+    return {
+      output: normalizeKSwarmWorkflowNodeOutput(isRecord(parsed.output) ? parsed.output : parsed, summary),
+      reviewDecision: null,
+    };
+  }
+
   async function runKSwarmAssignPo({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
     try {
       const projectId = readString(payload.projectId) || readString(payload.taskId);
@@ -1788,6 +1808,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     createTask: host.createTask.bind(host),
     runKSwarmHandoffTask,
+    runKSwarmWorkflowNode,
     runKSwarmReadinessProbe,
     runKSwarmAssignPo,
     runKSwarmReviewSubmission,
@@ -2137,6 +2158,37 @@ async function runKSwarmRuntimeTextTask(
   throw new Error('desktop_task_timeout');
 }
 
+function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, participantId: string): string {
+  const project = handoff.project || { id: handoff.projectId };
+  const base = [
+    'KSwarm 动态工作流节点执行。',
+    `执行者：${participantId}`,
+    `工作流：${handoff.workflowId}`,
+    `节点：${handoff.nodeTitle} (${handoff.nodeId})`,
+    `项目：${project.name || project.id}`,
+    project.goal ? `目标：${project.goal}` : '',
+    project.workFolder ? `工作区：${project.workFolder}` : '',
+    handoff.input ? `节点输入：${JSON.stringify(handoff.input)}` : '',
+  ].filter(Boolean);
+
+  if (handoff.nodeKind === 'review') {
+    return [
+      ...base,
+      '你是 reviewer / adversarial agent。请审查 worker 输出是否足够可靠、是否存在明显遗漏、是否能支撑下一步行动。',
+      '只返回一个 JSON 对象，不要返回 Markdown 包裹：',
+      '{"reviewDecision":{"status":"passed|needs_rework|blocked","reason":"一句明确原因","evidenceRefs":["可选证据引用"]},"output":{"summary":"复核摘要"}}',
+      'status 只能是 passed、needs_rework、blocked。reason 不能为空。',
+    ].join('\n');
+  }
+
+  return [
+    ...base,
+    '你是 worker agent。请检查项目状态、任务状态、阻塞点和下一步建议，输出结构化诊断。',
+    '只返回一个 JSON 对象，不要返回 Markdown 包裹：',
+    '{"output":{"summary":"诊断摘要","findings":["发现"],"recommendedActions":["建议"],"evidenceRefs":["证据引用"]}}',
+  ].join('\n');
+}
+
 function buildKSwarmAssignPoPrompt(payload: Record<string, unknown>, fallbackWorkerId: string): string {
   const members = readStringArray(payload.members);
   return [
@@ -2322,6 +2374,23 @@ function normalizeKSwarmReview(rawReview: Record<string, unknown>) {
     feedback: readString(rawReview.feedback) || (rawReview.passed === true ? '验收通过。' : '验收未通过。'),
     failureClass: rawReview.failureClass === null ? null : (readString(rawReview.failureClass) || null),
     planRevisionNeeded: rawReview.planRevisionNeeded === true,
+  };
+}
+
+function normalizeKSwarmWorkflowNodeOutput(rawOutput: Record<string, unknown>, fallbackSummary: string) {
+  return {
+    ...rawOutput,
+    summary: readString(rawOutput.summary) || fallbackSummary || 'workflow node completed',
+  };
+}
+
+function normalizeKSwarmWorkflowReviewDecision(rawDecision: Record<string, unknown>) {
+  const status = readString(rawDecision.status);
+  const normalizedStatus = ['passed', 'needs_rework', 'blocked'].includes(status) ? status : 'blocked';
+  return {
+    status: normalizedStatus,
+    reason: readString(rawDecision.reason) || 'Reviewer did not provide a valid reason.',
+    evidenceRefs: readStringArray(rawDecision.evidenceRefs),
   };
 }
 

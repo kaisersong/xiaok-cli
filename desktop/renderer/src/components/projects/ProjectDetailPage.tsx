@@ -302,7 +302,19 @@ function buildXiaokInterventionDraft(context: ReturnType<typeof buildSwarmContin
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const { getProjectFullDetail, approveProject, retryPlan, continueProject, dispatchTasks, deliverProject, closeProject, startProjectDiagnoseWorkflow, connected, agents } = useKSwarm();
+  const {
+    getProjectFullDetail,
+    approveProject,
+    retryPlan,
+    continueProject,
+    dispatchTasks,
+    deliverProject,
+    closeProject,
+    startProjectDiagnoseWorkflow,
+    startProjectAgentReviewSmokeWorkflow,
+    connected,
+    agents,
+  } = useKSwarm();
   const { t } = useLocale();
   const [detail, setDetail] = useState<ProjectFullDetail | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('board');
@@ -476,6 +488,25 @@ export function ProjectDetailPage() {
       }
     } catch {
       showNotice({ action: 'workflow', kind: 'error', message: '启动诊断工作流失败，请稍后重试。' }, 8_000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleStartAgentWorkflow = async () => {
+    if (!projectId || actionLoading !== null) return;
+    setActionLoading('workflow');
+    try {
+      const workflowRun = await startProjectAgentReviewSmokeWorkflow(projectId);
+      await refreshOnce();
+      if (workflowRun) {
+        setDetail(prev => mergeWorkflowRunIntoDetail(prev, workflowRun));
+        showNotice({ action: 'workflow', kind: 'success', message: 'Agent 工作流已启动。' }, 5_000);
+      } else {
+        showNotice({ action: 'workflow', kind: 'error', message: '启动 Agent 工作流失败，请稍后重试。' }, 8_000);
+      }
+    } catch {
+      showNotice({ action: 'workflow', kind: 'error', message: '启动 Agent 工作流失败，请稍后重试。' }, 8_000);
     } finally {
       setActionLoading(null);
     }
@@ -799,6 +830,7 @@ export function ProjectDetailPage() {
             workflowRun={latestWorkflowRun}
             busy={actionLoading === 'workflow'}
             onStartDiagnose={handleStartDiagnoseWorkflow}
+            onStartAgentWorkflow={handleStartAgentWorkflow}
           />
         </div>
       </div>

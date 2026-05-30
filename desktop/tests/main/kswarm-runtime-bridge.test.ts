@@ -227,6 +227,59 @@ describe('kswarm runtime bridge', () => {
     });
   });
 
+  it('routes workflow_node_handoff intents through desktop runtime and reports workflow_node_result', async () => {
+    const handleWorkflowNodeHandoff = vi.fn().mockResolvedValue({ ok: true });
+    const posts: Array<{ body: Record<string, unknown> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      posts.push({ body: JSON.parse(String(init?.body ?? '{}')) });
+      return new Response(JSON.stringify({ ok: true, deliveredCount: 1 }), { status: 200 });
+    });
+    const FakeWebSocket = createFakeWebSocket();
+    const client = createKSwarmRuntimeBridgeBrokerClient({
+      participantId: 'xiaok-worker',
+      bridge: {
+        handleTaskHandoff: async () => ({ ok: true }),
+        handleWorkflowNodeHandoff,
+      },
+      fetchImpl: fetchImpl as never,
+      WebSocketImpl: FakeWebSocket,
+    });
+
+    await client.start();
+    FakeWebSocket.instances[0].emitMessage({
+      type: 'new_intent',
+      event: {
+        kind: 'workflow_node_handoff',
+        fromParticipantId: 'kswarm-hub',
+        taskId: 'wf-proj-1-agent-review-smoke-1',
+        payload: {
+          projectId: 'proj-1',
+          workflowRunId: 'wf-proj-1-agent-review-smoke-1',
+          workflowId: 'agent-review-smoke',
+          nodeId: 'worker-diagnose-project',
+          nodeKind: 'agent_task',
+          nodeTitle: 'Worker 项目诊断',
+          attempt: 1,
+          handoffId: 'wfhd-1',
+          input: { project: { id: 'proj-1' } },
+        },
+      },
+    });
+    await nextTick();
+
+    expect(handleWorkflowNodeHandoff).toHaveBeenCalledWith(expect.objectContaining({
+      targetParticipantId: 'xiaok-worker',
+      handoff: expect.objectContaining({
+        projectId: 'proj-1',
+        workflowRunId: 'wf-proj-1-agent-review-smoke-1',
+        nodeId: 'worker-diagnose-project',
+        attempt: 1,
+        handoffId: 'wfhd-1',
+      }),
+    }));
+    expect(posts.slice(1).map(post => post.body.kind)).toEqual(['workflow_node_progress']);
+  });
+
   it('submits desktop runtime results to broker as the target xiaok participant', async () => {
     const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
