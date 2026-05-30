@@ -4,12 +4,19 @@ Native desktop surface for xiaok task delivery, scheduled automation, and KSwarm
 
 ## Current Release Focus
 
-v1.3.4 focuses on Swarm project reliability:
+v1.3.9 focuses on making KSwarm dynamic workflow visible and usable from project tasks:
 
-- Xiaok seed PO/Worker agents run through the full Desktop agent runtime, so project execution has the same model, tools, MCP plugins, web-search/fetch, report renderer, and slide renderer as normal Xiaok conversations.
-- KSwarm task handoff uses durable files and artifact-first result manifests instead of long broker text payloads.
-- Project execution, review, retry, recovery, artifact preview, and final delivery are visible from the desktop project board.
+- Project task cards can create a task-scoped `po-generated-task-workflow` proposal. The proposal shows source task, budget hard caps, permissions, phases, and acceptance rubric before any agent is dispatched.
+- Project-level workflows still live in the tab row as one "Run Workflow" menu. The project tab remains "Logs" because it contains both Swarm and Workflow activity.
+- Workflow run details show hard budget limits, last material progress, blocking failures, run-internal stored node results, and recovery mode.
+- The PO-generated path uses validated workflow IR. Desktop and KSwarm do not execute raw JavaScript or arbitrary user workflow scripts in this release.
 - Desktop release packaging must include the matching `kswarm`, `intent-broker`, and `kai-xiaok-plugins` sibling repositories.
+
+Troubleshooting:
+
+- If the workflow menu says the service version is too old, close the old Xiaok app or stale KSwarm process and launch the current Desktop build again.
+- If a workflow dialog appears over text with a transparent background, treat it as a regression. Menus and dialogs should use opaque `bg-[var(--c-bg-card)]` surfaces.
+- If a task workflow appears to finish instantly without details, open the workflow detail chip and check budget, cache/recovery, last progress, node output, and gate status. A valid run should not only say "completed".
 
 ## Local Validation
 

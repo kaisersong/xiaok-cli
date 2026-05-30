@@ -36,6 +36,7 @@ const HEALTH_INTERVAL_MS = 10_000;
 const RESTART_BASE_DELAY_MS = 2_000;
 const MAX_RESTART_DELAY_MS = 30_000;
 const MAX_RESTART_ATTEMPTS = 10;
+const DYNAMIC_WORKFLOW_FEATURE = 'dynamic_workflows';
 
 /**
  * Resolve service paths:
@@ -160,8 +161,18 @@ export function resolveBackgroundNodeRuntime(options: {
   return { command, env };
 }
 
-export function shouldAdoptExistingKSwarmService(input: { hasOwnedChild: boolean; healthOk: boolean; brokerReady?: boolean }): boolean {
-  return input.healthOk && input.brokerReady !== false && !input.hasOwnedChild;
+export function hasDynamicWorkflowSupport(body: Record<string, unknown> | null): boolean {
+  const features = body?.features;
+  return Array.isArray(features) && features.includes(DYNAMIC_WORKFLOW_FEATURE);
+}
+
+export function shouldAdoptExistingKSwarmService(input: {
+  hasOwnedChild: boolean;
+  healthOk: boolean;
+  brokerReady?: boolean;
+  dynamicWorkflowReady?: boolean;
+}): boolean {
+  return input.healthOk && input.brokerReady !== false && input.dynamicWorkflowReady !== false && !input.hasOwnedChild;
 }
 
 export interface KSwarmService {
@@ -411,15 +422,30 @@ export function createKSwarmService(): KSwarmService {
   }
 
   async function spawnServer(): Promise<void> {
-    const existingHealthy = await healthCheck();
+    const existingHealth = await fetchHealthJson(HEALTH_URL);
+    const existingHealthy = existingHealth.ok;
+    const dynamicWorkflowReady = hasDynamicWorkflowSupport(existingHealth.body);
     let brokerReady = await brokerHealthCheck();
-    if (shouldAdoptExistingKSwarmService({ hasOwnedChild: Boolean(child), healthOk: existingHealthy, brokerReady })) {
+    if (shouldAdoptExistingKSwarmService({
+      hasOwnedChild: Boolean(child),
+      healthOk: existingHealthy,
+      brokerReady,
+      dynamicWorkflowReady,
+    })) {
       console.log(`[kswarm-service] Adopting existing healthy kswarm service on port ${KSWARM_PORT}`);
       await reconcileSeedAgents();
       running = true;
       lastError = null;
       restartCount = 0;
       startHealthCheck();
+      notifyListeners();
+      return;
+    }
+
+    if (existingHealthy && !dynamicWorkflowReady && !child) {
+      lastError = `existing kswarm service on port ${KSWARM_PORT} does not support dynamic workflows`;
+      console.warn(`[kswarm-service] ${lastError}`);
+      running = false;
       notifyListeners();
       return;
     }

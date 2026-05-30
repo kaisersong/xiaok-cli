@@ -143,6 +143,15 @@ describe('kswarm service external adoption', () => {
     })).toBe(false);
   });
 
+  it('does not adopt a service that lacks dynamic workflow support', () => {
+    expect(shouldAdoptExistingKSwarmService({
+      hasOwnedChild: false,
+      healthOk: true,
+      brokerReady: true,
+      dynamicWorkflowReady: false,
+    })).toBe(false);
+  });
+
   it('does not treat a desktop-owned child as an external service', () => {
     expect(shouldAdoptExistingKSwarmService({ hasOwnedChild: true, healthOk: true })).toBe(false);
     expect(shouldAdoptExistingKSwarmService({ hasOwnedChild: false, healthOk: false })).toBe(false);

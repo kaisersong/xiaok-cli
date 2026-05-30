@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { KanbanBoard } from '../../renderer/src/components/projects/KanbanBoard';
 
@@ -16,10 +16,10 @@ afterEach(() => {
   cleanup();
 });
 
-function renderKanban(tasks: any[]) {
+function renderKanban(tasks: any[], onStartTaskWorkflow?: (taskId: string) => void) {
   return render(
     <LocaleProvider>
-      <KanbanBoard project={{ id: 'proj-story', name: '写一个AI工作小故事', status: 'active', tasks } as any} />
+      <KanbanBoard project={{ id: 'proj-story', name: '写一个AI工作小故事', status: 'active', tasks } as any} onStartTaskWorkflow={onStartTaskWorkflow} />
     </LocaleProvider>
   );
 }
@@ -114,5 +114,17 @@ describe('KSwarm kanban failure visibility', () => {
     expect(within(pending).getByText('只有描述的历史任务也应该可读')).toBeInTheDocument();
     expect(within(pending).getByText('Worker')).toBeInTheDocument();
     expect(within(pending).getByText('1')).toBeInTheDocument();
+  });
+
+  it('exposes task-level workflow execution on task cards when provided', () => {
+    const onStartTaskWorkflow = vi.fn();
+
+    renderKanban([
+      { id: 'workflow-task', title: '需要复核的复杂任务', status: 'pending', assignedAgent: 'worker' },
+    ], onStartTaskWorkflow);
+
+    fireEvent.click(screen.getByRole('button', { name: '用工作流执行' }));
+
+    expect(onStartTaskWorkflow).toHaveBeenCalledWith('workflow-task');
   });
 });

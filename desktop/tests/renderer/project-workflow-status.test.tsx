@@ -1,12 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import type { ProjectFullDetail } from '../../renderer/src/hooks/useKSwarmClient';
+import type { KSwarmWorkflowProposal, ProjectFullDetail } from '../../renderer/src/hooks/useKSwarmClient';
 
-const { mockGetProjectFullDetail, mockStartProjectDiagnoseWorkflow, mockStartProjectAgentReviewSmokeWorkflow } = vi.hoisted(() => ({
+const {
+  mockGetProjectFullDetail,
+  mockStartProjectDiagnoseWorkflow,
+  mockStartProjectAgentReviewSmokeWorkflow,
+  mockCreateWorkflowProposal,
+  mockStartWorkflowRunFromProposal,
+  mockCancelWorkflowRun,
+  mockServiceStatus,
+} = vi.hoisted(() => ({
   mockGetProjectFullDetail: vi.fn(),
   mockStartProjectDiagnoseWorkflow: vi.fn(),
   mockStartProjectAgentReviewSmokeWorkflow: vi.fn(),
+  mockCreateWorkflowProposal: vi.fn(),
+  mockStartWorkflowRunFromProposal: vi.fn(),
+  mockCancelWorkflowRun: vi.fn(),
+  mockServiceStatus: { current: null as null | { running: boolean; port: number; pid: number | null; restartCount: number; lastError: string | null } },
 }));
 
 vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
@@ -23,11 +35,22 @@ vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
     deleteProject: vi.fn(),
     startProjectDiagnoseWorkflow: mockStartProjectDiagnoseWorkflow,
     startProjectAgentReviewSmokeWorkflow: mockStartProjectAgentReviewSmokeWorkflow,
+    createWorkflowProposal: mockCreateWorkflowProposal,
+    startWorkflowRunFromProposal: mockStartWorkflowRunFromProposal,
+    cancelWorkflowRun: mockCancelWorkflowRun,
+    serviceStatus: mockServiceStatus.current,
   }),
 }));
 
 vi.mock('../../renderer/src/components/projects/KanbanBoard', () => ({
-  KanbanBoard: () => <div>kanban</div>,
+  KanbanBoard: ({ onStartTaskWorkflow }: { onStartTaskWorkflow?: (taskId: string) => void }) => (
+    <div>
+      <div>kanban</div>
+      {onStartTaskWorkflow && (
+        <button type="button" onClick={() => onStartTaskWorkflow('item-1')}>用工作流执行任务</button>
+      )}
+    </div>
+  ),
 }));
 vi.mock('../../renderer/src/components/projects/PlanView', () => ({
   PlanView: () => <div>plan</div>,
@@ -60,6 +83,7 @@ import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  mockServiceStatus.current = null;
 });
 
 function renderWithProviders(ui: React.ReactNode, initialPath = '/') {
@@ -142,6 +166,82 @@ function agentWorkflowRun() {
   };
 }
 
+function taskWorkflowRun() {
+  const run = agentWorkflowRun();
+  return {
+    ...run,
+    id: 'wf-proj-workflow-po-generated-task-workflow-1770000000000',
+    workflowId: 'po-generated-task-workflow',
+    title: 'PO 生成任务工作流',
+    source: 'po_generated',
+    scope: { projectId: 'proj-workflow', taskId: 'item-1' },
+    sourceTask: { id: 'item-1', title: '写报告', status: 'pending', assignedAgent: 'xiaok-worker' },
+    budgets: { maxNodes: 3, maxParallelism: 1, maxAgents: 2, maxMinutes: 15, maxTokens: 16000 },
+    budgetGate: {
+      status: 'passed',
+      hardLimits: { maxNodes: 3, maxParallelism: 1, maxAgents: 2, maxMinutes: 15, maxTokens: 16000 },
+      estimate: { riskLevel: 'medium', reason: '估算只用于风险提示；KSwarm 在启动和 dispatch 前执行 hard limits。' },
+    },
+    progressState: {
+      lastMaterialProgress: { nodeId: 'po-draft-task-plan', message: '正在生成任务工作流建议', at: 1770000000777 },
+    },
+    recovery: { mode: 'resume_completed_nodes', reusableNodeCount: 1, nextAction: 'resume_workflow' },
+    summary: {
+      total: 3,
+      completed: 1,
+      failed: 0,
+      blocked: 0,
+      running: 1,
+      pending: 1,
+      progress: 1 / 3,
+      primaryMessage: '执行中 1/3',
+      cache: { storedNodeCount: 1, reusableNodeCount: 1 },
+      blockingFailures: [],
+    },
+    nodes: [
+      {
+        id: 'po-draft-task-plan',
+        phaseId: 'plan',
+        title: 'PO 起草任务工作流',
+        status: 'completed' as const,
+        kind: 'agent_task',
+        dependsOn: [],
+        assignedAgent: 'xiaok-po',
+        attempt: 1,
+        output: { summary: '已生成任务工作流建议', evidenceRefs: ['task:item-1'] },
+        cache: { status: 'stored', key: 'cache-1', storedAt: 1770000001000, inputHash: 'in', outputHash: 'out' },
+        error: null,
+        startedAt: 1770000000000,
+        completedAt: 1770000001000,
+      },
+      {
+        id: 'reviewer-adversarial-check',
+        phaseId: 'review',
+        title: 'Reviewer 复核 PO 建议',
+        status: 'running' as const,
+        kind: 'review',
+        dependsOn: ['po-draft-task-plan'],
+        assignedAgent: 'xiaok-po',
+        attempt: 1,
+        output: null,
+        reviewDecision: null,
+        error: null,
+      },
+      {
+        id: 'reduce-review-gate',
+        phaseId: 'reduce',
+        title: '归约 review gate',
+        status: 'pending' as const,
+        kind: 'control',
+        dependsOn: ['reviewer-adversarial-check'],
+        assignedAgent: null,
+        output: null,
+        error: null,
+      },
+    ],
+  };
+}
+
 function runningAgentWorkflowRun() {
   const run = agentWorkflowRun();
   return {
@@ -158,6 +258,75 @@ function runningAgentWorkflowRun() {
       completedAt: null,
     })),
   };
+}
+
+function agentWorkflowProposal(): KSwarmWorkflowProposal {
+  return {
+    id: 'wfp-proj-workflow-agent-review-smoke-1770000000000',
+    projectId: 'proj-workflow',
+    workflowId: 'agent-review-smoke',
+    title: 'Agent 复核诊断',
+    description: 'Worker Agent 诊断项目，Reviewer Agent 对抗性复核，并由 KSwarm gate reducer 归约。',
+    goal: 'Worker Agent 诊断项目，Reviewer Agent 对抗性复核，并由 KSwarm gate reducer 归约。',
+    status: 'pending',
+    requestedBy: 'human',
+    createdAt: 1770000000000,
+    updatedAt: 1770000000000,
+    specHash: 'sha256:proposal',
+    phases: [
+      { id: 'inspect', title: 'Agent 诊断', nodes: [{ id: 'worker-diagnose-project', title: 'Worker 项目诊断', kind: 'agent', required: true, dependsOn: [] }] },
+      { id: 'review', title: '对抗性复核', nodes: [{ id: 'reviewer-adversarial-check', title: 'Reviewer 对抗性检查', kind: 'review', required: true, dependsOn: ['worker-diagnose-project'] }] },
+      { id: 'reduce', title: '门禁归约', nodes: [{ id: 'reduce-review-gate', title: '归约 review gate', kind: 'reduce', required: true, dependsOn: ['reviewer-adversarial-check'] }] },
+    ],
+    budgets: { maxNodes: 3, maxParallelism: 1, maxAgents: 2, maxMinutes: 10, maxTokens: 12000 },
+    permissions: { toolCategories: ['read_project_state'], allowWrite: false, allowShell: false, allowNetwork: false, allowRenderer: false },
+    outputContract: { kind: 'diagnosis', requiredArtifactTypes: [] },
+    assumptions: [
+      'Worker 只诊断项目状态和任务阻塞，不修改项目计划',
+      'Reviewer 只产出结构化 reviewDecision，不直接改变任务或产物状态',
+    ],
+    acceptanceRubric: {
+      id: 'agent-review-diagnosis-rubric',
+      title: 'Agent 复核诊断验收标准',
+      machineChecks: [{ id: 'worker_output_schema', title: 'Worker 输出结构合法', checkKind: 'schema', required: true, inputRefs: ['worker-diagnose-project.output'] }],
+      judgmentChecks: [{ id: 'review_evidence', title: '复核结论有证据', prompt: '检查 reviewer 是否引用证据。', evidenceRequired: true, reviewerCount: 1, required: true }],
+      disagreementPolicy: 'block',
+    },
+    approval: { required: true, status: 'pending', budget: { maxNodes: 3, maxParallelism: 1, maxAgents: 2, maxMinutes: 10, maxTokens: 12000 }, approvedBy: null, decidedAt: null },
+  };
+}
+
+function taskWorkflowProposal(): KSwarmWorkflowProposal {
+  return {
+    ...agentWorkflowProposal(),
+    id: 'wfp-proj-workflow-po-generated-task-workflow-1770000000000',
+    workflowId: 'po-generated-task-workflow',
+    title: 'PO 生成任务工作流',
+    description: 'PO 根据任务「写报告」生成受控工作流建议，执行前需要用户确认。',
+    goal: 'PO 根据任务「写报告」生成受控工作流建议，执行前需要用户确认。',
+    source: 'po_generated',
+    scope: { projectId: 'proj-workflow', taskId: 'item-1' },
+    sourceTask: { id: 'item-1', title: '写报告', status: 'pending', assignedAgent: 'xiaok-worker' },
+    budgets: { maxNodes: 3, maxParallelism: 1, maxAgents: 2, maxMinutes: 15, maxTokens: 16000 },
+    budgetGate: {
+      status: 'passed',
+      hardLimits: { maxNodes: 3, maxParallelism: 1, maxAgents: 2, maxMinutes: 15, maxTokens: 16000 },
+      estimate: { riskLevel: 'medium', reason: '估算只用于风险提示；KSwarm 在启动和 dispatch 前执行 hard limits。' },
+    },
+    phases: [
+      { id: 'plan', title: 'PO 生成建议', nodes: [{ id: 'po-draft-task-plan', title: 'PO 起草任务工作流', kind: 'agent', required: true, dependsOn: [] }] },
+      { id: 'review', title: '对抗性复核', nodes: [{ id: 'reviewer-adversarial-check', title: 'Reviewer 复核 PO 建议', kind: 'review', required: true, dependsOn: ['po-draft-task-plan'] }] },
+      { id: 'reduce', title: '门禁归约', nodes: [{ id: 'reduce-review-gate', title: '归约 review gate', kind: 'reduce', required: true, dependsOn: ['reviewer-adversarial-check'] }] },
+    ],
+    acceptanceRubric: {
+      id: 'po-generated-task-workflow-rubric',
+      title: 'PO 生成任务工作流验收标准',
+      machineChecks: [{ id: 'po_plan_schema', title: 'PO 计划输出结构合法', checkKind: 'schema', required: true, inputRefs: ['po-draft-task-plan.output'] }],
+      judgmentChecks: [{ id: 'task_scope_evidence', title: '任务范围和证据充分', prompt: '检查证据。', evidenceRequired: true, reviewerCount: 1, required: true }],
+      disagreementPolicy: 'block',
+    },
+    approval: { required: true, status: 'pending', budget: { maxNodes: 3, maxParallelism: 1, maxAgents: 2, maxMinutes: 15, maxTokens: 16000 }, approvedBy: null, decidedAt: null },
+  } as KSwarmWorkflowProposal;
 }
 
 function workflowDetail(overrides: Partial<ProjectFullDetail> = {}): ProjectFullDetail {
@@ -312,6 +481,28 @@ describe('WorkflowStatusStrip', () => {
     expect(screen.getByText('执行中 0/3')).toBeInTheDocument();
   });
 
+  it('shows workflow budget, cache, recovery, task scope, and last material progress in details', () => {
+    renderWithProviders(
+      <WorkflowStatusStrip
+        workflowRun={taskWorkflowRun()}
+        busy={false}
+        onStartDiagnose={vi.fn()}
+        onStartAgentWorkflow={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /PO 生成任务工作流/ }));
+
+    const dialog = screen.getByRole('dialog', { name: '工作流详情' });
+    expect(dialog).toHaveTextContent('任务：写报告');
+    expect(dialog).toHaveTextContent('预算上限');
+    expect(dialog).toHaveTextContent('2 Agent');
+    expect(dialog).toHaveTextContent('16000 tokens');
+    expect(dialog).toHaveTextContent('已保存节点结果 1');
+    expect(dialog).toHaveTextContent('恢复方式：复用已完成节点');
+    expect(dialog).toHaveTextContent('最近进展：正在生成任务工作流建议');
+  });
+
   it('opens one workflow run menu for quick diagnose and agent review diagnose', () => {
     const onStartDiagnose = vi.fn();
     const onStartAgentWorkflow = vi.fn();
@@ -387,19 +578,80 @@ describe('ProjectDetailPage workflow action', () => {
 
   it('starts agent-backed workflow smoke from project detail', async () => {
     const initial = workflowDetail({ workflowRuns: [] });
+    const proposal = agentWorkflowProposal();
     const smokeRun = agentWorkflowRun();
     mockGetProjectFullDetail.mockResolvedValueOnce(initial).mockResolvedValueOnce(initial);
-    mockStartProjectAgentReviewSmokeWorkflow.mockResolvedValue(smokeRun);
+    mockCreateWorkflowProposal.mockResolvedValue(proposal);
+    mockStartWorkflowRunFromProposal.mockResolvedValue(smokeRun);
 
     renderProjectDetail(initial);
 
     fireEvent.click(await screen.findByRole('button', { name: '运行工作流' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /Agent 复核诊断/ }));
 
-    await waitFor(() => expect(mockStartProjectAgentReviewSmokeWorkflow).toHaveBeenCalledWith('proj-workflow'));
+    await waitFor(() => expect(mockCreateWorkflowProposal).toHaveBeenCalledWith('proj-workflow', 'agent-review-smoke'));
+    expect(mockStartProjectAgentReviewSmokeWorkflow).not.toHaveBeenCalled();
+    expect(mockStartWorkflowRunFromProposal).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole('dialog', { name: '工作流执行确认' });
+    expect(dialog.className).toContain('bg-[var(--c-bg-card)]');
+    expect(dialog.className).not.toContain('/10');
+    expect(dialog).toHaveTextContent('Agent 复核诊断');
+    expect(dialog).toHaveTextContent('目标');
+    expect(dialog).toHaveTextContent('Agent 复核诊断验收标准');
+    expect(dialog).toHaveTextContent('Worker 输出结构合法');
+    expect(dialog).toHaveTextContent('复核结论有证据');
+    expect(dialog).toHaveTextContent('最大节点 3');
+    expect(dialog).toHaveTextContent('最大并发 1');
+    expect(dialog).toHaveTextContent('读取项目状态');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '运行一次' }));
+
+    await waitFor(() => expect(mockStartWorkflowRunFromProposal).toHaveBeenCalledWith('proj-workflow', 'agent-review-smoke', proposal.id));
     expect(await screen.findByText('Agent 复核诊断已启动。')).toBeInTheDocument();
     expect(await screen.findByText('Agent 复核诊断')).toBeInTheDocument();
     expect(screen.queryByText('Agent 工作流 smoke')).not.toBeInTheDocument();
+  });
+
+  it('creates and confirms a task-level PO-generated workflow proposal from the board', async () => {
+    const initial = workflowDetail({ workflowRuns: [] });
+    const proposal = taskWorkflowProposal();
+    const run = taskWorkflowRun();
+    mockGetProjectFullDetail.mockResolvedValueOnce(initial).mockResolvedValueOnce(initial);
+    mockCreateWorkflowProposal.mockResolvedValue(proposal);
+    mockStartWorkflowRunFromProposal.mockResolvedValue(run);
+
+    renderProjectDetail(initial);
+
+    fireEvent.click(await screen.findByRole('button', { name: '用工作流执行任务' }));
+
+    await waitFor(() => expect(mockCreateWorkflowProposal).toHaveBeenCalledWith('proj-workflow', 'po-generated-task-workflow', { taskId: 'item-1' }));
+    const dialog = await screen.findByRole('dialog', { name: '工作流执行确认' });
+    expect(dialog).toHaveTextContent('PO 生成任务工作流');
+    expect(dialog).toHaveTextContent('任务：写报告');
+    expect(dialog).toHaveTextContent('PO 生成任务工作流验收标准');
+    expect(dialog).toHaveTextContent('预算硬上限');
+    expect(dialog).toHaveTextContent('16000 tokens');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '运行一次' }));
+
+    await waitFor(() => expect(mockStartWorkflowRunFromProposal).toHaveBeenCalledWith('proj-workflow', 'po-generated-task-workflow', proposal.id, { taskId: 'item-1' }));
+    expect(await screen.findByText('任务工作流已启动。')).toBeInTheDocument();
+    expect(await screen.findByText('PO 生成任务工作流')).toBeInTheDocument();
+  });
+
+  it('cancels a running workflow from the workflow details', async () => {
+    const detail = workflowDetail({ workflowRuns: [runningAgentWorkflowRun()] });
+    mockGetProjectFullDetail.mockResolvedValue(detail);
+    mockCancelWorkflowRun.mockResolvedValue({ ...runningAgentWorkflowRun(), status: 'cancelled', summary: { ...runningAgentWorkflowRun().summary, primaryMessage: '已取消' } });
+
+    renderProjectDetail(detail);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Agent 复核诊断/ }));
+    const dialog = screen.getByRole('dialog', { name: 'Agent 复核诊断详情' });
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消工作流' }));
+
+    await waitFor(() => expect(mockCancelWorkflowRun).toHaveBeenCalledWith('proj-workflow', runningAgentWorkflowRun().id));
+    expect(await screen.findByText('工作流已取消。')).toBeInTheDocument();
   });
 
   it('labels the project detail tab as logs and sends workflow runs into the fused timeline', async () => {
@@ -416,5 +668,39 @@ describe('ProjectDetailPage workflow action', () => {
     expect(await screen.findByText('activity')).toBeInTheDocument();
     expect(screen.getByText('workflow-runs-prop:2')).toBeInTheDocument();
     expect(screen.queryByText('工作流运行记录')).not.toBeInTheDocument();
+  });
+
+  it('keeps the workflow entry visible in the project detail tab row', async () => {
+    const detail = workflowDetail({ workflowRuns: [] });
+    mockGetProjectFullDetail.mockResolvedValue(detail);
+
+    renderProjectDetail(detail);
+
+    const tabRow = await screen.findByTestId('project-detail-tab-row');
+    const workflowEntry = within(tabRow).getByTestId('project-detail-workflow-entry');
+    expect(within(workflowEntry).getByRole('button', { name: '运行工作流' })).toBeInTheDocument();
+    expect(within(tabRow).getByRole('button', { name: '日志' })).toBeInTheDocument();
+    expect(within(tabRow).getByText('最近工作流：尚未运行')).toBeInTheDocument();
+  });
+
+  it('disables workflow actions when desktop is connected to an incompatible old KSwarm service', async () => {
+    const detail = workflowDetail({ workflowRuns: [] });
+    mockGetProjectFullDetail.mockResolvedValue(detail);
+    mockServiceStatus.current = {
+      running: false,
+      port: 4400,
+      pid: null,
+      restartCount: 0,
+      lastError: 'existing kswarm service on port 4400 does not support dynamic workflows',
+    };
+
+    renderProjectDetail(detail);
+
+    const workflowEntry = within(await screen.findByTestId('project-detail-tab-row')).getByTestId('project-detail-workflow-entry');
+    expect(within(workflowEntry).getByText('工作流服务版本过旧，请关闭旧版小K并重启当前版本。')).toBeInTheDocument();
+    expect(within(workflowEntry).getByRole('button', { name: '运行工作流' })).toBeDisabled();
+
+    fireEvent.click(within(workflowEntry).getByRole('button', { name: '运行工作流' }));
+    expect(screen.queryByRole('menu', { name: '选择工作流' })).not.toBeInTheDocument();
   });
 });

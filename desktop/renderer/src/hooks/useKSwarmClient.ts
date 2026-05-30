@@ -218,6 +218,9 @@ export interface KSwarmClientActions {
   deliverProject(projectId: string): Promise<boolean>;
   startProjectDiagnoseWorkflow(projectId: string): Promise<KSwarmWorkflowRun | null>;
   startProjectAgentReviewSmokeWorkflow(projectId: string): Promise<KSwarmWorkflowRun | null>;
+  createWorkflowProposal(projectId: string, workflowId: string, options?: { taskId?: string }): Promise<KSwarmWorkflowProposal | null>;
+  startWorkflowRunFromProposal(projectId: string, workflowId: string, proposalId: string, options?: { taskId?: string }): Promise<KSwarmWorkflowRun | null>;
+  cancelWorkflowRun(projectId: string, workflowRunId: string): Promise<KSwarmWorkflowRun | null>;
   // Task actions
   humanAddTasks(projectId: string, tasks: Array<{ title: string; description?: string }>): Promise<boolean>;
   createTasks(projectId: string, tasks: Array<{ title: string; description?: string; phase?: number }>): Promise<boolean>;
@@ -310,6 +313,8 @@ export interface KSwarmWorkflowRun {
   completedAt?: number | null;
   cancelledAt?: number | null;
   requestedBy?: string | null;
+  scope?: { projectId?: string; taskId?: string } | null;
+  sourceTask?: { id: string; title?: string; status?: string; assignedAgent?: string | null } | null;
   approval?: {
     required: boolean;
     status: 'not_required' | 'pending' | 'approved' | 'rejected' | string;
@@ -317,6 +322,24 @@ export interface KSwarmWorkflowRun {
     approvedBy?: string | null;
     decidedAt?: number | null;
   };
+  budgets?: {
+    maxNodes?: number;
+    maxParallelism?: number;
+    maxAgents?: number;
+    maxMinutes?: number;
+    maxTokens?: number;
+  } | null;
+  budgetGate?: {
+    status?: 'passed' | 'blocked' | string;
+    hardLimits?: {
+      maxNodes?: number;
+      maxParallelism?: number;
+      maxAgents?: number;
+      maxMinutes?: number;
+      maxTokens?: number;
+    };
+    estimate?: { riskLevel?: 'low' | 'medium' | 'high' | string; reason?: string };
+  } | null;
   phases: Array<{ id: string; title: string; status: KSwarmWorkflowNodeStatus; nodeIds: string[] }>;
   nodes: KSwarmWorkflowNode[];
   summary: {
@@ -328,9 +351,73 @@ export interface KSwarmWorkflowRun {
     pending: number;
     progress: number;
     primaryMessage?: string | null;
+    cache?: { storedNodeCount?: number; reusableNodeCount?: number };
+    blockingFailures?: Array<{ nodeId?: string; title?: string; status?: string; reason?: string | null }>;
   };
+  progressState?: {
+    lastMaterialProgress?: { nodeId?: string; message?: string; at?: number };
+  } | null;
+  recovery?: {
+    mode?: 'not_needed' | 'resume_completed_nodes' | 'blocked_waiting_runtime' | 'rerun_from_start' | string;
+    reusableNodeCount?: number;
+    nextAction?: string;
+  } | null;
   diagnosis?: KSwarmWorkflowDiagnosis | null;
   gateDecision?: KSwarmWorkflowReviewDecision | null;
+}
+
+export interface KSwarmWorkflowProposal {
+  id: string;
+  projectId: string;
+  workflowId: string;
+  title: string;
+  description?: string;
+  goal?: string;
+  status: 'pending' | 'approved' | 'cancelled' | string;
+  requestedBy?: string | null;
+  strategy?: 'workflow' | string;
+  source?: 'builtin' | 'builtin-smoke' | 'po_generated' | string;
+  scope?: { projectId?: string; taskId?: string } | null;
+  sourceTask?: { id: string; title?: string; status?: string; assignedAgent?: string | null } | null;
+  createdAt: number;
+  updatedAt: number;
+  specHash?: string;
+  phases: Array<{
+    id: string;
+    title: string;
+    nodes: Array<{ id: string; title: string; kind: string; required: boolean; dependsOn?: string[] }>;
+  }>;
+  budgets: {
+    maxNodes?: number;
+    maxParallelism?: number;
+    maxAgents?: number;
+    maxMinutes?: number;
+    maxTokens?: number;
+  };
+  budgetGate?: KSwarmWorkflowRun['budgetGate'];
+  permissions: {
+    toolCategories?: string[];
+    allowWrite?: boolean;
+    allowShell?: boolean;
+    allowNetwork?: boolean;
+    allowRenderer?: boolean;
+  };
+  outputContract?: { kind?: string; requiredArtifactTypes?: string[] } | null;
+  assumptions?: string[];
+  acceptanceRubric: {
+    id: string;
+    title: string;
+    machineChecks: Array<{ id: string; title: string; checkKind: string; required: boolean; inputRefs?: string[] }>;
+    judgmentChecks: Array<{ id: string; title: string; prompt?: string; evidenceRequired: boolean; reviewerCount: number; required: boolean }>;
+    disagreementPolicy: string;
+  };
+  approval: {
+    required: boolean;
+    status: 'pending' | 'approved' | 'rejected' | string;
+    budget?: KSwarmWorkflowProposal['budgets'] | null;
+    approvedBy?: string | null;
+    decidedAt?: number | null;
+  };
 }
 
 export interface KSwarmWorkflowNode {
@@ -350,6 +437,13 @@ export interface KSwarmWorkflowNode {
     runId?: string;
     participantId?: string;
     lastProgressAt?: number;
+  } | null;
+  cache?: {
+    key?: string;
+    status?: 'stored' | string;
+    storedAt?: number;
+    inputHash?: string;
+    outputHash?: string;
   } | null;
   producerAgent?: string | null;
   error?: string | null;
@@ -800,6 +894,32 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     return result?.workflowRun || null;
   }, [fetchProjects]);
 
+  const createWorkflowProposal = useCallback(async (projectId: string, workflowId: string, options: { taskId?: string } = {}): Promise<KSwarmWorkflowProposal | null> => {
+    const result = await httpPost<{ ok: boolean; workflowProposal?: KSwarmWorkflowProposal }>(`/projects/${projectId}/workflows/${workflowId}/proposal`, {
+      requestedBy: 'human',
+      taskId: options.taskId,
+    });
+    return result?.ok ? (result.workflowProposal || null) : null;
+  }, []);
+
+  const startWorkflowRunFromProposal = useCallback(async (projectId: string, workflowId: string, proposalId: string, options: { taskId?: string } = {}): Promise<KSwarmWorkflowRun | null> => {
+    const result = await httpPost<{ ok: boolean; workflowRun?: KSwarmWorkflowRun }>(`/projects/${projectId}/workflows/${workflowId}/runs`, {
+      proposalId,
+      approvedBy: 'human',
+      taskId: options.taskId,
+    });
+    if (result?.ok) fetchProjects();
+    return result?.workflowRun || null;
+  }, [fetchProjects]);
+
+  const cancelWorkflowRun = useCallback(async (projectId: string, workflowRunId: string): Promise<KSwarmWorkflowRun | null> => {
+    const result = await httpPost<{ ok: boolean; workflowRun?: KSwarmWorkflowRun }>(`/projects/${projectId}/workflows/${workflowRunId}/cancel`, {
+      reason: 'human_cancelled',
+    });
+    if (result?.ok) fetchProjects();
+    return result?.workflowRun || null;
+  }, [fetchProjects]);
+
   // ─── Task Actions ─────────────────────────────────────────────
 
   const humanAddTasks = useCallback(async (projectId: string, tasks: Array<{ title: string; description?: string }>): Promise<boolean> => {
@@ -923,6 +1043,9 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     deliverProject,
     startProjectDiagnoseWorkflow,
     startProjectAgentReviewSmokeWorkflow,
+    createWorkflowProposal,
+    startWorkflowRunFromProposal,
+    cancelWorkflowRun,
     // Task actions
     humanAddTasks,
     createTasks,

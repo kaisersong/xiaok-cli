@@ -8,7 +8,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, LayoutGrid, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users, Download, FolderOpen, Circle, Loader, Clock, AlertTriangle, CircleOff } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import type { KSwarmProject, ProjectIntervention, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
+import type { KSwarmProject, ProjectIntervention, KSwarmWorkflowProposal, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
 import type { ProjectFullDetail } from '../../hooks/useKSwarmClient';
 import { PlanView } from './PlanView';
 import { KanbanBoard } from './KanbanBoard';
@@ -311,8 +311,11 @@ export function ProjectDetailPage() {
     deliverProject,
     closeProject,
     startProjectDiagnoseWorkflow,
-    startProjectAgentReviewSmokeWorkflow,
+    createWorkflowProposal,
+    startWorkflowRunFromProposal,
+    cancelWorkflowRun,
     connected,
+    serviceStatus,
     agents,
   } = useKSwarm();
   const { t } = useLocale();
@@ -323,6 +326,7 @@ export function ProjectDetailPage() {
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
   const [retryCooldownUntil, setRetryCooldownUntil] = useState(0);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [workflowProposal, setWorkflowProposal] = useState<KSwarmWorkflowProposal | null>(null);
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const retryCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -497,16 +501,77 @@ export function ProjectDetailPage() {
     if (!projectId || actionLoading !== null) return;
     setActionLoading('workflow');
     try {
-      const workflowRun = await startProjectAgentReviewSmokeWorkflow(projectId);
+      const proposal = await createWorkflowProposal(projectId, 'agent-review-smoke');
+      if (proposal) {
+        setWorkflowProposal(proposal);
+      } else {
+        showNotice({ action: 'workflow', kind: 'error', message: '生成 Agent 复核诊断计划失败，请稍后重试。' }, 8_000);
+      }
+    } catch {
+      showNotice({ action: 'workflow', kind: 'error', message: '生成 Agent 复核诊断计划失败，请稍后重试。' }, 8_000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleStartTaskWorkflow = async (taskId: string) => {
+    if (!projectId || actionLoading !== null) return;
+    setActionLoading('workflow');
+    try {
+      const proposal = await createWorkflowProposal(projectId, 'po-generated-task-workflow', { taskId });
+      if (proposal) {
+        setWorkflowProposal(proposal);
+      } else {
+        showNotice({ action: 'workflow', kind: 'error', message: '生成任务工作流计划失败，请稍后重试。' }, 8_000);
+      }
+    } catch {
+      showNotice({ action: 'workflow', kind: 'error', message: '生成任务工作流计划失败，请稍后重试。' }, 8_000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleConfirmWorkflowProposal = async () => {
+    if (!projectId || !workflowProposal || actionLoading !== null) return;
+    setActionLoading('workflow');
+    try {
+      const taskId = workflowProposal.scope?.taskId;
+      const workflowRun = taskId
+        ? await startWorkflowRunFromProposal(projectId, workflowProposal.workflowId, workflowProposal.id, { taskId })
+        : await startWorkflowRunFromProposal(projectId, workflowProposal.workflowId, workflowProposal.id);
+      await refreshOnce();
+      if (workflowRun) {
+        setWorkflowProposal(null);
+        setDetail(prev => mergeWorkflowRunIntoDetail(prev, workflowRun));
+        const message = taskId ? '任务工作流已启动。' : 'Agent 复核诊断已启动。';
+        showNotice({ action: 'workflow', kind: 'success', message }, 5_000);
+      } else {
+        const message = workflowProposal.scope?.taskId ? '启动任务工作流失败，请稍后重试。' : '启动 Agent 复核诊断失败，请稍后重试。';
+        showNotice({ action: 'workflow', kind: 'error', message }, 8_000);
+      }
+    } catch {
+      const message = workflowProposal.scope?.taskId ? '启动任务工作流失败，请稍后重试。' : '启动 Agent 复核诊断失败，请稍后重试。';
+      showNotice({ action: 'workflow', kind: 'error', message }, 8_000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleCancelWorkflowRun = async () => {
+    const currentWorkflowRun = detail?.workflowRuns?.[0] || null;
+    if (!projectId || !currentWorkflowRun || actionLoading !== null) return;
+    setActionLoading('workflow');
+    try {
+      const workflowRun = await cancelWorkflowRun(projectId, currentWorkflowRun.id);
       await refreshOnce();
       if (workflowRun) {
         setDetail(prev => mergeWorkflowRunIntoDetail(prev, workflowRun));
-        showNotice({ action: 'workflow', kind: 'success', message: 'Agent 复核诊断已启动。' }, 5_000);
+        showNotice({ action: 'workflow', kind: 'success', message: '工作流已取消。' }, 5_000);
       } else {
-        showNotice({ action: 'workflow', kind: 'error', message: '启动 Agent 复核诊断失败，请稍后重试。' }, 8_000);
+        showNotice({ action: 'workflow', kind: 'error', message: '取消工作流失败，请稍后重试。' }, 8_000);
       }
     } catch {
-      showNotice({ action: 'workflow', kind: 'error', message: '启动 Agent 复核诊断失败，请稍后重试。' }, 8_000);
+      showNotice({ action: 'workflow', kind: 'error', message: '取消工作流失败，请稍后重试。' }, 8_000);
     } finally {
       setActionLoading(null);
     }
@@ -620,6 +685,9 @@ export function ProjectDetailPage() {
   const healthSummary = summarizeProjectHealth(detail);
   const showHealthBanner = shouldShowProjectHealth(healthSummary.status) && !projectIntervention?.required;
   const latestWorkflowRun = detail.workflowRuns?.[0] || null;
+  const workflowUnavailableMessage = serviceStatus?.lastError?.includes('dynamic workflows')
+    ? '工作流服务版本过旧，请关闭旧版小K并重启当前版本。'
+    : null;
   const retryBusy = actionLoading === 'retry';
   const retryCoolingDown = retryCooldownUntil > Date.now();
   const retryDisabled = actionLoading !== null || retryCoolingDown;
@@ -812,7 +880,10 @@ export function ProjectDetailPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex items-center gap-1 border-b border-[var(--c-border-subtle)] px-6">
+      <div
+        data-testid="project-detail-tab-row"
+        className="flex min-h-[43px] flex-wrap items-center gap-1 border-b border-[var(--c-border-subtle)] px-6"
+      >
         {TABS.map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -825,12 +896,21 @@ export function ProjectDetailPage() {
             </button>
           );
         })}
-        <div className="ml-auto py-1.5">
+        <div
+          data-testid="project-detail-workflow-entry"
+          className="ml-2 flex min-w-0 items-center gap-2 border-l border-[var(--c-border-subtle)] py-1.5 pl-3"
+        >
+          <span className="shrink-0 text-[11px] font-medium text-[var(--c-text-muted)]">工作流</span>
           <WorkflowStatusStrip
             workflowRun={latestWorkflowRun}
             busy={actionLoading === 'workflow'}
             onStartDiagnose={handleStartDiagnoseWorkflow}
             onStartAgentWorkflow={handleStartAgentWorkflow}
+            workflowProposal={workflowProposal}
+            onConfirmWorkflowProposal={handleConfirmWorkflowProposal}
+            onDismissWorkflowProposal={() => setWorkflowProposal(null)}
+            onCancelWorkflowRun={handleCancelWorkflowRun}
+            disabledReason={workflowUnavailableMessage}
           />
         </div>
       </div>
@@ -841,7 +921,10 @@ export function ProjectDetailPage() {
           <PlanView plan={plan} planProgress={planProgress} tasks={tasks} />
         )}
         {activeTab === 'board' && (
-          <KanbanBoard project={{ ...project, tasks } as KSwarmProject} />
+          <KanbanBoard
+            project={{ ...project, tasks } as KSwarmProject}
+            onStartTaskWorkflow={workflowUnavailableMessage ? undefined : handleStartTaskWorkflow}
+          />
         )}
         {activeTab === 'agents' && (
           <div className="p-6">

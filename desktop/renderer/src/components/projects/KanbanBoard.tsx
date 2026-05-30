@@ -4,7 +4,7 @@
  */
 
 import { useState, useMemo } from 'react';
-import { Circle, Loader2, Eye, CheckCircle2, Plus, X as XIcon, Check, AlertCircle, Clock3 } from 'lucide-react';
+import { Circle, Loader2, Eye, CheckCircle2, Plus, X as XIcon, Check, AlertCircle, Clock3, Workflow } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmProject, KSwarmTask, KSwarmArtifact } from '../../hooks/useKSwarmClient';
@@ -12,6 +12,7 @@ import { ArtifactPreviewModal } from './ArtifactPreviewModal';
 
 interface KanbanBoardProps {
   project: KSwarmProject;
+  onStartTaskWorkflow?: (taskId: string) => void;
 }
 
 interface Column {
@@ -99,7 +100,17 @@ function getTaskTimeMeta(task: KSwarmTask): { label: string; value: number } | n
   return null;
 }
 
-function TaskCard({ task, projectId, onPreviewArtifact }: { task: KSwarmTask; projectId: string; onPreviewArtifact: (art: KSwarmArtifact) => void }) {
+function TaskCard({
+  task,
+  projectId,
+  onPreviewArtifact,
+  onStartTaskWorkflow,
+}: {
+  task: KSwarmTask;
+  projectId: string;
+  onPreviewArtifact: (art: KSwarmArtifact) => void;
+  onStartTaskWorkflow?: (taskId: string) => void;
+}) {
   const { cancelTask, markTaskDone, agents } = useKSwarm();
   const { t } = useLocale();
   const [acting, setActing] = useState(false);
@@ -136,6 +147,11 @@ function TaskCard({ task, projectId, onPreviewArtifact }: { task: KSwarmTask; pr
     setActing(false);
   };
 
+  const handleStartTaskWorkflow = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onStartTaskWorkflow?.(task.id);
+  };
+
   const isDone = task.status === 'done';
 
   return (
@@ -151,8 +167,13 @@ function TaskCard({ task, projectId, onPreviewArtifact }: { task: KSwarmTask; pr
       }`}>
         <div className="flex items-start justify-between gap-1">
           <p className="text-[12px] font-medium text-[var(--c-text-primary)] line-clamp-2 flex-1">{displayTitle}</p>
-          {!acting && (canCancel || canMarkDone) && (
+          {!acting && (canCancel || canMarkDone || onStartTaskWorkflow) && (
             <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+              {onStartTaskWorkflow && (
+                <button type="button" onClick={handleStartTaskWorkflow} className="rounded p-0.5 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]" title="用工作流执行" aria-label="用工作流执行">
+                  <Workflow size={12} />
+                </button>
+              )}
               {canMarkDone && (
                 <button type="button" onClick={handleMarkDone} className="rounded p-0.5 text-[var(--c-status-success-text)] hover:bg-[var(--c-bg-deep)]" title={t.projectsKanbanMarkDone}><Check size={12} /></button>
               )}
@@ -305,7 +326,7 @@ function AddTaskForm({ projectId, onDone }: { projectId: string; onDone(): void 
   );
 }
 
-export function KanbanBoard({ project }: KanbanBoardProps) {
+export function KanbanBoard({ project, onStartTaskWorkflow }: KanbanBoardProps) {
   const { t } = useLocale();
   const tasks = useMemo(() => (project.tasks || []).filter(isRenderableTask), [project.tasks]);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -366,7 +387,15 @@ export function KanbanBoard({ project }: KanbanBoardProps) {
                 <span className="ml-auto text-[10px] text-[var(--c-text-muted)]">{colTasks.length}</span>
               </div>
               <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
-                {colTasks.map(task => <TaskCard key={task.id} task={task} projectId={project.id} onPreviewArtifact={setPreviewArtifact} />)}
+                {colTasks.map(task => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    projectId={project.id}
+                    onPreviewArtifact={setPreviewArtifact}
+                    onStartTaskWorkflow={onStartTaskWorkflow}
+                  />
+                ))}
               </div>
             </div>
           );

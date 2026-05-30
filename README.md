@@ -20,6 +20,13 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.3.9:**
+
+- **Task-Level Dynamic Workflow**: Project task cards now expose "Run with Workflow" for task-scoped execution. KSwarm creates a pending workflow proposal with `scope.taskId`, source task metadata, budget hard limits, permissions, and acceptance rubric before any agent is dispatched
+- **Controlled PO-Generated Workflow Proposals**: The first `po-generated-task-workflow` path validates a PO-authored workflow IR for a task, shows the proposal in a confirmation card, and only starts the run after user approval. This is deliberately validated IR, not raw JavaScript execution
+- **Budget, Cache, Recovery, and Progress Visibility**: Workflow runs now show budget hard caps, last material progress, blocking failures, run-internal stored node results, and recovery mode in the project workflow detail panel
+- **Workflow UX Hardening**: Workflow menus and dialogs keep opaque backgrounds, stay in the project tab row instead of becoming a large top panel, and logs remain the fused Swarm + Workflow timeline
+
 **What's New in v1.3.8:**
 
 - **Basic Dynamic Workflow**: Xiaok Desktop now ships the first project-level dynamic workflow path in KSwarm. Projects can create durable workflow runs, execute built-in quick diagnosis, and launch an agent-backed review diagnosis that routes through a Worker agent, an adversarial Reviewer agent, and a review gate reducer
@@ -120,15 +127,18 @@ xiaok Desktop includes KSwarm project delivery for work that needs planning, par
 
 ### Basic Dynamic Workflow
 
-v1.3.8 adds the first basic dynamic workflow capability on top of KSwarm projects. This is not yet a general user-authored workflow builder, but it is a real durable workflow runtime slice:
+v1.3.9 expands the basic dynamic workflow capability on top of KSwarm projects. This is not yet a general user-authored workflow builder, but it is a real durable workflow runtime slice:
 
 - **Durable workflow runs**: KSwarm records workflow runs with phases, nodes, status, progress, gate decisions, and timestamps so Desktop can refresh, resume display, and audit what happened.
 - **Quick diagnosis workflow**: a built-in control workflow inspects project state, blockers, dispatchable tasks, and recommended next actions without calling an agent.
 - **Agent-backed review diagnosis**: Xiaok can launch a structured workflow that dispatches a Worker agent for project diagnosis, sends the result to a Reviewer/PO agent for adversarial review, then reduces the review decision through a gate.
+- **Task-level workflow execution**: task cards can open a `po-generated-task-workflow` proposal for the selected task. The proposal is task-scoped, budgeted, permission-bounded, and requires confirmation before dispatch.
+- **Controlled PO-generated proposals**: KSwarm can generate a validated workflow IR from project/task context. The first version is a controlled template that proves the proposal and approval path; it does not execute raw model-authored JavaScript or arbitrary user scripts.
+- **Budget, cache, recovery, and progress UI**: workflow details show hard budget caps, last material progress, blocking failures, run-internal stored node results, and the recovery mode for resumable runs.
 - **Clear UI semantics**: the right-side action is now one "Run Workflow" menu, while the project tab remains "Logs" because it contains both Swarm and Workflow activity.
 - **Fused log timeline**: Workflow runs and Swarm activity share one chronological project log, with source tags instead of separate top-level sections.
 
-This establishes the product direction for dynamic workflow in Xiaok: KSwarm remains the project control layer, while workflow orchestration runs at the agent layer and can evolve from today's built-in workflows toward richer, dynamically generated execution plans.
+This establishes the product direction for dynamic workflow in Xiaok: KSwarm remains the project control layer, while workflow orchestration runs at the agent layer and can evolve from today's built-in and controlled PO-generated workflows toward richer, dynamically generated execution plans.
 
 The v1.3.4 Swarm path is designed around clear responsibility boundaries:
 
@@ -313,9 +323,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-1.3.8-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.3.8-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-setup-1.3.8.exe** — Windows installer (x64)
+- **xiaok-1.3.9-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.3.9-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-setup-1.3.9.exe** — Windows installer (x64)
 
 ### Features
 
@@ -323,7 +333,7 @@ Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases
 - **Canvas Preview**: Auto-open generated files (HTML, MD, PDF) in a side panel
 - **Project Management**: Kanban board with drag-and-drop, agent assignment, activity timeline
 - **KSwarm Multi-Agent**: Create, approve, recover, review, and deliver multi-agent projects from the UI
-- **Basic Dynamic Workflow**: Run project quick diagnosis and agent-backed review diagnosis as durable workflow runs with Worker, Reviewer, and gate phases
+- **Basic Dynamic Workflow**: Run project quick diagnosis, agent-backed review diagnosis, and task-scoped PO-generated workflow proposals as durable workflow runs with budget, cache, recovery, progress, Reviewer, and gate metadata
 - **Scheduled Tasks**: Create recurring tasks (hourly, daily, weekly, cron)
 - **Plugin System**: Install and manage MCP server plugins with enable/disable controls
 - **i18n**: Full Chinese/English support with runtime locale switching
@@ -577,6 +587,8 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.3.9** — Task-level dynamic workflow release: project task cards can create `po-generated-task-workflow` proposals scoped to the selected task, with visible source task, budget hard caps, permissions, and acceptance rubric before dispatch. Workflow run details now show hard budget limits, last material progress, blocking failures, run-internal stored node results, and recovery mode. The PO-generated path uses validated workflow IR rather than raw JavaScript, keeping KSwarm as the control plane and agent runtimes as the execution layer.
 
 **v1.3.8** — Basic dynamic workflow release: KSwarm projects now have durable workflow runs, built-in quick diagnosis, and an agent-backed review diagnosis path that routes through Worker diagnosis, adversarial Reviewer/PO review, and a gate reducer. Desktop exposes this as one "Run Workflow" menu while keeping project activity under the "Logs" tab, fusing `Workflow` and `Swarm` events into one chronological timeline and filtering duplicate raw workflow activity events. The accompanying design docs define the staged path toward a fuller dynamic workflow engine with budget prompts, subagent result caching, progress aggregation, and reviewer fleets.
 

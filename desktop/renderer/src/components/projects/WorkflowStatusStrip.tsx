@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, Loader, Workflow, X } from 'lucide-react';
-import type { KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
+import type { KSwarmWorkflowProposal, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
 
 interface WorkflowStatusStripProps {
   workflowRun?: KSwarmWorkflowRun | null;
   busy: boolean;
   onStartDiagnose: () => void;
   onStartAgentWorkflow?: () => void;
+  workflowProposal?: KSwarmWorkflowProposal | null;
+  onConfirmWorkflowProposal?: () => void;
+  onDismissWorkflowProposal?: () => void;
+  onCancelWorkflowRun?: () => void;
+  disabledReason?: string | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -27,7 +32,17 @@ const BUILTIN_DIAGNOSE_STATUS_LABELS: Record<string, string> = {
   cancelled: '系统诊断已取消',
 };
 
-export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose, onStartAgentWorkflow }: WorkflowStatusStripProps) {
+export function WorkflowStatusStrip({
+  workflowRun,
+  busy,
+  onStartDiagnose,
+  onStartAgentWorkflow,
+  workflowProposal,
+  onConfirmWorkflowProposal,
+  onDismissWorkflowProposal,
+  onCancelWorkflowRun,
+  disabledReason,
+}: WorkflowStatusStripProps) {
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -48,6 +63,7 @@ export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose, onStar
       ? `已完成 ${completed}/${total}`
       : (summary?.primaryMessage || formatWorkflowProgress(status, completed, total))
     : '选择快速诊断或 Agent 复核';
+  const effectiveProgressText = disabledReason || progressText;
   const sourceText = workflowRun
     ? isBuiltinDiagnose
       ? '系统内置，未调用智能体'
@@ -67,6 +83,7 @@ export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose, onStar
     setMenuOpen(false);
     onStartAgentWorkflow?.();
   };
+  const showCancelRun = workflowRun && ['running', 'blocked', 'awaiting_approval'].includes(workflowRun.status) && onCancelWorkflowRun;
 
   useEffect(() => {
     if (!open && !menuOpen) return;
@@ -107,7 +124,7 @@ export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose, onStar
             <span className="shrink-0 text-[var(--c-text-secondary)]">{compact.blocker}</span>
           </>
         ) : (
-          <span className="truncate text-[var(--c-text-muted)]">{progressText}</span>
+          <span className="truncate text-[var(--c-text-muted)]">{effectiveProgressText}</span>
         )}
       </button>
 
@@ -120,11 +137,12 @@ export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose, onStar
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         aria-label="运行工作流"
-        disabled={busy}
-        className="inline-flex items-center gap-1 rounded-md bg-[var(--c-bg-page)] px-2 py-1 font-medium text-[var(--c-text-primary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-60"
+        disabled={busy || Boolean(disabledReason)}
+        title={disabledReason || undefined}
+        className="inline-flex items-center gap-1 rounded-md bg-[var(--c-bg-page)] px-2 py-1 font-medium text-[var(--c-text-primary)] hover:bg-[var(--c-bg-deep)] disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Workflow size={12} />
-        <span>{busy ? '工作流运行中' : '运行工作流'}</span>
+        <span>{busy ? '工作流运行中' : disabledReason ? '工作流不可用' : '运行工作流'}</span>
         <ChevronDown size={12} />
       </button>
 
@@ -193,6 +211,117 @@ export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose, onStar
 
           {diagnosis && <SystemDiagnosisDetails diagnosis={diagnosis} />}
           {genericWorkflow && <GenericWorkflowDetails workflow={genericWorkflow} />}
+          {showCancelRun && (
+            <div className="mt-2 flex justify-end border-t border-current/10 pt-2">
+              <button
+                type="button"
+                onClick={onCancelWorkflowRun}
+                className="rounded-md border border-[var(--c-status-error-text)]/35 px-2 py-1 text-[10px] font-medium text-[var(--c-status-error-text)] hover:bg-[var(--c-error-bg)]"
+              >
+                取消工作流
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {workflowProposal && (
+        <div
+          role="dialog"
+          aria-label="工作流执行确认"
+          className="absolute right-0 top-full z-50 mt-2 w-[min(620px,calc(100vw-48px))] rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-secondary)] shadow-xl"
+        >
+          <div className="flex items-start gap-2">
+            <div className="min-w-0">
+              <p className="text-[12px] font-semibold text-[var(--c-text-primary)]">{workflowProposal.title}</p>
+              <p className="mt-0.5 text-[10px] leading-relaxed text-[var(--c-text-muted)]">
+                目标：{workflowProposal.goal || workflowProposal.description || workflowProposal.title}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onDismissWorkflowProposal}
+              aria-label="关闭工作流执行确认"
+              className="ml-auto rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-page)] hover:text-[var(--c-text-primary)]"
+            >
+              <X size={12} />
+            </button>
+          </div>
+
+          <WorkflowProposalDetails proposal={workflowProposal} />
+
+          <div className="mt-3 flex justify-end gap-2 border-t border-current/10 pt-2">
+            <button
+              type="button"
+              onClick={onDismissWorkflowProposal}
+              className="rounded-md px-2 py-1 text-[11px] font-medium text-[var(--c-text-muted)] hover:bg-[var(--c-bg-page)]"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onConfirmWorkflowProposal}
+              className="rounded-md bg-[var(--c-text-primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--c-bg-card)] disabled:opacity-60"
+            >
+              运行一次
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WorkflowProposalDetails({ proposal }: { proposal: KSwarmWorkflowProposal }) {
+  const budgets = proposal.budgets || {};
+  const permissionText = formatPermissionSummary(proposal.permissions);
+  const hardLimits = proposal.budgetGate?.hardLimits || budgets;
+  return (
+    <div className="mt-2 space-y-2 border-t border-current/10 pt-2 text-[10px] text-[var(--c-text-secondary)]">
+      {proposal.sourceTask && (
+        <p className="leading-relaxed"><span className="font-medium text-[var(--c-text-primary)]">任务：</span>{proposal.sourceTask.title || proposal.sourceTask.id}</p>
+      )}
+      <div className="grid gap-1.5 sm:grid-cols-2">
+        <span><span className="text-[var(--c-text-muted)]">最大节点 </span><span className="font-medium text-[var(--c-text-primary)]">{budgets.maxNodes ?? '-'}</span></span>
+        <span><span className="text-[var(--c-text-muted)]">最大并发 </span><span className="font-medium text-[var(--c-text-primary)]">{budgets.maxParallelism ?? '-'}</span></span>
+        <span><span className="text-[var(--c-text-muted)]">最大 Agent </span><span className="font-medium text-[var(--c-text-primary)]">{budgets.maxAgents ?? '-'}</span></span>
+        <span><span className="text-[var(--c-text-muted)]">最长运行 </span><span className="font-medium text-[var(--c-text-primary)]">{budgets.maxMinutes ?? '-'} 分钟</span></span>
+      </div>
+      <p className="leading-relaxed">
+        <span className="font-medium text-[var(--c-text-primary)]">预算硬上限：</span>
+        {formatBudgetLimits(hardLimits)}
+      </p>
+      {proposal.source === 'po_generated' && (
+        <p className="leading-relaxed text-[var(--c-text-muted)]">PO 生成建议，需人工确认；当前执行的是 validated workflow IR，不执行 raw JavaScript。</p>
+      )}
+      <p className="leading-relaxed"><span className="font-medium text-[var(--c-text-primary)]">权限：</span>{permissionText}</p>
+      <p className="leading-relaxed"><span className="font-medium text-[var(--c-text-primary)]">验收：</span>{proposal.acceptanceRubric.title}</p>
+      <div className="grid gap-1 sm:grid-cols-2">
+        {proposal.acceptanceRubric.machineChecks.map((check) => (
+          <span key={check.id} className="rounded bg-[var(--c-bg-page)] px-2 py-1">机器检查：{check.title}</span>
+        ))}
+        {proposal.acceptanceRubric.judgmentChecks.map((check) => (
+          <span key={check.id} className="rounded bg-[var(--c-bg-page)] px-2 py-1">Reviewer 判断：{check.title}</span>
+        ))}
+      </div>
+      {proposal.assumptions && proposal.assumptions.length > 0 && (
+        <div className="space-y-1">
+          <p className="font-medium text-[var(--c-text-primary)]">主要假设</p>
+          {proposal.assumptions.map((item) => (
+            <p key={item} className="leading-relaxed text-[var(--c-text-muted)]">{item}</p>
+          ))}
+        </div>
+      )}
+      {proposal.phases.length > 0 && (
+        <div className="space-y-1">
+          <p className="font-medium text-[var(--c-text-primary)]">阶段</p>
+          {proposal.phases.map((phase) => (
+            <p key={phase.id} className="leading-relaxed">
+              <span className="text-[var(--c-text-primary)]">{phase.title}</span>
+              <span className="text-[var(--c-text-muted)]"> · {phase.nodes.length} 个节点</span>
+            </p>
+          ))}
         </div>
       )}
     </div>
@@ -258,6 +387,41 @@ function SystemDiagnosisDetails({ diagnosis }: { diagnosis: ReturnType<typeof bu
 function GenericWorkflowDetails({ workflow }: { workflow: ReturnType<typeof buildGenericWorkflowView> }) {
   return (
     <div className="mt-2 border-t border-current/10 pt-2 text-[10px] text-[var(--c-text-secondary)]">
+      {workflow.scopeText && (
+        <p className="leading-relaxed">
+          <span className="font-medium text-[var(--c-text-primary)]">{workflow.scopeText}</span>
+        </p>
+      )}
+      {workflow.budgetText && (
+        <p className="mt-1 leading-relaxed">
+          <span className="font-medium text-[var(--c-text-primary)]">预算上限：</span>{workflow.budgetText}
+        </p>
+      )}
+      {workflow.cacheText && (
+        <p className="mt-1 leading-relaxed">
+          <span className="font-medium text-[var(--c-text-primary)]">{workflow.cacheText}</span>
+        </p>
+      )}
+      {workflow.recoveryText && (
+        <p className="mt-1 leading-relaxed">
+          <span className="font-medium text-[var(--c-text-primary)]">恢复方式：</span>{workflow.recoveryText}
+        </p>
+      )}
+      {workflow.progressText && (
+        <p className="mt-1 leading-relaxed">
+          <span className="font-medium text-[var(--c-text-primary)]">最近进展：</span>{workflow.progressText}
+        </p>
+      )}
+      {workflow.blockingFailures.length > 0 && (
+        <div className="mt-1 space-y-1">
+          <p className="font-medium text-[var(--c-status-error-text)]">阻塞失败</p>
+          {workflow.blockingFailures.map((failure) => (
+            <p key={`${failure.nodeId}-${failure.reason}`} className="leading-relaxed text-[var(--c-status-error-text)]">
+              {failure.title || failure.nodeId} · {failure.reason || failure.status}
+            </p>
+          ))}
+        </div>
+      )}
       {workflow.gateText && (
         <p className="leading-relaxed text-[var(--c-text-primary)]">
           {workflow.gateText}
@@ -355,6 +519,12 @@ function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
       .filter(Boolean)
   ));
   return {
+    scopeText: workflowRun.sourceTask ? `任务：${workflowRun.sourceTask.title || workflowRun.sourceTask.id}` : '',
+    budgetText: formatBudgetLimits(workflowRun.budgetGate?.hardLimits || workflowRun.budgets || null),
+    cacheText: formatCacheSummary(workflowRun),
+    recoveryText: formatRecoverySummary(workflowRun.recovery),
+    progressText: readString(workflowRun.progressState?.lastMaterialProgress?.message),
+    blockingFailures: workflowRun.summary?.blockingFailures || [],
     gateText,
     agentText: agents.join(' / '),
     nodes: workflowRun.nodes.map((node) => {
@@ -379,6 +549,7 @@ function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
 
 function getWorkflowDisplayName(workflowRun: KSwarmWorkflowRun) {
   if (workflowRun.workflowId === 'agent-review-smoke') return 'Agent 复核诊断';
+  if (workflowRun.workflowId === 'po-generated-task-workflow') return 'PO 生成任务工作流';
   return workflowRun.title || STATUS_LABELS[workflowRun.status] || workflowRun.status;
 }
 
@@ -386,6 +557,40 @@ function getWorkflowDialogLabel(workflowRun?: KSwarmWorkflowRun | null) {
   if (!workflowRun) return '工作流详情';
   if (workflowRun.workflowId === 'agent-review-smoke') return 'Agent 复核诊断详情';
   return '工作流详情';
+}
+
+function formatPermissionSummary(permissions: KSwarmWorkflowProposal['permissions']) {
+  const parts: string[] = [];
+  if (permissions?.toolCategories?.includes('read_project_state')) parts.push('读取项目状态');
+  if (permissions?.allowWrite) parts.push('写文件');
+  if (permissions?.allowShell) parts.push('Shell');
+  if (permissions?.allowNetwork) parts.push('网络');
+  if (permissions?.allowRenderer) parts.push('Renderer');
+  return parts.length > 0 ? parts.join('、') : '无额外权限';
+}
+
+function formatBudgetLimits(budget?: KSwarmWorkflowProposal['budgets'] | null) {
+  if (!budget) return '';
+  const parts = [];
+  if (budget.maxAgents !== undefined) parts.push(`${budget.maxAgents} Agent`);
+  if (budget.maxParallelism !== undefined) parts.push(`${budget.maxParallelism} 并发`);
+  if (budget.maxMinutes !== undefined) parts.push(`${budget.maxMinutes} 分钟`);
+  if (budget.maxTokens !== undefined) parts.push(`${budget.maxTokens} tokens`);
+  return parts.length > 0 ? parts.join(' · ') : '未设置';
+}
+
+function formatCacheSummary(workflowRun: KSwarmWorkflowRun) {
+  const stored = workflowRun.summary?.cache?.storedNodeCount || 0;
+  if (stored <= 0) return '';
+  return `已保存节点结果 ${stored}`;
+}
+
+function formatRecoverySummary(recovery?: KSwarmWorkflowRun['recovery'] | null) {
+  if (!recovery || recovery.mode === 'not_needed') return '';
+  if (recovery.mode === 'resume_completed_nodes') return '复用已完成节点';
+  if (recovery.mode === 'blocked_waiting_runtime') return '等待运行时恢复';
+  if (recovery.mode === 'rerun_from_start') return '需要从头重跑';
+  return recovery.mode || '';
 }
 
 function readDecisionFromOutput(output: Record<string, unknown>) {
