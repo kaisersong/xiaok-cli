@@ -8,7 +8,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, LayoutGrid, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users, Download, FolderOpen, Circle, Loader, Clock, AlertTriangle, CircleOff } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import type { KSwarmProject, ProjectIntervention, KSwarmWorkflowProposal, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
+import type { KSwarmProject, KSwarmProjectExecutionMode, ProjectIntervention, KSwarmWorkflowProposal, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
 import type { ProjectFullDetail } from '../../hooks/useKSwarmClient';
 import { PlanView } from './PlanView';
 import { KanbanBoard } from './KanbanBoard';
@@ -32,7 +32,7 @@ import {
 
 type TabId = 'plan' | 'board' | 'agents' | 'activity' | 'deliverables';
 type ActionNotice = {
-  action: 'retry' | 'export' | 'continue' | 'close' | 'workflow';
+  action: 'retry' | 'export' | 'continue' | 'close' | 'workflow' | 'execution_mode';
   kind: 'info' | 'success' | 'error';
   message: string;
 };
@@ -50,6 +50,60 @@ function mergeWorkflowRunIntoDetail(detail: ProjectFullDetail | null, workflowRu
   };
 }
 const SWARM_CONTEXT_STORAGE_KEY = 'xiaok.swarmContinueContext';
+
+const EXECUTION_MODE_OPTIONS: Array<{ value: KSwarmProjectExecutionMode; label: string }> = [
+  { value: 'direct', label: '快速执行' },
+  { value: 'auto', label: '智能选择' },
+  { value: 'workflow_preferred', label: '高质量执行' },
+];
+
+function getExecutionModeLabel(mode?: KSwarmProjectExecutionMode) {
+  return EXECUTION_MODE_OPTIONS.find(option => option.value === mode)?.label || '快速执行';
+}
+
+function ProjectExecutionModeControl({
+  value,
+  busy,
+  onChange,
+}: {
+  value?: KSwarmProjectExecutionMode;
+  busy: boolean;
+  onChange: (mode: KSwarmProjectExecutionMode) => void;
+}) {
+  const current = value || 'direct';
+  return (
+    <div
+      role="group"
+      aria-label="项目执行方式"
+      className="ml-2 flex min-w-0 items-center gap-2 border-l border-[var(--c-border-subtle)] py-1.5 pl-3"
+    >
+      <span className="shrink-0 text-[11px] font-medium text-[var(--c-text-muted)]">执行方式</span>
+      <div className="inline-flex overflow-hidden rounded-md border border-[var(--c-border-subtle)] bg-[var(--c-bg-page)] p-0.5">
+        {EXECUTION_MODE_OPTIONS.map((option) => {
+          const active = option.value === current;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={active}
+              disabled={busy}
+              onClick={() => {
+                if (!active) onChange(option.value);
+              }}
+              className={`px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-60 ${
+                active
+                  ? 'rounded bg-[var(--c-bg-card)] text-[var(--c-text-primary)] shadow-sm'
+                  : 'text-[var(--c-text-muted)] hover:text-[var(--c-text-secondary)]'
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function SummaryCollapsible({ summary, score, taskScores }: { summary: string; score?: number | null; taskScores?: Array<{ title: string; agent: string; score: number; comment: string }> | null }) {
   const [expanded, setExpanded] = useState(false);
@@ -305,6 +359,7 @@ export function ProjectDetailPage() {
   const {
     getProjectFullDetail,
     approveProject,
+    updateProjectExecutionMode,
     retryPlan,
     continueProject,
     dispatchTasks,
@@ -406,6 +461,24 @@ export function ProjectDetailPage() {
     await fn();
     await refreshOnce();
     setActionLoading(null);
+  };
+
+  const handleExecutionModeChange = async (executionMode: KSwarmProjectExecutionMode) => {
+    if (!projectId || actionLoading !== null) return;
+    setActionLoading('execution_mode');
+    try {
+      const updated = await updateProjectExecutionMode(projectId, executionMode);
+      if (updated) {
+        setDetail(prev => prev ? { ...prev, project: { ...prev.project, executionMode: updated.executionMode || executionMode } } : prev);
+        showNotice({ action: 'execution_mode', kind: 'success', message: `已切换为${getExecutionModeLabel(updated.executionMode || executionMode)}。` }, 5_000);
+      } else {
+        showNotice({ action: 'execution_mode', kind: 'error', message: '切换执行方式失败，请稍后重试。' }, 8_000);
+      }
+    } catch {
+      showNotice({ action: 'execution_mode', kind: 'error', message: '切换执行方式失败，请稍后重试。' }, 8_000);
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const handleCloseProject = async () => {
@@ -896,6 +969,11 @@ export function ProjectDetailPage() {
             </button>
           );
         })}
+        <ProjectExecutionModeControl
+          value={project.executionMode || 'direct'}
+          busy={actionLoading === 'execution_mode'}
+          onChange={handleExecutionModeChange}
+        />
         <div
           data-testid="project-detail-workflow-entry"
           className="ml-2 flex min-w-0 items-center gap-2 border-l border-[var(--c-border-subtle)] py-1.5 pl-3"

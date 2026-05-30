@@ -127,4 +127,41 @@ describe('KSwarm kanban failure visibility', () => {
 
     expect(onStartTaskWorkflow).toHaveBeenCalledWith('workflow-task');
   });
+
+  it('shows the recorded task execution strategy on task cards', () => {
+    renderKanban([
+      {
+        id: 'workflow-task',
+        title: '需要复核的复杂任务',
+        status: 'dispatched',
+        assignedAgent: 'worker',
+        execution: {
+          strategy: 'workflow',
+          modeSource: 'auto_selector',
+          reasonCode: 'delivery_review',
+          workflowRunId: 'wf-1',
+          selectedAt: 1770000000000,
+        },
+      },
+      {
+        id: 'direct-task',
+        title: '整理会议纪要',
+        status: 'pending',
+        assignedAgent: 'worker',
+        execution: {
+          strategy: 'direct',
+          modeSource: 'project_default',
+          reasonCode: 'simple_direct',
+          workflowRunId: null,
+          selectedAt: 1770000000000,
+        },
+      },
+    ]);
+
+    const active = screen.getByTestId('kanban-column-active');
+    const pending = screen.getByTestId('kanban-column-pending');
+    expect(within(active).getByText('工作流执行')).toBeInTheDocument();
+    expect(within(active).getByText('交付复核')).toBeInTheDocument();
+    expect(within(pending).getByText('快速执行')).toBeInTheDocument();
+  });
 });

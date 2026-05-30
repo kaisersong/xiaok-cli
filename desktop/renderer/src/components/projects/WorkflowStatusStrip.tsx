@@ -274,28 +274,14 @@ export function WorkflowStatusStrip({
 }
 
 function WorkflowProposalDetails({ proposal }: { proposal: KSwarmWorkflowProposal }) {
-  const budgets = proposal.budgets || {};
-  const permissionText = formatPermissionSummary(proposal.permissions);
-  const hardLimits = proposal.budgetGate?.hardLimits || budgets;
   return (
     <div className="mt-2 space-y-2 border-t border-current/10 pt-2 text-[10px] text-[var(--c-text-secondary)]">
       {proposal.sourceTask && (
         <p className="leading-relaxed"><span className="font-medium text-[var(--c-text-primary)]">任务：</span>{proposal.sourceTask.title || proposal.sourceTask.id}</p>
       )}
-      <div className="grid gap-1.5 sm:grid-cols-2">
-        <span><span className="text-[var(--c-text-muted)]">最大节点 </span><span className="font-medium text-[var(--c-text-primary)]">{budgets.maxNodes ?? '-'}</span></span>
-        <span><span className="text-[var(--c-text-muted)]">最大并发 </span><span className="font-medium text-[var(--c-text-primary)]">{budgets.maxParallelism ?? '-'}</span></span>
-        <span><span className="text-[var(--c-text-muted)]">最大 Agent </span><span className="font-medium text-[var(--c-text-primary)]">{budgets.maxAgents ?? '-'}</span></span>
-        <span><span className="text-[var(--c-text-muted)]">最长运行 </span><span className="font-medium text-[var(--c-text-primary)]">{budgets.maxMinutes ?? '-'} 分钟</span></span>
-      </div>
-      <p className="leading-relaxed">
-        <span className="font-medium text-[var(--c-text-primary)]">预算硬上限：</span>
-        {formatBudgetLimits(hardLimits)}
-      </p>
       {proposal.source === 'po_generated' && (
         <p className="leading-relaxed text-[var(--c-text-muted)]">PO 生成建议，需人工确认；当前执行的是 validated workflow IR，不执行 raw JavaScript。</p>
       )}
-      <p className="leading-relaxed"><span className="font-medium text-[var(--c-text-primary)]">权限：</span>{permissionText}</p>
       <p className="leading-relaxed"><span className="font-medium text-[var(--c-text-primary)]">验收：</span>{proposal.acceptanceRubric.title}</p>
       <div className="grid gap-1 sm:grid-cols-2">
         {proposal.acceptanceRubric.machineChecks.map((check) => (
@@ -390,11 +376,6 @@ function GenericWorkflowDetails({ workflow }: { workflow: ReturnType<typeof buil
       {workflow.scopeText && (
         <p className="leading-relaxed">
           <span className="font-medium text-[var(--c-text-primary)]">{workflow.scopeText}</span>
-        </p>
-      )}
-      {workflow.budgetText && (
-        <p className="mt-1 leading-relaxed">
-          <span className="font-medium text-[var(--c-text-primary)]">预算上限：</span>{workflow.budgetText}
         </p>
       )}
       {workflow.cacheText && (
@@ -520,7 +501,6 @@ function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
   ));
   return {
     scopeText: workflowRun.sourceTask ? `任务：${workflowRun.sourceTask.title || workflowRun.sourceTask.id}` : '',
-    budgetText: formatBudgetLimits(workflowRun.budgetGate?.hardLimits || workflowRun.budgets || null),
     cacheText: formatCacheSummary(workflowRun),
     recoveryText: formatRecoverySummary(workflowRun.recovery),
     progressText: readString(workflowRun.progressState?.lastMaterialProgress?.message),
@@ -557,26 +537,6 @@ function getWorkflowDialogLabel(workflowRun?: KSwarmWorkflowRun | null) {
   if (!workflowRun) return '工作流详情';
   if (workflowRun.workflowId === 'agent-review-smoke') return 'Agent 复核诊断详情';
   return '工作流详情';
-}
-
-function formatPermissionSummary(permissions: KSwarmWorkflowProposal['permissions']) {
-  const parts: string[] = [];
-  if (permissions?.toolCategories?.includes('read_project_state')) parts.push('读取项目状态');
-  if (permissions?.allowWrite) parts.push('写文件');
-  if (permissions?.allowShell) parts.push('Shell');
-  if (permissions?.allowNetwork) parts.push('网络');
-  if (permissions?.allowRenderer) parts.push('Renderer');
-  return parts.length > 0 ? parts.join('、') : '无额外权限';
-}
-
-function formatBudgetLimits(budget?: KSwarmWorkflowProposal['budgets'] | null) {
-  if (!budget) return '';
-  const parts = [];
-  if (budget.maxAgents !== undefined) parts.push(`${budget.maxAgents} Agent`);
-  if (budget.maxParallelism !== undefined) parts.push(`${budget.maxParallelism} 并发`);
-  if (budget.maxMinutes !== undefined) parts.push(`${budget.maxMinutes} 分钟`);
-  if (budget.maxTokens !== undefined) parts.push(`${budget.maxTokens} tokens`);
-  return parts.length > 0 ? parts.join(' · ') : '未设置';
 }
 
 function formatCacheSummary(workflowRun: KSwarmWorkflowRun) {

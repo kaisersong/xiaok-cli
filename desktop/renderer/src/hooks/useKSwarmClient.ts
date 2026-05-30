@@ -40,6 +40,17 @@ export interface KSwarmTask {
   completedAt?: number | string | null;
   createdAt?: number | string;
   updatedAt?: number | string;
+  execution?: KSwarmTaskExecution | null;
+}
+
+export type KSwarmProjectExecutionMode = 'direct' | 'auto' | 'workflow_preferred';
+
+export interface KSwarmTaskExecution {
+  strategy: 'direct' | 'workflow';
+  modeSource?: 'project_default' | 'auto_selector' | 'manual_override' | string;
+  reasonCode?: string;
+  workflowRunId?: string | null;
+  selectedAt?: number;
 }
 
 export interface KSwarmArtifact {
@@ -70,6 +81,7 @@ export interface KSwarmProject {
   name: string;
   goal?: string;
   status: 'draft' | 'planning' | 'created' | 'active' | 'review' | 'delivered' | 'closed';
+  executionMode?: KSwarmProjectExecutionMode;
   tasks?: KSwarmTask[];
   phases?: KSwarmPhase[];
   poAgent?: string;
@@ -193,6 +205,7 @@ export interface CreateKSwarmProjectInput {
   members?: string[];
   workFolder?: string;
   enableSummary?: boolean;
+  executionMode?: KSwarmProjectExecutionMode;
   agentSelection?: KSwarmProjectAgentSelection;
 }
 
@@ -210,6 +223,7 @@ export interface KSwarmClientActions {
   getProjectDetail(projectId: string): Promise<KSwarmProject | null>;
   getProjectFullDetail(projectId: string): Promise<ProjectFullDetail | null>;
   createProject(input: CreateKSwarmProjectInput): Promise<KSwarmProject | null>;
+  updateProjectExecutionMode(projectId: string, executionMode: KSwarmProjectExecutionMode): Promise<KSwarmProject | null>;
   approveProject(projectId: string): Promise<boolean>;
   retryPlan(projectId: string): Promise<{ ok: boolean; retried?: boolean; poReassigned?: boolean; poAgent?: string; previousPoAgent?: string; poResolutionReason?: string } | null>;
   continueProject(projectId: string, request: ContinueProjectRequest): Promise<ContinueProjectResult | null>;
@@ -682,6 +696,20 @@ async function httpPut<T>(path: string, body?: unknown): Promise<T | null> {
   }
 }
 
+async function httpPatch<T>(path: string, body?: unknown): Promise<T | null> {
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 async function httpDelete(path: string): Promise<boolean> {
   try {
     const res = await fetch(`${BASE_URL}${path}`, { method: 'DELETE' });
@@ -765,7 +793,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
       'project_created', 'project_approved', 'project_closed', 'project_deliverable',
       'tasks_created', 'tasks_dispatched', 'task_done', 'task_failed', 'task_retry',
       'task_update', 'task_reviewed', 'task_cancelled', 'task_rework',
-      'plan_submitted', 'plan_revised', 'project_continue',
+      'plan_submitted', 'plan_revised', 'project_continue', 'project_execution_mode_updated',
     ];
     if (msg.type && refreshEvents.includes(msg.type)) {
       fetchProjects();
@@ -848,6 +876,15 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     const result = await httpPost<{ ok: boolean }>(`/projects/${projectId}/approve`);
     if (result?.ok) fetchProjects();
     return !!result?.ok;
+  }, [fetchProjects]);
+
+  const updateProjectExecutionMode = useCallback(async (projectId: string, executionMode: KSwarmProjectExecutionMode): Promise<KSwarmProject | null> => {
+    const result = await httpPatch<{ ok: boolean; project?: KSwarmProject }>(`/projects/${projectId}/execution-mode`, {
+      executionMode,
+      updatedBy: 'human',
+    });
+    if (result?.ok) fetchProjects();
+    return result?.project || null;
   }, [fetchProjects]);
 
   const retryPlan = useCallback(async (projectId: string) => {
@@ -1035,6 +1072,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     getProjectDetail,
     getProjectFullDetail,
     createProject,
+    updateProjectExecutionMode,
     approveProject,
     retryPlan,
     continueProject,

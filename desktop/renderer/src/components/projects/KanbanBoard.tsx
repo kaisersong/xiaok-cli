@@ -100,6 +100,39 @@ function getTaskTimeMeta(task: KSwarmTask): { label: string; value: number } | n
   return null;
 }
 
+function getTaskExecutionView(task: KSwarmTask): { label: string; reason?: string; tone: 'direct' | 'workflow' } | null {
+  const execution = task.execution;
+  if (!execution?.strategy) return null;
+  if (execution.strategy === 'workflow') {
+    return {
+      label: '工作流执行',
+      reason: formatExecutionReason(execution.reasonCode),
+      tone: 'workflow',
+    };
+  }
+  return {
+    label: '快速执行',
+    reason: formatExecutionReason(execution.reasonCode),
+    tone: 'direct',
+  };
+}
+
+function formatExecutionReason(reasonCode?: string): string {
+  const labels: Record<string, string> = {
+    delivery_review: '交付复核',
+    quality_requested: '质量门禁',
+    multi_source_evidence: '证据链',
+    retry_after_failure: '失败恢复',
+    rework_after_review: '返工复核',
+    blocked_or_unclear: '阻塞诊断',
+    project_workflow_preferred: '高质量',
+    manual_task_workflow: '手动指定',
+    simple_direct: '',
+    project_direct_default: '',
+  };
+  return labels[reasonCode || ''] || '';
+}
+
 function TaskCard({
   task,
   projectId,
@@ -126,6 +159,7 @@ function TaskCard({
   const review = (task as any).reviewResult;
   const hasArtifacts = result.artifacts && result.artifacts.length > 0;
   const failureReason = task.blockedReason || task.failureReason || task.lastFailureClass || task.failureClass || review?.feedback || '';
+  const executionView = getTaskExecutionView(task);
 
   const agentName = (id?: string) => {
     if (!id) return '';
@@ -203,6 +237,18 @@ function TaskCard({
           <div className="mt-1.5 flex items-center gap-1 text-[10px] text-[var(--c-text-muted)]">
             <Clock3 size={10} />
             <span>{taskTime.label} {formatTaskTimestamp(taskTime.value)}</span>
+          </div>
+        )}
+
+        {executionView && (
+          <div className={`mt-1.5 inline-flex max-w-full items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] ${
+            executionView.tone === 'workflow'
+              ? 'bg-[var(--c-accent)]/10 text-[var(--c-accent)]'
+              : 'bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]'
+          }`}>
+            <Workflow size={10} className="shrink-0" />
+            <span>{executionView.label}</span>
+            {executionView.reason && <span className="text-[var(--c-text-muted)]">{executionView.reason}</span>}
           </div>
         )}
 

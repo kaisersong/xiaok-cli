@@ -10,6 +10,7 @@ const {
   mockCreateWorkflowProposal,
   mockStartWorkflowRunFromProposal,
   mockCancelWorkflowRun,
+  mockUpdateProjectExecutionMode,
   mockServiceStatus,
 } = vi.hoisted(() => ({
   mockGetProjectFullDetail: vi.fn(),
@@ -18,6 +19,7 @@ const {
   mockCreateWorkflowProposal: vi.fn(),
   mockStartWorkflowRunFromProposal: vi.fn(),
   mockCancelWorkflowRun: vi.fn(),
+  mockUpdateProjectExecutionMode: vi.fn(),
   mockServiceStatus: { current: null as null | { running: boolean; port: number; pid: number | null; restartCount: number; lastError: string | null } },
 }));
 
@@ -38,6 +40,7 @@ vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
     createWorkflowProposal: mockCreateWorkflowProposal,
     startWorkflowRunFromProposal: mockStartWorkflowRunFromProposal,
     cancelWorkflowRun: mockCancelWorkflowRun,
+    updateProjectExecutionMode: mockUpdateProjectExecutionMode,
     serviceStatus: mockServiceStatus.current,
   }),
 }));
@@ -336,6 +339,7 @@ function workflowDetail(overrides: Partial<ProjectFullDetail> = {}): ProjectFull
       name: '动态工作流项目',
       goal: '验证项目级 workflow',
       status: 'active',
+      executionMode: 'direct',
       poAgent: 'xiaok-po',
       createdAt: '1770000000000',
       updatedAt: '1770000000000',
@@ -481,7 +485,7 @@ describe('WorkflowStatusStrip', () => {
     expect(screen.getByText('执行中 0/3')).toBeInTheDocument();
   });
 
-  it('shows workflow budget, cache, recovery, task scope, and last material progress in details', () => {
+  it('shows workflow cache, recovery, task scope, and last material progress without user-facing budget details', () => {
     renderWithProviders(
       <WorkflowStatusStrip
         workflowRun={taskWorkflowRun()}
@@ -495,9 +499,9 @@ describe('WorkflowStatusStrip', () => {
 
     const dialog = screen.getByRole('dialog', { name: '工作流详情' });
     expect(dialog).toHaveTextContent('任务：写报告');
-    expect(dialog).toHaveTextContent('预算上限');
-    expect(dialog).toHaveTextContent('2 Agent');
-    expect(dialog).toHaveTextContent('16000 tokens');
+    expect(dialog).not.toHaveTextContent('预算上限');
+    expect(dialog).not.toHaveTextContent('2 Agent');
+    expect(dialog).not.toHaveTextContent('16000 tokens');
     expect(dialog).toHaveTextContent('已保存节点结果 1');
     expect(dialog).toHaveTextContent('恢复方式：复用已完成节点');
     expect(dialog).toHaveTextContent('最近进展：正在生成任务工作流建议');
@@ -600,9 +604,9 @@ describe('ProjectDetailPage workflow action', () => {
     expect(dialog).toHaveTextContent('Agent 复核诊断验收标准');
     expect(dialog).toHaveTextContent('Worker 输出结构合法');
     expect(dialog).toHaveTextContent('复核结论有证据');
-    expect(dialog).toHaveTextContent('最大节点 3');
-    expect(dialog).toHaveTextContent('最大并发 1');
-    expect(dialog).toHaveTextContent('读取项目状态');
+    expect(dialog).not.toHaveTextContent('最大节点');
+    expect(dialog).not.toHaveTextContent('最大并发');
+    expect(dialog).not.toHaveTextContent('读取项目状态');
 
     fireEvent.click(within(dialog).getByRole('button', { name: '运行一次' }));
 
@@ -629,8 +633,8 @@ describe('ProjectDetailPage workflow action', () => {
     expect(dialog).toHaveTextContent('PO 生成任务工作流');
     expect(dialog).toHaveTextContent('任务：写报告');
     expect(dialog).toHaveTextContent('PO 生成任务工作流验收标准');
-    expect(dialog).toHaveTextContent('预算硬上限');
-    expect(dialog).toHaveTextContent('16000 tokens');
+    expect(dialog).not.toHaveTextContent('预算硬上限');
+    expect(dialog).not.toHaveTextContent('16000 tokens');
 
     fireEvent.click(within(dialog).getByRole('button', { name: '运行一次' }));
 
@@ -668,6 +672,25 @@ describe('ProjectDetailPage workflow action', () => {
     expect(await screen.findByText('activity')).toBeInTheDocument();
     expect(screen.getByText('workflow-runs-prop:2')).toBeInTheDocument();
     expect(screen.queryByText('工作流运行记录')).not.toBeInTheDocument();
+  });
+
+  it('keeps project execution mode as a compact project setting in the tab row', async () => {
+    const initial = workflowDetail({ workflowRuns: [] });
+    mockGetProjectFullDetail.mockResolvedValue(initial);
+    mockUpdateProjectExecutionMode.mockResolvedValue({ ...initial.project, executionMode: 'auto' });
+
+    renderProjectDetail(initial);
+
+    const tabRow = await screen.findByTestId('project-detail-tab-row');
+    const control = within(tabRow).getByRole('group', { name: '项目执行方式' });
+    expect(within(control).getByRole('button', { name: '快速执行' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(control).getByRole('button', { name: '智能选择' })).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(within(control).getByRole('button', { name: '智能选择' }));
+
+    await waitFor(() => expect(mockUpdateProjectExecutionMode).toHaveBeenCalledWith('proj-workflow', 'auto'));
+    expect(await screen.findByText('已切换为智能选择。')).toBeInTheDocument();
+    expect(within(control).getByRole('button', { name: '智能选择' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('keeps the workflow entry visible in the project detail tab row', async () => {
