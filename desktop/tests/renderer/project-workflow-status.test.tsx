@@ -1,0 +1,210 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import type { ProjectFullDetail } from '../../renderer/src/hooks/useKSwarmClient';
+
+const { mockGetProjectFullDetail, mockStartProjectDiagnoseWorkflow } = vi.hoisted(() => ({
+  mockGetProjectFullDetail: vi.fn(),
+  mockStartProjectDiagnoseWorkflow: vi.fn(),
+}));
+
+vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
+  useKSwarm: () => ({
+    connected: true,
+    agents: [],
+    getProjectFullDetail: mockGetProjectFullDetail,
+    approveProject: vi.fn(),
+    retryPlan: vi.fn(),
+    continueProject: vi.fn(),
+    dispatchTasks: vi.fn(),
+    deliverProject: vi.fn(),
+    closeProject: vi.fn(),
+    deleteProject: vi.fn(),
+    startProjectDiagnoseWorkflow: mockStartProjectDiagnoseWorkflow,
+  }),
+}));
+
+vi.mock('../../renderer/src/components/projects/KanbanBoard', () => ({
+  KanbanBoard: () => <div>kanban</div>,
+}));
+vi.mock('../../renderer/src/components/projects/PlanView', () => ({
+  PlanView: () => <div>plan</div>,
+}));
+vi.mock('../../renderer/src/components/projects/ActivityTimeline', () => ({
+  ActivityTimeline: () => <div>activity</div>,
+}));
+vi.mock('../../renderer/src/components/projects/DeliverableView', () => ({
+  DeliverableView: () => <div>deliverables</div>,
+}));
+vi.mock('../../renderer/src/shared/desktop', () => ({
+  getDesktopApi: () => ({
+    showSaveDialog: vi.fn(),
+    saveFile: vi.fn(),
+  }),
+}));
+vi.mock('../../renderer/src/api', () => ({
+  api: { createThread: vi.fn() },
+}));
+
+import { ProjectDetailPage } from '../../renderer/src/components/projects/ProjectDetailPage';
+import { WorkflowStatusStrip } from '../../renderer/src/components/projects/WorkflowStatusStrip';
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+function renderWithProviders(ui: React.ReactNode, initialPath = '/') {
+  return render(
+    <LocaleProvider>
+      <MemoryRouter initialEntries={[initialPath]}>
+        {ui}
+      </MemoryRouter>
+    </LocaleProvider>
+  );
+}
+
+function workflowDetail(overrides: Partial<ProjectFullDetail> = {}): ProjectFullDetail {
+  return {
+    project: {
+      id: 'proj-workflow',
+      name: '动态工作流项目',
+      goal: '验证项目级 workflow',
+      status: 'active',
+      poAgent: 'xiaok-po',
+      createdAt: '1770000000000',
+      updatedAt: '1770000000000',
+    },
+    tasks: [{ id: 'item-1', title: '写报告', status: 'pending', assignedAgent: 'xiaok-worker' }],
+    activities: [],
+    humanActions: [],
+    workspace: { path: '/tmp/proj-workflow', artifacts: [] },
+    plan: null,
+    planProgress: null,
+    workflowRuns: [
+      {
+        id: 'wf-proj-workflow-project-diagnose-1770000000000',
+        projectId: 'proj-workflow',
+        workflowId: 'project-diagnose',
+        title: '项目诊断工作流',
+        strategy: 'workflow',
+        source: 'builtin',
+        status: 'completed',
+        createdAt: 1770000000000,
+        updatedAt: 1770000000000,
+        startedAt: 1770000000000,
+        completedAt: 1770000000000,
+        cancelledAt: null,
+        requestedBy: 'human',
+        approval: { required: false, status: 'not_required', budget: null, approvedBy: null, decidedAt: null },
+        phases: [
+          { id: 'inspect', title: '检查项目状态', status: 'completed', nodeIds: ['collect-project-state', 'classify-blockers'] },
+          { id: 'recommend', title: '生成处理建议', status: 'completed', nodeIds: ['recommend-actions'] },
+        ],
+        nodes: [
+          { id: 'collect-project-state', phaseId: 'inspect', title: '收集项目状态', status: 'completed', kind: 'control', dependsOn: [], output: { projectStatus: 'active', taskCount: 1, healthState: 'dispatchable' }, error: null, startedAt: 1770000000000, completedAt: 1770000000000 },
+          { id: 'classify-blockers', phaseId: 'inspect', title: '识别阻塞与等待原因', status: 'completed', kind: 'control', dependsOn: ['collect-project-state'], output: { blockedTasks: [], waitingCount: 0, dispatchableCount: 1 }, error: null, startedAt: 1770000000000, completedAt: 1770000000000 },
+          { id: 'recommend-actions', phaseId: 'recommend', title: '生成下一步建议', status: 'completed', kind: 'review', dependsOn: ['classify-blockers'], output: { recommendedActions: [{ id: 'dispatch_tasks', label: '派发可执行任务', reason: '存在可派发任务' }] }, error: null, startedAt: 1770000000000, completedAt: 1770000000000 },
+        ],
+        summary: { total: 3, completed: 3, failed: 0, blocked: 0, running: 0, pending: 0, progress: 1, primaryMessage: '派发可执行任务' },
+        diagnosis: {
+          healthState: 'dispatchable',
+          gate: null,
+          blockedTasks: [],
+          dispatchableCount: 1,
+          waitingCount: 0,
+          recommendedActions: [{ id: 'dispatch_tasks', label: '派发可执行任务', reason: '存在可派发任务' }],
+        },
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function renderProjectDetail(detail: ProjectFullDetail) {
+  mockGetProjectFullDetail.mockResolvedValue(detail);
+  renderWithProviders(
+    <Routes>
+      <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
+    </Routes>,
+    `/projects/${detail.project.id}`
+  );
+}
+
+describe('WorkflowStatusStrip', () => {
+  it('renders compact workflow status and opens diagnosis details on demand', () => {
+    const detail = workflowDetail();
+
+    renderWithProviders(
+      <WorkflowStatusStrip
+        workflowRun={detail.workflowRuns?.[0] ?? null}
+        busy={false}
+        onStartDiagnose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('系统诊断完成')).toBeInTheDocument();
+    expect(screen.getByText('可派发')).toBeInTheDocument();
+    expect(screen.getByText('1 个任务')).toBeInTheDocument();
+    expect(screen.getByText('无阻塞')).toBeInTheDocument();
+    expect(screen.queryByText('项目状态')).not.toBeInTheDocument();
+    expect(screen.queryByText('系统内置，未调用智能体')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '运行系统诊断' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /系统诊断完成/ }));
+
+    const dialog = screen.getByRole('dialog', { name: '系统诊断详情' });
+    expect(dialog.className).toContain('bg-[var(--c-bg-card)]');
+    expect(dialog.className).not.toContain('/10');
+    expect(screen.getByText('已完成 3/3')).toBeInTheDocument();
+    expect(screen.getByText('系统内置，未调用智能体')).toBeInTheDocument();
+    expect(screen.getAllByText('派发可执行任务').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('项目状态')).toBeInTheDocument();
+    expect(screen.getByText('进行中')).toBeInTheDocument();
+    expect(screen.getByText('健康状态')).toBeInTheDocument();
+    expect(screen.getAllByText('可派发').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('任务')).toBeInTheDocument();
+    expect(screen.getAllByText('1').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/建议：/)).toBeInTheDocument();
+    expect(screen.getByText(/存在可派发任务/)).toBeInTheDocument();
+    expect(screen.getByText(/诊断依据：收集项目状态 ✓/)).toBeInTheDocument();
+  });
+});
+
+describe('ProjectDetailPage workflow action', () => {
+  it('starts project diagnose workflow and refreshes project detail', async () => {
+    const initial = workflowDetail({ workflowRuns: [] });
+    const refreshed = workflowDetail();
+    mockGetProjectFullDetail.mockResolvedValueOnce(initial).mockResolvedValueOnce(refreshed);
+    mockStartProjectDiagnoseWorkflow.mockResolvedValue(refreshed.workflowRuns?.[0]);
+
+    renderProjectDetail(initial);
+
+    fireEvent.click(await screen.findByRole('button', { name: '运行系统诊断' }));
+
+    await waitFor(() => expect(mockStartProjectDiagnoseWorkflow).toHaveBeenCalledWith('proj-workflow'));
+    await waitFor(() => expect(mockGetProjectFullDetail).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('系统诊断完成')).toBeInTheDocument();
+    expect(screen.queryByText('项目状态')).not.toBeInTheDocument();
+  });
+
+  it('shows completed workflow from the start response even when detail refresh is stale', async () => {
+    const initial = workflowDetail({ workflowRuns: [] });
+    const completedRun = workflowDetail().workflowRuns?.[0];
+    mockGetProjectFullDetail.mockResolvedValueOnce(initial).mockResolvedValueOnce(initial);
+    mockStartProjectDiagnoseWorkflow.mockResolvedValue(completedRun);
+
+    renderProjectDetail(initial);
+
+    fireEvent.click(await screen.findByRole('button', { name: '运行系统诊断' }));
+
+    await waitFor(() => expect(mockStartProjectDiagnoseWorkflow).toHaveBeenCalledWith('proj-workflow'));
+    expect(await screen.findByText('系统诊断已完成。')).toBeInTheDocument();
+    expect(await screen.findByText('系统诊断完成')).toBeInTheDocument();
+    expect(screen.queryByText('系统内置，未调用智能体')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /系统诊断完成/ }));
+    expect(screen.getByText('系统内置，未调用智能体')).toBeInTheDocument();
+    expect(screen.getAllByText('派发可执行任务').length).toBeGreaterThanOrEqual(1);
+  });
+});

@@ -84,6 +84,7 @@ export interface KSwarmProject {
   summaryScore?: number | null;
   taskScores?: Array<{ title: string; agent: string; score: number; comment: string }> | null;
   projectIntervention?: ProjectIntervention | null;
+  latestWorkflowRun?: KSwarmWorkflowRun | null;
 }
 
 export interface KSwarmDeliverable {
@@ -211,6 +212,7 @@ export interface KSwarmClientActions {
   closeProject(projectId: string): Promise<boolean>;
   deleteProject(projectId: string): Promise<boolean>;
   deliverProject(projectId: string): Promise<boolean>;
+  startProjectDiagnoseWorkflow(projectId: string): Promise<KSwarmWorkflowRun | null>;
   // Task actions
   humanAddTasks(projectId: string, tasks: Array<{ title: string; description?: string }>): Promise<boolean>;
   createTasks(projectId: string, tasks: Array<{ title: string; description?: string; phase?: number }>): Promise<boolean>;
@@ -269,6 +271,83 @@ export interface ProjectFullDetail {
     actions?: Array<{ id: string; label: string; recommended?: boolean }>;
   };
   projectIntervention?: ProjectIntervention | null;
+  workflowRuns?: KSwarmWorkflowRun[];
+}
+
+export type KSwarmWorkflowRunStatus =
+  | 'awaiting_approval'
+  | 'running'
+  | 'blocked'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export type KSwarmWorkflowNodeStatus =
+  | 'pending'
+  | 'ready'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'blocked'
+  | 'cancelled';
+
+export interface KSwarmWorkflowRun {
+  id: string;
+  projectId: string;
+  workflowId: 'project-diagnose' | string;
+  title: string;
+  strategy: 'workflow';
+  source: 'builtin' | string;
+  status: KSwarmWorkflowRunStatus;
+  createdAt: number;
+  updatedAt: number;
+  startedAt?: number | null;
+  completedAt?: number | null;
+  cancelledAt?: number | null;
+  requestedBy?: string | null;
+  approval?: {
+    required: boolean;
+    status: 'not_required' | 'pending' | 'approved' | 'rejected' | string;
+    budget?: { maxAgents?: number; maxUsd?: number; maxMinutes?: number } | null;
+    approvedBy?: string | null;
+    decidedAt?: number | null;
+  };
+  phases: Array<{ id: string; title: string; status: KSwarmWorkflowNodeStatus; nodeIds: string[] }>;
+  nodes: KSwarmWorkflowNode[];
+  summary: {
+    total: number;
+    completed: number;
+    failed: number;
+    blocked: number;
+    running: number;
+    pending: number;
+    progress: number;
+    primaryMessage?: string | null;
+  };
+  diagnosis?: KSwarmWorkflowDiagnosis | null;
+}
+
+export interface KSwarmWorkflowNode {
+  id: string;
+  phaseId: string;
+  title: string;
+  status: KSwarmWorkflowNodeStatus;
+  kind: 'control' | 'review' | 'agent_task' | string;
+  dependsOn: string[];
+  assignedAgent?: string | null;
+  output?: Record<string, unknown> | null;
+  error?: string | null;
+  startedAt?: number | null;
+  completedAt?: number | null;
+}
+
+export interface KSwarmWorkflowDiagnosis {
+  healthState?: string | null;
+  gate?: string | null;
+  blockedTasks: Array<{ taskId?: string; message?: string }>;
+  dispatchableCount: number;
+  waitingCount: number;
+  recommendedActions: Array<{ id: string; label: string; reason: string }>;
 }
 
 export interface ProjectIntervention {
@@ -436,7 +515,7 @@ function formatPrinciplesForPlanningGuidance(principles: PrincipleEntry[]): stri
 
 async function httpGet<T>(path: string): Promise<T | null> {
   try {
-    const res = await fetch(`${BASE_URL}${path}`);
+    const res = await fetch(`${BASE_URL}${path}`, { cache: 'no-store' });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -683,6 +762,14 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     return !!result?.ok;
   }, [fetchProjects]);
 
+  const startProjectDiagnoseWorkflow = useCallback(async (projectId: string): Promise<KSwarmWorkflowRun | null> => {
+    const result = await httpPost<{ ok: boolean; workflowRun?: KSwarmWorkflowRun }>(`/projects/${projectId}/workflows/project-diagnose`, {
+      requestedBy: 'human',
+    });
+    if (result?.ok) fetchProjects();
+    return result?.workflowRun || null;
+  }, [fetchProjects]);
+
   // ─── Task Actions ─────────────────────────────────────────────
 
   const humanAddTasks = useCallback(async (projectId: string, tasks: Array<{ title: string; description?: string }>): Promise<boolean> => {
@@ -804,6 +891,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     closeProject,
     deleteProject,
     deliverProject,
+    startProjectDiagnoseWorkflow,
     // Task actions
     humanAddTasks,
     createTasks,

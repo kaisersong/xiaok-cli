@@ -108,6 +108,63 @@ describe('KSwarm renderer contract', () => {
     });
   });
 
+  it('accepts workflow runs returned by the KSwarm full-detail API', () => {
+    const detail: ProjectFullDetail = {
+      project: { id: 'proj-1', name: '动态工作流项目', status: 'active' },
+      tasks: [],
+      activities: [],
+      humanActions: [],
+      workspace: { path: '/Users/[USER]/projects/proj-1', artifacts: [] },
+      plan: null,
+      planProgress: null,
+      workflowRuns: [
+        {
+          id: 'wf-proj-1-project-diagnose-1770000000000',
+          projectId: 'proj-1',
+          workflowId: 'project-diagnose',
+          title: '项目诊断工作流',
+          strategy: 'workflow',
+          source: 'builtin',
+          status: 'completed',
+          createdAt: 1770000000000,
+          updatedAt: 1770000000000,
+          startedAt: 1770000000000,
+          completedAt: 1770000000000,
+          cancelledAt: null,
+          requestedBy: 'human',
+          approval: { required: false, status: 'not_required', budget: null, approvedBy: null, decidedAt: null },
+          phases: [{ id: 'inspect', title: '检查项目状态', status: 'completed', nodeIds: ['collect-project-state'] }],
+          nodes: [
+            {
+              id: 'collect-project-state',
+              phaseId: 'inspect',
+              title: '收集项目状态',
+              status: 'completed',
+              kind: 'control',
+              dependsOn: [],
+              output: { taskCount: 0 },
+              error: null,
+              startedAt: 1770000000000,
+              completedAt: 1770000000000,
+            },
+          ],
+          summary: { total: 1, completed: 1, failed: 0, blocked: 0, running: 0, pending: 0, progress: 1, primaryMessage: '派发可执行任务' },
+          diagnosis: {
+            healthState: 'dispatchable',
+            gate: null,
+            blockedTasks: [],
+            dispatchableCount: 1,
+            waitingCount: 0,
+            recommendedActions: [{ id: 'dispatch_tasks', label: '派发可执行任务', reason: '存在可派发任务' }],
+          },
+        },
+      ],
+    };
+
+    expect(detail.workflowRuns?.[0].diagnosis?.recommendedActions[0].id).toBe('dispatch_tasks');
+    expect(detail.workflowRuns?.[0].summary.completed).toBe(1);
+  });
+
   it('derives agent card states from assigned task context', () => {
     const agent: KSwarmAgent = { id: 'cli-claude', name: 'Claude', status: 'idle' };
     const tasks: KSwarmTask[] = [

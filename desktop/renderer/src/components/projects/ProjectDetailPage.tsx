@@ -8,13 +8,14 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, LayoutGrid, Activity, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users, Download, FolderOpen, Circle, Loader, Clock, AlertTriangle, CircleOff } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import type { KSwarmProject, KSwarmTask, KSwarmActivityEvent, KSwarmHumanAction, ProjectIntervention } from '../../hooks/useKSwarmClient';
+import type { KSwarmProject, KSwarmTask, KSwarmActivityEvent, KSwarmHumanAction, ProjectIntervention, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
 import type { ProjectFullDetail } from '../../hooks/useKSwarmClient';
 import { PlanView } from './PlanView';
 import { KanbanBoard } from './KanbanBoard';
 import { ActivityTimeline } from './ActivityTimeline';
 import { DeliverableView } from './DeliverableView';
 import { ProjectInterventionBanner } from './ProjectInterventionBanner';
+import { WorkflowStatusStrip } from './WorkflowStatusStrip';
 import { exportProjectMarkdown } from './exportProjectMarkdown';
 import { getDesktopApi } from '../../shared/desktop';
 import { api } from '../../api';
@@ -31,7 +32,7 @@ import {
 
 type TabId = 'plan' | 'board' | 'agents' | 'activity' | 'deliverables';
 type ActionNotice = {
-  action: 'retry' | 'export' | 'continue' | 'close';
+  action: 'retry' | 'export' | 'continue' | 'close' | 'workflow';
   kind: 'info' | 'success' | 'error';
   message: string;
 };
@@ -39,6 +40,15 @@ type ActionNotice = {
 const RETRY_PLAN_COOLDOWN_MS = 15_000;
 const DETAIL_HOVER_DELAY_MS = 500;
 const THREAD_DRAFT_STORAGE_PREFIX = 'xiaok.threadDraft.';
+
+function mergeWorkflowRunIntoDetail(detail: ProjectFullDetail | null, workflowRun: KSwarmWorkflowRun): ProjectFullDetail | null {
+  if (!detail) return detail;
+  const existing = detail.workflowRuns ?? [];
+  return {
+    ...detail,
+    workflowRuns: [workflowRun, ...existing.filter((run) => run.id !== workflowRun.id)],
+  };
+}
 const SWARM_CONTEXT_STORAGE_KEY = 'xiaok.swarmContinueContext';
 
 function SummaryCollapsible({ summary, score, taskScores }: { summary: string; score?: number | null; taskScores?: Array<{ title: string; agent: string; score: number; comment: string }> | null }) {
@@ -292,7 +302,7 @@ function buildXiaokInterventionDraft(context: ReturnType<typeof buildSwarmContin
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const { getProjectFullDetail, approveProject, retryPlan, continueProject, dispatchTasks, deliverProject, closeProject, connected, agents } = useKSwarm();
+  const { getProjectFullDetail, approveProject, retryPlan, continueProject, dispatchTasks, deliverProject, closeProject, startProjectDiagnoseWorkflow, connected, agents } = useKSwarm();
   const { t } = useLocale();
   const [detail, setDetail] = useState<ProjectFullDetail | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('board');
@@ -452,6 +462,25 @@ export function ProjectDetailPage() {
     }
   };
 
+  const handleStartDiagnoseWorkflow = async () => {
+    if (!projectId || actionLoading !== null) return;
+    setActionLoading('workflow');
+    try {
+      const workflowRun = await startProjectDiagnoseWorkflow(projectId);
+      await refreshOnce();
+      if (workflowRun) {
+        setDetail(prev => mergeWorkflowRunIntoDetail(prev, workflowRun));
+        showNotice({ action: 'workflow', kind: 'success', message: '系统诊断已完成。' }, 5_000);
+      } else {
+        showNotice({ action: 'workflow', kind: 'error', message: '启动诊断工作流失败，请稍后重试。' }, 8_000);
+      }
+    } catch {
+      showNotice({ action: 'workflow', kind: 'error', message: '启动诊断工作流失败，请稍后重试。' }, 8_000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleContinueProject = async (intervention: ProjectIntervention) => {
     if (!projectId || actionLoading !== null) return;
     const primaryAction = intervention.primaryAction;
@@ -559,6 +588,7 @@ export function ProjectDetailPage() {
   const statusLabel = STATUS_LABELS[project.status] || project.status;
   const healthSummary = summarizeProjectHealth(detail);
   const showHealthBanner = shouldShowProjectHealth(healthSummary.status) && !projectIntervention?.required;
+  const latestWorkflowRun = detail.workflowRuns?.[0] || null;
   const retryBusy = actionLoading === 'retry';
   const retryCoolingDown = retryCooldownUntil > Date.now();
   const retryDisabled = actionLoading !== null || retryCoolingDown;
@@ -764,6 +794,13 @@ export function ProjectDetailPage() {
             </button>
           );
         })}
+        <div className="ml-auto py-1.5">
+          <WorkflowStatusStrip
+            workflowRun={latestWorkflowRun}
+            busy={actionLoading === 'workflow'}
+            onStartDiagnose={handleStartDiagnoseWorkflow}
+          />
+        </div>
       </div>
 
       {/* Tab content — pass full detail data to child components */}
