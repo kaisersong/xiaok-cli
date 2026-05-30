@@ -20,6 +20,13 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.3.8:**
+
+- **Basic Dynamic Workflow**: Xiaok Desktop now ships the first project-level dynamic workflow path in KSwarm. Projects can create durable workflow runs, execute built-in quick diagnosis, and launch an agent-backed review diagnosis that routes through a Worker agent, an adversarial Reviewer agent, and a review gate reducer
+- **Workflow-Orchestrated Agent Mode**: The project control layer stays in KSwarm while workflow execution happens at the agent layer, giving Xiaok two clear project execution paths: quick/direct orchestration for lightweight project control, and workflow orchestration for structured multi-step agent runs
+- **Workflow Logs in Project Timeline**: The project detail page keeps the tab as "Logs", adds one clear "Run Workflow" menu, and fuses `Workflow` and `Swarm` events into the same chronological timeline without duplicating raw `workflow.*` activity events
+- **Dynamic Workflow Roadmap Docs**: The design docs now spell out the staged evolution toward a fuller dynamic workflow engine, including budget confirmation, resumable subagent caching, typed progress aggregation, and reviewer/adversarial agent gates
+
 **What's New in v1.3.7:**
 
 - **Slide Renderer Recovery**: Packaged Desktop installs now replace stale symlinked bundled plugins with the packaged `kai-slide-creator`, preventing old development plugin directories or wrong-platform wheelhouses from breaking `slide-renderer` MCP startup
@@ -110,6 +117,18 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 ## Swarm Projects
 
 xiaok Desktop includes KSwarm project delivery for work that needs planning, parallel execution, review, and final synthesis. A project has a human-approved plan, a PO agent, worker agents, a task board, artifacts, and final deliverables.
+
+### Basic Dynamic Workflow
+
+v1.3.8 adds the first basic dynamic workflow capability on top of KSwarm projects. This is not yet a general user-authored workflow builder, but it is a real durable workflow runtime slice:
+
+- **Durable workflow runs**: KSwarm records workflow runs with phases, nodes, status, progress, gate decisions, and timestamps so Desktop can refresh, resume display, and audit what happened.
+- **Quick diagnosis workflow**: a built-in control workflow inspects project state, blockers, dispatchable tasks, and recommended next actions without calling an agent.
+- **Agent-backed review diagnosis**: Xiaok can launch a structured workflow that dispatches a Worker agent for project diagnosis, sends the result to a Reviewer/PO agent for adversarial review, then reduces the review decision through a gate.
+- **Clear UI semantics**: the right-side action is now one "Run Workflow" menu, while the project tab remains "Logs" because it contains both Swarm and Workflow activity.
+- **Fused log timeline**: Workflow runs and Swarm activity share one chronological project log, with source tags instead of separate top-level sections.
+
+This establishes the product direction for dynamic workflow in Xiaok: KSwarm remains the project control layer, while workflow orchestration runs at the agent layer and can evolve from today's built-in workflows toward richer, dynamically generated execution plans.
 
 The v1.3.4 Swarm path is designed around clear responsibility boundaries:
 
@@ -294,9 +313,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-1.3.4-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.3.4-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-setup-1.3.4.exe** — Windows installer (x64)
+- **xiaok-1.3.8-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.3.8-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-setup-1.3.8.exe** — Windows installer (x64)
 
 ### Features
 
@@ -304,6 +323,7 @@ Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases
 - **Canvas Preview**: Auto-open generated files (HTML, MD, PDF) in a side panel
 - **Project Management**: Kanban board with drag-and-drop, agent assignment, activity timeline
 - **KSwarm Multi-Agent**: Create, approve, recover, review, and deliver multi-agent projects from the UI
+- **Basic Dynamic Workflow**: Run project quick diagnosis and agent-backed review diagnosis as durable workflow runs with Worker, Reviewer, and gate phases
 - **Scheduled Tasks**: Create recurring tasks (hourly, daily, weekly, cron)
 - **Plugin System**: Install and manage MCP server plugins with enable/disable controls
 - **i18n**: Full Chinese/English support with runtime locale switching
@@ -557,6 +577,8 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.3.8** — Basic dynamic workflow release: KSwarm projects now have durable workflow runs, built-in quick diagnosis, and an agent-backed review diagnosis path that routes through Worker diagnosis, adversarial Reviewer/PO review, and a gate reducer. Desktop exposes this as one "Run Workflow" menu while keeping project activity under the "Logs" tab, fusing `Workflow` and `Swarm` events into one chronological timeline and filtering duplicate raw workflow activity events. The accompanying design docs define the staged path toward a fuller dynamic workflow engine with budget prompts, subagent result caching, progress aggregation, and reviewer fleets.
 
 **v1.3.7** — Slide renderer hotfix: packaged Desktop installs now replace stale symlinked bundled plugins with the packaged `kai-slide-creator`, preventing old development plugin directories or wrong-platform wheelhouses from breaking `slide-renderer` MCP startup.
 
