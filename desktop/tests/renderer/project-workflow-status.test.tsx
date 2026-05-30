@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { ProjectFullDetail } from '../../renderer/src/hooks/useKSwarmClient';
 
@@ -33,7 +33,12 @@ vi.mock('../../renderer/src/components/projects/PlanView', () => ({
   PlanView: () => <div>plan</div>,
 }));
 vi.mock('../../renderer/src/components/projects/ActivityTimeline', () => ({
-  ActivityTimeline: () => <div>activity</div>,
+  ActivityTimeline: ({ workflowRuns }: { workflowRuns?: unknown[] }) => (
+    <div>
+      <div>activity</div>
+      <div>workflow-runs-prop:{workflowRuns?.length ?? 0}</div>
+    </div>
+  ),
 }));
 vi.mock('../../renderer/src/components/projects/DeliverableView', () => ({
   DeliverableView: () => <div>deliverables</div>,
@@ -240,7 +245,9 @@ describe('WorkflowStatusStrip', () => {
     expect(screen.getByText('无阻塞')).toBeInTheDocument();
     expect(screen.queryByText('项目状态')).not.toBeInTheDocument();
     expect(screen.queryByText('系统内置，未调用智能体')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '运行系统诊断' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '运行工作流' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '运行系统诊断' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '运行 Agent 工作流' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /系统诊断完成/ }));
 
@@ -271,16 +278,18 @@ describe('WorkflowStatusStrip', () => {
       />
     );
 
-    expect(screen.getByText('Agent 工作流 smoke')).toBeInTheDocument();
-    expect(screen.getByText('Review gate passed')).toBeInTheDocument();
+    expect(screen.getByText('Agent 复核诊断')).toBeInTheDocument();
+    expect(screen.queryByText('Agent 工作流 smoke')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Review gate passed').length).toBeGreaterThanOrEqual(1);
 
-    fireEvent.click(screen.getByRole('button', { name: /Agent 工作流 smoke/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Agent 复核诊断/ }));
 
-    const dialog = screen.getByRole('dialog', { name: '工作流详情' });
+    const dialog = screen.getByRole('dialog', { name: 'Agent 复核诊断详情' });
     expect(dialog).toBeInTheDocument();
     expect(dialog.className).toContain('bg-[var(--c-bg-card)]');
     expect(dialog.className).not.toContain('/10');
-    expect(screen.getByText('Agent 工作流')).toBeInTheDocument();
+    expect(screen.getByText('执行方式：工作流执行')).toBeInTheDocument();
+    expect(screen.getByText('参与 Agent：xiaok-worker / xiaok-po')).toBeInTheDocument();
     expect(screen.getByText('Worker 项目诊断')).toBeInTheDocument();
     expect(screen.getByText('xiaok-worker')).toBeInTheDocument();
     expect(screen.getByText('Reviewer 对抗性检查')).toBeInTheDocument();
@@ -299,8 +308,42 @@ describe('WorkflowStatusStrip', () => {
       />
     );
 
-    expect(screen.getByText('Agent 工作流 smoke')).toBeInTheDocument();
+    expect(screen.getByText('Agent 复核诊断')).toBeInTheDocument();
     expect(screen.getByText('执行中 0/3')).toBeInTheDocument();
+  });
+
+  it('opens one workflow run menu for quick diagnose and agent review diagnose', () => {
+    const onStartDiagnose = vi.fn();
+    const onStartAgentWorkflow = vi.fn();
+
+    renderWithProviders(
+      <WorkflowStatusStrip
+        workflowRun={null}
+        busy={false}
+        onStartDiagnose={onStartDiagnose}
+        onStartAgentWorkflow={onStartAgentWorkflow}
+      />
+    );
+
+    expect(screen.getByText('最近工作流：尚未运行')).toBeInTheDocument();
+    const menuButton = screen.getByRole('button', { name: '运行工作流' });
+    fireEvent.click(menuButton);
+
+    const menu = screen.getByRole('menu', { name: '选择工作流' });
+    expect(menu.className).toContain('bg-[var(--c-bg-card)]');
+    expect(menu.className).not.toContain('/10');
+    expect(within(menu).getByText('快速诊断')).toBeInTheDocument();
+    expect(within(menu).getByText(/系统内置，不调用智能体/)).toBeInTheDocument();
+    expect(within(menu).getByText('Agent 复核诊断')).toBeInTheDocument();
+    expect(within(menu).getByText(/Reviewer Agent 对抗性复核/)).toBeInTheDocument();
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /快速诊断/ }));
+    expect(onStartDiagnose).toHaveBeenCalledTimes(1);
+    expect(onStartAgentWorkflow).not.toHaveBeenCalled();
+
+    fireEvent.click(menuButton);
+    fireEvent.click(screen.getByRole('menuitem', { name: /Agent 复核诊断/ }));
+    expect(onStartAgentWorkflow).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -313,7 +356,8 @@ describe('ProjectDetailPage workflow action', () => {
 
     renderProjectDetail(initial);
 
-    fireEvent.click(await screen.findByRole('button', { name: '运行系统诊断' }));
+    fireEvent.click(await screen.findByRole('button', { name: '运行工作流' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /快速诊断/ }));
 
     await waitFor(() => expect(mockStartProjectDiagnoseWorkflow).toHaveBeenCalledWith('proj-workflow'));
     await waitFor(() => expect(mockGetProjectFullDetail).toHaveBeenCalledTimes(2));
@@ -329,10 +373,11 @@ describe('ProjectDetailPage workflow action', () => {
 
     renderProjectDetail(initial);
 
-    fireEvent.click(await screen.findByRole('button', { name: '运行系统诊断' }));
+    fireEvent.click(await screen.findByRole('button', { name: '运行工作流' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /快速诊断/ }));
 
     await waitFor(() => expect(mockStartProjectDiagnoseWorkflow).toHaveBeenCalledWith('proj-workflow'));
-    expect(await screen.findByText('系统诊断已完成。')).toBeInTheDocument();
+    expect(await screen.findByText('快速诊断已完成。')).toBeInTheDocument();
     expect(await screen.findByText('系统诊断完成')).toBeInTheDocument();
     expect(screen.queryByText('系统内置，未调用智能体')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /系统诊断完成/ }));
@@ -348,10 +393,28 @@ describe('ProjectDetailPage workflow action', () => {
 
     renderProjectDetail(initial);
 
-    fireEvent.click(await screen.findByRole('button', { name: '运行 Agent 工作流' }));
+    fireEvent.click(await screen.findByRole('button', { name: '运行工作流' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Agent 复核诊断/ }));
 
     await waitFor(() => expect(mockStartProjectAgentReviewSmokeWorkflow).toHaveBeenCalledWith('proj-workflow'));
-    expect(await screen.findByText('Agent 工作流已启动。')).toBeInTheDocument();
-    expect(await screen.findByText('Agent 工作流 smoke')).toBeInTheDocument();
+    expect(await screen.findByText('Agent 复核诊断已启动。')).toBeInTheDocument();
+    expect(await screen.findByText('Agent 复核诊断')).toBeInTheDocument();
+    expect(screen.queryByText('Agent 工作流 smoke')).not.toBeInTheDocument();
+  });
+
+  it('labels the project detail tab as logs and sends workflow runs into the fused timeline', async () => {
+    const detail = workflowDetail({ workflowRuns: [agentWorkflowRun(), ...(workflowDetail().workflowRuns ?? [])] });
+    mockGetProjectFullDetail.mockResolvedValue(detail);
+
+    renderProjectDetail(detail);
+
+    const logTab = await screen.findByRole('button', { name: '日志' });
+    expect(logTab).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '工作流' })).not.toBeInTheDocument();
+    fireEvent.click(logTab);
+
+    expect(await screen.findByText('activity')).toBeInTheDocument();
+    expect(screen.getByText('workflow-runs-prop:2')).toBeInTheDocument();
+    expect(screen.queryByText('工作流运行记录')).not.toBeInTheDocument();
   });
 });

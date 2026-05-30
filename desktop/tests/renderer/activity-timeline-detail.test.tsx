@@ -14,13 +14,14 @@ afterEach(() => {
   cleanup();
 });
 
-function renderTimeline(activities: any[]) {
+function renderTimeline(activities: any[], workflowRuns: any[] = []) {
   return render(
     <LocaleProvider>
       <ActivityTimeline
         project={{ id: 'proj-story', name: '写一个AI工作小故事', status: 'active' } as any}
         activities={activities}
         humanActions={[]}
+        workflowRuns={workflowRuns}
       />
     </LocaleProvider>
   );
@@ -57,5 +58,79 @@ describe('ActivityTimeline detail visibility', () => {
     ]);
 
     expect(screen.getByText(/提交的产出物是一份交付报告/)).toBeInTheDocument();
+  });
+
+  it('merges workflow runs into the same chronological timeline as swarm events', () => {
+    renderTimeline([
+      {
+        type: 'task.progress',
+        taskTitle: '先执行的任务',
+        agent: 'xiaok',
+        ts: 1770000001000,
+      },
+      {
+        type: 'workflow.run.completed',
+        projectId: 'proj-story',
+        workflowRunId: 'wf-agent-review',
+        workflowId: 'agent-review-smoke',
+        status: 'completed',
+        ts: 1770000002000,
+      },
+      {
+        type: 'task.done',
+        taskTitle: '后执行的任务',
+        agent: 'xiaok',
+        ts: 1770000003000,
+      },
+    ], [
+      {
+        id: 'wf-agent-review',
+        projectId: 'proj-story',
+        workflowId: 'agent-review-smoke',
+        title: 'Agent 工作流 smoke',
+        strategy: 'workflow',
+        source: 'builtin-smoke',
+        status: 'completed',
+        createdAt: 1770000002000,
+        updatedAt: 1770000002000,
+        startedAt: 1770000002000,
+        completedAt: 1770000002000,
+        cancelledAt: null,
+        requestedBy: 'human',
+        approval: { required: false, status: 'not_required', budget: null, approvedBy: null, decidedAt: null },
+        phases: [],
+        nodes: [],
+        summary: { total: 3, completed: 3, failed: 0, blocked: 0, running: 0, pending: 0, progress: 1, primaryMessage: 'Review gate passed' },
+        gateDecision: { status: 'passed', reason: '诊断材料可用', evidenceRefs: [] },
+      },
+    ]);
+
+    expect(screen.queryByText('工作流运行记录')).not.toBeInTheDocument();
+
+    const entries = screen.getAllByTestId('activity-timeline-entry');
+    expect(entries).toHaveLength(3);
+    expect(entries[0]).toHaveTextContent('Swarm');
+    expect(entries[0]).toHaveTextContent('先执行的任务');
+    expect(entries[1]).toHaveTextContent('Workflow');
+    expect(entries[1]).toHaveTextContent('Agent 复核诊断');
+    expect(entries[1]).toHaveTextContent('Review gate passed');
+    expect(entries[2]).toHaveTextContent('Swarm');
+    expect(entries[2]).toHaveTextContent('后执行的任务');
+  });
+
+  it('labels raw workflow activity events as workflow logs when no run snapshot exists', () => {
+    renderTimeline([
+      {
+        type: 'workflow.run.started',
+        projectId: 'proj-story',
+        workflowRunId: 'wf-running',
+        workflowId: 'agent-review-smoke',
+        ts: 1770000004000,
+      },
+    ]);
+
+    const entry = screen.getByTestId('activity-timeline-entry');
+    expect(entry).toHaveTextContent('Workflow');
+    expect(entry).not.toHaveTextContent('Swarm');
   });
 });

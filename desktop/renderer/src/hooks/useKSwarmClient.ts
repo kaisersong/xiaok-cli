@@ -129,6 +129,10 @@ export interface KSwarmActivityEvent {
   failureClass?: string;
   action?: string;
   passed?: boolean;
+  workflowRunId?: string;
+  workflowId?: string;
+  status?: string;
+  decision?: string;
 }
 
 export interface KSwarmHumanAction {

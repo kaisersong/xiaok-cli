@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { AlertTriangle, CheckCircle2, Loader, PlayCircle, Workflow, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronDown, Loader, Workflow, X } from 'lucide-react';
 import type { KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
 
 interface WorkflowStatusStripProps {
@@ -29,13 +29,16 @@ const BUILTIN_DIAGNOSE_STATUS_LABELS: Record<string, string> = {
 
 export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose, onStartAgentWorkflow }: WorkflowStatusStripProps) {
   const [open, setOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const status = workflowRun?.status || 'idle';
   const isBuiltinDiagnose = workflowRun?.workflowId === 'project-diagnose' && workflowRun.source === 'builtin';
+  const workflowDisplayName = workflowRun ? getWorkflowDisplayName(workflowRun) : '';
   const label = workflowRun
     ? isBuiltinDiagnose
       ? (BUILTIN_DIAGNOSE_STATUS_LABELS[status] || status)
-      : (workflowRun.title || STATUS_LABELS[status] || status)
-    : '尚未运行系统诊断';
+      : workflowDisplayName
+    : '最近工作流：尚未运行';
   const summary = workflowRun?.summary;
   const action = workflowRun?.diagnosis?.recommendedActions?.[0];
   const completed = summary?.completed ?? 0;
@@ -44,24 +47,48 @@ export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose, onStar
     ? isBuiltinDiagnose
       ? `已完成 ${completed}/${total}`
       : (summary?.primaryMessage || formatWorkflowProgress(status, completed, total))
-    : '可运行控制层诊断';
+    : '选择快速诊断或 Agent 复核';
   const sourceText = workflowRun
     ? isBuiltinDiagnose
       ? '系统内置，未调用智能体'
-      : 'Agent 工作流'
+      : '工作流执行'
     : '读取项目状态，不调用智能体';
   const diagnosis = isBuiltinDiagnose && workflowRun ? buildSystemDiagnosisView(workflowRun) : null;
   const genericWorkflow = workflowRun && !diagnosis ? buildGenericWorkflowView(workflowRun) : null;
   const compact = diagnosis ? buildCompactDiagnosisSummary(diagnosis) : null;
   const StatusIcon = getStatusIcon(status);
   const toneClass = getToneClass(status);
-  const dialogLabel = diagnosis ? '系统诊断详情' : '工作流详情';
+  const dialogLabel = diagnosis ? '系统诊断详情' : getWorkflowDialogLabel(workflowRun);
+  const handleStartDiagnose = () => {
+    setMenuOpen(false);
+    onStartDiagnose();
+  };
+  const handleStartAgentWorkflow = () => {
+    setMenuOpen(false);
+    onStartAgentWorkflow?.();
+  };
+
+  useEffect(() => {
+    if (!open && !menuOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [open, menuOpen]);
 
   return (
-    <div className="relative flex items-center gap-1.5 text-[11px]">
+    <div ref={rootRef} className="relative flex items-center gap-1.5 text-[11px]">
       <button
         type="button"
-        onClick={() => workflowRun && setOpen(value => !value)}
+        onClick={() => {
+          if (!workflowRun) return;
+          setMenuOpen(false);
+          setOpen(value => !value);
+        }}
         aria-expanded={open}
         disabled={!workflowRun}
         className={`inline-flex min-w-0 max-w-[420px] items-center gap-1.5 rounded-md border px-2 py-1 text-left disabled:cursor-default ${toneClass}`}
@@ -86,26 +113,40 @@ export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose, onStar
 
       <button
         type="button"
-        onClick={onStartDiagnose}
-        aria-label="运行系统诊断"
+        onClick={() => {
+          setOpen(false);
+          setMenuOpen(value => !value);
+        }}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        aria-label="运行工作流"
         disabled={busy}
         className="inline-flex items-center gap-1 rounded-md bg-[var(--c-bg-page)] px-2 py-1 font-medium text-[var(--c-text-primary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-60"
       >
-        <PlayCircle size={12} />
-        <span>{busy ? '诊断中' : '运行'}</span>
+        <Workflow size={12} />
+        <span>{busy ? '工作流运行中' : '运行工作流'}</span>
+        <ChevronDown size={12} />
       </button>
 
-      {onStartAgentWorkflow && (
-        <button
-          type="button"
-          onClick={onStartAgentWorkflow}
-          aria-label="运行 Agent 工作流"
-          disabled={busy}
-          className="inline-flex items-center gap-1 rounded-md bg-[var(--c-bg-page)] px-2 py-1 font-medium text-[var(--c-text-primary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-60"
+      {menuOpen && !busy && (
+        <div
+          role="menu"
+          aria-label="选择工作流"
+          className="absolute right-0 top-full z-50 mt-2 w-[min(320px,calc(100vw-48px))] rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-1.5 text-[var(--c-text-secondary)] shadow-xl"
         >
-          <Workflow size={12} />
-          <span>{busy ? '运行中' : 'Agent'}</span>
-        </button>
+          <WorkflowMenuItem
+            title="快速诊断"
+            description="系统内置，不调用智能体，秒级检查项目状态。"
+            onClick={handleStartDiagnose}
+          />
+          {onStartAgentWorkflow && (
+            <WorkflowMenuItem
+              title="Agent 复核诊断"
+              description="Worker Agent 诊断，Reviewer Agent 对抗性复核，并经过 gate 归约。"
+              onClick={handleStartAgentWorkflow}
+            />
+          )}
+        </div>
       )}
 
       {workflowRun && open && (
@@ -123,6 +164,18 @@ export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose, onStar
             <span className="rounded bg-[var(--c-bg-page)]/70 px-1.5 py-0.5 text-[10px] text-[var(--c-text-muted)]">
               {sourceText}
             </span>
+            {genericWorkflow && (
+              <>
+                <span className="rounded bg-[var(--c-bg-page)]/70 px-1.5 py-0.5 text-[10px] text-[var(--c-text-secondary)]">
+                  执行方式：工作流执行
+                </span>
+                {genericWorkflow.agentText && (
+                  <span className="rounded bg-[var(--c-bg-page)]/70 px-1.5 py-0.5 text-[10px] text-[var(--c-text-secondary)]">
+                    参与 Agent：{genericWorkflow.agentText}
+                  </span>
+                )}
+              </>
+            )}
             {action && (
               <span className="rounded bg-[var(--c-bg-page)]/70 px-1.5 py-0.5 text-[10px] text-[var(--c-text-secondary)]">
                 {action.label}
@@ -143,6 +196,20 @@ export function WorkflowStatusStrip({ workflowRun, busy, onStartDiagnose, onStar
         </div>
       )}
     </div>
+  );
+}
+
+function WorkflowMenuItem({ title, description, onClick }: { title: string; description: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full flex-col rounded-md px-2.5 py-2 text-left hover:bg-[var(--c-bg-page)]"
+    >
+      <span className="text-[12px] font-semibold text-[var(--c-text-primary)]">{title}</span>
+      <span className="mt-0.5 text-[10px] leading-relaxed text-[var(--c-text-muted)]">{description}</span>
+    </button>
   );
 }
 
@@ -282,8 +349,14 @@ function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
   const gateText = gateDecision?.status
     ? `Gate：${gateDecision.status}${gateDecision.reason ? ` · ${gateDecision.reason}` : ''}`
     : '';
+  const agents = Array.from(new Set(
+    workflowRun.nodes
+      .map((node) => node.assignedAgent || node.producerAgent || '')
+      .filter(Boolean)
+  ));
   return {
     gateText,
+    agentText: agents.join(' / '),
     nodes: workflowRun.nodes.map((node) => {
       const output = node.output && typeof node.output === 'object' ? node.output : {};
       const summary = readString(output.summary || output.result || output.message);
@@ -302,6 +375,17 @@ function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
       };
     }),
   };
+}
+
+function getWorkflowDisplayName(workflowRun: KSwarmWorkflowRun) {
+  if (workflowRun.workflowId === 'agent-review-smoke') return 'Agent 复核诊断';
+  return workflowRun.title || STATUS_LABELS[workflowRun.status] || workflowRun.status;
+}
+
+function getWorkflowDialogLabel(workflowRun?: KSwarmWorkflowRun | null) {
+  if (!workflowRun) return '工作流详情';
+  if (workflowRun.workflowId === 'agent-review-smoke') return 'Agent 复核诊断详情';
+  return '工作流详情';
 }
 
 function readDecisionFromOutput(output: Record<string, unknown>) {

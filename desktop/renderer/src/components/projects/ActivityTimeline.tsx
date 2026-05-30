@@ -4,8 +4,8 @@
  */
 
 import { useEffect, useState, useRef } from 'react';
-import { CheckCircle2, AlertCircle, Play, FileText, Users, Plus, Send, Eye, Archive } from 'lucide-react';
-import type { KSwarmProject, KSwarmActivityEvent, KSwarmHumanAction, KSwarmArtifact } from '../../hooks/useKSwarmClient';
+import { CheckCircle2, AlertCircle, Play, FileText, Users, Plus, Send, Eye, Archive, Workflow as WorkflowIcon } from 'lucide-react';
+import type { KSwarmProject, KSwarmActivityEvent, KSwarmHumanAction, KSwarmArtifact, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import { ArtifactPreviewModal } from './ArtifactPreviewModal';
@@ -14,7 +14,12 @@ interface ActivityTimelineProps {
   project: KSwarmProject;
   activities?: KSwarmActivityEvent[];
   humanActions?: KSwarmHumanAction[];
+  workflowRuns?: KSwarmWorkflowRun[];
 }
+
+type TimelineEntry =
+  | { kind: 'activity'; key: string; tsValue: number; event: KSwarmActivityEvent }
+  | { kind: 'workflow'; key: string; tsValue: number; run: KSwarmWorkflowRun };
 
 function formatTime(ts?: number | string): string {
   if (!ts) return '';
@@ -24,7 +29,62 @@ function formatTime(ts?: number | string): string {
   } catch { return ''; }
 }
 
-export function ActivityTimeline({ project, activities: propActivities, humanActions: propHumanActions }: ActivityTimelineProps) {
+function timeValue(ts?: number | string | null): number {
+  if (!ts) return 0;
+  if (typeof ts === 'number') return ts;
+  const value = new Date(ts).getTime();
+  return Number.isFinite(value) ? value : 0;
+}
+
+function workflowRunTime(run: KSwarmWorkflowRun): number {
+  return run.completedAt ?? run.updatedAt ?? run.startedAt ?? run.createdAt ?? 0;
+}
+
+function formatWorkflowRunName(run: KSwarmWorkflowRun): string {
+  if (run.workflowId === 'agent-review-smoke') return 'Agent 复核诊断';
+  if (run.workflowId === 'project-diagnose') return '快速诊断';
+  return run.title || run.workflowId;
+}
+
+function formatWorkflowRunStatus(status: KSwarmWorkflowRun['status']): string {
+  const labels: Record<KSwarmWorkflowRun['status'], string> = {
+    awaiting_approval: '待确认',
+    running: '运行中',
+    blocked: '阻塞',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+  };
+  return labels[status] || status;
+}
+
+function getWorkflowRunDetail(run: KSwarmWorkflowRun): string {
+  return (
+    run.summary?.primaryMessage ||
+    run.gateDecision?.reason ||
+    (run.gateDecision?.status ? `Gate：${run.gateDecision.status}` : '') ||
+    formatWorkflowRunStatus(run.status)
+  );
+}
+
+function isWorkflowActivity(event: KSwarmActivityEvent): boolean {
+  return event.type.startsWith('workflow.');
+}
+
+function formatWorkflowActivityLabel(event: KSwarmActivityEvent): string {
+  const labels: Record<string, string> = {
+    'workflow.run.started': '工作流启动',
+    'workflow.run.completed': '工作流完成',
+    'workflow.run.cancelled': '工作流取消',
+    'workflow.run.gate_completed': '工作流 Gate 完成',
+    'workflow.node.output_received': '工作流节点提交',
+    'workflow.node.reviewed': '工作流节点复核',
+    'workflow.node.blocked': '工作流节点阻塞',
+  };
+  return labels[event.type] || event.type;
+}
+
+export function ActivityTimeline({ project, activities: propActivities, humanActions: propHumanActions, workflowRuns: propWorkflowRuns }: ActivityTimelineProps) {
   const { lastEvent, agents } = useKSwarm();
   const { t } = useLocale();
   const [previewArtifact, setPreviewArtifact] = useState<KSwarmArtifact | null>(null);
@@ -61,10 +121,30 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
     return a?.name || id;
   };
 
-  const activities = propActivities || [];
   const humanActions = propHumanActions || [];
+  const workflowRuns = propWorkflowRuns || [];
+  const workflowRunIds = new Set(workflowRuns.map((run) => run.id));
+  const activities = (propActivities || []).filter((event) => (
+    !isWorkflowActivity(event) ||
+    !event.workflowRunId ||
+    !workflowRunIds.has(event.workflowRunId)
+  ));
+  const timelineEntries: TimelineEntry[] = [
+    ...activities.map((event, index) => ({
+      kind: 'activity' as const,
+      key: `activity-${event.type}-${event.ts ?? index}-${index}`,
+      tsValue: timeValue(event.ts),
+      event,
+    })),
+    ...workflowRuns.map((run) => ({
+      kind: 'workflow' as const,
+      key: `workflow-${run.id}`,
+      tsValue: timeValue(workflowRunTime(run)),
+      run,
+    })),
+  ].sort((a, b) => a.tsValue - b.tsValue);
 
-  if (activities.length === 0 && humanActions.length === 0) {
+  if (timelineEntries.length === 0 && humanActions.length === 0) {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-[var(--c-text-tertiary)]">{t.projectsActivityEmpty}</p>
@@ -73,11 +153,51 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
   }
 
   return (
-    <div className="p-6">
+    <div className="p-6" data-testid="activity-timeline">
       {/* Activity events */}
       <div className="flex flex-col gap-0">
-        {activities.map((event, idx) => {
-          const meta = EVENT_META[event.type] || { icon: FileText, label: event.type, color: 'text-[var(--c-text-muted)]' };
+        {timelineEntries.map((entry, idx) => {
+          if (entry.kind === 'workflow') {
+            const { run } = entry;
+            const completed = run.summary?.completed ?? 0;
+            const total = run.summary?.total ?? 0;
+            const detailText = getWorkflowRunDetail(run);
+
+            return (
+              <div key={entry.key} data-testid="activity-timeline-entry" className="flex gap-3 group">
+                <div className="flex flex-col items-center">
+                  <div className="flex size-6 items-center justify-center rounded-full bg-[var(--c-bg-deep)]">
+                    <WorkflowIcon size={13} className="text-[var(--c-accent)]" />
+                  </div>
+                  {idx < timelineEntries.length - 1 && <div className="w-px flex-1 bg-[var(--c-border-subtle)]" />}
+                </div>
+
+                <div className="flex-1 pb-4">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[12px] font-medium text-[var(--c-text-primary)]">{formatWorkflowRunName(run)}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-accent)]/10 text-[var(--c-accent)]">Workflow</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]">{formatWorkflowRunStatus(run.status)}</span>
+                    {total > 0 && (
+                      <span className="text-[10px] text-[var(--c-text-tertiary)]">{completed}/{total}</span>
+                    )}
+                  </div>
+                  {detailText && (
+                    <p className="mt-1 max-w-3xl rounded-md bg-[var(--c-bg-deep)] px-2 py-1 text-[10px] leading-relaxed text-[var(--c-text-secondary)] line-clamp-3">
+                      {detailText}
+                    </p>
+                  )}
+                </div>
+
+                <span className="text-[10px] text-[var(--c-text-muted)] shrink-0 font-mono pt-1">{formatTime(workflowRunTime(run))}</span>
+              </div>
+            );
+          }
+
+          const { event } = entry;
+          const workflowActivity = isWorkflowActivity(event);
+          const meta = workflowActivity
+            ? { icon: WorkflowIcon, label: formatWorkflowActivityLabel(event), color: 'text-[var(--c-accent)]' }
+            : EVENT_META[event.type] || { icon: FileText, label: event.type, color: 'text-[var(--c-text-muted)]' };
           const Icon = meta.icon;
           const agent = event.agent || event.by || event.target || '';
           const taskTitle = event.taskTitle || '';
@@ -85,19 +205,24 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
           const detailText = getActivityDetail(event);
 
           return (
-            <div key={idx} className="flex gap-3 group">
+            <div key={entry.key} data-testid="activity-timeline-entry" className="flex gap-3 group">
               {/* Timeline line + dot */}
               <div className="flex flex-col items-center">
                 <div className="flex size-6 items-center justify-center rounded-full bg-[var(--c-bg-deep)]">
                   <Icon size={13} className={meta.color} />
                 </div>
-                {idx < activities.length - 1 && <div className="w-px flex-1 bg-[var(--c-border-subtle)]" />}
+                {idx < timelineEntries.length - 1 && <div className="w-px flex-1 bg-[var(--c-border-subtle)]" />}
               </div>
 
               {/* Content */}
               <div className="flex-1 pb-4">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[12px] font-medium text-[var(--c-text-primary)]">{meta.label}</span>
+                  {workflowActivity ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-accent)]/10 text-[var(--c-accent)]">Workflow</span>
+                  ) : (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]">Swarm</span>
+                  )}
                   {agent && <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]">@{agentName(agent)}</span>}
                   {taskTitle && <span className="text-[10px] text-[var(--c-text-tertiary)]">"{taskTitle}"</span>}
                 </div>

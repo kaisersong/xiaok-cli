@@ -1744,7 +1744,7 @@ export const zh: LocaleStrings = {
   // projects - detail page
   projectsDetailPlan: "计划",
   projectsDetailKanban: "看板",
-  projectsDetailActivity: "动态",
+  projectsDetailActivity: "日志",
   projectsDetailDeliverables: "产物",
   projectsDetailApprove: "审批",
   projectsDetailDispatch: "分发任务",

@@ -5,10 +5,10 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, LayoutGrid, Activity, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users, Download, FolderOpen, Circle, Loader, Clock, AlertTriangle, CircleOff } from 'lucide-react';
+import { ArrowLeft, FileText, LayoutGrid, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users, Download, FolderOpen, Circle, Loader, Clock, AlertTriangle, CircleOff } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import type { KSwarmProject, KSwarmTask, KSwarmActivityEvent, KSwarmHumanAction, ProjectIntervention, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
+import type { KSwarmProject, ProjectIntervention, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
 import type { ProjectFullDetail } from '../../hooks/useKSwarmClient';
 import { PlanView } from './PlanView';
 import { KanbanBoard } from './KanbanBoard';
@@ -331,7 +331,7 @@ export function ProjectDetailPage() {
     { id: 'plan', label: t.projectsDetailPlan, icon: FileText },
     { id: 'board', label: t.projectsDetailKanban, icon: LayoutGrid },
     { id: 'agents', label: '智能体', icon: Users },
-    { id: 'activity', label: t.projectsDetailActivity, icon: Activity },
+    { id: 'activity', label: t.projectsDetailActivity, icon: Clock },
     { id: 'deliverables', label: t.projectsDetailDeliverables, icon: Package },
   ], [t]);
 
@@ -482,12 +482,12 @@ export function ProjectDetailPage() {
       await refreshOnce();
       if (workflowRun) {
         setDetail(prev => mergeWorkflowRunIntoDetail(prev, workflowRun));
-        showNotice({ action: 'workflow', kind: 'success', message: '系统诊断已完成。' }, 5_000);
+        showNotice({ action: 'workflow', kind: 'success', message: '快速诊断已完成。' }, 5_000);
       } else {
-        showNotice({ action: 'workflow', kind: 'error', message: '启动诊断工作流失败，请稍后重试。' }, 8_000);
+        showNotice({ action: 'workflow', kind: 'error', message: '启动快速诊断失败，请稍后重试。' }, 8_000);
       }
     } catch {
-      showNotice({ action: 'workflow', kind: 'error', message: '启动诊断工作流失败，请稍后重试。' }, 8_000);
+      showNotice({ action: 'workflow', kind: 'error', message: '启动快速诊断失败，请稍后重试。' }, 8_000);
     } finally {
       setActionLoading(null);
     }
@@ -501,12 +501,12 @@ export function ProjectDetailPage() {
       await refreshOnce();
       if (workflowRun) {
         setDetail(prev => mergeWorkflowRunIntoDetail(prev, workflowRun));
-        showNotice({ action: 'workflow', kind: 'success', message: 'Agent 工作流已启动。' }, 5_000);
+        showNotice({ action: 'workflow', kind: 'success', message: 'Agent 复核诊断已启动。' }, 5_000);
       } else {
-        showNotice({ action: 'workflow', kind: 'error', message: '启动 Agent 工作流失败，请稍后重试。' }, 8_000);
+        showNotice({ action: 'workflow', kind: 'error', message: '启动 Agent 复核诊断失败，请稍后重试。' }, 8_000);
       }
     } catch {
-      showNotice({ action: 'workflow', kind: 'error', message: '启动 Agent 工作流失败，请稍后重试。' }, 8_000);
+      showNotice({ action: 'workflow', kind: 'error', message: '启动 Agent 复核诊断失败，请稍后重试。' }, 8_000);
     } finally {
       setActionLoading(null);
     }
@@ -899,7 +899,7 @@ export function ProjectDetailPage() {
           </div>
         )}
         {activeTab === 'activity' && (
-          <ActivityTimeline project={project} activities={activities} humanActions={humanActions} />
+          <ActivityTimeline project={project} activities={activities} humanActions={humanActions} workflowRuns={detail.workflowRuns} />
         )}
         {activeTab === 'deliverables' && (
           <div className="space-y-4">
