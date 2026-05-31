@@ -44,4 +44,24 @@ describe('plugin loader', () => {
     expect(loaded[0].collisions).toEqual(['command:doctor']);
     expect(loaded[0].lspServers?.[0]?.name).toBe('ts');
   });
+
+  it('skips plugins that declare a different platform', async () => {
+    const pluginDir = join(root, 'plugins');
+    mkdirSync(join(pluginDir, 'mac-only'), { recursive: true });
+    mkdirSync(join(pluginDir, 'windows-only'), { recursive: true });
+    writeFileSync(join(pluginDir, 'mac-only', 'plugin.json'), JSON.stringify({
+      name: 'mac-only',
+      version: '1.0.0',
+      platforms: ['darwin'],
+    }));
+    writeFileSync(join(pluginDir, 'windows-only', 'plugin.json'), JSON.stringify({
+      name: 'windows-only',
+      version: '1.0.0',
+      platforms: ['win32'],
+    }));
+
+    const loaded = await loadPlugins([pluginDir], { platform: 'win32' });
+
+    expect(loaded.map((plugin) => plugin.name)).toEqual(['windows-only']);
+  });
 });

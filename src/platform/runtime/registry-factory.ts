@@ -59,6 +59,23 @@ export interface PlatformRegistryFactory {
 }
 
 export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOptions): PlatformRegistryFactory {
+  const registries = new Set<ToolRegistry>();
+  const registerMcpTools = (registry: ToolRegistry, tools: Tool[]): void => {
+    const sandboxedTools = applySandboxToTools(tools, options.platform.sandboxEnforcer, {
+      onSandboxDenied: options.onSandboxDenied,
+    });
+    const orderedTools = mergeToolPools([], sandboxedTools)
+      .filter((tool) => !isCcRuntimeOnlyTool(tool));
+    for (const tool of orderedTools) {
+      registry.registerTool(tool);
+    }
+  };
+  options.platform.onMcpToolsChanged((tools) => {
+    for (const registry of registries) {
+      registerMcpTools(registry, tools);
+    }
+  });
+
   const runNamedSubAgent = async (agentName: string, prompt: string, cwd?: string, parentDepth?: number): Promise<string> => {
     const agentDef = options.platform.customAgents.find((agent) => agent.name === agentName);
     if (!agentDef) {
@@ -146,7 +163,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
       ? orderedTools.filter((tool) => allowedTools.includes(tool.definition.name))
       : orderedTools;
 
-    return new ToolRegistry({
+    const registry = new ToolRegistry({
       capabilityRegistry: options.platform.capabilityRegistry,
       permissionManager: options.permissionManager,
       dryRun: options.dryRun,
@@ -162,6 +179,8 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
       agentId,
       onToolObserved: options.onToolObserved,
     }, filteredTools);
+    registries.add(registry);
+    return registry;
   }
 
   return {

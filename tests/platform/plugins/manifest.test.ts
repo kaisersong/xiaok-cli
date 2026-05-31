@@ -7,6 +7,7 @@ describe('plugin manifest', () => {
     const manifest = parsePluginManifest({
       name: 'acme-tools',
       version: '1.0.0',
+      platforms: ['darwin'],
       skills: ['skills/review.md'],
       agents: ['agents/reviewer.md'],
       hooks: ['hooks/pre.js'],
@@ -16,6 +17,7 @@ describe('plugin manifest', () => {
     }, '/plugins/acme');
 
     expect(manifest.name).toBe('acme-tools');
+    expect(manifest.platforms).toEqual(['darwin']);
     expect(manifest.skills).toEqual([resolve('/plugins/acme/skills/review.md')]);
     expect(manifest.commands).toEqual(['doctor']);
     expect(manifest.mcpServers?.[0].name).toBe('docs');

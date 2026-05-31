@@ -36,10 +36,12 @@ describe('platform runtime context', () => {
   const tempDirs: string[] = [];
   let originalConfigDir: string | undefined;
   let originalDisableGlobalPlugins: string | undefined;
+  let originalMcpStartupTimeoutMs: string | undefined;
 
   beforeEach(() => {
     originalConfigDir = process.env.XIAOK_CONFIG_DIR;
     originalDisableGlobalPlugins = process.env.XIAOK_DISABLE_GLOBAL_PLUGINS;
+    originalMcpStartupTimeoutMs = process.env.XIAOK_MCP_STARTUP_TIMEOUT_MS;
     const configDir = join(tmpdir(), `xiaok-platform-config-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     tempDirs.push(configDir);
     mkdirSync(configDir, { recursive: true });
@@ -57,6 +59,11 @@ describe('platform runtime context', () => {
       delete process.env.XIAOK_DISABLE_GLOBAL_PLUGINS;
     } else {
       process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = originalDisableGlobalPlugins;
+    }
+    if (originalMcpStartupTimeoutMs === undefined) {
+      delete process.env.XIAOK_MCP_STARTUP_TIMEOUT_MS;
+    } else {
+      process.env.XIAOK_MCP_STARTUP_TIMEOUT_MS = originalMcpStartupTimeoutMs;
     }
 
     for (const dir of tempDirs.splice(0)) {
@@ -195,6 +202,7 @@ describe('platform runtime context', () => {
       builtinCommands: ['chat', 'yzj'],
       reminderMode: 'local',
     });
+    await context.mcpReady;
 
     expect(context.health.hasDegradedCapabilities()).toBe(false);
     expect(context.health.summary()).toContain('mcp:fixture-docs connected');
@@ -239,6 +247,7 @@ describe('platform runtime context', () => {
       builtinCommands: ['chat', 'yzj'],
       reminderMode: 'local',
     });
+    await context.mcpReady;
 
     expect(context.mcpTools.map((tool) => tool.definition.name)).toEqual(['xiaok_computer_use']);
     expect(context.capabilityRegistry.get('xiaok_computer_use')).toMatchObject({
@@ -280,6 +289,7 @@ describe('platform runtime context', () => {
       builtinCommands: ['chat', 'yzj'],
       reminderMode: 'local',
     });
+    await context.mcpReady;
 
     expect(context.health.hasDegradedCapabilities()).toBe(true);
     expect(context.health.summary()).toContain('mcp:broken-docs degraded');
@@ -290,6 +300,46 @@ describe('platform runtime context', () => {
     const healthStore = new FileCapabilityHealthStore(join(cwd, '.xiaok', 'state', 'capability-health.json'));
     expect(healthStore.get(cwd)?.summary).toContain('mcp:broken-docs degraded');
     expect(healthStore.get(cwd)?.summary).toContain('lsp:broken-lsp degraded');
+
+    await context.dispose();
+  });
+
+  itIfCanSpawn('does not await MCP startup when a server never responds', async () => {
+    process.env.XIAOK_MCP_STARTUP_TIMEOUT_MS = '500';
+    const cwd = join(tmpdir(), `xiaok-platform-context-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(cwd);
+    mkdirSync(join(cwd, '.xiaok'), { recursive: true });
+
+    writePlugin(cwd, 'silent-platform', {
+      name: 'silent-platform',
+      version: '1.0.0',
+      commands: [],
+      mcpServers: [
+        {
+          name: 'silent-docs',
+          type: 'stdio',
+          command: process.execPath,
+          args: ['-e', 'process.stdin.resume(); setInterval(() => {}, 1000);'],
+        },
+      ],
+    });
+
+    const startedAt = Date.now();
+    const context = await createPlatformRuntimeContext({
+      cwd,
+      builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(elapsedMs).toBeLessThan(300);
+    expect(context.mcpTools).toEqual([]);
+
+    await context.mcpReady;
+
+    expect(context.health.hasDegradedCapabilities()).toBe(true);
+    expect(context.health.summary()).toContain('mcp:silent-docs degraded');
+    expect(context.mcpTools).toEqual([]);
 
     await context.dispose();
   });

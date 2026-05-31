@@ -38,6 +38,7 @@ export interface PluginManifestHook {
 export interface PluginManifest {
     name: string;
     version: string;
+    platforms?: string[];
     skills: string[];
     agents: string[];
     /** Structured hook configs or legacy plain command strings */

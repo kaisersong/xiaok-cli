@@ -27,6 +27,36 @@ export interface McpClientConnection {
   dispose(): void;
 }
 
+export const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 3_000;
+
+export function resolveMcpStartupTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.XIAOK_MCP_STARTUP_TIMEOUT_MS;
+  if (!raw) {
+    return DEFAULT_MCP_STARTUP_TIMEOUT_MS;
+  }
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_MCP_STARTUP_TIMEOUT_MS;
+}
+
+export function resolveStdioCommand(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if ((command === 'python' || command === 'python3') && env.XIAOK_PYTHON_CMD) {
+    return env.XIAOK_PYTHON_CMD;
+  }
+
+  if (platform === 'win32' && command === 'python3') {
+    return 'python';
+  }
+
+  return command;
+}
+
 /**
  * 创建 MCP client 连接（统一入口）
  */
@@ -34,6 +64,7 @@ export async function createMcpClientConnection(
   serverName: string,
   config: McpServerConfig,
 ): Promise<McpClientConnection> {
+  const startupTimeoutMs = resolveMcpStartupTimeoutMs();
   const transport = await createTransport(serverName, config);
 
   const client = new Client(
@@ -42,7 +73,7 @@ export async function createMcpClientConnection(
   );
 
   try {
-    await client.connect(transport);
+    await client.connect(transport, { timeout: startupTimeoutMs });
   } catch (error) {
     transport.close?.();
     throw error;
@@ -91,7 +122,7 @@ async function createStdioTransport(config: McpStdioServerConfig): Promise<Trans
   }
 
   const transport = new StdioClientTransport({
-    command: config.command,
+    command: resolveStdioCommand(config.command),
     args: config.args ?? [],
     env,
     stderr: 'pipe',

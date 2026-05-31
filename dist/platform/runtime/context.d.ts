@@ -32,6 +32,8 @@ export interface PlatformRuntimeContext {
     sandboxEnforcer: ReturnType<typeof createSandboxEnforcer>;
     worktreeManager: WorktreeManager;
     mcpTools: Tool[];
+    mcpReady: Promise<void>;
+    onMcpToolsChanged(listener: (tools: Tool[]) => void): () => void;
     capabilityRegistry: CapabilityRegistry;
     reminderDefaultTimeZone: string;
     createReminderApi(sessionId: string, creatorUserId: string): ReminderApi;

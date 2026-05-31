@@ -9,14 +9,35 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { WebSocket } from 'ws';
+export const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 3_000;
+export function resolveMcpStartupTimeoutMs(env = process.env) {
+    const raw = env.XIAOK_MCP_STARTUP_TIMEOUT_MS;
+    if (!raw) {
+        return DEFAULT_MCP_STARTUP_TIMEOUT_MS;
+    }
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0
+        ? parsed
+        : DEFAULT_MCP_STARTUP_TIMEOUT_MS;
+}
+export function resolveStdioCommand(command, platform = process.platform, env = process.env) {
+    if ((command === 'python' || command === 'python3') && env.XIAOK_PYTHON_CMD) {
+        return env.XIAOK_PYTHON_CMD;
+    }
+    if (platform === 'win32' && command === 'python3') {
+        return 'python';
+    }
+    return command;
+}
 /**
  * 创建 MCP client 连接（统一入口）
  */
 export async function createMcpClientConnection(serverName, config) {
+    const startupTimeoutMs = resolveMcpStartupTimeoutMs();
     const transport = await createTransport(serverName, config);
     const client = new Client({ name: 'xiaok-cli', version: '0.5.6' }, { capabilities: {} });
     try {
-        await client.connect(transport);
+        await client.connect(transport, { timeout: startupTimeoutMs });
     }
     catch (error) {
         transport.close?.();
@@ -59,7 +80,7 @@ async function createStdioTransport(config) {
         }
     }
     const transport = new StdioClientTransport({
-        command: config.command,
+        command: resolveStdioCommand(config.command),
         args: config.args ?? [],
         env,
         stderr: 'pipe',

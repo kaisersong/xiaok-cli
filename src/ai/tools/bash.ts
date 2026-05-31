@@ -1,9 +1,42 @@
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import type { Tool } from '../../types.js';
 import { truncateText } from './truncation.js';
 import { classifyBashCommand } from './bash-safety.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const WINDOWS_ELEVATION_OUTPUT_PATTERNS = [
+  /需要管理员权限/i,
+  /以管理员身份运行/i,
+  /请手动运行/i,
+  /requested operation requires elevation/i,
+  /requires?\s+(?:administrator|admin|elevat)/i,
+  /(?:administrator|admin|elevat)\s+(?:privileges|rights|permissions?)\s+(?:are\s+)?required/i,
+  /run\s+(?:manually\s+)?as\s+administrator/i,
+];
+
+function outputRequestsWindowsElevation(output: string): boolean {
+  return WINDOWS_ELEVATION_OUTPUT_PATTERNS.some(pattern => pattern.test(output));
+}
+
+function terminateChildProcessTree(child: ChildProcess): void {
+  if (process.platform === 'win32' && child.pid) {
+    try {
+      // Fire-and-forget taskkill so result resolution is not blocked by process teardown.
+      const killer = spawn('taskkill', ['/F', '/T', '/PID', String(child.pid)], {
+        stdio: 'ignore',
+        windowsHide: true,
+        detached: true,
+      });
+      killer.unref();
+      return;
+    } catch {
+      // Fall back to killing the shell process itself if taskkill cannot start.
+    }
+  }
+
+  child.kill('SIGTERM');
+  setTimeout(() => child.kill('SIGKILL'), 2000);
+}
 
 export const bashTool: Tool = {
   permission: 'bash',
@@ -39,34 +72,44 @@ export const bashTool: Tool = {
       const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-c', command];
       const child = spawn(shell, shellArgs, { cwd: workdir, stdio: ['ignore', 'pipe', 'pipe'] });
 
-      let stdout = '';
-      let stderr = '';
-      child.stdout?.on('data', (d: Buffer) => (stdout += d.toString()));
-      child.stderr?.on('data', (d: Buffer) => (stderr += d.toString()));
-
       let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const finish = (result: string) => {
         if (settled) {
           return;
         }
         settled = true;
-        clearTimeout(timer);
+        if (timer) {
+          clearTimeout(timer);
+        }
         resolve(result);
       };
 
-      const timer = setTimeout(() => {
-        if (process.platform === 'win32' && child.pid) {
-          // Fire-and-forget taskkill so timeout resolution is not blocked by process teardown.
-          const killer = spawn('taskkill', ['/F', '/T', '/PID', String(child.pid)], {
-            stdio: 'ignore',
-            windowsHide: true,
-            detached: true,
-          });
-          killer.unref();
+      let stdout = '';
+      let stderr = '';
+      const handleOutput = (stream: 'stdout' | 'stderr', data: Buffer) => {
+        const chunk = data.toString();
+        if (stream === 'stdout') {
+          stdout += chunk;
         } else {
-          child.kill('SIGTERM');
-          setTimeout(() => child.kill('SIGKILL'), 2000);
+          stderr += chunk;
         }
+
+        const output = `${stdout}\n${stderr}`;
+        if (process.platform === 'win32' && outputRequestsWindowsElevation(output)) {
+          terminateChildProcessTree(child);
+          finish(truncateText(
+            `Error: 命令需要管理员权限，已停止等待。请在管理员 PowerShell 中手动运行该命令。\n${output}`,
+            max_chars,
+          ).text);
+        }
+      };
+
+      child.stdout?.on('data', (d: Buffer) => handleOutput('stdout', d));
+      child.stderr?.on('data', (d: Buffer) => handleOutput('stderr', d));
+
+      timer = setTimeout(() => {
+        terminateChildProcessTree(child);
         finish(truncateText(`Error: 命令超时（>${timeout_ms}ms）\n${stdout}${stderr}`, max_chars).text);
       }, timeout_ms);
 

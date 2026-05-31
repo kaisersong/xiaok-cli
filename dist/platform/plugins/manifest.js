@@ -97,6 +97,9 @@ export function parsePluginManifest(raw, pluginDir) {
     return {
         name: String(raw.name ?? ''),
         version: String(raw.version ?? ''),
+        platforms: Array.isArray(raw.platforms)
+            ? raw.platforms.filter((entry) => typeof entry === 'string')
+            : undefined,
         skills: toResolvedList(raw.skills),
         agents: toResolvedList(raw.agents),
         hooks: parseHooks(raw.hooks),

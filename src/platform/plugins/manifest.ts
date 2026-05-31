@@ -42,6 +42,7 @@ export interface PluginManifestHook {
 export interface PluginManifest {
   name: string;
   version: string;
+  platforms?: string[];
   skills: string[];
   agents: string[];
   /** Structured hook configs or legacy plain command strings */
@@ -144,6 +145,9 @@ export function parsePluginManifest(raw: Record<string, unknown>, pluginDir: str
   return {
     name: String(raw.name ?? ''),
     version: String(raw.version ?? ''),
+    platforms: Array.isArray(raw.platforms)
+      ? raw.platforms.filter((entry): entry is string => typeof entry === 'string')
+      : undefined,
     skills: toResolvedList(raw.skills),
     agents: toResolvedList(raw.agents),
     hooks: parseHooks(raw.hooks),

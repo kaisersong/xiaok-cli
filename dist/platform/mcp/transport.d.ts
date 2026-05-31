@@ -13,6 +13,9 @@ export interface McpClientConnection {
     client: Client;
     dispose(): void;
 }
+export declare const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 3000;
+export declare function resolveMcpStartupTimeoutMs(env?: NodeJS.ProcessEnv): number;
+export declare function resolveStdioCommand(command: string, platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv): string;
 /**
  * 创建 MCP client 连接（统一入口）
  */

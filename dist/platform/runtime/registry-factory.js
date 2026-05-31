@@ -21,6 +21,22 @@ function isCcRuntimeOnlyTool(tool) {
     return CC_RUNTIME_ONLY_TOOLS.has(name) || /^Task(?:Create|Update|List|Get|Output|Stop)$/.test(name);
 }
 export function createPlatformRegistryFactory(options) {
+    const registries = new Set();
+    const registerMcpTools = (registry, tools) => {
+        const sandboxedTools = applySandboxToTools(tools, options.platform.sandboxEnforcer, {
+            onSandboxDenied: options.onSandboxDenied,
+        });
+        const orderedTools = mergeToolPools([], sandboxedTools)
+            .filter((tool) => !isCcRuntimeOnlyTool(tool));
+        for (const tool of orderedTools) {
+            registry.registerTool(tool);
+        }
+    };
+    options.platform.onMcpToolsChanged((tools) => {
+        for (const registry of registries) {
+            registerMcpTools(registry, tools);
+        }
+    });
     const runNamedSubAgent = async (agentName, prompt, cwd, parentDepth) => {
         const agentDef = options.platform.customAgents.find((agent) => agent.name === agentName);
         if (!agentDef) {
@@ -89,7 +105,7 @@ export function createPlatformRegistryFactory(options) {
         const filteredTools = allowedTools?.length
             ? orderedTools.filter((tool) => allowedTools.includes(tool.definition.name))
             : orderedTools;
-        return new ToolRegistry({
+        const registry = new ToolRegistry({
             capabilityRegistry: options.platform.capabilityRegistry,
             permissionManager: options.permissionManager,
             dryRun: options.dryRun,
@@ -105,6 +121,8 @@ export function createPlatformRegistryFactory(options) {
             agentId,
             onToolObserved: options.onToolObserved,
         }, filteredTools);
+        registries.add(registry);
+        return registry;
     }
     return {
         createRegistry: createRegistryForCwd,

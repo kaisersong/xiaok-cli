@@ -70,6 +70,8 @@ describe('registry-factory CC tool filtering', () => {
       teamService: undefined,
       createBackgroundRunner: vi.fn(() => ({})),
       createReminderApi: vi.fn(() => undefined),
+      mcpReady: Promise.resolve(),
+      onMcpToolsChanged: vi.fn(() => () => undefined),
     } as unknown as PlatformRuntimeContext;
 
     factory = createPlatformRegistryFactory({
@@ -159,6 +161,8 @@ describe('registry-factory allowedTools filtering', () => {
       teamService: undefined,
       createBackgroundRunner: vi.fn(() => ({})),
       createReminderApi: vi.fn(() => undefined),
+      mcpReady: Promise.resolve(),
+      onMcpToolsChanged: vi.fn(() => () => undefined),
     } as unknown as PlatformRuntimeContext;
 
     factory = createPlatformRegistryFactory({

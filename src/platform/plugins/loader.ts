@@ -9,11 +9,13 @@ export interface LoadedPlugin extends PluginManifest {
 
 export interface PluginLoaderOptions {
   builtinCommands?: string[];
+  platform?: NodeJS.Platform;
 }
 
 export async function loadPlugins(dirs: string[], options: PluginLoaderOptions = {}): Promise<LoadedPlugin[]> {
   const loaded: LoadedPlugin[] = [];
   const builtinCommands = new Set(options.builtinCommands ?? []);
+  const platform = options.platform ?? process.platform;
 
   for (const dir of dirs) {
     if (!existsSync(dir)) continue;
@@ -25,6 +27,9 @@ export async function loadPlugins(dirs: string[], options: PluginLoaderOptions =
 
       const raw = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
       const manifest = parsePluginManifest(raw, pluginDir);
+      if (manifest.platforms?.length && !manifest.platforms.includes(platform)) {
+        continue;
+      }
       const collisions = manifest.commands
         .filter((command) => builtinCommands.has(command))
         .map((command) => `command:${command}`);

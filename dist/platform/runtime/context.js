@@ -19,7 +19,7 @@ import { createReminderService } from '../../runtime/reminder/service.js';
 import { CapabilityRegistry } from './capability-registry.js';
 import { FileCapabilityHealthStore } from './health-store.js';
 import { loadSettingsMcpServers, loadPluginMcpServers, mergeMcpServerConfigs, } from '../mcp/config.js';
-import { createMcpClientConnection } from '../mcp/transport.js';
+import { createMcpClientConnection, resolveMcpStartupTimeoutMs } from '../mcp/transport.js';
 export async function createPlatformRuntimeContext(options) {
     const pluginRuntime = await loadPlatformPluginRuntime(options.cwd, options.builtinCommands);
     const customAgents = await loadCustomAgents(undefined, options.cwd, pluginRuntime.agentDirs);
@@ -70,8 +70,9 @@ export async function createPlatformRuntimeContext(options) {
     const settingsMcpServers = loadSettingsMcpServers();
     const pluginMcpServers = loadPluginMcpServers(pluginRuntime);
     const mergedMcpServers = mergeMcpServerConfigs(settingsMcpServers, pluginMcpServers);
-    // 连接 MCP servers
-    const mcpTools = await connectWorkspaceMcpServers(mergedMcpServers, capabilityHealth, disposables);
+    const mcpTools = [];
+    const mcpToolListeners = new Set();
+    let disposed = false;
     for (const agent of customAgents) {
         capabilityRegistry.register({
             kind: 'agent',
@@ -79,17 +80,52 @@ export async function createPlatformRuntimeContext(options) {
             description: agent.model ? `subagent:${agent.model}` : 'subagent',
         });
     }
-    for (const tool of mcpTools) {
-        capabilityRegistry.register({
-            kind: 'mcp',
-            name: tool.definition.name,
-            description: tool.definition.description,
-            inputSchema: tool.definition.inputSchema,
-        });
-    }
     const lspClient = await connectWorkspaceLspServers(pluginRuntime, lspManager, options.cwd, capabilityHealth, disposables);
     const health = createPlatformRuntimeHealth(capabilityHealth);
     healthStore.set(options.cwd, health.snapshot());
+    const registerDisposable = (disposable) => {
+        if (disposed) {
+            try {
+                disposable.dispose();
+            }
+            catch { }
+            return false;
+        }
+        disposables.push(disposable);
+        return true;
+    };
+    const publishMcpTools = (tools) => {
+        if (disposed || tools.length === 0) {
+            return;
+        }
+        mcpTools.push(...tools);
+        for (const tool of tools) {
+            capabilityRegistry.register({
+                kind: 'mcp',
+                name: tool.definition.name,
+                description: tool.definition.description,
+                inputSchema: tool.definition.inputSchema,
+            });
+        }
+        for (const listener of mcpToolListeners) {
+            try {
+                listener(tools);
+            }
+            catch { }
+        }
+    };
+    const mcpReady = connectWorkspaceMcpServers(mergedMcpServers, capabilityHealth, registerDisposable, () => disposed).then((tools) => {
+        publishMcpTools(tools);
+        healthStore.set(options.cwd, health.snapshot());
+    }).catch((error) => {
+        capabilityHealth.push({
+            kind: 'mcp',
+            name: 'startup',
+            status: 'degraded',
+            detail: error instanceof Error ? error.message : String(error),
+        });
+        healthStore.set(options.cwd, health.snapshot());
+    });
     return {
         pluginRuntime,
         customAgents,
@@ -100,14 +136,23 @@ export async function createPlatformRuntimeContext(options) {
         sandboxEnforcer,
         worktreeManager,
         mcpTools,
+        mcpReady,
+        onMcpToolsChanged(listener) {
+            mcpToolListeners.add(listener);
+            return () => {
+                mcpToolListeners.delete(listener);
+            };
+        },
         capabilityRegistry,
         reminderDefaultTimeZone,
         createReminderApi,
         health,
         async dispose() {
+            disposed = true;
             for (const reminderApi of reminderApis.splice(0)) {
                 await reminderApi.dispose();
             }
+            await mcpReady.catch(() => undefined);
             for (const disposable of disposables.splice(0).reverse()) {
                 try {
                     disposable.dispose();
@@ -180,19 +225,25 @@ async function connectWorkspaceLspServers(pluginRuntime, lspManager, cwd, capabi
     }
     return firstClient;
 }
-async function connectWorkspaceMcpServers(servers, capabilityHealth, disposables) {
+async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDisposable, shouldStop = () => false) {
     const tools = [];
+    const startupTimeoutMs = resolveMcpStartupTimeoutMs();
     for (const server of servers) {
+        if (shouldStop()) {
+            break;
+        }
+        let connection;
         try {
             // 创建 client 连接
-            const connection = await createMcpClientConnection(server.name, server);
+            connection = await createMcpClientConnection(server.name, server);
+            const activeConnection = connection;
             // 列出所有 tools
-            const toolsResult = await connection.client.listTools();
+            const toolsResult = await activeConnection.client.listTools(undefined, { timeout: startupTimeoutMs });
             const schemas = toolsResult.tools ?? [];
             if (server.name === 'cua-driver') {
                 tools.push(createComputerUseTool({
                     callToolResult: async (name, input) => {
-                        const result = await connection.client.callTool({ name, arguments: input });
+                        const result = await activeConnection.client.callTool({ name, arguments: input });
                         return normalizeMcpRuntimeToolResult(result);
                     },
                 }));
@@ -203,13 +254,17 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, disposables
                 {
                     listTools: async () => schemas,
                     callTool: async (name, input) => {
-                        const result = await connection.client.callTool({ name, arguments: input });
+                        const result = await activeConnection.client.callTool({ name, arguments: input });
                         return normalizeMcpRuntimeToolResult(result).text;
                     },
-                    dispose: connection.dispose,
+                    dispose: activeConnection.dispose,
                 }, schemas));
             }
-            disposables.push(connection);
+            if (!registerDisposable(activeConnection)) {
+                connection = undefined;
+                continue;
+            }
+            connection = undefined;
             capabilityHealth.push({
                 kind: 'mcp',
                 name: server.name,
@@ -218,6 +273,7 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, disposables
             });
         }
         catch (error) {
+            connection?.dispose();
             capabilityHealth.push({
                 kind: 'mcp',
                 name: server.name,
