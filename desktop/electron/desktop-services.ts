@@ -1085,7 +1085,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const workspaceRoot = handoff.project?.workFolder || process.cwd();
     const artifactsDir = handoff.project?.workFolder ? join(handoff.project.workFolder, 'artifacts') : '';
     const taskDeliverableNode = isKSwarmTaskDeliverableWorkflowNode(handoff);
-    if (taskDeliverableNode && artifactsDir) mkdirSync(artifactsDir, { recursive: true });
+    const projectDeliverableNode = isKSwarmProjectDeliverableWorkflowNode(handoff);
+    const deliverableNode = taskDeliverableNode || projectDeliverableNode;
+    if (deliverableNode && artifactsDir) mkdirSync(artifactsDir, { recursive: true });
     const taskHost = createKSwarmTaskHost(workspaceRoot);
     const runStartedAt = Date.now();
     const prompt = buildKSwarmWorkflowNodePrompt(handoff, targetParticipantId || 'xiaok-worker', { artifactsDir });
@@ -1103,7 +1105,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
 
     const output = normalizeKSwarmWorkflowNodeOutput(isRecord(parsed.output) ? parsed.output : parsed, summary);
-    if (taskDeliverableNode) {
+    if (deliverableNode) {
       const mergedArtifacts = mergeKSwarmArtifacts(output.artifacts, artifacts);
       if (mergedArtifacts.length === 0) {
         throw new Error('workflow_artifact_evidence_missing');
@@ -2243,6 +2245,21 @@ function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, parti
     ].filter(Boolean).join('\n');
   }
 
+  if (isKSwarmProjectDeliverableWorkflowNode(handoff)) {
+    return [
+      ...base,
+      options.artifactsDir ? `产物目录：${options.artifactsDir}` : '',
+      '你是 worker agent。请执行整个项目，产出最终项目交付物，而不是只写诊断、计划或单个任务结果。',
+      `真实 workflow run ID 是 ${handoff.workflowRunId}；如果正文需要 workflow run ID，只能使用这个值，不要自行推导、缩写或伪造。`,
+      '项目目标、项目要求、计划和 taskSnapshot 共同构成本节点的工作范围；请覆盖所有尚未完成但属于项目目标的任务。',
+      '必须生成完整、可读、可复核的最终项目交付物文件，并写入产物目录；推荐 markdown 文件，文件名使用英文小写和连字符。',
+      'JSON 输出只放 manifest，不要把完整正文塞进 JSON。',
+      '只返回一个 JSON 对象，不要返回 Markdown 包裹：',
+      '{"output":{"summary":"项目交付物摘要，说明覆盖范围和文件内容","artifacts":[{"path":"绝对路径或相对产物路径","kind":"markdown","label":"文件名"}],"workFolder":"项目工作区路径","evidenceRefs":["artifact:文件路径"]}}',
+      '如果不能生成可读文件，status 不能假装完成；请在 summary 说明阻塞原因。',
+    ].filter(Boolean).join('\n');
+  }
+
   return [
     ...base,
     '你是 worker agent。请检查项目状态、任务状态、阻塞点和下一步建议，输出结构化诊断。',
@@ -2253,6 +2270,10 @@ function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, parti
 
 function isKSwarmTaskDeliverableWorkflowNode(handoff: KSwarmWorkflowNodeHandoff): boolean {
   return handoff.workflowId === 'po-generated-task-workflow' && handoff.nodeId === 'worker-produce-deliverable';
+}
+
+function isKSwarmProjectDeliverableWorkflowNode(handoff: KSwarmWorkflowNodeHandoff): boolean {
+  return handoff.workflowId === 'po-generated-project-workflow' && handoff.nodeId === 'worker-produce-project-deliverable';
 }
 
 function mergeKSwarmArtifacts(
