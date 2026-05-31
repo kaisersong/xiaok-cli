@@ -102,6 +102,41 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(mockGetThread).toHaveBeenCalledWith('thread-draft');
   });
 
+  it('shows the selected file name on the initial user message from WelcomePage', async () => {
+    mockGetThread.mockResolvedValue({
+      id: 'thread-file-visible',
+      title: '做对抗性评审',
+      status: 'idle',
+      mode: 'work',
+      createdAt: 1779000000000,
+      updatedAt: 1779000000000,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: null,
+      taskIds: [],
+    });
+
+    render(
+      <MemoryRouter initialEntries={[{
+        pathname: '/t/thread-file-visible',
+        state: {
+          initialPrompt: '做对抗性评审',
+          initialFiles: [{ filePath: 'D:\\reports\\board-review.docx', name: 'board-review.docx' }],
+        },
+      }]}>
+        <Routes>
+          <Route path="/t/:taskId" element={<ChatShell />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-messages')).toHaveTextContent('做对抗性评审');
+      expect(screen.getByTestId('chat-messages')).toHaveTextContent('附件: board-review.docx');
+    });
+  });
+
   it('drains a queued prompt after the running task completes', async () => {
     let subscribedHandler: ((event: { type: string; result?: { summary: string; artifacts: unknown[] } }) => void) | null = null;
     mockGetThread.mockResolvedValue({

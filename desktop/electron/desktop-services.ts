@@ -3025,6 +3025,23 @@ function getPluginSkillRoots(): string[] {
   return roots;
 }
 
+function isTextLikeMaterial(material: MaterialRecord): boolean {
+  const mimeType = material.mimeType.toLowerCase();
+  const extension = extname(material.workspacePath).toLowerCase();
+  return mimeType.startsWith('text/')
+    || mimeType === 'application/json'
+    || ['.txt', '.md', '.json', '.csv', '.html', '.svg'].includes(extension);
+}
+
+function readMaterialTextForPrompt(material: MaterialRecord): string {
+  const readablePath = material.extractedTextPath
+    || (isTextLikeMaterial(material) ? material.workspacePath : undefined);
+  if (!readablePath) {
+    throw new Error(`material format is not directly text-readable: ${material.mimeType}`);
+  }
+  return readFileSync(readablePath, 'utf-8');
+}
+
 function createDesktopModelRunner(dataRoot: string): TaskRunner {
   const cwd = process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
@@ -3157,7 +3174,7 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
       for (const m of materials) {
         // Read file content directly and include in message
         try {
-          const content = readFileSync(m.workspacePath, 'utf-8');
+          const content = readMaterialTextForPrompt(m);
           const ext = extname(m.workspacePath).toLowerCase();
 
           // Truncate very large files
@@ -3175,7 +3192,7 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
           materialsContext += `- 文件: ${m.originalName} (读取失败)\n`;
         }
       }
-      materialsContext += '\n以下是各文件的具体内容：\n';
+      materialsContext += '\n以下是各文件的具体内容（已由 xiaok desktop 预处理并注入上下文，不要再用 shell 脚本重新读取同一上传文件）：\n';
     }
 
     const config = await loadConfig();
@@ -4252,7 +4269,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
       for (const m of materials) {
         // Read file content directly and include in message
         try {
-          const content = readFileSync(m.workspacePath, 'utf-8');
+          const content = readMaterialTextForPrompt(m);
           const ext = extname(m.workspacePath).toLowerCase();
 
           // Truncate very large files
@@ -4270,7 +4287,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
           materialsContext += `- 文件: ${m.originalName} (读取失败)\n`;
         }
       }
-      materialsContext += '\n以下是各文件的具体内容：\n';
+      materialsContext += '\n以下是各文件的具体内容（已由 xiaok desktop 预处理并注入上下文，不要再用 shell 脚本重新读取同一上传文件）：\n';
     }
 
     const config = await loadConfig();

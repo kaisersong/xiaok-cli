@@ -80,7 +80,7 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
   ipcMain.handle('desktop:selectMaterials', async () => {
     log('info', 'selectMaterials');
     const result = await dialog.showOpenDialog(window, {
-      properties: ['openFile', 'openDirectory', 'multiSelections'],
+      properties: ['openFile', 'multiSelections'],
     });
     if (result.canceled) {
       log('info', 'selectMaterials cancelled');

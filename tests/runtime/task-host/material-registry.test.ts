@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { deflateRawSync } from 'node:zlib';
 import { MaterialRegistry } from '../../../src/runtime/task-host/material-registry.js';
 
 describe('MaterialRegistry', () => {
@@ -106,6 +107,37 @@ describe('MaterialRegistry', () => {
     ]);
   });
 
+  it('extracts readable text from imported docx materials', async () => {
+    const sourcePath = join(sourceDir, '董事会评审报告.docx');
+    writeFileSync(sourcePath, createMinimalDocx([
+      '这是一份董事会评审报告。',
+      '请进行对抗性评审。',
+    ]));
+    const registry = new MaterialRegistry({
+      workspaceRoot,
+      maxBytes: 1024 * 1024,
+      now: () => 1_777_000_000,
+    });
+
+    const record = await registry.importMaterial({
+      taskId: 'task_docx',
+      sourcePath,
+      role: 'customer_material',
+      roleSource: 'user',
+    });
+
+    expect(record).toMatchObject({
+      originalName: '董事会评审报告.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      parseStatus: 'parsed',
+    });
+    expect(record.extractedTextPath).toBeTruthy();
+    expect(existsSync(record.extractedTextPath!)).toBe(true);
+    const extracted = readFileSync(record.extractedTextPath!, 'utf8');
+    expect(extracted).toContain('董事会评审报告');
+    expect(extracted).toContain('对抗性评审');
+  });
+
   it('rejects unsupported, oversized, and unsafe source files', async () => {
     const registry = new MaterialRegistry({
       workspaceRoot,
@@ -142,3 +174,85 @@ describe('MaterialRegistry', () => {
     })).rejects.toThrow(/unsafe/i);
   });
 });
+
+function createMinimalDocx(paragraphs: string[]): Buffer {
+  const documentXml = [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>',
+    ...paragraphs.map((paragraph) => `<w:p><w:r><w:t>${escapeXml(paragraph)}</w:t></w:r></w:p>`),
+    '</w:body></w:document>',
+  ].join('');
+  return createZip([
+    { name: '[Content_Types].xml', content: '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types" />' },
+    { name: 'word/document.xml', content: documentXml },
+  ]);
+}
+
+function createZip(entries: Array<{ name: string; content: string }>): Buffer {
+  const localParts: Buffer[] = [];
+  const centralParts: Buffer[] = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name, 'utf8');
+    const data = Buffer.from(entry.content, 'utf8');
+    const compressed = deflateRawSync(data);
+
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0, 6);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(0, 10);
+    local.writeUInt32LE(0, 14);
+    local.writeUInt32LE(compressed.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    local.writeUInt16LE(0, 28);
+    localParts.push(local, name, compressed);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0, 8);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(0, 12);
+    central.writeUInt32LE(0, 16);
+    central.writeUInt32LE(compressed.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(name.length, 28);
+    central.writeUInt16LE(0, 30);
+    central.writeUInt16LE(0, 32);
+    central.writeUInt16LE(0, 34);
+    central.writeUInt16LE(0, 36);
+    central.writeUInt32LE(0, 38);
+    central.writeUInt32LE(offset, 42);
+    centralParts.push(central, name);
+
+    offset += local.length + name.length + compressed.length;
+  }
+
+  const centralOffset = offset;
+  const central = Buffer.concat(centralParts);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(0, 4);
+  eocd.writeUInt16LE(0, 6);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(central.length, 12);
+  eocd.writeUInt32LE(centralOffset, 16);
+  eocd.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...localParts, central, eocd]);
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}

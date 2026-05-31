@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, join, relative } from 'node:path';
+import { inflateRawSync } from 'node:zlib';
 import type { MaterialParseStatus, MaterialRecord, MaterialRole, MaterialRoleSource, MaterialView } from './types.js';
 
 interface MaterialRegistryOptions {
@@ -75,18 +76,25 @@ export class MaterialRegistry {
     await copyFile(sourceRealPath, workspacePath);
 
     const sha256 = await hashFile(workspacePath);
+    const extraction = input.parseStatus ? undefined : await tryExtractMaterialText({
+      ext,
+      workspacePath,
+      outputPath: join(taskDir, `${materialId}.txt`),
+    });
     const record: MaterialRecord = {
       materialId,
       taskId: input.taskId,
       originalName,
       workspacePath,
+      extractedTextPath: extraction?.extractedTextPath,
       mimeType,
       sizeBytes: sourceStat.size,
       sha256,
       role: input.role,
       roleSource: input.roleSource,
-      parseStatus: input.parseStatus ?? 'pending',
-      parseSummary: input.parseSummary,
+      parseStatus: input.parseStatus ?? extraction?.parseStatus ?? 'pending',
+      parseSummary: input.parseSummary ?? extraction?.parseSummary,
+      errorMessage: extraction?.errorMessage,
       createdAt: this.options.now?.() ?? Date.now(),
     };
     this.records.set(materialId, record);
@@ -175,4 +183,132 @@ function isNodeErrorCode(error: unknown, code: string): boolean {
     && error !== null
     && 'code' in error
     && (error as { code?: unknown }).code === code;
+}
+
+async function tryExtractMaterialText(input: {
+  ext: string;
+  workspacePath: string;
+  outputPath: string;
+}): Promise<{
+  extractedTextPath?: string;
+  parseStatus: MaterialParseStatus;
+  parseSummary?: string;
+  errorMessage?: string;
+} | undefined> {
+  if (input.ext !== '.docx') return undefined;
+  try {
+    const text = extractDocxText(await readFile(input.workspacePath));
+    if (!text.trim()) {
+      return {
+        parseStatus: 'failed',
+        errorMessage: 'DOCX 文档未提取到可读正文',
+      };
+    }
+    await writeFile(input.outputPath, text, 'utf8');
+    return {
+      extractedTextPath: input.outputPath,
+      parseStatus: 'parsed',
+      parseSummary: `已解析 Word 文档，提取 ${text.length} 字符`,
+    };
+  } catch (error) {
+    return {
+      parseStatus: 'failed',
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function extractDocxText(buffer: Buffer): string {
+  const documentXml = readZipEntry(buffer, 'word/document.xml').toString('utf8');
+  const tokens = documentXml.match(/<w:t\b[^>]*>[\s\S]*?<\/w:t>|<w:tab\b[^>]*\/>|<w:br\b[^>]*\/>|<\/w:p>|<\/w:tr>/g) ?? [];
+  let text = '';
+  for (const token of tokens) {
+    if (token.startsWith('<w:t')) {
+      const inner = token.replace(/^<w:t\b[^>]*>/, '').replace(/<\/w:t>$/, '');
+      text += decodeXmlEntities(inner);
+      continue;
+    }
+    if (token.startsWith('<w:tab')) {
+      text += '\t';
+      continue;
+    }
+    if (token.startsWith('<w:br') || token === '</w:p>' || token === '</w:tr>') {
+      text += '\n';
+    }
+  }
+  return text
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function readZipEntry(buffer: Buffer, entryName: string): Buffer {
+  const eocdOffset = findEndOfCentralDirectory(buffer);
+  const centralDirectorySize = buffer.readUInt32LE(eocdOffset + 12);
+  const centralDirectoryOffset = buffer.readUInt32LE(eocdOffset + 16);
+  const centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize;
+  let cursor = centralDirectoryOffset;
+
+  while (cursor < centralDirectoryEnd) {
+    if (buffer.readUInt32LE(cursor) !== 0x02014b50) {
+      throw new Error('invalid ZIP central directory');
+    }
+    const compressionMethod = buffer.readUInt16LE(cursor + 10);
+    const compressedSize = buffer.readUInt32LE(cursor + 20);
+    const fileNameLength = buffer.readUInt16LE(cursor + 28);
+    const extraLength = buffer.readUInt16LE(cursor + 30);
+    const commentLength = buffer.readUInt16LE(cursor + 32);
+    const localHeaderOffset = buffer.readUInt32LE(cursor + 42);
+    const fileName = buffer.slice(cursor + 46, cursor + 46 + fileNameLength).toString('utf8');
+
+    if (fileName === entryName) {
+      return readZipLocalEntry(buffer, localHeaderOffset, compressedSize, compressionMethod);
+    }
+
+    cursor += 46 + fileNameLength + extraLength + commentLength;
+  }
+
+  throw new Error(`missing ZIP entry: ${entryName}`);
+}
+
+function readZipLocalEntry(
+  buffer: Buffer,
+  localHeaderOffset: number,
+  compressedSize: number,
+  compressionMethod: number,
+): Buffer {
+  if (buffer.readUInt32LE(localHeaderOffset) !== 0x04034b50) {
+    throw new Error('invalid ZIP local file header');
+  }
+  const fileNameLength = buffer.readUInt16LE(localHeaderOffset + 26);
+  const extraLength = buffer.readUInt16LE(localHeaderOffset + 28);
+  const dataStart = localHeaderOffset + 30 + fileNameLength + extraLength;
+  const compressed = buffer.slice(dataStart, dataStart + compressedSize);
+  if (compressionMethod === 0) return compressed;
+  if (compressionMethod === 8) return inflateRawSync(compressed);
+  throw new Error(`unsupported ZIP compression method: ${compressionMethod}`);
+}
+
+function findEndOfCentralDirectory(buffer: Buffer): number {
+  const minOffset = Math.max(0, buffer.length - 0xffff - 22);
+  for (let offset = buffer.length - 22; offset >= minOffset; offset--) {
+    if (buffer.readUInt32LE(offset) === 0x06054b50) {
+      return offset;
+    }
+  }
+  throw new Error('invalid ZIP file: missing end of central directory');
+}
+
+function decodeXmlEntities(value: string): string {
+  return value.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (match, entity: string) => {
+    const lower = entity.toLowerCase();
+    if (lower === 'amp') return '&';
+    if (lower === 'lt') return '<';
+    if (lower === 'gt') return '>';
+    if (lower === 'quot') return '"';
+    if (lower === 'apos') return "'";
+    if (lower.startsWith('#x')) return String.fromCodePoint(Number.parseInt(lower.slice(2), 16));
+    if (lower.startsWith('#')) return String.fromCodePoint(Number.parseInt(lower.slice(1), 10));
+    return match;
+  });
 }

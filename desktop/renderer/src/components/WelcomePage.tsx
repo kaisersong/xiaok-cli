@@ -81,7 +81,14 @@ export function WelcomePage() {
       console.error('[WelcomePage] createTask failed:', (e as Error).message);
     }
 
-    navigate(`/t/${thread.id}`, { state: { initialPrompt: text } });
+    navigate(`/t/${thread.id}`, {
+      state: {
+        initialPrompt: text,
+        ...(files && files.length > 0
+          ? { initialFiles: files.map(file => ({ filePath: file.filePath, name: file.name })) }
+          : {}),
+      },
+    });
   };
 
   const handleQuickPrompt = (p: string) => {

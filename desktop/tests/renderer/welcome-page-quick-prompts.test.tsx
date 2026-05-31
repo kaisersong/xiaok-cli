@@ -1,18 +1,34 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+
+const { mockCreateThread, mockCreateTask, mockCreateTaskWithFiles, mockUpdateThreadTaskId } = vi.hoisted(() => ({
+  mockCreateThread: vi.fn(),
+  mockCreateTask: vi.fn(),
+  mockCreateTaskWithFiles: vi.fn(),
+  mockUpdateThreadTaskId: vi.fn(),
+}));
 
 vi.mock('../../renderer/src/api', () => ({
   api: {
-    createThread: vi.fn(),
-    createTask: vi.fn(),
-    createTaskWithFiles: vi.fn(),
-    updateThreadTaskId: vi.fn(),
+    createThread: mockCreateThread,
+    createTask: mockCreateTask,
+    createTaskWithFiles: mockCreateTaskWithFiles,
+    updateThreadTaskId: mockUpdateThreadTaskId,
   },
 }));
 
 vi.mock('../../renderer/src/components/ChatInput', () => ({
-  ChatInput: () => <div data-testid="chat-input" />,
+  ChatInput: ({ onSubmit }: { onSubmit?: (text: string, files?: Array<{ filePath: string; name: string }>) => void }) => (
+    <div data-testid="chat-input">
+      <button
+        type="button"
+        onClick={() => onSubmit?.('做对抗性评审', [{ filePath: 'D:\\reports\\board-review.docx', name: 'board-review.docx' }])}
+      >
+        submit-files
+      </button>
+    </div>
+  ),
 }));
 
 import { WelcomePage } from '../../renderer/src/components/WelcomePage';
@@ -42,4 +58,46 @@ describe('WelcomePage quick prompts', () => {
     expect(projectButton).toHaveClass('whitespace-nowrap');
     expect(projectButton).toHaveAttribute('title', projectPrompt);
   });
+
+  it('passes selected file names to the new thread route for visible attachment context', async () => {
+    mockCreateThread.mockResolvedValue({
+      id: 'thread-file',
+      title: '做对抗性评审',
+      status: 'idle',
+      mode: 'work',
+      createdAt: 1,
+      updatedAt: 1,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: null,
+      taskIds: [],
+    });
+    mockCreateTaskWithFiles.mockResolvedValue({ taskId: 'task-file' });
+    mockUpdateThreadTaskId.mockResolvedValue(undefined);
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route path="/" element={<WelcomePage />} />
+          <Route path="/t/:threadId" element={<RouteStateDump />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'submit-files' }));
+
+    await waitFor(() => {
+      expect(mockCreateTaskWithFiles).toHaveBeenCalledWith({
+        prompt: '做对抗性评审',
+        filePaths: ['D:\\reports\\board-review.docx'],
+      });
+      expect(screen.getByTestId('route-state')).toHaveTextContent('board-review.docx');
+    });
+  });
 });
+
+function RouteStateDump() {
+  const location = useLocation();
+  return <pre data-testid="route-state">{JSON.stringify(location.state)}</pre>;
+}

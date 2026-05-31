@@ -23,6 +23,12 @@ interface StoredThreadDraft {
   [key: string]: unknown;
 }
 
+interface DisplayFileRef {
+  filePath?: string;
+  name?: string;
+  originalName?: string;
+}
+
 function normalizeArtifactKind(kind: string): ArtifactKind {
   return ARTIFACT_KINDS.has(kind as ArtifactKind) ? kind as ArtifactKind : 'other';
 }
@@ -78,6 +84,20 @@ function writeStoredThreadDraft(threadId: string, draft: StoredThreadDraft): voi
   } catch {
     // Local storage is a convenience cache; route state still carries fresh drafts.
   }
+}
+
+function displayNameFromFileRef(file: DisplayFileRef): string | undefined {
+  const raw = file.name || file.originalName || file.filePath;
+  if (!raw) return undefined;
+  return raw.split(/[\\/]/).filter(Boolean).pop() || raw;
+}
+
+function formatUserMessageContent(prompt: string, files?: DisplayFileRef[]): string {
+  const fileNames = (files ?? [])
+    .map(displayNameFromFileRef)
+    .filter((name): name is string => Boolean(name));
+  if (fileNames.length === 0) return prompt;
+  return `${prompt}\n\n附件: ${fileNames.join(', ')}`;
 }
 
 function parseComputerUseRecoverableAction(response: string): ComputerUseActionData | null {
@@ -138,8 +158,9 @@ export function ChatShell() {
   const computerUseActionCodesRef = useRef<Set<string>>(new Set());
 
   // Read prompt state from navigation (WelcomePage initial submit or project help draft)
-  const state = location.state as { initialPrompt?: string; draftPrompt?: string } | undefined;
+  const state = location.state as { initialPrompt?: string; initialFiles?: DisplayFileRef[]; draftPrompt?: string } | undefined;
   const initialPrompt = state?.initialPrompt;
+  const initialFiles = state?.initialFiles;
   const draftPrompt = state?.draftPrompt;
 
   const handleEvent = useCallback((rawEvent: { type: string }) => {
@@ -376,7 +397,7 @@ export function ChatShell() {
 
   // Replay events from a single snapshot into messages
   // Returns { msgs, result, events } where events is for Canvas (not pushed to ref during replay)
-  const replaySnapshot = useCallback((snapshot: { events?: DesktopTaskEvent[]; prompt?: string }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[] } => {
+  const replaySnapshot = useCallback((snapshot: { events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[] } => {
     const msgs: ChatMessage[] = [];
     let lastResult: TaskResult | null = null;
     const replayEvents: DesktopTaskEvent[] = []; // Local array for Canvas, not ref
@@ -386,7 +407,7 @@ export function ChatShell() {
       msgs.push({
         id: `msg-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: 'user',
-        content: displayPrompt,
+        content: formatUserMessageContent(displayPrompt, snapshot.materials),
       });
     }
 
@@ -529,7 +550,7 @@ export function ChatShell() {
       setMessages([{
         id: `msg-initial-user`,
         role: 'user',
-        content: initialPrompt,
+        content: formatUserMessageContent(initialPrompt, initialFiles),
       }]);
       setStatus('running');
     }
@@ -642,7 +663,7 @@ export function ChatShell() {
       unsubRef.current?.();
       unsubRef.current = null;
     };
-  }, [taskId, initialPrompt, draftPrompt, handleEvent, replaySnapshot]);
+  }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, replaySnapshot]);
 
   const queuePrompt = useCallback((text: string) => {
     const trimmed = text.trim();
@@ -678,14 +699,10 @@ export function ChatShell() {
     toolStepsMsgIdRef.current = null;
 
     // Add user message immediately (include file names in content)
-    const fileNames = files?.flatMap(f => f.name ? [f.name] : []);
-    const displayContent = fileNames && fileNames.length > 0
-      ? `${text}\n\n附件: ${fileNames.join(', ')}`
-      : text;
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}-user`,
       role: 'user',
-      content: displayContent,
+      content: formatUserMessageContent(text, files),
     };
     setMessages(prev => [...prev, userMsg]);
     setPrompt('');
