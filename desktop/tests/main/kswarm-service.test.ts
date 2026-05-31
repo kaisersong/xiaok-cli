@@ -3,8 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   buildBackgroundNodeSpawnOptions,
   KSwarmUnavailableError,
+  nextHealthFailureCount,
+  requestWithFallbackBaseUrls,
   resolveBackgroundNodeRuntime,
   shouldAdoptExistingKSwarmService,
+  shouldRestartAfterHealthFailures,
+  uniqueServiceUrls,
 } from '../../electron/kswarm-service.js';
 
 // We can't actually spawn kswarm in unit tests, so request() behavior is tested
@@ -158,6 +162,43 @@ describe('kswarm service external adoption', () => {
   });
 });
 
+describe('kswarm service health monitor resilience', () => {
+  it('does not restart on the first transient health failure', () => {
+    const firstFailureCount = nextHealthFailureCount(0, false);
+
+    expect(firstFailureCount).toBe(1);
+    expect(shouldRestartAfterHealthFailures(firstFailureCount)).toBe(false);
+  });
+
+  it('restarts only after the configured consecutive failure threshold', () => {
+    const failure1 = nextHealthFailureCount(0, false);
+    const failure2 = nextHealthFailureCount(failure1, false);
+    const failure3 = nextHealthFailureCount(failure2, false);
+
+    expect(shouldRestartAfterHealthFailures(failure2)).toBe(false);
+    expect(shouldRestartAfterHealthFailures(failure3)).toBe(true);
+  });
+
+  it('resets consecutive health failures after a successful probe', () => {
+    const afterFailures = nextHealthFailureCount(2, false);
+    const afterSuccess = nextHealthFailureCount(afterFailures, true);
+
+    expect(afterFailures).toBe(3);
+    expect(afterSuccess).toBe(0);
+  });
+
+  it('preserves endpoint order while removing duplicate service URLs', () => {
+    expect(uniqueServiceUrls([
+      'http://localhost:4400',
+      'http://127.0.0.1:4400',
+      'http://localhost:4400',
+    ])).toEqual([
+      'http://localhost:4400',
+      'http://127.0.0.1:4400',
+    ]);
+  });
+});
+
 describe('kswarm service request gateway', () => {
   it('auto-starts when not running', async () => {
     const svc = createMockKSwarmService({
@@ -232,5 +273,61 @@ describe('kswarm service request gateway', () => {
     const res = await svc.request('/unknown');
     expect(res.status).toBe(404);
     expect(res.ok).toBe(false);
+  });
+
+  it('falls back to the next service URL when the first endpoint is unreachable', async () => {
+    const attemptedUrls: string[] = [];
+    const fetchImpl = async (input: string | URL | Request) => {
+      const url = String(input);
+      attemptedUrls.push(url);
+      if (url.startsWith('http://localhost:4400')) {
+        throw new Error('connect ECONNREFUSED ::1:4400');
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    };
+
+    const res = await requestWithFallbackBaseUrls({
+      baseUrls: ['http://localhost:4400', 'http://127.0.0.1:4400'],
+      path: '/health',
+      fetchImpl,
+      timeoutMs: 1_000,
+    });
+
+    expect(res.ok).toBe(true);
+    expect(attemptedUrls).toEqual([
+      'http://localhost:4400/health',
+      'http://127.0.0.1:4400/health',
+    ]);
+  });
+
+  it('returns HTTP responses without falling back on application-level failures', async () => {
+    const attemptedUrls: string[] = [];
+    const fetchImpl = async (input: string | URL | Request) => {
+      attemptedUrls.push(String(input));
+      return new Response(JSON.stringify({ error: 'not found' }), { status: 404 });
+    };
+
+    const res = await requestWithFallbackBaseUrls({
+      baseUrls: ['http://localhost:4400', 'http://127.0.0.1:4400'],
+      path: '/unknown',
+      fetchImpl,
+      timeoutMs: 1_000,
+    });
+
+    expect(res.status).toBe(404);
+    expect(attemptedUrls).toEqual(['http://localhost:4400/unknown']);
+  });
+
+  it('throws KSwarmUnavailableError only after all service URLs fail', async () => {
+    const fetchImpl = async (input: string | URL | Request) => {
+      throw new Error(`cannot reach ${String(input)}`);
+    };
+
+    await expect(requestWithFallbackBaseUrls({
+      baseUrls: ['http://localhost:4400', 'http://127.0.0.1:4400'],
+      path: '/health',
+      fetchImpl,
+      timeoutMs: 1_000,
+    })).rejects.toThrow(KSwarmUnavailableError);
   });
 });

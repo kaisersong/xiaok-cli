@@ -31,11 +31,22 @@ const __dirname = dirname(__filename);
 
 const KSWARM_PORT = 4400;
 const BROKER_PORT = 4318;
-const HEALTH_URL = `http://127.0.0.1:${KSWARM_PORT}/health`;
+export const KSWARM_REQUEST_BASE_URLS = uniqueServiceUrls([
+  `http://127.0.0.1:${KSWARM_PORT}`,
+  `http://localhost:${KSWARM_PORT}`,
+]);
+const KSWARM_HEALTH_URLS = uniqueServiceUrls(KSWARM_REQUEST_BASE_URLS.map(url => `${url}/health`));
+const BROKER_HEALTH_URLS = uniqueServiceUrls([
+  `http://127.0.0.1:${BROKER_PORT}/health`,
+  `http://localhost:${BROKER_PORT}/health`,
+]);
 const HEALTH_INTERVAL_MS = 10_000;
+const HEALTH_CHECK_TIMEOUT_MS = 2_000;
+const HEALTH_FAILURE_RESTART_THRESHOLD = 3;
 const RESTART_BASE_DELAY_MS = 2_000;
 const MAX_RESTART_DELAY_MS = 30_000;
 const MAX_RESTART_ATTEMPTS = 10;
+const REQUEST_TIMEOUT_MS = 30_000;
 const DYNAMIC_WORKFLOW_FEATURE = 'dynamic_workflows';
 
 /**
@@ -67,6 +78,54 @@ export class KSwarmUnavailableError extends Error {
     super(`KSwarm service unavailable: ${reason}`);
     this.name = 'KSwarmUnavailableError';
   }
+}
+
+export function uniqueServiceUrls(urls: string[]): string[] {
+  return Array.from(new Set(urls));
+}
+
+export function nextHealthFailureCount(current: number, ok: boolean): number {
+  return ok ? 0 : current + 1;
+}
+
+export function shouldRestartAfterHealthFailures(
+  failureCount: number,
+  threshold = HEALTH_FAILURE_RESTART_THRESHOLD,
+): boolean {
+  return failureCount >= threshold;
+}
+
+export async function requestWithFallbackBaseUrls(options: {
+  baseUrls: string[];
+  path: string;
+  init?: RequestInit;
+  fetchImpl?: (input: string, init?: RequestInit) => Promise<Response>;
+  timeoutMs?: number;
+}): Promise<Response> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const path = options.path.startsWith('/') ? options.path : `/${options.path}`;
+  const urls = uniqueServiceUrls(options.baseUrls).map(baseUrl => `${baseUrl}${path}`);
+  let lastError: Error | null = null;
+
+  for (const url of urls) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetchImpl(url, { ...options.init, signal: controller.signal });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        lastError = new Error(`KSwarm request timed out (${timeoutMs}ms): ${url}`);
+      } else {
+        lastError = error instanceof Error ? error : new Error('request failed');
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  throw new KSwarmUnavailableError(lastError?.message ?? 'all service endpoints failed');
 }
 
 function resolveBrokerLaunchSpec(): ServiceLaunchSpec | null {
@@ -197,6 +256,7 @@ export function createKSwarmService(): KSwarmService {
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
   let stopping = false;
   let startingPromise: Promise<void> | null = null;
+  let healthFailureCount = 0;
   const listeners = new Set<(status: KSwarmServiceStatus) => void>();
 
   function getStatus(): KSwarmServiceStatus {
@@ -222,17 +282,16 @@ export function createKSwarmService(): KSwarmService {
   }
 
   async function healthCheck(): Promise<boolean> {
-    try {
-      const res = await fetch(HEALTH_URL);
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const result = await fetchHealthJsonFromUrls(KSWARM_HEALTH_URLS);
+    return result.ok;
   }
 
   async function fetchHealthJson(url: string): Promise<{ ok: boolean; body: Record<string, unknown> | null; error: string | null }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
+
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
       let body: Record<string, unknown> | null = null;
       try {
         const parsed = await res.json();
@@ -249,13 +308,42 @@ export function createKSwarmService(): KSwarmService {
       return {
         ok: false,
         body: null,
-        error: error instanceof Error ? error.message : 'health check failed',
+        error: error instanceof Error && error.name === 'AbortError'
+          ? `health check timed out (${HEALTH_CHECK_TIMEOUT_MS}ms): ${url}`
+          : error instanceof Error ? error.message : 'health check failed',
       };
+    } finally {
+      clearTimeout(timer);
     }
   }
 
+  async function fetchKSwarm(path: string, init?: RequestInit): Promise<Response> {
+    return requestWithFallbackBaseUrls({
+      baseUrls: KSWARM_REQUEST_BASE_URLS,
+      path,
+      init,
+      timeoutMs: REQUEST_TIMEOUT_MS,
+    });
+  }
+
+  async function fetchHealthJsonFromUrls(urls: string[]): Promise<{ ok: boolean; body: Record<string, unknown> | null; error: string | null }> {
+    let lastResult: { ok: boolean; body: Record<string, unknown> | null; error: string | null } | null = null;
+    for (const url of uniqueServiceUrls(urls)) {
+      const result = await fetchHealthJson(url);
+      if (result.ok) {
+        return result;
+      }
+      lastResult = result;
+    }
+    return lastResult ?? {
+      ok: false,
+      body: null,
+      error: 'no health endpoints configured',
+    };
+  }
+
   async function brokerHealthCheck(): Promise<boolean> {
-    const result = await fetchHealthJson(`http://127.0.0.1:${BROKER_PORT}/health`);
+    const result = await fetchHealthJsonFromUrls(BROKER_HEALTH_URLS);
     return result.ok;
   }
 
@@ -264,9 +352,15 @@ export function createKSwarmService(): KSwarmService {
     healthTimer = setInterval(async () => {
       if (!running || stopping) return;
       const ok = await healthCheck();
+      healthFailureCount = nextHealthFailureCount(healthFailureCount, ok);
+      if (!ok && !shouldRestartAfterHealthFailures(healthFailureCount)) {
+        console.warn(`[kswarm-service] Health check failed (${healthFailureCount}/${HEALTH_FAILURE_RESTART_THRESHOLD}), will retry before restart`);
+        return;
+      }
       if (!ok && running && !stopping) {
-        console.log('[kswarm-service] Health check failed, attempting restart...');
+        console.log('[kswarm-service] Health check failed repeatedly, attempting restart...');
         running = false;
+        healthFailureCount = 0;
         notifyListeners();
         scheduleRestart();
       }
@@ -282,7 +376,7 @@ export function createKSwarmService(): KSwarmService {
 
   async function reconcileSeedAgents(): Promise<void> {
     try {
-      const res = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents`);
+      const res = await fetchKSwarm('/agents');
       if (!res.ok) return;
       const payload = await res.json() as { agents?: Array<Record<string, unknown>> };
       const agents = Array.isArray(payload.agents) ? payload.agents : [];
@@ -294,7 +388,7 @@ export function createKSwarmService(): KSwarmService {
       ];
       let liveness: Record<string, { online: boolean }> = {};
       try {
-        const livenessRes = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents/liveness`);
+        const livenessRes = await fetchKSwarm('/agents/liveness');
         if (livenessRes.ok) {
           const livenessPayload = await livenessRes.json() as { liveness?: Record<string, { online: boolean }> };
           liveness = livenessPayload.liveness ?? {};
@@ -309,7 +403,7 @@ export function createKSwarmService(): KSwarmService {
         }
         const existing = agents.find((agent) => agent.id === desired.id);
         if (!existing) {
-          const createRes = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents`, {
+          const createRes = await fetchKSwarm('/agents', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(desired),
@@ -320,12 +414,12 @@ export function createKSwarmService(): KSwarmService {
           continue;
         }
 
-        const detailRes = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents/${desired.id}`);
+        const detailRes = await fetchKSwarm(`/agents/${desired.id}`);
         const detailPayload = detailRes.ok ? await detailRes.json() as { agent?: Record<string, unknown> } : null;
         const currentAgent = detailPayload?.agent ?? existing;
         const patch = diffManagedXiaokAgentPatch(currentAgent, desired);
         if (patch) {
-          const updateRes = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents/${desired.id}`, {
+          const updateRes = await fetchKSwarm(`/agents/${desired.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(patch),
@@ -338,7 +432,7 @@ export function createKSwarmService(): KSwarmService {
         const status = String(existing.status ?? 'offline');
         const isGhostOnline = status !== 'offline' && liveness[desired.id]?.online === false;
         if ((patch && status !== 'offline') || isGhostOnline) {
-          const restartRes = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents/${desired.id}/restart`, {
+          const restartRes = await fetchKSwarm(`/agents/${desired.id}/restart`, {
             method: 'POST',
           });
           if (!restartRes.ok) {
@@ -348,7 +442,7 @@ export function createKSwarmService(): KSwarmService {
       }
 
       for (const agentId of plan.archive) {
-        const archiveRes = await fetch(`http://127.0.0.1:${KSWARM_PORT}/agents/${agentId}`, {
+        const archiveRes = await fetchKSwarm(`/agents/${agentId}`, {
           method: 'DELETE',
         });
         if (!archiveRes.ok && archiveRes.status !== 404) {
@@ -413,16 +507,13 @@ export function createKSwarmService(): KSwarmService {
     // Wait briefly for broker to be ready
     for (let i = 0; i < 10; i++) {
       await new Promise(r => setTimeout(r, 300));
-      try {
-        const res = await fetch(`http://127.0.0.1:${BROKER_PORT}/health`);
-        if (res.ok) return true;
-      } catch {}
+      if (await brokerHealthCheck()) return true;
     }
     return false;
   }
 
   async function spawnServer(): Promise<void> {
-    const existingHealth = await fetchHealthJson(HEALTH_URL);
+    const existingHealth = await fetchHealthJsonFromUrls(KSWARM_HEALTH_URLS);
     const existingHealthy = existingHealth.ok;
     const dynamicWorkflowReady = hasDynamicWorkflowSupport(existingHealth.body);
     let brokerReady = await brokerHealthCheck();
@@ -437,6 +528,7 @@ export function createKSwarmService(): KSwarmService {
       running = true;
       lastError = null;
       restartCount = 0;
+      healthFailureCount = 0;
       startHealthCheck();
       notifyListeners();
       return;
@@ -457,6 +549,7 @@ export function createKSwarmService(): KSwarmService {
       running = true;
       lastError = brokerReady ? null : 'intent-broker health check failed';
       restartCount = 0;
+      healthFailureCount = 0;
       startHealthCheck();
       notifyListeners();
       return;
@@ -525,6 +618,7 @@ export function createKSwarmService(): KSwarmService {
       running = true;
       lastError = null;
       restartCount = 0; // Reset on successful start
+      healthFailureCount = 0;
       console.log(`[kswarm-service] Server ready on port ${KSWARM_PORT}`);
       startHealthCheck();
       notifyListeners();
@@ -553,8 +647,6 @@ export function createKSwarmService(): KSwarmService {
     await startingPromise;
   }
 
-  const REQUEST_TIMEOUT_MS = 30_000;
-
   async function request(path: string, init?: RequestInit): Promise<Response> {
     await ensureReady();
 
@@ -562,27 +654,19 @@ export function createKSwarmService(): KSwarmService {
       throw new KSwarmUnavailableError(lastError || 'KSwarm service failed to start');
     }
 
-    const url = `http://127.0.0.1:${KSWARM_PORT}${path}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-    try {
-      const res = await fetch(url, { ...init, signal: controller.signal });
-      return res;
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error(`KSwarm request timed out (${REQUEST_TIMEOUT_MS}ms): ${url}`);
-      }
-      throw new KSwarmUnavailableError((err as Error).message);
-    } finally {
-      clearTimeout(timer);
-    }
+    return requestWithFallbackBaseUrls({
+      baseUrls: KSWARM_REQUEST_BASE_URLS,
+      path,
+      init,
+      timeoutMs: REQUEST_TIMEOUT_MS,
+    });
   }
 
   async function start(): Promise<void> {
     if (running || child) return;
     stopping = false;
     restartCount = 0;
+    healthFailureCount = 0;
     lastError = null;
     await spawnServer();
   }
@@ -608,6 +692,7 @@ export function createKSwarmService(): KSwarmService {
     }
     await stopOwnedBroker();
     running = false;
+    healthFailureCount = 0;
     notifyListeners();
   }
 
@@ -635,8 +720,8 @@ export function createKSwarmService(): KSwarmService {
 
   async function getServiceStatus(): Promise<DesktopServiceStatusSnapshot> {
     const [kswarmHealth, brokerHealth] = await Promise.all([
-      fetchHealthJson(HEALTH_URL),
-      fetchHealthJson(`http://127.0.0.1:${BROKER_PORT}/health`),
+      fetchHealthJsonFromUrls(KSWARM_HEALTH_URLS),
+      fetchHealthJsonFromUrls(BROKER_HEALTH_URLS),
     ]);
     const brokerConnected = kswarmHealth.body?.brokerConnected;
     const kswarmDetail = kswarmHealth.ok
