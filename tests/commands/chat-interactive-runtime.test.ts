@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1109,6 +1109,74 @@ describe('chat interactive runtime', () => {
     vi.clearAllMocks();
     resetAdapterState();
   });
+
+  it('releases session ownership when exiting with slash exit', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-exit-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1,
+      defaultModel: 'claude',
+      models: {
+        claude: { model: 'claude-test' },
+      },
+      defaultMode: 'interactive',
+      contextBudget: 4000,
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--auto']);
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+
+      const sessionsDir = join(configDir, 'sessions');
+      const [sessionFile] = readdirSync(sessionsDir).filter((entry) => entry.endsWith('.json'));
+      const saved = JSON.parse(readFileSync(join(sessionsDir, sessionFile), 'utf8')) as {
+        intentDelegation?: {
+          ownership?: {
+            state?: string;
+            ownerInstanceId?: string;
+            previousOwnerInstanceId?: string;
+          };
+        };
+      };
+
+      expect(saved.intentDelegation?.ownership?.state).toBe('released');
+      expect(saved.intentDelegation?.ownership?.ownerInstanceId).toBeUndefined();
+      expect(saved.intentDelegation?.ownership?.previousOwnerInstanceId).toMatch(/^inst_/);
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
 
   it('runs a fork skill through the interactive slash flow and honors the skill model override', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);

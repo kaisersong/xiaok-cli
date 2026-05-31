@@ -588,6 +588,38 @@ async function runChat(initialInput, opts) {
             transcript_path: transcriptLogger.path,
         },
     });
+    const cleanupRuntimeResources = async () => {
+        const cleanupSteps = [
+            () => platform.dispose(),
+            () => disposeModelAdapter(adapter),
+            () => memoryStore.close?.(),
+            ...embeddedChannels.map((ch) => () => ch.cleanup()),
+        ];
+        for (const cleanupStep of cleanupSteps) {
+            try {
+                await cleanupStep();
+            }
+            catch (error) {
+                log.warn('chat cleanup failed', { error: String(error) });
+            }
+        }
+    };
+    const cleanupRuntimeResourcesWithTimeout = async () => {
+        let timeout = null;
+        try {
+            await Promise.race([
+                cleanupRuntimeResources(),
+                new Promise((resolve) => {
+                    timeout = setTimeout(resolve, 2000);
+                }),
+            ]);
+        }
+        finally {
+            if (timeout) {
+                clearTimeout(timeout);
+            }
+        }
+    };
     const rawRuntimeHooks = createRuntimeHooks();
     const runtimeHooks = {
         on: rawRuntimeHooks.on,
@@ -1469,9 +1501,13 @@ async function runChat(initialInput, opts) {
         mdRenderer.beginNewSegment();
         resetStreamingSegment();
     };
-    const persistSession = async () => {
-        await refreshIntentLedger();
-        await refreshSkillEvalState();
+    const persistSession = async (options = {}) => {
+        if (options.refreshIntentLedger ?? true) {
+            await refreshIntentLedger();
+        }
+        if (options.refreshSkillEvalState ?? true) {
+            await refreshSkillEvalState();
+        }
         const snapshot = agent.exportSession();
         await sessionStore.save({
             ...snapshot,
@@ -1494,7 +1530,7 @@ async function runChat(initialInput, opts) {
             return;
         }
         currentIntentLedger = releaseSessionOwnership(currentIntentLedger, instanceId, Date.now());
-        await persistSession();
+        await persistSession({ refreshIntentLedger: false });
     };
     const wrapOverlayText = (text, maxWidth) => {
         const safeWidth = Math.max(1, maxWidth);
@@ -1694,8 +1730,7 @@ async function runChat(initialInput, opts) {
         finally {
             clearTurnIntentContext();
             await releaseSessionOwnershipForExit();
-            await platform.dispose();
-            await disposeModelAdapter(adapter);
+            await cleanupRuntimeResources();
         }
         if (!opts.print && !opts.json) {
             process.stdout.write('\n');
@@ -2163,14 +2198,7 @@ async function runChat(initialInput, opts) {
                 clearTurnIntentContext();
                 await releaseSessionOwnershipForExit();
                 await lifecycleHooks.runHooks('SessionEnd', { reason: 'sigint' });
-                const cleanup = async () => {
-                    await platform.dispose();
-                    await disposeModelAdapter(adapter);
-                    for (const ch of embeddedChannels) {
-                        await ch.cleanup();
-                    }
-                };
-                await Promise.race([cleanup(), new Promise(r => setTimeout(r, 2000))]);
+                await cleanupRuntimeResourcesWithTimeout();
                 statusBar.destroy();
                 process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
                 process.exit(0);
@@ -2799,14 +2827,7 @@ async function runChat(initialInput, opts) {
         stopSkillEvalRuntimeSync();
         skillCatalogWatcher?.close();
         await lifecycleHooks.runHooks('SessionEnd', { reason: 'exit' });
-        const finalCleanup = async () => {
-            await platform.dispose();
-            await disposeModelAdapter(adapter);
-            for (const ch of embeddedChannels) {
-                await ch.cleanup();
-            }
-        };
-        await Promise.race([finalCleanup(), new Promise(r => setTimeout(r, 2000))]);
+        await cleanupRuntimeResourcesWithTimeout();
     }
 }
 function resolveChatInstanceId() {
