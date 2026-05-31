@@ -1,5 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { createPlatformRegistryFactory } from '../../../src/platform/runtime/registry-factory.js';
+import { PermissionManager } from '../../../src/ai/permissions/manager.js';
+import { applySandboxToTools } from '../../../src/platform/sandbox/tool-wrappers.js';
+import { buildToolList } from '../../../src/ai/tools/index.js';
 import type { PlatformRuntimeContext } from '../../../src/platform/runtime/context.js';
 import type { ModelAdapter, Tool, ToolDefinition } from '../../../src/types.js';
 
@@ -52,6 +55,102 @@ vi.mock('../../../src/ai/tools/tool-pool.js', () => ({
   mergeToolPools: vi.fn((nonMcp, mcp) => [...nonMcp, ...mcp]),
   isMcpTool: vi.fn(() => false),
 }));
+
+function makeMockPlatform(expandAllowedPaths = vi.fn()): PlatformRuntimeContext {
+  return {
+    customAgents: [],
+    pluginRuntime: { hookConfigs: [], agentDirs: [] },
+    mcpTools: [],
+    sandboxEnforcer: {},
+    sandboxPolicy: { expandAllowedPaths },
+    capabilityRegistry: { register: vi.fn() },
+    worktreeManager: undefined,
+    lspManager: undefined,
+    teamService: undefined,
+    createBackgroundRunner: vi.fn(() => ({})),
+    createReminderApi: vi.fn(() => undefined),
+    mcpReady: Promise.resolve(),
+    onMcpToolsChanged: vi.fn(() => () => undefined),
+  } as unknown as PlatformRuntimeContext;
+}
+
+function getLastSandboxDeniedCallback() {
+  const calls = vi.mocked(applySandboxToTools).mock.calls;
+  const options = calls.at(-1)?.[2] as {
+    onSandboxDenied?: (deniedPath: string, toolName: string) => Promise<{ shouldProceed: boolean }> | { shouldProceed: boolean };
+  } | undefined;
+  if (!options?.onSandboxDenied) {
+    throw new Error('expected sandbox denial callback to be registered');
+  }
+  return options.onSandboxDenied;
+}
+
+describe('registry-factory sandbox auto mode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('auto-expands sandbox denials in auto mode without prompting', async () => {
+    const expandAllowedPaths = vi.fn();
+    const onSandboxDenied = vi.fn(async () => ({ shouldProceed: false }));
+    const factory = createPlatformRegistryFactory({
+      platform: makeMockPlatform(expandAllowedPaths),
+      source: 'chat',
+      sessionId: 'test-session',
+      adapter: () => ({ name: 'test', generate: vi.fn(), stream: vi.fn() } as unknown as ModelAdapter),
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      onSandboxDenied,
+      buildSystemPrompt: async () => 'prompt',
+    });
+
+    factory.createRegistry('/test/cwd');
+    const result = await getLastSandboxDeniedCallback()('/external/docs/file.md', 'read');
+
+    expect(result).toEqual({ shouldProceed: true });
+    expect(expandAllowedPaths).toHaveBeenCalledWith(['/external/docs/file.md']);
+    expect(onSandboxDenied).not.toHaveBeenCalled();
+  });
+
+  it('lets the sandbox enforcer own outside-cwd checks for workspace tools', () => {
+    const factory = createPlatformRegistryFactory({
+      platform: makeMockPlatform(),
+      source: 'chat',
+      sessionId: 'test-session',
+      adapter: () => ({ name: 'test', generate: vi.fn(), stream: vi.fn() } as unknown as ModelAdapter),
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      buildSystemPrompt: async () => 'prompt',
+    });
+
+    factory.createRegistry('/test/cwd');
+
+    expect(vi.mocked(buildToolList)).toHaveBeenCalledWith(
+      undefined,
+      { cwd: '/test/cwd', allowOutsideCwd: true },
+      expect.any(Array),
+    );
+  });
+
+  it('delegates sandbox denials outside auto mode', async () => {
+    const expandAllowedPaths = vi.fn();
+    const onSandboxDenied = vi.fn(async () => ({ shouldProceed: false }));
+    const factory = createPlatformRegistryFactory({
+      platform: makeMockPlatform(expandAllowedPaths),
+      source: 'chat',
+      sessionId: 'test-session',
+      adapter: () => ({ name: 'test', generate: vi.fn(), stream: vi.fn() } as unknown as ModelAdapter),
+      permissionManager: new PermissionManager({ mode: 'default' }),
+      onSandboxDenied,
+      buildSystemPrompt: async () => 'prompt',
+    });
+
+    factory.createRegistry('/test/cwd');
+    const result = await getLastSandboxDeniedCallback()('/external/docs/file.md', 'read');
+
+    expect(result).toEqual({ shouldProceed: false });
+    expect(expandAllowedPaths).not.toHaveBeenCalled();
+    expect(onSandboxDenied).toHaveBeenCalledWith('/external/docs/file.md', 'read');
+  });
+});
 
 describe('registry-factory CC tool filtering', () => {
   let factory: ReturnType<typeof createPlatformRegistryFactory>;

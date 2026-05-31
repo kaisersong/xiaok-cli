@@ -60,9 +60,21 @@ export interface PlatformRegistryFactory {
 
 export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOptions): PlatformRegistryFactory {
   const registries = new Set<ToolRegistry>();
+  const handleSandboxDenied = async (
+    deniedPath: string,
+    toolName: string,
+  ): Promise<{ shouldProceed: boolean }> => {
+    if (options.permissionManager?.getMode() === 'auto') {
+      options.platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
+      return { shouldProceed: true };
+    }
+
+    return options.onSandboxDenied?.(deniedPath, toolName) ?? { shouldProceed: false };
+  };
+
   const registerMcpTools = (registry: ToolRegistry, tools: Tool[]): void => {
     const sandboxedTools = applySandboxToTools(tools, options.platform.sandboxEnforcer, {
-      onSandboxDenied: options.onSandboxDenied,
+      onSandboxDenied: handleSandboxDenied,
     });
     const orderedTools = mergeToolPools([], sandboxedTools)
       .filter((tool) => !isCcRuntimeOnlyTool(tool));
@@ -145,11 +157,15 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
     ];
 
     // 构建基础 tool list
-    const baseTools = buildToolList(options.skillTool, { cwd }, extraTools);
+    const baseTools = buildToolList(
+      options.skillTool,
+      { cwd, allowOutsideCwd: Boolean(options.platform.sandboxEnforcer) },
+      extraTools,
+    );
 
     // 应用 sandbox
     const sandboxedTools = applySandboxToTools(baseTools, options.platform.sandboxEnforcer, {
-      onSandboxDenied: options.onSandboxDenied,
+      onSandboxDenied: handleSandboxDenied,
     });
 
     // 合并 built-in 和 MCP tools（保证 ordering）

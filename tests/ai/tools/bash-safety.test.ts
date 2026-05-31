@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { classifyBashCommand } from '../../../src/ai/tools/bash-safety.js';
+import {
+  classifyBashCommand,
+  requiresAutoPromptForBashCommand,
+} from '../../../src/ai/tools/bash-safety.js';
 
 describe('classifyBashCommand', () => {
   describe('block', () => {
@@ -57,6 +60,12 @@ describe('classifyBashCommand', () => {
       expect(classifyBashCommand('rm -rf ./build')).toMatchObject({ level: 'warn' });
     });
 
+    it('warns on Windows recursive delete commands', () => {
+      expect(classifyBashCommand('rmdir /s /q build')).toMatchObject({ level: 'warn' });
+      expect(classifyBashCommand('powershell -NoProfile -Command "Remove-Item -Recurse -Force .\\build"'))
+        .toMatchObject({ level: 'warn' });
+    });
+
     it('warns on git reset --hard', () => {
       expect(classifyBashCommand('git reset --hard HEAD~1')).toMatchObject({ level: 'warn' });
     });
@@ -75,6 +84,22 @@ describe('classifyBashCommand', () => {
 
     it('warns on kill -9', () => {
       expect(classifyBashCommand('kill -9 1234')).toMatchObject({ level: 'warn' });
+    });
+  });
+
+  describe('auto prompt subset', () => {
+    it('requires auto prompt for deletion and data-loss commands', () => {
+      expect(requiresAutoPromptForBashCommand('rm -rf ./build')).toMatchObject({ level: 'warn' });
+      expect(requiresAutoPromptForBashCommand('git clean -fd')).toMatchObject({ level: 'warn' });
+      expect(requiresAutoPromptForBashCommand('git push --force origin main')).toMatchObject({ level: 'warn' });
+      expect(requiresAutoPromptForBashCommand('psql -c "DROP DATABASE app"')).toMatchObject({ level: 'warn' });
+      expect(requiresAutoPromptForBashCommand('rmdir /s /q build')).toMatchObject({ level: 'warn' });
+    });
+
+    it('does not require auto prompt for non-deletion warn commands', () => {
+      expect(requiresAutoPromptForBashCommand('kill -9 1234')).toBeNull();
+      expect(requiresAutoPromptForBashCommand('chmod -R u+rw ./cache')).toBeNull();
+      expect(requiresAutoPromptForBashCommand('chown -R song ./cache')).toBeNull();
     });
   });
 

@@ -25,6 +25,10 @@ const BLOCK_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 
 const WARN_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /rm\s+-[^\s]*r[^\s]*f/, reason: 'recursive force delete' },
+  { pattern: /\bRemove-Item\b[\s\S]*(?:-Recurse|-r\b)[\s\S]*(?:-Force|-f\b)/i, reason: 'PowerShell recursive force delete' },
+  { pattern: /\bRemove-Item\b[\s\S]*(?:-Force|-f\b)[\s\S]*(?:-Recurse|-r\b)/i, reason: 'PowerShell recursive force delete' },
+  { pattern: /(^|[\s;&|])(?:rmdir|rd)\s+[\s\S]*\/s\b/i, reason: 'Windows recursive directory delete' },
+  { pattern: /(^|[\s;&|])(?:del|erase)\s+[\s\S]*\/s\b/i, reason: 'Windows recursive file delete' },
   { pattern: /git\s+reset\s+--hard/, reason: 'git reset --hard' },
   { pattern: /git\s+push\s+[^\n]*--force/, reason: 'git push --force' },
   { pattern: /git\s+push\s+[^\n]*-f\b/, reason: 'git push -f' },
@@ -34,6 +38,19 @@ const WARN_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bkillall\b/, reason: 'killall (may trigger sudo on macOS)' },
   { pattern: /chmod\s+[^\s]*-R/, reason: 'recursive chmod' },
   { pattern: /chown\s+[^\s]*-R/, reason: 'recursive chown' },
+];
+
+const AUTO_PROMPT_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+  { pattern: /rm\s+-[^\s]*r[^\s]*f/, reason: 'recursive force delete' },
+  { pattern: /\bRemove-Item\b[\s\S]*(?:-Recurse|-r\b)[\s\S]*(?:-Force|-f\b)/i, reason: 'PowerShell recursive force delete' },
+  { pattern: /\bRemove-Item\b[\s\S]*(?:-Force|-f\b)[\s\S]*(?:-Recurse|-r\b)/i, reason: 'PowerShell recursive force delete' },
+  { pattern: /(^|[\s;&|])(?:rmdir|rd)\s+[\s\S]*\/s\b/i, reason: 'Windows recursive directory delete' },
+  { pattern: /(^|[\s;&|])(?:del|erase)\s+[\s\S]*\/s\b/i, reason: 'Windows recursive file delete' },
+  { pattern: /git\s+reset\s+--hard/, reason: 'git reset --hard' },
+  { pattern: /git\s+push\s+[^\n]*--force/, reason: 'git push --force' },
+  { pattern: /git\s+push\s+[^\n]*-f\b/, reason: 'git push -f' },
+  { pattern: /git\s+clean\s+-[^\s]*f/, reason: 'git clean -f' },
+  { pattern: /\bDROP\s+(TABLE|DATABASE)\b/i, reason: 'DROP TABLE/DATABASE' },
 ];
 
 export function classifyBashCommand(command: string): BashRiskResult {
@@ -52,4 +69,16 @@ export function classifyBashCommand(command: string): BashRiskResult {
   }
 
   return { level: 'safe' };
+}
+
+export function requiresAutoPromptForBashCommand(command: string): BashRiskResult | null {
+  const trimmed = command.trim();
+
+  for (const { pattern, reason } of AUTO_PROMPT_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return { level: 'warn', reason };
+    }
+  }
+
+  return null;
 }

@@ -1,6 +1,6 @@
 import { PermissionPolicyEngine, matches } from './policy-engine.js';
 import { isScreenAutomationFallbackInvocation, isSensitiveToolInvocation } from './sensitive-paths.js';
-import { classifyBashCommand } from '../tools/bash-safety.js';
+import { classifyBashCommand, requiresAutoPromptForBashCommand } from '../tools/bash-safety.js';
 function readBashCommand(input) {
     return typeof input.command === 'string' ? input.command : '';
 }
@@ -66,8 +66,8 @@ export class PermissionManager {
         }
         if (this.mode === 'auto') {
             if (toolName === 'bash') {
-                const risk = classifyBashCommand(readBashCommand(input));
-                if (risk.level === 'warn' && evaluation.action !== 'allow') {
+                const autoPromptRisk = requiresAutoPromptForBashCommand(readBashCommand(input));
+                if (autoPromptRisk && evaluation.action !== 'allow') {
                     return 'prompt';
                 }
             }

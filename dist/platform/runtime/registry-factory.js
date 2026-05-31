@@ -22,9 +22,16 @@ function isCcRuntimeOnlyTool(tool) {
 }
 export function createPlatformRegistryFactory(options) {
     const registries = new Set();
+    const handleSandboxDenied = async (deniedPath, toolName) => {
+        if (options.permissionManager?.getMode() === 'auto') {
+            options.platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
+            return { shouldProceed: true };
+        }
+        return options.onSandboxDenied?.(deniedPath, toolName) ?? { shouldProceed: false };
+    };
     const registerMcpTools = (registry, tools) => {
         const sandboxedTools = applySandboxToTools(tools, options.platform.sandboxEnforcer, {
-            onSandboxDenied: options.onSandboxDenied,
+            onSandboxDenied: handleSandboxDenied,
         });
         const orderedTools = mergeToolPools([], sandboxedTools)
             .filter((tool) => !isCcRuntimeOnlyTool(tool));
@@ -94,10 +101,10 @@ export function createPlatformRegistryFactory(options) {
             }),
         ];
         // 构建基础 tool list
-        const baseTools = buildToolList(options.skillTool, { cwd }, extraTools);
+        const baseTools = buildToolList(options.skillTool, { cwd, allowOutsideCwd: Boolean(options.platform.sandboxEnforcer) }, extraTools);
         // 应用 sandbox
         const sandboxedTools = applySandboxToTools(baseTools, options.platform.sandboxEnforcer, {
-            onSandboxDenied: options.onSandboxDenied,
+            onSandboxDenied: handleSandboxDenied,
         });
         // 合并 built-in 和 MCP tools（保证 ordering）
         const orderedTools = mergeToolPools(sandboxedTools.filter((t) => !isMcpTool(t)), sandboxedTools.filter(isMcpTool)).filter((tool) => !isCcRuntimeOnlyTool(tool));

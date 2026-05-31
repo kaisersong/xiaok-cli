@@ -4,3 +4,4 @@ export interface BashRiskResult {
     reason?: string;
 }
 export declare function classifyBashCommand(command: string): BashRiskResult;
+export declare function requiresAutoPromptForBashCommand(command: string): BashRiskResult | null;

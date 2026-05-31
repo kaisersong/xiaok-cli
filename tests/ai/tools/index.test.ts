@@ -397,7 +397,35 @@ describe('ToolRegistry', () => {
     expect(result).toContain('written by hook-approved path');
   });
 
-  it('auto mode still prompts before warn-level bash commands', async () => {
+  it('auto mode runs non-deletion warn-level bash commands without prompting', async () => {
+    const onPrompt = vi.fn(async () => false);
+    const execute = vi.fn(async () => 'ran non-deletion warn command');
+
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      onPrompt,
+    }, [{
+      permission: 'bash',
+      definition: {
+        name: 'bash',
+        description: 'mock bash',
+        inputSchema: {
+          type: 'object',
+          properties: { command: { type: 'string' } },
+          required: ['command'],
+        },
+      },
+      execute,
+    }]);
+
+    const result = await registry.executeTool('bash', { command: 'kill -9 12345' });
+
+    expect(onPrompt).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledWith({ command: 'kill -9 12345' }, undefined);
+    expect(result).toContain('ran non-deletion warn command');
+  });
+
+  it('auto mode still prompts before deletion-class bash commands', async () => {
     const onPrompt = vi.fn(async () => false);
     const execute = vi.fn(async () => 'should not run');
 

@@ -76,10 +76,20 @@ describe('PermissionManager', () => {
       .resolves.toBe('allow');
   });
 
-  it('auto mode prompts for warn-level bash commands unless explicitly allowed', async () => {
+  it('auto mode allows non-deletion warn-level bash commands without prompting', async () => {
+    const pm = new PermissionManager({ mode: 'auto' });
+
+    await expect(pm.check('bash', { command: 'kill -9 12345' })).resolves.toBe('allow');
+    await expect(pm.check('bash', { command: 'chmod -R u+rw ./cache' })).resolves.toBe('allow');
+    await expect(pm.check('bash', { command: 'chown -R song ./cache' })).resolves.toBe('allow');
+  });
+
+  it('auto mode prompts for deletion and data-loss bash commands unless explicitly allowed', async () => {
     const pm = new PermissionManager({ mode: 'auto' });
 
     await expect(pm.check('bash', { command: 'rm -rf ./build' })).resolves.toBe('prompt');
+    await expect(pm.check('bash', { command: 'rmdir /s /q build' })).resolves.toBe('prompt');
+    await expect(pm.check('bash', { command: 'git clean -fd' })).resolves.toBe('prompt');
     await expect(pm.check('bash', { command: 'git reset --hard HEAD~1' })).resolves.toBe('prompt');
     await expect(pm.check('bash', { command: 'git push --force origin main' })).resolves.toBe('prompt');
     await expect(pm.check('bash', { command: 'psql -c "DROP TABLE users"' })).resolves.toBe('prompt');
