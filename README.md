@@ -15,7 +15,6 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | Metric | xiaok v1.0.0 | Claude Code | Improvement |
 |--------|-------------|-------------|-------------|
 | **Autonomy Score** | 100% | 100% | — |
-
 | **Simple Q&A Latency** | 3.8s | 7.5s | **-49%** |
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
