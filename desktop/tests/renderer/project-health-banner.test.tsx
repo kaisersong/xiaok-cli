@@ -189,6 +189,47 @@ describe('project health status UI', () => {
     expect(screen.getByText(/最终校验失败/)).toBeInTheDocument();
   });
 
+  it('does not show the project instance id on project list cards', () => {
+    renderWithProviders(
+      <ProjectCard
+        project={{
+          id: 'proj-123e4567-e89b-42d3-a456-426614174000',
+          name: '同名项目',
+          status: 'created',
+        }}
+      />
+    );
+
+    expect(screen.getByText('同名项目')).toBeInTheDocument();
+    expect(screen.queryByText('#123e4567')).not.toBeInTheDocument();
+    expect(screen.queryByText('proj-123e4567-e89b-42d3-a456-426614174000')).not.toBeInTheDocument();
+  });
+
+  it('shows the full project instance id on the project detail page', async () => {
+    const detail: ProjectFullDetail = {
+      project: {
+        id: 'proj-123e4567-e89b-42d3-a456-426614174000',
+        name: '同名项目',
+        goal: '验证项目实例身份',
+        status: 'created',
+        poAgent: 'xiaok-po',
+        createdAt: '1779000000000',
+        updatedAt: '1779000000000',
+      },
+      tasks: [],
+      activities: [],
+      humanActions: [],
+      workspace: { path: '/tmp/proj-123e4567', artifacts: [] },
+      plan: null,
+      planProgress: null,
+    };
+
+    renderProjectDetail(detail);
+
+    expect(await screen.findByText('项目实例 ID')).toBeInTheDocument();
+    expect(screen.getByText('proj-123e4567-e89b-42d3-a456-426614174000')).toBeInTheDocument();
+  });
+
   it('resolves the project card PO id to the agent name', () => {
     mockAgents.push({ id: '33db9546-bfa', name: 'PO', status: 'idle' });
 

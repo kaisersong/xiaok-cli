@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createTimedActionTools } from '../../electron/desktop-services.js';
+import { attachRuntimeToolRequestScope, createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createTimedActionTools, resolveToolOutputArtifactPath, resolveWriteToolArtifactPath } from '../../electron/desktop-services.js';
 import type { ExternalPluginDependency } from '../../electron/plugin-dependency-service.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 import { TimedActionService } from '../../electron/timed-action-service.js';
@@ -31,6 +31,59 @@ describe('desktop services', () => {
   afterEach(() => {
     rmSync(rootDir, { recursive: true, force: true });
     delete process.env.XIAOK_CONFIG_DIR;
+  });
+
+  it('uses successful tool input output_path as artifact evidence when result omits it', () => {
+    const outputPath = join(rootDir, 'slides.html');
+
+    expect(resolveToolOutputArtifactPath(
+      { output_path: outputPath },
+      JSON.stringify({ success: true, preset: 'Data Story', stats: { page_count: 8 } }),
+    )).toBe(outputPath);
+  });
+
+  it('does not use tool input output_path as artifact evidence when result reports failure', () => {
+    const outputPath = join(rootDir, 'slides.html');
+
+    expect(resolveToolOutputArtifactPath(
+      { output_path: outputPath },
+      JSON.stringify({ success: false, errors: ['render failed'] }),
+    )).toBeNull();
+    expect(resolveToolOutputArtifactPath(
+      { output_path: outputPath },
+      JSON.stringify({ success: false, output_path: outputPath, errors: ['render failed'] }),
+    )).toBeNull();
+  });
+
+  it('uses lowercase write file_path as artifact evidence', () => {
+    const outputPath = join(rootDir, 'report.md');
+
+    expect(resolveWriteToolArtifactPath('write', { file_path: outputPath })).toBe(outputPath);
+    expect(resolveWriteToolArtifactPath('read', { file_path: outputPath })).toBeNull();
+  });
+
+  it('detects a fresh artifact path from successful bash output', () => {
+    const outputPath = join(rootDir, 'xiaok-2026-05-features.pdf');
+    const toolStartedAt = Date.now();
+    writeFileSync(outputPath, 'fake pdf');
+
+    expect(resolveToolOutputArtifactPath(
+      { command: `chrome --print-to-pdf=${outputPath} file:///tmp/source.html` },
+      `1002509 bytes written to file ${outputPath}\n-rw-r--r-- 979K ${outputPath}`,
+      { toolName: 'bash', toolStartedAt },
+    )).toBe(outputPath);
+  });
+
+  it('does not treat an old bash-mentioned file as new artifact evidence', () => {
+    const oldPath = join(rootDir, 'old-report.pdf');
+    writeFileSync(oldPath, 'old pdf');
+    utimesSync(oldPath, new Date(1_000), new Date(1_000));
+
+    expect(resolveToolOutputArtifactPath(
+      { command: `ls -lh ${oldPath}` },
+      `-rw-r--r-- 979K ${oldPath}`,
+      { toolName: 'bash', toolStartedAt: Date.now() },
+    )).toBeNull();
   });
 
   it('imports material, creates a task, runs without confirmation, and recovers result', async () => {
@@ -325,6 +378,65 @@ describe('desktop services', () => {
       { path: finalArtifactPath, kind: 'markdown', label: 'project-final-report.md' },
     ]);
     expect(result.output?.evidenceRefs).toEqual([`artifact:${finalArtifactPath}`]);
+  });
+
+  it('runs a script-generated workflow agent node from the node prompt instead of project diagnosis', async () => {
+    const workFolder = join(rootDir, 'script-workflow-project');
+    const artifactsDir = join(workFolder, 'artifacts');
+    const finalArtifactPath = join(artifactsDir, 'script-agent-report.md');
+    let receivedPrompt = '';
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner: async ({ prompt, emitRuntimeEvent, sessionId }) => {
+        receivedPrompt = prompt;
+        mkdirSync(artifactsDir, { recursive: true });
+        writeFileSync(finalArtifactPath, '# Script agent report');
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            output: {
+              summary: '脚本节点报告已生成。',
+              artifacts: [{ path: finalArtifactPath, kind: 'markdown', label: 'script-agent-report.md' }],
+              evidenceRefs: [`artifact:${finalArtifactPath}`],
+            },
+          }),
+        });
+      },
+    });
+
+    const result = await services.runKSwarmWorkflowNode({
+      handoff: {
+        projectId: 'proj-script-workflow',
+        workflowRunId: 'wf-proj-script-workflow-ai-products-1',
+        workflowId: 'ai_products_analysis_may_2026',
+        nodeId: 'script-agent-3',
+        nodeKind: 'agent_task',
+        nodeTitle: 'Anthropic+Meta 动态采集',
+        attempt: 1,
+        handoffId: 'wfhd-script-agent-3',
+        project: { id: 'proj-script-workflow', name: 'AI products', goal: '分析 AI 产品动态', status: 'active', workFolder },
+        input: {
+          prompt: '搜索并分析 Anthropic 与 Meta 在 2026 年 5 月的 AI 产品动态。',
+          label: 'Anthropic+Meta 动态采集',
+        },
+      },
+      targetParticipantId: 'xiaok-worker',
+    });
+
+    expect(receivedPrompt).toContain('搜索并分析 Anthropic 与 Meta 在 2026 年 5 月的 AI 产品动态。');
+    expect(receivedPrompt).toContain(`产物目录：${artifactsDir}`);
+    expect(receivedPrompt).toContain('请执行节点输入中的 prompt');
+    expect(receivedPrompt).not.toContain('请检查项目状态、任务状态、阻塞点和下一步建议');
+    expect(result.output?.summary).toBe('脚本节点报告已生成。');
+    expect(result.output?.artifacts).toEqual([
+      { path: finalArtifactPath, kind: 'markdown', label: 'script-agent-report.md' },
+    ]);
   });
 
   it('runs a side-effect-free kswarm readiness probe', async () => {
@@ -1839,6 +1951,274 @@ describe('desktop services', () => {
     expect(installs).toHaveLength(2);
   });
 
+  it('enqueues a durable initial plan bootstrap job and returns before planning finishes', async () => {
+    const requests: Array<{ path: string; init?: RequestInit; body: Record<string, unknown> }> = [];
+    let releasePlanner!: () => void;
+    const plannerCanFinish = new Promise<void>((resolve) => {
+      releasePlanner = resolve;
+    });
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        requests.push({ path, init, body });
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'xiaok-po', name: 'PO-Agent', runtimeType: 'xiaok', roles: ['project_owner'], status: 'idle' },
+              { id: 'xiaok-worker', name: 'Worker-Agent', runtimeType: 'xiaok', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            ok: true,
+            project: { id: 'proj-bootstrap', name: '海外AI产品五月动态分析', status: 'created', createdAt: 123 },
+          }), { status: 201 });
+        }
+        if (path === '/projects/proj-bootstrap/plan') {
+          return new Response(JSON.stringify({ ok: true, plan: { version: 1 } }));
+        }
+        if (path === '/projects/proj-bootstrap/tasks') {
+          return new Response(JSON.stringify({ ok: true, taskIds: ['item-1'] }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService,
+      now: () => 300,
+      runner: async ({ sessionId, emitRuntimeEvent }) => {
+        await plannerCanFinish;
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            analysis: '需要覆盖主要海外 AI 公司动态并形成报告。',
+            successCriteria: ['完成有来源的分析报告'],
+            phases: [{
+              id: 'phase-1',
+              name: '研究与交付',
+              items: [{
+                id: 'item-1',
+                title: '完成五月 AI 产品动态分析报告',
+                brief: '按公司和产品线整理五月动态，包含时间线、特性、影响评估和来源。',
+                assignedAgent: 'xiaok-worker',
+                dependencies: [],
+                acceptanceCriteria: '报告覆盖用户指定公司，并列出来源和信息缺口。',
+                requiredOutputs: ['report_html'],
+              }],
+            }],
+          }),
+        });
+      },
+    });
+
+    const executePromise = services.executeTool('create_project', {
+      name: '海外AI产品五月动态分析',
+      goal: '完成2026年5月国外主要AI产品动态分析',
+      requirements: '覆盖OpenAI、Google、Anthropic、Meta、Microsoft，包含来源。',
+    });
+
+    const immediateResult = await Promise.race([
+      executePromise.then((value) => ({ kind: 'returned' as const, value })),
+      new Promise<{ kind: 'blocked' }>((resolve) => setTimeout(() => resolve({ kind: 'blocked' }), 25)),
+    ]);
+    if (immediateResult.kind === 'blocked') {
+      releasePlanner();
+      await executePromise;
+    }
+
+    expect(immediateResult.kind).toBe('returned');
+    const result = JSON.parse(immediateResult.kind === 'returned' ? immediateResult.value : '{}');
+
+    expect(result).toMatchObject({
+      type: 'project_card',
+      projectId: 'proj-bootstrap',
+      status: 'planning',
+      planningStatus: 'queued',
+    });
+    expect(result.planBootstrapped).toBeUndefined();
+    expect(requests.map(request => request.path)).toEqual([
+      '/agents',
+      '/projects',
+    ]);
+    expect(requests.find(request => request.path === '/projects')?.body).toMatchObject({
+      name: '海外AI产品五月动态分析',
+      autoStartPlanning: false,
+      poAgent: 'xiaok-po',
+      members: ['xiaok-worker'],
+    });
+
+    const jobsFile = join(rootDir, 'data', 'kswarm-initial-plan-bootstrap-jobs.json');
+    expect(existsSync(jobsFile)).toBe(true);
+    const jobsData = JSON.parse(readFileSync(jobsFile, 'utf8'));
+    expect(jobsData.jobs).toContainEqual(expect.objectContaining({
+      projectId: 'proj-bootstrap',
+      status: expect.stringMatching(/^(pending|running)$/),
+      attempts: 0,
+    }));
+
+    releasePlanner();
+    await waitFor(() => requests.some(request => request.path === '/projects/proj-bootstrap/plan'));
+    await waitFor(() => requests.some(request => request.path === '/projects/proj-bootstrap/tasks'));
+
+    expect(requests.map(request => request.path)).toEqual([
+      '/agents',
+      '/projects',
+      '/projects/proj-bootstrap/plan',
+      '/projects/proj-bootstrap/tasks',
+    ]);
+    expect(requests.find(request => request.path === '/projects/proj-bootstrap/plan')?.body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      plan: expect.objectContaining({
+        analysis: '需要覆盖主要海外 AI 公司动态并形成报告。',
+      }),
+    });
+    expect(requests.find(request => request.path === '/projects/proj-bootstrap/tasks')?.body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      tasks: [expect.objectContaining({
+        id: 'item-1',
+        title: '完成五月 AI 产品动态分析报告',
+        assignedAgent: 'xiaok-worker',
+      })],
+    });
+  });
+
+  it('records initial plan bootstrap failure for retry without failing the create_project card', async () => {
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string) => {
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'xiaok-po', name: 'PO-Agent', runtimeType: 'xiaok', roles: ['project_owner'], status: 'idle' },
+              { id: 'xiaok-worker', name: 'Worker-Agent', runtimeType: 'xiaok', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            ok: true,
+            project: { id: 'proj-no-plan', name: 'No Plan', status: 'created', createdAt: 123 },
+          }), { status: 201 });
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService,
+      now: () => 300,
+      runner: async () => {
+        throw new Error('planner runtime unavailable');
+      },
+    });
+
+    const result = JSON.parse(await services.executeTool('create_project', {
+      name: 'No Plan',
+      goal: 'Create project but fail planning',
+    }));
+
+    expect(result).toMatchObject({
+      type: 'project_card',
+      projectId: 'proj-no-plan',
+      status: 'planning',
+      planningStatus: 'queued',
+    });
+    await waitFor(() => {
+      const jobsFile = join(rootDir, 'data', 'kswarm-initial-plan-bootstrap-jobs.json');
+      if (!existsSync(jobsFile)) return false;
+      const jobsData = JSON.parse(readFileSync(jobsFile, 'utf8'));
+      const job = jobsData.jobs.find((item: { projectId?: string }) => item.projectId === 'proj-no-plan');
+      return job?.status === 'pending'
+        && job?.attempts === 1
+        && /(planner runtime unavailable|desktop_task_failed)/.test(job?.lastError || '');
+    }, 3000);
+  });
+
+  it('recovers pending initial plan bootstrap jobs on desktop service startup', async () => {
+    const dataRoot = join(rootDir, 'data');
+    mkdirSync(dataRoot, { recursive: true });
+    writeFileSync(join(dataRoot, 'kswarm-initial-plan-bootstrap-jobs.json'), JSON.stringify({
+      jobs: [{
+        id: 'proj-recover',
+        projectId: 'proj-recover',
+        projectName: 'Recover Me',
+        goal: 'Recover pending planning job',
+        requirements: '',
+        planningGuidance: '',
+        poAgent: 'xiaok-po',
+        members: ['xiaok-worker'],
+        status: 'pending',
+        attempts: 0,
+        maxAttempts: 3,
+        nextAttemptAt: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    }, null, 2));
+
+    const requests: Array<{ path: string; body?: Record<string, unknown> }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({
+          path,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        if (path === '/projects/proj-recover/plan') {
+          return new Response(JSON.stringify({ ok: true, plan: { version: 1 } }));
+        }
+        if (path === '/projects/proj-recover/tasks') {
+          return new Response(JSON.stringify({ ok: true, taskIds: ['item-1'] }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+
+    createDesktopServices({
+      dataRoot,
+      kswarmService,
+      now: () => 300,
+      runner: async ({ sessionId, emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            analysis: 'Recovered planning job.',
+            phases: [{
+              id: 'phase-1',
+              name: '恢复规划',
+              items: [{
+                id: 'item-1',
+                title: '恢复后生成任务',
+                assignedAgent: 'xiaok-worker',
+                dependencies: [],
+              }],
+            }],
+          }),
+        });
+      },
+    });
+
+    await waitFor(() => requests.some(request => request.path === '/projects/proj-recover/plan'));
+    await waitFor(() => requests.some(request => request.path === '/projects/proj-recover/tasks'));
+
+    const jobsData = JSON.parse(readFileSync(join(dataRoot, 'kswarm-initial-plan-bootstrap-jobs.json'), 'utf8'));
+    expect(jobsData.jobs).toContainEqual(expect.objectContaining({
+      projectId: 'proj-recover',
+      status: 'succeeded',
+    }));
+  });
+
   it('forwards workFolder from the chat create_project tool to kswarm', async () => {
     const requests: Array<{ path: string; init?: RequestInit }> = [];
     const kswarmService: KSwarmService = {
@@ -1879,6 +2259,77 @@ describe('desktop services', () => {
       poAgent: 'po-agent',
       members: ['worker-agent'],
       workFolder: '/tmp/kswarm-demo',
+    });
+  });
+
+  it('uses a stable scoped clientRequestKey so repeated create_project tool calls reuse the same project', async () => {
+    const requests: Array<{ path: string; init?: RequestInit; body?: Record<string, unknown> }> = [];
+    const createdProjects: Array<{ id: string; name: string; status: string; createdAt: number; clientRequestKey?: string }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+        requests.push({ path, init, body });
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'po-agent', name: 'PO', roles: ['project_owner'], status: 'idle' },
+              { id: 'worker-agent', name: 'Worker', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          const existing = createdProjects.find(project => project.clientRequestKey === body?.clientRequestKey);
+          if (existing) {
+            return new Response(JSON.stringify({ ok: true, project: existing, reused: true }));
+          }
+          const project = {
+            id: `proj-${createdProjects.length + 1}`,
+            name: String(body?.name || ''),
+            status: 'planning',
+            createdAt: 100 + createdProjects.length,
+            clientRequestKey: typeof body?.clientRequestKey === 'string' ? body.clientRequestKey : undefined,
+          };
+          createdProjects.push(project);
+          return new Response(JSON.stringify({ ok: true, project }), { status: 201 });
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmCreateProjectTool(kswarmService);
+    const input = {
+      _xiaokRequestScope: 'task-session:same-task',
+      name: '欢迎页固定项目',
+      goal: '让 2 个智能体完成分析',
+      requirements: '输出报告',
+    };
+
+    const first = JSON.parse(await tool.execute(input));
+    const second = JSON.parse(await tool.execute(input));
+
+    expect(first.projectId).toBe('proj-1');
+    expect(second.projectId).toBe('proj-1');
+    expect(createdProjects).toHaveLength(1);
+    const createBodies = requests.filter(request => request.path === '/projects').map(request => request.body);
+    expect(createBodies).toHaveLength(2);
+    expect(createBodies[0]?.clientRequestKey).toEqual(createBodies[1]?.clientRequestKey);
+    expect(createBodies[0]).not.toHaveProperty('reuseExistingLiveProject');
+    expect(createBodies[1]).not.toHaveProperty('reuseExistingLiveProject');
+  });
+
+  it('injects the runtime session id as create_project request scope', () => {
+    expect(attachRuntimeToolRequestScope('create_project', {
+      name: '欢迎页固定项目',
+      goal: '让 2 个智能体完成分析',
+    }, 'session-123')).toMatchObject({
+      name: '欢迎页固定项目',
+      goal: '让 2 个智能体完成分析',
+      _xiaokRequestScope: 'task-session:session-123',
+    });
+
+    expect(attachRuntimeToolRequestScope('read', { file_path: '/tmp/a.md' }, 'session-123')).toEqual({
+      file_path: '/tmp/a.md',
     });
   });
 

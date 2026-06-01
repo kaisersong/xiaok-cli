@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { SidebarComponent } from '../../renderer/src/components/Sidebar';
@@ -77,6 +77,7 @@ function renderSidebar(status: {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.clearAllMocks();
   localStorage.clear();
   mockKSwarmState.projects = [];
@@ -188,6 +189,157 @@ describe('Sidebar update reminder', () => {
     expect(list).toBeTruthy();
     expect(list?.className).not.toContain('max-h-');
     expect(list?.className).not.toContain('overflow-y-auto');
+  });
+
+  it('keeps sidebar project id and status hidden until the delayed hover details appear', async () => {
+    mockKSwarmState.projects = [
+      { id: 'proj-123e4567-e89b-42d3-a456-426614174000', name: '同名项目', status: 'active' },
+      { id: 'proj-223e4567-e89b-42d3-a456-426614174001', name: '同名项目', status: 'planning' },
+    ];
+
+    renderSidebar({
+      checking: false,
+      available: false,
+      downloading: false,
+      downloaded: false,
+      progress: 0,
+    }, '/projects');
+
+    const firstProjectButton = (await screen.findAllByText('同名项目'))[0].closest('button');
+    expect(firstProjectButton).toBeTruthy();
+    expect(screen.getAllByText('同名项目')).toHaveLength(2);
+    expect(screen.queryByText('#123e4567')).not.toBeInTheDocument();
+    expect(screen.queryByText('#223e4567')).not.toBeInTheDocument();
+    expect(screen.queryByText('active')).not.toBeInTheDocument();
+    expect(screen.queryByText('planning')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+
+    vi.useFakeTimers();
+    fireEvent.mouseEnter(firstProjectButton!);
+    act(() => {
+      vi.advanceTimersByTime(499);
+    });
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.getByRole('tooltip')).toHaveTextContent('active');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('同名项目');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('proj-123e4567-e89b-42d3-a456-426614174000');
+
+    fireEvent.mouseLeave(firstProjectButton!);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+
+  it('shows delayed hover details for scheduled task instances', async () => {
+    localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify([
+      {
+        id: 'scheduled-task-1',
+        name: '定时任务实例',
+        frequency: '每天',
+        threadId: 'thread-scheduled-1',
+        runtimeTaskId: 'runtime-scheduled-1',
+      },
+    ]));
+
+    renderSidebar({
+      checking: false,
+      available: false,
+      downloading: false,
+      downloaded: false,
+      progress: 0,
+    }, '/scheduled');
+
+    const scheduledButton = (await screen.findByText('定时任务实例')).closest('button');
+    expect(scheduledButton).toBeTruthy();
+    expect(screen.queryByText('scheduled-task-1')).not.toBeInTheDocument();
+    expect(screen.queryByText('thread-scheduled-1')).not.toBeInTheDocument();
+    expect(screen.queryByText('runtime-scheduled-1')).not.toBeInTheDocument();
+
+    vi.useFakeTimers();
+    fireEvent.mouseEnter(scheduledButton!);
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip).toHaveTextContent('定时任务实例');
+    expect(tooltip).toHaveTextContent('每天');
+    expect(tooltip).toHaveTextContent('scheduled-task-1');
+    expect(tooltip).toHaveTextContent('thread-scheduled-1');
+    expect(tooltip).toHaveTextContent('runtime-scheduled-1');
+  });
+
+  it('shows delayed hover details for recent tasks', async () => {
+    renderSidebar({
+      checking: false,
+      available: false,
+      downloading: false,
+      downloaded: false,
+      progress: 0,
+    }, '/', [
+      {
+        id: 'thread-recent-1',
+        title: '最近会话标题',
+        status: 'running',
+        mode: 'work',
+        createdAt: 1,
+        updatedAt: 2,
+        starred: false,
+        gtdBucket: null,
+        pinnedAt: null,
+        currentTaskId: 'task-current-1',
+        taskIds: ['task-current-1', 'task-previous-1'],
+      },
+    ]);
+
+    const recentButton = (await screen.findByText('最近会话标题')).closest('[role="button"]');
+    expect(recentButton).toBeTruthy();
+    expect(screen.queryByText('thread-recent-1')).not.toBeInTheDocument();
+    expect(screen.queryByText('task-current-1')).not.toBeInTheDocument();
+
+    vi.useFakeTimers();
+    fireEvent.mouseEnter(recentButton!);
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip).toHaveTextContent('最近会话标题');
+    expect(tooltip).toHaveTextContent('running');
+    expect(tooltip).toHaveTextContent('thread-recent-1');
+    expect(tooltip).toHaveTextContent('task-current-1');
+    expect(tooltip).toHaveTextContent('task-previous-1');
+  });
+
+  it('cancels sidebar project details when hover leaves before the delay', async () => {
+    mockKSwarmState.projects = [
+      { id: 'proj-123e4567-e89b-42d3-a456-426614174000', name: '同名项目', status: 'active' },
+    ];
+
+    renderSidebar({
+      checking: false,
+      available: false,
+      downloading: false,
+      downloaded: false,
+      progress: 0,
+    }, '/projects');
+
+    const projectButton = (await screen.findByText('同名项目')).closest('button');
+    expect(projectButton).toBeTruthy();
+
+    vi.useFakeTimers();
+    fireEvent.mouseEnter(projectButton!);
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    fireEvent.mouseLeave(projectButton!);
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
 
   it('keeps scheduled tasks and projects capped as compact summaries on the main page', async () => {

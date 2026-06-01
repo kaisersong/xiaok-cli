@@ -19,6 +19,14 @@
 | **重命名任务延迟** | 27.6s | 180.8s | **-85%** |
 | **Token 效率** | 100% | 250% | **-60%** |
 
+**v1.3.11 新特性：**
+
+- **基础版 Dynamic Workflow Script Runtime**：xiaok Desktop 现在可以通过 KSwarm、Intent Broker 和 Desktop agent runtime bridge 跑受控的动态 workflow script。脚本可以创建 phase、动态调用 `agent(...)`、收集节点输出，并完成持久化的 `script_generated` workflow run
+- **真实执行 Agent 节点 Prompt**：脚本生成的 workflow agent 节点现在会执行节点自己的 prompt，不再退回“项目诊断”。普通 `script-agent-*` 节点会拿到产物目录，写入真实文件，并返回结构化 artifact manifest
+- **项目交付同步**：script workflow 完成后，KSwarm 可以从最终产出 artifact 的 agent 节点交付项目，把看板任务标记为完成，并把交付物 provenance 写回项目和任务结果
+- **输出合同防线**：当最终任务要求 HTML 时，动态 workflow 不会再把 markdown/json 辅助产物当作合格交付。缺少终态硬输出会阻断项目交付，并明确记录 `missing` 信息，而不是静默标记完成
+- **端到端 Workflow 覆盖**：本版本新增真实 E2E，启动 Intent Broker 和 KSwarm，通过 runtime bridge 注册桌面 worker，运行动态脚本 workflow，创建动态 agent 节点，写入 artifact，并验证项目交付和任务看板完成状态
+
 **v1.3.10 新特性：**
 
 - **项目级高质量工作流**：高质量执行现在会创建项目级 `po-generated-project-workflow`。一个 workflow 负责项目的计划、派发、复核和最终汇总交付，不再把项目拆成彼此割裂的任务级 workflow

@@ -1,0 +1,109 @@
+import { describe, expect, it } from 'vitest';
+
+import { runWorkflowScript } from '../../electron/workflow-script-runtime.js';
+
+const script = `export const meta = {
+  name: 'report_review',
+  description: '复核报告事实、证据和交付质量',
+  phases: [
+    { title: '检查产物' },
+    { title: '交叉复核' },
+    { title: '归约结论' },
+  ],
+}
+
+phase('检查产物')
+const inventory = await agent('检查报告产物、引用和结构。', { label: '产物检查' })
+
+phase('交叉复核')
+const reviews = await parallel([
+  () => agent(\`基于 \${inventory.summary} 做事实复核。\`, { label: '事实复核' }),
+  () => agent('从证据充分性角度复核。', { label: '证据复核' }),
+])
+
+phase('归约结论')
+return await agent(\`综合 \${reviews.map((item) => item.summary).join('、')}，输出 gate 建议。\`, { label: '归约结论' })
+`;
+
+describe('workflow script runtime', () => {
+  it('executes safe Pi-style orchestration primitives through an injected controller', async () => {
+    const phases: string[] = [];
+    const calls: Array<{ label: string; phaseTitle: string | null; prompt: string }> = [];
+    let activeCalls = 0;
+    let maxActiveCalls = 0;
+
+    const result = await runWorkflowScript(script, {
+      concurrency: 2,
+      controller: {
+        async emitPhase(input) {
+          phases.push(input.title);
+        },
+        async createAgentNode(input) {
+          calls.push({
+            label: input.label,
+            phaseTitle: input.phaseTitle,
+            prompt: input.prompt,
+          });
+          activeCalls += 1;
+          maxActiveCalls = Math.max(maxActiveCalls, activeCalls);
+          await Promise.resolve();
+          activeCalls -= 1;
+          return { summary: input.label, prompt: input.prompt };
+        },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.meta.name).toBe('report_review');
+    expect(result.scriptHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.result).toEqual({
+      summary: '归约结论',
+      prompt: '综合 事实复核、证据复核，输出 gate 建议。',
+    });
+    expect(phases).toEqual(['检查产物', '交叉复核', '归约结论']);
+    expect(calls.map((call) => call.label)).toEqual(['产物检查', '事实复核', '证据复核', '归约结论']);
+    expect(calls.map((call) => call.phaseTitle)).toEqual(['检查产物', '交叉复核', '交叉复核', '归约结论']);
+    expect(calls[1].prompt).toBe('基于 产物检查 做事实复核。');
+    expect(maxActiveCalls).toBe(2);
+  });
+
+  it('rejects forbidden APIs before execution reaches the controller', async () => {
+    let agentCalled = false;
+
+    await expect(runWorkflowScript(
+      `export const meta = { name: 'unsafe_demo', description: 'desc' }
+process.env.OPENAI_API_KEY
+await agent('x')`,
+      {
+        controller: {
+          async createAgentNode() {
+            agentCalled = true;
+            return { ok: true };
+          },
+        },
+      },
+    )).rejects.toMatchObject({ code: 'workflow_script_forbidden_api' });
+    expect(agentCalled).toBe(false);
+  });
+
+  it('supports pipeline stages as rest arguments before a final agent call', async () => {
+    const result = await runWorkflowScript(
+      `export const meta = { name: 'pipeline_demo', description: 'pipeline demo' }
+phase('归纳')
+return await pipeline(
+  'seed',
+  (value) => value + ':checked',
+  (value) => agent(value, { label: '管线归纳' }),
+)`,
+      {
+        controller: {
+          async createAgentNode(input) {
+            return { summary: input.label, prompt: input.prompt };
+          },
+        },
+      },
+    );
+
+    expect(result.result).toEqual({ summary: '管线归纳', prompt: 'seed:checked' });
+  });
+});

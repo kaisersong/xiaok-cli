@@ -59,9 +59,17 @@ jobs:
           wheel_dir="../kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels"
           rm -rf "$wheel_dir"
           mkdir -p "$wheel_dir"
-          python3 -m pip download mcp==1.27.1 pydantic==2.13.4 jsonschema==4.26.0 beautifulsoup4 \
-            -d "$wheel_dir" \
-            --only-binary=:all:
+          for py in 311 312 313 314; do
+            python3 -m pip download mcp==1.27.1 pydantic==2.13.4 jsonschema==4.26.0 beautifulsoup4 \
+              -d "$wheel_dir" \
+              --only-binary=:all: \
+              --platform macosx_11_0_arm64 \
+              --implementation cp \
+              --python-version "$py" \
+              --abi "cp$py" \
+              --abi abi3 \
+              --abi none
+          done
 
       - name: Smoke test report-renderer
         run: |
@@ -121,7 +129,17 @@ jobs:
           $wheelDir = Join-Path (Resolve-Path ..\kai-xiaok-plugins\plugins\kai-slide-creator).Path 'bundled-wheels'
           Remove-Item -LiteralPath $wheelDir -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $wheelDir | Out-Null
-          python -m pip download mcp==1.27.1 pydantic==2.13.4 jsonschema==4.26.0 beautifulsoup4 -d $wheelDir --only-binary=:all:
+          foreach ($py in @('311', '312', '313', '314')) {
+            python -m pip download mcp==1.27.1 pydantic==2.13.4 jsonschema==4.26.0 beautifulsoup4 `
+              -d $wheelDir `
+              --only-binary=:all: `
+              --platform win_amd64 `
+              --implementation cp `
+              --python-version $py `
+              --abi "cp$py" `
+              --abi abi3 `
+              --abi none
+          }
 
       - name: Build desktop
         run: cd desktop && npm run build

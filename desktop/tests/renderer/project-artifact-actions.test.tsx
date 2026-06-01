@@ -196,4 +196,24 @@ describe('project artifact actions', () => {
     });
     expect(await screen.findByText(/最终报告/)).toBeInTheDocument();
   });
+
+  it('shows unlinked workspace artifacts while hiding generated plan files', () => {
+    render(
+      <LocaleProvider>
+        <DeliverableView
+          project={{ id: 'proj-live', name: '动态工作流交付同步实时验证', status: 'delivered' } as any}
+          tasks={[]}
+          workspaceArtifacts={[
+            { filename: 'plan-v1.md', mimeType: 'text/markdown', url: '/projects/proj-live/artifacts/plan-v1.md' },
+            { filename: 'live-sync-verification.md', mimeType: 'text/markdown', url: '/projects/proj-live/artifacts/live-sync-verification.md' },
+          ] as any}
+        />
+      </LocaleProvider>
+    );
+
+    expect(screen.getByText('项目文件')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /live-sync-verification\.md/ })).toBeInTheDocument();
+    expect(screen.queryByText('plan-v1.md')).not.toBeInTheDocument();
+    expect(screen.queryByText('暂无交付物')).not.toBeInTheDocument();
+  });
 });

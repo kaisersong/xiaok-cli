@@ -55,6 +55,9 @@ export function resolveLocalFileOpenPath(rawUrl: string): string | null {
   try {
     const url = new URL(rawUrl);
     if (url.protocol !== 'file:') return null;
+    if (/^\/[a-zA-Z]:\//.test(url.pathname)) {
+      return decodeURIComponent(url.pathname.slice(1)).replace(/\//g, '\\');
+    }
     return fileURLToPath(url);
   } catch {
     return null;

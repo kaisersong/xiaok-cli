@@ -20,6 +20,14 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.3.11:**
+
+- **Basic Dynamic Workflow Script Runtime**: Xiaok Desktop can now run a trusted dynamic workflow script through KSwarm, Intent Broker, and the Desktop agent runtime bridge. The script can create phases, fan out `agent(...)` calls, collect node outputs, and complete a durable `script_generated` workflow run
+- **Real Agent Node Execution**: Script-generated workflow agent nodes now execute the node prompt itself instead of falling back to project diagnosis. Ordinary `script-agent-*` nodes receive an artifacts directory, write real files, and return structured artifact manifests
+- **Project Delivery Synchronization**: When a script workflow completes, KSwarm can deliver the project from the final artifact-producing agent node, mark the board tasks done, and attach deliverable provenance to the project and task results
+- **Output Contract Guardrails**: Dynamic workflows no longer treat markdown/json side output as sufficient when the final task requires HTML. Missing required terminal outputs block project delivery with explicit `missing` details instead of silently marking the project complete
+- **End-to-End Workflow Coverage**: The release includes a real E2E test that starts Intent Broker and KSwarm, registers a desktop worker through the runtime bridge, runs a dynamic script workflow, creates dynamic agent nodes, writes an artifact, and verifies project delivery plus task-board completion
+
 **What's New in v1.3.10:**
 
 - **Project-Level High Quality Workflow**: High Quality execution is now a project-scoped `po-generated-project-workflow` run. One workflow owns planning, dispatch, review, and final synthesis for the project deliverable instead of starting isolated task-level workflow runs

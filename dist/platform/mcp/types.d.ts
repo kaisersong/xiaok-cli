@@ -49,6 +49,7 @@ export type McpServerConfig = McpStdioServerConfig | McpSSEServerConfig | McpHTT
  */
 export type PluginManifestMcpServer = McpServerConfig & {
     name: string;
+    requiresUserActivation?: boolean;
 };
 /**
  * Settings.json 中的 MCP Servers 配置
@@ -62,4 +63,5 @@ export interface SettingsMcpServers {
  */
 export type NamedMcpServerConfig = McpServerConfig & {
     name: string;
+    requiresUserActivation?: boolean;
 };

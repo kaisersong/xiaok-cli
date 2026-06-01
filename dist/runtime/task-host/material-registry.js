@@ -76,6 +76,21 @@ export class MaterialRegistry {
     list(taskId) {
         return [...this.records.values()].filter((record) => record.taskId === taskId);
     }
+    async updateMaterialExtraction(materialId, extraction) {
+        const existing = this.records.get(materialId);
+        if (!existing)
+            throw new Error(`unknown material: ${materialId}`);
+        const updated = {
+            ...existing,
+            extractedTextPath: extraction.extractedTextPath,
+            parseStatus: extraction.parseStatus,
+            parseSummary: extraction.parseSummary,
+            errorMessage: extraction.errorMessage,
+        };
+        this.records.set(materialId, updated);
+        await this.saveIndex();
+        return updated;
+    }
     toView(record) {
         return {
             materialId: record.materialId,

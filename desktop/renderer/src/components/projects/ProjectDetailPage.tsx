@@ -874,30 +874,32 @@ export function ProjectDetailPage() {
         )}
 
         {/* Row 3: Metadata tags */}
-        {((project as any).requirements || workspace?.path) && (
-          <div className="flex items-center gap-3 pl-[38px] flex-wrap">
-            {workspace?.path && (
-              <div className="flex items-center gap-1 text-[11px] text-[var(--c-text-muted)]">
-                <FolderOpen size={11} className="shrink-0" />
-                <span className="font-mono truncate max-w-[260px]">{workspace.path}</span>
-                {workspace.artifacts && workspace.artifacts.length > 0 && (
-                  <span className="text-[9px] px-1 rounded bg-[var(--c-bg-deep)]">{workspace.artifacts.length} files</span>
-                )}
-              </div>
-            )}
-            {(project as any).requirements && (
-              <div className="flex items-center gap-1 text-[11px] text-[var(--c-text-muted)]">
-                <FileText size={11} className="shrink-0" />
-                <DelayedHoverText
-                  text={(project as any).requirements}
-                  testId="project-requirements-preview"
-                  wrapperClassName="max-w-[400px] align-bottom"
-                  className="inline-block max-w-full truncate"
-                />
-              </div>
-            )}
+        <div className="flex items-center gap-3 pl-[38px] flex-wrap">
+          <div data-testid="project-instance-id" className="flex items-center gap-1 text-[11px] text-[var(--c-text-muted)]">
+            <span className="shrink-0">项目实例 ID</span>
+            <span className="font-mono text-[var(--c-text-secondary)]">{project.id}</span>
           </div>
-        )}
+          {workspace?.path && (
+            <div className="flex items-center gap-1 text-[11px] text-[var(--c-text-muted)]">
+              <FolderOpen size={11} className="shrink-0" />
+              <span className="font-mono truncate max-w-[260px]">{workspace.path}</span>
+              {workspace.artifacts && workspace.artifacts.length > 0 && (
+                <span className="text-[9px] px-1 rounded bg-[var(--c-bg-deep)]">{workspace.artifacts.length} files</span>
+              )}
+            </div>
+          )}
+          {(project as any).requirements && (
+            <div className="flex items-center gap-1 text-[11px] text-[var(--c-text-muted)]">
+              <FileText size={11} className="shrink-0" />
+              <DelayedHoverText
+                text={(project as any).requirements}
+                testId="project-requirements-preview"
+                wrapperClassName="max-w-[400px] align-bottom"
+                className="inline-block max-w-full truncate"
+              />
+            </div>
+          )}
+        </div>
 
         {actionNotice && (
           <div
@@ -1092,7 +1094,7 @@ export function ProjectDetailPage() {
             {project.summary && (
               <SummaryCollapsible summary={project.summary} score={project.summaryScore} taskScores={project.taskScores} />
             )}
-            <DeliverableView project={project} tasks={tasks} />
+            <DeliverableView project={project} tasks={tasks} workspaceArtifacts={workspace?.artifacts || []} />
           </div>
         )}
       </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type CSSProperties } from 'react';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Plus, Search, X, Bolt, Pencil, Download, RefreshCw, Clock, FolderKanban } from 'lucide-react';
@@ -14,6 +14,7 @@ import {
 } from '../lib/scheduled-task-threads';
 
 const log = createLogger('Sidebar');
+const SIDEBAR_DETAILS_DELAY_MS = 500;
 
 interface UpdateStatus {
   checking: boolean;
@@ -40,6 +41,18 @@ interface SidebarProps {
   onOpenSettings?: () => void;
 }
 
+interface SidebarProjectSummary {
+  id: string;
+  name: string;
+  status: string;
+}
+
+interface SidebarDetailsRow {
+  label: string;
+  value?: string | null;
+  mono?: boolean;
+}
+
 export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const navigate = useNavigate();
   const routerLocation = useLocation();
@@ -47,7 +60,6 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
-  const editRef = useRef<HTMLInputElement>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [activeNav, setActiveNav] = useState<NavSection>('new');
   const [sidebarTasks, setSidebarTasks] = useState<SidebarScheduledTask[]>([]);
@@ -150,13 +162,6 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       setActiveNav('new');
     }
   }, [routerLocation.pathname]);
-
-  useEffect(() => {
-    if (editingId && editRef.current) {
-      editRef.current.focus();
-      editRef.current.select();
-    }
-  }, [editingId]);
 
   const filteredThreads = (searchQuery
     ? threads.filter(t => t.title?.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -299,18 +304,11 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
           </div>
           <div className={scheduledListClassName}>
             {sidebarTasks.map(task => (
-              <button
+              <SidebarScheduledTaskListItem
                 key={task.id}
-                type="button"
-                onClick={() => handleScheduledClick(task)}
-                className="flex items-center justify-between rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-card)] transition-colors"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="size-1.5 rounded-full bg-[var(--c-accent)]/40 shrink-0" />
-                  <span className="truncate">{task.name}</span>
-                </div>
-                <span className="shrink-0 text-[var(--c-text-tertiary)] ml-2">{task.frequency}</span>
-              </button>
+                task={task}
+                onOpen={handleScheduledClick}
+              />
             ))}
           </div>
         </div>
@@ -324,22 +322,11 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
           </div>
           <div className={projectListClassName}>
             {activeProjects.map(project => (
-              <button
+              <SidebarProjectListItem
                 key={project.id}
-                type="button"
-                onClick={() => navigate(`/projects/${project.id}`)}
-                className="flex items-center justify-between rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-card)] transition-colors"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className={`size-1.5 rounded-full shrink-0 ${
-                    project.status === 'active' ? 'bg-green-500' :
-                    project.status === 'delivered' ? 'bg-blue-500' :
-                    'bg-yellow-500'
-                  }`} />
-                  <span className="truncate">{project.name}</span>
-                </div>
-                <span className="shrink-0 text-[10px] text-[var(--c-text-tertiary)] ml-2">{project.status}</span>
-              </button>
+                project={project}
+                onOpen={projectId => navigate(`/projects/${projectId}`)}
+              />
             ))}
           </div>
         </div>
@@ -380,49 +367,21 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
             {filteredThreads.map(thread => {
               const isSelected = routerLocation.pathname === `/t/${thread.id}`;
               return (
-              <div
+              <SidebarThreadListItem
                 key={thread.id}
-                className={`group flex cursor-pointer items-center rounded-lg px-2 py-1.5 text-sm hover:bg-[var(--c-bg-card)] ${isSelected ? 'bg-[var(--c-bg-card)] font-semibold' : ''}`}
-                onClick={() => navigate(`/t/${thread.id}`)}
-                onKeyDown={e => { if (e.key === 'Enter') navigate(`/t/${thread.id}`); }}
-                role="button"
-                tabIndex={0}
-                data-testid={`thread-item-${thread.id}`}
-              >
-                {editingId === thread.id ? (
-                  <input
-                    ref={editRef}
-                    aria-label="Rename thread"
-                    type="text"
-                    value={editTitle}
-                    onChange={e => setEditTitle(e.target.value)}
-                    onBlur={handleRenameSubmit}
-                    onKeyDown={handleRenameKeyDown}
-                    className="flex-1 rounded border border-[var(--c-accent)] bg-transparent px-1 text-sm outline-none"
-                    onClick={e => e.stopPropagation()}
-                  />
-                ) : (
-                  <span className="flex-1 truncate">{thread.title || t.untitled}</span>
-                )}
-                <button
-                  type="button"
-                  onClick={e => {
-                    e.stopPropagation();
-                    handleDoubleClick(thread);
-                  }}
-                  className="ml-1 hidden shrink-0 p-0.5 text-[var(--c-text-secondary)] hover:text-[var(--c-accent)] group-hover:block"
-                  title={t.sidebarRename}
-                >
-                  <Pencil className="size-3" />
-                </button>
-                <button
-                  type="button"
-                  onClick={e => handleDelete(e, thread.id)}
-                  className="ml-0.5 hidden shrink-0 p-0.5 text-[var(--c-text-secondary)] hover:text-red-500 group-hover:block"
-                >
-                  <X className="size-3" />
-                </button>
-              </div>
+                thread={thread}
+                title={thread.title || t.untitled}
+                isSelected={isSelected}
+                isEditing={editingId === thread.id}
+                editTitle={editTitle}
+                renameLabel={t.sidebarRename}
+                onOpen={() => navigate(`/t/${thread.id}`)}
+                onEditStart={() => handleDoubleClick(thread)}
+                onDelete={e => handleDelete(e, thread.id)}
+                onEditTitleChange={setEditTitle}
+                onRenameSubmit={handleRenameSubmit}
+                onRenameKeyDown={handleRenameKeyDown}
+              />
             );})}
           </div>
         </>
@@ -482,6 +441,274 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
         </div>
       </div>
     </aside>
+  );
+}
+
+function SidebarProjectListItem({
+  project,
+  onOpen,
+}: {
+  project: SidebarProjectSummary;
+  onOpen: (projectId: string) => void;
+}) {
+  const details = useDelayedSidebarDetails<HTMLButtonElement>();
+
+  return (
+    <>
+      <button
+        ref={details.itemRef}
+        type="button"
+        onClick={() => onOpen(project.id)}
+        onMouseEnter={details.scheduleDetails}
+        onMouseLeave={details.hideDetails}
+        onFocus={details.scheduleDetails}
+        onBlur={details.hideDetails}
+        className="flex w-full items-center rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-card)]"
+        data-testid={`sidebar-project-${project.id}`}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="size-1.5 shrink-0 rounded-full bg-[var(--c-text-tertiary)]/45" />
+          <span className="truncate">{project.name}</span>
+        </span>
+      </button>
+      {details.detailsOpen && (
+        <SidebarDetailsTooltip
+          testId={`sidebar-project-details-${project.id}`}
+          position={details.detailsPosition}
+          rows={[
+            { label: '项目', value: project.name },
+            { label: '状态', value: project.status },
+            { label: '项目 ID', value: project.id, mono: true },
+          ]}
+        />
+      )}
+    </>
+  );
+}
+
+function SidebarScheduledTaskListItem({
+  task,
+  onOpen,
+}: {
+  task: SidebarScheduledTask;
+  onOpen: (task: SidebarScheduledTask) => void;
+}) {
+  const details = useDelayedSidebarDetails<HTMLButtonElement>();
+
+  return (
+    <>
+      <button
+        ref={details.itemRef}
+        type="button"
+        onClick={() => onOpen(task)}
+        onMouseEnter={details.scheduleDetails}
+        onMouseLeave={details.hideDetails}
+        onFocus={details.scheduleDetails}
+        onBlur={details.hideDetails}
+        className="flex items-center justify-between rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-card)]"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="size-1.5 shrink-0 rounded-full bg-[var(--c-accent)]/40" />
+          <span className="truncate">{task.name}</span>
+        </div>
+        <span className="ml-2 shrink-0 text-[var(--c-text-tertiary)]">{task.frequency}</span>
+      </button>
+      {details.detailsOpen && (
+        <SidebarDetailsTooltip
+          testId={`sidebar-scheduled-details-${task.id}`}
+          position={details.detailsPosition}
+          rows={[
+            { label: '定时任务', value: task.name },
+            { label: '频率', value: task.frequency },
+            { label: '任务 ID', value: task.id, mono: true },
+            { label: '会话 ID', value: task.threadId, mono: true },
+            { label: '运行任务 ID', value: task.runtimeTaskId, mono: true },
+          ]}
+        />
+      )}
+    </>
+  );
+}
+
+function SidebarThreadListItem({
+  thread,
+  title,
+  isSelected,
+  isEditing,
+  editTitle,
+  renameLabel,
+  onOpen,
+  onEditStart,
+  onDelete,
+  onEditTitleChange,
+  onRenameSubmit,
+  onRenameKeyDown,
+}: {
+  thread: ThreadRecord;
+  title: string;
+  isSelected: boolean;
+  isEditing: boolean;
+  editTitle: string;
+  renameLabel: string;
+  onOpen: () => void;
+  onEditStart: () => void;
+  onDelete: (event: React.MouseEvent) => void;
+  onEditTitleChange: (title: string) => void;
+  onRenameSubmit: () => void;
+  onRenameKeyDown: (event: React.KeyboardEvent) => void;
+}) {
+  const details = useDelayedSidebarDetails<HTMLDivElement>();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+      details.hideDetails();
+    }
+  }, [isEditing]);
+
+  const taskIds = thread.taskIds.length > 0 ? thread.taskIds.join(', ') : null;
+
+  return (
+    <>
+      <div
+        ref={details.itemRef}
+        className={`group flex cursor-pointer items-center rounded-lg px-2 py-1.5 text-sm hover:bg-[var(--c-bg-card)] ${isSelected ? 'bg-[var(--c-bg-card)] font-semibold' : ''}`}
+        onClick={onOpen}
+        onKeyDown={e => { if (e.key === 'Enter') onOpen(); }}
+        onMouseEnter={details.scheduleDetails}
+        onMouseLeave={details.hideDetails}
+        onFocus={details.scheduleDetails}
+        onBlur={details.hideDetails}
+        role="button"
+        tabIndex={0}
+        data-testid={`thread-item-${thread.id}`}
+      >
+        {isEditing ? (
+          <input
+            ref={inputRef}
+            aria-label="Rename thread"
+            type="text"
+            value={editTitle}
+            onChange={e => onEditTitleChange(e.target.value)}
+            onBlur={onRenameSubmit}
+            onKeyDown={onRenameKeyDown}
+            className="flex-1 rounded border border-[var(--c-accent)] bg-transparent px-1 text-sm outline-none"
+            onClick={e => e.stopPropagation()}
+          />
+        ) : (
+          <span className="flex-1 truncate">{title}</span>
+        )}
+        <button
+          type="button"
+          onClick={e => {
+            e.stopPropagation();
+            onEditStart();
+          }}
+          className="ml-1 hidden shrink-0 p-0.5 text-[var(--c-text-secondary)] hover:text-[var(--c-accent)] group-hover:block"
+          title={renameLabel}
+        >
+          <Pencil className="size-3" />
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          className="ml-0.5 hidden shrink-0 p-0.5 text-[var(--c-text-secondary)] hover:text-red-500 group-hover:block"
+        >
+          <X className="size-3" />
+        </button>
+      </div>
+      {details.detailsOpen && !isEditing && (
+        <SidebarDetailsTooltip
+          testId={`sidebar-thread-details-${thread.id}`}
+          position={details.detailsPosition}
+          rows={[
+            { label: '最近任务', value: title },
+            { label: '状态', value: thread.status },
+            { label: '会话 ID', value: thread.id, mono: true },
+            { label: '当前任务 ID', value: thread.currentTaskId, mono: true },
+            { label: '任务 ID', value: taskIds, mono: true },
+          ]}
+        />
+      )}
+    </>
+  );
+}
+
+function useDelayedSidebarDetails<T extends HTMLElement>() {
+  const itemRef = useRef<T>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsPosition, setDetailsPosition] = useState<CSSProperties>({ top: 0, left: 0 });
+
+  const clearDetailsTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const hideDetails = () => {
+    clearDetailsTimer();
+    setDetailsOpen(false);
+  };
+
+  const scheduleDetails = () => {
+    clearDetailsTimer();
+    timerRef.current = setTimeout(() => {
+      const rect = itemRef.current?.getBoundingClientRect();
+      const tooltipWidth = 236;
+      const nextTop = rect
+        ? Math.max(12, Math.min(rect.top, window.innerHeight - 96))
+        : 12;
+      const nextLeft = rect
+        ? Math.max(12, Math.min(rect.right + 8, window.innerWidth - tooltipWidth - 12))
+        : 12;
+      setDetailsPosition({ top: nextTop, left: nextLeft });
+      setDetailsOpen(true);
+      timerRef.current = null;
+    }, SIDEBAR_DETAILS_DELAY_MS);
+  };
+
+  useEffect(() => () => clearDetailsTimer(), []);
+
+  return {
+    itemRef,
+    detailsOpen,
+    detailsPosition,
+    scheduleDetails,
+    hideDetails,
+  };
+}
+
+function SidebarDetailsTooltip({
+  testId,
+  position,
+  rows,
+}: {
+  testId: string;
+  position: CSSProperties;
+  rows: SidebarDetailsRow[];
+}) {
+  const visibleRows = rows.filter(row => row.value);
+
+  return (
+    <div
+      role="tooltip"
+      data-testid={testId}
+      className="pointer-events-none fixed z-[70] w-[236px] rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] px-3 py-2 text-left text-[11px] leading-relaxed text-[var(--c-text-secondary)] shadow-xl"
+      style={position}
+    >
+      {visibleRows.map(row => (
+        <div key={row.label} className="flex items-start justify-between gap-2">
+          <span className="shrink-0 text-[var(--c-text-tertiary)]">{row.label}</span>
+          <span className={`min-w-0 text-right text-[var(--c-text-primary)] ${row.mono ? 'break-all font-mono text-[10px]' : 'font-medium'}`}>
+            {row.value}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 

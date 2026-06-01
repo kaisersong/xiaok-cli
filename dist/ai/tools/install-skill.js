@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, rmSync } from 'fs';
 import { homedir } from 'os';
-import { basename, dirname, isAbsolute, join, resolve } from 'path';
+import { basename, dirname, isAbsolute, join, parse, resolve } from 'path';
 import { execSync } from 'child_process';
 import { getConfigDir } from '../../utils/config.js';
 function parseSkillDocument(raw) {
@@ -112,6 +112,29 @@ function formatDownloadError(status, statusText) {
     const text = statusText.trim();
     return text ? `下载 skill 失败 (${status} ${text})` : `下载 skill 失败 (${status})`;
 }
+function isFilesystemRoot(path) {
+    const resolved = resolve(path);
+    return resolved === parse(resolved).root;
+}
+function resolveInstallTarget(requestedScope, cwd, configDir) {
+    if (requestedScope === 'global') {
+        return {
+            scope: 'global',
+            skillDir: join(configDir, 'skills'),
+        };
+    }
+    if (isFilesystemRoot(cwd)) {
+        return {
+            scope: 'global',
+            skillDir: join(configDir, 'skills'),
+            notice: '当前目录不是可用项目目录，已改用 global scope',
+        };
+    }
+    return {
+        scope: 'project',
+        skillDir: join(cwd, '.xiaok', 'skills'),
+    };
+}
 /**
  * 克隆 GitHub 仓库作为复合技能
  */
@@ -186,9 +209,8 @@ export function createInstallSkillTool(options = {}) {
             const resolvedSource = resolveSource(source, cwd);
             // 处理仓库克隆（复合技能）
             if (resolvedSource.kind === 'repo') {
-                const skillDir = targetScope === 'global'
-                    ? join(configDir, 'skills')
-                    : join(cwd, '.xiaok', 'skills');
+                const target = resolveInstallTarget(targetScope, cwd, configDir);
+                const skillDir = target.skillDir;
                 const result = cloneSkillRepo(resolvedSource.location, skillDir);
                 if (!result.success) {
                     return `Error: ${result.message}`;
@@ -196,9 +218,9 @@ export function createInstallSkillTool(options = {}) {
                 await options.onInstall?.({
                     name: result.skillName,
                     path: join(skillDir, result.skillName),
-                    scope: targetScope,
+                    scope: target.scope,
                 });
-                return result.message;
+                return target.notice ? `${result.message}\n${target.notice}` : result.message;
             }
             // 处理单个文件下载/读取
             let raw;
@@ -224,9 +246,8 @@ export function createInstallSkillTool(options = {}) {
             if (!parsed) {
                 return 'Error: 下载内容不是有效的 skill Markdown（缺少 name/description frontmatter）';
             }
-            const skillDir = targetScope === 'global'
-                ? join(configDir, 'skills')
-                : join(cwd, '.xiaok', 'skills');
+            const target = resolveInstallTarget(targetScope, cwd, configDir);
+            const skillDir = target.skillDir;
             const fileName = `${sanitizeSkillFileName(parsed.name)}.md`;
             const targetPath = join(skillDir, basename(fileName));
             const existed = existsSync(targetPath);
@@ -237,7 +258,7 @@ export function createInstallSkillTool(options = {}) {
             await options.onInstall?.({
                 name: parsed.name,
                 path: targetPath,
-                scope: targetScope,
+                scope: target.scope,
             });
             options.capabilityRegistry?.register({
                 kind: 'skill',
@@ -246,12 +267,13 @@ export function createInstallSkillTool(options = {}) {
             });
             return [
                 `已${existed ? '更新' : '安装'} skill "${parsed.name}"`,
-                `范围: ${targetScope}`,
+                `范围: ${target.scope}`,
+                target.notice,
                 `路径: ${targetPath}`,
                 `来源: ${resolvedSource.location}`,
                 `描述: ${parsed.description}`,
                 `提示: 可使用 /skills-reload 命令刷新 skill 目录`,
-            ].join('\n');
+            ].filter(Boolean).join('\n');
         },
     };
 }

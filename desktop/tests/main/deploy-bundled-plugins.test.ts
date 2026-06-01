@@ -321,6 +321,37 @@ describe('deploy-bundled-plugins', () => {
       expect(existsSync(join(installedWheelsDir, incompatibleNativeWheel))).toBe(false);
     });
 
+    it('does not replace installed slide wheels with same-platform wheels for a different Python ABI', () => {
+      const installedPluginDir = join(pluginsDir, 'kai-slide-creator');
+      const bundledPluginDir = join(bundledDir, 'kai-slide-creator');
+      const installedWheelsDir = join(installedPluginDir, 'bundled-wheels');
+      const bundledWheelsDir = join(bundledPluginDir, 'bundled-wheels');
+
+      const platformTag = process.platform === 'win32'
+        ? 'win_amd64'
+        : process.platform === 'darwin'
+          ? `macosx_11_0_${process.arch === 'arm64' ? 'arm64' : 'x86_64'}`
+          : `manylinux_2_17_${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}`;
+      const installedNativeWheel = `pydantic_core-2.46.4-cp311-cp311-${platformTag}.whl`;
+      const installedRpdsWheel = `rpds_py-0.30.0-cp311-cp311-${platformTag}.whl`;
+      const bundledNativeWheel = `pydantic_core-2.46.4-cp314-cp314-${platformTag}.whl`;
+      const bundledRpdsWheel = `rpds_py-0.30.0-cp314-cp314-${platformTag}.whl`;
+
+      mkdirSync(installedWheelsDir, { recursive: true });
+      writeFileSync(join(installedWheelsDir, installedNativeWheel), '');
+      writeFileSync(join(installedWheelsDir, installedRpdsWheel), '');
+      mkdirSync(bundledWheelsDir, { recursive: true });
+      writeFileSync(join(bundledWheelsDir, bundledNativeWheel), '');
+      writeFileSync(join(bundledWheelsDir, bundledRpdsWheel), '');
+
+      ensureSlideRendererWheelhouseCompat(installedPluginDir, bundledPluginDir, 'cp311');
+
+      expect(existsSync(join(installedWheelsDir, installedNativeWheel))).toBe(true);
+      expect(existsSync(join(installedWheelsDir, installedRpdsWheel))).toBe(true);
+      expect(existsSync(join(installedWheelsDir, bundledNativeWheel))).toBe(false);
+      expect(existsSync(join(installedWheelsDir, bundledRpdsWheel))).toBe(false);
+    });
+
     it('reconciles report renderer css compatibility even when bundled-managed plugin is already current', async () => {
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;

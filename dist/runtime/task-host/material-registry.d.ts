@@ -20,6 +20,12 @@ export declare class MaterialRegistry {
     importMaterial(input: ImportMaterialInput): Promise<MaterialRecord>;
     get(materialId: string): MaterialRecord | undefined;
     list(taskId: string): MaterialRecord[];
+    updateMaterialExtraction(materialId: string, extraction: {
+        extractedTextPath?: string;
+        parseStatus: MaterialParseStatus;
+        parseSummary?: string;
+        errorMessage?: string;
+    }): Promise<MaterialRecord>;
     toView(record: MaterialRecord): MaterialView;
     toViews(records: MaterialRecord[]): MaterialView[];
     private createMaterialId;

@@ -6,6 +6,7 @@ export interface MaterialRecord {
     taskId: string;
     originalName: string;
     workspacePath: string;
+    extractedTextPath?: string;
     mimeType: string;
     sizeBytes: number;
     sha256: string;

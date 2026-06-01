@@ -12,6 +12,7 @@ import { artifactDisplayName, formatArtifactGeneratedTime, resolveArtifactUrl } 
 interface DeliverableViewProps {
   project: KSwarmProject;
   tasks?: KSwarmTask[];
+  workspaceArtifacts?: Array<KSwarmArtifact | string>;
 }
 
 function ArtifactCard({ artifact, taskTitle, onPreview }: { artifact: KSwarmArtifact; taskTitle: string; onPreview(artifact: KSwarmArtifact): void }) {
@@ -116,7 +117,7 @@ function DeliverableContent({
   );
 }
 
-export function DeliverableView({ project, tasks: propTasks }: DeliverableViewProps) {
+export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts = [] }: DeliverableViewProps) {
   const { t } = useLocale();
   const [previewArtifact, setPreviewArtifact] = useState<KSwarmArtifact | null>(null);
   const tasks = propTasks || project.tasks || [];
@@ -134,8 +135,16 @@ export function DeliverableView({ project, tasks: propTasks }: DeliverableViewPr
   const deliverable = rawDeliverable && !(
     typeof rawDeliverable === 'object' && rawDeliverable.synthesis && !rawDeliverable.files && !rawDeliverable.artifacts && !rawDeliverable.description
   ) ? rawDeliverable : null;
+  const linkedArtifactKeys = new Set<string>();
+  for (const { artifacts } of taskOutputs) {
+    for (const artifact of artifacts) addArtifactKeys(linkedArtifactKeys, artifact);
+  }
+  for (const artifact of extractDeliverableArtifacts(deliverable, project.id)) {
+    addArtifactKeys(linkedArtifactKeys, artifact);
+  }
+  const projectFiles = normalizeWorkspaceArtifacts(workspaceArtifacts, project.id, linkedArtifactKeys);
 
-  if (taskOutputs.length === 0 && deliverables.length === 0 && !deliverable) {
+  if (taskOutputs.length === 0 && deliverables.length === 0 && !deliverable && projectFiles.length === 0) {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-[var(--c-text-tertiary)]">{t.projectsDeliverableEmpty}</p>
@@ -178,6 +187,23 @@ export function DeliverableView({ project, tasks: propTasks }: DeliverableViewPr
         </div>
       )}
 
+      {/* Workspace files not yet linked to a deliverable/task */}
+      {projectFiles.length > 0 && (
+        <div>
+          <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)]">项目文件</h3>
+          <div className="flex flex-col gap-2">
+            {projectFiles.map((artifact, i) => (
+              <ArtifactCard
+                key={`${artifact.url || artifact.path || artifact.filename || artifact.name || 'workspace'}-${i}`}
+                artifact={artifact}
+                taskTitle="项目工作区"
+                onPreview={setPreviewArtifact}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Task output summaries */}
       {taskOutputs.length > 0 && (
         <div>
@@ -214,6 +240,69 @@ export function DeliverableView({ project, tasks: propTasks }: DeliverableViewPr
       )}
     </div>
   );
+}
+
+function extractDeliverableArtifacts(deliverable: unknown, projectId?: string): KSwarmArtifact[] {
+  if (typeof deliverable !== 'object' || deliverable === null) return [];
+  const obj = deliverable as Record<string, unknown>;
+  const fileArrayKeys = ['artifacts', 'files', 'expectedArtifacts', 'deliverables'];
+  const artifacts: KSwarmArtifact[] = [];
+  for (const key of fileArrayKeys) {
+    if (!Array.isArray(obj[key])) continue;
+    for (const item of obj[key]) {
+      const artifact = normalizeDeliverableFile(item, projectId);
+      if (artifact) artifacts.push(artifact);
+    }
+  }
+  return artifacts;
+}
+
+function normalizeWorkspaceArtifacts(
+  workspaceArtifacts: Array<KSwarmArtifact | string>,
+  projectId: string | undefined,
+  linkedArtifactKeys: Set<string>,
+): KSwarmArtifact[] {
+  const seen = new Set(linkedArtifactKeys);
+  const artifacts: KSwarmArtifact[] = [];
+  for (const item of workspaceArtifacts) {
+    const artifact = normalizeDeliverableFile(item, projectId);
+    if (!artifact || isGeneratedPlanArtifact(artifact)) continue;
+
+    const keys = getArtifactKeys(artifact);
+    if (keys.some(key => seen.has(key))) continue;
+    for (const key of keys) seen.add(key);
+    artifacts.push(artifact);
+  }
+  return artifacts;
+}
+
+function addArtifactKeys(target: Set<string>, artifact: KSwarmArtifact) {
+  for (const key of getArtifactKeys(artifact)) target.add(key);
+}
+
+function getArtifactKeys(artifact: KSwarmArtifact): string[] {
+  const rawValues = [
+    artifact.filename,
+    artifact.name,
+    artifact.relativePath,
+    artifact.path,
+    artifact.url,
+  ];
+  const keys = new Set<string>();
+  for (const value of rawValues) {
+    if (!value) continue;
+    const raw = String(value).trim();
+    if (!raw) continue;
+    keys.add(raw);
+    const name = basename(raw);
+    if (name) keys.add(name);
+  }
+  return [...keys];
+}
+
+function isGeneratedPlanArtifact(artifact: KSwarmArtifact): boolean {
+  const name = (artifact.filename || artifact.name || basename(artifact.path) || basename(artifact.url) || '').trim();
+  return /^plan-v\d+\.(md|markdown)$/i.test(name);
 }
 
 function normalizeDeliverableFile(item: unknown, projectId?: string): KSwarmArtifact | null {

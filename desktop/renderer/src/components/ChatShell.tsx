@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
 import { useParams, useLocation } from 'react-router-dom';
 import { api } from '../api';
-import { ChatView, type ChatMessage, type ComputerUseActionData, type ToolStep } from './ChatView';
+import { ChatView, type ChatMessage, type ComputerUseActionData, type GeneratedFile, type ToolStep } from './ChatView';
 import { CanvasPanel } from './CanvasPanel';
 import { TaskPanel } from './TaskPanel';
 import type { ThreadRecord } from '../api/types';
@@ -100,6 +100,63 @@ function formatUserMessageContent(prompt: string, files?: DisplayFileRef[]): str
   return `${prompt}\n\n附件: ${fileNames.join(', ')}`;
 }
 
+function addGeneratedFile(target: GeneratedFile[], seen: Set<string>, fp: string | undefined): void {
+  if (!fp || seen.has(fp)) return;
+  seen.add(fp);
+  const parts = fp.split('/');
+  target.push({ filePath: fp, name: parts[parts.length - 1] });
+}
+
+function collectGeneratedFilesFromEvents(events: DesktopTaskEvent[]): GeneratedFile[] {
+  const seen = new Set<string>();
+  const files: GeneratedFile[] = [];
+  for (const e of events) {
+    if (e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write') {
+      addGeneratedFile(files, seen, ((e as unknown) as { input?: { file_path?: string } }).input?.file_path);
+    }
+  }
+  return files;
+}
+
+function collectGeneratedFilesFromTexts(texts: string[]): GeneratedFile[] {
+  const seen = new Set<string>();
+  const files: GeneratedFile[] = [];
+  for (const text of texts) {
+    const fileExtMatch = /`?([^\s<`"'|]+?\.(?:md|html|txt|csv|json|pdf|png|jpg|svg|pptx|docx|xlsx))`?\b/g;
+    let match;
+    while ((match = fileExtMatch.exec(text)) !== null) {
+      const candidate = match[1];
+      if (candidate.startsWith('/')) addGeneratedFile(files, seen, candidate);
+    }
+  }
+  return files;
+}
+
+function collectGeneratedFilesForTurn(events: DesktopTaskEvent[], texts: string[]): GeneratedFile[] {
+  const seen = new Set<string>();
+  const files: GeneratedFile[] = [];
+  for (const file of collectGeneratedFilesFromEvents(events)) addGeneratedFile(files, seen, file.filePath);
+  for (const file of collectGeneratedFilesFromTexts(texts)) addGeneratedFile(files, seen, file.filePath);
+  return files;
+}
+
+function buildResultCardMessage(input: {
+  idHint: string;
+  result: TaskResult | null;
+  generatedFiles: GeneratedFile[];
+}): ChatMessage | null {
+  const hasSummary = Boolean(input.result?.summary?.trim());
+  const hasArtifacts = Boolean(input.result?.artifacts && input.result.artifacts.length > 0);
+  if (!hasSummary && !hasArtifacts && input.generatedFiles.length === 0) return null;
+  return {
+    id: `msg-result-${input.idHint}`,
+    role: 'result_card',
+    content: '',
+    result: input.result,
+    generatedFiles: input.generatedFiles,
+  };
+}
+
 function parseComputerUseRecoverableAction(response: string): ComputerUseActionData | null {
   try {
     const parsed = JSON.parse(response) as {
@@ -138,7 +195,6 @@ export function ChatShell() {
   const [status, setStatus] = useState<'idle' | 'running' | 'waiting_user' | 'completed' | 'failed'>('idle');
   const [currentQuestion, setCurrentQuestion] = useState<NeedsUserQuestion | null>(null);
   const [result, setResult] = useState<TaskResult | null>(null);
-  const [previousResults, setPreviousResults] = useState<TaskResult[]>([]);
   const [prompt, setPrompt] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [canvasOpen, setCanvasOpen] = useState(false);
@@ -153,6 +209,7 @@ export function ChatShell() {
   const currentLoadIdRef = useRef<string | null>(null);
   const mountGenRef = useRef(0);
   const allEventsRef = useRef<DesktopTaskEvent[]>([]);
+  const currentTaskEventsRef = useRef<DesktopTaskEvent[]>([]);
   const toolStepsMsgIdRef = useRef<string | null>(null);
   const toolStepsActiveRef = useRef(false);
   const computerUseActionCodesRef = useRef<Set<string>>(new Set());
@@ -175,6 +232,7 @@ export function ChatShell() {
 
     // Collect all events for Canvas
     allEventsRef.current = [...allEventsRef.current, event];
+    currentTaskEventsRef.current = [...currentTaskEventsRef.current, event];
 
     switch (event.type) {
       case 'task_started': {
@@ -227,7 +285,7 @@ export function ChatShell() {
       }
       case 'result': {
         const r = (event as { type: 'result'; result: TaskResult }).result;
-        const hasGeneratedFiles = allEventsRef.current.some(
+        const hasGeneratedFiles = currentTaskEventsRef.current.some(
           e => (e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
             && (e as { input: Record<string, unknown> }).input?.file_path)
           || (e.type === 'artifact_recorded' && (e as { kind?: string }).kind === 'html')
@@ -278,7 +336,7 @@ export function ChatShell() {
         // Auto-open canvas when generated files exist, preview first file
         if (hasGeneratedFiles && !canvasOpen) {
           sidebarWasCollapsedRef.current = sidebarCollapse.collapsed;
-          const writeCall = allEventsRef.current.find(
+          const writeCall = currentTaskEventsRef.current.find(
             e => e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
               && (e as { input: Record<string, unknown> }).input?.file_path
           );
@@ -286,7 +344,7 @@ export function ChatShell() {
           if (writeCall) {
             fp = (writeCall as { input: Record<string, unknown> }).input.file_path as string;
           } else {
-            const artifactEvent = allEventsRef.current.find(
+            const artifactEvent = currentTaskEventsRef.current.find(
               e => e.type === 'artifact_recorded' && (e as { kind?: string }).kind === 'html'
             );
             if (artifactEvent) fp = (artifactEvent as { filePath?: string }).filePath;
@@ -491,14 +549,21 @@ export function ChatShell() {
           const resultWithArtifacts = replayArtifacts.length > 0
             ? { ...r, artifacts: [...(r.artifacts || []), ...replayArtifacts] }
             : r;
+          const assistantContent = accumulated || r.summary;
           if (accumulated || r.summary) {
             msgs.push({
               id: `msg-assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               role: 'assistant',
-              content: accumulated || r.summary,
+              content: assistantContent,
             });
             accumulated = '';
           }
+          const resultCard = buildResultCardMessage({
+            idHint: `${(snapshot as { taskId?: string }).taskId || 'task'}-${msgs.length}`,
+            result: resultWithArtifacts,
+            generatedFiles: collectGeneratedFilesForTurn(snapshot.events || [], [resultWithArtifacts.summary, assistantContent]),
+          });
+          if (resultCard) msgs.push(resultCard);
           lastResult = resultWithArtifacts;
         }
       }
@@ -526,6 +591,7 @@ export function ChatShell() {
     const thisLoadId = taskId;
     currentLoadIdRef.current = thisLoadId;
     allEventsRef.current = [];
+    currentTaskEventsRef.current = [];
     toolStepsMsgIdRef.current = null;
     toolStepsActiveRef.current = false;
     computerUseActionCodesRef.current = new Set();
@@ -536,7 +602,6 @@ export function ChatShell() {
     streamRef.current = '';
     setStreamingText('');
     setResult(null);
-    setPreviousResults([]);
     setMessages([]);
     setCurrentQuestion(null);
     setThread(null);
@@ -598,9 +663,14 @@ export function ChatShell() {
               allMessages.push(...replayMsgs);
               // Collect events for Canvas panel (merge into ref after all tasks processed)
               allEventsRef.current.push(...replayEvents);
+              if (tid === allTaskIds[allTaskIds.length - 1]) {
+                currentTaskEventsRef.current = replayEvents;
+              }
 
-              // Collect result from last completed task (don't set yet - defer until after final check)
-              if (replayResult && tid === allTaskIds[allTaskIds.length - 1] && snapshot.status === 'completed') {
+              // Keep result separate only for a live latest task. Completed tasks are rendered as
+              // anchored result_card messages during replay, so they do not disappear when a new
+              // turn starts and do not duplicate at the bottom of the thread.
+              if (replayResult && tid === allTaskIds[allTaskIds.length - 1] && (snapshot.status === 'running' || snapshot.status === 'waiting_user')) {
                 lastResult = replayResult;
               }
 
@@ -704,15 +774,17 @@ export function ChatShell() {
       role: 'user',
       content: formatUserMessageContent(text, files),
     };
-    setMessages(prev => [...prev, userMsg]);
+    const sealedResultCard = buildResultCardMessage({
+      idHint: `${thread?.currentTaskId || 'current'}-${Date.now()}`,
+      result,
+      generatedFiles: collectGeneratedFilesForTurn(currentTaskEventsRef.current, [result?.summary || '', streamingText]),
+    });
+    setMessages(prev => sealedResultCard ? [...prev, sealedResultCard, userMsg] : [...prev, userMsg]);
     setPrompt('');
     setStatus('running');
     setStreamingText('');
     streamRef.current = '';
-    // Preserve current result in previous results before clearing
-    if (result) {
-      setPreviousResults(prev => [...prev, result]);
-    }
+    currentTaskEventsRef.current = [];
     setResult(null);
 
     // Update thread title only on first user message (keep original topic as title)
@@ -907,43 +979,17 @@ export function ChatShell() {
 
   // Extract generated files from multiple sources
   const generatedFiles = (() => {
-    const seen = new Set<string>();
-    const files: { filePath: string; name: string }[] = [];
-    const addFile = (fp: string) => {
-      if (seen.has(fp) || !fp) return;
-      seen.add(fp);
-      const parts = fp.split('/');
-      files.push({ filePath: fp, name: parts[parts.length - 1] });
-    };
-
-    // Source 1: Write tool calls
-    for (const e of allEventsRef.current) {
-      if (e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write') {
-        const fp = ((e as unknown) as { input?: { file_path?: string } }).input?.file_path;
-        if (fp) addFile(fp);
-      }
-    }
-
-    // Source 2: result summary and assistant messages (extract file paths from text)
     const textsToScan: string[] = [];
     if (result?.summary) textsToScan.push(result.summary);
-    for (const prev of previousResults) {
-      if (prev.summary) textsToScan.push(prev.summary);
-    }
-    for (const msg of messages) {
+    if (streamingText) textsToScan.push(streamingText);
+    const lastUserIndex = [...messages].reverse().findIndex(msg => msg.role === 'user');
+    const currentTurnMessages = lastUserIndex === -1
+      ? messages
+      : messages.slice(messages.length - lastUserIndex);
+    for (const msg of currentTurnMessages) {
       if (msg.role === 'assistant' && msg.content) textsToScan.push(msg.content);
     }
-    for (const text of textsToScan) {
-      // Match file paths that may be inside markdown code blocks (backticks)
-      const fileExtMatch = /`?([^\s<`"'|]+?\.(?:md|html|txt|csv|json|pdf|png|jpg|svg|pptx|docx|xlsx))`?\b/g;
-      let m;
-      while ((m = fileExtMatch.exec(text)) !== null) {
-        const candidate = m[1];
-        if (candidate.startsWith('/')) addFile(candidate);
-      }
-    }
-
-    return files;
+    return collectGeneratedFilesForTurn(currentTaskEventsRef.current, textsToScan);
   })();
 
   const showTaskPanel = planSteps.length > 0 && !canvasOpen;

@@ -4,7 +4,18 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ProjectInlineCard } from '../../renderer/src/components/projects/ProjectInlineCard';
 
-afterEach(cleanup);
+const mockKSwarmState = vi.hoisted(() => ({
+  projects: [] as Array<{ id: string; name: string; goal?: string; status: string }>,
+}));
+
+vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
+  useKSwarm: () => ({ projects: mockKSwarmState.projects }),
+}));
+
+afterEach(() => {
+  cleanup();
+  mockKSwarmState.projects = [];
+});
 
 function renderCard(overrides = {}) {
   const props = {
@@ -42,6 +53,17 @@ describe('ProjectInlineCard', () => {
   it('shows status text directly for other statuses', () => {
     renderCard({ status: 'active' });
     expect(screen.getByText(/active/)).toBeTruthy();
+  });
+
+  it('uses live KSwarm project status over the created project-card snapshot', () => {
+    mockKSwarmState.projects = [
+      { id: 'proj-123', name: 'AI推广方案', goal: '把AI原生推广方案做出来', status: 'delivered' },
+    ];
+
+    renderCard({ status: 'planning' });
+
+    expect(screen.getByText(/delivered/)).toBeTruthy();
+    expect(screen.queryByText(/planning/)).not.toBeInTheDocument();
   });
 
   it('is clickable and navigates to project page', () => {

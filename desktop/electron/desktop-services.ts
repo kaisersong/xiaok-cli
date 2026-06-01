@@ -3,6 +3,7 @@ import { join, extname, basename, dirname } from 'node:path';
 import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
 import { homedir, platform, arch, type } from 'node:os';
 import { spawnSync, execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createAdapter } from '../../src/ai/models.js';
 import { getProviderProfile, listProviderProfiles } from '../../src/ai/providers/registry.js';
 import type { ProtocolId } from '../../src/ai/providers/types.js';
@@ -62,7 +63,9 @@ import {
 import { createNotebookTools } from '../../src/ai/tools/notebook.js';
 import type { MemoryStore } from '../../src/ai/memory/store.js';
 import type { KSwarmService, KSwarmUnavailableError } from './kswarm-service.js';
+import { JsonKSwarmInitialPlanBootstrapStore, KSwarmInitialPlanBootstrapQueue } from './kswarm-initial-plan-bootstrap.js';
 import { resolveCreateProjectMembers } from './kswarm-project-tool.js';
+import { createKSwarmRunDynamicWorkflowScriptTool } from './kswarm-dynamic-workflow-script-tool.js';
 import { XIAOK_PO_SEED_ID, getPreferredPoAgentId } from '../shared/kswarm-seed-contract.js';
 import type { KSwarmTaskHandoff, KSwarmWorkflowNodeHandoff } from './kswarm-runtime-bridge.js';
 // NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
@@ -599,7 +602,17 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
-  registerKSwarmTools(registry, options.kswarmService);
+  const initialPlanBootstrapStore = new JsonKSwarmInitialPlanBootstrapStore(options.dataRoot);
+  const initialPlanBootstrapQueue = new KSwarmInitialPlanBootstrapQueue(
+    initialPlanBootstrapStore,
+    input => bootstrapKSwarmInitialPlan(input),
+    { now: options.now }
+  );
+  const kswarmCreateProjectToolOptions: KSwarmCreateProjectToolOptions = {
+    enqueuePlanBootstrap: input => initialPlanBootstrapQueue.enqueue(input),
+  };
+  registerKSwarmTools(registry, options.kswarmService, kswarmCreateProjectToolOptions);
+  initialPlanBootstrapQueue.startRecovery();
   // [2026-05-10] Intent delegation disabled — passive tracking only, no functional value.
   // See docs/2026-05-10-desktop-intent-delegation-removal.md
   // const intentStore = new InMemoryIntentLedgerStore();
@@ -950,7 +963,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
     snapshotStore,
-    runner: options.runner ?? createDesktopModelRunnerWithRegistry(registry, tools, options.dataRoot, options.kswarmService, materialRegistry),
+    runner: options.runner ?? createDesktopModelRunnerWithRegistry(registry, tools, options.dataRoot, options.kswarmService, materialRegistry, kswarmCreateProjectToolOptions),
     now: options.now,
     aheGuards: { artifactEvidence: true, recoveryContinuity: true },
     // Use timestamp + random suffix to ensure unique taskId/sessionId across app restarts
@@ -965,7 +978,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return new InProcessTaskRuntimeHost({
       materialRegistry,
       snapshotStore,
-      runner: createDesktopModelRunnerWithRegistry(scopedRegistry, scopedTools, options.dataRoot, options.kswarmService, materialRegistry),
+      runner: createDesktopModelRunnerWithRegistry(scopedRegistry, scopedTools, options.dataRoot, options.kswarmService, materialRegistry, kswarmCreateProjectToolOptions),
       now: options.now,
       aheGuards: { artifactEvidence: true, recoveryContinuity: true },
       createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1088,7 +1101,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const taskDeliverableNode = isKSwarmTaskDeliverableWorkflowNode(handoff);
     const projectDeliverableNode = isKSwarmProjectDeliverableWorkflowNode(handoff);
     const deliverableNode = taskDeliverableNode || projectDeliverableNode;
-    if (deliverableNode && artifactsDir) mkdirSync(artifactsDir, { recursive: true });
+    if (artifactsDir) mkdirSync(artifactsDir, { recursive: true });
     const taskHost = createKSwarmTaskHost(workspaceRoot);
     const runStartedAt = Date.now();
     const prompt = buildKSwarmWorkflowNodePrompt(handoff, targetParticipantId || 'xiaok-worker', { artifactsDir });
@@ -1106,8 +1119,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
 
     const output = normalizeKSwarmWorkflowNodeOutput(isRecord(parsed.output) ? parsed.output : parsed, summary);
+    const mergedArtifacts = mergeKSwarmArtifacts(output.artifacts, artifacts);
     if (deliverableNode) {
-      const mergedArtifacts = mergeKSwarmArtifacts(output.artifacts, artifacts);
       if (mergedArtifacts.length === 0) {
         throw new Error('workflow_artifact_evidence_missing');
       }
@@ -1123,7 +1136,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
 
     return {
-      output,
+      output: {
+        ...output,
+        ...(mergedArtifacts.length > 0 ? {
+          artifacts: mergedArtifacts,
+          evidenceRefs: mergeKSwarmEvidenceRefs(output.evidenceRefs, mergedArtifacts),
+          ...(artifactsDir ? { workFolder: workspaceRoot, workspacePath: workspaceRoot } : {}),
+        } : {}),
+      },
       reviewDecision: null,
     };
   }
@@ -1161,6 +1181,26 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     } catch (error) {
       return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
     }
+  }
+
+  async function bootstrapKSwarmInitialPlan(input: KSwarmInitialPlanBootstrapInput) {
+    const result = await runKSwarmAssignPo({
+      targetParticipantId: input.poAgent,
+      payload: {
+        projectId: input.projectId,
+        projectName: input.projectName,
+        name: input.projectName,
+        goal: input.goal,
+        requirements: input.requirements,
+        planningGuidance: input.planningGuidance,
+        poAgent: input.poAgent,
+        members: input.members,
+      },
+    });
+    if (!result.ok && result.error === 'plan_already_exists') {
+      return { ok: true as const };
+    }
+    return result;
   }
 
   async function runKSwarmReviewSubmission({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
@@ -2263,10 +2303,16 @@ function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, parti
 
   return [
     ...base,
-    '你是 worker agent。请检查项目状态、任务状态、阻塞点和下一步建议，输出结构化诊断。',
+    options.artifactsDir ? `产物目录：${options.artifactsDir}` : '',
+    '你是 worker agent。请执行节点输入中的 prompt，而不是诊断项目状态或只复述计划。',
+    '节点输入里的 prompt 是当前 workflow 节点的唯一工作指令；项目状态和计划只能作为背景。',
+    '如果 prompt 要求生成报告、分析、代码或其他交付物，必须把完整、可复核的文件写入产物目录；推荐文件名使用英文小写和连字符。',
+    `真实 workflow run ID 是 ${handoff.workflowRunId}；如果正文需要 workflow run ID，只能使用这个值，不要自行推导、缩写或伪造。`,
+    'JSON 输出只放 manifest，不要把完整正文塞进 JSON。',
     '只返回一个 JSON 对象，不要返回 Markdown 包裹：',
-    '{"output":{"summary":"诊断摘要","findings":["发现"],"recommendedActions":["建议"],"evidenceRefs":["证据引用"]}}',
-  ].join('\n');
+    '{"output":{"summary":"节点执行摘要","artifacts":[{"path":"绝对路径或相对产物路径","kind":"markdown","label":"文件名"}],"evidenceRefs":["artifact:文件路径"]}}',
+    '如果本节点确实不需要生成文件，artifacts 可以为空数组，但 summary 必须说明完成了 prompt 的哪些要求。',
+  ].filter(Boolean).join('\n');
 }
 
 function isKSwarmTaskDeliverableWorkflowNode(handoff: KSwarmWorkflowNodeHandoff): boolean {
@@ -2543,6 +2589,141 @@ async function requestKSwarmJson(kswarmService: KSwarmService, path: string, ini
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+export function resolveToolOutputArtifactPath(
+  toolInput: unknown,
+  result: string,
+  options: ToolOutputArtifactPathOptions = {},
+): string | null {
+  return resolveToolOutputArtifactPathWithOptions(toolInput, result, options);
+}
+
+export function resolveWriteToolArtifactPath(toolName: string, toolInput: unknown): string | null {
+  if (!isToolName(toolName, 'write') || !isRecord(toolInput)) return null;
+  return readString(toolInput.file_path) || null;
+}
+
+interface ToolOutputArtifactPathOptions {
+  toolName?: string;
+  toolStartedAt?: number;
+}
+
+function resolveToolOutputArtifactPathWithOptions(
+  toolInput: unknown,
+  result: string,
+  options: ToolOutputArtifactPathOptions = {},
+): string | null {
+  try {
+    const parsed = JSON.parse(result) as unknown;
+    if (isRecord(parsed)) {
+      const explicitlyFailed = parsed.success === false || parsed.ok === false;
+      if (explicitlyFailed) return null;
+
+      const returnedPath = readString(parsed.output_path);
+      if (returnedPath) return returnedPath;
+
+      const succeeded = parsed.success === true || parsed.ok === true;
+      if (succeeded && isRecord(toolInput)) {
+        const inputPath = readString(toolInput.output_path);
+        if (inputPath) return inputPath;
+      }
+    }
+  } catch {
+    // Non-JSON tool output is handled below for bash.
+  }
+
+  return resolveBashOutputArtifactPath(toolInput, result, options);
+}
+
+function isToolName(toolName: string | undefined, expected: string): boolean {
+  return typeof toolName === 'string' && toolName.trim().toLowerCase() === expected;
+}
+
+export function attachRuntimeToolRequestScope(toolName: string | undefined, input: unknown, sessionId: string): Record<string, unknown> {
+  const toolInput = isRecord(input) ? input : {};
+  if (!isToolName(toolName, 'create_project')) return toolInput;
+  const normalizedSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
+  if (!normalizedSessionId) return toolInput;
+  return {
+    ...toolInput,
+    _xiaokRequestScope: `task-session:${normalizedSessionId}`,
+  };
+}
+
+function resolveBashOutputArtifactPath(
+  toolInput: unknown,
+  result: string,
+  options: ToolOutputArtifactPathOptions,
+): string | null {
+  if (!isToolName(options.toolName, 'bash')) return null;
+  if (!result.trim() || result.trimStart().startsWith('Error')) return null;
+
+  const command = isRecord(toolInput) ? readString(toolInput.command) : '';
+  const candidates = rankArtifactPathCandidates([
+    ...extractArtifactPathCandidates(result),
+    ...extractArtifactPathCandidates(command),
+  ]);
+  for (const candidate of candidates) {
+    if (isFreshExistingArtifactPath(candidate, options.toolStartedAt)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function rankArtifactPathCandidates(paths: string[]): string[] {
+  const seen = new Set<string>();
+  return paths
+    .map((path, index) => ({ path, index, score: scoreArtifactPath(path) }))
+    .filter(item => {
+      if (!item.path || seen.has(item.path)) return false;
+      seen.add(item.path);
+      return true;
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(item => item.path);
+}
+
+function scoreArtifactPath(path: string): number {
+  let score = 0;
+  if (!/(^|\/)(tmp|private\/tmp|var\/folders)\//.test(path)) score += 10;
+  if (/\.(?:pdf|pptx|docx|xlsx)$/iu.test(path)) score += 5;
+  return score;
+}
+
+function extractArtifactPathCandidates(text: string): string[] {
+  if (!text) return [];
+  const candidates: string[] = [];
+  const pathPatterns = [
+    /(?:file:\/\/)?(\/[^\s"'`<>|]+?\.(?:pdf|html|md|markdown|pptx|docx|xlsx|csv|json|txt|png|jpg|jpeg|webp|svg))(?:\b|$)/giu,
+    /([A-Za-z]:\\[^\s"'`<>|]+?\.(?:pdf|html|md|markdown|pptx|docx|xlsx|csv|json|txt|png|jpg|jpeg|webp|svg))(?:\b|$)/giu,
+  ];
+  for (const pattern of pathPatterns) {
+    for (const match of text.matchAll(pattern)) {
+      const path = normalizeArtifactPathCandidate(match[1]);
+      if (path) candidates.push(path);
+    }
+  }
+  return candidates;
+}
+
+function normalizeArtifactPathCandidate(path: string): string {
+  return path.trim().replace(/[),.;，。]+$/u, '');
+}
+
+function isFreshExistingArtifactPath(filePath: string, toolStartedAt?: number): boolean {
+  try {
+    if (!existsSync(filePath)) return false;
+    const stat = statSync(filePath);
+    if (!stat.isFile()) return false;
+    if (typeof toolStartedAt === 'number' && stat.mtimeMs < toolStartedAt - 2_000) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function readStringArray(value: unknown): string[] {
@@ -3473,12 +3654,13 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
       for (const toolCall of toolCalls) {
         if (signal.aborted) throw new Error('task cancelled');
         totalToolCalls++;
+        const runtimeToolInput = attachRuntimeToolRequestScope(toolCall.name, toolCall.input, sessionId);
         // Dynamic TaskPanel: auto-track progress from tool calls (skip internal tools)
         const isInternalTool = toolCall.name === 'report_progress' || toolCall.name === 'skill' || toolCall.name === 'skill_bundle_refs' || toolCall.name === 'skill_list';
         if (!isInternalTool && !planEmitted) {
           planEmitted = true;
         }
-        emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id });
+        emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id });
 
         // Trace: tool start
         if (skillInvocation) {
@@ -3490,7 +3672,7 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
         }
 
         // Evidence tracking: count reference reads
-        if (toolCall.name === 'Read') {
+        if (isToolName(toolCall.name, 'read')) {
           referenceReads++;
           if (skillInvocation) {
             appendTrace(dataRoot, {
@@ -3521,16 +3703,17 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
             }
           } catch { /* non-critical */ }
         }
-        let { ok, result } = await executeDesktopTaskTool(toolCall, {
+        const toolStartedAt = Date.now();
+        let { ok, result } = await executeDesktopTaskTool({ ...toolCall, input: runtimeToolInput }, {
           registry,
           taskId,
           materials,
           materialRegistry,
         });
         if (ok) {
-          emitRuntimeEvent({ type: 'post_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
+          emitRuntimeEvent({ type: 'post_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
         } else {
-          emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id, error: result.slice(0, 10000) });
+          emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId, turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id, error: result.slice(0, 10000) });
         }
         // Dynamic TaskPanel: emit auto-progress from tool calls (skip internal tools)
         if (!isInternalTool) {
@@ -3549,8 +3732,9 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
         }
 
         // Emit file_changed for Write tool so canvas can track generated files
-        if (ok && toolCall.name === 'Write' && toolCall.input?.file_path) {
-          const filePath = toolCall.input.file_path as string;
+        const writeArtifactPath = resolveWriteToolArtifactPath(toolCall.name, runtimeToolInput);
+        if (ok && writeArtifactPath) {
+          const filePath = writeArtifactPath;
           emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
           // Emit artifact_recorded so result.artifacts is populated
           const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
@@ -3577,30 +3761,27 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
             });
           }
         }
-        // Detect MCP tools that return output_path in JSON result (e.g. render_report)
-        if (ok && toolCall.name !== 'Write') {
-          try {
-            const parsed = JSON.parse(result);
-            if (parsed.output_path && typeof parsed.output_path === 'string') {
-              const filePath = parsed.output_path;
-              emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
-              const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
-              const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
-              const fileName = filePath.split('/').pop() || filePath;
-              emitRuntimeEvent({
-                type: 'artifact_recorded',
-                sessionId,
-                turnId,
-                intentId,
-                stageId: stepId,
-                artifactId: `artifact_${toolCall.id}`,
-                label: fileName,
-                kind,
-                path: filePath,
-                creator: 'agent',
-              });
-            }
-          } catch { /* result not JSON, skip */ }
+        // Detect MCP tools that write an artifact path through result or input.
+        if (ok && !isToolName(toolCall.name, 'write')) {
+          const filePath = resolveToolOutputArtifactPath(runtimeToolInput, result, { toolName: toolCall.name, toolStartedAt });
+          if (filePath) {
+            emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
+            const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
+            const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
+            const fileName = filePath.split('/').pop() || filePath;
+            emitRuntimeEvent({
+              type: 'artifact_recorded',
+              sessionId,
+              turnId,
+              intentId,
+              stageId: stepId,
+              artifactId: `artifact_${toolCall.id}`,
+              label: fileName,
+              kind,
+              path: filePath,
+              creator: 'agent',
+            });
+          }
         }
         // Emit progress_plan_reported for TaskPanel
         if (ok && toolCall.name === 'report_progress') {
@@ -3658,7 +3839,23 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
   };
 }
 
-export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Tool {
+interface KSwarmInitialPlanBootstrapInput {
+  projectId: string;
+  projectName: string;
+  goal: string;
+  requirements: string;
+  planningGuidance: string;
+  poAgent: string;
+  members: string[];
+}
+
+type KSwarmInitialPlanBootstrapResult = { ok: true } | { ok: false; error: string };
+
+interface KSwarmCreateProjectToolOptions {
+  enqueuePlanBootstrap?: (input: KSwarmInitialPlanBootstrapInput) => { ok: true; status: 'queued' } | { ok: false; error: string };
+}
+
+export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, options: KSwarmCreateProjectToolOptions = {}): Tool {
   return {
     permission: 'safe',
     definition: {
@@ -3688,9 +3885,10 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
       },
     },
     async execute(input) {
-      const { name, goal, requirements, memberNames = [], memberCount = 0, workFolder } = input as {
+      const { name, goal, requirements, memberNames = [], memberCount = 0, workFolder, _xiaokRequestScope } = input as {
         name: string; goal: string; requirements?: string;
         memberNames?: string[]; memberCount?: number; workFolder?: string;
+        _xiaokRequestScope?: string;
       };
       const resolvedWorkFolder = typeof workFolder === 'string' ? workFolder.trim() : '';
 
@@ -3745,6 +3943,14 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
 
         // 4. 创建项目
         const planningGuidance = buildCreateProjectPlanningGuidanceForTool({ goal, requirements: requirements || '' });
+        const clientRequestKey = buildCreateProjectClientRequestKey({
+          requestScope: _xiaokRequestScope,
+          name,
+          goal,
+          requirements: requirements || '',
+          members: resolvedMembers,
+          workFolder: resolvedWorkFolder,
+        });
         const res = await kswarmService.request('/projects', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -3761,11 +3967,35 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
                 source: explicitlyNamedMemberIds.has(agentId) ? 'explicit_user' : 'default_seed',
               })),
             },
+            ...(options.enqueuePlanBootstrap ? { autoStartPlanning: false } : {}),
             ...(resolvedWorkFolder ? { workFolder: resolvedWorkFolder } : {}),
+            ...(clientRequestKey ? { clientRequestKey } : {}),
           }),
         });
         if (!res.ok) return JSON.stringify({ error: `Failed to create project: ${res.status}` });
-        const { project } = await res.json() as { project: { id: string; name: string; status: string; createdAt: number } };
+        const { project, reused } = await res.json() as { project: { id: string; name: string; status: string; createdAt: number }; reused?: boolean };
+
+        let planningStatus: 'queued' | undefined;
+        if (options.enqueuePlanBootstrap && !reused) {
+          const enqueueResult = options.enqueuePlanBootstrap({
+            projectId: project.id,
+            projectName: project.name,
+            goal,
+            requirements: requirements || '',
+            planningGuidance,
+            poAgent,
+            members: resolvedMembers,
+          });
+          if (!enqueueResult.ok) {
+            return JSON.stringify({
+              error: 'project_created_but_planning_enqueue_failed',
+              projectId: project.id,
+              name: project.name,
+              reason: enqueueResult.error,
+            });
+          }
+          planningStatus = enqueueResult.status;
+        }
 
         // 5. 返回 project_card 标记
         return JSON.stringify({
@@ -3773,15 +4003,42 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService): Too
           projectId: project.id,
           name: project.name,
           goal,
-          status: project.status,
+          status: options.enqueuePlanBootstrap && !reused ? 'planning' : project.status,
           createdAt: project.createdAt,
           memberCount: resolvedMembers.length,
+          ...(reused ? { reused: true } : {}),
+          ...(planningStatus ? { planningStatus } : {}),
         });
       } catch (err) {
         return JSON.stringify({ error: `KSwarm service unavailable: ${(err as Error).message}` });
       }
     },
   };
+}
+
+function buildCreateProjectClientRequestKey(input: {
+  requestScope?: unknown;
+  name: string;
+  goal: string;
+  requirements: string;
+  members: string[];
+  workFolder: string;
+}): string | undefined {
+  const requestScope = normalizeCreateProjectKeyPart(input.requestScope);
+  if (!requestScope) return undefined;
+  const payload = {
+    requestScope,
+    name: normalizeCreateProjectKeyPart(input.name),
+    goal: normalizeCreateProjectKeyPart(input.goal),
+    requirements: normalizeCreateProjectKeyPart(input.requirements),
+    members: [...input.members].map(member => normalizeCreateProjectKeyPart(member)).sort(),
+    workFolder: normalizeCreateProjectKeyPart(input.workFolder),
+  };
+  return `create-project:${createHash('sha256').update(JSON.stringify(payload)).digest('hex')}`;
+}
+
+function normalizeCreateProjectKeyPart(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
 }
 
 function buildCreateProjectPlanningGuidanceForTool(input: { goal: string; requirements?: string }): string {
@@ -4305,6 +4562,7 @@ function createDesktopModelRunnerWithRegistry(
   dataRoot: string,
   kswarmService: KSwarmService,
   materialRegistry: MaterialRegistry,
+  createProjectToolOptions: KSwarmCreateProjectToolOptions = {},
 ): TaskRunner {
   const cwd = process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
@@ -4312,7 +4570,7 @@ function createDesktopModelRunnerWithRegistry(
   let skillsLoaded = false;
 
   // Register kswarm create_project tool (allows AI to create multi-agent projects from chat)
-  registerKSwarmTools(registry, kswarmService);
+  registerKSwarmTools(registry, kswarmService, createProjectToolOptions);
 
   // Register report_progress tool (TaskPanel progress reporting)
   const reportProgressTool: Tool = {
@@ -4542,12 +4800,13 @@ function createDesktopModelRunnerWithRegistry(
       for (const toolCall of toolCalls) {
         if (signal.aborted) throw new Error('task cancelled');
         totalToolCalls++;
+        const runtimeToolInput = attachRuntimeToolRequestScope(toolCall.name, toolCall.input, sessionId);
         // Dynamic TaskPanel: auto-track progress from tool calls (skip internal tools)
         const isInternalTool = toolCall.name === 'report_progress' || toolCall.name === 'skill' || toolCall.name === 'skill_bundle_refs' || toolCall.name === 'skill_list';
         if (!isInternalTool && !planEmitted) {
           planEmitted = true;
         }
-        emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id });
+        emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id });
         // Track skill tool calls for stats and create invocation if missing
         if (toolCall.name === 'skill') {
           try {
@@ -4568,19 +4827,21 @@ function createDesktopModelRunnerWithRegistry(
             }
           } catch { /* non-critical */ }
         }
-        let { ok, result } = await executeDesktopTaskTool(toolCall, {
+        const toolStartedAt = Date.now();
+        let { ok, result } = await executeDesktopTaskTool({ ...toolCall, input: runtimeToolInput }, {
           registry,
           taskId,
           materials,
           materialRegistry,
         });
         if (ok) {
-          emitRuntimeEvent({ type: 'post_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
+          emitRuntimeEvent({ type: 'post_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
         } else {
-          emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolUseId: toolCall.id, error: result.slice(0, 10000) });
+          emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId, turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id, error: result.slice(0, 10000) });
         }
-        if (ok && toolCall.name === 'Write' && toolCall.input?.file_path) {
-          const filePath = toolCall.input.file_path as string;
+        const writeArtifactPath = resolveWriteToolArtifactPath(toolCall.name, runtimeToolInput);
+        if (ok && writeArtifactPath) {
+          const filePath = writeArtifactPath;
           emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
           const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
           const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
@@ -4598,30 +4859,27 @@ function createDesktopModelRunnerWithRegistry(
             creator: 'agent',
           });
         }
-        // Detect MCP tools that return output_path in JSON result (e.g. render_report)
-        if (ok && toolCall.name !== 'Write') {
-          try {
-            const parsed = JSON.parse(result);
-            if (parsed.output_path && typeof parsed.output_path === 'string') {
-              const filePath = parsed.output_path;
-              emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
-              const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
-              const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
-              const fileName = filePath.split('/').pop() || filePath;
-              emitRuntimeEvent({
-                type: 'artifact_recorded',
-                sessionId,
-                turnId,
-                intentId,
-                stageId: stepId,
-                artifactId: `artifact_${toolCall.id}`,
-                label: fileName,
-                kind,
-                path: filePath,
-                creator: 'agent',
-              });
-            }
-          } catch { /* result not JSON, skip */ }
+        // Detect MCP tools that write an artifact path through result or input.
+        if (ok && !isToolName(toolCall.name, 'write')) {
+          const filePath = resolveToolOutputArtifactPath(runtimeToolInput, result, { toolName: toolCall.name, toolStartedAt });
+          if (filePath) {
+            emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
+            const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
+            const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
+            const fileName = filePath.split('/').pop() || filePath;
+            emitRuntimeEvent({
+              type: 'artifact_recorded',
+              sessionId,
+              turnId,
+              intentId,
+              stageId: stepId,
+              artifactId: `artifact_${toolCall.id}`,
+              label: fileName,
+              kind,
+              path: filePath,
+              creator: 'agent',
+            });
+          }
         }
         // Emit progress_plan_reported for TaskPanel
         if (ok && toolCall.name === 'report_progress') {
@@ -4670,10 +4928,15 @@ function createDesktopModelRunnerWithRegistry(
   };
 }
 
-function registerKSwarmTools(registry: ToolRegistry, kswarmService: KSwarmService): void {
-  registry.registerTool(createKSwarmCreateProjectTool(kswarmService));
+function registerKSwarmTools(
+  registry: ToolRegistry,
+  kswarmService: KSwarmService,
+  createProjectToolOptions: KSwarmCreateProjectToolOptions = {},
+): void {
+  registry.registerTool(createKSwarmCreateProjectTool(kswarmService, createProjectToolOptions));
   registry.registerTool(createKSwarmInspectProjectTool(kswarmService));
   registry.registerTool(createKSwarmContinueProjectTool(kswarmService));
+  registry.registerTool(createKSwarmRunDynamicWorkflowScriptTool(kswarmService));
   registry.registerTool(createKSwarmRepairProjectTaskFromFileTool(kswarmService));
   registry.registerTool(createKSwarmRepairProjectTaskTool(kswarmService));
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildPythonServerEnv,
+  detectPythonCompatibilityTag,
   ensureSlideRendererPythonReady,
   isCompatibleSlideRendererWheelhouse,
   normalizePythonServerCommand,
@@ -46,7 +47,7 @@ describe('python runtime helper', () => {
     expect(result).toEqual({ ready: true, mode: 'online' });
     expect(exec).toHaveBeenNthCalledWith(2, 'C:\\runtime\\python.exe', [
       '-m', 'pip', 'install', '--no-index', '--find-links', 'C:\\wheels',
-      'mcp', 'jsonschema', 'pydantic', 'bs4',
+      'mcp==1.27.1', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4',
     ], { timeout: 60_000 });
     expect(exec).toHaveBeenNthCalledWith(4, 'C:\\runtime\\python.exe', [
       '-m', 'pip', 'install',
@@ -85,6 +86,16 @@ describe('python runtime helper', () => {
     });
   });
 
+  it('detects the managed python compatibility tag', async () => {
+    const exec: PythonExecFile = vi.fn(async () => ({ stdout: 'cp311\n' }));
+
+    await expect(detectPythonCompatibilityTag('/runtime/bin/python3', exec)).resolves.toBe('cp311');
+    expect(exec).toHaveBeenCalledWith('/runtime/bin/python3', [
+      '-c',
+      'import sys; print(f"cp{sys.version_info[0]}{sys.version_info[1]}")',
+    ], { timeout: 15_000 });
+  });
+
   it('rejects macOS native wheels for Windows offline slide-renderer installs', () => {
     expect(isCompatibleSlideRendererWheelhouse([
       'mcp-1.27.1-py3-none-any.whl',
@@ -100,7 +111,35 @@ describe('python runtime helper', () => {
       'pydantic-2.13.4-py3-none-any.whl',
       'pydantic_core-2.46.4-cp311-cp311-win_amd64.whl',
       'rpds_py-0.30.0-cp311-cp311-win_amd64.whl',
-    ], 'win32', 'x64')).toBe(true);
+    ], 'win32', 'x64', 'cp311')).toBe(true);
+  });
+
+  it('rejects same-platform native wheels when the Python ABI tag does not match', () => {
+    expect(isCompatibleSlideRendererWheelhouse([
+      'mcp-1.27.1-py3-none-any.whl',
+      'pydantic-2.13.4-py3-none-any.whl',
+      'pydantic_core-2.46.4-cp314-cp314-macosx_11_0_arm64.whl',
+      'rpds_py-0.30.0-cp314-cp314-macosx_11_0_arm64.whl',
+    ], 'darwin', 'arm64', 'cp311')).toBe(false);
+  });
+
+  it('accepts same-platform native wheels when the Python ABI tag matches', () => {
+    expect(isCompatibleSlideRendererWheelhouse([
+      'mcp-1.27.1-py3-none-any.whl',
+      'pydantic-2.13.4-py3-none-any.whl',
+      'pydantic_core-2.46.4-cp314-cp314-macosx_11_0_arm64.whl',
+      'rpds_py-0.30.0-cp314-cp314-macosx_11_0_arm64.whl',
+    ], 'darwin', 'arm64', 'cp314')).toBe(true);
+  });
+
+  it('rejects wheelhouses with another native dependency for a different Python ABI', () => {
+    expect(isCompatibleSlideRendererWheelhouse([
+      'mcp-1.27.1-py3-none-any.whl',
+      'pydantic-2.13.4-py3-none-any.whl',
+      'pydantic_core-2.46.4-cp311-cp311-macosx_11_0_arm64.whl',
+      'rpds_py-0.30.0-cp311-cp311-macosx_11_0_arm64.whl',
+      'cffi-2.0.0-cp314-cp314-macosx_11_0_arm64.whl',
+    ], 'darwin', 'arm64', 'cp311')).toBe(false);
   });
 
   it('rejects pure-only wheelhouses because pydantic-core needs a native wheel', () => {

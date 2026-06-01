@@ -496,8 +496,10 @@ function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
     : '';
   const agents = Array.from(new Set(
     workflowRun.nodes
-      .map((node) => node.assignedAgent || node.producerAgent || '')
-      .filter(Boolean)
+      .flatMap((node) => {
+        const agent = node.assignedAgent || node.producerAgent || '';
+        return agent ? [agent] : [];
+      })
   ));
   return {
     scopeText: workflowRun.sourceTask ? `任务：${workflowRun.sourceTask.title || workflowRun.sourceTask.id}` : '',

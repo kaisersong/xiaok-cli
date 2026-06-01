@@ -134,17 +134,17 @@ export function ProjectCard({ project }: ProjectCardProps) {
       <button type="button" onClick={() => navigate(`/projects/${project.id}`)}
         className="text-left w-full pr-16"
       >
-        <div className="flex items-start gap-2.5">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
-            <FolderKanban size={16} className="text-[var(--c-text-icon)]" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h3 className="text-[13px] font-medium text-[var(--c-text-primary)] truncate">{project.name}</h3>
-              <span className={`shrink-0 text-[10px] ${visibleStatus.color}`}>
-                <StatusIcon size={10} className="inline" /> {visibleStatus.label}
-              </span>
-            </div>
+            <div className="flex items-start gap-2.5">
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)]">
+                <FolderKanban size={16} className="text-[var(--c-text-icon)]" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-[13px] font-medium text-[var(--c-text-primary)] truncate">{project.name}</h3>
+                  <span className={`shrink-0 text-[10px] ${visibleStatus.color}`}>
+                    <StatusIcon size={10} className="inline" /> {visibleStatus.label}
+                  </span>
+                </div>
           </div>
         </div>
 

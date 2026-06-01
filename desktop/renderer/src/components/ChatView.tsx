@@ -38,16 +38,18 @@ export interface ComputerUseActionData {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'computer_use_action';
+  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'computer_use_action' | 'result_card';
   content: string;
   stage?: string;
   steps?: ToolStep[];
   stepsLive?: boolean;
   projectData?: ProjectCardData;
   computerUseAction?: ComputerUseActionData;
+  result?: TaskResult | null;
+  generatedFiles?: GeneratedFile[];
 }
 
-interface GeneratedFile {
+export interface GeneratedFile {
   filePath: string;
   name: string;
 }
@@ -195,6 +197,13 @@ export function ChatView({
                       ) : null}
                     </div>
                   </div>
+                ) : msg.role === 'result_card' ? (
+                  <ResultCard
+                    result={msg.result ?? null}
+                    generatedFiles={msg.generatedFiles ?? []}
+                    onArtifactClick={onArtifactClick}
+                    onArtifactOpenExternal={onArtifactOpenExternal}
+                  />
                 ) : (
                   <div className="max-w-[663px] text-sm text-[var(--c-text-primary)] leading-relaxed select-text">
                     <MarkdownRenderer content={msg.content} />
@@ -212,69 +221,12 @@ export function ChatView({
 
             {/* Result card + generated files */}
             {(result && (status === 'completed' || status === 'idle')) || generatedFiles.length > 0 ? (
-              <div className="rounded-xl border border-[var(--c-accent)]/30 bg-[var(--c-bg-card)] p-4">
-                {result && (
-                  <MarkdownRenderer content={result.summary} />
-                )}
-                {result?.artifacts && result.artifacts.length > 0 && (
-                  <div className="mt-3 flex flex-col gap-2">
-                    {result.artifacts.map(a => {
-                      const ext = a.title?.split('.').pop()?.toUpperCase() || 'FILE';
-                      return (
-                        <button
-                          key={a.artifactId}
-                          type="button"
-                          onClick={(e) => {
-                            const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
-                            if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
-                            else onArtifactClick?.(info);
-                          }}
-                          className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)] cursor-pointer"
-                          data-testid={`generated-file-${a.title}`}
-                        >
-                          <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
-                            {'</>'}
-                          </div>
-                          <div className="flex min-w-0 flex-1 flex-col items-start">
-                            <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{a.title}</span>
-                            <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
-                          </div>
-                          <span className="shrink-0 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)]">打开</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                {(!result?.artifacts || result.artifacts.length === 0) && generatedFiles.length > 0 && (
-                  <div className="mt-3 flex flex-col gap-2" data-testid="generated-files-list">
-                    {generatedFiles.map(f => {
-                      const ext = f.name?.split('.').pop()?.toUpperCase() || 'FILE';
-                      return (
-                        <button
-                          key={f.filePath}
-                          type="button"
-                          onClick={(e) => {
-                            const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
-                            if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
-                            else onArtifactClick?.(info);
-                          }}
-                          className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)] cursor-pointer"
-                          data-testid={`generated-file-${f.name}`}
-                        >
-                          <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
-                            {'</>'}
-                          </div>
-                          <div className="flex min-w-0 flex-1 flex-col items-start">
-                            <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{f.name}</span>
-                            <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
-                          </div>
-                          <span className="shrink-0 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)]">打开</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              <ResultCard
+                result={result}
+                generatedFiles={generatedFiles}
+                onArtifactClick={onArtifactClick}
+                onArtifactOpenExternal={onArtifactOpenExternal}
+              />
             ) : null}
 
             {/* Running indicator – always visible while task is running */}
@@ -352,6 +304,88 @@ export function ChatView({
           xiaok desktop v{__APP_VERSION__}
         </p>
       </div>
+    </div>
+  );
+}
+
+function ResultCard({
+  result,
+  generatedFiles,
+  onArtifactClick,
+  onArtifactOpenExternal,
+}: {
+  result: TaskResult | null;
+  generatedFiles: GeneratedFile[];
+  onArtifactClick?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
+  onArtifactOpenExternal?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
+}) {
+  const hasSummary = Boolean(result?.summary?.trim());
+  const hasArtifacts = Boolean(result?.artifacts && result.artifacts.length > 0);
+  if (!hasSummary && !hasArtifacts && generatedFiles.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-[var(--c-accent)]/30 bg-[var(--c-bg-card)] p-4">
+      {hasSummary && result ? (
+        <MarkdownRenderer content={result.summary} />
+      ) : null}
+      {result?.artifacts && result.artifacts.length > 0 && (
+        <div className="mt-3 flex flex-col gap-2">
+          {result.artifacts.map(a => {
+            const ext = a.title?.split('.').pop()?.toUpperCase() || 'FILE';
+            return (
+              <button
+                key={a.artifactId}
+                type="button"
+                onClick={(e) => {
+                  const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
+                  if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
+                  else onArtifactClick?.(info);
+                }}
+                className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)] cursor-pointer"
+                data-testid={`generated-file-${a.title}`}
+              >
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
+                  {'</>'}
+                </div>
+                <div className="flex min-w-0 flex-1 flex-col items-start">
+                  <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{a.title}</span>
+                  <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
+                </div>
+                <span className="shrink-0 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)]">打开</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {(!result?.artifacts || result.artifacts.length === 0) && generatedFiles.length > 0 && (
+        <div className="mt-3 flex flex-col gap-2" data-testid="generated-files-list">
+          {generatedFiles.map(f => {
+            const ext = f.name?.split('.').pop()?.toUpperCase() || 'FILE';
+            return (
+              <button
+                key={f.filePath}
+                type="button"
+                onClick={(e) => {
+                  const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
+                  if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
+                  else onArtifactClick?.(info);
+                }}
+                className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)] cursor-pointer"
+                data-testid={`generated-file-${f.name}`}
+              >
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
+                  {'</>'}
+                </div>
+                <div className="flex min-w-0 flex-1 flex-col items-start">
+                  <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{f.name}</span>
+                  <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
+                </div>
+                <span className="shrink-0 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)]">打开</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

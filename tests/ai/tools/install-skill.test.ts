@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, parse } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createInstallSkillTool } from '../../../src/ai/tools/install-skill.js';
 
@@ -46,6 +46,37 @@ Do the thing.
     expect(readFileSync(installedPath, 'utf8')).toContain('name: demo-skill');
     expect(result).toContain('已安装 skill "demo-skill"');
     expect(result).toContain(installedPath);
+  });
+
+  it('falls back to global scope when project install would target the filesystem root', async () => {
+    const cwd = parse(tmpdir()).root;
+    const configDir = createTempDir('xiaok-install-skill-config-');
+    tempDirs.push(configDir);
+
+    const tool = createInstallSkillTool({
+      cwd,
+      configDir,
+      fetchFn: async () => new Response(`---
+name: root-safe-skill
+description: Avoid root project writes
+---
+Do the thing safely.
+`, {
+        status: 200,
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+      }),
+    });
+
+    const result = await tool.execute({
+      source: 'https://example.com/skills/root-safe-skill.md',
+      scope: 'project',
+    });
+
+    const installedPath = join(configDir, 'skills', 'root-safe-skill.md');
+    expect(existsSync(installedPath)).toBe(true);
+    expect(result).toContain('范围: global');
+    expect(result).toContain('当前目录不是可用项目目录，已改用 global scope');
+    expect(result).not.toContain(join(cwd, '.xiaok', 'skills'));
   });
 
   it('converts GitHub blob URLs to raw URLs before downloading', async () => {

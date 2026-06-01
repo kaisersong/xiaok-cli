@@ -14,6 +14,34 @@ const RECONNECT_DELAY = 3000;
 const MAX_RECONNECT_DELAY = 60_000;
 const PARTICIPANT_POLL_INTERVAL = 8000;
 
+const PROJECT_REFRESH_EVENTS = new Set([
+  'project_created',
+  'project_approved',
+  'project_closed',
+  'project_deliverable',
+  'tasks_created',
+  'tasks_dispatched',
+  'task_done',
+  'task_failed',
+  'task_retry',
+  'task_update',
+  'task_reviewed',
+  'task_cancelled',
+  'task_rework',
+  'plan_submitted',
+  'plan_revised',
+  'project_continue',
+  'project_execution_mode_updated',
+  'workflow_run_started',
+  'workflow_run_updated',
+  'workflow_run_completed',
+  'workflow_progress_batch',
+]);
+
+export function shouldRefreshProjectsForEvent(type?: string | null): boolean {
+  return !!type && PROJECT_REFRESH_EVENTS.has(type);
+}
+
 // ─── Types ────────────────────────────────────────────────────────
 
 export interface KSwarmTask {
@@ -279,7 +307,7 @@ export interface ProjectFullDetail {
   tasks: KSwarmTask[];
   activities: KSwarmActivityEvent[];
   humanActions: KSwarmHumanAction[];
-  workspace: { path: string; custom?: boolean; artifacts?: string[] };
+  workspace: { path: string; custom?: boolean; artifacts?: Array<KSwarmArtifact | string> };
   plan: any | null;
   planProgress: { phases: Array<{ phaseId: string | number; total: number; done: number }>; total: number; done: number } | null;
   dispatchPlan?: {
@@ -804,14 +832,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   function handleWsMessage(msg: KSwarmEvent) {
     setLastEvent(msg);
 
-    // Refresh project list on relevant events
-    const refreshEvents = [
-      'project_created', 'project_approved', 'project_closed', 'project_deliverable',
-      'tasks_created', 'tasks_dispatched', 'task_done', 'task_failed', 'task_retry',
-      'task_update', 'task_reviewed', 'task_cancelled', 'task_rework',
-      'plan_submitted', 'plan_revised', 'project_continue', 'project_execution_mode_updated',
-    ];
-    if (msg.type && refreshEvents.includes(msg.type)) {
+    if (shouldRefreshProjectsForEvent(msg.type)) {
       fetchProjects();
     }
     if (msg.type === 'agent_created' || msg.type === 'agent_updated' || msg.type === 'agent_archived' || msg.type === 'agent_started' || msg.type === 'agent_stopped') {

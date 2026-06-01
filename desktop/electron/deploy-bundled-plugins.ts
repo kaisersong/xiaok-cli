@@ -12,7 +12,7 @@ import { getConfigDir } from '../../src/utils/config.js';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { ensureSlideRendererPythonReady, isCompatibleSlideRendererWheelhouse } from './python-runtime.js';
+import { detectPythonCompatibilityTag, ensureSlideRendererPythonReady, isCompatibleSlideRendererWheelhouse } from './python-runtime.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -119,12 +119,16 @@ export function ensureReportRendererCssCompat(pluginDir: string): void {
   cpSync(themedCssDir, legacyCssDir, { recursive: true });
 }
 
-export function ensureSlideRendererWheelhouseCompat(pluginDir: string, bundledPluginDir: string): void {
+export function ensureSlideRendererWheelhouseCompat(
+  pluginDir: string,
+  bundledPluginDir: string,
+  pythonTag?: string,
+): void {
   const bundledWheelsDir = join(bundledPluginDir, 'bundled-wheels');
   if (!existsSync(bundledWheelsDir)) return;
 
   const bundledWheelNames = readdirSync(bundledWheelsDir);
-  if (!isCompatibleSlideRendererWheelhouse(bundledWheelNames, process.platform, process.arch)) {
+  if (!isCompatibleSlideRendererWheelhouse(bundledWheelNames, process.platform, process.arch, pythonTag)) {
     return;
   }
 
@@ -165,6 +169,7 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
   const result: DeployResult = { deployed: [], pythonAvailable: false, venvReady: false };
   const pluginsDir = getConfigDir('plugins');
   mkdirSync(pluginsDir, { recursive: true });
+  const slideWheelhouseCompatTargets: Array<{ dest: string; src: string }> = [];
 
   const bundledDir = resolveBundledPluginsDir();
 
@@ -194,7 +199,7 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
             ensureReportRendererCssCompat(dest);
           }
           if (name === 'kai-slide-creator') {
-            ensureSlideRendererWheelhouseCompat(dest, src);
+            slideWheelhouseCompatTargets.push({ dest, src });
           }
           continue;
         }
@@ -208,7 +213,7 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
       ensureReportRendererCssCompat(dest);
     }
     if (name === 'kai-slide-creator') {
-      ensureSlideRendererWheelhouseCompat(dest, src);
+      slideWheelhouseCompatTargets.push({ dest, src });
     }
     // Mark as bundled-managed
     try {
@@ -242,6 +247,11 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
   }
 
   if (existsSync(venvPython)) {
+    const pythonTag = await detectPythonCompatibilityTag(venvPython);
+    for (const target of slideWheelhouseCompatTargets) {
+      ensureSlideRendererWheelhouseCompat(target.dest, target.src, pythonTag ?? undefined);
+    }
+
     // Install from bundled wheels (no network), then fall back to online pip
     // only if the environment is not already usable.
     const wheelsDir = app.isPackaged
@@ -251,6 +261,7 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
       readdirSync(wheelsDir),
       process.platform,
       process.arch,
+      pythonTag ?? undefined,
     );
     result.bundledWheelsUsable = wheelsUsable;
 
