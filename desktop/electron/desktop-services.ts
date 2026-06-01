@@ -13,13 +13,14 @@ import type { MaterialRecord, MaterialRole, TaskCreateContext, TaskSnapshot, Tas
 import { diagnoseTraceBundle } from '../../src/runtime/diagnostics/diagnoser.js';
 import { diagnoseProjectSnapshot } from '../../src/runtime/diagnostics/project-diagnoser.js';
 import type { DiagnosisReport } from '../../src/runtime/diagnostics/types.js';
+import { extractMaterialText } from '../../src/runtime/materials/text-extractor.js';
 import {
   buildProjectTraceBundleFromKSwarmDetail,
   buildSessionTraceBundleFromSnapshots,
   loadTaskSnapshotsForSession,
   writeTraceBundleToPath,
 } from '../../src/runtime/trace/exporter.js';
-import type { Config, Message, MessageBlock, StreamChunk, ToolCall } from '../../src/types.js';
+import type { Config, Message, MessageBlock, StreamChunk, ToolCall, ToolDefinition } from '../../src/types.js';
 import { buildToolList, ToolRegistry } from '../../src/ai/tools/index.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
@@ -949,7 +950,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
     snapshotStore,
-    runner: options.runner ?? createDesktopModelRunnerWithRegistry(registry, tools, options.dataRoot, options.kswarmService),
+    runner: options.runner ?? createDesktopModelRunnerWithRegistry(registry, tools, options.dataRoot, options.kswarmService, materialRegistry),
     now: options.now,
     aheGuards: { artifactEvidence: true, recoveryContinuity: true },
     // Use timestamp + random suffix to ensure unique taskId/sessionId across app restarts
@@ -964,7 +965,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return new InProcessTaskRuntimeHost({
       materialRegistry,
       snapshotStore,
-      runner: createDesktopModelRunnerWithRegistry(scopedRegistry, scopedTools, options.dataRoot, options.kswarmService),
+      runner: createDesktopModelRunnerWithRegistry(scopedRegistry, scopedTools, options.dataRoot, options.kswarmService, materialRegistry),
       now: options.now,
       aheGuards: { artifactEvidence: true, recoveryContinuity: true },
       createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -2925,14 +2926,14 @@ xiaok 支持从 ClawHub 安装技能。当用户说"安装XX技能"时：
 ## 关于用户上传的附件
 
 当用户消息提到"附件"、"文档"、"上传的文档"、"上传的文件"时，指的是用户通过 Plus 按钮上传的文件。
-这些文件会被自动导入到工作目录，你可以通过以下方式访问：
-1. 先用 Glob 工具查找工作目录下的文件（如 materials 目录）
-2. 用 Read 工具读取具体文件内容
-3. 如果是图片文件（.png/.jpg），可以用 Bash 打开查看
+这些文件会被自动导入到任务材料库，当前消息会列出每个文件的 materialId、文件名、格式和解析状态。
+读取附件必须使用 read_material 工具，并传入对应的 materialId。
+不要用 Glob、Read、Bash 或临时脚本去重新寻找、复制或解析同一个上传附件。
+如果 read_material 返回 unsupported 或 failed，应明确告诉用户哪个文件暂时无法直接读取，以及原因。
 
 用户上传文件后，消息中会显示"附件: 文件名"的提示。你应该：
 1. 确认收到附件
-2. 读取附件内容进行分析
+2. 在需要文件内容时调用 read_material
 3. 基于附件内容回答问题或执行任务
 
 ## Slash 命令（技能调用）注意事项
@@ -2995,6 +2996,7 @@ function toolNameToLabel(name: string, input?: Record<string, unknown>): string 
       const fname = fp?.split('/').pop() || '';
       return fname ? `读取 ${fname}` : '读取文件';
     }
+    case 'read_material': return '读取附件';
     case 'Edit': return '编辑文件';
     case 'bash': return '执行命令';
     case 'Glob': return '搜索文件';
@@ -3025,24 +3027,198 @@ function getPluginSkillRoots(): string[] {
   return roots;
 }
 
-function isTextLikeMaterial(material: MaterialRecord): boolean {
-  const mimeType = material.mimeType.toLowerCase();
-  const extension = extname(material.workspacePath).toLowerCase();
-  return mimeType.startsWith('text/')
-    || mimeType === 'application/json'
-    || ['.txt', '.md', '.json', '.csv', '.html', '.svg'].includes(extension);
-}
+const DEFAULT_READ_MATERIAL_MAX_CHARS = 50_000;
 
-function readMaterialTextForPrompt(material: MaterialRecord): string {
-  const readablePath = material.extractedTextPath
-    || (isTextLikeMaterial(material) ? material.workspacePath : undefined);
-  if (!readablePath) {
-    throw new Error(`material format is not directly text-readable: ${material.mimeType}`);
+export const READ_MATERIAL_TOOL_DEFINITION: ToolDefinition = {
+  name: 'read_material',
+  description: '读取用户通过附件上传的材料。必须使用 materialId，不要用本地路径、glob 或 shell 脚本查找附件。若正文不可提取，也会返回文件名、类型、大小等元数据。',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      materialId: { type: 'string', description: '当前用户消息中列出的附件 materialId，例如 mat_0001' },
+      maxChars: { type: 'number', description: '可选，返回内容的最大字符数，默认 50000' },
+    },
+    required: ['materialId'],
+  },
+};
+
+export function buildMaterialManifestForPrompt(materials: MaterialRecord[]): string {
+  if (materials.length === 0) return '';
+  const lines = [
+    '',
+    '',
+    '## 用户上传的文件',
+    '',
+    '以下文件已导入任务材料库。如果用户只问文件名、格式、大小等元数据，请直接根据清单回答；需要读取正文时，请调用 read_material，并传入对应 materialId。不要用 glob、read、bash 或脚本重新查找附件。',
+    '',
+  ];
+  for (const material of materials) {
+    const ext = extname(material.originalName || material.workspacePath).toLowerCase() || 'unknown';
+    const status = material.parseStatus || 'pending';
+    const summary = material.parseSummary ? `, ${material.parseSummary}` : '';
+    lines.push(`- materialId: ${material.materialId}; 文件: ${material.originalName}; 格式: ${ext}; MIME: ${material.mimeType}; 大小: ${material.sizeBytes} bytes (${formatMaterialSize(material.sizeBytes)}); 状态: ${status}${summary}`);
   }
-  return readFileSync(readablePath, 'utf-8');
+  return lines.join('\n');
 }
 
-function createDesktopModelRunner(dataRoot: string): TaskRunner {
+export async function executeReadMaterialForDesktop(
+  input: Record<string, unknown>,
+  options: {
+    taskId: string;
+    materials: MaterialRecord[];
+    materialRegistry?: MaterialRegistry;
+    maxChars?: number;
+  },
+): Promise<{ ok: boolean; result: string }> {
+  const materialId = typeof input.materialId === 'string' ? input.materialId.trim() : '';
+  const maxChars = normalizeReadMaterialLimit(input.maxChars, options.maxChars);
+  if (!materialId) {
+    return createReadMaterialResult(false, {
+      ok: false,
+      error: 'invalid_input',
+      message: 'read_material 需要 materialId。',
+    });
+  }
+
+  const material = options.materials.find((item) => item.materialId === materialId);
+  if (!material) {
+    return createReadMaterialResult(false, {
+      ok: false,
+      error: 'material_not_attached',
+      materialId,
+      message: '该 materialId 不属于当前任务，无法读取。',
+    });
+  }
+  if (!options.materialRegistry) {
+    return createReadMaterialResult(false, {
+      ok: false,
+      error: 'material_tool_unavailable',
+      materialId,
+      originalName: material.originalName,
+      mimeType: material.mimeType,
+      sizeBytes: material.sizeBytes,
+      message: '当前运行器没有可用的材料注册表，无法读取附件。',
+    });
+  }
+
+  if (material.extractedTextPath && existsSync(material.extractedTextPath)) {
+    const cached = truncateMaterialText(readFileSync(material.extractedTextPath, 'utf8'), maxChars);
+    return createReadMaterialResult(true, {
+      ok: true,
+      ...buildReadMaterialMetadata(material),
+      parseStatus: 'parsed',
+      cached: true,
+      content: cached,
+    });
+  }
+
+  const extraction = await extractMaterialText({
+    workspacePath: material.workspacePath,
+    mimeType: material.mimeType,
+    maxChars,
+  });
+  if (extraction.parseStatus === 'parsed' && extraction.text) {
+    const extractedTextPath = join(dirname(material.workspacePath), `${material.materialId}.txt`);
+    writeFileSync(extractedTextPath, extraction.text, 'utf8');
+    await options.materialRegistry.updateMaterialExtraction(material.materialId, {
+      extractedTextPath,
+      parseStatus: 'parsed',
+      parseSummary: extraction.parseSummary,
+    });
+    return createReadMaterialResult(true, {
+      ok: true,
+      ...buildReadMaterialMetadata(material),
+      parseStatus: 'parsed',
+      parseSummary: extraction.parseSummary,
+      content: extraction.text,
+    });
+  }
+
+  await options.materialRegistry.updateMaterialExtraction(material.materialId, {
+    parseStatus: extraction.parseStatus,
+    parseSummary: extraction.parseSummary,
+    errorMessage: extraction.errorMessage,
+  });
+  if (extraction.parseStatus === 'unsupported') {
+    return createReadMaterialResult(true, {
+      ok: true,
+      ...buildReadMaterialMetadata(material),
+      parseStatus: 'unsupported',
+      parseSummary: extraction.parseSummary,
+      contentAvailable: false,
+      message: extraction.errorMessage ?? '该附件格式暂不支持直接提取正文；文件名、类型、大小等元数据仍可用于回答元数据问题。',
+    });
+  }
+  return createReadMaterialResult(false, {
+    ok: false,
+    error: 'material_read_failed',
+    ...buildReadMaterialMetadata(material),
+    parseStatus: extraction.parseStatus,
+    contentAvailable: false,
+    message: extraction.errorMessage ?? '附件读取失败。',
+  });
+}
+
+async function executeDesktopTaskTool(
+  toolCall: ToolCall,
+  options: {
+    registry: ToolRegistry;
+    taskId: string;
+    materials: MaterialRecord[];
+    materialRegistry?: MaterialRegistry;
+  },
+): Promise<{ ok: boolean; result: string }> {
+  if (toolCall.name === 'read_material') {
+    return executeReadMaterialForDesktop(toolCall.input, {
+      taskId: options.taskId,
+      materials: options.materials,
+      materialRegistry: options.materialRegistry,
+    });
+  }
+  const result = await options.registry.executeTool(toolCall.name, toolCall.input);
+  return { ok: !result.startsWith('Error'), result };
+}
+
+function normalizeReadMaterialLimit(inputLimit: unknown, fallback?: number): number {
+  const raw = typeof inputLimit === 'number' && Number.isFinite(inputLimit)
+    ? inputLimit
+    : fallback ?? DEFAULT_READ_MATERIAL_MAX_CHARS;
+  return Math.max(1_000, Math.min(100_000, Math.floor(raw)));
+}
+
+function truncateMaterialText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n...[截断，原文件 ${text.length} 字符]`;
+}
+
+function buildReadMaterialMetadata(material: MaterialRecord): Record<string, unknown> {
+  return {
+    materialId: material.materialId,
+    originalName: material.originalName,
+    mimeType: material.mimeType,
+    sizeBytes: material.sizeBytes,
+  };
+}
+
+function formatMaterialSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return `${bytes} B`;
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const digits = value < 10 ? 2 : 1;
+  return `${value.toFixed(digits)} ${units[unitIndex]}`;
+}
+
+function createReadMaterialResult(ok: boolean, payload: Record<string, unknown>): { ok: boolean; result: string } {
+  return { ok, result: JSON.stringify(payload, null, 2) };
+}
+
+function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialRegistry): TaskRunner {
   const cwd = process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
   let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
@@ -3114,7 +3290,7 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
     registry.registerTool(tool);
   }
 
-  return async ({ sessionId, prompt, materials, signal, history: hostHistory, emitRuntimeEvent }) => {
+  return async ({ taskId, sessionId, prompt, materials, signal, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
@@ -3166,34 +3342,9 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
     const bundleTool = createSkillBundleRefsTool(skillCatalog);
     registry.registerTool(bundleTool);
 
-    // Build prompt with materials context - include file contents directly
-    let materialsContext = '';
-    let fileContentBlocks: MessageBlock[] = [];
-    if (materials && materials.length > 0) {
-      materialsContext = '\n\n## 用户上传的文件\n\n';
-      for (const m of materials) {
-        // Read file content directly and include in message
-        try {
-          const content = readMaterialTextForPrompt(m);
-          const ext = extname(m.workspacePath).toLowerCase();
-
-          // Truncate very large files
-          const maxLen = 50000;
-          const truncated = content.length > maxLen
-            ? content.slice(0, maxLen) + `\n...[截断，原文件 ${content.length} 字符]`
-            : content;
-
-          materialsContext += `- 文件: ${m.originalName} (${ext}, ${content.length} 字符)\n`;
-          fileContentBlocks.push({
-            type: 'text',
-            text: `\n### ${m.originalName}\n\n${truncated}`,
-          });
-        } catch (e) {
-          materialsContext += `- 文件: ${m.originalName} (读取失败)\n`;
-        }
-      }
-      materialsContext += '\n以下是各文件的具体内容（已由 xiaok desktop 预处理并注入上下文，不要再用 shell 脚本重新读取同一上传文件）：\n';
-    }
+    const materialsContext = materials && materials.length > 0
+      ? buildMaterialManifestForPrompt(materials)
+      : '';
 
     const config = await loadConfig();
     const adapter = createAdapter(config);
@@ -3217,11 +3368,11 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
     const userText = materialsContext
       ? `${effectivePrompt}${materialsContext}`
       : effectivePrompt;
-    const allToolDefs = registry.getToolDefinitions();
-    // Include file content blocks directly in user message
+    const allToolDefs = materials && materials.length > 0 && materialRegistry
+      ? [...registry.getToolDefinitions(), READ_MATERIAL_TOOL_DEFINITION]
+      : registry.getToolDefinitions();
     const userContent: MessageBlock[] = [
       { type: 'text', text: userText },
-      ...fileContentBlocks,
     ];
     const messages: Message[] = [
       ...hostHistory.map((h): Message => ({ role: h.role, content: [{ type: 'text', text: h.content }] })),
@@ -3370,8 +3521,12 @@ function createDesktopModelRunner(dataRoot: string): TaskRunner {
             }
           } catch { /* non-critical */ }
         }
-        let result = await registry.executeTool(toolCall.name, toolCall.input);
-        const ok = !result.startsWith('Error');
+        let { ok, result } = await executeDesktopTaskTool(toolCall, {
+          registry,
+          taskId,
+          materials,
+          materialRegistry,
+        });
         if (ok) {
           emitRuntimeEvent({ type: 'post_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
         } else {
@@ -4144,7 +4299,13 @@ export function createKSwarmRepairProjectTaskTool(_kswarmService: KSwarmService)
   };
 }
 
-function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Tool[], dataRoot: string, kswarmService: KSwarmService): TaskRunner {
+function createDesktopModelRunnerWithRegistry(
+  registry: ToolRegistry,
+  tools: Tool[],
+  dataRoot: string,
+  kswarmService: KSwarmService,
+  materialRegistry: MaterialRegistry,
+): TaskRunner {
   const cwd = process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
   let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
@@ -4209,7 +4370,7 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
     registry.registerTool(tool);
   }
 
-  return async ({ sessionId, prompt, materials, signal, history: hostHistory, emitRuntimeEvent }) => {
+  return async ({ taskId, sessionId, prompt, materials, signal, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
@@ -4261,34 +4422,9 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
     const bundleTool = createSkillBundleRefsTool(skillCatalog);
     registry.registerTool(bundleTool);
 
-    // Build prompt with materials context - include file contents directly
-    let materialsContext = '';
-    let fileContentBlocks: MessageBlock[] = [];
-    if (materials && materials.length > 0) {
-      materialsContext = '\n\n## 用户上传的文件\n\n';
-      for (const m of materials) {
-        // Read file content directly and include in message
-        try {
-          const content = readMaterialTextForPrompt(m);
-          const ext = extname(m.workspacePath).toLowerCase();
-
-          // Truncate very large files
-          const maxLen = 50000;
-          const truncated = content.length > maxLen
-            ? content.slice(0, maxLen) + `\n...[截断，原文件 ${content.length} 字符]`
-            : content;
-
-          materialsContext += `- 文件: ${m.originalName} (${ext}, ${content.length} 字符)\n`;
-          fileContentBlocks.push({
-            type: 'text',
-            text: `\n### ${m.originalName}\n\n${truncated}`,
-          });
-        } catch (e) {
-          materialsContext += `- 文件: ${m.originalName} (读取失败)\n`;
-        }
-      }
-      materialsContext += '\n以下是各文件的具体内容（已由 xiaok desktop 预处理并注入上下文，不要再用 shell 脚本重新读取同一上传文件）：\n';
-    }
+    const materialsContext = materials && materials.length > 0
+      ? buildMaterialManifestForPrompt(materials)
+      : '';
 
     const config = await loadConfig();
     const adapter = createAdapter(config);
@@ -4312,11 +4448,11 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
     const userText = materialsContext
       ? `${effectivePrompt}${materialsContext}`
       : effectivePrompt;
-    const allToolDefs = registry.getToolDefinitions();
-    // Include file content blocks directly in user message
+    const allToolDefs = materials && materials.length > 0
+      ? [...registry.getToolDefinitions(), READ_MATERIAL_TOOL_DEFINITION]
+      : registry.getToolDefinitions();
     const userContent: MessageBlock[] = [
       { type: 'text', text: userText },
-      ...fileContentBlocks,
     ];
     const messages: Message[] = [
       ...hostHistory.map((h): Message => ({ role: h.role, content: [{ type: 'text', text: h.content }] })),
@@ -4432,8 +4568,12 @@ function createDesktopModelRunnerWithRegistry(registry: ToolRegistry, tools: Too
             }
           } catch { /* non-critical */ }
         }
-        let result = await registry.executeTool(toolCall.name, toolCall.input);
-        const ok = !result.startsWith('Error');
+        let { ok, result } = await executeDesktopTaskTool(toolCall, {
+          registry,
+          taskId,
+          materials,
+          materialRegistry,
+        });
         if (ok) {
           emitRuntimeEvent({ type: 'post_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: toolCall.input, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
         } else {

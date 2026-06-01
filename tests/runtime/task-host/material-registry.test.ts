@@ -107,7 +107,7 @@ describe('MaterialRegistry', () => {
     ]);
   });
 
-  it('extracts readable text from imported docx materials', async () => {
+  it('keeps imported docx materials pending until a task explicitly reads them', async () => {
     const sourcePath = join(sourceDir, '董事会评审报告.docx');
     writeFileSync(sourcePath, createMinimalDocx([
       '这是一份董事会评审报告。',
@@ -129,13 +129,32 @@ describe('MaterialRegistry', () => {
     expect(record).toMatchObject({
       originalName: '董事会评审报告.docx',
       mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      parseStatus: 'parsed',
+      parseStatus: 'pending',
     });
-    expect(record.extractedTextPath).toBeTruthy();
-    expect(existsSync(record.extractedTextPath!)).toBe(true);
-    const extracted = readFileSync(record.extractedTextPath!, 'utf8');
-    expect(extracted).toContain('董事会评审报告');
-    expect(extracted).toContain('对抗性评审');
+    expect(record.extractedTextPath).toBeUndefined();
+
+    const extractedTextPath = join(workspaceRoot, 'task_docx', 'materials', `${record.materialId}.txt`);
+    writeFileSync(extractedTextPath, '这是一份董事会评审报告。');
+    const updated = await registry.updateMaterialExtraction(record.materialId, {
+      extractedTextPath,
+      parseStatus: 'parsed',
+      parseSummary: '已解析 Word 文档，提取 12 字符',
+    });
+    expect(updated).toMatchObject({
+      materialId: record.materialId,
+      parseStatus: 'parsed',
+      parseSummary: '已解析 Word 文档，提取 12 字符',
+      extractedTextPath,
+    });
+
+    const reloaded = new MaterialRegistry({
+      workspaceRoot,
+      maxBytes: 1024 * 1024,
+    });
+    expect(reloaded.get(record.materialId)).toMatchObject({
+      parseStatus: 'parsed',
+      extractedTextPath,
+    });
   });
 
   it('rejects unsupported, oversized, and unsafe source files', async () => {
