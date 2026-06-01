@@ -23,7 +23,7 @@ import { createHooksRunner } from '../runtime/hooks-runner.js';
 import type { RuntimeEvent } from '../runtime/events.js';
 import { createIntentBoundaryResolver } from '../ai/intent-delegation/boundary-resolver.js';
 import { classifyBoundaryWithLlm, createAdapterBoundaryInvoker } from '../ai/intent-delegation/llm-boundary-classifier.js';
-import { writeError, isTTY } from '../utils/ui.js';
+import { writeError, formatErrorText, isTTY } from '../utils/ui.js';
 import { showPermissionPrompt } from '../ui/permission-prompt.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
 import { loadSettings, mergeRules } from '../ai/permissions/settings.js';
@@ -1078,9 +1078,21 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
 
   const handleTurnFailure = (error: unknown): void => {
+    clearLongThinkingTimer();
+    endStreamingPhaseForInterrupt();
     runtimeState.markInputReady();
     resetTurnChrome();
-    writeError(String(error));
+    const errorText = `\x1b[31mError:\x1b[0m ${formatErrorText(String(error))}`;
+    if (scrollRegion.isActive() && !terminalUiSuspended) {
+      try {
+        scrollRegion.writeAtContentCursor(errorText + '\n');
+      } catch (uiError) {
+        suspendInteractiveUi('handle_turn_failure', uiError);
+        writeError(String(error));
+      }
+    } else {
+      writeError(String(error));
+    }
     renderFooterChrome();
   };
 
