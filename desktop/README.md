@@ -4,12 +4,13 @@ Native desktop surface for xiaok task delivery, scheduled automation, and KSwarm
 
 ## Current Release Focus
 
-v1.3.9 focuses on making KSwarm dynamic workflow visible and usable from project tasks:
+v1.3.12 focuses on making KSwarm dynamic workflow script orchestration parallel, durable, and visible from project detail:
 
-- Project task cards can create a task-scoped `po-generated-task-workflow` proposal. The proposal shows source task, budget hard caps, permissions, phases, and acceptance rubric before any agent is dispatched.
-- Project-level workflows still live in the tab row as one "Run Workflow" menu. The project tab remains "Logs" because it contains both Swarm and Workflow activity.
-- Workflow run details show hard budget limits, last material progress, blocking failures, run-internal stored node results, and recovery mode.
-- The PO-generated path uses validated workflow IR. Desktop and KSwarm do not execute raw JavaScript or arbitrary user workflow scripts in this release.
+- Trusted model-authored dynamic workflow scripts can create phases, call `agent(...)`, and use thunk-based `parallel([() => agent(...), ...])` for branch fan-out.
+- `parallel()` creates a durable KSwarm `parallelGroup` before dispatching branch nodes. Branches carry fan-out labels, required/schema/evidence metadata, and script checkpoints for snapshot-based observability.
+- The conversation tool supports `previewOnly` so an assistant can show a workflow preview before starting the run. Confirmed runs start in a background job and return `workflowRunId` immediately.
+- Project workflow details show parallel groups, branch completion counts, failure policy, branch labels, script checkpoints, blocking failures, and gate status from KSwarm snapshots.
+- This is not yet a full user-authored workflow platform. Cross-process script job recovery, advanced failure policies, professional workflow templates, and quality evals remain staged follow-up work.
 - Desktop release packaging must include the matching `kswarm`, `intent-broker`, and `kai-xiaok-plugins` sibling repositories.
 
 Troubleshooting:

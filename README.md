@@ -19,6 +19,16 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.3.12:**
+
+- **Parallel Dynamic Workflow Scripts**: Xiaok Desktop now supports the first parallel dynamic workflow script path. Trusted workflow scripts can use `parallel([() => agent(...), ...])` to fan out independent agent branches while keeping orchestration outside the main conversation.
+- **Durable KSwarm Parallel State**: `parallel()` no longer exists only as an in-memory `Promise.all`. KSwarm persists `parallelGroups`, branch node metadata, and `scriptCheckpoints`, so project detail, logs, and API snapshots can explain which branches ran and how they completed.
+- **Conversation Preview Before Run**: The `run_dynamic_workflow_script` tool now supports `previewOnly`, allowing the assistant to generate a workflow preview for user confirmation before starting the run. Confirmed runs start in the background and immediately return a `workflowRunId`.
+- **Workflow Status Visibility**: Project workflow details now show parallel groups, branch completion counts, failure policy, branch labels, and script checkpoint progress from KSwarm snapshots instead of inferring state from the chat transcript.
+- **Focused Test and E2E Coverage**: The release covers parser rejection for eager parallel calls, runtime branch annotation, KSwarm parallel group persistence, HTTP contract routing, background tool startup, and an end-to-end dynamic workflow script that completes through KSwarm and the desktop runtime bridge.
+
+This is a foundation release for dynamic workflow orchestration, not a full user-authored workflow platform yet. Script job recovery across app restarts, advanced failure policies, professional workflow templates, and quality evals remain staged follow-up work.
+
 **What's New in v1.3.11:**
 
 - **Basic Dynamic Workflow Script Runtime**: Xiaok Desktop can now run a trusted dynamic workflow script through KSwarm, Intent Broker, and the Desktop agent runtime bridge. The script can create phases, fan out `agent(...)` calls, collect node outputs, and complete a durable `script_generated` workflow run
@@ -141,7 +151,7 @@ xiaok Desktop includes KSwarm project delivery for work that needs planning, par
 
 ### Basic Dynamic Workflow
 
-v1.3.10 expands the basic dynamic workflow capability on top of KSwarm projects. This is not yet a general user-authored workflow builder, but it is a real durable workflow runtime slice:
+v1.3.12 expands the basic dynamic workflow capability on top of KSwarm projects. This is not yet a general user-authored workflow builder, but it is a real durable workflow runtime slice:
 
 - **Durable workflow runs**: KSwarm records workflow runs with phases, nodes, status, progress, gate decisions, and timestamps so Desktop can refresh, resume display, and audit what happened.
 - **Quick diagnosis workflow**: a built-in control workflow inspects project state, blockers, dispatchable tasks, and recommended next actions without calling an agent.
@@ -149,6 +159,9 @@ v1.3.10 expands the basic dynamic workflow capability on top of KSwarm projects.
 - **Project-level High Quality workflow**: High Quality project execution creates a single `po-generated-project-workflow` run at project scope. The workflow owns task dispatch, review gates, and final deliverable submission instead of fragmenting the project into unrelated task-level workflows.
 - **Task-level manual workflow execution**: task cards can still open a `po-generated-task-workflow` proposal for the selected task when the user explicitly wants to re-run or inspect one task. The proposal is task-scoped, budgeted, permission-bounded, and requires confirmation before dispatch.
 - **Controlled PO-generated proposals**: KSwarm can generate a validated workflow IR from project/task context. The current version is a controlled template that proves the proposal and approval path; it does not execute raw model-authored JavaScript or arbitrary user scripts.
+- **Controlled dynamic script execution**: trusted model-authored workflow scripts can run through a restricted desktop runtime. Scripts can create phases, call `agent(...)`, use thunk-based `parallel(...)`, return terminal results, or block the run with a structured reason.
+- **Durable parallel orchestration**: parallel script branches are persisted as KSwarm `parallelGroups`, with branch node identity, fan-out labels, required/schema/evidence metadata, and script checkpoints. Xiaok can show parallel progress without relying on chat transcript state.
+- **Conversation-first preview**: the dynamic script tool can return a `previewOnly` workflow plan before starting a run. After confirmation, the run starts in the background and returns a `workflowRunId` for snapshot-based status checks.
 - **Artifact-first delivery gates**: completed workflow tasks must submit readable in-workspace files or valid artifact references. Finalization rebuilds evidence from those files and blocks delivery when artifacts are missing, unreadable, outside the workspace, or only textual summaries.
 - **Budget, cache, recovery, and progress UI**: workflow details show hard budget caps, last material progress, blocking failures, run-internal stored node results, and the recovery mode for resumable runs.
 - **Clear UI semantics**: the right-side action is now one "Run Workflow" menu, while the project tab remains "Logs" because it contains both Swarm and Workflow activity.
