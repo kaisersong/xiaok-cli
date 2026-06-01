@@ -10,6 +10,10 @@ import {
   isAllowedShellExternalUrl,
   resolveLocalFileOpenPath,
 } from './security.js';
+import {
+  findIntentBrokerProtocolUrl,
+  registerIntentBrokerProtocolClient,
+} from './intent-broker-protocol.js';
 import { resolveDesktopDockIconPath, resolveDesktopWindowIconPath } from './window-icon.js';
 import {
   attachCloseToMinimize,
@@ -406,6 +410,18 @@ if (!singleInstanceLock) {
 } else {
   app.whenReady().then(async () => {
     debugMain('app:whenReady');
+    const protocolRegistered = registerIntentBrokerProtocolClient(app, {
+      platform: process.platform,
+      execPath: process.execPath,
+    });
+    debugMain('intent-broker-protocol:registration', {
+      platform: process.platform,
+      registered: protocolRegistered,
+    });
+    const launchProtocolUrl = findIntentBrokerProtocolUrl(process.argv);
+    if (launchProtocolUrl) {
+      debugMain('intent-broker-protocol:launch', { url: launchProtocolUrl });
+    }
     if (process.platform === 'darwin') {
       app.setName('xiaok');
       const iconPath = resolveDesktopDockIconPath(__dirname, process.resourcesPath, process.platform);
@@ -417,8 +433,9 @@ if (!singleInstanceLock) {
   }).catch((error) => {
     console.error('[main] whenReady failed:', error);
   });
-  app.on('second-instance', () => {
-    debugMain('app:second-instance');
+  app.on('second-instance', (_event, commandLine) => {
+    const protocolUrl = findIntentBrokerProtocolUrl(commandLine);
+    debugMain('app:second-instance', protocolUrl ? { protocolUrl } : undefined);
     restoreOrCreateWindow();
   });
   app.on('before-quit', () => {

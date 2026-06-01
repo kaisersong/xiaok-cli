@@ -2,6 +2,12 @@
   "appId": "com.xiaok.desktop",
   "productName": "xiaok",
   "npmRebuild": false,
+  "protocols": [
+    {
+      "name": "xiaok intent-broker protocol",
+      "schemes": ["intent-broker"]
+    }
+  ],
   "directories": {
     "output": "release"
   },
