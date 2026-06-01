@@ -7,6 +7,7 @@ export type AgentRuntimeEvent =
   | { type: 'tool_finished'; runId: string; toolName: string; ok: boolean }
   | { type: 'usage_updated'; runId: string; usage: UsageStats }
   | { type: 'compact_triggered'; runId: string; summary: string; compactionId?: string }
+  | { type: 'compact_failed'; runId: string; error: string }
   | {
       type: 'guard_evaluated';
       runId: string;

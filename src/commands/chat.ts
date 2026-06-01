@@ -867,12 +867,34 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   let turnVisibleAssistantTextSeen = false;
   let turnThinkingOnlyToolNoticeWritten = false;
   let thinkingOnlyToolNoticeTimer: NodeJS.Timeout | null = null;
+  let longThinkingTimer: NodeJS.Timeout | null = null;
+  let turnStartedAt = 0;
+  const LONG_THINKING_THRESHOLD_MS = 10_000;
+  const clearLongThinkingTimer = (): void => {
+    if (longThinkingTimer) {
+      clearInterval(longThinkingTimer);
+      longThinkingTimer = null;
+    }
+  };
+  const startLongThinkingTimer = (): void => {
+    clearLongThinkingTimer();
+    turnStartedAt = Date.now();
+    longThinkingTimer = setInterval(() => {
+      if (turnVisibleAssistantTextSeen) {
+        clearLongThinkingTimer();
+        return;
+      }
+      const elapsed = Math.round((Date.now() - turnStartedAt) / 1000);
+      beginActivity(`Thinking (${elapsed}s)`);
+    }, LONG_THINKING_THRESHOLD_MS);
+  };
   const resetStreamingSegment = (): void => {
     streamingSegmentText = '';
   };
   const noteVisibleAssistantText = (delta: string): void => {
     if (/\S/.test(delta)) {
       turnVisibleAssistantTextSeen = true;
+      clearLongThinkingTimer();
     }
   };
   const flushStreamingMarkdown = (): void => {
@@ -2403,6 +2425,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       clearTimeout(thinkingOnlyToolNoticeTimer);
       thinkingOnlyToolNoticeTimer = null;
     }
+    startLongThinkingTimer();
     runtimeState.beginTurn('Thinking');
     if (!terminalUiSuspended) {
       scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
@@ -2503,6 +2526,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
 
   runtimeHooks.on('turn_completed', () => {
+    clearLongThinkingTimer();
     stashQueuedInputIfAny();
     toolExplorer.reset();
     if (currentTurnIntentPlan?.stages.length) {
@@ -2520,6 +2544,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
 
   runtimeHooks.on('turn_failed', () => {
+    clearLongThinkingTimer();
     completedTurnIntentSummaryLine = '';
     runtimeState.markInputReady();
     resetTurnChrome();
@@ -2527,6 +2552,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
 
   runtimeHooks.on('turn_aborted', () => {
+    clearLongThinkingTimer();
     completedTurnIntentSummaryLine = '';
     runtimeState.markInputReady();
     resetTurnChrome();
@@ -2540,6 +2566,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     turnLayout.noteProgressNote();
     pauseActivity();
     writeProgressTranscriptNote('⚠ 上下文已压缩，保留最近对话');
+  });
+
+  runtimeHooks.on('compact_failed', (e) => {
+    log.warn('compact_failed', { error: (e as any)?.error });
+    writeProgressTranscriptNote(`⚠ 上下文压缩失败: ${(e as any)?.error ?? '未知错误'}`);
   });
 
   // 处理终端窗口大小调整
