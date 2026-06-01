@@ -5,7 +5,7 @@
  * 1. ~/.xiaok/settings.json (user-level)
  * 2. Plugin manifests (project/user-level)
  *
- * 合并策略：plugin 覆盖 settings 的同名 server
+ * 合并策略：plugin 覆盖 settings 的同名 server,同名冲突在 conflicts 中可观测。
  */
 
 import { existsSync, readFileSync } from 'fs';
@@ -15,6 +15,7 @@ import { getConfigDir } from '../../utils/config.js';
 import type {
   SettingsMcpServers,
   McpServerConfig,
+  McpServerSource,
   NamedMcpServerConfig,
 } from './types.js';
 
@@ -66,35 +67,71 @@ export function validateMcpServerConfig(name: string, config: McpServerConfig): 
 }
 
 /**
- * 从 plugin runtime 中提取 MCP servers
+ * 从 plugin runtime 中提取 MCP servers,并附加 source 元数据。
  */
 export function loadPluginMcpServers(
   pluginRuntime: PlatformPluginRuntimeState,
 ): NamedMcpServerConfig[] {
-  return pluginRuntime.plugins
-    .flatMap((plugin) => plugin.mcpServers ?? []);
+  const out: NamedMcpServerConfig[] = [];
+  for (const plugin of pluginRuntime.plugins) {
+    if (!plugin.mcpServers) continue;
+    for (const server of plugin.mcpServers) {
+      out.push({
+        ...server,
+        source: {
+          origin: 'plugin',
+          pluginName: plugin.name,
+          pluginDir: plugin.rootDir,
+        },
+      } as NamedMcpServerConfig);
+    }
+  }
+  return out;
+}
+
+export interface McpServerConfigConflict {
+  name: string;
+  winner: McpServerSource;
+  loser: McpServerSource;
+}
+
+export interface MergedMcpServerConfigs {
+  servers: NamedMcpServerConfig[];
+  conflicts: McpServerConfigConflict[];
 }
 
 /**
- * 合并 settings 和 plugin 的 MCP server 配置
- * 策略：plugin 覆盖 settings 的同名 server
+ * 合并 settings 和 plugin 的 MCP server 配置。
+ * 策略:plugin 覆盖 settings 的同名 server;同名 plugin 之间后到者胜。
+ * 任何同名覆盖都会进 conflicts,由调用方写入 health。
  */
 export function mergeMcpServerConfigs(
   settingsServers: SettingsMcpServers,
   pluginServers: NamedMcpServerConfig[],
-): NamedMcpServerConfig[] {
+): MergedMcpServerConfigs {
   const merged = new Map<string, NamedMcpServerConfig>();
+  const conflicts: McpServerConfigConflict[] = [];
 
-  // 1. 先加入 settings servers（低优先级）
   for (const [name, config] of Object.entries(settingsServers)) {
-    merged.set(name, { name, ...config } as NamedMcpServerConfig);
+    merged.set(name, {
+      name,
+      ...config,
+      source: { origin: 'settings' },
+    } as NamedMcpServerConfig);
   }
 
-  // 2. 再加入 plugin servers（高优先级，覆盖同名）
   for (const server of pluginServers) {
+    const incomingSource: McpServerSource = server.source ?? { origin: 'plugin' };
+    const prev = merged.get(server.name);
+    if (prev) {
+      conflicts.push({
+        name: server.name,
+        winner: incomingSource,
+        loser: prev.source ?? { origin: 'settings' },
+      });
+    }
     merged.set(server.name, server);
   }
 
-  // 3. 转换为数组
-  return Array.from(merged.values());
+  return { servers: Array.from(merged.values()), conflicts };
 }

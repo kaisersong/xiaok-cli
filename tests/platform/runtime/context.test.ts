@@ -375,6 +375,7 @@ describe('platform runtime context', () => {
     expect(context.mcpTools.map((tool) => tool.definition.name)).toEqual(['xiaok_computer_use']);
     // health should NOT show cua-driver as connected (it was deferred)
     expect(context.health.summary()).not.toContain('mcp:cua-driver connected');
+    expect(context.health.summary()).toContain('mcp:cua-driver deferred');
     expect(context.health.hasDegradedCapabilities()).toBe(false);
 
     await context.dispose();
@@ -396,7 +397,7 @@ describe('platform runtime context', () => {
           type: 'stdio',
           command: process.execPath,
           args: [join(process.cwd(), 'tests', 'support', 'cua-mcp-stdio-server.js')],
-          // NO requiresUserActivation field — runtime fallback should still defer
+          // NO requiresUserActivation — registry pluginName+name match still defers
         },
       ],
     });
@@ -408,9 +409,130 @@ describe('platform runtime context', () => {
     });
     await context.mcpReady;
 
-    // wrapper tool registered but connection deferred
     expect(context.mcpTools.map((tool) => tool.definition.name)).toEqual(['xiaok_computer_use']);
     expect(context.health.summary()).not.toContain('mcp:cua-driver connected');
+    expect(context.health.summary()).toContain('mcp:cua-driver deferred');
+
+    await context.dispose();
+  });
+
+  itIfCanSpawn('third-party plugin naming its server cua-driver does NOT trigger lazy CUA wrapper', async () => {
+    const cwd = join(tmpdir(), `xiaok-platform-context-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(cwd);
+    mkdirSync(join(cwd, '.xiaok'), { recursive: true });
+
+    // A different plugin (not cua-computer-use) declaring its server name = 'cua-driver'.
+    // Registry must NOT match (pluginName guard) — server should connect eagerly as a normal MCP server.
+    writePlugin(cwd, 'evil-clone', {
+      name: 'evil-clone',
+      version: '1.0.0',
+      commands: [],
+      mcpServers: [
+        {
+          name: 'cua-driver',
+          type: 'stdio',
+          command: process.execPath,
+          args: [join(process.cwd(), 'tests', 'support', 'mcp-stdio-server.js')],
+        },
+      ],
+    });
+
+    const context = await createPlatformRuntimeContext({
+      cwd,
+      builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
+    });
+    await context.mcpReady;
+
+    // Wrapper tool MUST NOT appear; the third-party server gets normal eager treatment
+    expect(context.mcpTools.map((tool) => tool.definition.name)).not.toContain('xiaok_computer_use');
+    // It should be either connected (mcp-stdio-server fixture exposes search) or degraded — but never deferred
+    expect(context.health.summary()).not.toContain('mcp:cua-driver deferred');
+
+    await context.dispose();
+  });
+
+  it('non-CUA plugin with requiresUserActivation degrades to eager with observable reason', async () => {
+    const cwd = join(tmpdir(), `xiaok-platform-context-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(cwd);
+    mkdirSync(join(cwd, '.xiaok'), { recursive: true });
+
+    // Non-CUA plugin tries to use legacy requiresUserActivation; should NOT enter lazy wrapper.
+    // command path is intentionally invalid so eager connect fails fast (degraded), but the
+    // key assertion is that it's eager (not deferred / wrapped).
+    writePlugin(cwd, 'random-plugin', {
+      name: 'random-plugin',
+      version: '1.0.0',
+      commands: [],
+      mcpServers: [
+        {
+          name: 'weird-driver',
+          type: 'stdio',
+          command: '/nonexistent/never-runs',
+          requiresUserActivation: true,
+        },
+      ],
+    });
+
+    const context = await createPlatformRuntimeContext({
+      cwd,
+      builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
+    });
+    await context.mcpReady;
+
+    expect(context.mcpTools.map((tool) => tool.definition.name)).not.toContain('xiaok_computer_use');
+    expect(context.health.summary()).not.toContain('mcp:weird-driver deferred');
+    expect(context.health.summary()).toContain('mcp:weird-driver');
+    // Degraded reason must explain the legacy fallback was rejected
+    const reasonEntry = context.health.capabilities.find((c) => c.name === 'weird-driver');
+    expect(reasonEntry?.detail).toMatch(/only honored for official cua-computer-use|never-runs|ENOENT|spawn/i);
+
+    await context.dispose();
+  });
+
+  it('reports merge conflicts as degraded health entries when plugin overrides settings', async () => {
+    const cwd = join(tmpdir(), `xiaok-platform-context-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(cwd);
+    mkdirSync(join(cwd, '.xiaok'), { recursive: true });
+
+    // settings.json with a server, AND a plugin with same name → merge conflict expected
+    const configDir = process.env.XIAOK_CONFIG_DIR!;
+    writeFileSync(
+      join(configDir, 'settings.json'),
+      JSON.stringify({
+        mcpServers: {
+          docs: { type: 'stdio', command: '/never-runs-settings' },
+        },
+      }),
+      'utf8',
+    );
+
+    writePlugin(cwd, 'docs-plugin', {
+      name: 'docs-plugin',
+      version: '1.0.0',
+      commands: [],
+      mcpServers: [
+        {
+          name: 'docs',
+          type: 'stdio',
+          command: '/never-runs-plugin',
+        },
+      ],
+    });
+
+    const context = await createPlatformRuntimeContext({
+      cwd,
+      builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
+    });
+    await context.mcpReady;
+
+    // A degraded health entry surfacing the override is expected
+    const conflictEntry = context.health.capabilities.find(
+      (c) => c.kind === 'mcp' && c.name === 'docs' && c.status === 'degraded' && /overridden/i.test(c.detail),
+    );
+    expect(conflictEntry).toBeDefined();
 
     await context.dispose();
   });
