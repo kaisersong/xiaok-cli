@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { createKSwarmRunDynamicWorkflowScriptTool } from '../../electron/kswarm-dynamic-workflow-script-tool.js';
+import {
+  REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE,
+  createKSwarmRunDynamicWorkflowScriptTool,
+} from '../../electron/kswarm-dynamic-workflow-script-tool.js';
+import { createWorkflowScriptPreview } from '../../electron/workflow-script-contract.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -48,9 +52,30 @@ describe('KSwarm dynamic workflow script tool', () => {
     expect(tool.definition.description).toContain('await agent');
     expect(tool.definition.description).toContain("phase('");
     expect(tool.definition.description).toContain('previewOnly');
+    expect(tool.definition.description).toContain('报告三路并行复核');
     expect(tool.definition.description).toContain('不要使用 agents');
     expect(tool.definition.inputSchema.properties.script.description).toContain('export const meta');
     expect(tool.definition.inputSchema.properties.script.description).toContain('example');
+  });
+
+  it('ships a professional report final review workflow script template with real parallel branches', () => {
+    const preview = createWorkflowScriptPreview(REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE, {
+      projectId: 'proj-1',
+      requestedBy: 'assistant',
+    });
+
+    expect(preview).toMatchObject({
+      ok: true,
+      workflowId: 'report_final_review',
+      analysis: {
+        parallelCallCount: 1,
+        agentCallCount: 5,
+      },
+    });
+    expect(REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE).toContain('事实复核');
+    expect(REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE).toContain('证据复核');
+    expect(REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE).toContain('格式与合同复核');
+    expect(REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE).toContain('最终 gate 建议');
   });
 
   it('previews a generated workflow script without creating a KSwarm run for conversational confirmation', async () => {

@@ -170,6 +170,55 @@ return await parallel([
     )).rejects.toMatchObject({ code: 'workflow_script_parallel_thunk_required' });
   });
 
+  it('collects branch failures when parallel failurePolicy is collect_errors', async () => {
+    const result = await runWorkflowScript(
+      `export const meta = { name: 'parallel_collect_errors_demo', description: 'parallel collect errors demo' }
+phase('交叉复核')
+return await parallel([
+  () => agent('事实复核', { label: '事实复核' }),
+  () => agent('证据复核', { label: '证据复核' }),
+], { label: '两路复核', failurePolicy: 'collect_errors' })`,
+      {
+        controller: {
+          async createAgentNode(input) {
+            if (input.label === '证据复核') throw Object.assign(new Error('缺少证据引用'), { code: 'missing_evidence' });
+            return { summary: input.label };
+          },
+        },
+      },
+    );
+
+    expect(result.result).toEqual([
+      { ok: true, value: { summary: '事实复核' } },
+      { ok: false, error: 'missing_evidence', message: '缺少证据引用', branch: '证据复核' },
+    ]);
+  });
+
+  it('returns quorum successes when parallel failurePolicy is quorum', async () => {
+    const result = await runWorkflowScript(
+      `export const meta = { name: 'parallel_quorum_demo', description: 'parallel quorum demo' }
+phase('交叉复核')
+return await parallel([
+  () => agent('事实复核', { label: '事实复核' }),
+  () => agent('证据复核', { label: '证据复核' }),
+  () => agent('格式复核', { label: '格式复核' }),
+], { label: '三路复核', failurePolicy: 'quorum', quorum: 2 })`,
+      {
+        controller: {
+          async createAgentNode(input) {
+            if (input.label === '证据复核') throw Object.assign(new Error('证据不足'), { code: 'insufficient_evidence' });
+            return { summary: input.label };
+          },
+        },
+      },
+    );
+
+    expect(result.result).toEqual([
+      { summary: '事实复核' },
+      { summary: '格式复核' },
+    ]);
+  });
+
   it('supports terminal workflow block primitive', async () => {
     const result = await runWorkflowScript(
       `export const meta = { name: 'blocked_demo', description: 'blocked demo' }

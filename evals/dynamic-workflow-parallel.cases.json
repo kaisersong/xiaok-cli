@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "id": "report-final-review-template",
+      "template": "report_final_review",
+      "expectedWorkflowId": "report_final_review",
+      "minAgentCalls": 5,
+      "minParallelCalls": 1,
+      "requiredLabels": ["事实复核", "证据复核", "格式与合同复核", "最终 gate 建议"]
+    }
+  ]
+}

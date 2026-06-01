@@ -177,6 +177,7 @@ export async function runWorkflowScript(
     }
     parallelSequence += 1;
     const normalizedOptions = normalizeOptions(options);
+    const failurePolicy = normalizeFailurePolicy(normalizedOptions?.failurePolicy);
     const group = await controller.beginParallelGroup?.({
       label: normalizeOptionalString(normalizedOptions?.label) || `并行分组 ${parallelSequence}`,
       phaseTitle: normalizeOptionalString(normalizedOptions?.phaseTitle)
@@ -186,21 +187,47 @@ export async function runWorkflowScript(
       kind: 'parallel',
       totalCount: items.length,
       limit: Math.max(1, Math.floor(Number(normalizedOptions?.limit || concurrency || 1))),
-      failurePolicy: normalizeFailurePolicy(normalizedOptions?.failurePolicy),
+      failurePolicy,
       quorum: Number.isFinite(Number(normalizedOptions?.quorum)) ? Number(normalizedOptions?.quorum) : null,
       scriptHash,
       workflowId,
     });
     const parallelGroupId = normalizeOptionalString(group?.parallelGroupId);
-    return Promise.all(items.map((item, index) => {
+    const tasks = items.map((item, index) => {
       const label = inferBranchLabel(item, index);
-      return branchContext.run({
-        parallelGroupId,
-        fanoutItemKey: `branch-${index + 1}`,
-        fanoutItemLabel: label,
-        pipelineStageIndex: null,
-      }, () => runParallelThunk(item));
-    }));
+      return {
+        label,
+        run: () => branchContext.run({
+          parallelGroupId,
+          fanoutItemKey: `branch-${index + 1}`,
+          fanoutItemLabel: label,
+          pipelineStageIndex: null,
+        }, () => runParallelThunk(item)),
+      };
+    });
+    if (failurePolicy === 'collect_errors') {
+      const settled = await Promise.allSettled(tasks.map(task => task.run()));
+      return settled.map((item, index) => item.status === 'fulfilled'
+        ? { ok: true, value: item.value }
+        : formatParallelBranchFailure(item.reason, tasks[index].label));
+    }
+    if (failurePolicy === 'quorum') {
+      const quorum = Math.max(1, Math.floor(Number(normalizedOptions?.quorum || items.length)));
+      const settled = await Promise.allSettled(tasks.map(task => task.run()));
+      const values = settled
+        .filter((item): item is PromiseFulfilledResult<unknown> => item.status === 'fulfilled')
+        .map(item => item.value);
+      if (values.length >= quorum) return values;
+      const failures = settled
+        .map((item, index) => item.status === 'rejected' ? formatParallelBranchFailure(item.reason, tasks[index].label) : null)
+        .filter(Boolean);
+      throw workflowScriptError('workflow_script_parallel_quorum_not_met', 'parallel quorum was not met', {
+        quorum,
+        successCount: values.length,
+        failures,
+      });
+    }
+    return Promise.all(tasks.map(task => task.run()));
   }
 
   async function pipeline(initialValue: unknown, ...rawStages: unknown[]): Promise<unknown> {
@@ -312,6 +339,16 @@ export async function runWorkflowScript(
     }
     return (item as AsyncThunk)();
   }
+}
+
+function formatParallelBranchFailure(error: unknown, branch: string): { ok: false; error: string; message: string; branch: string } {
+  const record = error && typeof error === 'object' ? error as { code?: unknown; message?: unknown } : {};
+  return {
+    ok: false,
+    error: normalizeOptionalString(record.code) || 'workflow_script_parallel_branch_failed',
+    message: normalizeOptionalString(record.message) || String(error || 'parallel branch failed'),
+    branch,
+  };
 }
 
 class WorkflowScriptTerminalSignal extends Error {

@@ -55,6 +55,7 @@
     "eval:skill-quality": "node --import tsx scripts/evals/skill-quality.ts",
     "eval:skill-adherence": "node --import tsx scripts/evals/skill-adherence.ts",
     "eval:skill-adherence:release": "node --import tsx scripts/evals/skill-adherence-release.ts",
+    "eval:dynamic-workflow": "node --import tsx scripts/evals/dynamic-workflow-parallel.ts",
     "eval:ahe-lite": "node --import tsx scripts/evals/ahe-lite.ts --scenario all --output .xiaok/evals/ahe-lite/latest.json",
     "eval:ahe-lite:live": "node --import tsx scripts/evals/ahe-lite-live-smoke.ts --output .xiaok/evals/ahe-lite/live-smoke.json",
     "eval:run": "node benchmark/run.mjs",

@@ -37,6 +37,26 @@ phase('归纳建议')
 return await agent(\`基于 \${snapshot.summary} 输出下一步建议。\`, { label: '建议归纳' })
 `;
 
+export const REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE = `export const meta = {
+  name: 'report_final_review',
+  description: '并行复核报告事实、证据、格式和交付要求，并输出最终 gate 建议',
+  phases: [{ title: '读取交付物' }, { title: '并行复核' }, { title: '归约结论' }],
+}
+
+phase('读取交付物')
+const inventory = await agent('读取报告、产物清单和用户要求，列出需要复核的事实、证据、格式和交付合同。', { label: '交付物盘点', evidenceRequired: true })
+
+phase('并行复核')
+const reviews = await parallel([
+  () => agent(\`基于 \${inventory.summary} 做事实准确性复核，指出事实风险和证据缺口。\`, { label: '事实复核', evidenceRequired: true }),
+  () => agent('从引用、来源、日期和可追溯性角度复核证据链。', { label: '证据复核', evidenceRequired: true }),
+  () => agent('从结构、格式、目标文件类型和交付合同角度复核最终产物。', { label: '格式与合同复核', evidenceRequired: true }),
+], { label: '报告三路并行复核', limit: 3, failurePolicy: 'required_all' })
+
+phase('归约结论')
+return await agent(\`综合三路复核结论：\${reviews.map((item) => item.summary).join('；')}。输出是否可交付、必须修复项、证据引用和下一步动作。\`, { label: '最终 gate 建议', schema: { type: 'object' }, evidenceRequired: true })
+`;
+
 function workflowScriptUsage() {
   return {
     requiredShape: '脚本必须以 export const meta = {...} 开头；meta.name 只能使用小写字母、数字和下划线；meta.description 必填；真正执行写在 meta 之后。',
@@ -48,6 +68,7 @@ function workflowScriptUsage() {
     ],
     forbiddenShape: '不要使用 agents、nodes、steps、tasks 等声明式 schema；不要把 phase 写成对象执行。phase 是函数调用，agent 也是函数调用。',
     exampleScript: WORKFLOW_SCRIPT_EXAMPLE,
+    professionalExampleScript: REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE,
   };
 }
 
@@ -69,7 +90,9 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
         '对话确认场景先传 previewOnly: true，只返回 workflow 预览；用户确认后再调用一次启动。',
         '脚本是命令式 JavaScript DSL，不是 JSON schema。不要使用 agents/nodes/steps/tasks 声明式字段。',
         "必须以 export const meta = {...} 开头；然后用 phase('阶段名')、await agent('任务提示', { label: '节点名' })、parallel/pipeline 编排。",
+        '专业报告复核类任务优先使用三路并行复核：事实、证据、格式/交付合同，最后用 reducer agent 归约 gate 建议。',
         `最小可用 example:\n${WORKFLOW_SCRIPT_EXAMPLE}`,
+        `专业报告复核 example:\n${REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE}`,
       ].join('\n\n'),
       inputSchema: {
         type: 'object',
@@ -83,6 +106,7 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
               "meta 后面直接写命令式执行逻辑：phase('阶段名'); const r = await agent('任务提示', { label: '节点名称' }); return {...}。",
               '不要提交 agents/nodes/steps/tasks 声明式 schema。',
               `example:\n${WORKFLOW_SCRIPT_EXAMPLE}`,
+              `professional report review example:\n${REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE}`,
             ].join('\n'),
           },
           requestedBy: { type: 'string', description: '发起者，默认 assistant' },
