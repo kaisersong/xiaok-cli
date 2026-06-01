@@ -4,7 +4,12 @@ import { fileURLToPath } from 'node:url';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { createDesktopServices } from './desktop-services.js';
 import { registerDesktopIpc } from './ipc.js';
-import { buildBrowserWindowOptions, isAllowedNavigationUrl } from './security.js';
+import {
+  buildBrowserWindowOptions,
+  isAllowedNavigationUrl,
+  isAllowedShellExternalUrl,
+  resolveLocalFileOpenPath,
+} from './security.js';
 import { resolveDesktopDockIconPath, resolveDesktopWindowIconPath } from './window-icon.js';
 import {
   attachCloseToMinimize,
@@ -354,10 +359,13 @@ async function createWindow(): Promise<BrowserWindow> {
   attachWindowRepaintHandlers(window);
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('file://')) {
-      void shell.openPath(decodeURIComponent(url.replace('file://', '')));
-    } else {
+    const filePath = resolveLocalFileOpenPath(url);
+    if (filePath) {
+      void shell.openPath(filePath);
+    } else if (isAllowedShellExternalUrl(url)) {
       void shell.openExternal(url);
+    } else {
+      debugMain('external-open:blocked', { url });
     }
     return { action: 'deny' };
   });
@@ -365,7 +373,11 @@ async function createWindow(): Promise<BrowserWindow> {
     if (url.startsWith('file://')) return;
     if (!isAllowedNavigationUrl(url)) {
       event.preventDefault();
-      void shell.openExternal(url);
+      if (isAllowedShellExternalUrl(url)) {
+        void shell.openExternal(url);
+      } else {
+        debugMain('navigation-external-open:blocked', { url });
+      }
     }
   });
 
