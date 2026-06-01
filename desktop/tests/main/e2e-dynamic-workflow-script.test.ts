@@ -163,11 +163,17 @@ phase('检查项目')
 const snapshot = await agent('检查项目状态。', { label: '项目检查' })
 
 phase('生成建议')
-const recommendation = await agent(\`基于 \${snapshot.summary} 输出下一步建议。\`, { label: '建议归纳' })
+const reviews = await parallel([
+  () => agent(\`基于 \${snapshot.summary} 做事实复核。\`, { label: '事实复核' }),
+  () => agent(\`基于 \${snapshot.summary} 做证据复核。\`, { label: '证据复核' }),
+], { label: '两路复核', limit: 2, failurePolicy: 'required_all' })
+
+const recommendation = await agent(\`综合 \${reviews.map((item) => item.summary).join('；')} 输出下一步建议。\`, { label: '建议归纳' })
 
 return {
   summary: recommendation.summary,
   snapshot: snapshot.summary,
+  reviews: reviews.map((item) => item.summary),
   evidenceRefs: recommendation.evidenceRefs,
 }
 `;
@@ -311,24 +317,61 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
         ok: boolean;
         status: string;
         workflowRunId: string;
-        result: { summary?: string; snapshot?: string; evidenceRefs?: string[] };
-        workflowRun: { nodes?: Array<{ id: string; status: string; output?: unknown }> };
+        backgroundJob?: { status?: string };
+        workflowRun: {
+          nodes?: Array<{ id: string; status: string; output?: unknown; parallelGroupId?: string | null }>;
+          parallelGroups?: Array<{ id: string; status: string; completedCount: number }>;
+        };
       };
 
       expect(output.ok).toBe(true);
-      expect(output.status).toBe('completed');
-      expect(output.result.snapshot).toBe('项目状态健康');
-      expect(output.result.summary).toContain('基于 项目状态健康 输出下一步建议。');
-      expect(output.result.evidenceRefs).toEqual(['artifacts/workflow-report.md: E2E markdown 交付物']);
+      expect(output.status).toBe('running');
+      expect(output.backgroundJob?.status).toBe('running');
+      expect(output.workflowRunId).toMatch(/^wf-/);
+
+      const completedRun = await waitForCondition(
+        () => fetchJson<{
+          workflowRun: {
+            status: string;
+            scriptResult?: { summary?: string; snapshot?: string; reviews?: string[]; evidenceRefs?: string[] };
+            nodes?: Array<{ id: string; status: string; output?: unknown; parallelGroupId?: string | null }>;
+            parallelGroups?: Array<{ id: string; status: string; completedCount: number }>;
+          };
+        }>(`${kswarmUrl}/projects/${created.project.id}/workflows/${output.workflowRunId}`),
+        (value) => value.workflowRun.status === 'completed',
+        20_000,
+      );
+
+      const scriptResult = completedRun.workflowRun.scriptResult ?? {};
+      expect(scriptResult.snapshot).toBe('项目状态健康');
+      expect(scriptResult.reviews).toEqual([
+        '继续执行：基于 项目状态健康 做事实复核。',
+        '继续执行：基于 项目状态健康 做证据复核。',
+      ]);
+      expect(scriptResult.summary).toContain('综合 继续执行：基于 项目状态健康 做事实复核。；继续执行：基于 项目状态健康 做证据复核。 输出下一步建议。');
+      expect(scriptResult.evidenceRefs).toEqual(['artifacts/workflow-report.md: E2E markdown 交付物']);
       expect(seenPrompts).toEqual([
         '检查项目状态。',
-        '基于 项目状态健康 输出下一步建议。',
+        '基于 项目状态健康 做事实复核。',
+        '基于 项目状态健康 做证据复核。',
+        '综合 继续执行：基于 项目状态健康 做事实复核。；继续执行：基于 项目状态健康 做证据复核。 输出下一步建议。',
       ]);
 
-      const nodes = output.workflowRun.nodes ?? [];
+      const nodes = completedRun.workflowRun.nodes ?? [];
       expect(nodes.find(node => node.id === 'script-runtime')?.status).toBe('completed');
       expect(nodes.find(node => node.id === 'script-agent-1')?.status).toBe('completed');
       expect(nodes.find(node => node.id === 'script-agent-2')?.status).toBe('completed');
+      expect(nodes.find(node => node.id === 'script-agent-3')?.status).toBe('completed');
+      expect(nodes.find(node => node.id === 'script-agent-4')?.status).toBe('completed');
+      expect(completedRun.workflowRun.parallelGroups?.[0]).toMatchObject({
+        id: 'script-parallel-1',
+        status: 'completed',
+        completedCount: 2,
+      });
+      expect(nodes.filter(node => node.parallelGroupId === 'script-parallel-1').map(node => node.id)).toEqual([
+        'script-agent-2',
+        'script-agent-3',
+      ]);
 
       const detail = await fetchJson<{
         project: { status: string; deliverable?: { artifacts?: Array<{ path?: string; label?: string }> } | null };

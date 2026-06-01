@@ -1,4 +1,5 @@
 import vm from 'node:vm';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 import {
   parseWorkflowScript,
@@ -16,6 +17,13 @@ export interface WorkflowScriptAgentInput {
   sequence: number;
   scriptHash: string;
   workflowId: string;
+  parallelGroupId?: string | null;
+  fanoutItemKey?: string | null;
+  fanoutItemLabel?: string | null;
+  pipelineStageIndex?: number | null;
+  required?: boolean;
+  outputSchema?: Record<string, unknown> | null;
+  evidenceRequired?: boolean;
 }
 
 export interface WorkflowScriptPhaseInput {
@@ -38,11 +46,29 @@ export interface WorkflowScriptUserInputRequest {
   workflowId: string;
 }
 
+export interface WorkflowScriptParallelGroupInput {
+  label: string;
+  phaseTitle: string | null;
+  primitiveId: string;
+  kind: 'parallel' | 'pipeline';
+  totalCount: number;
+  limit: number;
+  failurePolicy: 'required_all' | 'collect_errors' | 'fail_fast' | 'quorum';
+  quorum: number | null;
+  scriptHash: string;
+  workflowId: string;
+}
+
+export interface WorkflowScriptParallelGroupResult {
+  parallelGroupId: string;
+}
+
 export interface WorkflowScriptController {
   createAgentNode(input: WorkflowScriptAgentInput): Promise<unknown>;
   emitPhase?(input: WorkflowScriptPhaseInput): Promise<void> | void;
   emitLog?(input: WorkflowScriptLogInput): Promise<void> | void;
   requestUserInput?(input: WorkflowScriptUserInputRequest): Promise<unknown>;
+  beginParallelGroup?(input: WorkflowScriptParallelGroupInput): Promise<WorkflowScriptParallelGroupResult> | WorkflowScriptParallelGroupResult;
 }
 
 export interface WorkflowScriptRuntimeOptions {
@@ -55,12 +81,26 @@ export interface WorkflowScriptRuntimeOptions {
 export interface WorkflowScriptRunResult {
   ok: true;
   result: unknown;
+  terminal?: WorkflowScriptTerminalResult | null;
   meta: WorkflowScriptMeta;
   scriptHash: string;
   analysis: WorkflowScriptAnalysis;
 }
 
+export interface WorkflowScriptTerminalResult {
+  status: 'finished' | 'blocked' | 'needs_replanning' | 'needs_rubric_clarification';
+  reason?: string;
+  evidenceRefs?: string[];
+  result?: unknown;
+}
+
 type AsyncThunk<T = unknown> = () => Promise<T> | T;
+type BranchContext = {
+  parallelGroupId: string | null;
+  fanoutItemKey: string | null;
+  fanoutItemLabel: string | null;
+  pipelineStageIndex: number | null;
+};
 
 export async function runWorkflowScript(
   script: string,
@@ -87,6 +127,8 @@ export async function runWorkflowScript(
   let currentPhaseTitle: string | null = null;
   let phaseSequence = 0;
   let agentSequence = 0;
+  let parallelSequence = 0;
+  const branchContext = new AsyncLocalStorage<BranchContext>();
 
   async function phase(title: unknown): Promise<{ title: string; sequence: number }> {
     const normalizedTitle = normalizeRequiredString(title, 'workflow_script_phase_title_required');
@@ -109,6 +151,7 @@ export async function runWorkflowScript(
     const phaseTitle = normalizeOptionalString(normalizedOptions?.phaseTitle)
       || normalizeOptionalString(normalizedOptions?.phase)
       || currentPhaseTitle;
+    const activeBranch = branchContext.getStore();
     const input: WorkflowScriptAgentInput = {
       prompt: normalizedPrompt,
       label,
@@ -117,15 +160,47 @@ export async function runWorkflowScript(
       sequence: agentSequence,
       scriptHash,
       workflowId,
+      parallelGroupId: activeBranch?.parallelGroupId || null,
+      fanoutItemKey: activeBranch?.fanoutItemKey || null,
+      fanoutItemLabel: activeBranch?.fanoutItemLabel || null,
+      pipelineStageIndex: activeBranch?.pipelineStageIndex ?? null,
+      required: normalizedOptions?.required !== false,
+      outputSchema: normalizeSchema(normalizedOptions?.schema),
+      evidenceRequired: normalizedOptions?.evidenceRequired === true,
     };
     return limit(() => controller.createAgentNode(input));
   }
 
-  async function parallel(items: unknown): Promise<unknown[]> {
+  async function parallel(items: unknown, options: unknown = null): Promise<unknown[]> {
     if (!Array.isArray(items)) {
       throw workflowScriptError('workflow_script_parallel_array_required', 'parallel() expects an array');
     }
-    return Promise.all(items.map((item) => runThunkOrValue(item)));
+    parallelSequence += 1;
+    const normalizedOptions = normalizeOptions(options);
+    const group = await controller.beginParallelGroup?.({
+      label: normalizeOptionalString(normalizedOptions?.label) || `并行分组 ${parallelSequence}`,
+      phaseTitle: normalizeOptionalString(normalizedOptions?.phaseTitle)
+        || normalizeOptionalString(normalizedOptions?.phase)
+        || currentPhaseTitle,
+      primitiveId: normalizeOptionalString(normalizedOptions?.primitiveId) || `parallel-${parallelSequence}`,
+      kind: 'parallel',
+      totalCount: items.length,
+      limit: Math.max(1, Math.floor(Number(normalizedOptions?.limit || concurrency || 1))),
+      failurePolicy: normalizeFailurePolicy(normalizedOptions?.failurePolicy),
+      quorum: Number.isFinite(Number(normalizedOptions?.quorum)) ? Number(normalizedOptions?.quorum) : null,
+      scriptHash,
+      workflowId,
+    });
+    const parallelGroupId = normalizeOptionalString(group?.parallelGroupId);
+    return Promise.all(items.map((item, index) => {
+      const label = inferBranchLabel(item, index);
+      return branchContext.run({
+        parallelGroupId,
+        fanoutItemKey: `branch-${index + 1}`,
+        fanoutItemLabel: label,
+        pipelineStageIndex: null,
+      }, () => runParallelThunk(item));
+    }));
   }
 
   async function pipeline(initialValue: unknown, ...rawStages: unknown[]): Promise<unknown> {
@@ -163,6 +238,21 @@ export async function runWorkflowScript(
         workflowId,
       });
     },
+    finish: (result: unknown = null): never => {
+      throw new WorkflowScriptTerminalSignal({
+        status: 'finished',
+        result,
+      });
+    },
+    block: (reason: unknown): never => {
+      throw new WorkflowScriptTerminalSignal(normalizeTerminalResult('blocked', reason));
+    },
+    needsReplanning: (reason: unknown): never => {
+      throw new WorkflowScriptTerminalSignal(normalizeTerminalResult('needs_replanning', reason));
+    },
+    needsRubricClarification: (reason: unknown): never => {
+      throw new WorkflowScriptTerminalSignal(normalizeTerminalResult('needs_rubric_clarification', reason));
+    },
   });
 
   const context = vm.createContext(
@@ -192,11 +282,20 @@ export async function runWorkflowScript(
     filename: `workflow-script-${scriptHash}.js`,
   });
 
-  const result = await compiled.runInContext(context, { timeout: syncTimeoutMs });
+  let result: unknown;
+  let terminal: WorkflowScriptTerminalResult | null = null;
+  try {
+    result = await compiled.runInContext(context, { timeout: syncTimeoutMs });
+  } catch (error) {
+    if (!(error instanceof WorkflowScriptTerminalSignal)) throw error;
+    terminal = error.terminal;
+    result = terminal.status === 'finished' ? terminal.result : terminal;
+  }
   assertJsonSerializable(result, 'workflow_script_result_not_serializable');
   return {
     ok: true,
     result,
+    terminal,
     meta,
     scriptHash,
     analysis,
@@ -206,6 +305,36 @@ export async function runWorkflowScript(
     if (typeof item === 'function') return (item as AsyncThunk)();
     return item;
   }
+
+  async function runParallelThunk(item: unknown): Promise<unknown> {
+    if (typeof item !== 'function') {
+      throw workflowScriptError('workflow_script_parallel_thunk_required', 'parallel() branch items must be thunks');
+    }
+    return (item as AsyncThunk)();
+  }
+}
+
+class WorkflowScriptTerminalSignal extends Error {
+  public constructor(public readonly terminal: WorkflowScriptTerminalResult) {
+    super(`workflow terminal: ${terminal.status}`);
+  }
+}
+
+function normalizeTerminalResult(
+  status: WorkflowScriptTerminalResult['status'],
+  value: unknown,
+): WorkflowScriptTerminalResult {
+  if (typeof value === 'string') return { status, reason: value };
+  const options = normalizeOptions(value) || {};
+  return {
+    status,
+    reason: normalizeOptionalString(options.reason) || status,
+    evidenceRefs: normalizeStringArray(options.evidenceRefs),
+  };
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(item => String(item || '').trim()).filter(Boolean) : [];
 }
 
 function createConcurrencyLimiter(rawLimit: number): <T>(task: () => Promise<T>) => Promise<T> {
@@ -245,6 +374,28 @@ function normalizeOptions(value: unknown): Record<string, unknown> | null {
   }
   assertJsonSerializable(value, 'workflow_script_options_not_serializable');
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function normalizeSchema(value: unknown): Record<string, unknown> | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw workflowScriptError('workflow_script_schema_object_required', 'workflow script schema must be an object');
+  }
+  assertJsonSerializable(value, 'workflow_script_schema_not_serializable');
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function normalizeFailurePolicy(value: unknown): 'required_all' | 'collect_errors' | 'fail_fast' | 'quorum' {
+  return value === 'collect_errors' || value === 'fail_fast' || value === 'quorum'
+    ? value
+    : 'required_all';
+}
+
+function inferBranchLabel(item: unknown, index: number): string {
+  if (typeof item !== 'function') return `分支 ${index + 1}`;
+  const source = Function.prototype.toString.call(item);
+  const labelMatch = source.match(/\blabel\s*:\s*(['"`])((?:\\.|(?!\1).)*?)\1/);
+  return labelMatch?.[2]?.trim() || `分支 ${index + 1}`;
 }
 
 function assertJsonSerializable(value: unknown, code: string): void {

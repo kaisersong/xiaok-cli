@@ -106,4 +106,94 @@ return await pipeline(
 
     expect(result.result).toEqual({ summary: '管线归纳', prompt: 'seed:checked' });
   });
+
+  it('registers durable parallel groups and annotates branch agent nodes', async () => {
+    const groups: Array<{ label: string; totalCount: number; limit: number; failurePolicy: string }> = [];
+    const calls: Array<{ label: string; parallelGroupId: string | null; fanoutItemKey: string | null; fanoutItemLabel: string | null }> = [];
+
+    await runWorkflowScript(
+      `export const meta = { name: 'parallel_demo', description: 'parallel demo' }
+phase('交叉复核')
+return await parallel([
+  () => agent('事实复核', { label: '事实复核' }),
+  () => agent('证据复核', { label: '证据复核' }),
+], { label: '两路复核', limit: 2, failurePolicy: 'required_all' })`,
+      {
+        concurrency: 2,
+        controller: {
+          async beginParallelGroup(input) {
+            groups.push({
+              label: input.label,
+              totalCount: input.totalCount,
+              limit: input.limit,
+              failurePolicy: input.failurePolicy,
+            });
+            return { parallelGroupId: 'script-parallel-1' };
+          },
+          async createAgentNode(input) {
+            calls.push({
+              label: input.label,
+              parallelGroupId: input.parallelGroupId,
+              fanoutItemKey: input.fanoutItemKey,
+              fanoutItemLabel: input.fanoutItemLabel,
+            });
+            return { summary: input.label };
+          },
+        },
+      },
+    );
+
+    expect(groups).toEqual([
+      { label: '两路复核', totalCount: 2, limit: 2, failurePolicy: 'required_all' },
+    ]);
+    expect(calls).toEqual([
+      { label: '事实复核', parallelGroupId: 'script-parallel-1', fanoutItemKey: 'branch-1', fanoutItemLabel: '事实复核' },
+      { label: '证据复核', parallelGroupId: 'script-parallel-1', fanoutItemKey: 'branch-2', fanoutItemLabel: '证据复核' },
+    ]);
+  });
+
+  it('rejects non-thunk parallel branch items at runtime', async () => {
+    await expect(runWorkflowScript(
+      `export const meta = { name: 'bad_parallel_runtime', description: 'bad parallel runtime' }
+phase('复核')
+return await parallel([
+  'not a thunk',
+  () => agent('证据复核', { label: '证据复核' }),
+])`,
+      {
+        controller: {
+          async createAgentNode(input) {
+            return { summary: input.label };
+          },
+        },
+      },
+    )).rejects.toMatchObject({ code: 'workflow_script_parallel_thunk_required' });
+  });
+
+  it('supports terminal workflow block primitive', async () => {
+    const result = await runWorkflowScript(
+      `export const meta = { name: 'blocked_demo', description: 'blocked demo' }
+phase('复核')
+await agent('检查证据', { label: '证据检查' })
+workflow.block({ reason: '缺少 HTML 交付物', evidenceRefs: ['artifacts/report.md'] })`,
+      {
+        controller: {
+          async createAgentNode(input) {
+            return { summary: input.label };
+          },
+        },
+      },
+    );
+
+    expect(result.result).toEqual({
+      status: 'blocked',
+      reason: '缺少 HTML 交付物',
+      evidenceRefs: ['artifacts/report.md'],
+    });
+    expect(result.terminal).toEqual({
+      status: 'blocked',
+      reason: '缺少 HTML 交付物',
+      evidenceRefs: ['artifacts/report.md'],
+    });
+  });
 });

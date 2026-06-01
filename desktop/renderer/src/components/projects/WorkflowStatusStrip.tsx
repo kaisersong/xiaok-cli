@@ -393,6 +393,32 @@ function GenericWorkflowDetails({ workflow }: { workflow: ReturnType<typeof buil
           <span className="font-medium text-[var(--c-text-primary)]">最近进展：</span>{workflow.progressText}
         </p>
       )}
+      {workflow.checkpointText && (
+        <p className="mt-1 leading-relaxed">
+          <span className="font-medium text-[var(--c-text-primary)]">脚本检查点：</span>{workflow.checkpointText}
+        </p>
+      )}
+      {workflow.parallelGroups.length > 0 && (
+        <div className="mt-2 space-y-1">
+          <p className="font-medium text-[var(--c-text-primary)]">并行编排</p>
+          {workflow.parallelGroups.map((group) => (
+            <div
+              key={group.id}
+              className="rounded-md border border-[var(--c-border-subtle)] bg-[var(--c-bg-page)] px-2 py-1.5"
+            >
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate font-medium text-[var(--c-text-primary)]">{group.label}</span>
+                <span className="shrink-0 text-[var(--c-text-muted)]">{group.status}</span>
+                <span className="ml-auto shrink-0 text-[var(--c-text-secondary)]">{group.progress}</span>
+              </div>
+              <p className="mt-1 leading-relaxed text-[var(--c-text-muted)]">
+                策略：{group.failurePolicy}
+                {group.branchText ? ` · 分支：${group.branchText}` : ''}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
       {workflow.blockingFailures.length > 0 && (
         <div className="mt-1 space-y-1">
           <p className="font-medium text-[var(--c-status-error-text)]">阻塞失败</p>
@@ -428,6 +454,9 @@ function GenericWorkflowDetails({ workflow }: { workflow: ReturnType<typeof buil
             )}
             {node.reviewText && (
               <p className="mt-1 leading-relaxed text-[var(--c-text-muted)]">{node.reviewText}</p>
+            )}
+            {node.branchText && (
+              <p className="mt-1 leading-relaxed text-[var(--c-text-muted)]">{node.branchText}</p>
             )}
             {node.error && (
               <p className="mt-1 leading-relaxed text-[var(--c-status-error-text)]">{node.error}</p>
@@ -501,11 +530,36 @@ function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
         return agent ? [agent] : [];
       })
   ));
+  const nodesByParallelGroup = new Map<string, KSwarmWorkflowRun['nodes']>();
+  for (const node of workflowRun.nodes) {
+    if (!node.parallelGroupId) continue;
+    const nodes = nodesByParallelGroup.get(node.parallelGroupId) || [];
+    nodes.push(node);
+    nodesByParallelGroup.set(node.parallelGroupId, nodes);
+  }
+  const checkpoints = workflowRun.summary?.checkpoints;
   return {
     scopeText: workflowRun.sourceTask ? `任务：${workflowRun.sourceTask.title || workflowRun.sourceTask.id}` : '',
     cacheText: formatCacheSummary(workflowRun),
     recoveryText: formatRecoverySummary(workflowRun.recovery),
     progressText: readString(workflowRun.progressState?.lastMaterialProgress?.message),
+    checkpointText: checkpoints?.total
+      ? `${checkpoints.completed || 0}/${checkpoints.total}${checkpoints.waiting ? `，等待 ${checkpoints.waiting}` : ''}${checkpoints.failed ? `，失败 ${checkpoints.failed}` : ''}`
+      : '',
+    parallelGroups: (workflowRun.parallelGroups || []).map((group) => {
+      const branchNodes = nodesByParallelGroup.get(group.id) || [];
+      const branchLabels = branchNodes
+        .map((node) => node.fanoutItemLabel || node.title)
+        .filter(Boolean);
+      return {
+        id: group.id,
+        label: group.label || group.primitiveId || group.id,
+        status: labelNodeStatus(group.status),
+        progress: `完成 ${group.completedCount || 0}/${group.totalCount || branchNodes.length}`,
+        failurePolicy: labelFailurePolicy(group.failurePolicy),
+        branchText: branchLabels.join(' / '),
+      };
+    }),
     blockingFailures: workflowRun.summary?.blockingFailures || [],
     gateText,
     agentText: agents.join(' / '),
@@ -523,6 +577,9 @@ function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
         agent: node.assignedAgent || node.producerAgent || '',
         summary,
         reviewText,
+        branchText: node.parallelGroupId
+          ? `并行分支：${node.fanoutItemLabel || node.fanoutItemKey || node.parallelGroupId}`
+          : '',
         error: node.error || '',
       };
     }),
@@ -625,6 +682,16 @@ function labelNodeStatus(status: string): string {
     cancelled: '已取消',
   };
   return labels[status] || status;
+}
+
+function labelFailurePolicy(policy?: string) {
+  const labels: Record<string, string> = {
+    required_all: '全部必需',
+    collect_errors: '收集错误',
+    fail_fast: '快速失败',
+    quorum: '达到法定数量',
+  };
+  return labels[policy || ''] || policy || '默认';
 }
 
 function getStatusIcon(status: string) {

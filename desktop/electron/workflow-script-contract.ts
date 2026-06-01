@@ -183,6 +183,13 @@ export function validateWorkflowScript(
     };
   }
 
+  if (hasEagerParallelAgentCall(parsed.body)) {
+    return {
+      ok: false,
+      error: 'workflow_script_parallel_thunk_required',
+    };
+  }
+
   const analysis = analyzeWorkflowScriptBody(parsed.body);
   if (analysis.agentCallCount === 0) {
     return {
@@ -260,6 +267,12 @@ export function createWorkflowScriptPreview(
     scriptHash,
     analysis,
   };
+}
+
+function hasEagerParallelAgentCall(body: string): boolean {
+  const stripped = stripStringsAndComments(body);
+  return /\bparallel\s*\(\s*\[\s*(?:await\s+)?agent\s*\(/.test(stripped)
+    || /,\s*(?:await\s+)?agent\s*\(/.test(stripped.match(/\bparallel\s*\(\s*\[[\s\S]*?\]\s*(?:,|\))/)?.[0] || '');
 }
 
 function validateWorkflowMeta(meta: unknown): { ok: true; meta: WorkflowScriptMeta } | { ok: false; error: string } {

@@ -3,7 +3,9 @@ import type {
   WorkflowScriptAgentInput,
   WorkflowScriptController,
   WorkflowScriptLogInput,
+  WorkflowScriptParallelGroupInput,
   WorkflowScriptPhaseInput,
+  WorkflowScriptTerminalResult,
 } from './workflow-script-runtime.js';
 
 export interface KSwarmScriptWorkflowRunInput {
@@ -57,16 +59,18 @@ export async function completeKSwarmScriptWorkflowRun({
   projectId,
   workflowRunId,
   result,
+  terminal = null,
 }: {
   kswarmService: KSwarmService;
   projectId: string;
   workflowRunId: string;
   result: unknown;
+  terminal?: WorkflowScriptTerminalResult | null;
 }): Promise<{ workflowRun: Record<string, unknown> }> {
   const completed = await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowRunId)}/script/complete`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ result }),
+    body: JSON.stringify({ result, terminal }),
   });
   const workflowRun = readRecord(readRecord(completed).workflowRun);
   if (!readString(workflowRun.id)) throw workflowScriptKSwarmError('workflow_script_completion_missing', 'KSwarm did not return a completed workflow run');
@@ -89,6 +93,25 @@ export function createKSwarmWorkflowScriptController({
     async emitLog(_input: WorkflowScriptLogInput): Promise<void> {
       // Reserved for workflow progress batching; current MVP keeps logs local.
     },
+    async beginParallelGroup(input: WorkflowScriptParallelGroupInput): Promise<{ parallelGroupId: string }> {
+      const created = await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowRunId)}/script/parallel-groups`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          phaseTitle: input.phaseTitle || '动态执行',
+          label: input.label,
+          primitiveId: input.primitiveId,
+          kind: input.kind,
+          totalCount: input.totalCount,
+          limit: input.limit,
+          failurePolicy: input.failurePolicy,
+          quorum: input.quorum,
+        }),
+      });
+      const parallelGroupId = readString(readRecord(readRecord(created).parallelGroup).id);
+      if (!parallelGroupId) throw workflowScriptKSwarmError('workflow_script_parallel_group_missing', 'KSwarm did not return a workflow parallel group id');
+      return { parallelGroupId };
+    },
     async createAgentNode(input: WorkflowScriptAgentInput): Promise<unknown> {
       const created = await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowRunId)}/script/nodes`, {
         method: 'POST',
@@ -99,6 +122,13 @@ export function createKSwarmWorkflowScriptController({
           prompt: input.prompt,
           assignedAgent,
           options: input.options,
+          parallelGroupId: input.parallelGroupId,
+          fanoutItemKey: input.fanoutItemKey,
+          fanoutItemLabel: input.fanoutItemLabel,
+          pipelineStageIndex: input.pipelineStageIndex,
+          required: input.required,
+          outputSchema: input.outputSchema,
+          evidenceRequired: input.evidenceRequired,
         }),
       });
       const nodeId = readString(readRecord(created).nodeId) || inferLatestScriptNodeId(readRecord(readRecord(created).workflowRun));
