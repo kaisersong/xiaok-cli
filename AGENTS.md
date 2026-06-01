@@ -79,6 +79,13 @@
 - `xiaok chat` terminal frontend 规则仍然有效，但只在修改 `src/ui/**` 或 `src/commands/chat.ts` 中直接影响 TUI 的路径时适用。
 - 不要把 `yzj` channel、webhook、websocket 工作混入 desktop 或 terminal frontend 的当前变更，除非用户明确要求。
 
+## CUA / Computer Use 平台边界
+
+- CUA / Computer Use 当前是 macOS-only 能力。
+- Windows CLI / desktop startup 不能顶层 import、启动期解析或暴露 CUA / CuaDriver / `cua-driver mcp` 依赖；平台 gate 必须发生在动态 import `platform/mcp/cua-connection-manager` 和注册 `xiaok_computer_use` wrapper 之前。
+- Windows 上发现 `cua-driver` / `cua-computer-use` plugin 时，应标记为 macOS-only degraded capability 并跳过 wrapper 注册，不能让 `xiaok --auto` 因 CUA 模块缺失或 CuaDriver 不存在而启动失败。
+- 改 CUA lazy activation 或 CLI runtime startup 时，必须跑 package-boundary 测试，证明缺失 compiled CUA manager 时 Windows runtime context 仍可导入并跳过 CUA。
+
 ## Worktrees
 
 - CLI runtime layer refactor 已经合回主工作区。

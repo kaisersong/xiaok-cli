@@ -6,7 +6,6 @@ import { loadCustomAgents, type CustomAgentDef } from '../../ai/agents/loader.js
 import { buildMcpRuntimeTools } from '../../ai/mcp/runtime/tools.js';
 import { createComputerUseTool } from '../../ai/tools/computer-use.js';
 import { normalizeMcpRuntimeToolResult } from '../../ai/mcp/runtime/client.js';
-import { CuaConnectionManager } from '../mcp/cua-connection-manager.js';
 import { createBackgroundRunner, type BackgroundJobRecord } from '../agents/background-runner.js';
 import { createLspManager } from '../lsp/manager.js';
 import { loadPlatformPluginRuntime, connectDeclaredLspServer, type PlatformPluginRuntimeState } from '../plugins/runtime.js';
@@ -92,6 +91,7 @@ export interface CreatePlatformRuntimeContextOptions {
   reminderMode?: 'daemon' | 'local';
   reminderSocketPath?: string;
   mcpClassificationRegistry?: readonly McpClassificationEntry[];
+  platform?: NodeJS.Platform;
 }
 
 export async function createPlatformRuntimeContext(
@@ -152,6 +152,7 @@ export async function createPlatformRuntimeContext(
   );
   const classificationRegistry = options.mcpClassificationRegistry ?? BUILT_IN_MCP_CLASSIFICATIONS;
   validateRegistry(classificationRegistry);
+  const runtimePlatform = options.platform ?? process.platform;
   const mcpTools: Tool[] = [];
   const mcpToolListeners = new Set<(tools: Tool[]) => void>();
   let disposed = false;
@@ -206,6 +207,7 @@ export async function createPlatformRuntimeContext(
     registerDisposable,
     () => disposed,
     classificationRegistry,
+    runtimePlatform,
   ).then((tools) => {
     publishMcpTools(tools);
     healthStore.set(options.cwd, health.snapshot());
@@ -332,6 +334,7 @@ async function connectWorkspaceMcpServers(
   registerDisposable: (disposable: { dispose(): void }) => boolean,
   shouldStop: () => boolean = () => false,
   classificationRegistry: readonly McpClassificationEntry[] = BUILT_IN_MCP_CLASSIFICATIONS,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<Tool[]> {
   const tools: Tool[] = [];
   const startupTimeoutMs = resolveMcpStartupTimeoutMs();
@@ -344,7 +347,18 @@ async function connectWorkspaceMcpServers(
     const policy = classifyMcpServer(server, classificationRegistry);
 
     if (policy.activation.mode === 'lazy' && policy.activation.adapter === 'cua-computer-use-wrapper') {
+      if (platform !== 'darwin') {
+        capabilityHealth.push({
+          kind: 'mcp',
+          name: server.name,
+          status: 'degraded',
+          detail: 'Computer Use / CUA is macOS-only and is disabled on this platform',
+        });
+        continue;
+      }
+
       const frozenSnapshot = freezeServerSnapshot(server);
+      const { CuaConnectionManager } = await import('../mcp/cua-connection-manager.js');
       const cuaManager = new CuaConnectionManager(async () => {
         const conn = await createMcpClientConnection(server.name, frozenSnapshot);
         registerDisposable(conn);
