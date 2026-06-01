@@ -128,7 +128,12 @@ export class AgentRuntime {
           let summaryText: string;
           try {
             summaryText = await this.compactRunner.run(messages);
-          } catch {
+          } catch (compactError) {
+            onEvent({
+              type: 'compact_failed',
+              runId: run.runId,
+              error: compactError instanceof Error ? compactError.message : String(compactError),
+            });
             summaryText = '';
           }
           const compaction = this.session.forceCompact(summaryText || this.compactPlaceholder);
