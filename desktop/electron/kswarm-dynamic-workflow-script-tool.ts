@@ -8,6 +8,22 @@ import {
 } from './workflow-script-kswarm-controller.js';
 import { runWorkflowScript } from './workflow-script-runtime.js';
 
+type WorkflowScriptBackgroundJobStatus = 'running' | 'completed' | 'failed';
+
+interface WorkflowScriptBackgroundJob {
+  id: string;
+  projectId: string;
+  workflowRunId: string;
+  workflowId: string;
+  scriptHash: string;
+  status: WorkflowScriptBackgroundJobStatus;
+  startedAt: number;
+  completedAt: number | null;
+  error: string | null;
+}
+
+const backgroundJobs = new Map<string, WorkflowScriptBackgroundJob>();
+
 const WORKFLOW_SCRIPT_EXAMPLE = `export const meta = {
   name: 'project_snapshot_review',
   description: '检查项目状态并输出下一步建议',
@@ -50,6 +66,7 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
       name: 'run_dynamic_workflow_script',
       description: [
         '为一个 KSwarm 项目运行动态 workflow 脚本。适用于用户要求通过对话创建并启动 workflow，而不是只做普通 direct/swarm 执行。',
+        '对话确认场景先传 previewOnly: true，只返回 workflow 预览；用户确认后再调用一次启动。',
         '脚本是命令式 JavaScript DSL，不是 JSON schema。不要使用 agents/nodes/steps/tasks 声明式字段。',
         "必须以 export const meta = {...} 开头；然后用 phase('阶段名')、await agent('任务提示', { label: '节点名' })、parallel/pipeline 编排。",
         `最小可用 example:\n${WORKFLOW_SCRIPT_EXAMPLE}`,
@@ -70,6 +87,14 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
           },
           requestedBy: { type: 'string', description: '发起者，默认 assistant' },
           assignedAgent: { type: 'string', description: '动态 agent 节点默认派发给哪个 KSwarm agent，默认由 KSwarm 选择' },
+          waitForCompletion: {
+            type: 'boolean',
+            description: '测试或短任务可设为 true 等待完成。默认 false：后台启动后立即返回 workflowRunId。',
+          },
+          previewOnly: {
+            type: 'boolean',
+            description: '设为 true 时只校验脚本并返回 workflow 预览，不创建 KSwarm proposal/run；用于对话中先请用户确认。',
+          },
         },
         required: ['script'],
       },
@@ -78,6 +103,8 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
       const script = typeof input.script === 'string' ? input.script : '';
       const requestedBy = typeof input.requestedBy === 'string' && input.requestedBy.trim() ? input.requestedBy.trim() : 'assistant';
       const assignedAgent = typeof input.assignedAgent === 'string' && input.assignedAgent.trim() ? input.assignedAgent.trim() : null;
+      const waitForCompletion = input.waitForCompletion === true;
+      const previewOnly = input.previewOnly === true;
 
       try {
         const projectId = await resolveProjectId(kswarmService, input);
@@ -88,6 +115,16 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
           requestedBy,
         });
         if (!preview.ok) return validationFailure(preview);
+        if (previewOnly) {
+          return JSON.stringify({
+            ok: true,
+            projectId,
+            workflowId: readString(preview.workflowId),
+            scriptHash: readString(preview.scriptHash),
+            status: 'pending_confirmation',
+            preview,
+          });
+        }
 
         const started = await createKSwarmScriptWorkflowRun({
           kswarmService,
@@ -102,22 +139,48 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
           workflowRunId,
           assignedAgent,
         });
-        const run = await runWorkflowScript(script, { controller });
-        const completed = await completeKSwarmScriptWorkflowRun({
+        if (!waitForCompletion) {
+          const job = startWorkflowScriptBackgroundJob({
+            kswarmService,
+            projectId,
+            workflowRunId,
+            workflowId: readString(preview.workflowId) || readString(started.workflowRun.workflowId) || 'script_workflow',
+            scriptHash: readString(preview.scriptHash),
+            script,
+            controller,
+          });
+          return JSON.stringify({
+            ok: true,
+            projectId,
+            workflowRunId,
+            workflowId: job.workflowId,
+            scriptHash: job.scriptHash,
+            status: readString(started.workflowRun.status) || 'running',
+            workflowRun: started.workflowRun,
+            backgroundJob: {
+              id: job.id,
+              status: job.status,
+              startedAt: job.startedAt,
+            },
+          });
+        }
+
+        const completed = await runAndCompleteWorkflowScript({
           kswarmService,
           projectId,
           workflowRunId,
-          result: run.result,
+          script,
+          controller,
         });
 
         return JSON.stringify({
           ok: true,
           projectId,
           workflowRunId,
-          workflowId: run.meta.name,
-          scriptHash: run.scriptHash,
+          workflowId: completed.workflowId,
+          scriptHash: completed.scriptHash,
           status: readString(completed.workflowRun.status) || 'completed',
-          result: run.result,
+          result: completed.result,
           workflowRun: completed.workflowRun,
         });
       } catch (error) {
@@ -127,6 +190,91 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
         });
       }
     },
+  };
+}
+
+function startWorkflowScriptBackgroundJob({
+  kswarmService,
+  projectId,
+  workflowRunId,
+  workflowId,
+  scriptHash,
+  script,
+  controller,
+}: {
+  kswarmService: KSwarmService;
+  projectId: string;
+  workflowRunId: string;
+  workflowId: string;
+  scriptHash: string;
+  script: string;
+  controller: ReturnType<typeof createKSwarmWorkflowScriptController>;
+}): WorkflowScriptBackgroundJob {
+  const now = Date.now();
+  const job: WorkflowScriptBackgroundJob = {
+    id: `wf-script-job-${workflowRunId}`,
+    projectId,
+    workflowRunId,
+    workflowId,
+    scriptHash,
+    status: 'running',
+    startedAt: now,
+    completedAt: null,
+    error: null,
+  };
+  backgroundJobs.set(job.id, job);
+
+  setTimeout(() => {
+    void runAndCompleteWorkflowScript({
+      kswarmService,
+      projectId,
+      workflowRunId,
+      script,
+      controller,
+    }).then(() => {
+      job.status = 'completed';
+      job.completedAt = Date.now();
+    }).catch((error) => {
+      job.status = 'failed';
+      job.completedAt = Date.now();
+      job.error = readErrorCode(error);
+    });
+  }, 0);
+
+  return job;
+}
+
+async function runAndCompleteWorkflowScript({
+  kswarmService,
+  projectId,
+  workflowRunId,
+  script,
+  controller,
+}: {
+  kswarmService: KSwarmService;
+  projectId: string;
+  workflowRunId: string;
+  script: string;
+  controller: ReturnType<typeof createKSwarmWorkflowScriptController>;
+}): Promise<{
+  workflowId: string;
+  scriptHash: string;
+  result: unknown;
+  workflowRun: Record<string, unknown>;
+}> {
+  const run = await runWorkflowScript(script, { controller });
+  const completed = await completeKSwarmScriptWorkflowRun({
+    kswarmService,
+    projectId,
+    workflowRunId,
+    result: run.result,
+    terminal: run.terminal || null,
+  });
+  return {
+    workflowId: run.meta.name,
+    scriptHash: run.scriptHash,
+    result: run.result,
+    workflowRun: completed.workflowRun,
   };
 }
 

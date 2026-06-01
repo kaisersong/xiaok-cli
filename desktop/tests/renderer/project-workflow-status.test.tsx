@@ -267,6 +267,120 @@ function runningAgentWorkflowRun() {
   };
 }
 
+function scriptParallelWorkflowRun() {
+  return {
+    id: 'wf-proj-workflow-script-parallel-1770000000000',
+    projectId: 'proj-workflow',
+    workflowId: 'parallel_report_review',
+    title: '并行报告复核',
+    strategy: 'workflow' as const,
+    source: 'script_generated',
+    status: 'completed' as const,
+    createdAt: 1770000000000,
+    updatedAt: 1770000004000,
+    startedAt: 1770000000000,
+    completedAt: 1770000004000,
+    cancelledAt: null,
+    requestedBy: 'assistant',
+    approval: { required: true, status: 'approved', budget: null, approvedBy: 'assistant', decidedAt: 1770000000000 },
+    phases: [
+      { id: 'script-review', title: '并行复核', status: 'completed' as const, nodeIds: ['script-agent-1', 'script-agent-2'] },
+      { id: 'script-summary', title: '汇总', status: 'completed' as const, nodeIds: ['script-runtime'] },
+    ],
+    parallelGroups: [
+      {
+        id: 'script-parallel-1',
+        workflowRunId: 'wf-proj-workflow-script-parallel-1770000000000',
+        phaseId: 'script-review',
+        primitiveId: 'parallel-1',
+        kind: 'parallel',
+        label: '两路复核',
+        status: 'completed',
+        limit: 2,
+        totalCount: 2,
+        completedCount: 2,
+        failedCount: 0,
+        cancelledCount: 0,
+        requiredFailedCount: 0,
+        failurePolicy: 'required_all',
+        quorum: null,
+        createdAt: 1770000001000,
+        updatedAt: 1770000003000,
+        completedAt: 1770000003000,
+      },
+    ],
+    scriptCheckpoints: [
+      { id: 'script-checkpoint-1', workflowRunId: 'wf-proj-workflow-script-parallel-1770000000000', primitiveType: 'parallel', primitiveId: 'parallel-1', phaseId: 'script-review', parallelGroupId: 'script-parallel-1', status: 'completed', outputRefs: [], createdAt: 1770000001000, updatedAt: 1770000003000 },
+      { id: 'script-checkpoint-2', workflowRunId: 'wf-proj-workflow-script-parallel-1770000000000', primitiveType: 'agent', primitiveId: 'script-agent-1', phaseId: 'script-review', parallelGroupId: 'script-parallel-1', status: 'completed', outputRefs: ['script-agent-1'], createdAt: 1770000001000, updatedAt: 1770000002000 },
+      { id: 'script-checkpoint-3', workflowRunId: 'wf-proj-workflow-script-parallel-1770000000000', primitiveType: 'agent', primitiveId: 'script-agent-2', phaseId: 'script-review', parallelGroupId: 'script-parallel-1', status: 'completed', outputRefs: ['script-agent-2'], createdAt: 1770000001000, updatedAt: 1770000003000 },
+    ],
+    nodes: [
+      {
+        id: 'script-runtime',
+        phaseId: 'script-summary',
+        title: '动态脚本运行时',
+        status: 'completed' as const,
+        kind: 'control',
+        dependsOn: [],
+        assignedAgent: 'desktop-workflow-runtime',
+        attempt: 1,
+        output: { summary: '并行复核完成' },
+        error: null,
+        startedAt: 1770000000000,
+        completedAt: 1770000004000,
+      },
+      {
+        id: 'script-agent-1',
+        phaseId: 'script-review',
+        title: '格式检查',
+        status: 'completed' as const,
+        kind: 'agent_task',
+        dependsOn: [],
+        assignedAgent: 'xiaok-worker',
+        attempt: 1,
+        output: { summary: '格式通过' },
+        error: null,
+        startedAt: 1770000001000,
+        completedAt: 1770000002000,
+        parallelGroupId: 'script-parallel-1',
+        fanoutItemKey: 'branch-1',
+        fanoutItemLabel: '格式检查',
+      },
+      {
+        id: 'script-agent-2',
+        phaseId: 'script-review',
+        title: '事实检查',
+        status: 'completed' as const,
+        kind: 'agent_task',
+        dependsOn: [],
+        assignedAgent: 'xiaok-worker',
+        attempt: 1,
+        output: { summary: '事实通过' },
+        error: null,
+        startedAt: 1770000001000,
+        completedAt: 1770000003000,
+        parallelGroupId: 'script-parallel-1',
+        fanoutItemKey: 'branch-2',
+        fanoutItemLabel: '事实检查',
+      },
+    ],
+    summary: {
+      total: 3,
+      completed: 3,
+      failed: 0,
+      blocked: 0,
+      running: 0,
+      pending: 0,
+      progress: 1,
+      primaryMessage: '并行复核完成',
+      parallelGroups: { total: 1, completed: 1, failed: 0, blocked: 0, running: 0, cancelled: 0 },
+      checkpoints: { total: 3, completed: 3, waiting: 0, failed: 0 },
+      blockingFailures: [],
+    },
+    gateDecision: null,
+  };
+}
+
 function agentWorkflowProposal(): KSwarmWorkflowProposal {
   return {
     id: 'wfp-proj-workflow-agent-review-smoke-1770000000000',
@@ -511,6 +625,32 @@ describe('WorkflowStatusStrip', () => {
     expect(dialog).toHaveTextContent('已保存节点结果 1');
     expect(dialog).toHaveTextContent('恢复方式：复用已完成节点');
     expect(dialog).toHaveTextContent('最近进展：正在生成任务工作流建议');
+  });
+
+  it('shows durable parallel groups and script checkpoints for dynamic workflow scripts', () => {
+    renderWithProviders(
+      <WorkflowStatusStrip
+        workflowRun={scriptParallelWorkflowRun()}
+        busy={false}
+        onStartDiagnose={vi.fn()}
+        onStartAgentWorkflow={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('并行报告复核')).toBeInTheDocument();
+    expect(screen.getByText('并行复核完成')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /并行报告复核/ }));
+
+    const dialog = screen.getByRole('dialog', { name: '工作流详情' });
+    expect(dialog).toHaveTextContent('脚本检查点：3/3');
+    expect(dialog).toHaveTextContent('并行编排');
+    expect(dialog).toHaveTextContent('两路复核');
+    expect(dialog).toHaveTextContent('完成 2/2');
+    expect(dialog).toHaveTextContent('策略：全部必需');
+    expect(dialog).toHaveTextContent('分支：格式检查 / 事实检查');
+    expect(dialog).toHaveTextContent('并行分支：格式检查');
+    expect(dialog).toHaveTextContent('并行分支：事实检查');
   });
 
   it('opens one workflow run menu for quick diagnose and agent review diagnose', () => {

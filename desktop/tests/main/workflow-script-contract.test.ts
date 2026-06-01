@@ -134,4 +134,16 @@ describe('workflow script contract', () => {
       actual: 4,
     });
   });
+
+  it('rejects parallel calls that eagerly start agent promises instead of thunks', () => {
+    expect(validateWorkflowScript(`export const meta = { name: 'bad_parallel', description: 'desc' }
+phase('复核')
+await parallel([
+  agent('事实复核', { label: '事实复核' }),
+  () => agent('证据复核', { label: '证据复核' }),
+])`)).toMatchObject({
+      ok: false,
+      error: 'workflow_script_parallel_thunk_required',
+    });
+  });
 });

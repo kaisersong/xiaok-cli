@@ -47,9 +47,35 @@ describe('KSwarm dynamic workflow script tool', () => {
 
     expect(tool.definition.description).toContain('await agent');
     expect(tool.definition.description).toContain("phase('");
+    expect(tool.definition.description).toContain('previewOnly');
     expect(tool.definition.description).toContain('不要使用 agents');
     expect(tool.definition.inputSchema.properties.script.description).toContain('export const meta');
     expect(tool.definition.inputSchema.properties.script.description).toContain('example');
+  });
+
+  it('previews a generated workflow script without creating a KSwarm run for conversational confirmation', async () => {
+    const { service, requests } = createMockService([]);
+    const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
+
+    const output = JSON.parse(await tool.execute({
+      projectId: 'proj-1',
+      script: workflowScript,
+      requestedBy: 'assistant',
+      previewOnly: true,
+    })) as Record<string, unknown>;
+
+    expect(output).toMatchObject({
+      ok: true,
+      projectId: 'proj-1',
+      workflowId: 'project_snapshot_review',
+      status: 'pending_confirmation',
+      preview: {
+        source: 'script_generated',
+        strategy: 'workflow',
+        title: '检查项目当前状态并输出下一步建议',
+      },
+    });
+    expect(requests).toEqual([]);
   });
 
   it('runs a generated workflow script through KSwarm and completes the workflow run', async () => {
@@ -69,6 +95,7 @@ describe('KSwarm dynamic workflow script tool', () => {
       script: workflowScript,
       requestedBy: 'assistant',
       assignedAgent: 'xiaok-worker',
+      waitForCompletion: true,
     })) as Record<string, unknown>;
 
     expect(output).toMatchObject({
@@ -107,6 +134,36 @@ describe('KSwarm dynamic workflow script tool', () => {
       prompt: '基于 项目可推进 输出下一步建议。',
       assignedAgent: 'xiaok-worker',
     });
+  });
+
+  it('starts a background script job and returns the workflow run id without waiting by default', async () => {
+    const { service, requests } = createMockService([
+      jsonResponse({ ok: true, workflowProposal: { id: 'proposal-1' } }, 201),
+      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'running' } }, 201),
+    ]);
+    const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
+
+    const output = JSON.parse(await tool.execute({
+      projectId: 'proj-1',
+      script: workflowScript,
+      requestedBy: 'assistant',
+      assignedAgent: 'xiaok-worker',
+    })) as Record<string, unknown>;
+
+    expect(output).toMatchObject({
+      ok: true,
+      projectId: 'proj-1',
+      workflowRunId: 'run-1',
+      status: 'running',
+      backgroundJob: {
+        status: 'running',
+      },
+    });
+    expect('result' in output).toBe(false);
+    expect(requests.map((request) => [request.method, request.path])).toEqual([
+      ['POST', '/projects/proj-1/workflows/script-generated/proposal'],
+      ['POST', '/projects/proj-1/workflows/script-generated/runs'],
+    ]);
   });
 
   it('returns validation errors without calling KSwarm when the script is unsafe', async () => {

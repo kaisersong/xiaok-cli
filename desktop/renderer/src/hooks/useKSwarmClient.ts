@@ -410,8 +410,24 @@ export interface KSwarmWorkflowRun {
     progress: number;
     primaryMessage?: string | null;
     cache?: { storedNodeCount?: number; reusableNodeCount?: number };
+    parallelGroups?: {
+      total?: number;
+      completed?: number;
+      failed?: number;
+      blocked?: number;
+      running?: number;
+      cancelled?: number;
+    };
+    checkpoints?: {
+      total?: number;
+      completed?: number;
+      waiting?: number;
+      failed?: number;
+    };
     blockingFailures?: Array<{ nodeId?: string; title?: string; status?: string; reason?: string | null }>;
   };
+  parallelGroups?: KSwarmWorkflowParallelGroup[];
+  scriptCheckpoints?: KSwarmWorkflowScriptCheckpoint[];
   progressState?: {
     lastMaterialProgress?: { nodeId?: string; message?: string; at?: number };
   } | null;
@@ -507,6 +523,49 @@ export interface KSwarmWorkflowNode {
   error?: string | null;
   startedAt?: number | null;
   completedAt?: number | null;
+  parallelGroupId?: string | null;
+  fanoutItemKey?: string | null;
+  fanoutItemLabel?: string | null;
+  pipelineStageIndex?: number | null;
+  required?: boolean;
+  outputSchema?: Record<string, unknown> | null;
+  evidenceRequired?: boolean;
+}
+
+export interface KSwarmWorkflowParallelGroup {
+  id: string;
+  workflowRunId?: string | null;
+  phaseId?: string | null;
+  primitiveId?: string | null;
+  kind?: 'parallel' | 'pipeline' | string;
+  label: string;
+  status: string;
+  limit?: number;
+  totalCount?: number;
+  completedCount?: number;
+  failedCount?: number;
+  cancelledCount?: number;
+  requiredFailedCount?: number;
+  failurePolicy?: 'required_all' | 'collect_errors' | 'fail_fast' | 'quorum' | string;
+  quorum?: number | null;
+  createdAt?: number | null;
+  updatedAt?: number | null;
+  completedAt?: number | null;
+}
+
+export interface KSwarmWorkflowScriptCheckpoint {
+  id: string;
+  workflowRunId?: string | null;
+  scriptHash?: string | null;
+  primitiveType?: 'parallel' | 'pipeline' | 'agent' | string | null;
+  primitiveId?: string | null;
+  phaseId?: string | null;
+  parallelGroupId?: string | null;
+  status: string;
+  inputHash?: string | null;
+  outputRefs?: string[];
+  createdAt?: number | null;
+  updatedAt?: number | null;
 }
 
 export interface KSwarmWorkflowReviewDecision {
