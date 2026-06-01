@@ -9,6 +9,7 @@ import { type TeamService } from '../teams/service.js';
 import { type WorktreeManager } from '../worktrees/manager.js';
 import { type ReminderApi } from '../../runtime/reminder/service.js';
 import { CapabilityRegistry } from './capability-registry.js';
+import { type McpClassificationEntry } from '../mcp/server-classification.js';
 export interface LspClientLike {
     didOpenDocument(document: {
         uri: string;
@@ -50,7 +51,7 @@ export interface PlatformRuntimeContext {
 export interface PlatformCapabilityHealth {
     kind: 'mcp' | 'lsp';
     name: string;
-    status: 'connected' | 'degraded';
+    status: 'connected' | 'degraded' | 'deferred';
     detail: string;
 }
 export interface PlatformRuntimeHealth {
@@ -68,5 +69,7 @@ export interface CreatePlatformRuntimeContextOptions {
     builtinCommands: string[];
     reminderMode?: 'daemon' | 'local';
     reminderSocketPath?: string;
+    mcpClassificationRegistry?: readonly McpClassificationEntry[];
+    platform?: NodeJS.Platform;
 }
 export declare function createPlatformRuntimeContext(options: CreatePlatformRuntimeContextOptions): Promise<PlatformRuntimeContext>;

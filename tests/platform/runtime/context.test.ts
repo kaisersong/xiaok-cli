@@ -246,6 +246,7 @@ describe('platform runtime context', () => {
       cwd,
       builtinCommands: ['chat', 'yzj'],
       reminderMode: 'local',
+      platform: 'darwin',
     });
     await context.mcpReady;
 
@@ -368,6 +369,7 @@ describe('platform runtime context', () => {
       cwd,
       builtinCommands: ['chat', 'yzj'],
       reminderMode: 'local',
+      platform: 'darwin',
     });
     await context.mcpReady;
 
@@ -406,6 +408,7 @@ describe('platform runtime context', () => {
       cwd,
       builtinCommands: ['chat', 'yzj'],
       reminderMode: 'local',
+      platform: 'darwin',
     });
     await context.mcpReady;
 
