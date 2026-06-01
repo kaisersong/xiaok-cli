@@ -59,6 +59,7 @@ export type McpServerConfig =
  */
 export type PluginManifestMcpServer = McpServerConfig & {
   name: string;
+  requiresUserActivation?: boolean;
 };
 
 /**
@@ -74,4 +75,5 @@ export interface SettingsMcpServers {
  */
 export type NamedMcpServerConfig = McpServerConfig & {
   name: string;
+  requiresUserActivation?: boolean;
 };

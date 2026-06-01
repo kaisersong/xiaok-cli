@@ -343,4 +343,75 @@ describe('platform runtime context', () => {
 
     await context.dispose();
   });
+
+  itIfCanSpawn('does not spawn cua-driver mcp at startup when requiresUserActivation is set', async () => {
+    const cwd = join(tmpdir(), `xiaok-platform-context-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(cwd);
+    mkdirSync(join(cwd, '.xiaok'), { recursive: true });
+
+    writePlugin(cwd, 'cua-computer-use', {
+      name: 'cua-computer-use',
+      version: '1.0.0',
+      commands: [],
+      mcpServers: [
+        {
+          name: 'cua-driver',
+          type: 'stdio',
+          command: process.execPath,
+          args: [join(process.cwd(), 'tests', 'support', 'cua-mcp-stdio-server.js')],
+          requiresUserActivation: true,
+        },
+      ],
+    });
+
+    const context = await createPlatformRuntimeContext({
+      cwd,
+      builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
+    });
+    await context.mcpReady;
+
+    // wrapper tool registered (model can see it) but no connection was made
+    expect(context.mcpTools.map((tool) => tool.definition.name)).toEqual(['xiaok_computer_use']);
+    // health should NOT show cua-driver as connected (it was deferred)
+    expect(context.health.summary()).not.toContain('mcp:cua-driver connected');
+    expect(context.health.hasDegradedCapabilities()).toBe(false);
+
+    await context.dispose();
+  });
+
+  itIfCanSpawn('runtime fallback: cua-driver server without requiresUserActivation field is still deferred', async () => {
+    const cwd = join(tmpdir(), `xiaok-platform-context-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(cwd);
+    mkdirSync(join(cwd, '.xiaok'), { recursive: true });
+
+    // Simulates a deployed plugin that was never updated with requiresUserActivation
+    writePlugin(cwd, 'cua-computer-use', {
+      name: 'cua-computer-use',
+      version: '0.2.0',
+      commands: [],
+      mcpServers: [
+        {
+          name: 'cua-driver',
+          type: 'stdio',
+          command: process.execPath,
+          args: [join(process.cwd(), 'tests', 'support', 'cua-mcp-stdio-server.js')],
+          // NO requiresUserActivation field — runtime fallback should still defer
+        },
+      ],
+    });
+
+    const context = await createPlatformRuntimeContext({
+      cwd,
+      builtinCommands: ['chat', 'yzj'],
+      reminderMode: 'local',
+    });
+    await context.mcpReady;
+
+    // wrapper tool registered but connection deferred
+    expect(context.mcpTools.map((tool) => tool.definition.name)).toEqual(['xiaok_computer_use']);
+    expect(context.health.summary()).not.toContain('mcp:cua-driver connected');
+
+    await context.dispose();
+  });
 });

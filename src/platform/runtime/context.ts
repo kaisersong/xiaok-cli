@@ -6,6 +6,7 @@ import { loadCustomAgents, type CustomAgentDef } from '../../ai/agents/loader.js
 import { buildMcpRuntimeTools } from '../../ai/mcp/runtime/tools.js';
 import { createComputerUseTool } from '../../ai/tools/computer-use.js';
 import { normalizeMcpRuntimeToolResult } from '../../ai/mcp/runtime/client.js';
+import { CuaConnectionManager } from '../mcp/cua-connection-manager.js';
 import { createBackgroundRunner, type BackgroundJobRecord } from '../agents/background-runner.js';
 import { createLspManager } from '../lsp/manager.js';
 import { loadPlatformPluginRuntime, connectDeclaredLspServer, type PlatformPluginRuntimeState } from '../plugins/runtime.js';
@@ -320,6 +321,27 @@ async function connectWorkspaceMcpServers(
     if (shouldStop()) {
       break;
     }
+
+    const shouldDeferCua = server.requiresUserActivation === true || server.name === 'cua-driver';
+    if (shouldDeferCua) {
+      const cuaManager = new CuaConnectionManager(async () => {
+        const conn = await createMcpClientConnection(server.name, server);
+        registerDisposable(conn);
+        return {
+          callToolResult: async (name, input) => {
+            const result = await conn.client.callTool({ name, arguments: input });
+            return normalizeMcpRuntimeToolResult(result);
+          },
+          dispose: () => conn.dispose(),
+        };
+      });
+      tools.push(createComputerUseTool({
+        callToolResult: (name, input) => cuaManager.callToolResult(name, input),
+      }));
+      registerDisposable({ dispose: () => { cuaManager.dispose(); } });
+      continue;
+    }
+
     let connection: Awaited<ReturnType<typeof createMcpClientConnection>> | undefined;
     try {
       // 创建 client 连接
