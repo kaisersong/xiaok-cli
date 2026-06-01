@@ -24,9 +24,16 @@ import {
   loadSettingsMcpServers,
   loadPluginMcpServers,
   mergeMcpServerConfigs,
+  type McpServerConfigConflict,
 } from '../mcp/config.js';
-import { createMcpClientConnection, resolveMcpStartupTimeoutMs } from '../mcp/transport.js';
+import { createMcpClientConnection, resolveMcpStartupTimeoutMs, resolveStdioCommand } from '../mcp/transport.js';
 import type { NamedMcpServerConfig } from '../mcp/types.js';
+import {
+  BUILT_IN_MCP_CLASSIFICATIONS,
+  classifyMcpServer,
+  validateRegistry,
+  type McpClassificationEntry,
+} from '../mcp/server-classification.js';
 
 export interface LspClientLike {
   didOpenDocument(document: { uri: string; languageId: string; version?: number; text: string }): Promise<void>;
@@ -64,7 +71,7 @@ export interface PlatformRuntimeContext {
 export interface PlatformCapabilityHealth {
   kind: 'mcp' | 'lsp';
   name: string;
-  status: 'connected' | 'degraded';
+  status: 'connected' | 'degraded' | 'deferred';
   detail: string;
 }
 
@@ -84,6 +91,7 @@ export interface CreatePlatformRuntimeContextOptions {
   builtinCommands: string[];
   reminderMode?: 'daemon' | 'local';
   reminderSocketPath?: string;
+  mcpClassificationRegistry?: readonly McpClassificationEntry[];
 }
 
 export async function createPlatformRuntimeContext(
@@ -138,10 +146,19 @@ export async function createPlatformRuntimeContext(
   // 加载 MCP server 配置（settings.json + plugin manifests）
   const settingsMcpServers = loadSettingsMcpServers();
   const pluginMcpServers = loadPluginMcpServers(pluginRuntime);
-  const mergedMcpServers = mergeMcpServerConfigs(settingsMcpServers, pluginMcpServers);
+  const { servers: mergedMcpServers, conflicts: mcpConflicts } = mergeMcpServerConfigs(
+    settingsMcpServers,
+    pluginMcpServers,
+  );
+  const classificationRegistry = options.mcpClassificationRegistry ?? BUILT_IN_MCP_CLASSIFICATIONS;
+  validateRegistry(classificationRegistry);
   const mcpTools: Tool[] = [];
   const mcpToolListeners = new Set<(tools: Tool[]) => void>();
   let disposed = false;
+
+  for (const conflict of mcpConflicts) {
+    capabilityHealth.push(buildConflictHealthEntry(conflict));
+  }
 
   for (const agent of customAgents) {
     capabilityRegistry.register({
@@ -188,6 +205,7 @@ export async function createPlatformRuntimeContext(
     capabilityHealth,
     registerDisposable,
     () => disposed,
+    classificationRegistry,
   ).then((tools) => {
     publishMcpTools(tools);
     healthStore.set(options.cwd, health.snapshot());
@@ -313,6 +331,7 @@ async function connectWorkspaceMcpServers(
   capabilityHealth: PlatformCapabilityHealth[],
   registerDisposable: (disposable: { dispose(): void }) => boolean,
   shouldStop: () => boolean = () => false,
+  classificationRegistry: readonly McpClassificationEntry[] = BUILT_IN_MCP_CLASSIFICATIONS,
 ): Promise<Tool[]> {
   const tools: Tool[] = [];
   const startupTimeoutMs = resolveMcpStartupTimeoutMs();
@@ -322,10 +341,12 @@ async function connectWorkspaceMcpServers(
       break;
     }
 
-    const shouldDeferCua = server.requiresUserActivation === true || server.name === 'cua-driver';
-    if (shouldDeferCua) {
+    const policy = classifyMcpServer(server, classificationRegistry);
+
+    if (policy.activation.mode === 'lazy' && policy.activation.adapter === 'cua-computer-use-wrapper') {
+      const frozenSnapshot = freezeServerSnapshot(server);
       const cuaManager = new CuaConnectionManager(async () => {
-        const conn = await createMcpClientConnection(server.name, server);
+        const conn = await createMcpClientConnection(server.name, frozenSnapshot);
         registerDisposable(conn);
         return {
           callToolResult: async (name, input) => {
@@ -339,67 +360,104 @@ async function connectWorkspaceMcpServers(
         callToolResult: (name, input) => cuaManager.callToolResult(name, input),
       }));
       registerDisposable({ dispose: () => { cuaManager.dispose(); } });
+      capabilityHealth.push({
+        kind: 'mcp',
+        name: server.name,
+        status: 'deferred',
+        detail: policy.reason || 'lazy activation',
+      });
       continue;
     }
 
     let connection: Awaited<ReturnType<typeof createMcpClientConnection>> | undefined;
     try {
-      // 创建 client 连接
       connection = await createMcpClientConnection(server.name, server);
       const activeConnection = connection;
 
-      // 列出所有 tools
       const toolsResult = await activeConnection.client.listTools(undefined, { timeout: startupTimeoutMs });
       const schemas = toolsResult.tools ?? [];
 
-      if (server.name === 'cua-driver') {
-        tools.push(createComputerUseTool({
-          callToolResult: async (name, input) => {
-            const result = await activeConnection.client.callTool({ name, arguments: input });
-            return normalizeMcpRuntimeToolResult(result);
-          },
-        }));
-      } else {
-        // 构建 xiaok Tool 对象
-        tools.push(
-          ...buildMcpRuntimeTools(
-            { name: server.name, command: '' }, // declaration 兼容旧接口
-            {
-              listTools: async () => schemas,
-              callTool: async (name, input) => {
-                const result = await activeConnection.client.callTool({ name, arguments: input });
-                return normalizeMcpRuntimeToolResult(result).text;
-              },
-              dispose: activeConnection.dispose,
+      tools.push(
+        ...buildMcpRuntimeTools(
+          { name: server.name, command: '' },
+          {
+            listTools: async () => schemas,
+            callTool: async (name, input) => {
+              const result = await activeConnection.client.callTool({ name, arguments: input });
+              return normalizeMcpRuntimeToolResult(result).text;
             },
-            schemas,
-          ),
-        );
-      }
+            dispose: activeConnection.dispose,
+          },
+          schemas,
+        ),
+      );
 
       if (!registerDisposable(activeConnection)) {
         connection = undefined;
         continue;
       }
       connection = undefined;
+      const detailParts: string[] = [`${schemas.length} tools`];
+      if (policy.source === 'legacy-manifest' && policy.reason) {
+        detailParts.push(policy.reason);
+      }
       capabilityHealth.push({
         kind: 'mcp',
         name: server.name,
         status: 'connected',
-        detail: `${schemas.length} tools`,
+        detail: detailParts.join('; '),
       });
     } catch (error) {
       connection?.dispose();
+      const detailParts: string[] = [error instanceof Error ? error.message : String(error)];
+      if (policy.source === 'legacy-manifest' && policy.reason) {
+        detailParts.unshift(policy.reason);
+      }
       capabilityHealth.push({
         kind: 'mcp',
         name: server.name,
         status: 'degraded',
-        detail: error instanceof Error ? error.message : String(error),
+        detail: detailParts.join('; '),
       });
     }
   }
 
   return tools;
+}
+
+/**
+ * 把 lazy 激活前的 launch plan 冻结成 plain object。
+ * - stdio: 解析 command + 合并 process.env + 平台特化,激活时不再读 process.env。
+ * - 其它 transport: 浅拷贝避免后续 manifest 变更影响。
+ */
+function freezeServerSnapshot(server: NamedMcpServerConfig): NamedMcpServerConfig {
+  if (server.type === 'stdio') {
+    const platform = process.platform;
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries({ ...process.env, ...server.env })) {
+      if (value !== undefined) {
+        env[key] = value;
+      }
+    }
+    return Object.freeze({
+      ...server,
+      command: resolveStdioCommand(server.command, platform),
+      args: server.args ? [...server.args] : [],
+      env,
+    }) as NamedMcpServerConfig;
+  }
+  return Object.freeze({ ...server }) as NamedMcpServerConfig;
+}
+
+function buildConflictHealthEntry(conflict: McpServerConfigConflict): PlatformCapabilityHealth {
+  const winner = conflict.winner.pluginName ?? conflict.winner.origin;
+  const loser = conflict.loser.pluginName ?? conflict.loser.origin;
+  return {
+    kind: 'mcp',
+    name: conflict.name,
+    status: 'degraded',
+    detail: `mcp server "${conflict.name}" overridden: ${loser} -> ${winner}`,
+  };
 }
 
 function collectLspSeedDocuments(cwd: string): Array<{ uri: string; languageId: string; text: string }> {

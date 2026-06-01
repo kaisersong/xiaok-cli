@@ -28,4 +28,30 @@ describe('capability health store', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('round-trips deferred status without coercion or loss', () => {
+    const root = join(tmpdir(), `xiaok-health-store-deferred-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const filePath = join(root, 'health.json');
+
+    try {
+      const store = new FileCapabilityHealthStore(filePath);
+      store.set('/repo', {
+        updatedAt: 2,
+        summary: 'mcp:cua-driver deferred (lazy CUA)',
+        capabilities: [
+          { kind: 'mcp', name: 'cua-driver', status: 'deferred', detail: 'lazy CUA' },
+        ],
+      });
+
+      const reloaded = new FileCapabilityHealthStore(filePath);
+      const snap = reloaded.get('/repo');
+      expect(snap?.capabilities).toEqual([
+        { kind: 'mcp', name: 'cua-driver', status: 'deferred', detail: 'lazy CUA' },
+      ]);
+      expect(snap?.summary).toBe('mcp:cua-driver deferred (lazy CUA)');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
