@@ -93,6 +93,19 @@
 - 本地验证 `xiaok` 命令必须使用主工作区 `/Users/song/projects/xiaok-cli`；不要 `npm link` feature worktree。
 - 如果后续确实需要 worktree，只为隔离实现创建，并在集成后移除。
 
+## 跨平台兼容
+
+以下规则适用于 `xiaok-cli` 及所有关联项目（`kswarm`、`intent-broker`、`kai-xiaok-plugins`）。
+
+- 路径拼接必须用 `path.join` / `path.resolve`，禁止硬编码 `/` 或 `\` 分隔符。
+- 禁止对 `os.homedir()`、config dir、temp dir 的结果做字符串拼接 `/`；一律用 `path.join`。
+- macOS 专有能力（CUA driver、`open` 命令、`.app` bundle 路径、`launchctl`、`defaults`）必须有 `process.platform` 守卫；Windows / Linux 路径下不能调用，也不能因为缺失而导致启动崩溃。
+- Windows 专有能力（`reg`、`cmd /c`、`explorer.exe`）同样需要平台守卫。
+- child_process spawn / exec 的命令和参数不要假设 Unix shell 语法（如 `&&`、`|`、`$VAR`）；需要跨平台时用 `cross-spawn` 或分成多步。
+- 文件路径比较和去重必须考虑大小写（Windows 默认 case-insensitive）和盘符（`C:\` vs `/`）。
+- 新增或修改 daemon spawn、MCP server 启动、plugin 路径解析、socket 路径时，必须验证 Windows 分支不会崩溃。CI 可以覆盖，但至少需要 `process.platform === 'win32'` 分支的单元测试或条件跳过。
+- 已知历史教训：CUA 是 macOS 专有功能，之前因为无条件启动 CUA daemon 导致 Windows CLI 无法启动；路径硬编码 `/Users/...` 导致 Windows 解析失败。改动时优先检查是否会重蹈覆辙。
+
 ## Requirement Implementation Gate
 
 - 任何新需求或行为变更，先写设计文档。

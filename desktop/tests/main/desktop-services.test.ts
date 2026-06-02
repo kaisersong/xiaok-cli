@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { attachRuntimeToolRequestScope, createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createTimedActionTools, resolveToolOutputArtifactPath, resolveWriteToolArtifactPath } from '../../electron/desktop-services.js';
+import { attachRuntimeToolRequestScope, createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createReportArtifactTool, createTimedActionTools, resolveToolOutputArtifactPath, resolveWriteToolArtifactPath } from '../../electron/desktop-services.js';
 import type { ExternalPluginDependency } from '../../electron/plugin-dependency-service.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 import { TimedActionService } from '../../electron/timed-action-service.js';
@@ -84,6 +84,40 @@ describe('desktop services', () => {
       `-rw-r--r-- 979K ${oldPath}`,
       { toolName: 'bash', toolStartedAt: Date.now() },
     )).toBeNull();
+  });
+
+  it('renders report HTML through a semantic desktop tool without exposing plugin internals to the agent', async () => {
+    const toolRoot = join(process.cwd(), `.tmp-report-tool-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    process.env.XIAOK_CONFIG_DIR = join(toolRoot, 'config');
+    const rendererDir = join(process.env.XIAOK_CONFIG_DIR!, 'plugins', 'kai-report-creator', 'mcp-servers', 'report-renderer', 'dist', 'renderer');
+    try {
+      mkdirSync(rendererDir, { recursive: true });
+      writeFileSync(join(rendererDir, 'package.json'), '{"type":"module"}\n');
+      writeFileSync(join(rendererDir, 'html-builder.js'), `
+        import { writeFileSync } from 'node:fs';
+        export function renderReport({ irContent, outputPath, themeOverride }) {
+          writeFileSync(outputPath, '<html><body>' + irContent + ':' + (themeOverride || '') + '</body></html>');
+          return { success: true, outputPath, stats: { sectionCount: 1 }, validation: { errors: [], warnings: [] }, warnings: [] };
+        }
+      `);
+      const outputPath = join(toolRoot, 'workflow-report.html');
+      const tool = createReportArtifactTool();
+
+      const result = JSON.parse(await tool.execute({
+        ir_content: '---\ntitle: Smoke\n---\n\n## 结论\n\n:::callout type=note\nPASS\n:::',
+        output_path: outputPath,
+        theme: 'corporate-blue',
+      })) as Record<string, unknown>;
+
+      if (result.success !== true) {
+        throw new Error(JSON.stringify(result));
+      }
+      expect(result).toMatchObject({ success: true, output_path: outputPath });
+      expect(readFileSync(outputPath, 'utf-8')).toContain('Smoke');
+    } finally {
+      rmSync(toolRoot, { recursive: true, force: true });
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, 'config');
+    }
   });
 
   it('imports material, creates a task, runs without confirmation, and recovers result', async () => {
@@ -437,6 +471,97 @@ describe('desktop services', () => {
     expect(result.output?.artifacts).toEqual([
       { path: finalArtifactPath, kind: 'markdown', label: 'script-agent-report.md' },
     ]);
+  });
+
+  it('retries a script-generated workflow node once after a transient stream close', async () => {
+    const workFolder = join(rootDir, 'retry-workflow-project');
+    const artifactsDir = join(workFolder, 'artifacts');
+    const finalArtifactPath = join(artifactsDir, 'retry-script-agent-report.md');
+    const runner = vi.fn(async ({ emitRuntimeEvent, sessionId }) => {
+      if (runner.mock.calls.length === 1) {
+        throw new Error('Premature close');
+      }
+      mkdirSync(artifactsDir, { recursive: true });
+      writeFileSync(finalArtifactPath, '# Retry script agent report');
+      emitRuntimeEvent({
+        type: 'receipt_emitted',
+        sessionId,
+        turnId: 'turn_retry',
+        intentId: 'intent_retry',
+        stepId: 'step_retry',
+        note: JSON.stringify({
+          output: {
+            summary: '重试后脚本节点报告已生成。',
+            artifacts: [{ path: finalArtifactPath, kind: 'markdown', label: 'retry-script-agent-report.md' }],
+            evidenceRefs: [`artifact:${finalArtifactPath}`],
+          },
+        }),
+      });
+    });
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner,
+    });
+
+    const result = await services.runKSwarmWorkflowNode({
+      handoff: {
+        projectId: 'proj-script-workflow-retry',
+        workflowRunId: 'wf-proj-script-workflow-retry-1',
+        workflowId: 'dynamic_workflow_retry',
+        nodeId: 'script-agent-1',
+        nodeKind: 'agent_task',
+        nodeTitle: '并行 Smoke 检查',
+        attempt: 1,
+        handoffId: 'wfhd-script-agent-1',
+        project: { id: 'proj-script-workflow-retry', name: 'Workflow retry', goal: '验证 transient retry', status: 'active', workFolder },
+        input: {
+          prompt: '执行一次可能发生 transient stream close 的节点。',
+          label: '重试节点',
+        },
+      },
+      targetParticipantId: 'xiaok-worker',
+    });
+
+    expect(runner).toHaveBeenCalledTimes(2);
+    expect(result.output?.summary).toBe('重试后脚本节点报告已生成。');
+    expect(result.output?.artifacts).toEqual([
+      { path: finalArtifactPath, kind: 'markdown', label: 'retry-script-agent-report.md' },
+    ]);
+  });
+
+  it('fails a workflow node when the desktop runner fails instead of leaving it running', async () => {
+    const workFolder = join(rootDir, 'failed-workflow-project');
+    const runner = vi.fn(async () => {
+      throw new Error('simulated_worker_failure');
+    });
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner,
+    });
+
+    await expect(services.runKSwarmWorkflowNode({
+      handoff: {
+        projectId: 'proj-script-workflow-failed',
+        workflowRunId: 'wf-proj-script-workflow-failed-1',
+        workflowId: 'dynamic_workflow_smoke',
+        nodeId: 'script-agent-2',
+        nodeKind: 'agent_task',
+        nodeTitle: '并行 Smoke 检查',
+        attempt: 1,
+        handoffId: 'wfhd-script-agent-2',
+        project: { id: 'proj-script-workflow-failed', name: 'Workflow failed', goal: '验证失败收敛', status: 'active', workFolder },
+        input: {
+          prompt: '执行会失败的节点。',
+          label: '失败节点',
+        },
+      },
+      targetParticipantId: 'xiaok-worker',
+    })).rejects.toThrow(/desktop_task_failed/);
+    expect(runner).toHaveBeenCalledTimes(1);
   });
 
   it('runs a side-effect-free kswarm readiness probe', async () => {
@@ -2259,6 +2384,93 @@ describe('desktop services', () => {
       poAgent: 'po-agent',
       members: ['worker-agent'],
       workFolder: '/tmp/kswarm-demo',
+    });
+  });
+
+  it('maps explicit workflow execution mode from chat create_project tool to kswarm workflow_preferred mode', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'po-agent', name: 'PO', roles: ['project_owner'], status: 'idle' },
+              { id: 'worker-agent', name: 'Worker', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            ok: true,
+            project: { id: 'proj-workflow', name: 'Workflow Demo', status: 'planning', createdAt: 123 },
+          }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmCreateProjectTool(kswarmService);
+    const result = JSON.parse(await tool.execute({
+      name: 'Workflow Demo',
+      goal: '用动态工作流生成分析报告',
+      requirements: '两个智能体并行调研，最终输出 HTML 报告',
+      executionMode: 'workflow',
+    }));
+
+    expect(result).toMatchObject({
+      type: 'project_card',
+      projectId: 'proj-workflow',
+      executionMode: 'workflow_preferred',
+    });
+    const createRequest = requests.find(request => request.path === '/projects');
+    expect(JSON.parse(String(createRequest?.init?.body))).toMatchObject({
+      name: 'Workflow Demo',
+      executionMode: 'workflow_preferred',
+    });
+  });
+
+  it('infers workflow_preferred mode from real workflow wording when create_project omits executionMode', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'po-agent', name: 'PO', roles: ['project_owner'], status: 'idle' },
+              { id: 'worker-agent', name: 'Worker', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            ok: true,
+            project: { id: 'proj-inferred-workflow', name: 'Workflow Smoke', status: 'created', createdAt: 123 },
+          }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmCreateProjectTool(kswarmService);
+    const result = JSON.parse(await tool.execute({
+      name: 'dynamic workflow smoke 2026-06-02',
+      goal: '创建项目，用workflow方式让2个智能体并行完成动态工作流 smoke 验证报告',
+      requirements: '最终生成 HTML 报告',
+    }));
+
+    expect(result).toMatchObject({
+      type: 'project_card',
+      projectId: 'proj-inferred-workflow',
+      executionMode: 'workflow_preferred',
+    });
+    const createRequest = requests.find(request => request.path === '/projects');
+    expect(JSON.parse(String(createRequest?.init?.body))).toMatchObject({
+      name: 'dynamic workflow smoke 2026-06-02',
+      executionMode: 'workflow_preferred',
     });
   });
 

@@ -299,7 +299,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   }
 
   async recoverTask(taskId: string): Promise<{ snapshot: TaskSnapshot }> {
-    const snapshot = await this.requireSnapshot(taskId);
+    const snapshot = await this.recoverStaleRunningTask(await this.requireSnapshot(taskId));
     this.rehydrateWaitingQuestion(snapshot);
     return { snapshot };
   }
@@ -480,6 +480,21 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       },
     });
     return false;
+  }
+
+  private async recoverStaleRunningTask(snapshot: TaskSnapshot): Promise<TaskSnapshot> {
+    if (snapshot.status !== 'running' || this.activeExecutions.has(snapshot.taskId)) {
+      return snapshot;
+    }
+    const salvage: SalvageSummary = {
+      summary: ['任务执行进程已中断，已保留当前快照，可重新发起或基于现有上下文继续。'],
+      reason: 'stale_running_task_recovered',
+    };
+    await this.appendEvent(snapshot.taskId, { type: 'error', message: 'stale_running_task_recovered' });
+    await this.updateSnapshot(snapshot.taskId, { status: 'failed', salvage });
+    await this.options.snapshotStore.clearActiveTask(snapshot.taskId);
+    this.closeSubscribers(snapshot.taskId);
+    return this.requireSnapshot(snapshot.taskId);
   }
 
   private async appendEvent(taskId: string, event: DesktopTaskEvent): Promise<void> {

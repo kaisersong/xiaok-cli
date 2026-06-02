@@ -533,4 +533,88 @@ describe('OpenAIAdapter', () => {
       },
     ]);
   });
+
+  it('retries when the stream is dropped mid-flight with "Premature close"', async () => {
+    vi.useFakeTimers();
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    let calls = 0;
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+      calls += 1;
+      if (calls < 2) {
+        return {
+          async *[Symbol.asyncIterator]() {
+            throw Object.assign(new Error('Premature close'), { code: 'ERR_STREAM_PREMATURE_CLOSE' });
+          },
+        } as never;
+      }
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { choices: [{ delta: { content: 'ok' }, finish_reason: null }] };
+          yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+        },
+      } as never;
+    });
+
+    const adapter = new OpenAIAdapter('test-key', 'gpt-4o');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const streamPromise = (async () => {
+      const chunks: string[] = [];
+      for await (const chunk of adapter.stream([], [], 'sys')) {
+        if (chunk.type === 'text') chunks.push(chunk.delta);
+      }
+      return chunks;
+    })();
+
+    await vi.runAllTimersAsync();
+    const chunks = await streamPromise;
+
+    expect(calls).toBe(2);
+    expect(chunks).toEqual(['ok']);
+    vi.useRealTimers();
+  });
+
+  it('does not retry once a chunk has already been emitted', async () => {
+    vi.useFakeTimers();
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    let calls = 0;
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+      calls += 1;
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { choices: [{ delta: { content: 'partial' }, finish_reason: null }] };
+          throw Object.assign(new Error('Premature close'), { code: 'ERR_STREAM_PREMATURE_CLOSE' });
+        },
+      } as never;
+    });
+
+    const adapter = new OpenAIAdapter('test-key', 'gpt-4o');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    let caughtError: Error | undefined;
+    const chunks: string[] = [];
+    const streamPromise = (async () => {
+      try {
+        for await (const chunk of adapter.stream([], [], 'sys')) {
+          if (chunk.type === 'text') chunks.push(chunk.delta);
+        }
+      } catch (e) {
+        caughtError = e as Error;
+      }
+    })();
+
+    await vi.runAllTimersAsync();
+    await streamPromise;
+
+    expect(calls).toBe(1);
+    expect(chunks).toEqual(['partial']);
+    expect(caughtError?.message).toBe('Premature close');
+    vi.useRealTimers();
+  });
 });

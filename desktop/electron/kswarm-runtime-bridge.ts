@@ -520,14 +520,15 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
         });
       }
     } catch (error) {
+      const failureReason = getWorkflowNodeFailureReason(error);
       await sendIntent('workflow_node_failed', event, {
         projectId: handoff.projectId,
         workflowRunId: handoff.workflowRunId,
         nodeId: handoff.nodeId,
         attempt: handoff.attempt,
         handoffId: handoff.handoffId,
-        failureReason: 'workflow_node_error',
-        errorMessage: error instanceof Error ? error.message : String(error),
+        failureReason,
+        errorMessage: failureReason,
       });
     }
   }
@@ -588,6 +589,16 @@ function isAllowedPath(filePath: string, allowedRoots: string[] | undefined): bo
 
 function normalizeBrokerUrl(url: string): string {
   return url.replace(/\/$/, '');
+}
+
+function getWorkflowNodeFailureReason(error: unknown): string {
+  const raw = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : String(error ?? '');
+  const firstLine = raw.split(/\r?\n/)[0]?.trim() || 'workflow_node_error';
+  return firstLine.length > 500 ? `${firstLine.slice(0, 497)}...` : firstLine;
 }
 
 function parseBrokerMessage(data: unknown): { type?: string; event?: unknown } | null {

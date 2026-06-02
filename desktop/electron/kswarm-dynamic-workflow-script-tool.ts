@@ -23,6 +23,7 @@ interface WorkflowScriptBackgroundJob {
 }
 
 const backgroundJobs = new Map<string, WorkflowScriptBackgroundJob>();
+const DEFAULT_DESKTOP_WORKFLOW_AGENT_ID = 'xiaok-worker';
 
 const WORKFLOW_SCRIPT_EXAMPLE = `export const meta = {
   name: 'project_snapshot_review',
@@ -92,6 +93,8 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
         '脚本是命令式 JavaScript DSL，不是 JSON schema。不要使用 agents/nodes/steps/tasks 声明式字段。',
         "必须以 export const meta = {...} 开头；然后用 phase('阶段名')、await agent('任务提示', { label: '节点名' })、parallel/pipeline 编排。",
         '专业报告复核类任务优先使用三路并行复核：事实、证据、格式/交付合同，最后用 reducer agent 归约 gate 建议。',
+        '报告/分析报告/研究报告的最终交付必须生成 report renderer HTML artifact；只产出 .report.md 或普通 markdown 会被项目交付合同判定为未完成。',
+        '如果脚本负责生成报告，最终 agent prompt 必须明确要求调用 report renderer / kai-report-creator 渲染 HTML，并在 output.artifacts 返回 .html 路径。',
         `最小可用 example:\n${WORKFLOW_SCRIPT_EXAMPLE}`,
         `专业报告复核 example:\n${REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE}`,
       ].join('\n\n'),
@@ -106,12 +109,13 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
               '动态 workflow JavaScript 脚本。必须以 export const meta = {...} 开头，meta.name 使用 snake_case 小写标识符，meta.description 必填。',
               "meta 后面直接写命令式执行逻辑：phase('阶段名'); const r = await agent('任务提示', { label: '节点名称' }); return {...}。",
               '不要提交 agents/nodes/steps/tasks 声明式 schema。',
+              '报告类最终节点必须生成 report renderer HTML artifact；不要只要求 .report.md。',
               `example:\n${WORKFLOW_SCRIPT_EXAMPLE}`,
               `professional report review example:\n${REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE}`,
             ].join('\n'),
           },
           requestedBy: { type: 'string', description: '发起者，默认 assistant' },
-          assignedAgent: { type: 'string', description: '动态 agent 节点默认派发给哪个 KSwarm agent，默认由 KSwarm 选择' },
+          assignedAgent: { type: 'string', description: `动态 agent 节点默认派发给哪个 KSwarm agent，默认 ${DEFAULT_DESKTOP_WORKFLOW_AGENT_ID}` },
           waitForCompletion: {
             type: 'boolean',
             description: '测试或短任务可设为 true 等待完成。默认 false：后台启动后立即返回 workflowRunId。',
@@ -131,7 +135,9 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
     async execute(input) {
       const script = typeof input.script === 'string' ? input.script : '';
       const requestedBy = typeof input.requestedBy === 'string' && input.requestedBy.trim() ? input.requestedBy.trim() : 'assistant';
-      const assignedAgent = typeof input.assignedAgent === 'string' && input.assignedAgent.trim() ? input.assignedAgent.trim() : null;
+      const assignedAgent = typeof input.assignedAgent === 'string' && input.assignedAgent.trim()
+        ? input.assignedAgent.trim()
+        : DEFAULT_DESKTOP_WORKFLOW_AGENT_ID;
       const waitForCompletion = input.waitForCompletion === true;
       const previewOnly = input.previewOnly === true;
       const resumeWorkflowRunId = typeof input.resumeWorkflowRunId === 'string' && input.resumeWorkflowRunId.trim()

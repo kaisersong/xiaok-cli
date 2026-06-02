@@ -303,4 +303,83 @@ describe('ClaudeAdapter', () => {
       },
     ]);
   });
+
+  it('retries when the stream is dropped mid-flight with "Premature close"', async () => {
+    vi.useFakeTimers();
+    const { ClaudeAdapter } = await import('../../../src/ai/adapters/claude.js');
+
+    let calls = 0;
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const instance = new Anthropic({ apiKey: 'test' });
+    vi.spyOn(instance.messages, 'stream').mockImplementation(() => {
+      calls += 1;
+      if (calls < 2) {
+        // 模拟 Node fetch/undici 在响应体传输中途断开
+        const err = Object.assign(new Error('Premature close'), { code: 'ERR_STREAM_PREMATURE_CLOSE' });
+        return (async function* () { throw err; })() as never;
+      }
+      return (async function* () {
+        yield { type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } };
+        yield { type: 'message_stop' };
+      })() as never;
+    });
+
+    const adapter = new ClaudeAdapter('test-key', 'claude-opus-4-6');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const streamPromise = (async () => {
+      const chunks: string[] = [];
+      for await (const chunk of adapter.stream([], [], 'sys')) {
+        if (chunk.type === 'text') chunks.push(chunk.delta);
+      }
+      return chunks;
+    })();
+
+    await vi.runAllTimersAsync();
+    const chunks = await streamPromise;
+
+    expect(calls).toBe(2);
+    expect(chunks).toEqual(['ok']);
+    vi.useRealTimers();
+  });
+
+  it('does not retry once a chunk has already been emitted', async () => {
+    vi.useFakeTimers();
+    const { ClaudeAdapter } = await import('../../../src/ai/adapters/claude.js');
+
+    let calls = 0;
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const instance = new Anthropic({ apiKey: 'test' });
+    vi.spyOn(instance.messages, 'stream').mockImplementation(() => {
+      calls += 1;
+      // 先产出一个 chunk，再断流：此时重试会重复输出，必须放弃
+      return (async function* () {
+        yield { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } };
+        throw Object.assign(new Error('Premature close'), { code: 'ERR_STREAM_PREMATURE_CLOSE' });
+      })() as never;
+    });
+
+    const adapter = new ClaudeAdapter('test-key', 'claude-opus-4-6');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    let caughtError: Error | undefined;
+    const chunks: string[] = [];
+    const streamPromise = (async () => {
+      try {
+        for await (const chunk of adapter.stream([], [], 'sys')) {
+          if (chunk.type === 'text') chunks.push(chunk.delta);
+        }
+      } catch (e) {
+        caughtError = e as Error;
+      }
+    })();
+
+    await vi.runAllTimersAsync();
+    await streamPromise;
+
+    expect(calls).toBe(1);
+    expect(chunks).toEqual(['partial']);
+    expect(caughtError?.message).toBe('Premature close');
+    vi.useRealTimers();
+  });
 });

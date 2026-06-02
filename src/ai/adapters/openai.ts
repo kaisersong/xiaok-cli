@@ -6,7 +6,26 @@ import type { ModelCapabilities, ModelInvocationOptions } from '../runtime/model
 import { estimateTokens } from '../runtime/usage.js';
 
 const MAX_RETRIES = 3;
+const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 const KIMI_CODING_COMPAT_USER_AGENT = 'claude-code/1.0';
+
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    if (error.name === 'AbortError' || error.name === 'TimeoutError') return true;
+    const record = error as unknown as Record<string, unknown>;
+    const status = record.status;
+    if (typeof status === 'number' && RETRYABLE_STATUS.has(status)) return true;
+    const code = typeof record.code === 'string' ? record.code : '';
+    if (/ERR_STREAM_PREMATURE_CLOSE|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR/i.test(code)) return true;
+    if (/overload|502|503|timeout|ECONNRESET|ETIMEDOUT|EPIPE|Bad gateway|Premature close|terminated|socket hang up|network|fetch failed/i.test(error.message)) return true;
+  }
+  return false;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 const RAW_THINK_OPEN_TAG = '<think>';
 const RAW_THINK_CLOSE_TAG = '</think>';
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -217,7 +236,39 @@ export class OpenAIAdapter implements ModelAdapter {
     messages: Message[],
     tools: ToolDefinition[],
     systemPrompt: string,
+    options?: ModelInvocationOptions,
+  ): AsyncIterable<StreamChunk> {
+    let attempt = 0;
+    while (true) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+      let emittedAny = false;
+      try {
+        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, controller.signal)) {
+          emittedAny = true;
+          yield chunk;
+        }
+        clearTimeout(timer);
+        return;
+      } catch (error) {
+        clearTimeout(timer);
+        // 已产出 chunk 后重试会重复输出，必须放弃重试
+        if (emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) {
+          throw error;
+        }
+        const delayMs = Math.min(1000 * 2 ** attempt, 16000);
+        await sleep(delayMs);
+        attempt += 1;
+      }
+    }
+  }
+
+  private async *streamOnce(
+    messages: Message[],
+    tools: ToolDefinition[],
+    systemPrompt: string,
     _options?: ModelInvocationOptions,
+    signal?: AbortSignal,
   ): AsyncIterable<StreamChunk> {
     const openaiMessages: OpenAI.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
@@ -305,7 +356,7 @@ export class OpenAIAdapter implements ModelAdapter {
       tools: openaiTools.length > 0 ? openaiTools : undefined,
       stream: true,
       stream_options: { include_usage: true },
-    });
+    }, { signal });
 
     const toolBuffers = new Map<number, { id: string; name: string; argsBuffer: string }>();
     const rawThinkParser: RawThinkParserState = {

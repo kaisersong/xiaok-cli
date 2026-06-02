@@ -133,4 +133,23 @@ describe('ActivityTimeline detail visibility', () => {
     expect(entry).toHaveTextContent('Workflow');
     expect(entry).not.toHaveTextContent('Swarm');
   });
+
+  it('shows the concrete workflow node blocked reason from raw workflow logs', () => {
+    renderTimeline([
+      {
+        type: 'workflow.node.blocked',
+        projectId: 'proj-story',
+        workflowRunId: 'wf-parallel',
+        workflowId: 'parallel-report',
+        nodeId: 'script-agent-1',
+        reason: 'Premature close',
+        ts: 1770000005000,
+      },
+    ]);
+
+    const entry = screen.getByTestId('activity-timeline-entry');
+    expect(entry).toHaveTextContent('工作流节点阻塞');
+    expect(entry).toHaveTextContent('Workflow');
+    expect(entry).toHaveTextContent('Premature close');
+  });
 });

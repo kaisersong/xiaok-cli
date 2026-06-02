@@ -19,6 +19,14 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.3.14:**
+
+- **Streaming Retry Hardening**: Anthropic, OpenAI Chat Completions, and OpenAI Responses adapters now detect `ERR_STREAM_PREMATURE_CLOSE`, `ECONNRESET`, `ETIMEDOUT`, `EPIPE`, `Premature close`, `socket hang up`, `terminated`, and `fetch failed` as retryable transport errors. Once any stream chunk has been emitted to the consumer, retry is disabled to prevent duplicate output. The OpenAI Chat Completions adapter also gained a 5-minute per-stream timeout and abort controller.
+- **Stale Running Task Recovery**: `InProcessTaskRuntimeHost.recoverTask` now salvages tasks that are still marked `running` but have no live execution after a process restart, transitioning them to `failed` with a `stale_running_task_recovered` salvage summary instead of leaving the snapshot stuck.
+- **KSwarm Runtime Task Retry**: Desktop's `runKSwarmRuntimeTextTask` now retries once on retryable transport failures, surfaces the actual failure reason from `salvage.reason` or the latest error event, and only retries when the failure matches the same network/stream class above.
+- **Dynamic Workflow HTML Report Tool**: New `render_report_artifact` tool renders a complete `.report.md` IR into an HTML artifact for dynamic workflow final report nodes. Worker / final-output / generic dynamic workflow node prompts now explicitly require generating a complete `.report.md` IR and calling `render_report_artifact` instead of reading `~/.xiaok/plugins` internals or hand-writing HTML.
+- **Cross-Platform Compatibility Rules**: `AGENTS.md` now publishes the cross-platform rules that apply to xiaok-cli, kswarm, intent-broker, and kai-xiaok-plugins: always use `path.join` / `path.resolve`, never hardcode `/` or `\` separators, guard macOS-only calls (CUA driver, `open`, `.app` bundle paths, `launchctl`, `defaults`) with `process.platform`, guard Windows-only calls (`reg`, `cmd /c`, `explorer.exe`), avoid Unix shell syntax in `child_process` invocations, and treat path comparisons as case-insensitive on Windows.
+
 **What's New in v1.3.13:**
 
 - **Parallel Dynamic Workflow Scripts**: Xiaok Desktop now supports the first parallel dynamic workflow script path. Trusted workflow scripts can use `parallel([() => agent(...), ...])` to fan out independent agent branches while keeping orchestration outside the main conversation.
@@ -622,6 +630,8 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.3.14** — Streaming and dynamic workflow reliability release: Anthropic, OpenAI Chat Completions, and OpenAI Responses adapters now treat `ERR_STREAM_PREMATURE_CLOSE`, `ECONNRESET`, `ETIMEDOUT`, `EPIPE`, `Premature close`, `socket hang up`, `terminated`, and `fetch failed` as retryable transport errors, but disable retry as soon as any chunk has been delivered so the user never sees duplicated streamed output; the OpenAI Chat Completions path also gains a 5-minute per-stream timeout. `InProcessTaskRuntimeHost.recoverTask` salvages tasks that are still marked `running` after a process restart and transitions them to `failed` with a `stale_running_task_recovered` summary instead of leaving the snapshot stuck. Desktop's `runKSwarmRuntimeTextTask` now retries once on retryable transport failures and surfaces the actual failure reason. A new `render_report_artifact` tool turns a complete `.report.md` IR into an HTML artifact for dynamic workflow final report nodes, and worker / final-output / generic node prompts require using the renderer instead of reading plugin internals or hand-writing HTML. AGENTS.md publishes cross-platform compatibility rules covering path joining, macOS / Windows platform guards, and `child_process` shell-syntax bans across xiaok-cli, kswarm, intent-broker, and kai-xiaok-plugins.
 
 **v1.3.13** — Parallel dynamic workflow hardening release: dynamic workflow scripts can now resume the same KSwarm run by reusing completed primitive outputs, query status through a read-only KSwarm snapshot tool, and complete a professional `report_final_review` E2E that produces HTML/PDF artifacts while keeping workflow run, gate decision, project deliverable, artifact provenance, and task-board state consistent. KSwarm now records passed gate decisions for successful script workflows, and the design/adversarial review docs capture the remaining boundaries around automatic job replay and durable user-input pause/resume.
 

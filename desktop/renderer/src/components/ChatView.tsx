@@ -25,6 +25,7 @@ export interface ProjectCardData {
   status: string;
   createdAt: number;
   memberCount: number;
+  executionMode?: string;
 }
 
 export interface ComputerUseActionData {
@@ -161,6 +162,7 @@ export function ChatView({
                     status={msg.projectData.status}
                     createdAt={msg.projectData.createdAt}
                     memberCount={msg.projectData.memberCount}
+                    executionMode={msg.projectData.executionMode}
                   />
                 ) : msg.role === 'computer_use_action' && msg.computerUseAction ? (
                   <div className="max-w-[663px] rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-4 text-sm text-[var(--c-text-primary)] shadow-sm">

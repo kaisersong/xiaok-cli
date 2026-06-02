@@ -280,6 +280,60 @@ describe('kswarm runtime bridge', () => {
     expect(posts.slice(1).map(post => post.body.kind)).toEqual(['workflow_node_progress']);
   });
 
+  it('reports the actual workflow node runtime error as the failure reason', async () => {
+    const handleWorkflowNodeHandoff = vi.fn().mockRejectedValue(new Error('Premature close'));
+    const posts: Array<{ body: Record<string, unknown> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      posts.push({ body: JSON.parse(String(init?.body ?? '{}')) });
+      return new Response(JSON.stringify({ ok: true, deliveredCount: 1 }), { status: 200 });
+    });
+    const FakeWebSocket = createFakeWebSocket();
+    const client = createKSwarmRuntimeBridgeBrokerClient({
+      participantId: 'xiaok-worker',
+      bridge: {
+        handleTaskHandoff: async () => ({ ok: true }),
+        handleWorkflowNodeHandoff,
+      },
+      fetchImpl: fetchImpl as never,
+      WebSocketImpl: FakeWebSocket,
+    });
+
+    await client.start();
+    FakeWebSocket.instances[0].emitMessage({
+      type: 'new_intent',
+      event: {
+        kind: 'workflow_node_handoff',
+        fromParticipantId: 'kswarm-hub',
+        taskId: 'wf-proj-1-parallel-1',
+        payload: {
+          projectId: 'proj-1',
+          workflowRunId: 'wf-proj-1-parallel-1',
+          workflowId: 'parallel-report',
+          nodeId: 'script-agent-1',
+          nodeKind: 'agent_task',
+          nodeTitle: '并行研究 A',
+          attempt: 1,
+          handoffId: 'wfhd-1',
+          input: { topic: 'A' },
+        },
+      },
+    });
+    await nextTick();
+
+    expect(posts.at(-1)?.body).toMatchObject({
+      kind: 'workflow_node_failed',
+      fromParticipantId: 'xiaok-worker',
+      taskId: 'wf-proj-1-parallel-1',
+      payload: expect.objectContaining({
+        projectId: 'proj-1',
+        workflowRunId: 'wf-proj-1-parallel-1',
+        nodeId: 'script-agent-1',
+        failureReason: 'Premature close',
+        errorMessage: 'Premature close',
+      }),
+    });
+  });
+
   it('submits desktop runtime results to broker as the target xiaok participant', async () => {
     const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {

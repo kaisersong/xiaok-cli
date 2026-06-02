@@ -57,6 +57,63 @@ describe('InProcessTaskRuntimeHost', () => {
     await waitFor(async () => (await host.getActiveTask()) === null);
   });
 
+  it('marks a persisted running task as failed when no execution exists after restart', async () => {
+    await snapshotStore.save({
+      ...makeSnapshot({ taskId: 'task_stale', status: 'running', createdAt: 100, updatedAt: 200 }),
+      understanding: {
+        goal: '验证 workflow',
+        deliverable: '报告',
+        taskType: 'unknown',
+        audience: '用户',
+        inputs: [],
+        missingInfo: [],
+        assumptions: [],
+        riskLevel: 'low',
+        suggestedPlan: [],
+        nextAction: 'execute',
+      },
+      events: [{ type: 'task_started', taskId: 'task_stale' }],
+    });
+    const restartedHost = new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner: vi.fn<TaskRunner>(async () => undefined),
+      now: () => 500,
+      createTaskId: () => 'task_new',
+      createSessionId: () => 'sess_new',
+    });
+
+    const recovered = await restartedHost.recoverTask('task_stale');
+
+    expect(recovered.snapshot.status).toBe('failed');
+    expect(recovered.snapshot.salvage?.reason).toBe('stale_running_task_recovered');
+    expect(recovered.snapshot.events).toEqual(expect.arrayContaining([
+      { type: 'error', message: 'stale_running_task_recovered' },
+    ]));
+    expect(await restartedHost.getActiveTasks()).toEqual([]);
+  });
+
+  it('does not mark a currently executing running task as stale', async () => {
+    let releaseRunner: (() => void) | undefined;
+    const host = createHost(async () => {
+      await new Promise<void>((resolve) => {
+        releaseRunner = resolve;
+      });
+    });
+
+    await host.createTask({
+      prompt: '生成 A 客户方案 PPT',
+      materials: [{ materialId: material.materialId }],
+    });
+    await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'running');
+
+    const recovered = await host.recoverTask('task_1');
+
+    expect(recovered.snapshot.status).toBe('running');
+    releaseRunner?.();
+    await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed');
+  });
+
   it('projects runtime events and persists completion without a confirmation step', async () => {
     const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
       emitRuntimeEvent({

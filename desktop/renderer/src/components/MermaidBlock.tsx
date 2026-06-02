@@ -9,22 +9,26 @@ const COLLAPSED_MAX_HEIGHT = 400
 let mermaidInitialized = false
 function ensureMermaidInit() {
   if (mermaidInitialized) return
+  mermaid.initialize(createMermaidConfig())
   mermaidInitialized = true
-  mermaid.initialize({
+}
+
+export function createMermaidConfig() {
+  return {
     startOnLoad: false,
     theme: 'base',
     themeVariables: {
-      primaryColor: 'var(--c-bg-sub)',
-      primaryTextColor: 'var(--c-text-primary)',
-      primaryBorderColor: 'var(--c-border)',
-      lineColor: 'var(--c-text-tertiary)',
-      secondaryColor: 'var(--c-bg-deep)',
-      tertiaryColor: 'var(--c-bg-page)',
+      primaryColor: '#f7f5ef',
+      primaryTextColor: '#1f2933',
+      primaryBorderColor: '#d9d4c9',
+      lineColor: '#7b756a',
+      secondaryColor: '#f3f0e8',
+      tertiaryColor: '#fbfaf7',
       fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
     },
     flowchart: { htmlLabels: false, curve: 'basis' },
     securityLevel: 'strict',
-  })
+  } as const
 }
 
 let renderCounter = 0
@@ -37,19 +41,35 @@ export function MermaidBlock({ content }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [renderState, setRenderState] = useState<'idle' | 'loading' | 'rendered' | 'source_fallback'>('idle')
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastContentRef = useRef('')
 
   const renderMermaid = useCallback(async (code: string) => {
-    if (!containerRef.current || !code.trim()) return
-    ensureMermaidInit()
+    const source = code.trim()
+    if (!containerRef.current) return
+    if (!source) {
+      containerRef.current.innerHTML = ''
+      setError(null)
+      setRenderState('source_fallback')
+      return
+    }
+    setRenderState('loading')
 
     const id = `mermaid-${++renderCounter}`
     try {
-      const { svg } = await mermaid.render(id, code.trim())
+      ensureMermaidInit()
+      const { svg } = await mermaid.render(id, source)
       if (containerRef.current) {
-        containerRef.current.innerHTML = svg
-        setError(null)
+        if (!shouldFallbackToMermaidSource(svg, source)) {
+          containerRef.current.innerHTML = svg
+          setError(null)
+          setRenderState('rendered')
+        } else {
+          containerRef.current.innerHTML = ''
+          setError(null)
+          setRenderState('source_fallback')
+        }
       }
     } catch (e) {
       // mermaid may inject error SVG into document body before throwing — clean it up
@@ -60,6 +80,7 @@ export function MermaidBlock({ content }: Props) {
       if (tempContainer) tempContainer.remove()
       if (containerRef.current) containerRef.current.innerHTML = ''
       setError(e instanceof Error ? e.message : String(e))
+      setRenderState('source_fallback')
     }
   }, [])
 
@@ -138,22 +159,76 @@ export function MermaidBlock({ content }: Props) {
           }}
         >
           {error}
+          {content.trim() ? `\n\n${content.trim()}` : ''}
         </div>
-      ) : (
-        <div
-          ref={containerRef}
+      ) : renderState === 'source_fallback' ? (
+        <pre
           style={{
-            width: '100%',
-            minHeight: `${MIN_HEIGHT}px`,
-            maxHeight: expanded ? undefined : `${COLLAPSED_MAX_HEIGHT}px`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
+            margin: 0,
+            padding: '16px',
+            color: content.trim() ? 'var(--c-text-secondary)' : 'var(--c-text-tertiary)',
+            fontSize: '13px',
+            fontFamily: "'JetBrains Mono', monospace",
+            whiteSpace: 'pre-wrap',
             overflow: 'auto',
-            transition: 'max-height 0.2s ease',
+            maxHeight: expanded ? undefined : `${COLLAPSED_MAX_HEIGHT}px`,
           }}
-        />
+        >
+          {content.trim() || 'Mermaid 图表内容为空'}
+        </pre>
+      ) : (
+        <div style={{ position: 'relative' }}>
+          {renderState === 'loading' ? (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--c-text-tertiary)',
+                fontSize: '12px',
+                pointerEvents: 'none',
+              }}
+            >
+              正在渲染图表...
+            </div>
+          ) : null}
+          <div
+            ref={containerRef}
+            style={{
+              width: '100%',
+              minHeight: `${MIN_HEIGHT}px`,
+              maxHeight: expanded ? undefined : `${COLLAPSED_MAX_HEIGHT}px`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              overflow: 'auto',
+              transition: 'max-height 0.2s ease',
+            }}
+          />
+        </div>
       )}
     </div>
   )
+}
+
+export function shouldFallbackToMermaidSource(svg: string, source: string): boolean {
+  if (!source.trim()) return true
+  if (!svg || !svg.includes('<svg')) return true
+  if (!/<(text|path|rect|line|circle|ellipse|polygon|polyline|g)\b/i.test(svg)) return true
+
+  // Mermaid can occasionally return a structural SVG with paths/groups but no
+  // readable labels. In the chat surface that appears as a blank diagram, so
+  // show the source instead of leaving an empty framed block.
+  const readableText = svg
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim()
+  return readableText.length === 0
 }

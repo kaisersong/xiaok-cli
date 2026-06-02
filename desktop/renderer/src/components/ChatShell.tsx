@@ -9,6 +9,10 @@ import type { ThreadRecord } from '../api/types';
 import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
 import { useSidebarCollapse } from '../layouts/AppLayout';
 import { sanitizeUserFacingErrorMessage } from '../lib/error-display';
+import {
+  buildProjectCardMessageFromToolResult,
+  buildWorkflowMessageFromToolResult,
+} from './chatToolResultMessages';
 
 const log = createLogger('ChatShell');
 const ARTIFACT_KINDS = new Set<ArtifactKind>(['pptx', 'pdf', 'docx', 'xlsx', 'html', 'image', 'text', 'other']);
@@ -390,34 +394,29 @@ export function ChatShell() {
       }
       case 'canvas_tool_result': {
         const ev = event as { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string };
+        const immediateMessage = ev.ok && ev.toolName === 'create_project'
+          ? buildProjectCardMessageFromToolResult(ev.response)
+          : ev.ok && (ev.toolName === 'run_dynamic_workflow_script' || ev.toolName === 'get_dynamic_workflow_status')
+            ? buildWorkflowMessageFromToolResult(ev.response)
+            : null;
+        if (immediateMessage) {
+          setMessages(prev => prev.some(msg => msg.id === immediateMessage.id) ? prev : [...prev, immediateMessage]);
+        }
         const sealId = toolStepsMsgIdRef.current;
-        if (!sealId) break;
         const now = Date.now();
-        setMessages(prev => {
-          const existingIdx = prev.findIndex(m => m.id === sealId);
-          if (existingIdx === -1) return prev;
-          const updated = [...prev];
-          updated[existingIdx] = {
-            ...updated[existingIdx],
-            steps: (updated[existingIdx].steps ?? []).map(s =>
-              s.toolUseId === ev.toolUseId ? { ...s, status: ev.ok ? 'done' : 'error', response: ev.response, finishedAt: now } : s
-            ),
-          };
-          return updated;
-        });
-        // Detect create_project tool result → render project card
-        if (ev.toolName === 'create_project' && ev.ok) {
-          try {
-            const data = JSON.parse(ev.response);
-            if (data.type === 'project_card') {
-              setMessages(prev => [...prev, {
-                id: `msg-project-${data.projectId}`,
-                role: 'project_card',
-                content: '',
-                projectData: data,
-              }]);
-            }
-          } catch { /* response not JSON */ }
+        if (sealId) {
+          setMessages(prev => {
+            const existingIdx = prev.findIndex(m => m.id === sealId);
+            if (existingIdx === -1) return prev;
+            const updated = [...prev];
+            updated[existingIdx] = {
+              ...updated[existingIdx],
+              steps: (updated[existingIdx].steps ?? []).map(s =>
+                s.toolUseId === ev.toolUseId ? { ...s, status: ev.ok ? 'done' : 'error', response: ev.response, finishedAt: now } : s
+              ),
+            };
+            return updated;
+          });
         }
         if (ev.toolName === 'xiaok_computer_use') {
           const action = parseComputerUseRecoverableAction(ev.response);
@@ -505,18 +504,13 @@ export function ChatShell() {
           replayToolSteps = replayToolSteps.map(s =>
             s.toolUseId === evR.toolUseId ? { ...s, status: evR.ok ? 'done' : 'error', response: evR.response, finishedAt: evR.ts } : s
           );
-          if (evR.toolName === 'create_project' && evR.ok) {
-            try {
-              const data = JSON.parse(evR.response);
-              if (data.type === 'project_card') {
-                msgs.push({
-                  id: `msg-project-${data.projectId}`,
-                  role: 'project_card',
-                  content: '',
-                  projectData: data,
-                });
-              }
-            } catch { /* not JSON */ }
+          if (evR.ok && evR.toolName === 'create_project') {
+            const message = buildProjectCardMessageFromToolResult(evR.response);
+            if (message) msgs.push(message);
+          }
+          if (evR.ok && (evR.toolName === 'run_dynamic_workflow_script' || evR.toolName === 'get_dynamic_workflow_status')) {
+            const message = buildWorkflowMessageFromToolResult(evR.response);
+            if (message) msgs.push(message);
           }
           if (evR.toolName === 'xiaok_computer_use') {
             const action = parseComputerUseRecoverableAction(evR.response);

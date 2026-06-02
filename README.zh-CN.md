@@ -19,6 +19,14 @@
 | **重命名任务延迟** | 27.6s | 180.8s | **-85%** |
 | **Token 效率** | 100% | 250% | **-60%** |
 
+**v1.3.14 新特性：**
+
+- **流式重试加固**：Anthropic、OpenAI Chat Completions、OpenAI Responses 适配器现在会把 `ERR_STREAM_PREMATURE_CLOSE`、`ECONNRESET`、`ETIMEDOUT`、`EPIPE`、`Premature close`、`socket hang up`、`terminated`、`fetch failed` 识别为可重试的传输错误。一旦本次尝试已经向消费端产出了 chunk，就立即放弃重试，避免重复输出。OpenAI Chat Completions 适配器还新增 5 分钟单次流超时与 AbortController。
+- **Stale Running 任务自愈**：`InProcessTaskRuntimeHost.recoverTask` 会对进程重启后仍处于 `running` 但没有活跃执行的任务做抢救，转为 `failed` 并写入 `stale_running_task_recovered` 抢救摘要，不再让快照永久卡在 running。
+- **KSwarm Runtime 任务重试**：桌面端 `runKSwarmRuntimeTextTask` 现在会在传输类故障下额外重试一次，并从 `salvage.reason` 或最近的 error event 还原真实失败原因，仅对网络/流类失败重试。
+- **动态工作流 HTML 报告工具**：新增 `render_report_artifact` 工具，把完整的 `.report.md` IR 渲染为 HTML 产物，作为动态工作流最终报告节点的输出。Worker / final-output / generic 节点 prompt 现在明确要求先生成完整 `.report.md` IR 再调用 `render_report_artifact`，而不是读取 `~/.xiaok/plugins` 插件内部文件或手写 HTML。
+- **跨平台兼容规则**：`AGENTS.md` 现在公开了适用于 xiaok-cli、kswarm、intent-broker、kai-xiaok-plugins 的跨平台规则：必须用 `path.join` / `path.resolve`，禁止硬编码 `/` 或 `\` 分隔符；macOS 专有能力（CUA driver、`open`、`.app` bundle 路径、`launchctl`、`defaults`）必须有 `process.platform` 守卫；Windows 专有能力（`reg`、`cmd /c`、`explorer.exe`）同样要守卫；`child_process` 不能依赖 Unix shell 语法；Windows 路径比较默认 case-insensitive。
+
 **v1.3.13 新特性：**
 
 - **并行动动态 Workflow Script**：xiaok Desktop 现在支持第一条并行动动态 workflow script 路径。受控 workflow script 可以用 `parallel([() => agent(...), ...])` 扇出多个独立 agent 分支，同时把编排过程放在主对话上下文之外。
@@ -622,6 +630,8 @@ npm run dev -- --help  # 从源码运行
 ---
 
 ## 版本日志
+
+**v1.3.14** — 流式与动态工作流可靠性版本：Anthropic、OpenAI Chat Completions、OpenAI Responses 适配器把 `ERR_STREAM_PREMATURE_CLOSE`、`ECONNRESET`、`ETIMEDOUT`、`EPIPE`、`Premature close`、`socket hang up`、`terminated`、`fetch failed` 识别为可重试传输错误，但只要本次尝试已经向消费端产出 chunk 就禁止重试，避免向用户重复输出；OpenAI Chat 路径还新增 5 分钟单次流超时与 AbortController。`InProcessTaskRuntimeHost.recoverTask` 在进程重启后会对仍然标记 `running` 但无活跃执行的任务做抢救，转为 `failed` 并写入 `stale_running_task_recovered` 抢救摘要。桌面端 `runKSwarmRuntimeTextTask` 现在会在传输类故障下重试一次，并暴露真实失败原因。新增 `render_report_artifact` 工具，把完整 `.report.md` IR 渲染为动态工作流最终报告 HTML 产物；Worker / final-output / generic 节点 prompt 强制使用 renderer，不再读取插件内部文件或手写 HTML。AGENTS.md 公开了适用于 xiaok-cli、kswarm、intent-broker、kai-xiaok-plugins 的跨平台兼容规则，覆盖 path 拼接、macOS / Windows 平台守卫、`child_process` shell 语法限制等。
 
 **v1.3.13** — 并行动动态 workflow 加固版本：动态 workflow script 现在可以在同一个 KSwarm run 上复用已完成 primitive 输出继续执行，也可以通过只读状态查询工具从 KSwarm snapshot 汇总 run / node / parallel group / checkpoint / gate / delivery 状态。专业 `report_final_review` E2E 会产出 HTML/PDF，并验证 workflow run、gate decision、项目 deliverable、artifact provenance 和任务看板一致。KSwarm 会为成功的 script workflow 写入 passed gate decision；设计和对抗性评审文档也记录了自动 job replay、durable user-input pause/resume 的后续边界。
 

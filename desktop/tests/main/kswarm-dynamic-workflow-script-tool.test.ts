@@ -55,8 +55,11 @@ describe('KSwarm dynamic workflow script tool', () => {
     expect(tool.definition.description).toContain('previewOnly');
     expect(tool.definition.description).toContain('resumeWorkflowRunId');
     expect(tool.definition.description).toContain('报告三路并行复核');
+    expect(tool.definition.description).toContain('report renderer HTML artifact');
+    expect(tool.definition.description).toContain('只产出 .report.md');
     expect(tool.definition.description).toContain('不要使用 agents');
     expect(tool.definition.inputSchema.properties.script.description).toContain('export const meta');
+    expect(tool.definition.inputSchema.properties.script.description).toContain('不要只要求 .report.md');
     expect(tool.definition.inputSchema.properties.script.description).toContain('example');
   });
 
@@ -174,7 +177,6 @@ describe('KSwarm dynamic workflow script tool', () => {
       projectId: 'proj-1',
       script: workflowScript,
       requestedBy: 'assistant',
-      assignedAgent: 'xiaok-worker',
     })) as Record<string, unknown>;
 
     expect(output).toMatchObject({
@@ -191,6 +193,29 @@ describe('KSwarm dynamic workflow script tool', () => {
       ['POST', '/projects/proj-1/workflows/script-generated/proposal'],
       ['POST', '/projects/proj-1/workflows/script-generated/runs'],
     ]);
+  });
+
+  it('defaults script agent nodes to the desktop worker when assignedAgent is omitted', async () => {
+    const { service, requests } = createMockService([
+      jsonResponse({ ok: true, workflowProposal: { id: 'proposal-1' } }, 201),
+      jsonResponse({ ok: true, workflowRun: { id: 'run-1' } }, 201),
+      jsonResponse({ ok: true, nodeId: 'script-agent-1', workflowRun: { id: 'run-1' } }, 201),
+      jsonResponse({ workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-1', status: 'completed', output: { summary: '项目可推进' } }] } }),
+      jsonResponse({ ok: true, nodeId: 'script-agent-2', workflowRun: { id: 'run-1' } }, 201),
+      jsonResponse({ workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
+      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'completed' } }, 200),
+    ]);
+    const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
+
+    await tool.execute({
+      projectId: 'proj-1',
+      script: workflowScript,
+      requestedBy: 'assistant',
+      waitForCompletion: true,
+    });
+
+    expect(requests[2].body).toMatchObject({ assignedAgent: 'xiaok-worker' });
+    expect(requests[4].body).toMatchObject({ assignedAgent: 'xiaok-worker' });
   });
 
   it('resumes an existing workflow run without creating a duplicate proposal or rerunning completed agent nodes', async () => {

@@ -21,7 +21,10 @@ const MAX_RETRIES = 2;
 function isRetryableError(error: unknown): boolean {
   if (error instanceof Error) {
     if (error.name === 'AbortError' || error.name === 'TimeoutError') return true;
-    if (/ECONNRESET|ETIMEDOUT|fetch failed|network/i.test(error.message)) return true;
+    const record = error as unknown as Record<string, unknown>;
+    const code = typeof record.code === 'string' ? record.code : '';
+    if (/ERR_STREAM_PREMATURE_CLOSE|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR/i.test(code)) return true;
+    if (/ECONNRESET|ETIMEDOUT|EPIPE|fetch failed|network|Premature close|terminated|socket hang up/i.test(error.message)) return true;
   }
   return false;
 }
@@ -70,11 +73,16 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
   ): AsyncIterable<StreamChunk> {
     let attempt = 0;
     while (true) {
+      let emittedAny = false;
       try {
-        yield* this.streamOnce(messages, tools, systemPrompt);
+        for await (const chunk of this.streamOnce(messages, tools, systemPrompt)) {
+          emittedAny = true;
+          yield chunk;
+        }
         return;
       } catch (error) {
-        if (!isRetryableError(error) || attempt >= MAX_RETRIES) throw error;
+        // 已产出 chunk 后重试会重复输出，必须放弃重试
+        if (emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) throw error;
         const delayMs = Math.min(2000 * 2 ** attempt, 10000);
         await sleep(delayMs);
         attempt++;
