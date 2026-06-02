@@ -144,6 +144,26 @@ describe('TuiRuntimeState', () => {
     expect(runtimeState.getSnapshot().activityVisible).toBe(true);
   });
 
+  it('can enter a busy turn before rendering live activity', () => {
+    const { runtimeState, statusBar, scrollRegion } = createRuntimeState();
+
+    runtimeState.beginTurn('Thinking', { deferActivity: true });
+
+    expect(runtimeState.getSnapshot()).toMatchObject({
+      turnSurfaceState: 'busy_finishing',
+      footerMode: 'busy',
+      activityVisible: false,
+    });
+    expect(statusBar.beginActivity).not.toHaveBeenCalled();
+    expect(scrollRegion.renderActivity).not.toHaveBeenCalled();
+
+    runtimeState.beginActivity('Thinking', true);
+
+    expect(statusBar.beginActivity).toHaveBeenCalledWith('Thinking', expect.any(Number));
+    expect(scrollRegion.renderActivity).toHaveBeenCalledWith('⠋ Thinking · 1s');
+    expect(runtimeState.getSnapshot().activityVisible).toBe(true);
+  });
+
   it('does not restore live activity after the turn has already been deactivated', async () => {
     const { runtimeState, statusBar } = createRuntimeState();
 

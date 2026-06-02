@@ -18,7 +18,7 @@ import { createRuntimeHooks } from '../runtime/hooks.js';
 import { createHooksRunner } from '../runtime/hooks-runner.js';
 import { createIntentBoundaryResolver } from '../ai/intent-delegation/boundary-resolver.js';
 import { classifyBoundaryWithLlm, createAdapterBoundaryInvoker } from '../ai/intent-delegation/llm-boundary-classifier.js';
-import { writeError, isTTY } from '../utils/ui.js';
+import { writeError, formatErrorText, isTTY } from '../utils/ui.js';
 import { showPermissionPrompt } from '../ui/permission-prompt.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
 import { loadSettings, mergeRules } from '../ai/permissions/settings.js';
@@ -702,7 +702,7 @@ async function runChat(initialInput, opts) {
     inputReader.setScrollPromptRenderer((frame) => {
         if (!scrollRegion.isActive())
             return false;
-        const placeholder = frame.placeholder === '> ' ? getFooterInputPrompt() : frame.placeholder;
+        const placeholder = frame.placeholder === '> ' ? '' : frame.placeholder;
         scrollRegion.renderPromptFrame({
             inputValue: frame.inputValue,
             cursor: frame.cursor,
@@ -730,12 +730,34 @@ async function runChat(initialInput, opts) {
     let turnVisibleAssistantTextSeen = false;
     let turnThinkingOnlyToolNoticeWritten = false;
     let thinkingOnlyToolNoticeTimer = null;
+    let longThinkingTimer = null;
+    let turnStartedAt = 0;
+    const LONG_THINKING_THRESHOLD_MS = 10_000;
+    const clearLongThinkingTimer = () => {
+        if (longThinkingTimer) {
+            clearInterval(longThinkingTimer);
+            longThinkingTimer = null;
+        }
+    };
+    const startLongThinkingTimer = () => {
+        clearLongThinkingTimer();
+        turnStartedAt = Date.now();
+        longThinkingTimer = setInterval(() => {
+            if (turnVisibleAssistantTextSeen) {
+                clearLongThinkingTimer();
+                return;
+            }
+            const elapsed = Math.round((Date.now() - turnStartedAt) / 1000);
+            beginActivity(`Thinking (${elapsed}s)`);
+        }, LONG_THINKING_THRESHOLD_MS);
+    };
     const resetStreamingSegment = () => {
         streamingSegmentText = '';
     };
     const noteVisibleAssistantText = (delta) => {
         if (/\S/.test(delta)) {
             turnVisibleAssistantTextSeen = true;
+            clearLongThinkingTimer();
         }
     };
     const flushStreamingMarkdown = () => {
@@ -832,6 +854,18 @@ async function runChat(initialInput, opts) {
         runtimeState.stopLiveActivityTimer();
     };
     const withPausedLiveActivity = async (action) => (runtimeState.withPausedLiveActivity(action));
+    function ensureBusyInputCapture() {
+        if (terminalUiSuspended || !scrollRegion.isActive()) {
+            return;
+        }
+        if (activeBusyCapture?.isActive()) {
+            return;
+        }
+        activeBusyCapture?.stop();
+        activeBusyCapture = inputReader.startBusyCapture({
+            placeholder: getFooterInputPrompt(),
+        });
+    }
     let askUserQuestionPromptActive = false;
     const enterAskUserQuestionPrompt = () => {
         stopBusyCapture();
@@ -849,12 +883,8 @@ async function runChat(initialInput, opts) {
             askUserQuestionPromptActive = false;
             runtimeState.exitInteractivePrompt();
         }
+        ensureBusyInputCapture();
         runtimeState.beginActivity(describeLiveActivity('AskUserQuestion', {}), true);
-        if (!terminalUiSuspended && scrollRegion.isActive()) {
-            activeBusyCapture = inputReader.startBusyCapture({
-                placeholder: getFooterInputPrompt(),
-            });
-        }
     };
     // Wire up lazy callbacks for AskUserQuestion interactive prompt.
     askUserOnEnter = enterAskUserQuestionPrompt;
@@ -901,9 +931,23 @@ async function runChat(initialInput, opts) {
         resetStreamingSegment();
     };
     const handleTurnFailure = (error) => {
+        clearLongThinkingTimer();
+        endStreamingPhaseForInterrupt();
         runtimeState.markInputReady();
         resetTurnChrome();
-        writeError(String(error));
+        const errorText = `\x1b[31mError:\x1b[0m ${formatErrorText(String(error))}`;
+        if (scrollRegion.isActive() && !terminalUiSuspended) {
+            try {
+                scrollRegion.writeAtContentCursor(errorText + '\n');
+            }
+            catch (uiError) {
+                suspendInteractiveUi('handle_turn_failure', uiError);
+                writeError(String(error));
+            }
+        }
+        else {
+            writeError(String(error));
+        }
         renderFooterChrome();
     };
     const getFooterInputPrompt = () => runtimeState.getFooterInputPrompt();
@@ -953,10 +997,13 @@ async function runChat(initialInput, opts) {
     };
     const ensureStreamingPhase = () => {
         if (scrollRegion.isContentStreaming()) {
-            pauseActivity();
+            if (scrollRegion.isActive()) {
+                scrollRegion.clearActivity();
+                scrollRegion.positionCursorAtContentCursor();
+                mdRenderer.setNewlineCallback(scrollRegion.getNewlineCallback());
+            }
             return;
         }
-        scrollRegion.clearActivityLine();
         const assistantLeadIn = turnLayout.consumeAssistantLeadIn();
         if (assistantLeadIn) {
             if (scrollRegion.isActive()) {
@@ -966,11 +1013,10 @@ async function runChat(initialInput, opts) {
                 process.stdout.write(assistantLeadIn);
             }
         }
+        stopLiveActivityTimer();
         scrollRegion.beginContentStreaming();
         runtimeState.enterStreamingContent();
-        beginActivity('Answering');
         mdRenderer.setNewlineCallback(scrollRegion.getNewlineCallback());
-        scheduleActivityPause(220);
     };
     const getCurrentIntentSummaryLine = () => {
         let source = 'none';
@@ -1485,6 +1531,9 @@ async function runChat(initialInput, opts) {
             return;
         }
         endStreamingPhaseForInterrupt();
+        if (scrollRegion.isActive()) {
+            scrollRegion.clearActivity();
+        }
         const separatedBlock = block.startsWith('\n') ? block : `\n${block}`;
         if (scrollRegion.isActive()) {
             try {
@@ -2019,16 +2068,32 @@ async function runChat(initialInput, opts) {
         inputReader.setSkills(skills);
         let deferredInput = null;
         let pendingQueuedInput = null;
+        let normalTurnChromePrimed = false;
+        let turnHadAskUserQuestion = false;
         stopBusyCapture = () => {
             activeBusyCapture?.stop();
             activeBusyCapture = null;
         };
-        const stashQueuedInputIfAny = () => {
+        const stashQueuedInputIfAny = (options) => {
             const queuedInput = activeBusyCapture?.consumeQueued() ?? null;
-            stopBusyCapture();
+            if (options?.stopCapture !== false) {
+                stopBusyCapture();
+            }
             if (queuedInput !== null && queuedInput.trim().length > 0) {
                 pendingQueuedInput = queuedInput;
             }
+        };
+        const beginNormalInputTurnChrome = (submittedInput) => {
+            turnHadAskUserQuestion = false;
+            runtimeState.beginTurn('Thinking', { deferActivity: true });
+            ensureBusyInputCapture();
+            if (!terminalUiSuspended) {
+                scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
+            }
+            if (submittedInput.length > 0 && scrollRegion.isActive() && !terminalUiSuspended) {
+                scrollRegion.writeSubmittedInput(formatSubmittedInput(submittedInput));
+            }
+            beginActivity('Thinking', true);
         };
         runtimeHooks.on('turn_started', (e) => {
             log.debug('turn_started', JSON.stringify({ turnId: e?.turnId }));
@@ -2042,21 +2107,16 @@ async function runChat(initialInput, opts) {
                 clearTimeout(thinkingOnlyToolNoticeTimer);
                 thinkingOnlyToolNoticeTimer = null;
             }
-            runtimeState.beginTurn('Thinking');
-            if (!terminalUiSuspended) {
-                scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
-            }
-            if (!terminalUiSuspended && scrollRegion.isActive()) {
-                activeBusyCapture?.stop();
-                activeBusyCapture = inputReader.startBusyCapture({
-                    placeholder: getFooterInputPrompt(),
-                });
+            startLongThinkingTimer();
+            if (!normalTurnChromePrimed) {
+                beginNormalInputTurnChrome('');
             }
         });
         runtimeHooks.on('tool_started', (e) => {
             log.debug('tool_started', JSON.stringify({ tool: e?.toolName }));
             endStreamingPhaseForInterrupt();
             if (e.toolName === 'AskUserQuestion') {
+                turnHadAskUserQuestion = true;
                 enterAskUserQuestionPrompt();
                 maybeAdvanceCurrentTurnStageForTool(e.toolName, e.toolInput);
                 return;
@@ -2134,7 +2194,9 @@ async function runChat(initialInput, opts) {
             renderIntentSummaryLine();
         });
         runtimeHooks.on('turn_completed', () => {
-            stashQueuedInputIfAny();
+            clearLongThinkingTimer();
+            stashQueuedInputIfAny({ stopCapture: turnHadAskUserQuestion });
+            turnHadAskUserQuestion = false;
             toolExplorer.reset();
             if (currentTurnIntentPlan?.stages.length) {
                 currentTurnStageIndex = currentTurnIntentPlan.stages.length - 1;
@@ -2142,6 +2204,23 @@ async function runChat(initialInput, opts) {
                 completedTurnIntentSummaryLine = getCurrentTurnSummaryLine();
                 const stageSummaryBlock = getCurrentTurnStageSummaryBlock();
                 if (stageSummaryBlock) {
+                    if (scrollRegion.isActive() && scrollRegion.isContentStreaming() && !terminalUiSuspended) {
+                        flushStreamingMarkdown();
+                        scrollRegion.endContentStreaming({
+                            inputPrompt: getFooterInputPrompt(),
+                            summaryLine: '',
+                            statusLine: statusBar.getStatusLine(),
+                        });
+                        mdRenderer.beginNewSegment();
+                        resetStreamingSegment();
+                    }
+                    if (scrollRegion.isActive() && !terminalUiSuspended) {
+                        scrollRegion.renderFooter({
+                            inputPrompt: getFooterInputPrompt(),
+                            summaryLine: '',
+                            statusLine: statusBar.getStatusLine(),
+                        });
+                    }
                     writeOrchestrationBlock(stageSummaryBlock);
                 }
             }
@@ -2150,12 +2229,16 @@ async function runChat(initialInput, opts) {
             void refreshIntentLedger().then(renderIntentSummaryLine);
         });
         runtimeHooks.on('turn_failed', () => {
+            clearLongThinkingTimer();
+            turnHadAskUserQuestion = false;
             completedTurnIntentSummaryLine = '';
             runtimeState.markInputReady();
             resetTurnChrome();
             void refreshIntentLedger().then(renderIntentSummaryLine);
         });
         runtimeHooks.on('turn_aborted', () => {
+            clearLongThinkingTimer();
+            turnHadAskUserQuestion = false;
             completedTurnIntentSummaryLine = '';
             runtimeState.markInputReady();
             resetTurnChrome();
@@ -2168,6 +2251,10 @@ async function runChat(initialInput, opts) {
             turnLayout.noteProgressNote();
             pauseActivity();
             writeProgressTranscriptNote('⚠ 上下文已压缩，保留最近对话');
+        });
+        runtimeHooks.on('compact_failed', (e) => {
+            log.warn('compact_failed', { error: e?.error });
+            writeProgressTranscriptNote(`⚠ 上下文压缩失败: ${e?.error ?? '未知错误'}`);
         });
         // 处理终端窗口大小调整
         handleResize = () => {
@@ -2205,7 +2292,7 @@ async function runChat(initialInput, opts) {
             })();
         });
         const handleCompletedIntentFeedbackResult = async (result) => {
-            stashQueuedInputIfAny();
+            stashQueuedInputIfAny({ stopCapture: result.deferredInput !== null || result.exitRequested });
             if (result.deferredInput !== null) {
                 if (scrollRegion.isActive()) {
                     scrollRegion.clearOverlayPromptState();
@@ -2227,12 +2314,15 @@ async function runChat(initialInput, opts) {
         // 交互循环
         interactiveLoop: while (true) {
             await refreshSkills();
+            stashQueuedInputIfAny({ stopCapture: false });
             let input;
             if (deferredInput !== null) {
+                stopBusyCapture();
                 input = deferredInput;
                 deferredInput = null;
             }
             else if (pendingQueuedInput !== null) {
+                stopBusyCapture();
                 input = pendingQueuedInput;
                 pendingQueuedInput = null;
             }
@@ -2241,6 +2331,7 @@ async function runChat(initialInput, opts) {
                 if (!scrollRegion.isActive() && !terminalUiSuspended) {
                     renderInputSeparator();
                 }
+                runtimeState.markInputReady();
                 input = await inputReader.read('> ');
             }
             if (input === null || input.trim() === '/exit') {
@@ -2260,8 +2351,18 @@ async function runChat(initialInput, opts) {
                 completedTurnIntentSummaryLine = '';
                 renderFooterChrome();
             }
-            await refreshSkills();
             const shellEscape = parseShellEscapeInput(trimmed);
+            const slash = parseSlashCommand(trimmed);
+            const shouldPrimeNormalTurnChrome = shellEscape === null && slash === null;
+            let normalInputTurnChromeStarted = false;
+            if (shouldPrimeNormalTurnChrome) {
+                mdRenderer.reset();
+                resetStreamingSegment();
+                beginNormalInputTurnChrome(trimmed);
+                normalInputTurnChromeStarted = true;
+                normalTurnChromePrimed = true;
+            }
+            await refreshSkills();
             if (shellEscape?.kind === 'usage') {
                 dismissWelcomeScreen();
                 writeCommandOutput(trimmed, '用法：! <command>\n\n');
@@ -2399,6 +2500,10 @@ async function runChat(initialInput, opts) {
                 continue;
             }
             if (trimmed === '/models') {
+                if (scrollRegion.isActive() && !terminalUiSuspended) {
+                    scrollRegion.clearOverlayPromptState();
+                    replRenderer.prepareForInput();
+                }
                 const selected = await selectModel(config, { renderer: replRenderer });
                 if (selected) {
                     // 如果选的是 provider 目录里的模型（尚未在 config.models 中），自动注册
@@ -2507,7 +2612,6 @@ async function runChat(initialInput, opts) {
                 process.stdout.write(formatSubmittedInput(trimmed));
             }
             // 斜杠命令：直接触发对应 skill
-            const slash = parseSlashCommand(trimmed);
             if (slash) {
                 let skill = findSkillByCommandName(skills, slash.skillName);
                 if (!skill) {
@@ -2601,10 +2705,6 @@ async function runChat(initialInput, opts) {
                             if (await handleCompletedIntentFeedbackResult(feedbackResult)) {
                                 break interactiveLoop;
                             }
-                            if (deferredInput === null) {
-                                runtimeState.markInputReady();
-                                renderFooterChrome();
-                            }
                         }
                         if (!scrollRegion.isActive()) {
                             process.stdout.write('\n');
@@ -2630,6 +2730,10 @@ async function runChat(initialInput, opts) {
             mdRenderer.reset();
             resetStreamingSegment();
             try {
+                if (!normalInputTurnChromeStarted) {
+                    beginNormalInputTurnChrome(trimmed);
+                    normalTurnChromePrimed = true;
+                }
                 // UserPromptSubmit hook — broker 可在此注入额外上下文
                 const promptHookResult = await lifecycleHooks.runHooks('UserPromptSubmit', {
                     prompt: trimmed,
@@ -2654,14 +2758,6 @@ async function runChat(initialInput, opts) {
                     }
                 }
                 let lastAssistantText = '';
-                // Clear previously typed input so footer shows placeholder during turn
-                if (!terminalUiSuspended) {
-                    scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
-                }
-                // Re-display user input in the content area (after screen clear)
-                if (scrollRegion.isActive() && !terminalUiSuspended) {
-                    scrollRegion.writeSubmittedInput(formatSubmittedInput(trimmed));
-                }
                 await primeTurnIntentPlan(true);
                 await maybePrepareFreshContextHandoff();
                 await runtimeFacade.runTurn({
@@ -2698,9 +2794,6 @@ async function runChat(initialInput, opts) {
                 }
                 if (deferredInput !== null) {
                     continue interactiveLoop;
-                }
-                if (deferredInput === null) {
-                    renderFooterChrome();
                 }
                 if (!scrollRegion.isActive()) {
                     process.stdout.write('\n');
@@ -2776,16 +2869,9 @@ async function runChat(initialInput, opts) {
                     if (deferredInput !== null) {
                         continue interactiveLoop;
                     }
-                    if (deferredInput === null) {
-                        renderFooterChrome();
-                    }
                     if (!scrollRegion.isActive()) {
                         process.stdout.write('\n');
                     }
-                }
-                if (deferredInput === null) {
-                    runtimeState.markInputReady();
-                    renderFooterChrome();
                 }
             }
             catch (e) {
@@ -2793,13 +2879,15 @@ async function runChat(initialInput, opts) {
                 stashQueuedInputIfAny();
                 handleTurnFailure(e);
             }
-            if (deferredInput === null && scrollRegion.isActive() && runtimeState.getSnapshot().footerMode !== 'busy') {
-                renderFooterChrome();
-            }
             runtimeState.deactivateTurn();
             stopActivity();
-            // Activity line was already cleared by clearActivityLine() at the start
-            // of content streaming. Skipping nextTick clear to avoid clearing content.
+            if (deferredInput === null && scrollRegion.isActive()) {
+                scrollRegion.clearActivityState();
+                renderFooterChrome();
+            }
+            normalTurnChromePrimed = false;
+            // Live activity is stopped when content streaming starts, so do not clear
+            // the activity row again here; that row may now contain assistant text.
         }
     }
     finally {

@@ -10,7 +10,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { PassThrough } from 'node:stream';
 import { MarkdownRenderer } from '../../src/ui/markdown.js';
 import { formatProgressNote, formatSubmittedInput, setColorsEnabled } from '../../src/ui/render.js';
-import { formatCurrentTurnIntentSummaryLine } from '../../src/ui/orchestration.js';
+import { formatCurrentTurnIntentSummaryLine, formatIntentStageSummaryTranscriptBlock } from '../../src/ui/orchestration.js';
 import { ScrollRegionManager } from '../../src/ui/scroll-region.js';
 import { createTtyHarness } from '../support/tty.js';
 
@@ -70,6 +70,27 @@ describe('ScrollRegionManager activity rendering', () => {
 
         const lines = harness.screen.lines();
         expect(lines.some((line) => line.includes('tail line'))).toBe(true);
+      } finally {
+        harness.restore();
+      }
+    });
+
+    it('clears same-row activity before markdown emits a content newline', () => {
+      const harness = createTtyHarness(80, 24);
+      const manager = new ScrollRegionManager(process.stdout);
+
+      try {
+        manager.begin();
+        manager.renderFooter({
+          inputPrompt: 'Finishing response...',
+          statusLine: 'gpt-terminal-e2e · auto · project',
+        });
+        manager.renderActivity('⠸ Running command · 0s');
+        manager.setContentCursor(manager.maxContentRows);
+        manager.positionCursorAtContentCursor();
+        manager.getNewlineCallback()();
+
+        expect(harness.screen.text()).not.toContain('Running command');
       } finally {
         harness.restore();
       }
@@ -776,6 +797,58 @@ describe('scroll-region prompt frame ownership', () => {
       expect(lines[21]).toContain('❯ Type your message...');
       expect(lines[23]).toContain('gpt-terminal-e2e · 4% · project');
     } finally {
+      harness.restore();
+    }
+  });
+
+  it('clears stale multi-row slash overlay rows before restoring the normal footer', () => {
+    const previousTmux = process.env.TMUX;
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      process.env.TMUX = 'tmux-test,1,0';
+      manager.begin();
+      manager.renderPromptFrame({
+        inputValue: '/mod',
+        cursor: 4,
+        placeholder: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · 4% · project',
+        overlayLines: [
+          '  ❯ /mode  查看当前权限模式',
+          '    /mode default  切到 default',
+          '    /mode auto  切到 auto',
+          '    /models  打开模型选择器',
+        ],
+      });
+      manager.renderPromptFrame({
+        inputValue: '/mod',
+        cursor: 4,
+        placeholder: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · 4% · project',
+        overlayLines: [],
+      });
+
+      manager.clearOverlayPromptState();
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · 4% · project',
+      });
+
+      const lines = harness.screen.lines();
+      const promptRows = lines.filter((line) => line.includes('> Type your message...'));
+      const statusRows = lines.filter((line) => line.includes('gpt-terminal-e2e · 4% · project'));
+
+      expect(lines.some((line) => line.includes('/mode'))).toBe(false);
+      expect(lines.some((line) => line.includes('/models'))).toBe(false);
+      expect(promptRows).toHaveLength(1);
+      expect(statusRows).toHaveLength(1);
+    } finally {
+      if (previousTmux === undefined) {
+        delete process.env.TMUX;
+      } else {
+        process.env.TMUX = previousTmux;
+      }
       harness.restore();
     }
   });
@@ -2131,6 +2204,155 @@ describe('streaming cursor handoff', () => {
       expect(firstTailIndex).toBeGreaterThanOrEqual(0);
       expect(secondHeadIndex).toBeGreaterThan(firstTailIndex);
     } finally {
+      harness.restore();
+    }
+  });
+
+  it('keeps activity closest to the prompt when a third turn enters busy state in Windows tmux layout', () => {
+    const previousTmux = process.env.TMUX;
+    const harness = createTtyHarness(120, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const markdown = new MarkdownRenderer();
+    const firstResponse = [
+      '适合中午的：',
+      '',
+      '- 快餐：鸡腿饭',
+      '- 面食：拉面',
+      '- 轻食：三明治',
+      '',
+      '想吃点重口还是清淡的？',
+    ].join('\n');
+    const secondResponse = [
+      '辣的午餐：',
+      '',
+      '- 川菜：麻婆豆腐饭',
+      '- 小吃：麻辣烫',
+    ].join('\n');
+
+    const writeTurn = (input: string, response: string) => {
+      manager.clearLastInput({ inputPrompt: 'Type your message...' });
+      manager.writeSubmittedInput(formatSubmittedInput(input));
+      markdown.reset();
+      markdown.setNewlineCallback(manager.getNewlineCallback());
+      manager.beginContentStreaming();
+      markdown.write(response);
+      const flushResult = markdown.flush();
+      manager.advanceContentCursorByRenderedText(flushResult.renderedLine);
+      manager.endContentStreaming({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · auto · 0% · project',
+      });
+    };
+
+    try {
+      process.env.TMUX = 'tmux-test,1,0';
+      manager.begin();
+      manager.setWelcomeRows(14);
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        statusLine: 'gpt-terminal-e2e · auto · 0% · project',
+      });
+
+      writeTurn('first terminal request', firstResponse);
+      writeTurn('second terminal request', secondResponse);
+
+      manager.clearLastInput({ inputPrompt: 'Type your message...' });
+      manager.writeSubmittedInput(formatSubmittedInput('queued slow first turn'));
+      manager.clearLastInput({ inputPrompt: 'Finishing response...' });
+      manager.renderActivity('⠋ Thinking · 1s');
+
+      const lines = harness.screen.lines();
+      const promptIndex = lines.findIndex((line) => line.includes('> Finishing response...'));
+      expect(promptIndex).toBeGreaterThanOrEqual(0);
+
+      let cursor = promptIndex - 1;
+      while (cursor >= 0 && lines[cursor].trim() === '') {
+        cursor -= 1;
+      }
+      expect(lines[cursor]).toContain('Thinking · 1s');
+      expect(lines.slice(cursor + 1, promptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
+    } finally {
+      if (previousTmux === undefined) {
+        delete process.env.TMUX;
+      } else {
+        process.env.TMUX = previousTmux;
+      }
+      harness.restore();
+    }
+  });
+
+  it('clears wrapped intent summary chrome before writing non-streaming transcript blocks in Windows tmux layout', () => {
+    const previousTmux = process.env.TMUX;
+    const harness = createTtyHarness(60, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const markdown = new MarkdownRenderer();
+    const workingSummary = formatCurrentTurnIntentSummaryLine({
+      deliverable: 'md -> 报告',
+      stageOrder: 0,
+      totalStages: 2,
+      stageLabel: '提取 Markdown',
+      status: 'Working',
+    });
+    const completedSummary = formatCurrentTurnIntentSummaryLine({
+      deliverable: 'md -> 报告',
+      stageOrder: 1,
+      totalStages: 2,
+      stageLabel: '生成报告',
+      status: 'Completed',
+    });
+    const stageSummaryBlock = formatIntentStageSummaryTranscriptBlock({
+      deliverable: 'md -> 报告',
+      stages: [
+        { order: 0, totalStages: 2, label: '提取 Markdown', status: 'Completed' },
+        { order: 1, totalStages: 2, label: '生成报告', status: 'Completed' },
+      ],
+    });
+
+    try {
+      process.env.TMUX = 'tmux-test,1,0';
+      manager.begin();
+      manager.setWelcomeRows(14);
+      manager.renderFooter({
+        inputPrompt: 'Finishing response...',
+        summaryLine: workingSummary,
+        statusLine: 'gpt-terminal-e2e · 5% · project',
+      });
+      manager.renderActivity('⠋ Exploring codebase · 1s');
+
+      manager.writeAtContentCursor('\n  ╭─ Explored\n  │ Read 01-market-overview.md\n');
+      markdown.setNewlineCallback(manager.getNewlineCallback());
+      manager.beginContentStreaming();
+      markdown.write('三份文档已先合并为 Markdown，再生成报告。');
+      const flushResult = markdown.flush();
+      manager.advanceContentCursorByRenderedText(flushResult.renderedLine);
+      manager.endContentStreaming({
+        inputPrompt: 'Finishing response...',
+        summaryLine: workingSummary,
+        statusLine: 'gpt-terminal-e2e · 0% · project',
+      });
+      manager.writeAtContentCursor(`\n${stageSummaryBlock}`);
+      manager.renderFooter({
+        inputPrompt: 'Type your message...',
+        summaryLine: completedSummary,
+        statusLine: 'gpt-terminal-e2e · 0% · project',
+      });
+
+      const lines = harness.screen.lines();
+      const summaryRows = lines.filter((line) => line.includes('Intent: md -> 报告'));
+      const staleWorkingRows = lines.filter((line) => line.includes('Stage 1/2 提取 Markdown') && line.includes('Working'));
+      const stageRowsWithIntent = lines.filter((line) => line.includes('│ Stage') && line.includes('Intent:'));
+
+      expect(summaryRows).toHaveLength(1);
+      expect(staleWorkingRows).toHaveLength(0);
+      expect(stageRowsWithIntent).toHaveLength(0);
+      expect(lines.some((line) => line.includes('三份文档已先合并为 Markdown，再生成报告。'))).toBe(true);
+      expect(lines.some((line) => line.includes('│ Stage 2/2 生成报告 · Completed'))).toBe(true);
+    } finally {
+      if (previousTmux === undefined) {
+        delete process.env.TMUX;
+      } else {
+        process.env.TMUX = previousTmux;
+      }
       harness.restore();
     }
   });

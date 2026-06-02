@@ -49,6 +49,10 @@ export interface TuiRuntimeStateOptions {
   isTerminalUiSuspended: () => boolean;
 }
 
+export interface TuiBeginTurnOptions {
+  deferActivity?: boolean;
+}
+
 export class TuiRuntimeState {
   private liveActivityTimer: NodeJS.Timeout | null = null;
   private resumeActivityTimer: NodeJS.Timeout | null = null;
@@ -82,13 +86,15 @@ export class TuiRuntimeState {
     return this.snapshot.footerMode === 'busy' ? 'Finishing response...' : 'Type your message...';
   }
 
-  beginTurn(activityLabel = 'Thinking'): void {
+  beginTurn(activityLabel = 'Thinking', options: TuiBeginTurnOptions = {}): void {
     this.turnActive = true;
     this.responseStarted = false;
     this.lastReassuranceBucket = -1;
     this.liveActivityFrame = 0;
     this.markBusyFinishing();
-    this.beginActivity(activityLabel, true);
+    if (!options.deferActivity) {
+      this.beginActivity(activityLabel, true);
+    }
     this.ensureReassuranceTimer();
   }
 

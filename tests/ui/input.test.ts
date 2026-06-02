@@ -22,6 +22,7 @@ import { createTtyHarness } from '../support/tty.js';
 import type { TranscriptLogger } from '../../src/ui/transcript.js';
 import { ReplRenderer } from '../../src/ui/repl-renderer.js';
 import { clearPastedImagePaths, parseInputBlocks } from '../../src/ui/image-input.js';
+import { waitFor } from '../support/wait-for.js';
 
 describe('getSlashCommands', () => {
   it('should return base commands when no skills provided', () => {
@@ -358,15 +359,17 @@ describe('InputReader', () => {
       harness.restore();
     });
 
-    it('renders the footer status immediately below the prompt before the first keypress', async () => {
+    it('renders the footer status below the prompt before the first keypress', async () => {
       const harness = createTtyHarness();
       reader = new InputReader(new ReplRenderer(process.stdout));
       reader.setStatusLineProvider(() => ['  xiaok-cli · claude-sonnet-4 · 1%']);
 
       const pending = reader.read('> ');
 
-      expect(harness.screen.lines()[0]).toMatch(/❯/);
-      expect(harness.screen.lines()[1]).toContain('xiaok-cli');
+      await waitFor(() => {
+        expect(harness.screen.lines()[0]).toMatch(/❯/);
+        expect(harness.screen.lines()[1]).toContain('xiaok-cli');
+      });
 
       harness.send('\x03');
       await expect(pending).resolves.toBeNull();
@@ -738,8 +741,10 @@ describe('InputReader', () => {
 
       const pending = reader.read('> ');
 
-      expect(harness.screen.lines()[0]).toMatch(/❯/);
-      expect(harness.screen.text()).toContain('xiaok-cli · kimi-for-coding · 4%');
+      await waitFor(() => {
+        expect(harness.screen.lines()[0]).toMatch(/❯/);
+        expect(harness.screen.text()).toContain('xiaok-cli · kimi-for-coding · 4%');
+      });
 
       harness.send('\x03');
       await expect(pending).resolves.toBeNull();

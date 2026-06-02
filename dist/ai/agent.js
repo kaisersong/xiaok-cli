@@ -142,6 +142,15 @@ export class Agent {
             });
             return;
         }
+        if (event.type === 'compact_failed') {
+            this.options.hooks.emit({
+                type: 'compact_failed',
+                sessionId: this.sessionId,
+                turnId,
+                error: event.error,
+            });
+            return;
+        }
         if (event.type === 'guard_evaluated') {
             this.options.hooks.emit({
                 type: 'guard_evaluated',

@@ -100,6 +100,11 @@ export type RuntimeEvent = {
     sessionId: string;
     turnId: string;
 } | {
+    type: 'compact_failed';
+    sessionId: string;
+    turnId: string;
+    error: string;
+} | {
     type: 'guard_evaluated';
     sessionId: string;
     turnId: string;

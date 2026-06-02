@@ -839,7 +839,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
   inputReader.setScrollPromptRenderer((frame) => {
     if (!scrollRegion.isActive()) return false;
-    const placeholder = frame.placeholder === '> ' ? getFooterInputPrompt() : frame.placeholder;
+    const placeholder = frame.placeholder === '> ' ? '' : frame.placeholder;
     scrollRegion.renderPromptFrame({
       inputValue: frame.inputValue,
       cursor: frame.cursor,
@@ -1003,6 +1003,19 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     runtimeState.withPausedLiveActivity(action)
   );
 
+  function ensureBusyInputCapture(): void {
+    if (terminalUiSuspended || !scrollRegion.isActive()) {
+      return;
+    }
+    if (activeBusyCapture?.isActive()) {
+      return;
+    }
+    activeBusyCapture?.stop();
+    activeBusyCapture = inputReader.startBusyCapture({
+      placeholder: getFooterInputPrompt(),
+    });
+  }
+
   let askUserQuestionPromptActive = false;
 
   const enterAskUserQuestionPrompt = (): void => {
@@ -1022,12 +1035,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       askUserQuestionPromptActive = false;
       runtimeState.exitInteractivePrompt();
     }
+    ensureBusyInputCapture();
     runtimeState.beginActivity(describeLiveActivity('AskUserQuestion', {}), true);
-    if (!terminalUiSuspended && scrollRegion.isActive()) {
-      activeBusyCapture = inputReader.startBusyCapture({
-        placeholder: getFooterInputPrompt(),
-      });
-    }
   };
 
   // Wire up lazy callbacks for AskUserQuestion interactive prompt.
@@ -1146,11 +1155,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   const ensureStreamingPhase = (): void => {
     if (scrollRegion.isContentStreaming()) {
-      pauseActivity();
+      if (scrollRegion.isActive()) {
+        scrollRegion.clearActivity();
+        scrollRegion.positionCursorAtContentCursor();
+        mdRenderer.setNewlineCallback(scrollRegion.getNewlineCallback());
+      }
       return;
     }
 
-    scrollRegion.clearActivityLine();
     const assistantLeadIn = turnLayout.consumeAssistantLeadIn();
     if (assistantLeadIn) {
       if (scrollRegion.isActive()) {
@@ -1159,11 +1171,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         process.stdout.write(assistantLeadIn);
       }
     }
+    stopLiveActivityTimer();
     scrollRegion.beginContentStreaming();
     runtimeState.enterStreamingContent();
-    beginActivity('Answering');
     mdRenderer.setNewlineCallback(scrollRegion.getNewlineCallback());
-    scheduleActivityPause(220);
   };
 
   const getCurrentIntentSummaryLine = (): string => {
@@ -1809,6 +1820,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
 
     endStreamingPhaseForInterrupt();
+    if (scrollRegion.isActive()) {
+      scrollRegion.clearActivity();
+    }
     const separatedBlock = block.startsWith('\n') ? block : `\n${block}`;
     if (scrollRegion.isActive()) {
       try {
@@ -2411,18 +2425,37 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   let deferredInput: string | null = null;
   let pendingQueuedInput: string | null = null;
+  let normalTurnChromePrimed = false;
+  let turnHadAskUserQuestion = false;
 
   stopBusyCapture = (): void => {
     activeBusyCapture?.stop();
     activeBusyCapture = null;
   };
 
-  const stashQueuedInputIfAny = (): void => {
+  const stashQueuedInputIfAny = (options?: { stopCapture?: boolean }): void => {
     const queuedInput = activeBusyCapture?.consumeQueued() ?? null;
-    stopBusyCapture();
+    if (options?.stopCapture !== false) {
+      stopBusyCapture();
+    }
     if (queuedInput !== null && queuedInput.trim().length > 0) {
       pendingQueuedInput = queuedInput;
     }
+  };
+
+  const beginNormalInputTurnChrome = (submittedInput: string): void => {
+    turnHadAskUserQuestion = false;
+    runtimeState.beginTurn('Thinking', { deferActivity: true });
+    ensureBusyInputCapture();
+
+    if (!terminalUiSuspended) {
+      scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
+    }
+
+    if (submittedInput.length > 0 && scrollRegion.isActive() && !terminalUiSuspended) {
+      scrollRegion.writeSubmittedInput(formatSubmittedInput(submittedInput));
+    }
+    beginActivity('Thinking', true);
   };
 
   runtimeHooks.on('turn_started', (e) => {
@@ -2438,15 +2471,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       thinkingOnlyToolNoticeTimer = null;
     }
     startLongThinkingTimer();
-    runtimeState.beginTurn('Thinking');
-    if (!terminalUiSuspended) {
-      scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
-    }
-    if (!terminalUiSuspended && scrollRegion.isActive()) {
-      activeBusyCapture?.stop();
-      activeBusyCapture = inputReader.startBusyCapture({
-        placeholder: getFooterInputPrompt(),
-      });
+    if (!normalTurnChromePrimed) {
+      beginNormalInputTurnChrome('');
     }
   });
 
@@ -2454,6 +2480,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     log.debug('tool_started', JSON.stringify({ tool: (e as any)?.toolName }));
     endStreamingPhaseForInterrupt();
     if (e.toolName === 'AskUserQuestion') {
+      turnHadAskUserQuestion = true;
       enterAskUserQuestionPrompt();
       maybeAdvanceCurrentTurnStageForTool(e.toolName, e.toolInput);
       return;
@@ -2539,7 +2566,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   runtimeHooks.on('turn_completed', () => {
     clearLongThinkingTimer();
-    stashQueuedInputIfAny();
+    stashQueuedInputIfAny({ stopCapture: turnHadAskUserQuestion });
+    turnHadAskUserQuestion = false;
     toolExplorer.reset();
     if (currentTurnIntentPlan?.stages.length) {
       currentTurnStageIndex = currentTurnIntentPlan.stages.length - 1;
@@ -2547,6 +2575,23 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       completedTurnIntentSummaryLine = getCurrentTurnSummaryLine();
       const stageSummaryBlock = getCurrentTurnStageSummaryBlock();
       if (stageSummaryBlock) {
+        if (scrollRegion.isActive() && scrollRegion.isContentStreaming() && !terminalUiSuspended) {
+          flushStreamingMarkdown();
+          scrollRegion.endContentStreaming({
+            inputPrompt: getFooterInputPrompt(),
+            summaryLine: '',
+            statusLine: statusBar.getStatusLine(),
+          });
+          mdRenderer.beginNewSegment();
+          resetStreamingSegment();
+        }
+        if (scrollRegion.isActive() && !terminalUiSuspended) {
+          scrollRegion.renderFooter({
+            inputPrompt: getFooterInputPrompt(),
+            summaryLine: '',
+            statusLine: statusBar.getStatusLine(),
+          });
+        }
         writeOrchestrationBlock(stageSummaryBlock);
       }
     }
@@ -2557,6 +2602,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   runtimeHooks.on('turn_failed', () => {
     clearLongThinkingTimer();
+    turnHadAskUserQuestion = false;
     completedTurnIntentSummaryLine = '';
     runtimeState.markInputReady();
     resetTurnChrome();
@@ -2565,6 +2611,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   runtimeHooks.on('turn_aborted', () => {
     clearLongThinkingTimer();
+    turnHadAskUserQuestion = false;
     completedTurnIntentSummaryLine = '';
     runtimeState.markInputReady();
     resetTurnChrome();
@@ -2623,7 +2670,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const handleCompletedIntentFeedbackResult = async (
     result: CompletedIntentFeedbackResult,
   ): Promise<boolean> => {
-    stashQueuedInputIfAny();
+    stashQueuedInputIfAny({ stopCapture: result.deferredInput !== null || result.exitRequested });
     if (result.deferredInput !== null) {
       if (scrollRegion.isActive()) {
         scrollRegion.clearOverlayPromptState();
@@ -2648,12 +2695,15 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     // 交互循环
     interactiveLoop: while (true) {
       await refreshSkills();
+      stashQueuedInputIfAny({ stopCapture: false });
 
       let input: string | null;
       if (deferredInput !== null) {
+        stopBusyCapture();
         input = deferredInput;
         deferredInput = null;
       } else if (pendingQueuedInput !== null) {
+        stopBusyCapture();
         input = pendingQueuedInput;
         pendingQueuedInput = null;
       } else {
@@ -2661,6 +2711,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         if (!scrollRegion.isActive() && !terminalUiSuspended) {
           renderInputSeparator();
         }
+        runtimeState.markInputReady();
         input = await inputReader.read('> ');
       }
 
@@ -2683,9 +2734,20 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       renderFooterChrome();
     }
 
+    const shellEscape = parseShellEscapeInput(trimmed);
+    const slash = parseSlashCommand(trimmed);
+    const shouldPrimeNormalTurnChrome = shellEscape === null && slash === null;
+    let normalInputTurnChromeStarted = false;
+    if (shouldPrimeNormalTurnChrome) {
+      mdRenderer.reset();
+      resetStreamingSegment();
+      beginNormalInputTurnChrome(trimmed);
+      normalInputTurnChromeStarted = true;
+      normalTurnChromePrimed = true;
+    }
+
     await refreshSkills();
 
-    const shellEscape = parseShellEscapeInput(trimmed);
     if (shellEscape?.kind === 'usage') {
       dismissWelcomeScreen();
       writeCommandOutput(trimmed, '用法：! <command>\n\n');
@@ -2834,6 +2896,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
 
     if (trimmed === '/models') {
+      if (scrollRegion.isActive() && !terminalUiSuspended) {
+        scrollRegion.clearOverlayPromptState();
+        replRenderer.prepareForInput();
+      }
       const selected = await selectModel(config, { renderer: replRenderer });
       if (selected) {
         // 如果选的是 provider 目录里的模型（尚未在 config.models 中），自动注册
@@ -2950,7 +3016,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
 
     // 斜杠命令：直接触发对应 skill
-    const slash = parseSlashCommand(trimmed);
     if (slash) {
       let skill = findSkillByCommandName(skills, slash.skillName);
       if (!skill) {
@@ -3049,10 +3114,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
             if (await handleCompletedIntentFeedbackResult(feedbackResult)) {
               break interactiveLoop;
             }
-            if (deferredInput === null) {
-              runtimeState.markInputReady();
-              renderFooterChrome();
-            }
           }
 
           if (!scrollRegion.isActive()) {
@@ -3081,6 +3142,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     mdRenderer.reset();
     resetStreamingSegment();
     try {
+      if (!normalInputTurnChromeStarted) {
+        beginNormalInputTurnChrome(trimmed);
+        normalTurnChromePrimed = true;
+      }
+
       // UserPromptSubmit hook — broker 可在此注入额外上下文
       const promptHookResult = await lifecycleHooks.runHooks('UserPromptSubmit', {
         prompt: trimmed,
@@ -3110,15 +3176,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
 
       let lastAssistantText = '';
-      // Clear previously typed input so footer shows placeholder during turn
-      if (!terminalUiSuspended) {
-        scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
-      }
-
-      // Re-display user input in the content area (after screen clear)
-      if (scrollRegion.isActive() && !terminalUiSuspended) {
-        scrollRegion.writeSubmittedInput(formatSubmittedInput(trimmed));
-      }
       await primeTurnIntentPlan(true);
 
       await maybePrepareFreshContextHandoff();
@@ -3156,9 +3213,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
       if (deferredInput !== null) {
         continue interactiveLoop;
-      }
-      if (deferredInput === null) {
-        renderFooterChrome();
       }
       if (!scrollRegion.isActive()) {
         process.stdout.write('\n');
@@ -3236,30 +3290,25 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         if (deferredInput !== null) {
           continue interactiveLoop;
         }
-        if (deferredInput === null) {
-          renderFooterChrome();
-        }
         if (!scrollRegion.isActive()) {
           process.stdout.write('\n');
         }
       }
 
-      if (deferredInput === null) {
-        runtimeState.markInputReady();
-        renderFooterChrome();
-      }
     } catch (e) {
       clearTurnIntentContext();
       stashQueuedInputIfAny();
       handleTurnFailure(e);
     }
-    if (deferredInput === null && scrollRegion.isActive() && runtimeState.getSnapshot().footerMode !== 'busy') {
-      renderFooterChrome();
-    }
     runtimeState.deactivateTurn();
     stopActivity();
-    // Activity line was already cleared by clearActivityLine() at the start
-    // of content streaming. Skipping nextTick clear to avoid clearing content.
+    if (deferredInput === null && scrollRegion.isActive()) {
+      scrollRegion.clearActivityState();
+      renderFooterChrome();
+    }
+    normalTurnChromePrimed = false;
+    // Live activity is stopped when content streaming starts, so do not clear
+    // the activity row again here; that row may now contain assistant text.
     }
   } finally {
     stopBusyCapture();

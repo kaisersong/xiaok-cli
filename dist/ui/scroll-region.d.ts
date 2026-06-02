@@ -86,6 +86,7 @@ export declare class ScrollRegionManager {
     /** Last screen rows occupied by footer/overlay chrome, used to clear stale rows after terminal resize. */
     private lastFooterClearStartRow;
     private lastFooterClearEndRow;
+    private lastOverlayClearStartRow;
     constructor(stream?: NodeJS.WriteStream, config?: ScrollRegionConfig);
     private clampCursorRow;
     private maxInputRows;
@@ -97,6 +98,7 @@ export declare class ScrollRegionManager {
      * Calculate the bottom row of the scroll region (where activity line renders).
      */
     private getScrollBottom;
+    private getActivityRow;
     /**
      * Calculate the input bar row where the last input line sits.
      */
@@ -115,7 +117,10 @@ export declare class ScrollRegionManager {
     private clearScreenRow;
     private getClearScreenRowSequence;
     private composeActivityLineRender;
+    private clearActivityIfContentWillUseRow;
     private clearRenderedFooterRows;
+    private clearPromptChromeRows;
+    private clearSummaryChromeRows;
     /**
      * Calculate cursor column after the "❯ " prefix.
      * "❯" is at column 1, space at column 2, text starts at column 3.
@@ -198,6 +203,7 @@ export declare class ScrollRegionManager {
      * Does NOT reposition the cursor — content continues from current position.
      */
     clearActivityLine(): void;
+    clearActivityState(): void;
     clearOverlayPromptState(): void;
     positionCursorAtContentCursor(): void;
     /**
@@ -265,7 +271,9 @@ export declare class ScrollRegionManager {
     setContentCursor(row: number): void;
     getContentCursor(): number;
     get maxContentRows(): number;
-    writeAtContentCursor(text: string): void;
+    writeAtContentCursor(text: string, options?: {
+        clearPromptChrome?: boolean;
+    }): void;
     writeSubmittedInput(text: string): void;
     getNewlineCallback(): (() => void);
     syncContentCursorFromRenderedLines(lines: string[]): void;

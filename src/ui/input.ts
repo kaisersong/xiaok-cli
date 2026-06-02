@@ -337,6 +337,7 @@ export class InputReader {
 
   startBusyCapture(options: BusyCaptureOptions = {}): BusyCaptureHandle {
     if (!stdin.isTTY || this.forcePlainMode || this.readActive || (!this.scrollPromptRenderer && !this.renderer)) {
+      this.transcriptLogger?.record({ type: 'busy_capture_detach', reason: 'disabled', timestamp: Date.now() });
       options.onDeactivate?.('disabled');
       return createDisabledBusyCapture();
     }
@@ -404,6 +405,7 @@ export class InputReader {
           } catch {}
         }
         handle.stop();
+        this.transcriptLogger?.record({ type: 'busy_capture_detach', reason: 'ui_error', timestamp: Date.now() });
         options.onDeactivate?.('ui_error');
         log(`busy capture render failed: ${String(error)}`);
       }
@@ -520,20 +522,22 @@ export class InputReader {
       stdin.setRawMode(true);
       stdin.resume();
       attached = true;
+      reader.transcriptLogger?.record({ type: 'busy_capture_attach', timestamp: Date.now() });
       render();
     };
 
-    const detach = () => {
+    const detach = (reason: 'pause' | 'stop') => {
       if (!attached) return;
       stdin.removeListener('data', onData);
       attached = false;
+      reader.transcriptLogger?.record({ type: 'busy_capture_detach', reason, timestamp: Date.now() });
     };
 
     const handle: BusyCaptureHandle = {
       pause() {
         if (!active || paused) return;
         paused = true;
-        detach();
+        detach('pause');
       },
       resume() {
         if (!active || !paused || reader.readActive) return;
@@ -543,7 +547,7 @@ export class InputReader {
       stop() {
         if (!active) return;
         active = false;
-        detach();
+        detach('stop');
         if (reader.busyCapture === handle) {
           reader.busyCapture = null;
         }
@@ -577,17 +581,12 @@ export class InputReader {
     return handle;
   }
 
-  private pauseBusyCaptureForRead(): (() => void) | null {
+  private pauseBusyCaptureForRead(): void {
     const capture = this.busyCapture;
     if (!capture?.isActive()) {
-      return null;
+      return;
     }
     capture.pause();
-    return () => {
-      if (this.busyCapture === capture) {
-        capture.resume();
-      }
-    };
   }
 
   async read(prompt: string, options?: InputReadOptions): Promise<string | null> {
@@ -602,7 +601,7 @@ export class InputReader {
     }
 
     loadKeybindingsSync();
-    const resumeBusyCapture = this.pauseBusyCaptureForRead();
+    this.pauseBusyCaptureForRead();
     this.readActive = true;
 
     return new Promise((resolve) => {
@@ -822,7 +821,7 @@ export class InputReader {
             return getEditorState();
           },
           onCancel: () => {
-            done(null);
+            done(null, 'cancel');
             return getEditorState();
           },
           onChange: (snapshot, reason) => {
@@ -971,7 +970,10 @@ export class InputReader {
         return recallNextHistory();
       };
 
-      const done = (result: string | null) => {
+      const done = (
+        result: string | null,
+        reason: 'submit' | 'cancel' | 'eof' = result === null ? 'cancel' : 'submit',
+      ) => {
         if (resolved) return;
 
         // Clear prompt line BEFORE closeMenu() to prevent redraw() from re-rendering it
@@ -989,7 +991,7 @@ export class InputReader {
         stdin.setRawMode(false);
         stdin.pause();
         this.readActive = false;
-        resumeBusyCapture?.();
+        this.transcriptLogger?.record({ type: 'input_read_detach', reason, timestamp: Date.now() });
 
         if (result !== null && result.length > 0 && this.history[this.history.length - 1] !== result) {
           this.history.push(result);
@@ -1035,11 +1037,11 @@ export class InputReader {
                   applyEngineAction(action);
                   needsFinalRedraw = true;
                 } else if (action === 'cancel') {
-                  done(null);
+                  done(null, 'cancel');
                   return;
                 } else if (action === 'eof') {
                   if (input.length === 0) {
-                    done(null);
+                    done(null, 'eof');
                     return;
                   }
                 } else if (action === 'delete-back') {
@@ -1153,13 +1155,13 @@ export class InputReader {
 
         const handleAction = (action: Action): boolean => {
           if (action === 'cancel') {
-            done(null);
+            done(null, 'cancel');
             return true;
           }
 
           if (action === 'eof') {
             if (input.length === 0) {
-              done(null);
+              done(null, 'eof');
             }
             return true;
           }
@@ -1399,12 +1401,19 @@ export class InputReader {
       if (this.renderer) {
         stdin.setRawMode(true);
         stdin.resume();
+        this.transcriptLogger?.record({ type: 'input_read_attach', timestamp: Date.now() });
         redraw();
+        setTimeout(() => {
+          if (!resolved) {
+            redraw();
+          }
+        }, 20);
       } else {
         stdout.write(prompt);
         stdout.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l');
         stdin.setRawMode(true);
         stdin.resume();
+        this.transcriptLogger?.record({ type: 'input_read_attach', timestamp: Date.now() });
       }
     });
   }

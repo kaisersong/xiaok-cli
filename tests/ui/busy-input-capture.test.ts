@@ -74,7 +74,7 @@ describe('InputReader busy capture', () => {
     }
   });
 
-  it('pauses busy capture while read owns stdin and resumes afterward', async () => {
+  it('pauses busy capture while read owns stdin and keeps it paused after submit', async () => {
     const harness = createTtyHarness();
     const reader = new InputReader(new ReplRenderer(process.stdout));
 
@@ -90,7 +90,8 @@ describe('InputReader busy capture', () => {
       harness.send('继续排队');
       harness.send('\r');
 
-      expect(capture.consumeQueued()).toBe('排队前继续排队');
+      expect(capture.getSnapshot().draft).toBe('排队前');
+      expect(capture.consumeQueued()).toBeNull();
       capture.stop();
       expect(harness.emitter.listenerCount('data')).toBe(0);
     } finally {

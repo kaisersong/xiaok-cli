@@ -20,8 +20,8 @@ describe('chat terminal layout', () => {
     expect(source).toContain('formatToolActivity');
     expect(source).toContain('ToolExplorer');
     expect(source).toContain('beginActivity');
+    expect(source).toContain('stopLiveActivityTimer()');
     expect(source).toContain('TuiRuntimeState');
-    expect(source).toContain('Answering');
     expect(source).toContain('TurnLayout');
     expect(source).toContain('consumeAssistantLeadIn');
     expect(runtimeStateSource).toContain('getReassuranceTick');
@@ -32,6 +32,63 @@ describe('chat terminal layout', () => {
 
     expect(source).toContain("input = await inputReader.read('> ')");
     expect(source).not.toContain('renderInputPrompt();');
+  });
+
+  it('should not show an input-ready footer before stdin is owned by the next read', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const readIndex = source.indexOf("input = await inputReader.read('> ');");
+    expect(readIndex).toBeGreaterThan(-1);
+
+    const beforeRead = source.slice(Math.max(0, readIndex - 320), readIndex);
+    expect(beforeRead).toContain('runtimeState.markInputReady();');
+    expect(beforeRead).not.toContain('renderFooterChrome();');
+
+    const cleanupStart = source.lastIndexOf('runtimeState.deactivateTurn();');
+    const cleanupEnd = source.indexOf('// Live activity is stopped when content streaming starts', cleanupStart);
+    const cleanupSource = source.slice(cleanupStart, cleanupEnd);
+    expect(cleanupStart).toBeGreaterThan(-1);
+    expect(cleanupEnd).toBeGreaterThan(cleanupStart);
+    expect(cleanupSource).toContain('scrollRegion.clearActivityState();');
+    expect(cleanupSource).not.toContain('runtimeState.markInputReady();');
+    expect(cleanupSource).toContain('renderFooterChrome();');
+
+    expect(source).not.toContain([
+      'if (deferredInput === null) {',
+      '        runtimeState.markInputReady();',
+      '        renderFooterChrome();',
+      '      }',
+      '    } catch (e) {',
+    ].join('\n'));
+  });
+
+  it('keeps busy capture alive across post-turn cleanup until the next loop owns stdin', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+
+    expect(source).toContain('stashQueuedInputIfAny({ stopCapture: false });');
+    expect(source).toContain('stashQueuedInputIfAny({ stopCapture: result.deferredInput !== null || result.exitRequested });');
+    expect(source).toContain([
+      "        input = await inputReader.read('> ');",
+    ].join('\n'));
+    const loopStart = source.indexOf('interactiveLoop: while (true) {');
+    const refreshIndex = source.indexOf('await refreshSkills();', loopStart);
+    const stashIndex = source.indexOf('stashQueuedInputIfAny({ stopCapture: false });', refreshIndex);
+    const inputDeclIndex = source.indexOf('let input: string | null;', stashIndex);
+    const markReadyIndex = source.indexOf('runtimeState.markInputReady();', inputDeclIndex);
+    const readStart = source.indexOf("        input = await inputReader.read('> ');", markReadyIndex);
+    expect(loopStart).toBeGreaterThan(-1);
+    expect(refreshIndex).toBeGreaterThan(loopStart);
+    expect(stashIndex).toBeGreaterThan(refreshIndex);
+    expect(inputDeclIndex).toBeGreaterThan(stashIndex);
+    expect(markReadyIndex).toBeGreaterThan(inputDeclIndex);
+    expect(readStart).toBeGreaterThan(markReadyIndex);
+    const readEnd = source.indexOf('      }', readStart);
+    expect(source.slice(readStart, readEnd)).not.toContain('stopBusyCapture();');
+  });
+
+  it('renders an empty prompt while InputReader owns stdin', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+
+    expect(source).toContain("const placeholder = frame.placeholder === '> ' ? '' : frame.placeholder;");
   });
 
   it('should clear the active input line before rendering the submitted bubble', () => {
@@ -130,6 +187,70 @@ describe('chat terminal layout', () => {
     expect(runtimeStateSource).toContain("return this.snapshot.footerMode === 'busy' ? 'Finishing response...' : 'Type your message...';");
   });
 
+  it('should attach busy input capture before rendering a busy footer prompt', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+
+    const helperStart = source.indexOf('function ensureBusyInputCapture(): void {');
+    const helperEnd = source.indexOf('let askUserQuestionPromptActive = false;', helperStart);
+    const helperSource = source.slice(helperStart, helperEnd);
+
+    expect(helperStart).toBeGreaterThan(-1);
+    expect(helperEnd).toBeGreaterThan(helperStart);
+    expect(helperSource).toContain('if (activeBusyCapture?.isActive()) {');
+    expect(helperSource).toContain('return;');
+    expect(helperSource).toContain('inputReader.startBusyCapture');
+
+    const turnChromeStart = source.indexOf('const beginNormalInputTurnChrome = (submittedInput: string): void => {');
+    const turnChromeEnd = source.indexOf("runtimeHooks.on('turn_started'", turnChromeStart);
+    const turnChromeSource = source.slice(turnChromeStart, turnChromeEnd);
+    const beginTurnIndex = turnChromeSource.indexOf("runtimeState.beginTurn('Thinking', { deferActivity: true })");
+    const busyCaptureIndex = turnChromeSource.indexOf('ensureBusyInputCapture();');
+    const clearInputIndex = turnChromeSource.indexOf('scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() })');
+    const submittedInputIndex = turnChromeSource.indexOf('scrollRegion.writeSubmittedInput(formatSubmittedInput(submittedInput));');
+    const activityIndex = turnChromeSource.indexOf("beginActivity('Thinking', true)");
+
+    expect(turnChromeStart).toBeGreaterThan(-1);
+    expect(turnChromeEnd).toBeGreaterThan(turnChromeStart);
+    expect(beginTurnIndex).toBeGreaterThan(-1);
+    expect(busyCaptureIndex).toBeGreaterThan(-1);
+    expect(clearInputIndex).toBeGreaterThan(-1);
+    expect(submittedInputIndex).toBeGreaterThan(-1);
+    expect(activityIndex).toBeGreaterThan(-1);
+    expect(beginTurnIndex).toBeLessThan(busyCaptureIndex);
+    expect(busyCaptureIndex).toBeLessThan(clearInputIndex);
+    expect(clearInputIndex).toBeLessThan(submittedInputIndex);
+    expect(submittedInputIndex).toBeLessThan(activityIndex);
+
+    const turnStartedStart = source.indexOf("runtimeHooks.on('turn_started'");
+    const turnStartedEnd = source.indexOf("runtimeHooks.on('tool_started'", turnStartedStart);
+    const turnStartedSource = source.slice(turnStartedStart, turnStartedEnd);
+
+    expect(turnStartedStart).toBeGreaterThan(-1);
+    expect(turnStartedEnd).toBeGreaterThan(turnStartedStart);
+    expect(turnStartedSource).toContain('if (!normalTurnChromePrimed) {');
+    expect(turnStartedSource).toContain("beginNormalInputTurnChrome('');");
+
+    const askExitStart = source.indexOf('const exitAskUserQuestionPrompt = (): void => {');
+    const askExitEnd = source.indexOf('// Wire up lazy callbacks for AskUserQuestion interactive prompt.', askExitStart);
+    const askExitSource = source.slice(askExitStart, askExitEnd);
+    const askBusyCaptureIndex = askExitSource.indexOf('ensureBusyInputCapture();');
+    const askActivityIndex = askExitSource.indexOf("runtimeState.beginActivity(describeLiveActivity('AskUserQuestion', {}), true)");
+
+    expect(askExitStart).toBeGreaterThan(-1);
+    expect(askExitEnd).toBeGreaterThan(askExitStart);
+    expect(askBusyCaptureIndex).toBeGreaterThan(-1);
+    expect(askActivityIndex).toBeGreaterThan(-1);
+    expect(askBusyCaptureIndex).toBeLessThan(askActivityIndex);
+
+    const normalInputStart = source.indexOf('// 普通输入');
+    const normalInputEnd = source.indexOf('// UserPromptSubmit hook', normalInputStart);
+    const normalInputSource = source.slice(normalInputStart, normalInputEnd);
+
+    expect(normalInputStart).toBeGreaterThan(-1);
+    expect(normalInputEnd).toBeGreaterThan(normalInputStart);
+    expect(normalInputSource).toContain('beginNormalInputTurnChrome(trimmed);');
+  });
+
   it('should construct a dedicated tui runtime-state owner instead of keeping timer ownership inside chat.ts', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
@@ -167,12 +288,13 @@ describe('chat terminal layout', () => {
   it('should render submitted input before the intent orchestration block in interactive chat', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
-    const inputWrite = source.indexOf('scrollRegion.writeSubmittedInput(formatSubmittedInput(trimmed));');
+    const inputWrite = source.indexOf('beginNormalInputTurnChrome(trimmed);');
     const intentPrime = source.indexOf('await primeTurnIntentPlan(true);');
 
     expect(inputWrite).toBeGreaterThan(-1);
     expect(intentPrime).toBeGreaterThan(-1);
     expect(inputWrite).toBeLessThan(intentPrime);
+    expect(source).toContain('scrollRegion.writeSubmittedInput(formatSubmittedInput(submittedInput));');
   });
 
   it('should route resume replay and stop-hook auto-continue transcript writes through the scroll region instead of raw stdout', () => {

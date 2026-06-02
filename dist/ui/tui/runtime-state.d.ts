@@ -34,6 +34,9 @@ export interface TuiRuntimeStateOptions {
     onSuspendInteractiveUi: (context: string, error: unknown) => void;
     isTerminalUiSuspended: () => boolean;
 }
+export interface TuiBeginTurnOptions {
+    deferActivity?: boolean;
+}
 export declare class TuiRuntimeState {
     private readonly options;
     private liveActivityTimer;
@@ -51,7 +54,7 @@ export declare class TuiRuntimeState {
     getSnapshot(): TuiSurfaceSnapshot;
     setSummarySource(summarySource: TuiSummarySource): void;
     getFooterInputPrompt(): string;
-    beginTurn(activityLabel?: string): void;
+    beginTurn(activityLabel?: string, options?: TuiBeginTurnOptions): void;
     noteResponseStarted(): void;
     enterStreamingContent(): void;
     enterToolInterrupt(): void;

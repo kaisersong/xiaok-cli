@@ -44,11 +44,21 @@ export interface McpWebSocketServerConfig {
  */
 export type McpServerConfig = McpStdioServerConfig | McpSSEServerConfig | McpHTTPServerConfig | McpWebSocketServerConfig;
 /**
+ * Runtime classification 用的来源元数据。
+ * pluginName + pluginDir 仅当 origin === 'plugin' 时填充。
+ */
+export interface McpServerSource {
+    origin: 'settings' | 'plugin';
+    pluginName?: string;
+    pluginDir?: string;
+}
+/**
  * Plugin Manifest 中的 MCP Server 配置
  * 必须显式声明 name 字段
  */
 export type PluginManifestMcpServer = McpServerConfig & {
     name: string;
+    /** @deprecated Legacy hint;xiaok 主线分类已迁移到 server-classification registry。 */
     requiresUserActivation?: boolean;
 };
 /**
@@ -63,5 +73,8 @@ export interface SettingsMcpServers {
  */
 export type NamedMcpServerConfig = McpServerConfig & {
     name: string;
+    /** @deprecated 语义同 PluginManifestMcpServer.requiresUserActivation。 */
     requiresUserActivation?: boolean;
+    /** merge 阶段注入的来源元数据;classify 时用 */
+    source?: McpServerSource;
 };

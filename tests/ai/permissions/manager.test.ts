@@ -27,6 +27,17 @@ describe('PermissionManager', () => {
     await expect(pm.check('write', { file_path: '/tmp/project/src/index.ts' })).resolves.toBe('allow');
   });
 
+  it('matches Windows path allow rules when rule and target use different separators', async () => {
+    const pm = new PermissionManager({
+      mode: 'default',
+      allowRules: ['write(C:\\Users\\song\\project/*)'],
+    });
+
+    await expect(pm.check('write', {
+      file_path: 'C:\\Users\\song\\project\\report-analysis.report.md',
+    })).resolves.toBe('allow');
+  });
+
   it('treats ui-style single-word bash rules as matching the bare command and command with args', async () => {
     const pm = new PermissionManager({
       mode: 'default',

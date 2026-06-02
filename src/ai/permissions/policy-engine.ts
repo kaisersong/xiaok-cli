@@ -42,8 +42,9 @@ export class PermissionPolicyEngine {
 export function matches(rules: string[], toolName: string, input: Record<string, unknown>): boolean {
   return rules.some((rule) => {
     const parenMatch = rule.match(/^([a-z_]+)\((.*)\)$/i);
-    const [ruleTool, pattern = '*'] = rule.includes(':')
-      ? rule.split(':', 2)
+    const colonMatch = parenMatch ? null : rule.match(/^([a-z_]+):(.*)$/i);
+    const [ruleTool, pattern = '*'] = colonMatch
+      ? [colonMatch[1], colonMatch[2]]
       : parenMatch
         ? [parenMatch[1], parenMatch[2]]
         : [toolName, rule];
@@ -51,10 +52,21 @@ export function matches(rules: string[], toolName: string, input: Record<string,
       return false;
     }
 
-    const target = getRuleTarget(input);
-    const regex = buildRuleRegex(pattern);
+    const rawTarget = getRuleTarget(input);
+    const [normalizedPattern, target] = usesPathTarget(input)
+      ? [normalizePathSeparators(pattern), normalizePathSeparators(rawTarget)]
+      : [pattern, rawTarget];
+    const regex = buildRuleRegex(normalizedPattern);
     return regex.test(target);
   });
+}
+
+function usesPathTarget(input: Record<string, unknown>): boolean {
+  return typeof input.file_path === 'string' || typeof input.path === 'string';
+}
+
+function normalizePathSeparators(value: string): string {
+  return value.replace(/\\/g, '/');
 }
 
 export function buildRuleRegex(pattern: string): RegExp {

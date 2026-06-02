@@ -55,43 +55,49 @@ export function parsePluginManifest(raw, pluginDir) {
             if (!type) {
                 throw new Error(`Plugin MCP server "${name}" missing required "type" field`);
             }
-            // 根据 type 构建 config
-            if (type === 'stdio') {
-                const rawArgs = Array.isArray(entry.args) ? entry.args.filter((a) => typeof a === 'string') : undefined;
-                // Resolve relative paths in args against the plugin directory
-                const resolvedArgs = rawArgs?.map((arg) => arg.startsWith('/') || arg.startsWith('-') ? arg : resolve(pluginDir, arg));
-                return {
-                    name,
-                    type: 'stdio',
-                    command: String(entry.command ?? ''),
-                    args: resolvedArgs,
-                    env: entry.env && typeof entry.env === 'object' ? entry.env : undefined,
-                };
+            const buildBase = () => {
+                if (type === 'stdio') {
+                    const rawArgs = Array.isArray(entry.args) ? entry.args.filter((a) => typeof a === 'string') : undefined;
+                    // Resolve relative paths in args against the plugin directory
+                    const resolvedArgs = rawArgs?.map((arg) => arg.startsWith('/') || arg.startsWith('-') ? arg : resolve(pluginDir, arg));
+                    return {
+                        name,
+                        type: 'stdio',
+                        command: String(entry.command ?? ''),
+                        args: resolvedArgs,
+                        env: entry.env && typeof entry.env === 'object' ? entry.env : undefined,
+                    };
+                }
+                if (type === 'sse') {
+                    return {
+                        name,
+                        type: 'sse',
+                        url: String(entry.url ?? ''),
+                        headers: entry.headers && typeof entry.headers === 'object' ? entry.headers : undefined,
+                    };
+                }
+                if (type === 'http') {
+                    return {
+                        name,
+                        type: 'http',
+                        url: String(entry.url ?? ''),
+                        headers: entry.headers && typeof entry.headers === 'object' ? entry.headers : undefined,
+                    };
+                }
+                if (type === 'ws') {
+                    return {
+                        name,
+                        type: 'ws',
+                        url: String(entry.url ?? ''),
+                    };
+                }
+                throw new Error(`Plugin MCP server "${name}" has invalid type: ${type}`);
+            };
+            const base = buildBase();
+            if (entry.requiresUserActivation === true) {
+                base.requiresUserActivation = true;
             }
-            if (type === 'sse') {
-                return {
-                    name,
-                    type: 'sse',
-                    url: String(entry.url ?? ''),
-                    headers: entry.headers && typeof entry.headers === 'object' ? entry.headers : undefined,
-                };
-            }
-            if (type === 'http') {
-                return {
-                    name,
-                    type: 'http',
-                    url: String(entry.url ?? ''),
-                    headers: entry.headers && typeof entry.headers === 'object' ? entry.headers : undefined,
-                };
-            }
-            if (type === 'ws') {
-                return {
-                    name,
-                    type: 'ws',
-                    url: String(entry.url ?? ''),
-                };
-            }
-            throw new Error(`Plugin MCP server "${name}" has invalid type: ${type}`);
+            return base;
         });
     };
     return {

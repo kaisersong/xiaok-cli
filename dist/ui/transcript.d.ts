@@ -3,6 +3,13 @@ export type TranscriptEvent = {
     key: string;
     timestamp: number;
 } | {
+    type: 'input_read_attach';
+    timestamp: number;
+} | {
+    type: 'input_read_detach';
+    reason: 'submit' | 'cancel' | 'eof';
+    timestamp: number;
+} | {
     type: 'input_submit';
     value: string;
     timestamp: number;
@@ -26,6 +33,13 @@ export type TranscriptEvent = {
 } | {
     type: 'input_queue_dequeue';
     value: string;
+    timestamp: number;
+} | {
+    type: 'busy_capture_attach';
+    timestamp: number;
+} | {
+    type: 'busy_capture_detach';
+    reason: 'pause' | 'stop' | 'disabled' | 'ui_error';
     timestamp: number;
 } | {
     type: 'permission_prompt_open';

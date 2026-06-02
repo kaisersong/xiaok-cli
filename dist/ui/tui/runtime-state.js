@@ -28,13 +28,15 @@ export class TuiRuntimeState {
     getFooterInputPrompt() {
         return this.snapshot.footerMode === 'busy' ? 'Finishing response...' : 'Type your message...';
     }
-    beginTurn(activityLabel = 'Thinking') {
+    beginTurn(activityLabel = 'Thinking', options = {}) {
         this.turnActive = true;
         this.responseStarted = false;
         this.lastReassuranceBucket = -1;
         this.liveActivityFrame = 0;
         this.markBusyFinishing();
-        this.beginActivity(activityLabel, true);
+        if (!options.deferActivity) {
+            this.beginActivity(activityLabel, true);
+        }
         this.ensureReassuranceTimer();
     }
     noteResponseStarted() {

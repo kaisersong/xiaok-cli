@@ -25,8 +25,8 @@
     "xiaok": "dist/index.js"
   },
   "scripts": {
-    "build": "node -e \"const fs=require('fs');const t=new Date();const s=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0')+' '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');fs.writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = '+JSON.stringify(s)+';\\n')\" && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
-    "build:release": "node -e \"require('fs').writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = null;\\n')\" && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
+    "build": "node -e \"const fs=require('fs');const t=new Date();const s=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0')+' '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');fs.writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = '+JSON.stringify(s)+';\\n')\" && node scripts/clean-cli-build.mjs && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
+    "build:release": "node -e \"require('fs').writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = null;\\n')\" && node scripts/clean-cli-build.mjs && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
     "dev": "tsx src/index.ts",
     "desktop:pack:dir": "npm run pack:dir --prefix desktop",
     "desktop:pack": "npm run pack:release --prefix desktop",

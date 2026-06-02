@@ -111,4 +111,58 @@ describe('buildModelOptions', () => {
       harness.restore();
     }
   });
+
+  it('clears a stale slash overlay before rendering the model selector in Windows tmux mode', async () => {
+    const previousTmux = process.env.TMUX;
+    const harness = createTtyHarness(80, 24);
+    const renderer = new ReplRenderer(process.stdout);
+    const scrollRegion = new ScrollRegionManager(process.stdout);
+
+    try {
+      process.env.TMUX = 'tmux-test,1,0';
+      scrollRegion.begin();
+      scrollRegion.renderPromptFrame({
+        inputValue: '/mod',
+        cursor: 4,
+        placeholder: 'Type your message...',
+        statusLine: 'kimi-for-coding · 16% · master · xiaok-cli',
+        overlayLines: [
+          '  ❯ /mode  查看当前权限模式',
+          '    /mode default  切到 default',
+          '    /mode auto  切到 auto',
+          '    /models  打开模型选择器',
+        ],
+      });
+      scrollRegion.renderPromptFrame({
+        inputValue: '/mod',
+        cursor: 4,
+        placeholder: 'Type your message...',
+        statusLine: 'kimi-for-coding · 16% · master · xiaok-cli',
+        overlayLines: [],
+      });
+      scrollRegion.clearOverlayPromptState();
+      renderer.setScrollRegion(scrollRegion);
+
+      const pending = selectModel(configFixture, { renderer });
+
+      await waitFor(() => {
+        const lines = harness.screen.lines();
+        expect(lines.some((line) => line.includes('选择模型'))).toBe(true);
+        expect(lines.some((line) => line.includes('Kimi Default'))).toBe(true);
+        expect(lines.some((line) => line.includes('/mode'))).toBe(false);
+        expect(lines.some((line) => line.includes('/models'))).toBe(false);
+        expect(lines.some((line) => line.includes('> Type your message...'))).toBe(true);
+      });
+
+      harness.send('\x1b');
+      await expect(pending).resolves.toBeNull();
+    } finally {
+      if (previousTmux === undefined) {
+        delete process.env.TMUX;
+      } else {
+        process.env.TMUX = previousTmux;
+      }
+      harness.restore();
+    }
+  });
 });

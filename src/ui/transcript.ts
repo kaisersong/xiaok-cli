@@ -4,12 +4,16 @@ import { getConfigDir } from '../utils/config.js';
 
 export type TranscriptEvent =
   | { type: 'input_key'; key: string; timestamp: number }
+  | { type: 'input_read_attach'; timestamp: number }
+  | { type: 'input_read_detach'; reason: 'submit' | 'cancel' | 'eof'; timestamp: number }
   | { type: 'input_submit'; value: string; timestamp: number }
   | { type: 'input_queue_submit'; value: string; timestamp: number }
   | { type: 'input_queue_replace'; oldValue: string; newValue: string; timestamp: number }
   | { type: 'input_queue_edit'; value: string; timestamp: number }
   | { type: 'input_queue_cancel'; value?: string; timestamp: number }
   | { type: 'input_queue_dequeue'; value: string; timestamp: number }
+  | { type: 'busy_capture_attach'; timestamp: number }
+  | { type: 'busy_capture_detach'; reason: 'pause' | 'stop' | 'disabled' | 'ui_error'; timestamp: number }
   | { type: 'permission_prompt_open'; toolName: string; timestamp: number }
   | { type: 'permission_prompt_navigate'; direction: 'up' | 'down'; timestamp: number }
   | { type: 'permission_prompt_decision'; action: string; timestamp: number }
