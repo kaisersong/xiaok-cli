@@ -17,9 +17,34 @@ export interface ResolveCreateProjectMembersResult {
 }
 
 function uniquePush(list: string[], agentId: string): void {
-  if (!list.includes(agentId)) {
+  if (agentId && !list.includes(agentId)) {
     list.push(agentId);
   }
+}
+
+function readAgentId(value: unknown): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+export function extractCreatedAgentId(response: unknown): string {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) return '';
+  const record = response as Record<string, unknown>;
+  const topLevelId = readAgentId(record.id);
+  if (topLevelId) return topLevelId;
+  const agent = record.agent;
+  if (!agent || typeof agent !== 'object' || Array.isArray(agent)) return '';
+  return readAgentId((agent as Record<string, unknown>).id);
+}
+
+export function sanitizeCreateProjectMembers(members: unknown[], poAgent?: string): string[] {
+  const po = readAgentId(poAgent);
+  const resolved: string[] = [];
+  for (const member of Array.isArray(members) ? members : []) {
+    const agentId = readAgentId(member);
+    if (!agentId || agentId === po) continue;
+    uniquePush(resolved, agentId);
+  }
+  return resolved;
 }
 
 export function resolveCreateProjectMembers(

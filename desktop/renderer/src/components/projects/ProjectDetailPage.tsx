@@ -61,6 +61,13 @@ function getExecutionModeLabel(mode?: KSwarmProjectExecutionMode) {
   return EXECUTION_MODE_OPTIONS.find(option => option.value === mode)?.label || '快速执行';
 }
 
+function workflowOwnsProjectProgress(workflowRun?: KSwarmWorkflowRun | null) {
+  if (!workflowRun) return false;
+  if (workflowRun.source !== 'script_generated') return false;
+  if (workflowRun.scope?.taskId) return false;
+  return ['awaiting_approval', 'running', 'blocked'].includes(workflowRun.status);
+}
+
 function ProjectExecutionModeControl({
   value,
   busy,
@@ -768,10 +775,12 @@ export function ProjectDetailPage() {
   }
 
   const { project, tasks, activities, humanActions, workspace, plan, planProgress } = detail;
+  const latestWorkflowRun = detail.workflowRuns?.[0] || null;
+  const workflowHasProjectProgress = workflowOwnsProjectProgress(latestWorkflowRun);
   const dispatchableTaskCount = detail.dispatchPlan?.dispatchedTasks?.length
     ?? detail.dispatchPlan?.dispatchable?.length
     ?? tasks.filter(t => t.status === 'pending').length;
-  const showApprove = project.status === 'created' || project.status === 'draft' || project.status === 'planning';
+  const showApprove = !workflowHasProjectProgress && (project.status === 'created' || project.status === 'draft' || project.status === 'planning');
   const showRetryPlan = canRetryPlanForProject(project, plan, tasks);
   const showInterruptedPlanHint = isInterruptedPlanProject(project, plan, tasks);
   const projectIntervention = detail.projectIntervention;
@@ -781,7 +790,6 @@ export function ProjectDetailPage() {
   const statusLabel = STATUS_LABELS[project.status] || project.status;
   const healthSummary = summarizeProjectHealth(detail);
   const showHealthBanner = shouldShowProjectHealth(healthSummary.status) && !projectIntervention?.required;
-  const latestWorkflowRun = detail.workflowRuns?.[0] || null;
   const workflowUnavailableMessage = serviceStatus?.lastError?.includes('dynamic workflows')
     ? '工作流服务版本过旧，请关闭旧版小K并重启当前版本。'
     : null;
@@ -963,7 +971,7 @@ export function ProjectDetailPage() {
         )}
 
         {/* Status hint */}
-        {(project.status === 'created' || project.status === 'draft' || project.status === 'planning' || showInterruptedPlanHint) && (
+        {(!workflowHasProjectProgress && (project.status === 'created' || project.status === 'draft' || project.status === 'planning' || showInterruptedPlanHint)) && (
           <div className="pl-[38px]">
             {showInterruptedPlanHint && (
               <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-[var(--c-bg-deep)] text-[var(--c-status-warning-text)]">计划中断，可重新制定计划</span>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveCreateProjectMembers } from '../../electron/kswarm-project-tool.js';
+import { extractCreatedAgentId, resolveCreateProjectMembers } from '../../electron/kswarm-project-tool.js';
 
 describe('kswarm create_project defaults', () => {
   it('keeps the offline xiaok worker as the default member seed and reports total agent count', () => {
@@ -50,5 +50,13 @@ describe('kswarm create_project defaults', () => {
 
     expect(result.members).toEqual(['codex-worker', 'claude-worker']);
     expect(result.totalAgentCount).toBe(3);
+  });
+
+  it('extracts created worker ids from KSwarm agent creation responses without leaking undefined members', () => {
+    expect(extractCreatedAgentId({ id: 'worker-top-level' })).toBe('worker-top-level');
+    expect(extractCreatedAgentId({ agent: { id: 'worker-nested' } })).toBe('worker-nested');
+    expect(extractCreatedAgentId({ agent: { id: '' } })).toBe('');
+    expect(extractCreatedAgentId({ agent: { source: 'default_seed' } })).toBe('');
+    expect(extractCreatedAgentId(null)).toBe('');
   });
 });

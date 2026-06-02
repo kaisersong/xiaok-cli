@@ -180,7 +180,7 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
               workflowRun,
             });
           }
-          if (status && status !== 'running') {
+          if (status && !isResumableWorkflowRunStatus(workflowRun)) {
             return validationFailure({
               error: 'workflow_script_run_not_resumable',
               message: `workflow run ${resumeWorkflowRunId} is ${status}`,
@@ -513,4 +513,12 @@ function inferWorkflowNextAction(
   if (status === 'blocked') return readString(gateDecision.status) || readString(projectDelivery.status) || 'blocked';
   if (activeNodes.length > 0) return 'wait_for_active_nodes';
   return status || 'unknown';
+}
+
+function isResumableWorkflowRunStatus(workflowRun: Record<string, unknown>): boolean {
+  const status = readString(workflowRun.status);
+  if (status === 'running') return true;
+  if (status !== 'blocked') return false;
+  const recovery = readRecord(workflowRun.recovery);
+  return readString(recovery.nextAction) === 'resume_workflow';
 }

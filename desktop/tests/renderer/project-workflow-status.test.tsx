@@ -388,6 +388,64 @@ function scriptParallelWorkflowRun() {
   };
 }
 
+function blockedScriptParallelWorkflowRun() {
+  return {
+    ...scriptParallelWorkflowRun(),
+    status: 'blocked' as const,
+    completedAt: null,
+    summary: {
+      ...scriptParallelWorkflowRun().summary,
+      completed: 4,
+      blocked: 1,
+      running: 1,
+      progress: 4 / 6,
+      primaryMessage: null,
+      blockingFailures: [
+        { nodeId: 'script-agent-4', title: 'AI基础设施与芯片', status: 'blocked', reason: 'structured_json_missing' },
+      ],
+    },
+    recovery: { mode: 'resume_completed_nodes', reusableNodeCount: 4, nextAction: 'resume_workflow' },
+    parallelGroups: [
+      {
+        ...scriptParallelWorkflowRun().parallelGroups[0],
+        status: 'failed',
+        totalCount: 5,
+        completedCount: 4,
+        requiredFailedCount: 1,
+      },
+    ],
+    nodes: [
+      {
+        id: 'script-runtime',
+        phaseId: 'script-runtime',
+        title: '动态工作流编排',
+        status: 'running' as const,
+        kind: 'script_runtime',
+        dependsOn: [],
+        assignedAgent: 'desktop-workflow-runtime',
+        attempt: 1,
+        output: null,
+        error: null,
+      },
+      {
+        id: 'script-agent-4',
+        phaseId: 'phase-1',
+        title: 'AI基础设施与芯片',
+        status: 'blocked' as const,
+        kind: 'agent_task',
+        dependsOn: [],
+        assignedAgent: 'xiaok-worker',
+        attempt: 1,
+        output: null,
+        error: 'structured_json_missing',
+        parallelGroupId: 'script-parallel-1',
+        fanoutItemKey: 'branch-4',
+        fanoutItemLabel: 'AI基础设施与芯片',
+      },
+    ],
+  };
+}
+
 function agentWorkflowProposal(): KSwarmWorkflowProposal {
   return {
     id: 'wfp-proj-workflow-agent-review-smoke-1770000000000',
@@ -765,6 +823,34 @@ describe('ProjectDetailPage workflow action', () => {
 
     await waitFor(() => expect(mockApproveProject).toHaveBeenCalledWith('proj-workflow'));
     expect(await screen.findByText('审批失败：项目准备未完成，请检查智能体状态或重新制定计划。')).toBeInTheDocument();
+  });
+
+  it('prioritizes a blocked script workflow over stale project approval actions', async () => {
+    const detail = workflowDetail({
+      project: {
+        ...workflowDetail().project,
+        status: 'planning',
+        executionMode: 'workflow_preferred',
+      },
+      plan: {
+        version: 1,
+        phases: [{ id: 'phase-1', name: '阶段一', items: [] }],
+      } as any,
+      workflowRuns: [blockedScriptParallelWorkflowRun() as any],
+    });
+    mockGetProjectFullDetail.mockResolvedValue(detail);
+
+    renderProjectDetail(detail);
+
+    expect(await screen.findByText('并行报告复核')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '审批' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/可审批/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /并行报告复核/ }));
+    const dialog = screen.getByRole('dialog', { name: '工作流详情' });
+    expect(dialog).toHaveTextContent('阻塞失败');
+    expect(dialog).toHaveTextContent('AI基础设施与芯片 · structured_json_missing');
+    expect(dialog).toHaveTextContent('恢复方式：复用已完成节点');
   });
 
   it('shows a success notice when dispatch starts task workflows', async () => {

@@ -126,13 +126,29 @@ export function createKSwarmWorkflowScriptController({
     },
     async createAgentNode(input: WorkflowScriptAgentInput): Promise<unknown> {
       if (reuseCompletedPrimitives) {
-        const reusable = await findReusableAgentNodeOutput({
+        const reusable = await findReusableAgentNode({
           kswarmService,
           projectId,
           workflowRunId,
           input,
         });
         if (reusable.found) return reusable.output;
+        if (reusable.retryableNodeId) {
+          const retried = await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowRunId)}/script/nodes/${encodeURIComponent(reusable.retryableNodeId)}/retry`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ assignedAgent }),
+          });
+          const nodeId = readString(readRecord(retried).nodeId) || reusable.retryableNodeId;
+          return waitForWorkflowNodeOutput({
+            kswarmService,
+            projectId,
+            workflowRunId,
+            nodeId,
+            pollIntervalMs,
+            timeoutMs,
+          });
+        }
       }
 
       const created = await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowRunId)}/script/nodes`, {
@@ -186,12 +202,12 @@ async function findReusableParallelGroupId({
       && readString(group.kind) === input.kind
       && readString(group.label) === input.label
       && Number(group.totalCount || 0) === input.totalCount
-      && !['failed', 'blocked', 'cancelled'].includes(status);
+      && status !== 'cancelled';
   });
   return readString(match?.id) || null;
 }
 
-async function findReusableAgentNodeOutput({
+async function findReusableAgentNode({
   kswarmService,
   projectId,
   workflowRunId,
@@ -201,14 +217,25 @@ async function findReusableAgentNodeOutput({
   projectId: string;
   workflowRunId: string;
   input: WorkflowScriptAgentInput;
-}): Promise<{ found: boolean; output: unknown }> {
+}): Promise<{ found: boolean; output: unknown; retryableNodeId: string | null }> {
   const workflowRun = await fetchWorkflowRunSnapshot({ kswarmService, projectId, workflowRunId });
   const nodes = Array.isArray(workflowRun.nodes) ? workflowRun.nodes.filter(isRecord) : [];
   const match = nodes.find(node => {
+    if (!workflowScriptNodeMatchesInput(node, input)) return false;
+    return readString(node.status) === 'completed';
+  });
+  if (match) return { found: true, output: match.output ?? null, retryableNodeId: null };
+  const retryable = nodes.find(node => {
+    if (!workflowScriptNodeMatchesInput(node, input)) return false;
+    return ['blocked', 'failed'].includes(readString(node.status));
+  });
+  return { found: false, output: null, retryableNodeId: readString(retryable?.id) || null };
+}
+
+function workflowScriptNodeMatchesInput(node: Record<string, unknown>, input: WorkflowScriptAgentInput): boolean {
     const nodeInput = readRecord(node.input);
     const script = readRecord(nodeInput.script);
     return readString(node.kind) === 'agent_task'
-      && readString(node.status) === 'completed'
       && readString(nodeInput.prompt) === input.prompt
       && readString(nodeInput.label) === input.label
       && readString(script.phaseTitle) === (input.phaseTitle || '动态执行')
@@ -217,9 +244,6 @@ async function findReusableAgentNodeOutput({
       && nullableString(node.fanoutItemLabel) === nullableString(input.fanoutItemLabel)
       && nullableNumber(node.pipelineStageIndex) === nullableNumber(input.pipelineStageIndex)
       && stableJson(nodeInput.options ?? null) === stableJson(input.options || null);
-  });
-  if (!match) return { found: false, output: null };
-  return { found: true, output: match.output ?? null };
 }
 
 async function fetchWorkflowRunSnapshot({

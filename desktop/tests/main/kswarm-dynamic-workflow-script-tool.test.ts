@@ -312,6 +312,97 @@ describe('KSwarm dynamic workflow script tool', () => {
     });
   });
 
+  it('allows blocked script workflow runs to resume when KSwarm advertises reusable completed nodes', async () => {
+    const { service, requests } = createMockService([
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          status: 'blocked',
+          workflowId: 'project_snapshot_review',
+          recovery: { mode: 'resume_completed_nodes', reusableNodeCount: 1, nextAction: 'resume_workflow' },
+          nodes: [{
+            id: 'script-agent-1',
+            kind: 'agent_task',
+            status: 'completed',
+            input: {
+              prompt: '检查项目状态。',
+              label: '项目检查',
+              options: { label: '项目检查' },
+              script: { phaseTitle: '检查项目' },
+            },
+            output: { summary: '项目可推进' },
+          }],
+        },
+      }),
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          status: 'blocked',
+          recovery: { mode: 'resume_completed_nodes', reusableNodeCount: 1, nextAction: 'resume_workflow' },
+          nodes: [{
+            id: 'script-agent-1',
+            kind: 'agent_task',
+            status: 'completed',
+            input: {
+              prompt: '检查项目状态。',
+              label: '项目检查',
+              options: { label: '项目检查' },
+              script: { phaseTitle: '检查项目' },
+            },
+            output: { summary: '项目可推进' },
+          }],
+        },
+      }),
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          status: 'blocked',
+          recovery: { mode: 'resume_completed_nodes', reusableNodeCount: 1, nextAction: 'resume_workflow' },
+          nodes: [{
+            id: 'script-agent-1',
+            kind: 'agent_task',
+            status: 'completed',
+            input: {
+              prompt: '检查项目状态。',
+              label: '项目检查',
+              options: { label: '项目检查' },
+              script: { phaseTitle: '检查项目' },
+            },
+            output: { summary: '项目可推进' },
+          }],
+        },
+      }),
+      jsonResponse({ ok: true, nodeId: 'script-agent-2', workflowRun: { id: 'run-1' } }, 201),
+      jsonResponse({ workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
+      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'completed' } }, 200),
+    ]);
+    const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
+
+    const output = JSON.parse(await tool.execute({
+      projectId: 'proj-1',
+      script: workflowScript,
+      requestedBy: 'assistant',
+      assignedAgent: 'xiaok-worker',
+      waitForCompletion: true,
+      resumeWorkflowRunId: 'run-1',
+    })) as Record<string, unknown>;
+
+    expect(output).toMatchObject({
+      ok: true,
+      projectId: 'proj-1',
+      workflowRunId: 'run-1',
+      status: 'completed',
+    });
+    expect(requests.map((request) => [request.method, request.path])).toEqual([
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['POST', '/projects/proj-1/workflows/run-1/script/nodes'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['POST', '/projects/proj-1/workflows/run-1/script/complete'],
+    ]);
+  });
+
   it('returns validation errors without calling KSwarm when the script is unsafe', async () => {
     const { service, requests } = createMockService([]);
     const tool = createKSwarmRunDynamicWorkflowScriptTool(service);

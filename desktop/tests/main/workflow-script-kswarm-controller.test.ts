@@ -293,4 +293,103 @@ describe('workflow script KSwarm controller', () => {
       ['GET', '/projects/proj-1/workflows/run-1'],
     ]);
   });
+
+  it('reuses failed parallel group state and retries a blocked matching script node during resume', async () => {
+    const { service, requests } = createMockService([
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          parallelGroups: [{
+            id: 'script-parallel-1',
+            primitiveId: 'parallel-1',
+            kind: 'parallel',
+            label: '两路复核',
+            totalCount: 2,
+            status: 'failed',
+          }],
+          nodes: [],
+        },
+      }),
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          parallelGroups: [],
+          nodes: [{
+            id: 'script-agent-2',
+            kind: 'agent_task',
+            status: 'blocked',
+            parallelGroupId: 'script-parallel-1',
+            fanoutItemKey: 'branch-2',
+            fanoutItemLabel: '证据复核',
+            pipelineStageIndex: null,
+            input: {
+              prompt: '证据复核',
+              label: '证据复核',
+              options: { label: '证据复核', evidenceRequired: true },
+              script: { phaseTitle: '交叉复核' },
+            },
+            output: null,
+          }],
+        },
+      }),
+      jsonResponse({
+        ok: true,
+        nodeId: 'script-agent-2',
+        workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-2', status: 'running' }] },
+        dispatches: [{ nodeId: 'script-agent-2', attempt: 2 }],
+      }, 200),
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          nodes: [{ id: 'script-agent-2', status: 'completed', output: { summary: '证据复核已完成' } }],
+        },
+      }),
+    ]);
+    const controller = createKSwarmWorkflowScriptController({
+      kswarmService: service,
+      projectId: 'proj-1',
+      workflowRunId: 'run-1',
+      assignedAgent: 'xiaok-worker',
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+      reuseCompletedPrimitives: true,
+    });
+
+    const group = await controller.beginParallelGroup?.({
+      label: '两路复核',
+      phaseTitle: '交叉复核',
+      primitiveId: 'parallel-1',
+      kind: 'parallel',
+      totalCount: 2,
+      limit: 2,
+      failurePolicy: 'required_all',
+      quorum: null,
+      scriptHash: 'a'.repeat(64),
+      workflowId: 'report_review',
+    });
+    const result = await controller.createAgentNode({
+      prompt: '证据复核',
+      label: '证据复核',
+      phaseTitle: '交叉复核',
+      options: { label: '证据复核', evidenceRequired: true },
+      sequence: 2,
+      scriptHash: 'a'.repeat(64),
+      workflowId: 'report_review',
+      parallelGroupId: group?.parallelGroupId || null,
+      fanoutItemKey: 'branch-2',
+      fanoutItemLabel: '证据复核',
+      required: true,
+      outputSchema: null,
+      evidenceRequired: true,
+    });
+
+    expect(group).toEqual({ parallelGroupId: 'script-parallel-1' });
+    expect(result).toEqual({ summary: '证据复核已完成' });
+    expect(requests.map((request) => [request.method, request.path])).toEqual([
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['POST', '/projects/proj-1/workflows/run-1/script/nodes/script-agent-2/retry'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
+    ]);
+  });
 });

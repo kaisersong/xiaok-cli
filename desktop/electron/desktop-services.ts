@@ -65,7 +65,7 @@ import { createNotebookTools } from '../../src/ai/tools/notebook.js';
 import type { MemoryStore } from '../../src/ai/memory/store.js';
 import type { KSwarmService, KSwarmUnavailableError } from './kswarm-service.js';
 import { JsonKSwarmInitialPlanBootstrapStore, KSwarmInitialPlanBootstrapQueue } from './kswarm-initial-plan-bootstrap.js';
-import { resolveCreateProjectMembers } from './kswarm-project-tool.js';
+import { extractCreatedAgentId, resolveCreateProjectMembers, sanitizeCreateProjectMembers } from './kswarm-project-tool.js';
 import {
   createKSwarmGetDynamicWorkflowStatusTool,
   createKSwarmRunDynamicWorkflowScriptTool,
@@ -4084,10 +4084,12 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
               )
             );
             for (const newAgent of createResults) {
-              if (newAgent && !resolvedMembers.includes(newAgent.id)) resolvedMembers.push(newAgent.id);
+              const newAgentId = extractCreatedAgentId(newAgent);
+              if (newAgentId && !resolvedMembers.includes(newAgentId)) resolvedMembers.push(newAgentId);
             }
           }
         }
+        const sanitizedMembers = sanitizeCreateProjectMembers(resolvedMembers, poAgent);
 
         // 4. 创建项目
         const planningGuidance = buildCreateProjectPlanningGuidanceForTool({ goal, requirements: requirements || '' });
@@ -4096,7 +4098,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
           name,
           goal,
           requirements: requirements || '',
-          members: resolvedMembers,
+          members: sanitizedMembers,
           workFolder: resolvedWorkFolder,
         });
         const res = await kswarmService.request('/projects', {
@@ -4107,10 +4109,10 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
             requirements: requirements || '',
             ...(planningGuidance ? { planningGuidance } : {}),
             poAgent,
-            members: resolvedMembers,
+            members: sanitizedMembers,
             agentSelection: {
               poAgent: { agentId: poAgent, source: 'default_seed' },
-              members: resolvedMembers.map(agentId => ({
+              members: sanitizedMembers.map(agentId => ({
                 agentId,
                 source: explicitlyNamedMemberIds.has(agentId) ? 'explicit_user' : 'default_seed',
               })),
@@ -4133,7 +4135,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
             requirements: requirements || '',
             planningGuidance,
             poAgent,
-            members: resolvedMembers,
+            members: sanitizedMembers,
           });
           if (!enqueueResult.ok) {
             return JSON.stringify({
@@ -4154,7 +4156,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
           goal,
           status: options.enqueuePlanBootstrap && !reused ? 'planning' : project.status,
           createdAt: project.createdAt,
-          memberCount: resolvedMembers.length,
+          memberCount: sanitizedMembers.length,
           ...(resolvedExecutionMode ? { executionMode: resolvedExecutionMode } : {}),
           ...(reused ? { reused: true } : {}),
           ...(planningStatus ? { planningStatus } : {}),
