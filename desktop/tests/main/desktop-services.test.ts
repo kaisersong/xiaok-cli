@@ -89,15 +89,52 @@ describe('desktop services', () => {
   it('renders report HTML through a semantic desktop tool without exposing plugin internals to the agent', async () => {
     const toolRoot = join(process.cwd(), `.tmp-report-tool-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     process.env.XIAOK_CONFIG_DIR = join(toolRoot, 'config');
-    const rendererDir = join(process.env.XIAOK_CONFIG_DIR!, 'plugins', 'kai-report-creator', 'mcp-servers', 'report-renderer', 'dist', 'renderer');
+    const distDir = join(process.env.XIAOK_CONFIG_DIR!, 'plugins', 'kai-report-creator', 'mcp-servers', 'report-renderer', 'dist');
+    const rendererDir = join(distDir, 'renderer');
     try {
       mkdirSync(rendererDir, { recursive: true });
-      writeFileSync(join(rendererDir, 'package.json'), '{"type":"module"}\n');
-      writeFileSync(join(rendererDir, 'html-builder.js'), `
-        import { writeFileSync } from 'node:fs';
-        export function renderReport({ irContent, outputPath, themeOverride }) {
-          writeFileSync(outputPath, '<html><body>' + irContent + ':' + (themeOverride || '') + '</body></html>');
-          return { success: true, outputPath, stats: { sectionCount: 1 }, validation: { errors: [], warnings: [] }, warnings: [] };
+      writeFileSync(join(distDir, 'package.json'), '{"type":"commonjs"}\n');
+      writeFileSync(join(rendererDir, 'html-builder.js'), 'import "missing-direct-renderer-dependency";\n');
+      writeFileSync(join(distDir, 'server.bundle.js'), `
+        const fs = require('node:fs');
+        const path = require('node:path');
+        let buffer = '';
+        process.stdin.setEncoding('utf8');
+        process.stdin.on('data', (chunk) => {
+          buffer += chunk;
+          let newlineIndex = buffer.indexOf('\\n');
+          while (newlineIndex >= 0) {
+            const line = buffer.slice(0, newlineIndex).trim();
+            buffer = buffer.slice(newlineIndex + 1);
+            if (line) handleMessage(JSON.parse(line));
+            newlineIndex = buffer.indexOf('\\n');
+          }
+        });
+        function handleMessage(message) {
+          if (message.method === 'initialize') {
+            respond(message.id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'report-renderer', version: 'test' } });
+            return;
+          }
+          if (message.method === 'tools/call') {
+            const args = message.params.arguments;
+            fs.mkdirSync(path.dirname(args.output_path), { recursive: true });
+            fs.writeFileSync(args.output_path, '<!DOCTYPE html><html data-template="kai-report-creator"><body>' + args.ir_content + ':' + (args.theme || '') + '</body></html>');
+            respond(message.id, {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  success: false,
+                  output_path: args.output_path,
+                  stats: { sectionCount: 1 },
+                  validation: { l0_passed: true, l1_passed: true, l2_passed: true },
+                  warnings: ['L3 validation failed: soft quality warning'],
+                }),
+              }],
+            });
+          }
+        }
+        function respond(id, result) {
+          process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');
         }
       `);
       const outputPath = join(toolRoot, 'workflow-report.html');
@@ -115,7 +152,12 @@ describe('desktop services', () => {
       expect(result).toMatchObject({ success: true, output_path: outputPath });
       expect(readFileSync(outputPath, 'utf-8')).toContain('Smoke');
     } finally {
-      rmSync(toolRoot, { recursive: true, force: true });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      try {
+        rmSync(toolRoot, { recursive: true, force: true });
+      } catch {
+        // Windows can keep the just-exited MCP child process directory locked briefly.
+      }
       process.env.XIAOK_CONFIG_DIR = join(rootDir, 'config');
     }
   });

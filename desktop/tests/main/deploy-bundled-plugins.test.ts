@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import {
   deployBundledPlugins,
   ensureManagedPythonVenv,
+  ensureReportRendererDistCompat,
   ensureReportRendererCssCompat,
   ensureSlideRendererWheelhouseCompat,
 } from '../../electron/deploy-bundled-plugins.js';
@@ -292,6 +293,33 @@ describe('deploy-bundled-plugins', () => {
       ).toBe(true);
     });
 
+    it('restores missing bundled report renderer runtime files from packaged resources', () => {
+      const bundledPluginDir = join(bundledDir, 'kai-report-creator');
+      const installedPluginDir = join(pluginsDir, 'kai-report-creator');
+      createPluginWithFiles(bundledPluginDir, {
+        name: 'kai-report-creator',
+        version: '2.0.0',
+      }, {
+        'mcp-servers/report-renderer/dist/server.bundle.js': 'current server bundle',
+        'mcp-servers/report-renderer/dist/renderer/html-builder.js': 'current html builder',
+        'mcp-servers/report-renderer/dist/themes/css/corporate-blue.css': 'body { color: black; }',
+      });
+      createPluginWithFiles(installedPluginDir, {
+        name: 'kai-report-creator',
+        version: '2.0.0',
+        source: 'bundled',
+      }, {
+        'mcp-servers/report-renderer/dist/server.bundle.js': 'stale server bundle',
+      });
+
+      ensureReportRendererDistCompat(installedPluginDir, bundledPluginDir);
+
+      expect(readFileSync(join(installedPluginDir, 'mcp-servers', 'report-renderer', 'dist', 'server.bundle.js'), 'utf8'))
+        .toBe('current server bundle');
+      expect(existsSync(join(installedPluginDir, 'mcp-servers', 'report-renderer', 'dist', 'renderer', 'html-builder.js'))).toBe(true);
+      expect(existsSync(join(installedPluginDir, 'mcp-servers', 'report-renderer', 'dist', 'css', 'corporate-blue.css'))).toBe(true);
+    });
+
     it('replaces stale same-version bundled slide wheels with current-platform wheels', () => {
       const installedPluginDir = join(pluginsDir, 'kai-slide-creator');
       const bundledPluginDir = join(bundledDir, 'kai-slide-creator');
@@ -386,6 +414,40 @@ describe('deploy-bundled-plugins', () => {
       ).toBe(true);
     });
 
+    it('reconciles missing report renderer runtime files even when bundled-managed plugin is already current', async () => {
+      process.env.HOME = rootDir;
+      process.env.USERPROFILE = rootDir;
+      process.env.PATH = '';
+      mockIsPackaged.mockReturnValue(true);
+      mockResourcesPath.mockReturnValue(rootDir);
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = rootDir;
+
+      const bundledPluginDir = join(bundledDir, 'kai-report-creator');
+      createPluginWithFiles(bundledPluginDir, {
+        name: 'kai-report-creator',
+        version: '2.0.0',
+      }, {
+        'mcp-servers/report-renderer/dist/server.bundle.js': 'current server bundle',
+        'mcp-servers/report-renderer/dist/renderer/html-builder.js': 'current html builder',
+      });
+
+      const installedPluginDir = join(rootDir, '.xiaok', 'plugins', 'kai-report-creator');
+      createPluginWithFiles(installedPluginDir, {
+        name: 'kai-report-creator',
+        version: '2.0.0',
+        source: 'bundled',
+      }, {
+        'mcp-servers/report-renderer/dist/server.bundle.js': 'stale server bundle',
+      });
+
+      const result = await deployBundledPlugins();
+
+      expect(result.deployed).toEqual([]);
+      expect(readFileSync(join(installedPluginDir, 'mcp-servers', 'report-renderer', 'dist', 'server.bundle.js'), 'utf8'))
+        .toBe('current server bundle');
+      expect(existsSync(join(installedPluginDir, 'mcp-servers', 'report-renderer', 'dist', 'renderer', 'html-builder.js'))).toBe(true);
+    });
+
     it('replaces a stale symlinked bundled plugin with packaged resources', async () => {
       process.env.HOME = rootDir;
       process.env.USERPROFILE = rootDir;
@@ -414,7 +476,7 @@ describe('deploy-bundled-plugins', () => {
       });
       const installedPluginDir = join(rootDir, '.xiaok', 'plugins', 'kai-slide-creator');
       mkdirSync(dirname(installedPluginDir), { recursive: true });
-      symlinkSync(stalePluginDir, installedPluginDir);
+      symlinkSync(stalePluginDir, installedPluginDir, process.platform === 'win32' ? 'junction' : 'dir');
 
       const result = await deployBundledPlugins();
 

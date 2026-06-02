@@ -55,6 +55,8 @@ describe('e2e: plugin bundling and MCP server startup', () => {
     }, null, 2));
     writeFileSync(join(srcPlugin, 'skills', 'SKILL.md'), '# Report Creator');
     writeFileSync(join(srcPlugin, 'mcp-servers', 'report-renderer', 'dist', 'server.bundle.js'), 'console.log("stub")');
+    mkdirSync(join(srcPlugin, 'mcp-servers', 'report-renderer', 'dist', 'renderer'), { recursive: true });
+    writeFileSync(join(srcPlugin, 'mcp-servers', 'report-renderer', 'dist', 'renderer', 'html-builder.js'), 'export function buildHtml() {}');
 
     // Simulate deploy
     const dest = join(pluginsDir, 'kai-report-creator');
@@ -69,6 +71,7 @@ describe('e2e: plugin bundling and MCP server startup', () => {
     expect(existsSync(join(dest, 'plugin.json'))).toBe(true);
     expect(existsSync(join(dest, 'skills', 'SKILL.md'))).toBe(true);
     expect(existsSync(join(dest, 'mcp-servers', 'report-renderer', 'dist', 'server.bundle.js'))).toBe(true);
+    expect(existsSync(join(dest, 'mcp-servers', 'report-renderer', 'dist', 'renderer', 'html-builder.js'))).toBe(true);
 
     const deployed = JSON.parse(readFileSync(join(dest, 'plugin.json'), 'utf8'));
     expect(deployed.source).toBe('bundled');

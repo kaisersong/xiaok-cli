@@ -1,6 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync, statSync, realpathSync } from 'node:fs';
 import { join, extname, basename, dirname, resolve, relative, isAbsolute } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
 import { homedir, platform, arch, type } from 'node:os';
 import { spawnSync, execFile } from 'node:child_process';
@@ -10,7 +9,7 @@ import { getProviderProfile, listProviderProfiles } from '../../src/ai/providers
 import type { ProtocolId } from '../../src/ai/providers/types.js';
 import { MaterialRegistry } from '../../src/runtime/task-host/material-registry.js';
 import { FileTaskSnapshotStore } from '../../src/runtime/task-host/snapshot-store.js';
-import { InProcessTaskRuntimeHost, type TaskRunner } from '../../src/runtime/task-host/task-runtime-host.js';
+import { InProcessTaskRuntimeHost, type TaskRunner, type TaskRunnerInput } from '../../src/runtime/task-host/task-runtime-host.js';
 import type { MaterialRecord, MaterialRole, TaskCreateContext, TaskSnapshot, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
 import { diagnoseTraceBundle } from '../../src/runtime/diagnostics/diagnoser.js';
 import { diagnoseProjectSnapshot } from '../../src/runtime/diagnostics/project-diagnoser.js';
@@ -22,7 +21,7 @@ import {
   loadTaskSnapshotsForSession,
   writeTraceBundleToPath,
 } from '../../src/runtime/trace/exporter.js';
-import type { Config, Message, MessageBlock, StreamChunk, ToolCall, ToolDefinition } from '../../src/types.js';
+import type { Config, Message, MessageBlock, ModelAdapter, StreamChunk, ToolCall, ToolDefinition } from '../../src/types.js';
 import { buildToolList, ToolRegistry } from '../../src/ai/tools/index.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
@@ -3291,6 +3290,14 @@ export function createReportArtifactTool(): Tool {
         return JSON.stringify({ success: false, error: 'output_path_outside_allowed_roots', output_path: outputPath });
       }
 
+      const pluginDir = join(getConfigDir('plugins'), 'kai-report-creator');
+      const serverBundlePath = join(
+        pluginDir,
+        'mcp-servers',
+        'report-renderer',
+        'dist',
+        'server.bundle.js',
+      );
       const rendererPath = join(
         getConfigDir('plugins'),
         'kai-report-creator',
@@ -3300,26 +3307,32 @@ export function createReportArtifactTool(): Tool {
         'renderer',
         'html-builder.js',
       );
-      if (!existsSync(rendererPath)) {
-        return JSON.stringify({ success: false, error: 'report_renderer_not_installed', renderer_path: rendererPath });
+      if (!existsSync(serverBundlePath)) {
+        return JSON.stringify({
+          success: false,
+          error: 'report_renderer_not_installed',
+          server_path: serverBundlePath,
+          renderer_path: rendererPath,
+        });
       }
 
       try {
-        mkdirSync(dirname(outputPath), { recursive: true });
-        const rendererUrl = pathToFileURL(realpathSync(rendererPath)).href;
-        const mod = await import(/* @vite-ignore */ rendererUrl);
-        const renderReport = (mod as { renderReport?: (args: { irContent: string; outputPath: string; themeOverride?: string }) => unknown }).renderReport;
-        if (typeof renderReport !== 'function') {
-          return JSON.stringify({ success: false, error: 'report_renderer_export_missing', renderer_path: rendererPath });
-        }
-        const result = renderReport({ irContent, outputPath, themeOverride: theme }) as Record<string, unknown>;
-        const success = result.success !== false && existsSync(outputPath);
+        const result = await renderReportArtifactViaBundledMcp({
+          pluginDir,
+          serverBundlePath,
+          irContent,
+          outputPath,
+          theme,
+        });
+        const outputExists = existsSync(outputPath);
+        const success = outputExists && (result.success !== false || isReportRendererStructurallyValid(result.validation));
         return JSON.stringify({
+          ...result,
           success,
           output_path: outputPath,
           stats: result.stats ?? null,
           validation: result.validation ?? null,
-          warnings: result.warnings ?? [],
+          warnings: Array.isArray(result.warnings) ? result.warnings : [],
         });
       } catch (error) {
         return JSON.stringify({
@@ -3330,6 +3343,75 @@ export function createReportArtifactTool(): Tool {
       }
     },
   };
+}
+
+async function renderReportArtifactViaBundledMcp({
+  pluginDir,
+  serverBundlePath,
+  irContent,
+  outputPath,
+  theme,
+}: {
+  pluginDir: string;
+  serverBundlePath: string;
+  irContent: string;
+  outputPath: string;
+  theme?: string;
+}): Promise<Record<string, unknown>> {
+  mkdirSync(dirname(outputPath), { recursive: true });
+  const command = process.env.XIAOK_NODE_CMD || process.execPath;
+  const runtimeEnv = !process.env.XIAOK_NODE_CMD && process.versions.electron
+    ? { ELECTRON_RUN_AS_NODE: '1' }
+    : undefined;
+  const proc = startMcpServerProcess(command, [serverBundlePath], {
+    cwd: pluginDir,
+    env: runtimeEnv,
+  });
+  const transport = createStdioMcpTransport(proc.child);
+  const client = createMcpRuntimeClient(transport);
+  try {
+    await withReportRendererTimeout(client.initialize(), 'report_renderer_initialize');
+    const raw = await withReportRendererTimeout(
+      client.callTool('render_report', {
+        ir_content: irContent,
+        output_path: outputPath,
+        ...(theme ? { theme } : {}),
+      }),
+      'report_renderer_render',
+    );
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (isRecord(parsed)) return parsed;
+    } catch {
+      // Handled below as an invalid renderer response.
+    }
+    return {
+      success: false,
+      error: 'report_renderer_response_invalid',
+      response: raw.slice(0, 2000),
+    };
+  } finally {
+    transport.dispose();
+    proc.dispose();
+  }
+}
+
+function isReportRendererStructurallyValid(validation: unknown): boolean {
+  if (!isRecord(validation)) return false;
+  const l0 = validation.l0_passed ?? validation.l0;
+  const l1 = validation.l1_passed ?? validation.l1;
+  const l2 = validation.l2_passed ?? validation.l2;
+  return l0 === true && l1 === true && l2 === true;
+}
+
+function withReportRendererTimeout<T>(promise: Promise<T>, operation: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${operation}_timeout`)), 30_000);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 function isAllowedReportArtifactOutputPath(outputPath: string): boolean {
@@ -3535,6 +3617,65 @@ function createReadMaterialResult(ok: boolean, payload: Record<string, unknown>)
   return { ok, result: JSON.stringify(payload, null, 2) };
 }
 
+const DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS = 20;
+const DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT = [
+  '工具调用预算已用尽。不要再调用工具。',
+  '请基于以上所有工具结果直接给出最终答复。',
+  '如果原始任务要求 JSON 或特定 schema，必须严格按原始 schema 输出。',
+  '不要输出 Markdown 代码块，除非原始任务明确要求 Markdown 正文。',
+].join('\n');
+
+async function streamDesktopToolLoopFinalization(input: {
+  adapter: Pick<ModelAdapter, 'stream'>;
+  apiMessages: Message[];
+  systemPrompt: string;
+  signal: AbortSignal;
+  sessionId: string;
+  turnId: string;
+  intentId: string;
+  stepId: string;
+  emitRuntimeEvent: TaskRunnerInput['emitRuntimeEvent'];
+  onUsage?: (chunk: Extract<StreamChunk, { type: 'usage' }>) => void;
+}): Promise<{ reply: string; assistantBlocks: MessageBlock[] }> {
+  const assistantBlocks: MessageBlock[] = [];
+  let reply = '';
+  for await (const chunk of input.adapter.stream(input.apiMessages, [], input.systemPrompt)) {
+    if (input.signal.aborted) throw new Error('task cancelled');
+    if (chunk.type === 'text') {
+      const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+      if (lastBlock?.type === 'text') {
+        lastBlock.text += chunk.delta;
+      } else {
+        assistantBlocks.push({ type: 'text', text: chunk.delta });
+      }
+      reply += chunk.delta;
+      input.emitRuntimeEvent({
+        type: 'assistant_delta',
+        sessionId: input.sessionId,
+        turnId: input.turnId,
+        intentId: input.intentId,
+        stepId: input.stepId,
+        delta: chunk.delta,
+      });
+    } else if (chunk.type === 'thinking') {
+      const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+      if (lastBlock?.type === 'thinking') {
+        lastBlock.thinking += chunk.delta;
+      } else {
+        assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
+      }
+    } else if (chunk.type === 'tool_use') {
+      throw new Error('desktop_tool_loop_finalization_requested_tool');
+    } else if (chunk.type === 'usage') {
+      input.onUsage?.(chunk);
+    }
+  }
+  if (!reply.trim()) {
+    throw new Error('desktop_tool_loop_finalization_empty');
+  }
+  return { reply, assistantBlocks };
+}
+
 function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialRegistry): TaskRunner {
   const cwd = process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
@@ -3700,7 +3841,6 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
     }];
     let reply = '';
     let iteration = 0;
-    const MAX_ITERATIONS = 20;
     const TASK_TIMEOUT_MS = 30 * 60_000;
     const taskDeadline = Date.now() + TASK_TIMEOUT_MS;
     let totalToolCalls = 0;
@@ -3708,6 +3848,7 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
     const autoSteps: Array<{id: string; label: string; status: string}> = [];
     let referenceReads = 0;
     let lastRequestInputTokens = 0;
+    let toolResultsAwaitingFinalResponse = false;
     const contextLimit = getContextLimit(adapter.getModelName());
     const sessionDir = join(dataRoot, 'sessions', sessionId);
 
@@ -3719,7 +3860,7 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
       });
     }
 
-    while (iteration < MAX_ITERATIONS) {
+    while (iteration < DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS) {
       if (signal.aborted) throw new Error('task cancelled');
       if (Date.now() > taskDeadline) throw new Error('任务超时（30分钟），可能是网络不稳定或模型响应过慢。请检查网络后重试。');
       iteration++;
@@ -3786,7 +3927,12 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
       }
       messages.push({ role: 'assistant', content: assistantBlocks });
       const toolCalls = assistantBlocks.filter((b): b is ToolCall => b.type === 'tool_use');
-      if (toolCalls.length === 0) break;
+      if (toolCalls.length === 0) {
+        if (assistantBlocks.some((block) => block.type === 'text' && block.text.trim())) {
+          toolResultsAwaitingFinalResponse = false;
+        }
+        break;
+      }
       const toolResults: MessageBlock[] = [];
       for (const toolCall of toolCalls) {
         if (signal.aborted) throw new Error('task cancelled');
@@ -3935,6 +4081,7 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
         toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: resultContent, is_error: !ok });
       }
       messages.push({ role: 'user', content: toolResults });
+      toolResultsAwaitingFinalResponse = true;
 
       // Trace: model turn end
       if (skillInvocation) {
@@ -3943,6 +4090,33 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
           stageId: skillInvocation.stageId, iteration, event: 'model_turn_end',
         });
       }
+    }
+    if (toolResultsAwaitingFinalResponse) {
+      messages.push({
+        role: 'user',
+        content: [{ type: 'text', text: DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT }],
+      });
+      const finalized = await streamDesktopToolLoopFinalization({
+        adapter,
+        apiMessages: buildViewForAPI(messages, 2),
+        systemPrompt,
+        signal,
+        sessionId,
+        turnId,
+        intentId,
+        stepId,
+        emitRuntimeEvent,
+        onUsage: (chunk) => {
+          try {
+            const inputTkns = chunk.usage?.inputTokens ?? 0;
+            lastRequestInputTokens = inputTkns;
+            totalInputTokens += inputTkns;
+            totalOutputTokens += chunk.usage?.outputTokens ?? 0;
+          } catch { /* usage capture failure is non-critical */ }
+        },
+      });
+      reply += finalized.reply;
+      messages.push({ role: 'assistant', content: finalized.assistantBlocks });
     }
     emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note: reply.trim() || '模型没有返回内容。' });
     // Record skill execution stats
@@ -4906,13 +5080,13 @@ function createDesktopModelRunnerWithRegistry(
     }];
     let reply = '';
     let iteration = 0;
-    const MAX_ITERATIONS = 20;
     const TASK_TIMEOUT_MS = 30 * 60_000;
     const taskDeadline = Date.now() + TASK_TIMEOUT_MS;
     let totalToolCalls = 0;
     let planEmitted = false;
     const autoSteps: Array<{id: string; label: string; status: string}> = [];
     let referenceReads = 0;
+    let toolResultsAwaitingFinalResponse = false;
 
     // Trace: first model turn start
     if (skillInvocation) {
@@ -4922,7 +5096,7 @@ function createDesktopModelRunnerWithRegistry(
       });
     }
 
-    while (iteration < MAX_ITERATIONS) {
+    while (iteration < DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS) {
       if (signal.aborted) throw new Error('task cancelled');
       if (Date.now() > taskDeadline) throw new Error('任务超时（30分钟），可能是网络不稳定或模型响应过慢。请检查网络后重试。');
       iteration++;
@@ -4981,7 +5155,12 @@ function createDesktopModelRunnerWithRegistry(
       }
       messages.push({ role: 'assistant', content: assistantBlocks });
       const toolCalls = assistantBlocks.filter((b): b is ToolCall => b.type === 'tool_use');
-      if (toolCalls.length === 0) break;
+      if (toolCalls.length === 0) {
+        if (assistantBlocks.some((block) => block.type === 'text' && block.text.trim())) {
+          toolResultsAwaitingFinalResponse = false;
+        }
+        break;
+      }
       const toolResults: MessageBlock[] = [];
       for (const toolCall of toolCalls) {
         if (signal.aborted) throw new Error('task cancelled');
@@ -5081,6 +5260,32 @@ function createDesktopModelRunnerWithRegistry(
         toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: result.slice(0, 50000), is_error: !ok });
       }
       messages.push({ role: 'user', content: toolResults });
+      toolResultsAwaitingFinalResponse = true;
+    }
+    if (toolResultsAwaitingFinalResponse) {
+      messages.push({
+        role: 'user',
+        content: [{ type: 'text', text: DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT }],
+      });
+      const finalized = await streamDesktopToolLoopFinalization({
+        adapter,
+        apiMessages: messages,
+        systemPrompt,
+        signal,
+        sessionId,
+        turnId,
+        intentId,
+        stepId,
+        emitRuntimeEvent,
+        onUsage: (chunk) => {
+          try {
+            totalInputTokens += chunk.usage?.inputTokens ?? 0;
+            totalOutputTokens += chunk.usage?.outputTokens ?? 0;
+          } catch { /* usage capture failure is non-critical */ }
+        },
+      });
+      reply += finalized.reply;
+      messages.push({ role: 'assistant', content: finalized.assistantBlocks });
     }
     emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note: reply.trim() || '模型没有返回内容。' });
     // Record skill execution stats

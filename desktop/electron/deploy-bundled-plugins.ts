@@ -119,6 +119,25 @@ export function ensureReportRendererCssCompat(pluginDir: string): void {
   cpSync(themedCssDir, legacyCssDir, { recursive: true });
 }
 
+export function ensureReportRendererDistCompat(pluginDir: string, bundledPluginDir: string): void {
+  const bundledDistDir = join(bundledPluginDir, 'mcp-servers', 'report-renderer', 'dist');
+  const installedDistDir = join(pluginDir, 'mcp-servers', 'report-renderer', 'dist');
+  if (!existsSync(bundledDistDir)) return;
+
+  const criticalFiles = [
+    join(installedDistDir, 'server.bundle.js'),
+    join(installedDistDir, 'renderer', 'html-builder.js'),
+  ];
+  if (criticalFiles.every(file => existsSync(file))) {
+    return;
+  }
+
+  mkdirSync(dirname(installedDistDir), { recursive: true });
+  rmSync(installedDistDir, { recursive: true, force: true });
+  cpSync(bundledDistDir, installedDistDir, { recursive: true });
+  ensureReportRendererCssCompat(pluginDir);
+}
+
 export function ensureSlideRendererWheelhouseCompat(
   pluginDir: string,
   bundledPluginDir: string,
@@ -196,6 +215,7 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
         if (semverGte(destVer, srcVer) && destMeta.source !== 'bundled') continue;
         if (semverGte(destVer, srcVer)) {
           if (name === 'kai-report-creator') {
+            ensureReportRendererDistCompat(dest, src);
             ensureReportRendererCssCompat(dest);
           }
           if (name === 'kai-slide-creator') {
@@ -210,6 +230,7 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
 
     cpSync(src, dest, { recursive: true });
     if (name === 'kai-report-creator') {
+      ensureReportRendererDistCompat(dest, src);
       ensureReportRendererCssCompat(dest);
     }
     if (name === 'kai-slide-creator') {

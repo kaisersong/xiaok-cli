@@ -68,8 +68,7 @@
       "filter": [
         "plugin.json",
         "skills/**/*",
-        "mcp-servers/report-renderer/dist/server.bundle.js",
-        "mcp-servers/report-renderer/dist/themes/**/*"
+        "mcp-servers/report-renderer/dist/**/*"
       ]
     },
     {

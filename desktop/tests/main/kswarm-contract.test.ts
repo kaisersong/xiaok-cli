@@ -110,6 +110,12 @@ describe('desktop service path contract', () => {
     expect(slidePluginEntry?.filter).toContain('skills/**/*');
     expect(slidePluginEntry?.filter).not.toContain('SKILL.md');
 
+    const reportPluginEntry = builderConfig.extraResources.find(
+      (entry) => entry.from === '../../kai-xiaok-plugins/plugins/kai-report-creator',
+    );
+    expect(reportPluginEntry?.filter).toContain('mcp-servers/report-renderer/dist/**/*');
+    expect(reportPluginEntry?.filter).not.toContain('mcp-servers/report-renderer/dist/server.bundle.js');
+
     const intentBrokerAdaptersEntry = builderConfig.extraResources.find(
       (entry) => entry.from === '../../intent-broker/adapters',
     );

@@ -321,7 +321,9 @@ describe('workflow script KSwarm controller', () => {
             parallelGroupId: 'script-parallel-1',
             fanoutItemKey: 'branch-2',
             fanoutItemLabel: '证据复核',
-            pipelineStageIndex: null,
+            // KSwarm persisted old parallel branch nodes with 0 here even
+            // though runtime resume passes null for non-pipeline branches.
+            pipelineStageIndex: 0,
             input: {
               prompt: '证据复核',
               label: '证据复核',

@@ -242,8 +242,15 @@ function workflowScriptNodeMatchesInput(node: Record<string, unknown>, input: Wo
       && nullableString(node.parallelGroupId) === nullableString(input.parallelGroupId)
       && nullableString(node.fanoutItemKey) === nullableString(input.fanoutItemKey)
       && nullableString(node.fanoutItemLabel) === nullableString(input.fanoutItemLabel)
-      && nullableNumber(node.pipelineStageIndex) === nullableNumber(input.pipelineStageIndex)
+      && workflowScriptPipelineStageMatches(node, input)
       && stableJson(nodeInput.options ?? null) === stableJson(input.options || null);
+}
+
+function workflowScriptPipelineStageMatches(node: Record<string, unknown>, input: WorkflowScriptAgentInput): boolean {
+  const nodeStage = nullableNumber(node.pipelineStageIndex);
+  const inputStage = nullableNumber(input.pipelineStageIndex);
+  if (inputStage === null && nullableString(input.fanoutItemKey) && nodeStage === 0) return true;
+  return nodeStage === inputStage;
 }
 
 async function fetchWorkflowRunSnapshot({
