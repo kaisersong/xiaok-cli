@@ -19,17 +19,19 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
-**What's New in v1.3.12:**
+**What's New in v1.3.13:**
 
 - **Parallel Dynamic Workflow Scripts**: Xiaok Desktop now supports the first parallel dynamic workflow script path. Trusted workflow scripts can use `parallel([() => agent(...), ...])` to fan out independent agent branches while keeping orchestration outside the main conversation.
 - **Durable KSwarm Parallel State**: `parallel()` no longer exists only as an in-memory `Promise.all`. KSwarm persists `parallelGroups`, branch node metadata, and `scriptCheckpoints`, so project detail, logs, and API snapshots can explain which branches ran and how they completed.
 - **Conversation Preview Before Run**: The `run_dynamic_workflow_script` tool now supports `previewOnly`, allowing the assistant to generate a workflow preview for user confirmation before starting the run. Confirmed runs start in the background and immediately return a `workflowRunId`.
+- **Resume and Status Tools**: `resumeWorkflowRunId` can continue the same workflow run while reusing completed parallel groups and agent node outputs, and `get_dynamic_workflow_status` reports run/node/parallel/checkpoint/gate/delivery state from KSwarm snapshots.
 - **Professional Report Review Template**: The tool now ships a `report_final_review` script template that runs fact, evidence, and format/contract review branches in parallel, then reduces them into a final gate recommendation.
+- **HTML/PDF Professional E2E**: The dynamic workflow E2E now creates a new KSwarm project, runs the professional parallel review script, produces HTML and PDF artifacts, and verifies workflow run, gate decision, project deliverable, artifact provenance, and task-board state stay consistent.
 - **Failure Policy Foundations**: Parallel runtime now supports `required_all`, `collect_errors`, and `quorum` semantics, with KSwarm quorum group reduction covered by workflow tests.
 - **Workflow Status Visibility**: Project workflow details now show parallel groups, branch completion counts, failure policy, branch labels, and script checkpoint progress from KSwarm snapshots instead of inferring state from the chat transcript.
-- **Focused Test, E2E, and Eval Coverage**: The release covers parser rejection for eager parallel calls, runtime branch annotation, KSwarm parallel group persistence, HTTP contract routing, background tool startup, a dynamic workflow eval case, and an end-to-end dynamic workflow script that completes through KSwarm and the desktop runtime bridge.
+- **Focused Test, E2E, and Eval Coverage**: The release covers parser rejection for eager parallel calls, runtime branch annotation, KSwarm parallel group persistence, HTTP contract routing, background tool startup, resume primitive reuse, status-query tooling, a dynamic workflow eval case, and an end-to-end dynamic workflow script that completes through KSwarm and the desktop runtime bridge.
 
-This is a foundation release for dynamic workflow orchestration, not a full user-authored workflow platform yet. Script job recovery across app restarts, broader negative E2E coverage, and comparative professional quality evals remain staged follow-up work.
+This is a foundation release for dynamic workflow orchestration, not a full user-authored workflow platform yet. Automatic script job recovery across app restarts, durable user-input pause/resume, and comparative professional quality evals remain staged follow-up work.
 
 **What's New in v1.3.11:**
 
@@ -153,7 +155,7 @@ xiaok Desktop includes KSwarm project delivery for work that needs planning, par
 
 ### Basic Dynamic Workflow
 
-v1.3.12 expands the basic dynamic workflow capability on top of KSwarm projects. This is not yet a general user-authored workflow builder, but it is a real durable workflow runtime slice:
+v1.3.13 expands the basic dynamic workflow capability on top of KSwarm projects. This is not yet a general user-authored workflow builder, but it is a real durable workflow runtime slice:
 
 - **Durable workflow runs**: KSwarm records workflow runs with phases, nodes, status, progress, gate decisions, and timestamps so Desktop can refresh, resume display, and audit what happened.
 - **Quick diagnosis workflow**: a built-in control workflow inspects project state, blockers, dispatchable tasks, and recommended next actions without calling an agent.
@@ -164,6 +166,7 @@ v1.3.12 expands the basic dynamic workflow capability on top of KSwarm projects.
 - **Controlled dynamic script execution**: trusted model-authored workflow scripts can run through a restricted desktop runtime. Scripts can create phases, call `agent(...)`, use thunk-based `parallel(...)`, return terminal results, or block the run with a structured reason.
 - **Durable parallel orchestration**: parallel script branches are persisted as KSwarm `parallelGroups`, with branch node identity, fan-out labels, required/schema/evidence metadata, and script checkpoints. Xiaok can show parallel progress without relying on chat transcript state.
 - **Conversation-first preview**: the dynamic script tool can return a `previewOnly` workflow plan before starting a run. After confirmation, the run starts in the background and returns a `workflowRunId` for snapshot-based status checks.
+- **Run resume and status query**: conversation agents can pass `resumeWorkflowRunId` to continue a same-run script without rerunning completed primitives, and can call `get_dynamic_workflow_status` to summarize KSwarm run, node, parallel group, checkpoint, gate, delivery, and background job state.
 - **Professional report final review**: the bundled script example shows a real professional workflow shape: inventory the deliverable, run fact/evidence/format-contract checks in parallel, then reduce the result into a final gate recommendation.
 - **Artifact-first delivery gates**: completed workflow tasks must submit readable in-workspace files or valid artifact references. Finalization rebuilds evidence from those files and blocks delivery when artifacts are missing, unreadable, outside the workspace, or only textual summaries.
 - **Budget, cache, recovery, and progress UI**: workflow details show hard budget caps, last material progress, blocking failures, run-internal stored node results, and the recovery mode for resumable runs.
@@ -619,6 +622,10 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.3.13** — Parallel dynamic workflow hardening release: dynamic workflow scripts can now resume the same KSwarm run by reusing completed primitive outputs, query status through a read-only KSwarm snapshot tool, and complete a professional `report_final_review` E2E that produces HTML/PDF artifacts while keeping workflow run, gate decision, project deliverable, artifact provenance, and task-board state consistent. KSwarm now records passed gate decisions for successful script workflows, and the design/adversarial review docs capture the remaining boundaries around automatic job replay and durable user-input pause/resume.
+
+**v1.3.12** — Parallel dynamic workflow foundation release: trusted model-authored scripts can use thunk-based `parallel()` with durable KSwarm `parallelGroups`, branch metadata, script checkpoints, background execution, and project workflow status visibility. The bundled `report_final_review` template demonstrates the first professional parallel workflow shape, with focused tests and eval coverage for the script parser, runtime, KSwarm controller, and desktop bridge.
 
 **v1.3.10** — Project-level workflow release: High Quality execution now creates one `po-generated-project-workflow` at project scope, so planning, task dispatch, review, and final synthesis are owned by the workflow for the whole project. Fast/Smart/High Quality execution mode is preserved through KSwarm dispatch. Workflow delivery is artifact-first: finalization rejects missing, unreadable, outside-workspace, or non-file artifacts and rebuilds evidence references from submitted files before the project can be delivered. Desktop workflow approval and reviewer diagnosis dialogs were hardened, and workflow runs now show readable running/completed/failed states.
 

@@ -4,15 +4,17 @@ Native desktop surface for xiaok task delivery, scheduled automation, and KSwarm
 
 ## Current Release Focus
 
-v1.3.12 focuses on making KSwarm dynamic workflow script orchestration parallel, durable, and visible from project detail:
+v1.3.13 focuses on making KSwarm dynamic workflow script orchestration parallel, resumable within the same run, and visible from project detail:
 
 - Trusted model-authored dynamic workflow scripts can create phases, call `agent(...)`, and use thunk-based `parallel([() => agent(...), ...])` for branch fan-out.
 - `parallel()` creates a durable KSwarm `parallelGroup` before dispatching branch nodes. Branches carry fan-out labels, required/schema/evidence metadata, and script checkpoints for snapshot-based observability.
 - The conversation tool supports `previewOnly` so an assistant can show a workflow preview before starting the run. Confirmed runs start in a background job and return `workflowRunId` immediately.
+- The conversation tool also supports `resumeWorkflowRunId` for same-run primitive reuse, and `get_dynamic_workflow_status` for read-only KSwarm snapshot status checks.
 - The bundled `report_final_review` template demonstrates a professional parallel workflow: fact review, evidence review, format/contract review, then a final gate reducer.
+- The professional E2E now creates HTML/PDF artifacts and verifies workflow run, gate decision, project deliverable, artifact provenance, and task-board state stay consistent.
 - Parallel runtime has foundation semantics for `required_all`, `collect_errors`, and `quorum`; KSwarm persists quorum group completion when enough branches pass.
 - Project workflow details show parallel groups, branch completion counts, failure policy, branch labels, script checkpoints, blocking failures, and gate status from KSwarm snapshots.
-- This is not yet a full user-authored workflow platform. Cross-process script job recovery, broader negative E2E coverage, and comparative professional quality evals remain staged follow-up work.
+- This is not yet a full user-authored workflow platform. Automatic cross-process script job recovery, durable user-input pause/resume, and comparative professional quality evals remain staged follow-up work.
 - Desktop release packaging must include the matching `kswarm`, `intent-broker`, and `kai-xiaok-plugins` sibling repositories.
 
 Troubleshooting:

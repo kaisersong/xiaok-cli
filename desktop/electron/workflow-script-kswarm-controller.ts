@@ -27,6 +27,7 @@ export interface KSwarmWorkflowScriptControllerOptions {
   assignedAgent?: string | null;
   pollIntervalMs?: number;
   timeoutMs?: number;
+  reuseCompletedPrimitives?: boolean;
 }
 
 export async function createKSwarmScriptWorkflowRun({
@@ -84,6 +85,7 @@ export function createKSwarmWorkflowScriptController({
   assignedAgent = null,
   pollIntervalMs = 1_000,
   timeoutMs = 10 * 60_000,
+  reuseCompletedPrimitives = false,
 }: KSwarmWorkflowScriptControllerOptions): WorkflowScriptController {
   return {
     async emitPhase(_input: WorkflowScriptPhaseInput): Promise<void> {
@@ -94,6 +96,16 @@ export function createKSwarmWorkflowScriptController({
       // Reserved for workflow progress batching; current MVP keeps logs local.
     },
     async beginParallelGroup(input: WorkflowScriptParallelGroupInput): Promise<{ parallelGroupId: string }> {
+      if (reuseCompletedPrimitives) {
+        const existingGroupId = await findReusableParallelGroupId({
+          kswarmService,
+          projectId,
+          workflowRunId,
+          input,
+        });
+        if (existingGroupId) return { parallelGroupId: existingGroupId };
+      }
+
       const created = await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowRunId)}/script/parallel-groups`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -113,6 +125,16 @@ export function createKSwarmWorkflowScriptController({
       return { parallelGroupId };
     },
     async createAgentNode(input: WorkflowScriptAgentInput): Promise<unknown> {
+      if (reuseCompletedPrimitives) {
+        const reusable = await findReusableAgentNodeOutput({
+          kswarmService,
+          projectId,
+          workflowRunId,
+          input,
+        });
+        if (reusable.found) return reusable.output;
+      }
+
       const created = await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowRunId)}/script/nodes`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -143,6 +165,74 @@ export function createKSwarmWorkflowScriptController({
       });
     },
   };
+}
+
+async function findReusableParallelGroupId({
+  kswarmService,
+  projectId,
+  workflowRunId,
+  input,
+}: {
+  kswarmService: KSwarmService;
+  projectId: string;
+  workflowRunId: string;
+  input: WorkflowScriptParallelGroupInput;
+}): Promise<string | null> {
+  const workflowRun = await fetchWorkflowRunSnapshot({ kswarmService, projectId, workflowRunId });
+  const groups = Array.isArray(workflowRun.parallelGroups) ? workflowRun.parallelGroups.filter(isRecord) : [];
+  const match = groups.find(group => {
+    const status = readString(group.status);
+    return readString(group.primitiveId) === input.primitiveId
+      && readString(group.kind) === input.kind
+      && readString(group.label) === input.label
+      && Number(group.totalCount || 0) === input.totalCount
+      && !['failed', 'blocked', 'cancelled'].includes(status);
+  });
+  return readString(match?.id) || null;
+}
+
+async function findReusableAgentNodeOutput({
+  kswarmService,
+  projectId,
+  workflowRunId,
+  input,
+}: {
+  kswarmService: KSwarmService;
+  projectId: string;
+  workflowRunId: string;
+  input: WorkflowScriptAgentInput;
+}): Promise<{ found: boolean; output: unknown }> {
+  const workflowRun = await fetchWorkflowRunSnapshot({ kswarmService, projectId, workflowRunId });
+  const nodes = Array.isArray(workflowRun.nodes) ? workflowRun.nodes.filter(isRecord) : [];
+  const match = nodes.find(node => {
+    const nodeInput = readRecord(node.input);
+    const script = readRecord(nodeInput.script);
+    return readString(node.kind) === 'agent_task'
+      && readString(node.status) === 'completed'
+      && readString(nodeInput.prompt) === input.prompt
+      && readString(nodeInput.label) === input.label
+      && readString(script.phaseTitle) === (input.phaseTitle || '动态执行')
+      && nullableString(node.parallelGroupId) === nullableString(input.parallelGroupId)
+      && nullableString(node.fanoutItemKey) === nullableString(input.fanoutItemKey)
+      && nullableString(node.fanoutItemLabel) === nullableString(input.fanoutItemLabel)
+      && nullableNumber(node.pipelineStageIndex) === nullableNumber(input.pipelineStageIndex)
+      && stableJson(nodeInput.options ?? null) === stableJson(input.options || null);
+  });
+  if (!match) return { found: false, output: null };
+  return { found: true, output: match.output ?? null };
+}
+
+async function fetchWorkflowRunSnapshot({
+  kswarmService,
+  projectId,
+  workflowRunId,
+}: {
+  kswarmService: KSwarmService;
+  projectId: string;
+  workflowRunId: string;
+}): Promise<Record<string, unknown>> {
+  const detail = await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowRunId)}`);
+  return readRecord(readRecord(detail).workflowRun);
 }
 
 async function waitForWorkflowNodeOutput({
@@ -219,6 +309,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function nullableString(value: unknown): string | null {
+  const text = readString(value);
+  return text || null;
+}
+
+function nullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  return Number.isFinite(Number(value)) ? Number(value) : null;
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(stableValue(value ?? null));
+}
+
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!isRecord(value)) return value ?? null;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map(key => [key, stableValue(value[key])]),
+  );
 }
 
 function sleep(ms: number): Promise<void> {

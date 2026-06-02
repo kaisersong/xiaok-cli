@@ -208,4 +208,89 @@ describe('workflow script KSwarm controller', () => {
       evidenceRequired: true,
     });
   });
+
+  it('reuses completed primitive state when resuming the same workflow run', async () => {
+    const { service, requests } = createMockService([
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          parallelGroups: [{
+            id: 'script-parallel-1',
+            primitiveId: 'parallel-1',
+            kind: 'parallel',
+            label: '两路复核',
+            totalCount: 2,
+            status: 'completed',
+          }],
+          nodes: [],
+        },
+      }),
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          parallelGroups: [],
+          nodes: [{
+            id: 'script-agent-1',
+            kind: 'agent_task',
+            status: 'completed',
+            parallelGroupId: 'script-parallel-1',
+            fanoutItemKey: 'branch-1',
+            fanoutItemLabel: '事实复核',
+            pipelineStageIndex: null,
+            input: {
+              prompt: '事实复核',
+              label: '事实复核',
+              options: { b: 2, a: 1 },
+              script: { phaseTitle: '交叉复核' },
+            },
+            output: { summary: '事实复核已完成' },
+          }],
+        },
+      }),
+    ]);
+    const controller = createKSwarmWorkflowScriptController({
+      kswarmService: service,
+      projectId: 'proj-1',
+      workflowRunId: 'run-1',
+      assignedAgent: 'xiaok-worker',
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+      reuseCompletedPrimitives: true,
+    });
+
+    const group = await controller.beginParallelGroup?.({
+      label: '两路复核',
+      phaseTitle: '交叉复核',
+      primitiveId: 'parallel-1',
+      kind: 'parallel',
+      totalCount: 2,
+      limit: 2,
+      failurePolicy: 'required_all',
+      quorum: null,
+      scriptHash: 'a'.repeat(64),
+      workflowId: 'report_review',
+    });
+    const result = await controller.createAgentNode({
+      prompt: '事实复核',
+      label: '事实复核',
+      phaseTitle: '交叉复核',
+      options: { a: 1, b: 2 },
+      sequence: 1,
+      scriptHash: 'a'.repeat(64),
+      workflowId: 'report_review',
+      parallelGroupId: group?.parallelGroupId || null,
+      fanoutItemKey: 'branch-1',
+      fanoutItemLabel: '事实复核',
+      required: true,
+      outputSchema: null,
+      evidenceRequired: true,
+    });
+
+    expect(group).toEqual({ parallelGroupId: 'script-parallel-1' });
+    expect(result).toEqual({ summary: '事实复核已完成' });
+    expect(requests.map((request) => [request.method, request.path])).toEqual([
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
+    ]);
+  });
 });

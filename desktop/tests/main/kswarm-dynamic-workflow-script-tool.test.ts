@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createKSwarmGetDynamicWorkflowStatusTool,
   REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE,
   createKSwarmRunDynamicWorkflowScriptTool,
 } from '../../electron/kswarm-dynamic-workflow-script-tool.js';
@@ -52,6 +53,7 @@ describe('KSwarm dynamic workflow script tool', () => {
     expect(tool.definition.description).toContain('await agent');
     expect(tool.definition.description).toContain("phase('");
     expect(tool.definition.description).toContain('previewOnly');
+    expect(tool.definition.description).toContain('resumeWorkflowRunId');
     expect(tool.definition.description).toContain('报告三路并行复核');
     expect(tool.definition.description).toContain('不要使用 agents');
     expect(tool.definition.inputSchema.properties.script.description).toContain('export const meta');
@@ -191,6 +193,100 @@ describe('KSwarm dynamic workflow script tool', () => {
     ]);
   });
 
+  it('resumes an existing workflow run without creating a duplicate proposal or rerunning completed agent nodes', async () => {
+    const { service, requests } = createMockService([
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          status: 'running',
+          workflowId: 'project_snapshot_review',
+          nodes: [{
+            id: 'script-agent-1',
+            kind: 'agent_task',
+            status: 'completed',
+            input: {
+              prompt: '检查项目状态。',
+              label: '项目检查',
+              options: { label: '项目检查' },
+              script: { phaseTitle: '检查项目' },
+            },
+            output: { summary: '项目可推进' },
+          }],
+        },
+      }),
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          status: 'running',
+          nodes: [{
+            id: 'script-agent-1',
+            kind: 'agent_task',
+            status: 'completed',
+            input: {
+              prompt: '检查项目状态。',
+              label: '项目检查',
+              options: { label: '项目检查' },
+              script: { phaseTitle: '检查项目' },
+            },
+            output: { summary: '项目可推进' },
+          }],
+        },
+      }),
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          status: 'running',
+          nodes: [{
+            id: 'script-agent-1',
+            kind: 'agent_task',
+            status: 'completed',
+            input: {
+              prompt: '检查项目状态。',
+              label: '项目检查',
+              options: { label: '项目检查' },
+              script: { phaseTitle: '检查项目' },
+            },
+            output: { summary: '项目可推进' },
+          }],
+        },
+      }),
+      jsonResponse({ ok: true, nodeId: 'script-agent-2', workflowRun: { id: 'run-1' } }, 201),
+      jsonResponse({ workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
+      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'completed' } }, 200),
+    ]);
+    const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
+
+    const output = JSON.parse(await tool.execute({
+      projectId: 'proj-1',
+      script: workflowScript,
+      requestedBy: 'assistant',
+      assignedAgent: 'xiaok-worker',
+      waitForCompletion: true,
+      resumeWorkflowRunId: 'run-1',
+    })) as Record<string, unknown>;
+
+    expect(output).toMatchObject({
+      ok: true,
+      projectId: 'proj-1',
+      workflowRunId: 'run-1',
+      status: 'completed',
+      result: { summary: '继续执行核心任务' },
+    });
+    expect(requests.map((request) => [request.method, request.path])).toEqual([
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['POST', '/projects/proj-1/workflows/run-1/script/nodes'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['POST', '/projects/proj-1/workflows/run-1/script/complete'],
+    ]);
+    expect(requests[3].body).toMatchObject({
+      phaseTitle: '归纳建议',
+      label: '建议归纳',
+      prompt: '基于 项目可推进 输出下一步建议。',
+    });
+  });
+
   it('returns validation errors without calling KSwarm when the script is unsafe', async () => {
     const { service, requests } = createMockService([]);
     const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
@@ -211,5 +307,72 @@ await agent('x')`,
       },
     });
     expect(requests).toEqual([]);
+  });
+
+  it('reports dynamic workflow status for conversational follow-up', async () => {
+    const { service, requests } = createMockService([
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          workflowId: 'report_final_review',
+          source: 'script_generated',
+          status: 'running',
+          nodes: [
+            { id: 'script-runtime', status: 'running', input: { label: '脚本运行时' } },
+            { id: 'script-agent-1', status: 'completed', input: { label: '交付物盘点' } },
+            { id: 'script-agent-2', status: 'running', assignedAgent: 'xiaok-worker', input: { label: '事实复核' }, parallelGroupId: 'script-parallel-1' },
+          ],
+          parallelGroups: [{
+            id: 'script-parallel-1',
+            label: '报告三路并行复核',
+            status: 'waiting_for_children',
+            completedCount: 1,
+            failedCount: 0,
+            totalCount: 3,
+          }],
+          scriptCheckpoints: [
+            { id: 'script-checkpoint-1', status: 'completed' },
+            { id: 'script-checkpoint-2', status: 'waiting' },
+          ],
+          gateDecision: { status: 'pending' },
+        },
+      }),
+    ]);
+    const tool = createKSwarmGetDynamicWorkflowStatusTool(service);
+
+    const output = JSON.parse(await tool.execute({
+      projectId: 'proj-1',
+      workflowRunId: 'run-1',
+    })) as Record<string, unknown>;
+
+    expect(output).toMatchObject({
+      ok: true,
+      projectId: 'proj-1',
+      workflowRunId: 'run-1',
+      status: 'running',
+      workflowId: 'report_final_review',
+      summary: {
+        nodes: { running: 2, completed: 1 },
+        parallelGroups: { waiting_for_children: 1 },
+        checkpoints: { completed: 1, waiting: 1 },
+        nextAction: 'wait_for_active_nodes',
+        activeNodes: [
+          { id: 'script-runtime', status: 'running', label: '脚本运行时' },
+          { id: 'script-agent-2', status: 'running', label: '事实复核', assignedAgent: 'xiaok-worker', parallelGroupId: 'script-parallel-1' },
+        ],
+        latestParallelGroups: [{
+          id: 'script-parallel-1',
+          label: '报告三路并行复核',
+          status: 'waiting_for_children',
+          completedCount: 1,
+          failedCount: 0,
+          totalCount: 3,
+        }],
+      },
+      gateDecision: { status: 'pending' },
+    });
+    expect(requests.map((request) => [request.method, request.path])).toEqual([
+      ['GET', '/projects/proj-1/workflows/run-1'],
+    ]);
   });
 });

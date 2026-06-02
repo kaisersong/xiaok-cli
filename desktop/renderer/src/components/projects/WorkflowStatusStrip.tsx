@@ -48,6 +48,8 @@ export function WorkflowStatusStrip({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const status = workflowRun?.status || 'idle';
   const isBuiltinDiagnose = workflowRun?.workflowId === 'project-diagnose' && workflowRun.source === 'builtin';
+  const isCompletedScriptWorkflowAwaitingDelivery = Boolean(workflowRun && isScriptWorkflowAwaitingDelivery(workflowRun));
+  const displayStatus = isCompletedScriptWorkflowAwaitingDelivery ? 'blocked' : status;
   const workflowDisplayName = workflowRun ? getWorkflowDisplayName(workflowRun) : '';
   const label = workflowRun
     ? isBuiltinDiagnose
@@ -61,7 +63,9 @@ export function WorkflowStatusStrip({
   const progressText = workflowRun
     ? isBuiltinDiagnose
       ? `已完成 ${completed}/${total}`
-      : (summary?.primaryMessage || formatWorkflowProgress(status, completed, total))
+      : isCompletedScriptWorkflowAwaitingDelivery
+        ? '执行完成，待确认交付物'
+        : (summary?.primaryMessage || formatWorkflowProgress(status, completed, total))
     : '选择快速诊断或 Agent 复核';
   const effectiveProgressText = disabledReason || progressText;
   const sourceText = workflowRun
@@ -72,8 +76,8 @@ export function WorkflowStatusStrip({
   const diagnosis = isBuiltinDiagnose && workflowRun ? buildSystemDiagnosisView(workflowRun) : null;
   const genericWorkflow = workflowRun && !diagnosis ? buildGenericWorkflowView(workflowRun) : null;
   const compact = diagnosis ? buildCompactDiagnosisSummary(diagnosis) : null;
-  const StatusIcon = getStatusIcon(status);
-  const toneClass = getToneClass(status);
+  const StatusIcon = getStatusIcon(displayStatus);
+  const toneClass = getToneClass(displayStatus);
   const dialogLabel = diagnosis ? '系统诊断详情' : getWorkflowDialogLabel(workflowRun);
   const handleStartDiagnose = () => {
     setMenuOpen(false);
@@ -590,6 +594,14 @@ function getWorkflowDisplayName(workflowRun: KSwarmWorkflowRun) {
   if (workflowRun.workflowId === 'agent-review-smoke') return 'Agent 复核诊断';
   if (workflowRun.workflowId === 'po-generated-task-workflow') return 'PO 生成任务工作流';
   return workflowRun.title || STATUS_LABELS[workflowRun.status] || workflowRun.status;
+}
+
+function isScriptWorkflowAwaitingDelivery(workflowRun: KSwarmWorkflowRun) {
+  if (workflowRun.source !== 'script_generated') return false;
+  if (workflowRun.status !== 'completed') return false;
+  if (workflowRun.scope?.taskId) return false;
+  const delivery = (workflowRun as KSwarmWorkflowRun & { projectDelivery?: { status?: string } | null }).projectDelivery;
+  return delivery?.status !== 'delivered';
 }
 
 function getWorkflowDialogLabel(workflowRun?: KSwarmWorkflowRun | null) {

@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
 import WebSocket from 'ws';
 
-import { createKSwarmRunDynamicWorkflowScriptTool } from '../../electron/kswarm-dynamic-workflow-script-tool.js';
+import {
+  REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE,
+  createKSwarmRunDynamicWorkflowScriptTool,
+} from '../../electron/kswarm-dynamic-workflow-script-tool.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 import {
   createKSwarmRuntimeBridge,
@@ -153,30 +156,7 @@ function createKSwarmHttpService(baseUrl: string): KSwarmService {
   };
 }
 
-const workflowScript = `export const meta = {
-  name: 'e2e_dynamic_workflow_script',
-  description: '通过真实 KSwarm 和 intent-broker 验证动态脚本工作流',
-  phases: [{ title: '检查项目' }, { title: '生成建议' }],
-}
-
-phase('检查项目')
-const snapshot = await agent('检查项目状态。', { label: '项目检查' })
-
-phase('生成建议')
-const reviews = await parallel([
-  () => agent(\`基于 \${snapshot.summary} 做事实复核。\`, { label: '事实复核' }),
-  () => agent(\`基于 \${snapshot.summary} 做证据复核。\`, { label: '证据复核' }),
-], { label: '两路复核', limit: 2, failurePolicy: 'required_all' })
-
-const recommendation = await agent(\`综合 \${reviews.map((item) => item.summary).join('；')} 输出下一步建议。\`, { label: '建议归纳' })
-
-return {
-  summary: recommendation.summary,
-  snapshot: snapshot.summary,
-  reviews: reviews.map((item) => item.summary),
-  evidenceRefs: recommendation.evidenceRefs,
-}
-`;
+const workflowScript = REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE;
 
 describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runtime bridge', () => {
   let tempRoot: string;
@@ -238,17 +218,45 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
         runWorkflowNode: async ({ handoff }) => {
           const prompt = String(handoff.input?.prompt ?? '');
           seenPrompts.push(prompt);
-          if (prompt === '检查项目状态。') {
-            return { output: { summary: '项目状态健康', prompt } };
+          if (prompt.startsWith('读取报告、产物清单和用户要求')) {
+            return {
+              output: {
+                summary: '报告交付物包含 HTML/PDF 目标，需复核事实、证据和交付合同。',
+                prompt,
+                evidenceRefs: ['requirements.md: 用户要求交付正式报告'],
+              },
+            };
           }
-          const artifactPath = join(tempWorkFolder, 'artifacts', 'workflow-report.md');
+          if (prompt.includes('事实准确性复核')) {
+            return { output: { summary: '事实复核通过', prompt, evidenceRefs: ['sources.md: 事实来源已核对'] } };
+          }
+          if (prompt.includes('证据链')) {
+            return { output: { summary: '证据复核通过', prompt, evidenceRefs: ['sources.md: 引用日期可追溯'] } };
+          }
+          if (prompt.includes('格式、目标文件类型和交付合同')) {
+            return { output: { summary: '格式合同复核通过', prompt, evidenceRefs: ['contract.md: HTML/PDF 交付合同满足'] } };
+          }
           mkdirSync(join(tempWorkFolder, 'artifacts'), { recursive: true });
-          writeFileSync(artifactPath, '# E2E 动态脚本工作流报告\n\n项目状态健康，动态 workflow 已生成交付物。\n');
+          writeFileSync(
+            join(tempWorkFolder, 'artifacts', 'workflow-report.html'),
+            '<!doctype html><html><head><meta charset="utf-8"><title>动态 Workflow 报告</title></head><body><h1>动态 Workflow 报告</h1><p>三路并行复核已通过。</p></body></html>\n',
+          );
+          writeFileSync(
+            join(tempWorkFolder, 'artifacts', 'workflow-report.pdf'),
+            '%PDF-1.4\n% xiaok dynamic workflow e2e pdf artifact\n',
+          );
           return {
             output: {
-              summary: `继续执行：${prompt}`,
+              summary: '报告通过 final gate，HTML/PDF 产物已生成。',
               prompt,
-              evidenceRefs: ['artifacts/workflow-report.md: E2E markdown 交付物'],
+              artifacts: [
+                { path: 'artifacts/workflow-report.html', label: 'HTML 报告', type: 'report_html', mimeType: 'text/html' },
+                { path: 'artifacts/workflow-report.pdf', label: 'PDF 报告', type: 'pdf', mimeType: 'application/pdf' },
+              ],
+              evidenceRefs: [
+                'artifacts/workflow-report.html: E2E HTML 交付物',
+                'artifacts/workflow-report.pdf: E2E PDF 交付物',
+              ],
             },
           };
         },
@@ -302,7 +310,7 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           tasks: [
-            { title: '等待动态 workflow 覆盖完成的任务', assignedAgent: 'xiaok-worker', requiredOutputs: ['markdown'] },
+            { title: '等待动态 workflow 覆盖完成的任务', assignedAgent: 'xiaok-worker', requiredOutputs: ['report_html'] },
           ],
         }),
       });
@@ -333,7 +341,9 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
         () => fetchJson<{
           workflowRun: {
             status: string;
-            scriptResult?: { summary?: string; snapshot?: string; reviews?: string[]; evidenceRefs?: string[] };
+            scriptResult?: { summary?: string; artifacts?: Array<{ path?: string; type?: string }>; evidenceRefs?: string[] };
+            gateDecision?: { status?: string };
+            projectDelivery?: { status?: string };
             nodes?: Array<{ id: string; status: string; output?: unknown; parallelGroupId?: string | null }>;
             parallelGroups?: Array<{ id: string; status: string; completedCount: number }>;
           };
@@ -343,19 +353,25 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
       );
 
       const scriptResult = completedRun.workflowRun.scriptResult ?? {};
-      expect(scriptResult.snapshot).toBe('项目状态健康');
-      expect(scriptResult.reviews).toEqual([
-        '继续执行：基于 项目状态健康 做事实复核。',
-        '继续执行：基于 项目状态健康 做证据复核。',
+      expect(scriptResult.summary).toBe('报告通过 final gate，HTML/PDF 产物已生成。');
+      expect(scriptResult.artifacts?.map(artifact => artifact.path)).toEqual([
+        'artifacts/workflow-report.html',
+        'artifacts/workflow-report.pdf',
       ]);
-      expect(scriptResult.summary).toContain('综合 继续执行：基于 项目状态健康 做事实复核。；继续执行：基于 项目状态健康 做证据复核。 输出下一步建议。');
-      expect(scriptResult.evidenceRefs).toEqual(['artifacts/workflow-report.md: E2E markdown 交付物']);
-      expect(seenPrompts).toEqual([
-        '检查项目状态。',
-        '基于 项目状态健康 做事实复核。',
-        '基于 项目状态健康 做证据复核。',
-        '综合 继续执行：基于 项目状态健康 做事实复核。；继续执行：基于 项目状态健康 做证据复核。 输出下一步建议。',
+      expect(scriptResult.evidenceRefs).toEqual([
+        'artifacts/workflow-report.html: E2E HTML 交付物',
+        'artifacts/workflow-report.pdf: E2E PDF 交付物',
       ]);
+      expect(completedRun.workflowRun.gateDecision?.status).toBe('passed');
+      expect(completedRun.workflowRun.projectDelivery?.status).toBe('delivered');
+      expect(seenPrompts.length).toBe(5);
+      expect(seenPrompts[0]).toContain('读取报告、产物清单和用户要求');
+      expect(seenPrompts.slice(1, 4)).toEqual([
+        '基于 报告交付物包含 HTML/PDF 目标，需复核事实、证据和交付合同。 做事实准确性复核，指出事实风险和证据缺口。',
+        '从引用、来源、日期和可追溯性角度复核证据链。',
+        '从结构、格式、目标文件类型和交付合同角度复核最终产物。',
+      ]);
+      expect(seenPrompts[4]).toContain('综合三路复核结论：事实复核通过；证据复核通过；格式合同复核通过');
 
       const nodes = completedRun.workflowRun.nodes ?? [];
       expect(nodes.find(node => node.id === 'script-runtime')?.status).toBe('completed');
@@ -363,24 +379,32 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
       expect(nodes.find(node => node.id === 'script-agent-2')?.status).toBe('completed');
       expect(nodes.find(node => node.id === 'script-agent-3')?.status).toBe('completed');
       expect(nodes.find(node => node.id === 'script-agent-4')?.status).toBe('completed');
+      expect(nodes.find(node => node.id === 'script-agent-5')?.status).toBe('completed');
       expect(completedRun.workflowRun.parallelGroups?.[0]).toMatchObject({
         id: 'script-parallel-1',
         status: 'completed',
-        completedCount: 2,
+        completedCount: 3,
       });
       expect(nodes.filter(node => node.parallelGroupId === 'script-parallel-1').map(node => node.id)).toEqual([
         'script-agent-2',
         'script-agent-3',
+        'script-agent-4',
       ]);
 
       const detail = await fetchJson<{
-        project: { status: string; deliverable?: { artifacts?: Array<{ path?: string; label?: string }> } | null };
-        tasks: Array<{ status: string; result?: { artifacts?: Array<{ path?: string; label?: string }> } | null }>;
+        project: { status: string; deliverable?: { artifacts?: Array<{ path?: string; label?: string; type?: string }> } | null };
+        tasks: Array<{ status: string; result?: { artifacts?: Array<{ path?: string; label?: string; type?: string }> } | null }>;
       }>(`${kswarmUrl}/projects/${created.project.id}`);
       expect(detail.project.status).toBe('delivered');
-      expect(detail.project.deliverable?.artifacts?.[0]?.path).toBe('artifacts/workflow-report.md');
+      expect(detail.project.deliverable?.artifacts?.map(artifact => artifact.path)).toEqual([
+        'artifacts/workflow-report.html',
+        'artifacts/workflow-report.pdf',
+      ]);
       expect(detail.tasks.map(task => task.status)).toEqual(['done']);
-      expect(detail.tasks[0].result?.artifacts?.[0]?.path).toBe('artifacts/workflow-report.md');
+      expect(detail.tasks[0].result?.artifacts?.map(artifact => artifact.path)).toEqual([
+        'artifacts/workflow-report.html',
+        'artifacts/workflow-report.pdf',
+      ]);
     } catch (error) {
       throw new Error([
         error instanceof Error ? error.stack || error.message : String(error),

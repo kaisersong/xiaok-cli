@@ -65,7 +65,10 @@ import type { MemoryStore } from '../../src/ai/memory/store.js';
 import type { KSwarmService, KSwarmUnavailableError } from './kswarm-service.js';
 import { JsonKSwarmInitialPlanBootstrapStore, KSwarmInitialPlanBootstrapQueue } from './kswarm-initial-plan-bootstrap.js';
 import { resolveCreateProjectMembers } from './kswarm-project-tool.js';
-import { createKSwarmRunDynamicWorkflowScriptTool } from './kswarm-dynamic-workflow-script-tool.js';
+import {
+  createKSwarmGetDynamicWorkflowStatusTool,
+  createKSwarmRunDynamicWorkflowScriptTool,
+} from './kswarm-dynamic-workflow-script-tool.js';
 import { XIAOK_PO_SEED_ID, getPreferredPoAgentId } from '../shared/kswarm-seed-contract.js';
 import type { KSwarmTaskHandoff, KSwarmWorkflowNodeHandoff } from './kswarm-runtime-bridge.js';
 // NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
@@ -4937,6 +4940,7 @@ function registerKSwarmTools(
   registry.registerTool(createKSwarmInspectProjectTool(kswarmService));
   registry.registerTool(createKSwarmContinueProjectTool(kswarmService));
   registry.registerTool(createKSwarmRunDynamicWorkflowScriptTool(kswarmService));
+  registry.registerTool(createKSwarmGetDynamicWorkflowStatusTool(kswarmService));
   registry.registerTool(createKSwarmRepairProjectTaskFromFileTool(kswarmService));
   registry.registerTool(createKSwarmRepairProjectTaskTool(kswarmService));
 }

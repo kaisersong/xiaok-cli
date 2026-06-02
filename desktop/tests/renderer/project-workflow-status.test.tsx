@@ -378,6 +378,13 @@ function scriptParallelWorkflowRun() {
       blockingFailures: [],
     },
     gateDecision: null,
+    projectDelivery: {
+      status: 'delivered',
+      deliveredAt: 1770000004000,
+      projectId: 'proj-workflow',
+      workflowRunId: 'wf-proj-workflow-script-parallel-1770000000000',
+      taskCount: 1,
+    },
   };
 }
 
@@ -651,6 +658,30 @@ describe('WorkflowStatusStrip', () => {
     expect(dialog).toHaveTextContent('分支：格式检查 / 事实检查');
     expect(dialog).toHaveTextContent('并行分支：格式检查');
     expect(dialog).toHaveTextContent('并行分支：事实检查');
+  });
+
+  it('does not present completed script workflow without project delivery as finished project work', () => {
+    const workflowRun = {
+      ...scriptParallelWorkflowRun(),
+      summary: {
+        ...scriptParallelWorkflowRun().summary,
+        primaryMessage: null,
+      },
+      projectDelivery: null,
+      scriptResult: { summary: '动态 workflow 已运行完，但没有交付产物。' },
+    };
+
+    renderWithProviders(
+      <WorkflowStatusStrip
+        workflowRun={workflowRun}
+        busy={false}
+        onStartDiagnose={vi.fn()}
+        onStartAgentWorkflow={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('执行完成，待确认交付物')).toBeInTheDocument();
+    expect(screen.queryByText('已完成 3/3')).not.toBeInTheDocument();
   });
 
   it('opens one workflow run menu for quick diagnose and agent review diagnose', () => {

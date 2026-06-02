@@ -88,6 +88,7 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
       description: [
         '为一个 KSwarm 项目运行动态 workflow 脚本。适用于用户要求通过对话创建并启动 workflow，而不是只做普通 direct/swarm 执行。',
         '对话确认场景先传 previewOnly: true，只返回 workflow 预览；用户确认后再调用一次启动。',
+        '断线或后台任务丢失后的恢复场景传 resumeWorkflowRunId，会在同一个 workflowRun 上复用已完成 primitive 并继续执行。',
         '脚本是命令式 JavaScript DSL，不是 JSON schema。不要使用 agents/nodes/steps/tasks 声明式字段。',
         "必须以 export const meta = {...} 开头；然后用 phase('阶段名')、await agent('任务提示', { label: '节点名' })、parallel/pipeline 编排。",
         '专业报告复核类任务优先使用三路并行复核：事实、证据、格式/交付合同，最后用 reducer agent 归约 gate 建议。',
@@ -119,6 +120,10 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
             type: 'boolean',
             description: '设为 true 时只校验脚本并返回 workflow 预览，不创建 KSwarm proposal/run；用于对话中先请用户确认。',
           },
+          resumeWorkflowRunId: {
+            type: 'string',
+            description: '已有 workflowRunId。用于后台任务中断后恢复，同一个脚本会复用已完成的 parallel/agent primitive，不新建 proposal/run。',
+          },
         },
         required: ['script'],
       },
@@ -129,6 +134,9 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
       const assignedAgent = typeof input.assignedAgent === 'string' && input.assignedAgent.trim() ? input.assignedAgent.trim() : null;
       const waitForCompletion = input.waitForCompletion === true;
       const previewOnly = input.previewOnly === true;
+      const resumeWorkflowRunId = typeof input.resumeWorkflowRunId === 'string' && input.resumeWorkflowRunId.trim()
+        ? input.resumeWorkflowRunId.trim()
+        : '';
 
       try {
         const projectId = await resolveProjectId(kswarmService, input);
@@ -150,25 +158,53 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
           });
         }
 
-        const started = await createKSwarmScriptWorkflowRun({
-          kswarmService,
-          projectId,
-          preview,
-          requestedBy,
-        });
-        const workflowRunId = readString(started.workflowRun.id);
+        let workflowRunId = resumeWorkflowRunId;
+        let workflowRun: Record<string, unknown>;
+        if (resumeWorkflowRunId) {
+          workflowRun = await fetchKSwarmWorkflowRunSnapshot(kswarmService, projectId, resumeWorkflowRunId);
+          const status = readString(workflowRun.status);
+          if (status === 'completed') {
+            return JSON.stringify({
+              ok: true,
+              projectId,
+              workflowRunId: resumeWorkflowRunId,
+              workflowId: readString(preview.workflowId) || readString(workflowRun.workflowId) || 'script_workflow',
+              scriptHash: readString(preview.scriptHash),
+              status: 'completed',
+              workflowRun,
+            });
+          }
+          if (status && status !== 'running') {
+            return validationFailure({
+              error: 'workflow_script_run_not_resumable',
+              message: `workflow run ${resumeWorkflowRunId} is ${status}`,
+              workflowRunId: resumeWorkflowRunId,
+              status,
+            });
+          }
+        } else {
+          const started = await createKSwarmScriptWorkflowRun({
+            kswarmService,
+            projectId,
+            preview,
+            requestedBy,
+          });
+          workflowRunId = readString(started.workflowRun.id);
+          workflowRun = started.workflowRun;
+        }
         const controller = createKSwarmWorkflowScriptController({
           kswarmService,
           projectId,
           workflowRunId,
           assignedAgent,
+          reuseCompletedPrimitives: Boolean(resumeWorkflowRunId),
         });
         if (!waitForCompletion) {
           const job = startWorkflowScriptBackgroundJob({
             kswarmService,
             projectId,
             workflowRunId,
-            workflowId: readString(preview.workflowId) || readString(started.workflowRun.workflowId) || 'script_workflow',
+            workflowId: readString(preview.workflowId) || readString(workflowRun.workflowId) || 'script_workflow',
             scriptHash: readString(preview.scriptHash),
             script,
             controller,
@@ -179,12 +215,13 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
             workflowRunId,
             workflowId: job.workflowId,
             scriptHash: job.scriptHash,
-            status: readString(started.workflowRun.status) || 'running',
-            workflowRun: started.workflowRun,
+            status: resumeWorkflowRunId ? 'resuming' : (readString(workflowRun.status) || 'running'),
+            workflowRun,
             backgroundJob: {
               id: job.id,
               status: job.status,
               startedAt: job.startedAt,
+              resumed: Boolean(resumeWorkflowRunId),
             },
           });
         }
@@ -206,6 +243,66 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
           status: readString(completed.workflowRun.status) || 'completed',
           result: completed.result,
           workflowRun: completed.workflowRun,
+        });
+      } catch (error) {
+        return validationFailure({
+          error: readErrorCode(error),
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+  };
+}
+
+export function createKSwarmGetDynamicWorkflowStatusTool(kswarmService: KSwarmService): Tool {
+  return {
+    permission: 'safe',
+    definition: {
+      name: 'get_dynamic_workflow_status',
+      description: [
+        '查询 KSwarm dynamic workflow run 的当前状态，用于对话层回答 workflow 是否已完成、卡在哪个 primitive、并行分支是否完成、产物/gate 是否可交付。',
+        '不会创建、恢复或修改 workflow，只读取 KSwarm 里的 workflowRun 快照和当前桌面后台 job 状态。',
+      ].join('\n'),
+      inputSchema: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string', description: 'KSwarm 项目 ID，例如 proj-1779090338840' },
+          projectName: { type: 'string', description: '没有 projectId 时用项目名称匹配' },
+          workflowRunId: { type: 'string', description: '要查询的 dynamic workflowRunId' },
+        },
+        required: ['workflowRunId'],
+      },
+    },
+    async execute(input) {
+      try {
+        const projectId = await resolveProjectId(kswarmService, input);
+        if (!projectId) return validationFailure({ error: 'projectId_or_projectName_required' });
+        const workflowRunId = typeof input.workflowRunId === 'string' && input.workflowRunId.trim()
+          ? input.workflowRunId.trim()
+          : '';
+        if (!workflowRunId) return validationFailure({ error: 'workflowRunId_required' });
+        const workflowRun = await fetchKSwarmWorkflowRunSnapshot(kswarmService, projectId, workflowRunId);
+        const backgroundJob = backgroundJobs.get(`wf-script-job-${workflowRunId}`) || null;
+        return JSON.stringify({
+          ok: true,
+          projectId,
+          workflowRunId,
+          status: readString(workflowRun.status) || 'unknown',
+          workflowId: readString(workflowRun.workflowId),
+          source: readString(workflowRun.source),
+          summary: summarizeWorkflowRun(workflowRun),
+          gateDecision: readRecord(workflowRun.gateDecision),
+          projectDelivery: readRecord(workflowRun.projectDelivery),
+          scriptResult: workflowRun.scriptResult ?? null,
+          terminal: workflowRun.terminal ?? null,
+          backgroundJob: backgroundJob ? {
+            id: backgroundJob.id,
+            status: backgroundJob.status,
+            startedAt: backgroundJob.startedAt,
+            completedAt: backgroundJob.completedAt,
+            error: backgroundJob.error,
+          } : null,
+          workflowRun,
         });
       } catch (error) {
         return validationFailure({
@@ -268,6 +365,23 @@ function startWorkflowScriptBackgroundJob({
   return job;
 }
 
+async function fetchKSwarmWorkflowRunSnapshot(
+  kswarmService: KSwarmService,
+  projectId: string,
+  workflowRunId: string,
+): Promise<Record<string, unknown>> {
+  const response = await kswarmService.request(`/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowRunId)}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw workflowScriptToolError(`kswarm_http_${response.status}`, `KSwarm request failed with HTTP ${response.status}`);
+  }
+  const workflowRun = readRecord(readRecord(payload).workflowRun);
+  if (!readString(workflowRun.id)) {
+    throw workflowScriptToolError('workflow_script_run_missing', 'KSwarm did not return a workflow run');
+  }
+  return workflowRun;
+}
+
 async function runAndCompleteWorkflowScript({
   kswarmService,
   projectId,
@@ -326,6 +440,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function readRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -334,4 +452,59 @@ function readErrorCode(error: unknown): string {
   return error instanceof Error && typeof (error as Error & { code?: unknown }).code === 'string'
     ? String((error as Error & { code: string }).code)
     : 'workflow_script_run_failed';
+}
+
+function workflowScriptToolError(code: string, message: string): Error & { code: string } {
+  const error = new Error(message) as Error & { code: string };
+  error.code = code;
+  return error;
+}
+
+function summarizeWorkflowRun(workflowRun: Record<string, unknown>): Record<string, unknown> {
+  const nodes = Array.isArray(workflowRun.nodes) ? workflowRun.nodes.filter(isRecord) : [];
+  const parallelGroups = Array.isArray(workflowRun.parallelGroups) ? workflowRun.parallelGroups.filter(isRecord) : [];
+  const checkpoints = Array.isArray(workflowRun.scriptCheckpoints) ? workflowRun.scriptCheckpoints.filter(isRecord) : [];
+  const counts = (items: Record<string, unknown>[]) => items.reduce<Record<string, number>>((acc, item) => {
+    const status = readString(item.status) || 'unknown';
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
+  const activeNodes = nodes
+    .filter(node => !['completed', 'cancelled'].includes(readString(node.status)))
+    .map(node => ({
+      id: readString(node.id),
+      status: readString(node.status),
+      label: readString(readRecord(node.input).label) || readString(node.label),
+      assignedAgent: readString(node.assignedAgent),
+      parallelGroupId: readString(node.parallelGroupId) || null,
+    }));
+  return {
+    nodes: counts(nodes),
+    parallelGroups: counts(parallelGroups),
+    checkpoints: counts(checkpoints),
+    activeNodes,
+    latestParallelGroups: parallelGroups.slice(-5).map(group => ({
+      id: readString(group.id),
+      label: readString(group.label),
+      status: readString(group.status),
+      completedCount: Number(group.completedCount || 0),
+      failedCount: Number(group.failedCount || 0),
+      totalCount: Number(group.totalCount || 0),
+    })),
+    nextAction: inferWorkflowNextAction(workflowRun, activeNodes),
+  };
+}
+
+function inferWorkflowNextAction(
+  workflowRun: Record<string, unknown>,
+  activeNodes: Array<Record<string, unknown>>,
+): string {
+  const status = readString(workflowRun.status);
+  const projectDelivery = readRecord(workflowRun.projectDelivery);
+  const gateDecision = readRecord(workflowRun.gateDecision);
+  if (status === 'completed' && readString(projectDelivery.status) === 'delivered') return 'delivered';
+  if (status === 'completed') return 'inspect_delivery_or_artifacts';
+  if (status === 'blocked') return readString(gateDecision.status) || readString(projectDelivery.status) || 'blocked';
+  if (activeNodes.length > 0) return 'wait_for_active_nodes';
+  return status || 'unknown';
 }
