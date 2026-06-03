@@ -27,6 +27,7 @@ export interface InProcessTaskRuntimeHostOptions {
     now?: () => number;
     createTaskId?: () => string;
     createSessionId?: () => string;
+    taskWatchdogMs?: number;
     aheGuards?: {
         artifactEvidence?: boolean;
         recoveryContinuity?: boolean;
@@ -62,7 +63,9 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         taskId: string;
         understanding?: TaskUnderstanding;
     }>;
-    subscribeTask(taskId: string): AsyncIterable<DesktopTaskEvent>;
+    subscribeTask(taskId: string, options?: {
+        sinceIndex?: number;
+    }): AsyncIterable<DesktopTaskEvent>;
     answerQuestion(input: {
         taskId: string;
         answer: UserAnswer;
@@ -80,8 +83,10 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     isExecutingForTest(taskId: string): boolean;
     private executeTask;
     private resolveContextHistory;
+    private isEmptyDelivery;
     private appendRuntimeEvent;
     private applyArtifactEvidenceGuard;
+    private recoverStaleRunningTask;
     private appendEvent;
     private updateSnapshot;
     private enqueueMutation;

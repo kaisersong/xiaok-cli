@@ -69,6 +69,7 @@ describe('preload API contract', () => {
       'kswarmStart',
       'kswarmStop',
       'kswarmRestart',
+      'kswarmResumeWorkflowRun',
       'onKSwarmStatus',
       'exportTraceBundle',
       'diagnose',
@@ -323,5 +324,22 @@ describe('preload API contract', () => {
 
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:timedAction:approveAuto', 'action-1');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:timedAction:revokeAuto', 'action-1');
+  });
+
+  it('routes dynamic workflow direct resume through semantic IPC channel', async () => {
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue({ restored: true, jobId: 'wf-script-job-run-1' }),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer);
+
+    await expect(
+      api.kswarmResumeWorkflowRun({ projectId: 'proj-1', workflowRunId: 'run-1' }),
+    ).resolves.toEqual({ restored: true, jobId: 'wf-script-job-run-1' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:resumeWorkflowRun', {
+      projectId: 'proj-1',
+      workflowRunId: 'run-1',
+    });
   });
 });

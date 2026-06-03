@@ -391,6 +391,15 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
         'script-agent-4',
       ]);
 
+      // Part A: the real KSwarm run must persist the script source so the
+      // orchestration can be resumed after a desktop/background-job restart.
+      const persisted = await fetchJson<{
+        workflowRun: { scriptSource?: string; scriptHash?: string };
+      }>(`${kswarmUrl}/projects/${created.project.id}/workflows/${output.workflowRunId}`);
+      expect(typeof persisted.workflowRun.scriptSource).toBe('string');
+      expect(persisted.workflowRun.scriptSource ?? '').toMatch(/^export const meta/);
+      expect(persisted.workflowRun.scriptHash ?? '').toMatch(/^[a-f0-9]{64}$/);
+
       const detail = await fetchJson<{
         project: { status: string; deliverable?: { artifacts?: Array<{ path?: string; label?: string; type?: string }> } | null };
         tasks: Array<{ status: string; result?: { artifacts?: Array<{ path?: string; label?: string; type?: string }> } | null }>;

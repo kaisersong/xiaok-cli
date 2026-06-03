@@ -110,10 +110,15 @@ export class InProcessTaskRuntimeHost {
         this.executionPromises.set(taskId, execPromise);
         return { taskId, understanding };
     }
-    async *subscribeTask(taskId) {
+    async *subscribeTask(taskId, options) {
         const snapshot = await this.requireSnapshot(taskId);
-        for (const event of snapshot.events) {
-            yield event;
+        // events is append-only (only grown via [...events, event]), so a numeric
+        // index is a stable replay cursor. Clamp into [0, length] to make negative or
+        // out-of-range cursors safe (out-of-range = skip all history, only live).
+        const requested = options?.sinceIndex ?? 0;
+        const start = Math.max(0, Math.min(requested, snapshot.events.length));
+        for (let i = start; i < snapshot.events.length; i++) {
+            yield snapshot.events[i];
         }
         if (TERMINAL_STATUSES.has(snapshot.status)) {
             return;
@@ -193,7 +198,7 @@ export class InProcessTaskRuntimeHost {
         return tasks[0] ?? null;
     }
     async recoverTask(taskId) {
-        const snapshot = await this.requireSnapshot(taskId);
+        const snapshot = await this.recoverStaleRunningTask(await this.requireSnapshot(taskId));
         this.rehydrateWaitingQuestion(snapshot);
         return { snapshot };
     }
@@ -216,6 +221,8 @@ export class InProcessTaskRuntimeHost {
         const taskHistory = this.taskHistories.get(taskId) ?? [];
         this.activeExecutions.set(taskId, { taskId, controller });
         await this.updateSnapshot(taskId, { status: 'running' });
+        const watchdogMs = this.options.taskWatchdogMs ?? 30 * 60_000;
+        const watchdogTimer = setTimeout(() => controller.abort(), watchdogMs);
         try {
             await this.options.runner({
                 taskId,
@@ -258,6 +265,16 @@ export class InProcessTaskRuntimeHost {
                     this.closeSubscribers(taskId);
                     return;
                 }
+                if (this.isEmptyDelivery(guardedLatest)) {
+                    await this.appendEvent(taskId, {
+                        type: 'progress',
+                        eventId: `${taskId}:degraded`,
+                        message: '任务完成但未产出实质内容，已标记为降级交付。',
+                        stage: 'warning',
+                    });
+                    const currentResult = guardedLatest.result ?? { summary: '', artifacts: [] };
+                    await this.updateSnapshot(taskId, { result: { ...currentResult, degraded: true } });
+                }
                 await this.updateSnapshot(taskId, { status: 'completed' });
                 await this.options.snapshotStore.clearActiveTask(taskId);
                 this.closeSubscribers(taskId);
@@ -282,6 +299,7 @@ export class InProcessTaskRuntimeHost {
             throw error;
         }
         finally {
+            clearTimeout(watchdogTimer);
             this.taskHistories.delete(taskId);
             this.permissionModes.delete(taskId);
             this.activeExecutions.delete(taskId);
@@ -325,6 +343,14 @@ export class InProcessTaskRuntimeHost {
             },
         };
     }
+    isEmptyDelivery(snapshot) {
+        const summary = snapshot.result?.summary?.trim() ?? '';
+        const isFallbackSummary = !summary || summary === '模型没有返回内容。';
+        const hasArtifacts = (snapshot.result?.artifacts?.length ?? 0) > 0;
+        const hasRecordedArtifacts = snapshot.events.some((e) => e.type === 'artifact_recorded');
+        const hasAssistantOutput = snapshot.events.some((e) => e.type === 'assistant_delta');
+        return isFallbackSummary && !hasArtifacts && !hasRecordedArtifacts && !hasAssistantOutput;
+    }
     async appendRuntimeEvent(taskId, event) {
         const desktopEvents = projectRuntimeEventsToDesktopEvents({ taskId, events: [event] });
         for (const desktopEvent of desktopEvents) {
@@ -365,6 +391,20 @@ export class InProcessTaskRuntimeHost {
             },
         });
         return false;
+    }
+    async recoverStaleRunningTask(snapshot) {
+        if (snapshot.status !== 'running' || this.activeExecutions.has(snapshot.taskId)) {
+            return snapshot;
+        }
+        const salvage = {
+            summary: ['任务执行进程已中断，已保留当前快照，可重新发起或基于现有上下文继续。'],
+            reason: 'stale_running_task_recovered',
+        };
+        await this.appendEvent(snapshot.taskId, { type: 'error', message: 'stale_running_task_recovered' });
+        await this.updateSnapshot(snapshot.taskId, { status: 'failed', salvage });
+        await this.options.snapshotStore.clearActiveTask(snapshot.taskId);
+        this.closeSubscribers(snapshot.taskId);
+        return this.requireSnapshot(snapshot.taskId);
     }
     async appendEvent(taskId, event) {
         await this.enqueueMutation(taskId, async () => {

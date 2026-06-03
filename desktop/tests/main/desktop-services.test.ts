@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { attachRuntimeToolRequestScope, createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createReportArtifactTool, createTimedActionTools, resolveToolOutputArtifactPath, resolveWriteToolArtifactPath } from '../../electron/desktop-services.js';
+import { attachRuntimeToolRequestScope, createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createReportArtifactTool, createTimedActionTools, recoverInterruptedScriptWorkflows, resolveToolOutputArtifactPath, resolveWriteToolArtifactPath, resumeOneScriptWorkflow } from '../../electron/desktop-services.js';
 import type { ExternalPluginDependency } from '../../electron/plugin-dependency-service.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 import { TimedActionService } from '../../electron/timed-action-service.js';
@@ -513,6 +513,54 @@ describe('desktop services', () => {
     expect(result.output?.artifacts).toEqual([
       { path: finalArtifactPath, kind: 'markdown', label: 'script-agent-report.md' },
     ]);
+  });
+
+  it('falls back to raw markdown summary when a script node returns non-JSON output', async () => {
+    const workFolder = join(rootDir, 'markdown-fallback-project');
+    const markdownSummary = [
+      '## 战略与市场分析',
+      '',
+      '苍穹GPT 的定价区间为 {待确认}，详见下文分析。',
+      '',
+      '- 要点一：市场份额持续扩大',
+      '- 要点二：竞品动态密集',
+    ].join('\n');
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner: async ({ emitRuntimeEvent, sessionId }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: markdownSummary,
+        });
+      },
+    });
+
+    const result = await services.runKSwarmWorkflowNode({
+      handoff: {
+        projectId: 'proj-markdown-fallback',
+        workflowRunId: 'wf-proj-markdown-fallback-1',
+        workflowId: 'ai_products_analysis_may_2026',
+        nodeId: 'script-agent-4',
+        nodeKind: 'agent_task',
+        nodeTitle: '战略与市场分析',
+        attempt: 1,
+        handoffId: 'wfhd-script-agent-4',
+        project: { id: 'proj-markdown-fallback', name: 'AI products', goal: '分析 AI 产品动态', status: 'active', workFolder },
+        input: {
+          prompt: '输出战略与市场分析。',
+          label: '战略与市场分析',
+        },
+      },
+      targetParticipantId: 'xiaok-worker',
+    });
+
+    expect(result.output?.summary).toBe(markdownSummary);
   });
 
   it('retries a script-generated workflow node once after a transient stream close', async () => {
@@ -3242,6 +3290,201 @@ describe('desktop services', () => {
     expect(sourceFile).toContain('不要在回复、stdout、tool 参数或聊天消息中粘贴完整交付物');
     expect(sourceFile).toContain('不要反复调用 continue_project');
     expect(sourceFile).toContain('needs_conversation');
+  });
+
+  it('system prompt documents resuming interrupted dynamic workflows without re-pasting the script', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join: pathJoin } = await import('node:path');
+    const sourceFile = readFileSync(pathJoin(__dirname, '../../electron/desktop-services.ts'), 'utf-8');
+
+    expect(sourceFile).toContain('script_workflow');
+    expect(sourceFile).toContain('resumeWorkflowRunId');
+    expect(sourceFile).toContain('不要传 script 参数');
+  });
+
+  describe('recoverInterruptedScriptWorkflows', () => {
+    function mockScanService(handler: (path: string, init?: RequestInit) => Response): {
+      service: KSwarmService;
+      paths: string[];
+    } {
+      const paths: string[] = [];
+      const service = {
+        ...mockKSwarmService(),
+        request: async (path: string, init?: RequestInit): Promise<Response> => {
+          paths.push(path);
+          return handler(path, init);
+        },
+      } as KSwarmService;
+      return { service, paths };
+    }
+
+    function jsonResponse(body: unknown, status = 200): Response {
+      return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    }
+
+    it('restores a resumable script run that has a persisted script source', async () => {
+      const runId = `run-${Date.now()}`;
+      const scriptSource = "export const meta = { name: 'demo', description: 'd' }\nawait agent('x')";
+      const { service, paths } = mockScanService((path) => {
+        if (path === '/projects') {
+          return jsonResponse({ projects: [{ id: 'proj-1' }] });
+        }
+        if (path === '/projects/proj-1/workflows') {
+          return jsonResponse({
+            workflowRuns: [{
+              id: runId,
+              source: 'script_generated',
+              status: 'running',
+              scriptSource,
+            }],
+          });
+        }
+        // Background job's controller calls land here; keep them benign.
+        return jsonResponse({ workflowRun: { id: runId, status: 'running', nodes: [] } });
+      });
+
+      await recoverInterruptedScriptWorkflows(service);
+
+      expect(paths).toContain('/projects');
+      expect(paths).toContain('/projects/proj-1/workflows');
+    });
+
+    it('skips non-script runs and runs without a persisted script source', async () => {
+      const { service, paths } = mockScanService((path) => {
+        if (path === '/projects') {
+          return jsonResponse({ projects: [{ id: 'proj-1' }] });
+        }
+        if (path === '/projects/proj-1/workflows') {
+          return jsonResponse({
+            workflowRuns: [
+              { id: 'po-run', source: 'po_generated', status: 'running', scriptSource: 'x' },
+              { id: 'no-source', source: 'script_generated', status: 'running' },
+            ],
+          });
+        }
+        return jsonResponse({ error: 'unexpected' }, 500);
+      });
+
+      await recoverInterruptedScriptWorkflows(service);
+
+      // Only the listing endpoints are hit; no restore/controller traffic.
+      expect(paths).toEqual(['/projects', '/projects/proj-1/workflows']);
+    });
+
+    it('returns silently when kswarm is unavailable', async () => {
+      const { service, paths } = mockScanService(() => jsonResponse({ error: 'mock' }, 503));
+      await expect(recoverInterruptedScriptWorkflows(service)).resolves.toBeUndefined();
+      expect(paths).toEqual(['/projects']);
+    });
+
+    it('continues scanning when one project workflow listing fails', async () => {
+      const { service, paths } = mockScanService((path) => {
+        if (path === '/projects') {
+          return jsonResponse({ projects: [{ id: 'bad' }, { id: 'good' }] });
+        }
+        if (path === '/projects/bad/workflows') {
+          return jsonResponse({ error: 'boom' }, 500);
+        }
+        if (path === '/projects/good/workflows') {
+          return jsonResponse({ workflowRuns: [] });
+        }
+        return jsonResponse({ workflowRun: { id: 'x', status: 'running', nodes: [] } });
+      });
+
+      await recoverInterruptedScriptWorkflows(service);
+
+      expect(paths).toContain('/projects/bad/workflows');
+      expect(paths).toContain('/projects/good/workflows');
+    });
+  });
+
+  describe('resumeOneScriptWorkflow', () => {
+    function mockRunService(handler: (path: string, init?: RequestInit) => Response): {
+      service: KSwarmService;
+      paths: string[];
+    } {
+      const paths: string[] = [];
+      const service = {
+        ...mockKSwarmService(),
+        request: async (path: string, init?: RequestInit): Promise<Response> => {
+          paths.push(path);
+          return handler(path, init);
+        },
+      } as KSwarmService;
+      return { service, paths };
+    }
+
+    function jsonResponse(body: unknown, status = 200): Response {
+      return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    }
+
+    it('rejects empty input without hitting kswarm', async () => {
+      const { service, paths } = mockRunService(() => jsonResponse({ error: 'unexpected' }, 500));
+      await expect(resumeOneScriptWorkflow(service, '', '')).resolves.toEqual({
+        restored: false,
+        reason: 'invalid_input',
+      });
+      expect(paths).toEqual([]);
+    });
+
+    it('returns kswarm_unavailable when the run snapshot request fails', async () => {
+      const { service } = mockRunService(() => jsonResponse({ error: 'boom' }, 503));
+      await expect(resumeOneScriptWorkflow(service, 'proj-1', 'run-1')).resolves.toEqual({
+        restored: false,
+        reason: 'kswarm_unavailable',
+      });
+    });
+
+    it('returns not_script_workflow for a po_generated run', async () => {
+      const { service } = mockRunService(() => jsonResponse({
+        workflowRun: { id: 'run-1', source: 'po_generated', status: 'running', scriptSource: 'x' },
+      }));
+      await expect(resumeOneScriptWorkflow(service, 'proj-1', 'run-1')).resolves.toEqual({
+        restored: false,
+        reason: 'not_script_workflow',
+      });
+    });
+
+    it('returns not_resumable for a completed script run', async () => {
+      const { service } = mockRunService(() => jsonResponse({
+        workflowRun: { id: 'run-1', source: 'script_generated', status: 'completed', scriptSource: 'x' },
+      }));
+      await expect(resumeOneScriptWorkflow(service, 'proj-1', 'run-1')).resolves.toEqual({
+        restored: false,
+        reason: 'not_resumable',
+      });
+    });
+
+    it('returns no_script_source when the run has no persisted script source', async () => {
+      const { service } = mockRunService(() => jsonResponse({
+        workflowRun: { id: 'run-1', source: 'script_generated', status: 'running' },
+      }));
+      await expect(resumeOneScriptWorkflow(service, 'proj-1', 'run-1')).resolves.toEqual({
+        restored: false,
+        reason: 'no_script_source',
+      });
+    });
+
+    it('restores a resumable script run and is idempotent on a second call', async () => {
+      const runId = `resume-run-${Date.now()}`;
+      const scriptSource = "export const meta = { name: 'demo', description: 'd' }\nawait agent('x')";
+      const { service } = mockRunService((path) => {
+        if (path === `/projects/proj-1/workflows/${runId}`) {
+          return jsonResponse({
+            workflowRun: { id: runId, source: 'script_generated', status: 'running', scriptSource },
+          });
+        }
+        // Background job controller traffic — keep benign.
+        return jsonResponse({ workflowRun: { id: runId, status: 'running', nodes: [] } });
+      });
+
+      const first = await resumeOneScriptWorkflow(service, 'proj-1', runId);
+      expect(first.restored).toBe(true);
+      expect(first.jobId).toBe(`wf-script-job-${runId}`);
+
+      const second = await resumeOneScriptWorkflow(service, 'proj-1', runId);
+      expect(second.reason).toBe('already_running');
+    });
   });
 
   it('preserves history for cancelled context tasks so subsequent tasks see prior context', async () => {

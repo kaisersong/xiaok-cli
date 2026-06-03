@@ -19,13 +19,13 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   uninstallSkill: (skillName) => ipcRenderer.invoke('desktop:uninstallSkill', skillName),
   createTaskWithFiles: (input) => ipcRenderer.invoke('desktop:createTaskWithFiles', input),
   createTask: (input) => ipcRenderer.invoke('desktop:createTask', input),
-  subscribeTask(taskId, handler) {
+  subscribeTask(taskId, handler, sinceIndex) {
     const channel = `desktop:taskEvent:${taskId}`;
     const listener = (_event, payload) => {
       handler(payload);
     };
     ipcRenderer.on(channel, listener);
-    void ipcRenderer.invoke('desktop:subscribeTask', { taskId });
+    void ipcRenderer.invoke('desktop:subscribeTask', typeof sinceIndex === 'number' ? { taskId, sinceIndex } : { taskId });
     return () => {
       ipcRenderer.off(channel, listener);
     };
@@ -96,6 +96,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   kswarmStart: () => ipcRenderer.invoke('desktop:kswarm:start'),
   kswarmStop: () => ipcRenderer.invoke('desktop:kswarm:stop'),
   kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart'),
+  kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input),
   onKSwarmStatus(handler) {
     const channel = 'desktop:kswarm:statusChange';
     const listener = (_event, payload) => {

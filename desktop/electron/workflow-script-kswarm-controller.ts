@@ -13,6 +13,8 @@ export interface KSwarmScriptWorkflowRunInput {
   projectId: string;
   preview: unknown;
   requestedBy?: string;
+  scriptSource?: string | null;
+  scriptHash?: string | null;
 }
 
 export interface KSwarmScriptWorkflowRunResult {
@@ -35,11 +37,13 @@ export async function createKSwarmScriptWorkflowRun({
   projectId,
   preview,
   requestedBy = 'human',
+  scriptSource = null,
+  scriptHash = null,
 }: KSwarmScriptWorkflowRunInput): Promise<KSwarmScriptWorkflowRunResult> {
   const proposal = await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/script-generated/proposal`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ preview, requestedBy }),
+    body: JSON.stringify({ preview, requestedBy, scriptSource, scriptHash }),
   });
   const proposalId = readString(readRecord(proposal).workflowProposal && readRecord(readRecord(proposal).workflowProposal).id);
   if (!proposalId) throw workflowScriptKSwarmError('workflow_script_proposal_missing', 'KSwarm did not return a workflow proposal id');

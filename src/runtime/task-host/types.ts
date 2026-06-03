@@ -173,7 +173,7 @@ export interface ActiveTaskRef {
 
 export interface TaskRuntimeHost {
   createTask(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
-  subscribeTask(taskId: string): AsyncIterable<DesktopTaskEvent>;
+  subscribeTask(taskId: string, options?: { sinceIndex?: number }): AsyncIterable<DesktopTaskEvent>;
   answerQuestion(input: { taskId: string; answer: UserAnswer }): Promise<void>;
   cancelTask(taskId: string): Promise<void>;
   getActiveTasks(): Promise<ActiveTaskRef[]>;

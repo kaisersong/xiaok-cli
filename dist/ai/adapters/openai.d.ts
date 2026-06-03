@@ -14,5 +14,6 @@ export declare class OpenAIAdapter implements ModelAdapter {
     getCapabilities(): Partial<ModelCapabilities>;
     dispose(): void;
     cloneWithModel(model: string): OpenAIAdapter;
-    stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, _options?: ModelInvocationOptions): AsyncIterable<StreamChunk>;
+    stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: ModelInvocationOptions): AsyncIterable<StreamChunk>;
+    private streamOnce;
 }

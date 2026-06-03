@@ -353,4 +353,50 @@ describe('project intervention actions', () => {
     expect(stored.nextActions[0].toolName).toBe('repair_project_task_from_file');
     expect(stored.nextActions[0].params.expectedPrimaryTaskId).toBe('item-1');
   });
+
+  it('opens a resume-workflow xiaok draft for an interrupted dynamic workflow', async () => {
+    mockCreateThread.mockResolvedValue({
+      id: 'thread-resume',
+      title: '让小K帮忙：外贸趋势分析',
+      status: 'idle',
+      mode: 'work',
+      createdAt: 1779000000000,
+      updatedAt: 1779000000000,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: null,
+      taskIds: [],
+    });
+    renderProjectDetail(interventionDetail({
+      kind: 'script_workflow',
+      workflowRunId: 'wf-run-1',
+      message: '动态工作流被中断，需要续跑。',
+      primaryAction: {
+        id: 'resume_dynamic_workflow',
+        strategy: 'resume_workflow',
+        toolName: 'run_dynamic_workflow_script',
+        params: { projectId: 'proj-intervention', resumeWorkflowRunId: 'wf-run-1' },
+      },
+    } as any));
+
+    fireEvent.click(await screen.findByRole('button', { name: '让小K帮忙' }));
+
+    expect(await screen.findByTestId('chat-thread-id')).toHaveTextContent('thread-resume');
+    const state = JSON.parse(screen.getByTestId('chat-state').textContent || '{}');
+    expect(state.draftPrompt).toContain('get_dynamic_workflow_status');
+    expect(state.draftPrompt).toContain('run_dynamic_workflow_script');
+    expect(state.draftPrompt).toContain('wf-run-1');
+    expect(state.draftPrompt).toContain('不要传 script 参数');
+    expect(state.swarmContinueContext).toMatchObject({
+      strategy: 'resume_workflow',
+      workflowKind: 'script_workflow',
+      resumeWorkflowRunId: 'wf-run-1',
+    });
+    expect(state.swarmContinueContext.availableTools).toContain('run_dynamic_workflow_script');
+
+    const stored = JSON.parse(window.sessionStorage.getItem('xiaok.swarmContinueContext') || '{}');
+    expect(stored.strategy).toBe('resume_workflow');
+    expect(stored.resumeWorkflowRunId).toBe('wf-run-1');
+  });
 });

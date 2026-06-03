@@ -1,6 +1,6 @@
 import type { Tool } from '../../src/types.js';
 import type { KSwarmService } from './kswarm-service.js';
-import { createWorkflowScriptPreview } from './workflow-script-contract.js';
+import { createWorkflowScriptPreview, hashWorkflowScript, normalizeWorkflowScript } from './workflow-script-contract.js';
 import {
   completeKSwarmScriptWorkflowRun,
   createKSwarmScriptWorkflowRun,
@@ -126,10 +126,10 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
           },
           resumeWorkflowRunId: {
             type: 'string',
-            description: '已有 workflowRunId。用于后台任务中断后恢复，同一个脚本会复用已完成的 parallel/agent primitive，不新建 proposal/run。',
+            description: '已有 workflowRunId。用于后台任务中断后恢复，同一个脚本会复用已完成的 parallel/agent primitive，不新建 proposal/run。恢复时可省略 script：系统会自动从已持久化的 workflowRun.scriptSource 取回脚本源续跑，无需重新粘贴脚本。',
           },
         },
-        required: ['script'],
+        required: [],
       },
     },
     async execute(input) {
@@ -148,7 +148,50 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
         const projectId = await resolveProjectId(kswarmService, input);
         if (!projectId) return validationFailure({ error: 'projectId_or_projectName_required' });
 
-        const preview = createWorkflowScriptPreview(script, {
+        // For resume, fetch the durable run first so we can recover the persisted
+        // script source (when no script was supplied) and bind the script hash.
+        let workflowRunId = resumeWorkflowRunId;
+        let workflowRun: Record<string, unknown> | null = null;
+        if (resumeWorkflowRunId) {
+          workflowRun = await fetchKSwarmWorkflowRunSnapshot(kswarmService, projectId, resumeWorkflowRunId);
+          const status = readString(workflowRun.status);
+          if (status === 'completed') {
+            return JSON.stringify({
+              ok: true,
+              projectId,
+              workflowRunId: resumeWorkflowRunId,
+              workflowId: readString(workflowRun.workflowId) || 'script_workflow',
+              scriptHash: readString(workflowRun.scriptHash),
+              status: 'completed',
+              workflowRun,
+            });
+          }
+          if (status && !isResumableWorkflowRunStatus(workflowRun)) {
+            return validationFailure({
+              error: 'workflow_script_run_not_resumable',
+              message: `workflow run ${resumeWorkflowRunId} is ${status}`,
+              workflowRunId: resumeWorkflowRunId,
+              status,
+            });
+          }
+        }
+
+        // Resolve the effective script: supplied input wins; otherwise (resume only)
+        // recover the persisted source from the durable run.
+        let effectiveScript = script;
+        if (!effectiveScript && resumeWorkflowRunId && workflowRun) {
+          const persistedSource = readString(workflowRun.scriptSource);
+          if (!persistedSource) {
+            return validationFailure({
+              error: 'workflow_script_source_unavailable',
+              message: `workflow run ${resumeWorkflowRunId} has no persisted script source to resume from`,
+              workflowRunId: resumeWorkflowRunId,
+            });
+          }
+          effectiveScript = persistedSource;
+        }
+
+        const preview = createWorkflowScriptPreview(effectiveScript, {
           projectId,
           requestedBy,
         });
@@ -164,39 +207,30 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
           });
         }
 
-        let workflowRunId = resumeWorkflowRunId;
-        let workflowRun: Record<string, unknown>;
-        if (resumeWorkflowRunId) {
-          workflowRun = await fetchKSwarmWorkflowRunSnapshot(kswarmService, projectId, resumeWorkflowRunId);
-          const status = readString(workflowRun.status);
-          if (status === 'completed') {
-            return JSON.stringify({
-              ok: true,
-              projectId,
-              workflowRunId: resumeWorkflowRunId,
-              workflowId: readString(preview.workflowId) || readString(workflowRun.workflowId) || 'script_workflow',
-              scriptHash: readString(preview.scriptHash),
-              status: 'completed',
-              workflowRun,
-            });
-          }
-          if (status && !isResumableWorkflowRunStatus(workflowRun)) {
+        if (resumeWorkflowRunId && workflowRun) {
+          const runScriptHash = readString(workflowRun.scriptHash);
+          if (runScriptHash && readString(preview.scriptHash) !== runScriptHash) {
             return validationFailure({
-              error: 'workflow_script_run_not_resumable',
-              message: `workflow run ${resumeWorkflowRunId} is ${status}`,
+              error: 'workflow_script_source_hash_mismatch',
+              message: `resume script hash ${readString(preview.scriptHash)} does not match run ${runScriptHash}`,
               workflowRunId: resumeWorkflowRunId,
-              status,
             });
           }
         } else {
+          const normalizedSource = normalizeWorkflowScript(effectiveScript);
           const started = await createKSwarmScriptWorkflowRun({
             kswarmService,
             projectId,
             preview,
             requestedBy,
+            scriptSource: normalizedSource,
+            scriptHash: hashWorkflowScript(normalizedSource),
           });
           workflowRunId = readString(started.workflowRun.id);
           workflowRun = started.workflowRun;
+        }
+        if (!workflowRun) {
+          return validationFailure({ error: 'workflow_script_run_missing' });
         }
         const controller = createKSwarmWorkflowScriptController({
           kswarmService,
@@ -212,7 +246,7 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
             workflowRunId,
             workflowId: readString(preview.workflowId) || readString(workflowRun.workflowId) || 'script_workflow',
             scriptHash: readString(preview.scriptHash),
-            script,
+            script: effectiveScript,
             controller,
           });
           return JSON.stringify({
@@ -236,7 +270,7 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
           kswarmService,
           projectId,
           workflowRunId,
-          script,
+          script: effectiveScript,
           controller,
         });
 
@@ -369,6 +403,54 @@ function startWorkflowScriptBackgroundJob({
   }, 0);
 
   return job;
+}
+
+export function restoreWorkflowScriptBackgroundJob({
+  kswarmService,
+  projectId,
+  workflowRunId,
+  scriptSource,
+  scriptHash,
+  assignedAgent = DEFAULT_DESKTOP_WORKFLOW_AGENT_ID,
+}: {
+  kswarmService: KSwarmService;
+  projectId: string;
+  workflowRunId: string;
+  scriptSource: string;
+  scriptHash?: string | null;
+  assignedAgent?: string;
+}): { restored: boolean; reason?: string; jobId?: string } {
+  const jobId = `wf-script-job-${workflowRunId}`;
+  // Idempotency: never run a second job for the same run. The has/set pair stays
+  // synchronous (no await between them) so concurrent restore calls cannot race.
+  if (backgroundJobs.has(jobId)) {
+    return { restored: false, reason: 'already_running' };
+  }
+  if (!readString(scriptSource)) {
+    return { restored: false, reason: 'no_script_source' };
+  }
+  const normalizedSource = normalizeWorkflowScript(scriptSource);
+  const actualHash = hashWorkflowScript(normalizedSource);
+  if (scriptHash && actualHash !== scriptHash) {
+    return { restored: false, reason: 'hash_mismatch' };
+  }
+  const controller = createKSwarmWorkflowScriptController({
+    kswarmService,
+    projectId,
+    workflowRunId,
+    assignedAgent,
+    reuseCompletedPrimitives: true,
+  });
+  const job = startWorkflowScriptBackgroundJob({
+    kswarmService,
+    projectId,
+    workflowRunId,
+    workflowId: 'script_workflow',
+    scriptHash: actualHash,
+    script: normalizedSource,
+    controller,
+  });
+  return { restored: true, jobId: job.id };
 }
 
 async function fetchKSwarmWorkflowRunSnapshot(
@@ -515,7 +597,7 @@ function inferWorkflowNextAction(
   return status || 'unknown';
 }
 
-function isResumableWorkflowRunStatus(workflowRun: Record<string, unknown>): boolean {
+export function isResumableWorkflowRunStatus(workflowRun: Record<string, unknown>): boolean {
   const status = readString(workflowRun.status);
   if (status === 'running') return true;
   if (status !== 'blocked') return false;

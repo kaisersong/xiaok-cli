@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type CSSProperties } from 'react';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Search, X, Bolt, Pencil, Download, RefreshCw, Clock, FolderKanban } from 'lucide-react';
+import { Plus, Search, X, Bolt, Pencil, RefreshCw, Clock, FolderKanban, ExternalLink } from 'lucide-react';
 import { api, type ThreadRecord } from '../api';
 import { useKSwarm } from '../contexts/KSwarmContext';
 import { useLocale } from '../contexts/LocaleContext';
@@ -25,7 +25,14 @@ interface UpdateStatus {
   progress: number;
   version?: string;
   error?: string;
+  currentVersion?: string;
 }
+
+// During the ad-hoc-signing window (no Apple Developer cert yet), Squirrel.Mac
+// cannot verify the downloaded package, so quitAndInstall silently fails and the
+// button gets stuck. Until the cert lands, the reminder opens a popover that
+// points users at the GitHub release for a manual download + drag-to-replace.
+const GITHUB_RELEASES_URL = 'https://github.com/kaisersong/xiaok-cli/releases/latest';
 
 interface SidebarScheduledTask {
   id: string;
@@ -61,6 +68,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [showUpdatePopover, setShowUpdatePopover] = useState(false);
   const [activeNav, setActiveNav] = useState<NavSection>('new');
   const [sidebarTasks, setSidebarTasks] = useState<SidebarScheduledTask[]>([]);
   const [scheduledThreadIds, setScheduledThreadIds] = useState<Set<string>>(new Set());
@@ -147,7 +155,12 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
 
   // Subscribe to update status
   useEffect(() => {
-    const unsub = api.onUpdateStatus(setUpdateStatus);
+    const unsub = api.onUpdateStatus((status) =>
+      setUpdateStatus(prev => ({
+        ...status,
+        currentVersion: status.currentVersion ?? prev?.currentVersion,
+      })),
+    );
     api.getUpdateStatus().then(setUpdateStatus).catch(() => {});
     return unsub;
   }, []);
@@ -209,22 +222,14 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const isOnScheduled = activeNav === 'scheduled';
   const hideThreadList = activeNav === 'scheduled' || activeNav === 'projects';
   const updateVersion = updateStatus?.version || '新版本';
+  const currentVersion = updateStatus?.currentVersion;
   const showUpdateReminder = Boolean(updateStatus && (
-    updateStatus.checking ||
     updateStatus.available ||
     updateStatus.downloading ||
     updateStatus.downloaded ||
     updateStatus.installing
   ));
-  const updateReminderLabel = updateStatus?.downloaded
-    ? updateStatus.installing
-      ? '安装中'
-      : `安装 ${updateVersion}`
-    : updateStatus?.downloading
-      ? `${updateStatus.progress}%`
-      : updateStatus?.checking
-        ? '检查中'
-        : `升级到 ${updateVersion}`;
+  const updateReminderLabel = `升级到 ${updateVersion}`;
   const scheduledListClassName = activeNav === 'new'
     ? 'flex flex-col gap-0 max-h-[90px] overflow-y-auto'
     : 'flex flex-col gap-0';
@@ -232,13 +237,12 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     ? 'flex flex-col gap-0 max-h-[150px] overflow-y-auto'
     : 'flex flex-col gap-0';
 
-  const handleUpdateReminderClick = async () => {
-    if (!updateStatus || updateStatus.downloading || updateStatus.checking || updateStatus.installing) return;
-    if (updateStatus.downloaded) {
-      await api.quitAndInstall();
-      return;
-    }
-    await api.checkForUpdates();
+  const handleUpdateReminderClick = () => {
+    setShowUpdatePopover(prev => !prev);
+  };
+
+  const handleOpenGithubReleases = () => {
+    window.open(GITHUB_RELEASES_URL, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -396,37 +400,64 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
           <SidebarUserProfile />
           <div className="flex items-center gap-1">
             {showUpdateReminder && (
-              <button
-                type="button"
-                onClick={handleUpdateReminderClick}
-                disabled={updateStatus?.downloading || updateStatus?.checking || updateStatus?.installing}
-                aria-label={updateReminderLabel}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-[background-color,color,transform] duration-[60ms] active:scale-[0.96] ${
-                  updateStatus?.downloaded
-                    ? 'bg-green-50 text-green-700 hover:bg-green-100'
-                    : updateStatus?.downloading || updateStatus?.checking || updateStatus?.installing
-                      ? 'cursor-default bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]'
-                      : 'bg-[var(--c-accent)] text-white hover:opacity-90'
-                }`}
-                title={
-                  updateStatus?.downloaded
-                    ? updateStatus.installing
-                      ? `正在安装 v${updateVersion}`
-                      : `更新已就绪: v${updateVersion}，点击安装`
-                    : updateStatus?.downloading
-                      ? `正在下载: ${updateStatus.progress}%`
-                      : updateStatus?.checking
-                        ? '正在检查更新'
-                        : `发现新版本: v${updateVersion}，点击升级`
-                }
-              >
-                {updateStatus?.downloaded ? (
-                  <Download size={14} />
-                ) : (
-                  <RefreshCw size={14} className={updateStatus?.downloading || updateStatus?.checking || updateStatus?.installing ? 'animate-spin' : ''} />
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={handleUpdateReminderClick}
+                  aria-label={updateReminderLabel}
+                  aria-expanded={showUpdatePopover}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--c-accent)] px-2 text-xs font-medium text-white transition-[background-color,color,transform] duration-[60ms] hover:opacity-90 active:scale-[0.96]"
+                  title={`发现新版本: v${updateVersion}，点击查看更新方式`}
+                >
+                  <RefreshCw size={14} />
+                  <span>{updateReminderLabel}</span>
+                </button>
+
+                {showUpdatePopover && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setShowUpdatePopover(false)}
+                    />
+                    <div className="absolute bottom-10 right-0 z-50 w-72 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 shadow-lg">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-sm font-semibold text-[var(--c-text-heading)]">发现新版本</span>
+                        <button
+                          type="button"
+                          onClick={() => setShowUpdatePopover(false)}
+                          aria-label="关闭"
+                          className="flex size-6 items-center justify-center rounded text-[var(--c-text-icon)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+
+                      <div className="mb-3 flex items-center gap-2 text-xs text-[var(--c-text-secondary)]">
+                        {currentVersion && (
+                          <>
+                            <span className="rounded bg-[var(--c-bg-deep)] px-1.5 py-0.5 font-mono">v{currentVersion}</span>
+                            <span>→</span>
+                          </>
+                        )}
+                        <span className="rounded bg-[var(--c-accent)]/10 px-1.5 py-0.5 font-mono font-semibold text-[var(--c-accent)]">v{updateVersion}</span>
+                      </div>
+
+                      <p className="mb-3 text-xs leading-relaxed text-[var(--c-text-secondary)]">
+                        请前往 GitHub 下载最新版本，下载后将应用拖入「应用程序」覆盖安装即可。
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={handleOpenGithubReleases}
+                        className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-[var(--c-accent)] px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
+                      >
+                        <ExternalLink size={15} />
+                        <span>前往 GitHub 下载</span>
+                      </button>
+                    </div>
+                  </>
                 )}
-                <span>{updateReminderLabel}</span>
-              </button>
+              </div>
             )}
             {onOpenSettings && (
               <button

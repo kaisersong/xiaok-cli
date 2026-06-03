@@ -454,7 +454,7 @@ export function ChatShell() {
 
   // Replay events from a single snapshot into messages
   // Returns { msgs, result, events } where events is for Canvas (not pushed to ref during replay)
-  const replaySnapshot = useCallback((snapshot: { events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[] } => {
+  const replaySnapshot = useCallback((snapshot: { events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
     const msgs: ChatMessage[] = [];
     let lastResult: TaskResult | null = null;
     const replayEvents: DesktopTaskEvent[] = []; // Local array for Canvas, not ref
@@ -468,12 +468,12 @@ export function ChatShell() {
       });
     }
 
+    let replayToolMsgId: string | null = null;
     if (snapshot?.events && snapshot.events.length > 0) {
       let accumulated = '';
       let lastProgress: ChatMessage | null = null;
       // For replay, also collect tool_steps so past tasks show tool execution
       let replayToolSteps: ToolStep[] = [];
-      let replayToolMsgId: string | null = null;
       const replayArtifacts: ArtifactSummary[] = [];
       for (const ev of snapshot.events) {
         if (ev.type === 'artifact_recorded') {
@@ -572,7 +572,7 @@ export function ChatShell() {
         setStreamingText(accumulated);
       }
     }
-    return { msgs, result: lastResult, events: replayEvents };
+    return { msgs, result: lastResult, events: replayEvents, toolStepsMsgId: replayToolMsgId };
   }, []);
 
   useEffect(() => {
@@ -641,6 +641,8 @@ export function ChatShell() {
         let lastResult: TaskResult | null = null;
         let lastStatus: 'idle' | 'running' | 'waiting_user' = 'idle';
         let lastTaskIdForSub: string | null = null;
+        let lastSubSinceIndex = 0;
+        let lastSubToolStepsMsgId: string | null = null;
 
         for (const tid of allTaskIds) {
           // Check again after each async operation
@@ -652,7 +654,7 @@ export function ChatShell() {
               console.log(`[ChatShell] Replaying task=${tid} prompt="${snapshot.prompt?.slice(0, 40)}" status=${snapshot.status} events=${snapshot.events?.length}`);
               const isFirst = tid === allTaskIds[0];
               const addPrompt = Boolean(snapshot.prompt && (!isFirst || !initialPrompt));
-              const { msgs: replayMsgs, result: replayResult, events: replayEvents } = replaySnapshot(snapshot, addPrompt);
+              const { msgs: replayMsgs, result: replayResult, events: replayEvents, toolStepsMsgId: replayToolStepsMsgId } = replaySnapshot(snapshot, addPrompt);
               console.log(`[ChatShell] Replayed task=${tid} → ${replayMsgs.length} msgs, addPrompt=${addPrompt}`);
               allMessages.push(...replayMsgs);
               // Collect events for Canvas panel (merge into ref after all tasks processed)
@@ -673,6 +675,10 @@ export function ChatShell() {
                 lastTaskIdForSub = tid;
                 if (snapshot.status === 'running' || snapshot.status === 'waiting_user') {
                   lastStatus = snapshot.status;
+                  // Subscribe incrementally: skip the events we already replayed so the
+                  // live stream does not re-emit history and duplicate the tool steps.
+                  lastSubSinceIndex = snapshot.events?.length ?? 0;
+                  lastSubToolStepsMsgId = replayToolStepsMsgId;
                 } else if (snapshot.status === 'completed') {
                   lastStatus = 'idle';
                 }
@@ -696,7 +702,14 @@ export function ChatShell() {
         if (lastTaskIdForSub && (lastStatus === 'running' || lastStatus === 'waiting_user')) {
           // Guard: if effect was cleaned up during async gap (StrictMode), don't subscribe
           if (mountGenRef.current !== gen) return;
-          unsubRef.current = api.subscribeTask(lastTaskIdForSub, handleEvent);
+          // Rebind live tool-steps refs to the message replay already created, so the
+          // incremental stream updates the existing steps instead of spawning a second
+          // (perpetually-running) tool_steps message.
+          if (lastSubToolStepsMsgId) {
+            toolStepsMsgIdRef.current = lastSubToolStepsMsgId;
+            toolStepsActiveRef.current = true;
+          }
+          unsubRef.current = api.subscribeTask(lastTaskIdForSub, handleEvent, lastSubSinceIndex);
         }
       } else {
         setThread({

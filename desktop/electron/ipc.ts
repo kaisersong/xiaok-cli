@@ -141,7 +141,8 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
   const activeTaskSubs = new Map<string, AbortController>();
   ipcMain.handle('desktop:subscribeTask', async (_event, input) => {
     const taskId = input.taskId as string;
-    log('info', 'subscribeTask', { taskId });
+    const sinceIndex = typeof input.sinceIndex === 'number' ? input.sinceIndex : undefined;
+    log('info', 'subscribeTask', { taskId, sinceIndex });
 
     // Cancel any existing subscription for this taskId to prevent duplicate streams
     const prev = activeTaskSubs.get(taskId);
@@ -155,7 +156,10 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
 
     void (async () => {
       try {
-        for await (const event of services.subscribeTask(taskId)) {
+        const stream = sinceIndex !== undefined
+          ? services.subscribeTask(taskId, { sinceIndex })
+          : services.subscribeTask(taskId);
+        for await (const event of stream) {
           if (controller.signal.aborted || window.isDestroyed()) {
             break;
           }

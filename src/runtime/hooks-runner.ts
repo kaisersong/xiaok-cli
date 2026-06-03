@@ -345,6 +345,7 @@ async function executeCommand(
   config: CommandHookConfig,
   timeoutMs: number,
   payloadJson: string,
+  extraEnv?: Record<string, string>,
 ): Promise<CommandResult> {
   return new Promise<CommandResult>((resolve, reject) => {
     let stdout = '';
@@ -354,6 +355,7 @@ async function executeCommand(
       shell: config.shell || undefined,
       env: {
         ...process.env,
+        ...extraEnv,
         XIAOK_HOOK_PAYLOAD: payloadJson,
       },
     });
@@ -393,11 +395,13 @@ function executeCommandAsync(
   config: CommandHookConfig,
   payloadJson: string,
   onRewake?: () => void,
+  extraEnv?: Record<string, string>,
 ): void {
   const child = exec(config.command, {
     shell: config.shell || undefined,
     env: {
       ...process.env,
+      ...extraEnv,
       XIAOK_HOOK_PAYLOAD: payloadJson,
     },
   });
@@ -527,6 +531,10 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
       return merged;
     }
     const payloadJson = buildPayload(eventName, payload, ctx);
+    const extraEnv: Record<string, string> = {};
+    if (ctx.session_id) {
+      extraEnv['XIAOK_CODE_SESSION_ID'] = ctx.session_id;
+    }
 
     for (const hook of allHooks) {
       if (!shouldMatch(hook, eventName, payload)) continue;
@@ -546,6 +554,7 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
         executeCommandAsync(cmdConfig, payloadJson, hook.asyncRewake
           ? () => config.onAsyncRewake?.(eventName, payload)
           : undefined,
+          extraEnv,
         );
         merged.async = true;
         continue;
@@ -560,7 +569,7 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
         } else if (hookType === 'prompt') {
           result = await executePrompt(hook as PromptHookConfig, payloadJson, config.promptExecutor);
         } else {
-          result = await executeCommand(hook as CommandHookConfig, timeout, payloadJson);
+          result = await executeCommand(hook as CommandHookConfig, timeout, payloadJson, extraEnv);
         }
 
         const interpreted = interpretExitCode(result, eventName);

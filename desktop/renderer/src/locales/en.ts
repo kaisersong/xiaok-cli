@@ -2024,6 +2024,8 @@ export const en: LocaleStrings = {
   scheduledApproveAutoNeedsReview: "Run the task once and review the plan before approving auto execution.",
   scheduledRevokeAuto: "Revoke auto",
   scheduledRevokeAutoTitle: "Switch this task back to plan-only mode.",
+  scheduledAutoExecCreatedNotice: "This task has auto-execution enabled by default. To limit to plan-only, click \"Revoke auto\".",
+  scheduledHighFreqConfirmBody: "This task will auto-execute at high frequency (\u226430 min interval) with write/command permissions. Confirm creation?",
 
   // common
   commonConfirm: "Confirm",

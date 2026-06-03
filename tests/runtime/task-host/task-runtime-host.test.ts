@@ -198,6 +198,120 @@ describe('InProcessTaskRuntimeHost', () => {
     await subscription.return?.();
   });
 
+  it('replays only events after sinceIndex for an incremental subscriber', async () => {
+    let emitProgress: ((message: string) => void) | undefined;
+    let finishRunner: (() => void) | undefined;
+    const runner: TaskRunner = async ({ emitRuntimeEvent }) => {
+      emitProgress = (message) => {
+        emitRuntimeEvent({
+          type: 'breadcrumb_emitted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          status: 'running',
+          message,
+        });
+      };
+      await new Promise<void>((resolve) => {
+        finishRunner = resolve;
+      });
+    };
+    const host = createHost(runner);
+    await host.createTask({
+      prompt: '生成 A 客户方案 PPT',
+      materials: [{ materialId: material.materialId }],
+    });
+    await waitFor(() => Boolean(emitProgress));
+
+    // The snapshot now has historical events (task_started, understanding_updated).
+    const before = await host.recoverTask('task_1');
+    const replayedCount = before.snapshot.events.length;
+    expect(replayedCount).toBeGreaterThan(0);
+
+    // An incremental subscriber starting at sinceIndex must skip all history and
+    // receive only events produced after that point.
+    const subscription = host.subscribeTask('task_1', { sinceIndex: replayedCount })[Symbol.asyncIterator]();
+    const liveEventPromise = subscription.next();
+    emitProgress?.('只发增量');
+
+    await expect(liveEventPromise).resolves.toEqual({
+      done: false,
+      value: {
+        type: 'progress',
+        eventId: 'turn_1:step_1:breadcrumb',
+        message: '只发增量',
+        stage: 'running',
+      },
+    });
+
+    finishRunner?.();
+    await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed');
+    await subscription.return?.();
+  });
+
+  it('treats an out-of-range sinceIndex as start-of-live (no history replay)', async () => {
+    let emitProgress: ((message: string) => void) | undefined;
+    let finishRunner: (() => void) | undefined;
+    const runner: TaskRunner = async ({ emitRuntimeEvent }) => {
+      emitProgress = (message) => {
+        emitRuntimeEvent({
+          type: 'breadcrumb_emitted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          status: 'running',
+          message,
+        });
+      };
+      await new Promise<void>((resolve) => {
+        finishRunner = resolve;
+      });
+    };
+    const host = createHost(runner);
+    await host.createTask({
+      prompt: '生成 A 客户方案 PPT',
+      materials: [{ materialId: material.materialId }],
+    });
+    await waitFor(() => Boolean(emitProgress));
+
+    const subscription = host.subscribeTask('task_1', { sinceIndex: 9999 })[Symbol.asyncIterator]();
+    const liveEventPromise = subscription.next();
+    emitProgress?.('越界也只发增量');
+
+    await expect(liveEventPromise).resolves.toEqual({
+      done: false,
+      value: {
+        type: 'progress',
+        eventId: 'turn_1:step_1:breadcrumb',
+        message: '越界也只发增量',
+        stage: 'running',
+      },
+    });
+
+    finishRunner?.();
+    await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed');
+    await subscription.return?.();
+  });
+
+  it('replays full history when sinceIndex is omitted (backward compatible)', async () => {
+    const runner = vi.fn<TaskRunner>(async () => undefined);
+    const host = createHost(runner);
+    const created = await host.createTask({
+      prompt: '帮我基于这些材料，生成一版给 A 客户 CIO 汇报的制造业数字化方案 PPT 初稿。',
+      materials: [{ materialId: material.materialId }],
+    });
+    await waitFor(() => runner.mock.calls.length === 1);
+
+    const replayed = await takeEvents(host.subscribeTask('task_1'), 2);
+    expect(replayed).toEqual([
+      { type: 'task_started', taskId: 'task_1' },
+      { type: 'understanding_updated', understanding: created.understanding },
+    ]);
+    await waitFor(async () => (await host.getActiveTask()) === null);
+  });
+
   it('executes multiple tasks in parallel', async () => {
     let resolveTask1: (() => void) | undefined;
     let task2Ran = false;

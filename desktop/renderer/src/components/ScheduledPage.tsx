@@ -228,6 +228,9 @@ export function ScheduledPage() {
   const [formFrequency, setFormFrequency] = useState<FormFrequency>('manual');
   const [formScheduleConfig, setFormScheduleConfig] = useState<ScheduledTask['scheduleConfig']>({});
   const [saving, setSaving] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [toastKind, setToastKind] = useState<'success' | 'info'>('info');
+  const [confirmHighFreq, setConfirmHighFreq] = useState(false);
 
   const intervalLabels: Record<number, string> = {
     30: t.scheduledEvery30Min,
@@ -328,6 +331,12 @@ export function ScheduledPage() {
     window.dispatchEvent(new CustomEvent('xiaok:scheduled-tasks-updated'));
   };
 
+  const showToast = (msg: string, kind: 'success' | 'info' = 'info', ttlMs = 6_000) => {
+    setToastMsg(msg);
+    setToastKind(kind);
+    setTimeout(() => setToastMsg(null), ttlMs);
+  };
+
   const openCreate = () => {
     setFormName('');
     setFormDesc('');
@@ -355,6 +364,15 @@ export function ScheduledPage() {
 
   const handleSave = async () => {
     if (!formName.trim() || !formPrompt.trim()) return;
+
+    if (modalMode === 'create') {
+      const intervalMinutes = formScheduleConfig?.intervalMinutes ?? 60;
+      if ((formFrequency === 'hourly' || formFrequency === 'interval') && intervalMinutes <= 30 && !confirmHighFreq) {
+        setConfirmHighFreq(true);
+        return;
+      }
+    }
+
     setSaving(true);
 
     const now = Date.now();
@@ -373,7 +391,9 @@ export function ScheduledPage() {
           });
           await loadTasks();
           setSaving(false);
+          setConfirmHighFreq(false);
           closeModal();
+          showToast(t.scheduledAutoExecCreatedNotice, 'info');
           return;
         } catch (e) {
           console.warn('[Scheduled] main createScheduledTask failed, falling back to local cache:', e);
@@ -392,6 +412,7 @@ export function ScheduledPage() {
         updatedAt: now,
       };
       saveTasks([newTask, ...tasks]);
+      showToast(t.scheduledAutoExecCreatedNotice, 'info');
     } else if (editingTask) {
       const desktop = (window as any).xiaokDesktop;
       if (desktop?.updateScheduledTask && formFrequency !== 'manual') {
@@ -422,6 +443,7 @@ export function ScheduledPage() {
       saveTasks(updated);
     }
 
+    setConfirmHighFreq(false);
     setSaving(false);
     closeModal();
   };
@@ -579,6 +601,34 @@ export function ScheduledPage() {
 
   return (
     <div className="flex flex-1 flex-col bg-[var(--c-bg-page)]" data-testid="scheduled-page">
+      {/* Toast */}
+      {toastMsg && (
+        <div className={`mx-auto mt-3 max-w-[600px] rounded-lg border px-4 py-2 text-center text-sm ${
+          toastKind === 'success'
+            ? 'border-green-200 bg-green-50 text-green-700'
+            : 'border-blue-200 bg-blue-50 text-blue-700'
+        }`}>
+          {toastMsg}
+        </div>
+      )}
+      {/* High-frequency confirm dialog (C2) */}
+      {confirmHighFreq && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+          <div className="mx-4 max-w-md rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] p-6 shadow-xl">
+            <p className="text-sm text-[var(--c-text-primary)]">{t.scheduledHighFreqConfirmBody}</p>
+            <div className="mt-4 flex justify-end gap-3">
+              <button type="button"
+                onClick={() => setConfirmHighFreq(false)}
+                className="rounded-lg border border-[var(--c-border)] px-4 py-1.5 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
+              >{t.commonCancel}</button>
+              <button type="button"
+                onClick={() => { handleSave(); }}
+                className="rounded-lg bg-[var(--c-btn-bg)] px-4 py-1.5 text-sm font-medium text-[var(--c-btn-text)] transition-[filter] duration-150 hover:brightness-[1.12]"
+              >{t.commonConfirm}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--c-border)] px-8 py-4">
         <div className="flex items-center gap-4">

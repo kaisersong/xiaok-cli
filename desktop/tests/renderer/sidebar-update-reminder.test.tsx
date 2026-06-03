@@ -53,6 +53,7 @@ function renderSidebar(status: {
   downloaded: boolean;
   progress: number;
   version?: string;
+  currentVersion?: string;
 }, initialEntry = '/', threads: unknown[] = []) {
   mockApi.listThreads.mockResolvedValue(threads);
   mockApi.getThread.mockResolvedValue(null);
@@ -88,7 +89,7 @@ afterEach(() => {
 });
 
 describe('Sidebar update reminder', () => {
-  it('shows a clear upgrade reminder next to settings and starts update when clicked', async () => {
+  it('opens a popover with a version comparison when the reminder is clicked', async () => {
     renderSidebar({
       checking: false,
       available: true,
@@ -96,6 +97,7 @@ describe('Sidebar update reminder', () => {
       downloaded: false,
       progress: 0,
       version: '1.3.1',
+      currentVersion: '1.3.0',
     });
 
     const button = await screen.findByRole('button', { name: '升级到 1.3.1' });
@@ -103,12 +105,42 @@ describe('Sidebar update reminder', () => {
 
     fireEvent.click(button);
 
-    await waitFor(() => {
-      expect(mockApi.checkForUpdates).toHaveBeenCalledTimes(1);
-    });
+    expect(await screen.findByText('v1.3.0')).toBeInTheDocument();
+    expect(screen.getByText('v1.3.1')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /前往 GitHub 下载/ })).toBeInTheDocument();
   });
 
-  it('shows an install reminder when the update has been downloaded', async () => {
+  it('opens the GitHub releases page when the download button is clicked', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+
+    renderSidebar({
+      checking: false,
+      available: true,
+      downloading: false,
+      downloaded: false,
+      progress: 0,
+      version: '1.3.1',
+      currentVersion: '1.3.0',
+    });
+
+    const button = await screen.findByRole('button', { name: '升级到 1.3.1' });
+    fireEvent.click(button);
+
+    const downloadButton = await screen.findByRole('button', { name: /前往 GitHub 下载/ });
+    fireEvent.click(downloadButton);
+
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://github.com/kaisersong/xiaok-cli/releases/latest',
+      '_blank',
+      'noopener,noreferrer',
+    );
+
+    openSpy.mockRestore();
+  });
+
+  it('never triggers auto check or install from the reminder (ad-hoc signing safe)', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null);
+
     renderSidebar({
       checking: false,
       available: true,
@@ -116,27 +148,17 @@ describe('Sidebar update reminder', () => {
       downloaded: true,
       progress: 100,
       version: '1.3.1',
+      currentVersion: '1.3.0',
     });
 
-    const button = await screen.findByRole('button', { name: '安装 1.3.1' });
+    const button = await screen.findByRole('button', { name: '升级到 1.3.1' });
     fireEvent.click(button);
 
-    await waitFor(() => {
-      expect(mockApi.quitAndInstall).toHaveBeenCalledTimes(1);
-    });
-  });
+    const downloadButton = await screen.findByRole('button', { name: /前往 GitHub 下载/ });
+    fireEvent.click(downloadButton);
 
-  it('shows download progress while an update is downloading', async () => {
-    renderSidebar({
-      checking: false,
-      available: true,
-      downloading: true,
-      downloaded: false,
-      progress: 42,
-      version: '1.3.1',
-    });
-
-    expect(await screen.findByText('42%')).toBeInTheDocument();
+    expect(mockApi.checkForUpdates).not.toHaveBeenCalled();
+    expect(mockApi.quitAndInstall).not.toHaveBeenCalled();
   });
 
   it('lists scheduled tasks without a three-row nested scroll container on scheduled page', async () => {

@@ -586,7 +586,11 @@ export interface KSwarmWorkflowDiagnosis {
 export interface ProjectIntervention {
   required: boolean;
   severity?: 'normal' | 'warning' | 'action_required' | string;
+  kind?: 'task_board' | 'script_workflow' | string;
   projectId?: string | null;
+  workflowRunId?: string | null;
+  workflowId?: string | null;
+  scriptHash?: string | null;
   reason?: string;
   headline?: string | null;
   message?: string;
@@ -603,10 +607,16 @@ export interface ProjectIntervention {
   } | null;
   primaryAction?: {
     id: 'continue_project' | string;
-    label: string;
+    label?: string;
     strategy?: string;
     taskId?: string;
     taskUpdatedAt?: number | string | null;
+    toolName?: string;
+    params?: {
+      projectId?: string;
+      resumeWorkflowRunId?: string;
+      [key: string]: unknown;
+    } | null;
   } | null;
   secondaryAction?: {
     id: 'ask_xiaok' | string;

@@ -40,7 +40,7 @@ describe('report_progress prompt regression', () => {
 
   it('tool is registered with safe permission level', () => {
     // report_progress is a display-only tool, must be safe
-    const toolDefRegex = /reportProgressTool[^}]*permission:\s*'safe'/s;
+    const toolDefRegex = /createReportProgressTool\(\)[^]*?permission:\s*'safe'/s;
     expect(source).toMatch(toolDefRegex);
   });
 });

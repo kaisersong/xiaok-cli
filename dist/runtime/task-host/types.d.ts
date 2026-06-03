@@ -98,6 +98,7 @@ export interface TaskResult {
     artifacts: ArtifactSummary[];
     assumptions?: string[];
     nextSteps?: string[];
+    degraded?: boolean;
 }
 export interface SalvageSummary {
     summary: string[];
@@ -214,7 +215,9 @@ export interface TaskRuntimeHost {
         taskId: string;
         understanding?: TaskUnderstanding;
     }>;
-    subscribeTask(taskId: string): AsyncIterable<DesktopTaskEvent>;
+    subscribeTask(taskId: string, options?: {
+        sinceIndex?: number;
+    }): AsyncIterable<DesktopTaskEvent>;
     answerQuestion(input: {
         taskId: string;
         answer: UserAnswer;

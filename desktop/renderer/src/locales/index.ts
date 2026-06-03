@@ -1942,6 +1942,8 @@ export interface LocaleStrings {
   scheduledApproveAutoNeedsReview: string;
   scheduledRevokeAuto: string;
   scheduledRevokeAutoTitle: string;
+  scheduledAutoExecCreatedNotice: string;
+  scheduledHighFreqConfirmBody: string;
 
   // common
   commonConfirm: string;

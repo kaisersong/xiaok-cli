@@ -180,6 +180,21 @@ describe('TimedActionStore', () => {
     });
   });
 
+  it('creates new actions with userApprovedAuto defaulting to true', () => {
+    const action = store.createAction({
+      id: 'new_default_test',
+      title: '新任务默认自动执行',
+      trigger: { kind: 'daily', hour: 9, minute: 0 },
+      executor: { kind: 'agent_task', prompt: '每日检查' },
+      source: 'user',
+      now: 1_000,
+    });
+    expect(action.userApprovedAuto).toBe(true);
+
+    const persisted = store.getAction('new_default_test');
+    expect(persisted?.userApprovedAuto).toBe(true);
+  });
+
   it('approveAuto sets reviewedAt and userApprovedAuto, revokeAuto leaves reviewedAt intact', () => {
     const action = store.createAction({
       id: 'review_action',
@@ -190,7 +205,7 @@ describe('TimedActionStore', () => {
       now: 1_000,
     });
 
-    expect(action.userApprovedAuto).toBe(false);
+    expect(action.userApprovedAuto).toBe(true);
     expect(action.reviewedAt).toBeUndefined();
 
     const approved = store.approveAuto('review_action', 4_321);

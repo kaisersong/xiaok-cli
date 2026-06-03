@@ -3,10 +3,14 @@ const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 function isRetryableError(error) {
     if (error instanceof Error) {
-        const status = error.status;
+        const record = error;
+        const status = record.status;
         if (typeof status === 'number' && RETRYABLE_STATUS.has(status))
             return true;
-        if (/overload|502|503|timeout|ECONNRESET|Bad gateway/i.test(error.message))
+        const code = typeof record.code === 'string' ? record.code : '';
+        if (/ERR_STREAM_PREMATURE_CLOSE|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR/i.test(code))
+            return true;
+        if (/overload|502|503|timeout|ECONNRESET|ETIMEDOUT|EPIPE|Bad gateway|Premature close|terminated|socket hang up|network|fetch failed/i.test(error.message))
             return true;
     }
     return false;
@@ -58,14 +62,19 @@ export class ClaudeAdapter {
         while (true) {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+            let emittedAny = false;
             try {
-                yield* this.streamOnce(messages, tools, systemPrompt, options, controller.signal);
+                for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, controller.signal)) {
+                    emittedAny = true;
+                    yield chunk;
+                }
                 clearTimeout(timer);
                 return;
             }
             catch (error) {
                 clearTimeout(timer);
-                if (!isRetryableError(error) || attempt >= MAX_RETRIES) {
+                // 一旦本次尝试已产出 chunk（消费端已实时落地/上屏），重试会重复输出，必须放弃重试
+                if (emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) {
                     throw error;
                 }
                 const delayMs = Math.min(1000 * 2 ** attempt, 16000);

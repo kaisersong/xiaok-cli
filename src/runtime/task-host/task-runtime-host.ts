@@ -208,10 +208,15 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     return { taskId, understanding };
   }
 
-  async *subscribeTask(taskId: string): AsyncIterable<DesktopTaskEvent> {
+  async *subscribeTask(taskId: string, options?: { sinceIndex?: number }): AsyncIterable<DesktopTaskEvent> {
     const snapshot = await this.requireSnapshot(taskId);
-    for (const event of snapshot.events) {
-      yield event;
+    // events is append-only (only grown via [...events, event]), so a numeric
+    // index is a stable replay cursor. Clamp into [0, length] to make negative or
+    // out-of-range cursors safe (out-of-range = skip all history, only live).
+    const requested = options?.sinceIndex ?? 0;
+    const start = Math.max(0, Math.min(requested, snapshot.events.length));
+    for (let i = start; i < snapshot.events.length; i++) {
+      yield snapshot.events[i];
     }
 
     if (TERMINAL_STATUSES.has(snapshot.status)) {

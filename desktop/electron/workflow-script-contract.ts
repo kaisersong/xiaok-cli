@@ -389,7 +389,7 @@ function stripStringsAndComments(source: string): string {
   return out;
 }
 
-function hashWorkflowScript(script: string): string {
+export function hashWorkflowScript(script: string): string {
   return createHash('sha256').update(script).digest('hex');
 }
 

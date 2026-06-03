@@ -2004,6 +2004,8 @@ export const zh: LocaleStrings = {
   scheduledApproveAutoNeedsReview: "请先运行一次并审阅计划，再批准自动执行。",
   scheduledRevokeAuto: "撤回自动",
   scheduledRevokeAutoTitle: "切回仅生成计划模式。",
+  scheduledAutoExecCreatedNotice: "该任务已默认开启自动执行。如需仅生成计划，请点击「撤回自动」。",
+  scheduledHighFreqConfirmBody: "该任务将以高频（≤30分钟间隔）自动执行，包含写入/命令操作权限。确认创建？",
 
   // common
   commonConfirm: "确认",

@@ -23,7 +23,7 @@ import {
 } from '../../src/runtime/trace/exporter.js';
 import type { Config, Message, MessageBlock, ModelAdapter, StreamChunk, ToolCall, ToolDefinition } from '../../src/types.js';
 import { buildToolList, ToolRegistry } from '../../src/ai/tools/index.js';
-import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta } from '../../src/ai/skills/loader.js';
+import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta, type SkillCatalog } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
 import { getConfigDir, getConfigPath, loadConfig, saveConfig } from '../../src/utils/config.js';
 import { createIntentDelegationTools } from '../../src/ai/tools/intent-delegation.js';
@@ -68,6 +68,8 @@ import { extractCreatedAgentId, resolveCreateProjectMembers, sanitizeCreateProje
 import {
   createKSwarmGetDynamicWorkflowStatusTool,
   createKSwarmRunDynamicWorkflowScriptTool,
+  isResumableWorkflowRunStatus,
+  restoreWorkflowScriptBackgroundJob,
 } from './kswarm-dynamic-workflow-script-tool.js';
 import { XIAOK_PO_SEED_ID, getPreferredPoAgentId } from '../shared/kswarm-seed-contract.js';
 import type { KSwarmTaskHandoff, KSwarmWorkflowNodeHandoff } from './kswarm-runtime-bridge.js';
@@ -1112,7 +1114,28 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       artifactsDir,
       runStartedAt,
     });
-    const parsed = extractKSwarmJsonObject(summary);
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = extractKSwarmJsonObject(summary);
+    } catch {
+      console.warn('[kswarm-workflow-node] structured JSON extraction failed, fallback applied', {
+        nodeKind: handoff.nodeKind,
+        rawPreview: summary.slice(0, 200),
+      });
+      if (handoff.nodeKind === 'review') {
+        // Review nodes must not default to 'blocked' on parse failure — that
+        // permanently blocks the workflow. Use 'needs_rework' so the orchestrator
+        // can retry or escalate, and capture the raw output as the reason.
+        parsed = {
+          reviewDecision: {
+            status: 'needs_rework',
+            reason: summary.slice(0, 2000) || 'Reviewer output was not structured JSON.',
+          },
+        };
+      } else {
+        parsed = {};
+      }
+    }
 
     if (handoff.nodeKind === 'review') {
       const rawDecision = isRecord(parsed.reviewDecision) ? parsed.reviewDecision : parsed;
@@ -1888,6 +1911,21 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     cancelTask: host.cancelTask.bind(host),
     getActiveTask: host.getActiveTask.bind(host),
     recoverTask: host.recoverTask.bind(host),
+    async recoverStaleTasks(): Promise<void> {
+      const active = await host.getActiveTasks();
+      for (const ref of active) {
+        try {
+          await host.recoverTask(ref.taskId);
+        } catch {
+          // Per-task recovery failure must not block desktop startup.
+        }
+      }
+      try {
+        await recoverInterruptedScriptWorkflows(options.kswarmService);
+      } catch {
+        // Dynamic workflow recovery is best-effort; never block desktop startup.
+      }
+    },
     async openArtifact(_artifactId: string): Promise<void> {
       // Artifact opening stays behind the semantic API even before rich preview exists.
     },
@@ -2453,13 +2491,21 @@ function extractKSwarmJsonObject(text: string): Record<string, unknown> {
   }
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fenced?.[1]) {
-    const parsed = JSON.parse(fenced[1]);
-    if (isRecord(parsed)) return parsed;
+    try {
+      const parsed = JSON.parse(fenced[1]);
+      if (isRecord(parsed)) return parsed;
+    } catch {
+      // Fall through to embedded JSON extraction.
+    }
   }
   const embedded = trimmed.match(/\{[\s\S]*\}/);
   if (embedded?.[0]) {
-    const parsed = JSON.parse(embedded[0]);
-    if (isRecord(parsed)) return parsed;
+    try {
+      const parsed = JSON.parse(embedded[0]);
+      if (isRecord(parsed)) return parsed;
+    } catch {
+      // Fall through to the structured_json_missing failure below.
+    }
   }
   throw new Error('structured_json_missing');
 }
@@ -2620,6 +2666,105 @@ async function requestKSwarmJson(kswarmService: KSwarmService, path: string, ini
     throw new Error(readString(body.error) || 'kswarm_request_failed');
   }
   return body;
+}
+
+export async function recoverInterruptedScriptWorkflows(kswarmService: KSwarmService): Promise<void> {
+  if (!kswarmService) return;
+  let projects: Record<string, unknown>[] = [];
+  try {
+    const payload = await requestKSwarmJson(kswarmService, '/projects');
+    const list = isRecord(payload) ? payload.projects : null;
+    if (!Array.isArray(list)) return;
+    projects = list.filter(isRecord);
+  } catch {
+    // kswarm not ready / unavailable — skip silently, do not block startup.
+    return;
+  }
+
+  // Global cap (across all projects) to avoid flooding the runtime during cold boot.
+  const maxRestarts = 20;
+  let restarted = 0;
+  for (const project of projects) {
+    if (restarted >= maxRestarts) break;
+    const projectId = readString(project.id);
+    if (!projectId) continue;
+    let runs: Record<string, unknown>[] = [];
+    try {
+      const payload = await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows`);
+      const list = isRecord(payload) ? payload.workflowRuns : null;
+      runs = Array.isArray(list) ? list.filter(isRecord) : [];
+    } catch {
+      continue;
+    }
+    for (const run of runs) {
+      if (restarted >= maxRestarts) break;
+      if (readString(run.source) !== 'script_generated') continue;
+      if (!isResumableWorkflowRunStatus(run)) continue;
+      const scriptSource = readString(run.scriptSource);
+      if (!scriptSource) continue;
+      try {
+        const result = restoreWorkflowScriptBackgroundJob({
+          kswarmService,
+          projectId,
+          workflowRunId: readString(run.id),
+          scriptSource,
+          scriptHash: readString(run.scriptHash) || null,
+          assignedAgent: readString(run.assignedAgent) || undefined,
+        });
+        if (result.restored) restarted += 1;
+      } catch {
+        // Per-run restore failure must not abort the rest of the scan.
+      }
+    }
+  }
+}
+
+// Single-run direct resume powering the renderer's one-click "继续推进" for
+// dynamic (script_generated) workflows. Unlike the conversational path, this
+// rebuilds the desktop background job directly. All failures return a reason
+// code; nothing is thrown back to the renderer.
+export async function resumeOneScriptWorkflow(
+  kswarmService: KSwarmService,
+  projectId: string,
+  workflowRunId: string,
+): Promise<{ restored: boolean; reason?: string; jobId?: string }> {
+  if (!kswarmService) return { restored: false, reason: 'kswarm_unavailable' };
+  if (!readString(projectId) || !readString(workflowRunId)) {
+    return { restored: false, reason: 'invalid_input' };
+  }
+  let run: Record<string, unknown> | null = null;
+  try {
+    const payload = await requestKSwarmJson(
+      kswarmService,
+      `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowRunId)}`,
+    );
+    if (isRecord(payload)) {
+      run = isRecord(payload.workflowRun) ? payload.workflowRun : payload;
+    }
+  } catch {
+    return { restored: false, reason: 'kswarm_unavailable' };
+  }
+  if (!run) return { restored: false, reason: 'not_found' };
+  if (readString(run.source) !== 'script_generated') {
+    return { restored: false, reason: 'not_script_workflow' };
+  }
+  if (!isResumableWorkflowRunStatus(run)) {
+    return { restored: false, reason: 'not_resumable' };
+  }
+  const scriptSource = readString(run.scriptSource);
+  if (!scriptSource) return { restored: false, reason: 'no_script_source' };
+  try {
+    return restoreWorkflowScriptBackgroundJob({
+      kswarmService,
+      projectId,
+      workflowRunId: readString(run.id) || workflowRunId,
+      scriptSource,
+      scriptHash: readString(run.scriptHash) || null,
+      assignedAgent: readString(run.assignedAgent) || undefined,
+    });
+  } catch {
+    return { restored: false, reason: 'restore_failed' };
+  }
 }
 
 function readString(value: unknown): string {
@@ -3139,6 +3284,7 @@ create_project 只用于用户**明确要求**多智能体协作或项目管理�
 6. 不要在回复、stdout、tool 参数或聊天消息中粘贴完整交付物；只传 artifactPath、summary、mimeType 等元数据。
 7. repair_project_task_from_file 只是提交复审，不是强制完成；不要跳过必需任务，不要人工放行不合格结果，不要提交占位符。
 8. 完成后说明项目是"已继续派发"、"已提交复审"还是"仍需用户确认"，并说明下一步等待谁处理。
+9. 如果 inspect_project 返回 projectIntervention.kind 是 script_workflow（strategy=resume_workflow），说明这是被中断的动态工作流（dynamic workflow），需要续跑而不是新建：先调用 get_dynamic_workflow_status 查看卡点，再调用 run_dynamic_workflow_script 续跑，只传 projectId 和 resumeWorkflowRunId（即 intervention 里的 workflowRunId），不要传 script 参数——已持久化的脚本源会自动恢复并重新校验，重贴脚本可能导致 hash 不一致而失败。
 
 ## 消息通道功能
 
@@ -3340,6 +3486,11 @@ export function createReportArtifactTool(): Tool {
         });
         const outputExists = existsSync(outputPath);
         const success = outputExists && (result.success !== false || isReportRendererStructurallyValid(result.validation));
+        if (success && isRecord(result.validation) && result.validation.l3_passed === false) {
+          console.warn('[report-renderer] L3 quality check failed (KPI placeholders detected)', {
+            warnings: Array.isArray(result.validation.l3_warnings) ? result.validation.l3_warnings : [],
+          });
+        }
         return JSON.stringify({
           ...result,
           success,
@@ -3355,6 +3506,56 @@ export function createReportArtifactTool(): Tool {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+    },
+  };
+}
+
+function createReportProgressTool(): Tool {
+  return {
+    permission: 'safe',
+    definition: {
+      name: 'report_progress',
+      description: '向用户报告任务计划和进度。在开始非trivial任务时调用此工具上报计划，每完成一步更新状态。简单问答不要调用。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', description: '步骤稳定标识，如 step-1' },
+                label: { type: 'string', description: '面向用户的步骤描述，使用自然语言' },
+                status: { type: 'string', enum: ['planned', 'running', 'completed', 'blocked', 'failed'] },
+              },
+              required: ['id', 'label', 'status'],
+            },
+          },
+        },
+        required: ['steps'],
+      },
+    },
+    async execute(input) {
+      const { steps } = input as { steps: unknown };
+      if (!Array.isArray(steps)) {
+        return JSON.stringify({ ok: false, error: 'steps must be an array' });
+      }
+      const validStatuses = new Set(['planned', 'running', 'completed', 'blocked', 'failed']);
+      const validated: Array<{ id: string; label: string; status: string }> = [];
+      for (const s of steps) {
+        if (!s || !s.id || !s.label) continue;
+        validated.push({
+          id: String(s.id),
+          label: String(s.label),
+          status: validStatuses.has(s.status) ? s.status : 'planned',
+        });
+      }
+      const base = JSON.stringify({ ok: true, displayed_steps: validated.length, _validated: validated });
+      const allCompleted = validated.length > 0 && validated.every(s => s.status === 'completed');
+      if (allCompleted) {
+        return base + '\n\n⚠️ 所有步骤已标记完成。请回顾用户原始请求，确认是否所有要求的交付物都已生成。如果有遗漏，请追加新步骤继续执行，不要结束任务。';
+      }
+      return base;
     },
   };
 }
@@ -3679,7 +3880,9 @@ async function streamDesktopToolLoopFinalization(input: {
         assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
       }
     } else if (chunk.type === 'tool_use') {
-      throw new Error('desktop_tool_loop_finalization_requested_tool');
+      // Model violated the "no tools" finalization constraint. Ignore the tool
+      // call and keep consuming the stream — accumulated text is sufficient.
+      continue;
     } else if (chunk.type === 'usage') {
       input.onUsage?.(chunk);
     }
@@ -3689,6 +3892,333 @@ async function streamDesktopToolLoopFinalization(input: {
   }
   return { reply, assistantBlocks };
 }
+
+interface ToolLoopStrategies {
+  compact: {
+    enabled: boolean;
+    shouldCompact: (inputTokens: number) => boolean;
+    doCompact: (msgs: Message[]) => Promise<void>;
+  };
+  buildApiView: (msgs: Message[]) => Message[];
+  processToolResult: (result: string, toolName: string, toolUseId: string) => string;
+  trackAutoProgress: boolean;
+  trackReferenceReads: boolean;
+  emitSkillArtifactTrace: boolean;
+}
+
+interface ToolLoopContext {
+  adapter: Pick<ModelAdapter, 'stream'>;
+  systemPrompt: string;
+  messages: Message[];
+  allToolDefs: ToolDefinition[];
+  registry: ToolRegistry;
+  signal: AbortSignal;
+  taskDeadline: number;
+  sessionId: string;
+  turnId: string;
+  intentId: string;
+  stepId: string;
+  taskId: string;
+  materials: MaterialRecord[];
+  materialRegistry?: MaterialRegistry;
+  emitRuntimeEvent: TaskRunnerInput['emitRuntimeEvent'];
+  skillInvocation: SkillInvocation | null;
+  skillCatalog: SkillCatalog;
+  dataRoot: string;
+  taskStartTime: number;
+  strategies: ToolLoopStrategies;
+  onUsage?: (inputTokens: number, outputTokens: number) => void;
+}
+
+async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
+  reply: string;
+  totalToolCalls: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  referenceReads: number;
+  autoSteps: Array<{ id: string; label: string; status: string }>;
+  skillNamesDetected: string[];
+  skillTriggerType: 'slash_command' | 'tool_call' | 'auto';
+  skillInvocation: SkillInvocation | null;
+}> {
+  let reply = '';
+  let iteration = 0;
+  let totalToolCalls = 0;
+  let planEmitted = false;
+  const autoSteps: Array<{ id: string; label: string; status: string }> = [];
+  let referenceReads = 0;
+  let lastRequestInputTokens = 0;
+  let toolResultsAwaitingFinalResponse = false;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let { skillInvocation } = ctx;
+  let skillNamesDetected: string[] = [];
+  let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
+
+  if (skillInvocation) {
+    appendTrace(ctx.dataRoot, {
+      ts: Date.now(), taskId: ctx.sessionId, skillName: skillInvocation.primarySkill,
+      stageId: skillInvocation.stageId, iteration: 1, event: 'model_turn_start',
+    });
+  }
+
+  while (iteration < DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS) {
+    if (ctx.signal.aborted) throw new Error('task cancelled');
+    if (Date.now() > ctx.taskDeadline) throw new Error('任务超时（30分钟），可能是网络不稳定或模型响应过慢。请检查网络后重试。');
+    iteration++;
+
+    if (skillInvocation) {
+      const budgetResult = checkBudget(skillInvocation, iteration, totalToolCalls, referenceReads, totalInputTokens, ctx.dataRoot);
+      if (!budgetResult.ok) {
+        appendTrace(ctx.dataRoot, {
+          ts: Date.now(), taskId: ctx.sessionId, skillName: skillInvocation.primarySkill,
+          stageId: skillInvocation.stageId, iteration, event: 'model_turn_end',
+          durationMs: Date.now() - ctx.taskStartTime, details: `stopped: ${budgetResult.reason}`,
+        });
+        break;
+      }
+    }
+
+    if (skillInvocation && iteration > 1) {
+      appendTrace(ctx.dataRoot, {
+        ts: Date.now(), taskId: ctx.sessionId, skillName: skillInvocation.primarySkill,
+        stageId: skillInvocation.stageId, iteration, event: 'model_turn_start',
+      });
+    }
+
+    const assistantBlocks: MessageBlock[] = [];
+
+    if (ctx.strategies.compact.enabled && iteration > 1 && ctx.strategies.compact.shouldCompact(lastRequestInputTokens)) {
+      await ctx.strategies.compact.doCompact(ctx.messages);
+    }
+
+    const apiMessages = ctx.strategies.buildApiView(ctx.messages);
+    lastRequestInputTokens = 0;
+    for await (const chunk of ctx.adapter.stream(apiMessages, ctx.allToolDefs, ctx.systemPrompt)) {
+      if (ctx.signal.aborted) throw new Error('task cancelled');
+      if (chunk.type === 'text') {
+        const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+        if (lastBlock?.type === 'text') {
+          lastBlock.text += chunk.delta;
+        } else {
+          assistantBlocks.push({ type: 'text', text: chunk.delta });
+        }
+        reply += chunk.delta;
+        ctx.emitRuntimeEvent({ type: 'assistant_delta', sessionId: ctx.sessionId, turnId: ctx.turnId, intentId: ctx.intentId, stepId: ctx.stepId, delta: chunk.delta });
+      } else if (chunk.type === 'tool_use') {
+        assistantBlocks.push({ type: 'tool_use', id: chunk.id, name: chunk.name, input: chunk.input });
+      } else if (chunk.type === 'thinking') {
+        const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+        if (lastBlock?.type === 'thinking') {
+          lastBlock.thinking += chunk.delta;
+        } else {
+          assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
+        }
+      } else if (chunk.type === 'usage') {
+        try {
+          const inputTkns = chunk.usage?.inputTokens ?? 0;
+          lastRequestInputTokens = inputTkns;
+          totalInputTokens += inputTkns;
+          totalOutputTokens += chunk.usage?.outputTokens ?? 0;
+          ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0);
+        } catch { /* usage capture failure is non-critical */ }
+      }
+    }
+    ctx.messages.push({ role: 'assistant', content: assistantBlocks });
+    const toolCalls = assistantBlocks.filter((b): b is ToolCall => b.type === 'tool_use');
+    if (toolCalls.length === 0) {
+      if (assistantBlocks.some((block) => block.type === 'text' && block.text.trim())) {
+        toolResultsAwaitingFinalResponse = false;
+      }
+      break;
+    }
+    const toolResults: MessageBlock[] = [];
+    for (const toolCall of toolCalls) {
+      if (ctx.signal.aborted) throw new Error('task cancelled');
+      totalToolCalls++;
+      const runtimeToolInput = attachRuntimeToolRequestScope(toolCall.name, toolCall.input, ctx.sessionId);
+      const isInternalTool = toolCall.name === 'report_progress' || toolCall.name === 'skill' || toolCall.name === 'skill_bundle_refs' || toolCall.name === 'skill_list';
+      if (!isInternalTool && !planEmitted) {
+        planEmitted = true;
+      }
+      ctx.emitRuntimeEvent({ type: 'pre_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id });
+
+      if (skillInvocation) {
+        appendTrace(ctx.dataRoot, {
+          ts: Date.now(), taskId: ctx.sessionId, skillName: skillInvocation.primarySkill,
+          stageId: skillInvocation.stageId, iteration, event: 'tool_start',
+          toolName: toolCall.name,
+        });
+      }
+
+      if (ctx.strategies.trackReferenceReads && isToolName(toolCall.name, 'read')) {
+        referenceReads++;
+        if (skillInvocation) {
+          appendTrace(ctx.dataRoot, {
+            ts: Date.now(), taskId: ctx.sessionId, skillName: skillInvocation.primarySkill,
+            stageId: skillInvocation.stageId, iteration, event: 'tool_end',
+            toolName: 'read_reference', details: String((toolCall.input as Record<string, unknown>).file_path || ''),
+          });
+        }
+      }
+
+      if (toolCall.name === 'skill') {
+        try {
+          const extracted = extractSkillNames(toolCall.input as Record<string, unknown>);
+          if (skillNamesDetected.length === 0 || skillTriggerType === 'auto') {
+            skillNamesDetected = extracted;
+            if (skillTriggerType === 'auto') skillTriggerType = 'tool_call';
+            if (!skillInvocation) {
+              skillInvocation = buildSkillInvocation(extracted[0], ctx.skillCatalog, ctx.sessionId);
+              if (skillInvocation) {
+                appendTrace(ctx.dataRoot, {
+                  ts: Date.now(), taskId: ctx.sessionId, skillName: extracted[0],
+                  event: 'skill_invoked', details: 'tool_call',
+                });
+              }
+            }
+          }
+        } catch { /* non-critical */ }
+      }
+      const toolStartedAt = Date.now();
+      let { ok, result } = await executeDesktopTaskTool({ ...toolCall, input: runtimeToolInput }, {
+        registry: ctx.registry,
+        taskId: ctx.taskId,
+        materials: ctx.materials,
+        materialRegistry: ctx.materialRegistry,
+      });
+      if (ok) {
+        ctx.emitRuntimeEvent({ type: 'post_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
+      } else {
+        ctx.emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id, error: result.slice(0, 10000) });
+      }
+      if (ctx.strategies.trackAutoProgress && !isInternalTool) {
+        const label = toolNameToLabel(toolCall.name, toolCall.input as Record<string, unknown>);
+        autoSteps.push({ id: `auto-${totalToolCalls}`, label, status: ok ? 'completed' : 'failed' });
+        ctx.emitRuntimeEvent({ type: 'progress_plan_reported', sessionId: ctx.sessionId, steps: autoSteps });
+      }
+
+      if (skillInvocation) {
+        appendTrace(ctx.dataRoot, {
+          ts: Date.now(), taskId: ctx.sessionId, skillName: skillInvocation.primarySkill,
+          stageId: skillInvocation.stageId, iteration, event: 'tool_end',
+          toolName: toolCall.name, outputBytes: result.length,
+        });
+      }
+
+      const writeArtifactPath = resolveWriteToolArtifactPath(toolCall.name, runtimeToolInput);
+      if (ok && writeArtifactPath) {
+        const filePath = writeArtifactPath;
+        ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });
+        const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
+        const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
+        const fileName = filePath.split('/').pop() || filePath;
+        ctx.emitRuntimeEvent({
+          type: 'artifact_recorded',
+          sessionId: ctx.sessionId,
+          turnId: ctx.turnId,
+          intentId: ctx.intentId,
+          stageId: ctx.stepId,
+          artifactId: `artifact_${toolCall.id}`,
+          label: fileName,
+          kind,
+          path: filePath,
+          creator: 'agent',
+        });
+        if (ctx.strategies.emitSkillArtifactTrace && skillInvocation) {
+          appendTrace(ctx.dataRoot, {
+            ts: Date.now(), taskId: ctx.sessionId, skillName: skillInvocation.primarySkill,
+            stageId: skillInvocation.stageId, iteration, event: 'tool_end',
+            toolName: 'artifact_written', details: filePath,
+          });
+        }
+      }
+      if (ok && !isToolName(toolCall.name, 'write')) {
+        const filePath = resolveToolOutputArtifactPath(runtimeToolInput, result, { toolName: toolCall.name, toolStartedAt });
+        if (filePath) {
+          ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });
+          const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
+          const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
+          const fileName = filePath.split('/').pop() || filePath;
+          ctx.emitRuntimeEvent({
+            type: 'artifact_recorded',
+            sessionId: ctx.sessionId,
+            turnId: ctx.turnId,
+            intentId: ctx.intentId,
+            stageId: ctx.stepId,
+            artifactId: `artifact_${toolCall.id}`,
+            label: fileName,
+            kind,
+            path: filePath,
+            creator: 'agent',
+          });
+        }
+      }
+      if (ok && toolCall.name === 'report_progress') {
+        try {
+          const parsed = JSON.parse(result);
+          if (parsed._validated) {
+            ctx.emitRuntimeEvent({ type: 'progress_plan_reported', sessionId: ctx.sessionId, steps: parsed._validated });
+            result = JSON.stringify({ ok: true, displayed_steps: parsed.displayed_steps });
+          }
+        } catch { /* non-critical */ }
+      }
+      const resultContent = ctx.strategies.processToolResult(result, toolCall.name, toolCall.id);
+      toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: resultContent, is_error: !ok });
+    }
+    ctx.messages.push({ role: 'user', content: toolResults });
+    toolResultsAwaitingFinalResponse = true;
+
+    if (skillInvocation) {
+      appendTrace(ctx.dataRoot, {
+        ts: Date.now(), taskId: ctx.sessionId, skillName: skillInvocation.primarySkill,
+        stageId: skillInvocation.stageId, iteration, event: 'model_turn_end',
+      });
+    }
+  }
+
+  if (toolResultsAwaitingFinalResponse) {
+    ctx.messages.push({
+      role: 'user',
+      content: [{ type: 'text', text: DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT }],
+    });
+    const finalized = await streamDesktopToolLoopFinalization({
+      adapter: ctx.adapter,
+      apiMessages: ctx.strategies.buildApiView(ctx.messages),
+      systemPrompt: ctx.systemPrompt,
+      signal: ctx.signal,
+      sessionId: ctx.sessionId,
+      turnId: ctx.turnId,
+      intentId: ctx.intentId,
+      stepId: ctx.stepId,
+      emitRuntimeEvent: ctx.emitRuntimeEvent,
+      onUsage: (chunk) => {
+        try {
+          const inputTkns = chunk.usage?.inputTokens ?? 0;
+          lastRequestInputTokens = inputTkns;
+          totalInputTokens += inputTkns;
+          totalOutputTokens += chunk.usage?.outputTokens ?? 0;
+          ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0);
+        } catch { /* usage capture failure is non-critical */ }
+      },
+    });
+    reply += finalized.reply;
+    ctx.messages.push({ role: 'assistant', content: finalized.assistantBlocks });
+  }
+
+  return {
+    reply,
+    totalToolCalls,
+    totalInputTokens,
+    totalOutputTokens,
+    referenceReads,
+    autoSteps,
+    skillNamesDetected,
+    skillTriggerType,
+    skillInvocation,
+  };
+}
+
 
 function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialRegistry): TaskRunner {
   const cwd = process.cwd();
@@ -3708,55 +4238,7 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
   // });
   // registry.registerTool(intentTools[0]);
 
-  // Register report_progress tool (TaskPanel progress reporting)
-  const reportProgressTool: Tool = {
-    permission: 'safe',
-    definition: {
-      name: 'report_progress',
-      description: '向用户报告任务计划和进度。在开始非trivial任务时调用此工具上报计划，每完成一步更新状态。简单问答不要调用。',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          steps: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                id: { type: 'string', description: '步骤稳定标识，如 step-1' },
-                label: { type: 'string', description: '面向用户的步骤描述，使用自然语言' },
-                status: { type: 'string', enum: ['planned', 'running', 'completed', 'blocked', 'failed'] },
-              },
-              required: ['id', 'label', 'status'],
-            },
-          },
-        },
-        required: ['steps'],
-      },
-    },
-    async execute(input) {
-      const { steps } = input as { steps: unknown };
-      if (!Array.isArray(steps)) {
-        return JSON.stringify({ ok: false, error: 'steps must be an array' });
-      }
-      const validStatuses = new Set(['planned', 'running', 'completed', 'blocked', 'failed']);
-      const validated: Array<{ id: string; label: string; status: string }> = [];
-      for (const s of steps) {
-        if (!s || !s.id || !s.label) continue;
-        validated.push({
-          id: String(s.id),
-          label: String(s.label),
-          status: validStatuses.has(s.status) ? s.status : 'planned',
-        });
-      }
-      const base = JSON.stringify({ ok: true, displayed_steps: validated.length, _validated: validated });
-      const allCompleted = validated.length > 0 && validated.every(s => s.status === 'completed');
-      if (allCompleted) {
-        return base + '\n\n⚠️ 所有步骤已标记完成。请回顾用户原始请求，确认是否所有要求的交付物都已生成。如果有遗漏，请追加新步骤继续执行，不要结束任务。';
-      }
-      return base;
-    },
-  };
-  registry.registerTool(reportProgressTool);
+  registry.registerTool(createReportProgressTool());
 
   // Register notebook (memory) tools — shared LayeredMemoryStore
   for (const tool of createNotebookTools(getDesktopMemoryStore(dataRoot))) {
@@ -3767,12 +4249,9 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
-    // Skill stats tracking
     const taskStartTime = Date.now();
     let skillNamesDetected: string[] = [];
     let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
-    let totalInputTokens = 0;
-    let totalOutputTokens = 0;
     if (!skillsLoaded) {
       try {
         const skills = await skillCatalog.reload();
@@ -3853,294 +4332,56 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
       role: 'user',
       content: userContent,
     }];
-    let reply = '';
-    let iteration = 0;
-    const TASK_TIMEOUT_MS = 30 * 60_000;
-    const taskDeadline = Date.now() + TASK_TIMEOUT_MS;
-    let totalToolCalls = 0;
-    let planEmitted = false;
-    const autoSteps: Array<{id: string; label: string; status: string}> = [];
-    let referenceReads = 0;
-    let lastRequestInputTokens = 0;
-    let toolResultsAwaitingFinalResponse = false;
     const contextLimit = getContextLimit(adapter.getModelName());
     const sessionDir = join(dataRoot, 'sessions', sessionId);
+    const TASK_TIMEOUT_MS = 30 * 60_000;
 
-    // Trace: first model turn start
-    if (skillInvocation) {
-      appendTrace(dataRoot, {
-        ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
-        stageId: skillInvocation.stageId, iteration: 1, event: 'model_turn_start',
-      });
-    }
-
-    while (iteration < DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS) {
-      if (signal.aborted) throw new Error('task cancelled');
-      if (Date.now() > taskDeadline) throw new Error('任务超时（30分钟），可能是网络不稳定或模型响应过慢。请检查网络后重试。');
-      iteration++;
-
-      // Budget check
-      if (skillInvocation) {
-        const budgetResult = checkBudget(skillInvocation, iteration, totalToolCalls, referenceReads, totalInputTokens, dataRoot);
-        if (!budgetResult.ok) {
-          appendTrace(dataRoot, {
-            ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
-            stageId: skillInvocation.stageId, iteration, event: 'model_turn_end',
-            durationMs: Date.now() - taskStartTime, details: `stopped: ${budgetResult.reason}`,
-          });
-          break;
-        }
-      }
-
-      // Trace: subsequent model turn start
-      if (skillInvocation && iteration > 1) {
-        appendTrace(dataRoot, {
-          ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
-          stageId: skillInvocation.stageId, iteration, event: 'model_turn_start',
-        });
-      }
-
-      const assistantBlocks: MessageBlock[] = [];
-
-      // Auto-compact: compress context if approaching limit
-      if (iteration > 1 && shouldAutoCompact(lastRequestInputTokens, contextLimit)) {
-        await compactConversation(messages, adapter, systemPrompt);
-      }
-
-      // Build API view: slice from last boundary + strip old thinking
-      const apiMessages = buildViewForAPI(messages, 2);
-      lastRequestInputTokens = 0;
-      for await (const chunk of adapter.stream(apiMessages, allToolDefs, systemPrompt)) {
-        if (signal.aborted) throw new Error('task cancelled');
-        if (chunk.type === 'text') {
-          const lastBlock = assistantBlocks[assistantBlocks.length - 1];
-          if (lastBlock?.type === 'text') {
-            lastBlock.text += chunk.delta;
-          } else {
-            assistantBlocks.push({ type: 'text', text: chunk.delta });
-          }
-          reply += chunk.delta;
-          emitRuntimeEvent({ type: 'assistant_delta', sessionId, turnId, intentId, stepId, delta: chunk.delta });
-        } else if (chunk.type === 'tool_use') {
-          assistantBlocks.push({ type: 'tool_use', id: chunk.id, name: chunk.name, input: chunk.input });
-        } else if (chunk.type === 'thinking') {
-          const lastBlock = assistantBlocks[assistantBlocks.length - 1];
-          if (lastBlock?.type === 'thinking') {
-            lastBlock.thinking += chunk.delta;
-          } else {
-            assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
-          }
-        } else if (chunk.type === 'usage') {
-          try {
-            const inputTkns = chunk.usage?.inputTokens ?? 0;
-            lastRequestInputTokens = inputTkns;
-            totalInputTokens += inputTkns;
-            totalOutputTokens += chunk.usage?.outputTokens ?? 0;
-          } catch { /* usage capture failure is non-critical */ }
-        }
-      }
-      messages.push({ role: 'assistant', content: assistantBlocks });
-      const toolCalls = assistantBlocks.filter((b): b is ToolCall => b.type === 'tool_use');
-      if (toolCalls.length === 0) {
-        if (assistantBlocks.some((block) => block.type === 'text' && block.text.trim())) {
-          toolResultsAwaitingFinalResponse = false;
-        }
-        break;
-      }
-      const toolResults: MessageBlock[] = [];
-      for (const toolCall of toolCalls) {
-        if (signal.aborted) throw new Error('task cancelled');
-        totalToolCalls++;
-        const runtimeToolInput = attachRuntimeToolRequestScope(toolCall.name, toolCall.input, sessionId);
-        // Dynamic TaskPanel: auto-track progress from tool calls (skip internal tools)
-        const isInternalTool = toolCall.name === 'report_progress' || toolCall.name === 'skill' || toolCall.name === 'skill_bundle_refs' || toolCall.name === 'skill_list';
-        if (!isInternalTool && !planEmitted) {
-          planEmitted = true;
-        }
-        emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id });
-
-        // Trace: tool start
-        if (skillInvocation) {
-          appendTrace(dataRoot, {
-            ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
-            stageId: skillInvocation.stageId, iteration, event: 'tool_start',
-            toolName: toolCall.name,
-          });
-        }
-
-        // Evidence tracking: count reference reads
-        if (isToolName(toolCall.name, 'read')) {
-          referenceReads++;
-          if (skillInvocation) {
-            appendTrace(dataRoot, {
-              ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
-              stageId: skillInvocation.stageId, iteration, event: 'tool_end',
-              toolName: 'read_reference', details: String((toolCall.input as Record<string, unknown>).file_path || ''),
-            });
-          }
-        }
-
-        // Track skill tool calls for stats and create invocation if missing
-        if (toolCall.name === 'skill') {
-          try {
-            const extracted = extractSkillNames(toolCall.input as Record<string, unknown>);
-            if (skillNamesDetected.length === 0 || skillTriggerType === 'auto') {
-              skillNamesDetected = extracted;
-              if (skillTriggerType === 'auto') skillTriggerType = 'tool_call';
-              // Create invocation for tool-called skills too
-              if (!skillInvocation) {
-                skillInvocation = buildSkillInvocation(extracted[0], skillCatalog, sessionId);
-                if (skillInvocation) {
-                  appendTrace(dataRoot, {
-                    ts: Date.now(), taskId: sessionId, skillName: extracted[0],
-                    event: 'skill_invoked', details: 'tool_call',
-                  });
-                }
-              }
-            }
-          } catch { /* non-critical */ }
-        }
-        const toolStartedAt = Date.now();
-        let { ok, result } = await executeDesktopTaskTool({ ...toolCall, input: runtimeToolInput }, {
-          registry,
-          taskId,
-          materials,
-          materialRegistry,
-        });
-        if (ok) {
-          emitRuntimeEvent({ type: 'post_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
-        } else {
-          emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId, turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id, error: result.slice(0, 10000) });
-        }
-        // Dynamic TaskPanel: emit auto-progress from tool calls (skip internal tools)
-        if (!isInternalTool) {
-          const label = toolNameToLabel(toolCall.name, toolCall.input as Record<string, unknown>);
-          autoSteps.push({ id: `auto-${totalToolCalls}`, label, status: ok ? 'completed' : 'failed' });
-          emitRuntimeEvent({ type: 'progress_plan_reported', sessionId, steps: autoSteps });
-        }
-
-        // Trace: tool end
-        if (skillInvocation) {
-          appendTrace(dataRoot, {
-            ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
-            stageId: skillInvocation.stageId, iteration, event: 'tool_end',
-            toolName: toolCall.name, outputBytes: result.length,
-          });
-        }
-
-        // Emit file_changed for Write tool so canvas can track generated files
-        const writeArtifactPath = resolveWriteToolArtifactPath(toolCall.name, runtimeToolInput);
-        if (ok && writeArtifactPath) {
-          const filePath = writeArtifactPath;
-          emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
-          // Emit artifact_recorded so result.artifacts is populated
-          const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
-          const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
-          const fileName = filePath.split('/').pop() || filePath;
-          emitRuntimeEvent({
-            type: 'artifact_recorded',
-            sessionId,
-            turnId,
-            intentId,
-            stageId: stepId,
-            artifactId: `artifact_${toolCall.id}`,
-            label: fileName,
-            kind,
-            path: filePath,
-            creator: 'agent',
-          });
-          // Evidence: stage artifact
-          if (skillInvocation) {
-            appendTrace(dataRoot, {
-              ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
-              stageId: skillInvocation.stageId, iteration, event: 'tool_end',
-              toolName: 'artifact_written', details: filePath,
-            });
-          }
-        }
-        // Detect MCP tools that write an artifact path through result or input.
-        if (ok && !isToolName(toolCall.name, 'write')) {
-          const filePath = resolveToolOutputArtifactPath(runtimeToolInput, result, { toolName: toolCall.name, toolStartedAt });
-          if (filePath) {
-            emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
-            const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
-            const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
-            const fileName = filePath.split('/').pop() || filePath;
-            emitRuntimeEvent({
-              type: 'artifact_recorded',
-              sessionId,
-              turnId,
-              intentId,
-              stageId: stepId,
-              artifactId: `artifact_${toolCall.id}`,
-              label: fileName,
-              kind,
-              path: filePath,
-              creator: 'agent',
-            });
-          }
-        }
-        // Emit progress_plan_reported for TaskPanel
-        if (ok && toolCall.name === 'report_progress') {
-          try {
-            const parsed = JSON.parse(result);
-            if (parsed._validated) {
-              emitRuntimeEvent({ type: 'progress_plan_reported', sessionId, steps: parsed._validated });
-              // Clean internal field from LLM-visible result
-              result = JSON.stringify({ ok: true, displayed_steps: parsed.displayed_steps });
-            }
-          } catch { /* non-critical */ }
-        }
-        const { content: resultContent } = maybePersistToolResult(result, toolCall.name, toolCall.id, sessionDir);
-        toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: resultContent, is_error: !ok });
-      }
-      messages.push({ role: 'user', content: toolResults });
-      toolResultsAwaitingFinalResponse = true;
-
-      // Trace: model turn end
-      if (skillInvocation) {
-        appendTrace(dataRoot, {
-          ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
-          stageId: skillInvocation.stageId, iteration, event: 'model_turn_end',
-        });
-      }
-    }
-    if (toolResultsAwaitingFinalResponse) {
-      messages.push({
-        role: 'user',
-        content: [{ type: 'text', text: DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT }],
-      });
-      const finalized = await streamDesktopToolLoopFinalization({
-        adapter,
-        apiMessages: buildViewForAPI(messages, 2),
-        systemPrompt,
-        signal,
-        sessionId,
-        turnId,
-        intentId,
-        stepId,
-        emitRuntimeEvent,
-        onUsage: (chunk) => {
-          try {
-            const inputTkns = chunk.usage?.inputTokens ?? 0;
-            lastRequestInputTokens = inputTkns;
-            totalInputTokens += inputTkns;
-            totalOutputTokens += chunk.usage?.outputTokens ?? 0;
-          } catch { /* usage capture failure is non-critical */ }
+    const loopResult = await runDesktopToolLoop({
+      adapter,
+      systemPrompt,
+      messages,
+      allToolDefs,
+      registry,
+      signal,
+      taskDeadline: Date.now() + TASK_TIMEOUT_MS,
+      sessionId,
+      turnId,
+      intentId,
+      stepId,
+      taskId,
+      materials,
+      materialRegistry,
+      emitRuntimeEvent,
+      skillInvocation,
+      skillCatalog,
+      dataRoot,
+      taskStartTime,
+      strategies: {
+        compact: {
+          enabled: true,
+          shouldCompact: (inputTokens) => shouldAutoCompact(inputTokens, contextLimit),
+          doCompact: (msgs) => compactConversation(msgs, adapter, systemPrompt),
         },
-      });
-      reply += finalized.reply;
-      messages.push({ role: 'assistant', content: finalized.assistantBlocks });
-    }
+        buildApiView: (msgs) => buildViewForAPI(msgs, 2),
+        processToolResult: (result, _toolName, toolUseId) => maybePersistToolResult(result, _toolName, toolUseId, sessionDir).content,
+        trackAutoProgress: true,
+        trackReferenceReads: true,
+        emitSkillArtifactTrace: true,
+      },
+    });
+
+    const { reply, totalToolCalls, totalInputTokens, totalOutputTokens, referenceReads } = loopResult;
+    skillNamesDetected = loopResult.skillNamesDetected.length > 0 ? loopResult.skillNamesDetected : skillNamesDetected;
+    skillTriggerType = loopResult.skillTriggerType !== 'auto' ? loopResult.skillTriggerType : skillTriggerType;
+    skillInvocation = loopResult.skillInvocation ?? skillInvocation;
+
     emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note: reply.trim() || '模型没有返回内容。' });
-    // Record skill execution stats
     if (skillNamesDetected.length > 0) {
       try {
-        const taskId = sessionId;
         await appendExecRecord(dataRoot, {
           id: `exec_${taskStartTime.toString(36)}`,
           skillNames: skillNamesDetected,
-          taskId,
+          taskId: sessionId,
           startTime: taskStartTime,
           endTime: Date.now(),
           durationMs: Date.now() - taskStartTime,
@@ -4152,7 +4393,6 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
         });
       } catch { /* stats recording failure is non-critical */ }
     }
-    // Trace: skill execution complete
     if (skillInvocation) {
       appendTrace(dataRoot, {
         ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
@@ -4946,56 +5186,7 @@ function createDesktopModelRunnerWithRegistry(
   registerKSwarmTools(registry, kswarmService, createProjectToolOptions);
   registry.registerTool(createReportArtifactTool());
 
-  // Register report_progress tool (TaskPanel progress reporting)
-  const reportProgressTool: Tool = {
-    permission: 'safe',
-    definition: {
-      name: 'report_progress',
-      description: '向用户报告任务计划和进度。在开始非trivial任务时调用此工具上报计划，每完成一步更新状态。简单问答不要调用。',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          steps: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                id: { type: 'string', description: '步骤稳定标识，如 step-1' },
-                label: { type: 'string', description: '面向用户的步骤描述，使用自然语言' },
-                status: { type: 'string', enum: ['planned', 'running', 'completed', 'blocked', 'failed'] },
-              },
-              required: ['id', 'label', 'status'],
-            },
-          },
-        },
-        required: ['steps'],
-      },
-    },
-    async execute(input) {
-      const { steps } = input as { steps: unknown };
-      if (!Array.isArray(steps)) {
-        return JSON.stringify({ ok: false, error: 'steps must be an array' });
-      }
-      const validStatuses = new Set(['planned', 'running', 'completed', 'blocked', 'failed']);
-      const validated: Array<{ id: string; label: string; status: string }> = [];
-      for (const s of steps) {
-        if (!s || !s.id || !s.label) continue;
-        validated.push({
-          id: String(s.id),
-          label: String(s.label),
-          status: validStatuses.has(s.status) ? s.status : 'planned',
-        });
-      }
-      // Result is stored; event emission happens in the tool loop via emitRuntimeEvent
-      const base = JSON.stringify({ ok: true, displayed_steps: validated.length, _validated: validated });
-      const allCompleted = validated.length > 0 && validated.every(s => s.status === 'completed');
-      if (allCompleted) {
-        return base + '\n\n⚠️ 所有步骤已标记完成。请回顾用户原始请求，确认是否所有要求的交付物都已生成。如果有遗漏，请追加新步骤继续执行，不要结束任务。';
-      }
-      return base;
-    },
-  };
-  registry.registerTool(reportProgressTool);
+  registry.registerTool(createReportProgressTool());
 
   // Register notebook (memory) tools — shared LayeredMemoryStore
   for (const tool of createNotebookTools(getDesktopMemoryStore(dataRoot))) {
@@ -5006,12 +5197,9 @@ function createDesktopModelRunnerWithRegistry(
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
-    // Skill stats tracking
     const taskStartTime = Date.now();
     let skillNamesDetected: string[] = [];
     let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
-    let totalInputTokens = 0;
-    let totalOutputTokens = 0;
     if (!skillsLoaded) {
       try {
         const skills = await skillCatalog.reload();
@@ -5092,224 +5280,54 @@ function createDesktopModelRunnerWithRegistry(
       role: 'user',
       content: userContent,
     }];
-    let reply = '';
-    let iteration = 0;
     const TASK_TIMEOUT_MS = 30 * 60_000;
-    const taskDeadline = Date.now() + TASK_TIMEOUT_MS;
-    let totalToolCalls = 0;
-    let planEmitted = false;
-    const autoSteps: Array<{id: string; label: string; status: string}> = [];
-    let referenceReads = 0;
-    let toolResultsAwaitingFinalResponse = false;
 
-    // Trace: first model turn start
-    if (skillInvocation) {
-      appendTrace(dataRoot, {
-        ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
-        stageId: skillInvocation.stageId, iteration: 1, event: 'model_turn_start',
-      });
-    }
-
-    while (iteration < DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS) {
-      if (signal.aborted) throw new Error('task cancelled');
-      if (Date.now() > taskDeadline) throw new Error('任务超时（30分钟），可能是网络不稳定或模型响应过慢。请检查网络后重试。');
-      iteration++;
-
-      // Budget check
-      if (skillInvocation) {
-        const budgetResult = checkBudget(skillInvocation, iteration, totalToolCalls, referenceReads, totalInputTokens, dataRoot);
-        if (!budgetResult.ok) {
-          appendTrace(dataRoot, {
-            ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
-            stageId: skillInvocation.stageId, iteration, event: 'model_turn_end',
-            durationMs: Date.now() - taskStartTime, details: `stopped: ${budgetResult.reason}`,
-          });
-          break;
-        }
-      }
-
-      // Trace: subsequent model turn start
-      if (skillInvocation && iteration > 1) {
-        appendTrace(dataRoot, {
-          ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,
-          stageId: skillInvocation.stageId, iteration, event: 'model_turn_start',
-        });
-      }
-
-      const assistantBlocks: MessageBlock[] = [];
-
-      // Pass full messages to API (no compact in skill runner)
-      for await (const chunk of adapter.stream(messages, allToolDefs, systemPrompt)) {
-        if (signal.aborted) throw new Error('task cancelled');
-        if (chunk.type === 'text') {
-          const lastBlock = assistantBlocks[assistantBlocks.length - 1];
-          if (lastBlock?.type === 'text') {
-            lastBlock.text += chunk.delta;
-          } else {
-            assistantBlocks.push({ type: 'text', text: chunk.delta });
-          }
-          reply += chunk.delta;
-          emitRuntimeEvent({ type: 'assistant_delta', sessionId, turnId, intentId, stepId, delta: chunk.delta });
-        } else if (chunk.type === 'tool_use') {
-          assistantBlocks.push({ type: 'tool_use', id: chunk.id, name: chunk.name, input: chunk.input });
-        } else if (chunk.type === 'thinking') {
-          const lastBlock = assistantBlocks[assistantBlocks.length - 1];
-          if (lastBlock?.type === 'thinking') {
-            lastBlock.thinking += chunk.delta;
-          } else {
-            assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
-          }
-        } else if (chunk.type === 'usage') {
-          try {
-            const inputTkns = chunk.usage?.inputTokens ?? 0;
-            totalInputTokens += inputTkns;
-            totalOutputTokens += chunk.usage?.outputTokens ?? 0;
-          } catch { /* usage capture failure is non-critical */ }
-        }
-      }
-      messages.push({ role: 'assistant', content: assistantBlocks });
-      const toolCalls = assistantBlocks.filter((b): b is ToolCall => b.type === 'tool_use');
-      if (toolCalls.length === 0) {
-        if (assistantBlocks.some((block) => block.type === 'text' && block.text.trim())) {
-          toolResultsAwaitingFinalResponse = false;
-        }
-        break;
-      }
-      const toolResults: MessageBlock[] = [];
-      for (const toolCall of toolCalls) {
-        if (signal.aborted) throw new Error('task cancelled');
-        totalToolCalls++;
-        const runtimeToolInput = attachRuntimeToolRequestScope(toolCall.name, toolCall.input, sessionId);
-        // Dynamic TaskPanel: auto-track progress from tool calls (skip internal tools)
-        const isInternalTool = toolCall.name === 'report_progress' || toolCall.name === 'skill' || toolCall.name === 'skill_bundle_refs' || toolCall.name === 'skill_list';
-        if (!isInternalTool && !planEmitted) {
-          planEmitted = true;
-        }
-        emitRuntimeEvent({ type: 'pre_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id });
-        // Track skill tool calls for stats and create invocation if missing
-        if (toolCall.name === 'skill') {
-          try {
-            const extracted = extractSkillNames(toolCall.input as Record<string, unknown>);
-            if (skillNamesDetected.length === 0 || skillTriggerType === 'auto') {
-              skillNamesDetected = extracted;
-              if (skillTriggerType === 'auto') skillTriggerType = 'tool_call';
-              // Create invocation for tool-called skills too
-              if (!skillInvocation) {
-                skillInvocation = buildSkillInvocation(extracted[0], skillCatalog, sessionId);
-                if (skillInvocation) {
-                  appendTrace(dataRoot, {
-                    ts: Date.now(), taskId: sessionId, skillName: extracted[0],
-                    event: 'skill_invoked', details: 'tool_call',
-                  });
-                }
-              }
-            }
-          } catch { /* non-critical */ }
-        }
-        const toolStartedAt = Date.now();
-        let { ok, result } = await executeDesktopTaskTool({ ...toolCall, input: runtimeToolInput }, {
-          registry,
-          taskId,
-          materials,
-          materialRegistry,
-        });
-        if (ok) {
-          emitRuntimeEvent({ type: 'post_tool_use', sessionId, turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
-        } else {
-          emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId, turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id, error: result.slice(0, 10000) });
-        }
-        const writeArtifactPath = resolveWriteToolArtifactPath(toolCall.name, runtimeToolInput);
-        if (ok && writeArtifactPath) {
-          const filePath = writeArtifactPath;
-          emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
-          const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
-          const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
-          const fileName = filePath.split('/').pop() || filePath;
-          emitRuntimeEvent({
-            type: 'artifact_recorded',
-            sessionId,
-            turnId,
-            intentId,
-            stageId: stepId,
-            artifactId: `artifact_${toolCall.id}`,
-            label: fileName,
-            kind,
-            path: filePath,
-            creator: 'agent',
-          });
-        }
-        // Detect MCP tools that write an artifact path through result or input.
-        if (ok && !isToolName(toolCall.name, 'write')) {
-          const filePath = resolveToolOutputArtifactPath(runtimeToolInput, result, { toolName: toolCall.name, toolStartedAt });
-          if (filePath) {
-            emitRuntimeEvent({ type: 'file_changed', sessionId, filePath, event: 'add' });
-            const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
-            const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
-            const fileName = filePath.split('/').pop() || filePath;
-            emitRuntimeEvent({
-              type: 'artifact_recorded',
-              sessionId,
-              turnId,
-              intentId,
-              stageId: stepId,
-              artifactId: `artifact_${toolCall.id}`,
-              label: fileName,
-              kind,
-              path: filePath,
-              creator: 'agent',
-            });
-          }
-        }
-        // Emit progress_plan_reported for TaskPanel
-        if (ok && toolCall.name === 'report_progress') {
-          try {
-            const parsed = JSON.parse(result);
-            if (parsed._validated) {
-              emitRuntimeEvent({ type: 'progress_plan_reported', sessionId, steps: parsed._validated });
-              // Clean internal field from LLM-visible result
-              result = JSON.stringify({ ok: true, displayed_steps: parsed.displayed_steps });
-            }
-          } catch { /* non-critical */ }
-        }
-        toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: result.slice(0, 50000), is_error: !ok });
-      }
-      messages.push({ role: 'user', content: toolResults });
-      toolResultsAwaitingFinalResponse = true;
-    }
-    if (toolResultsAwaitingFinalResponse) {
-      messages.push({
-        role: 'user',
-        content: [{ type: 'text', text: DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT }],
-      });
-      const finalized = await streamDesktopToolLoopFinalization({
-        adapter,
-        apiMessages: messages,
-        systemPrompt,
-        signal,
-        sessionId,
-        turnId,
-        intentId,
-        stepId,
-        emitRuntimeEvent,
-        onUsage: (chunk) => {
-          try {
-            totalInputTokens += chunk.usage?.inputTokens ?? 0;
-            totalOutputTokens += chunk.usage?.outputTokens ?? 0;
-          } catch { /* usage capture failure is non-critical */ }
+    const loopResult = await runDesktopToolLoop({
+      adapter,
+      systemPrompt,
+      messages,
+      allToolDefs,
+      registry,
+      signal,
+      taskDeadline: Date.now() + TASK_TIMEOUT_MS,
+      sessionId,
+      turnId,
+      intentId,
+      stepId,
+      taskId,
+      materials,
+      materialRegistry,
+      emitRuntimeEvent,
+      skillInvocation,
+      skillCatalog,
+      dataRoot,
+      taskStartTime,
+      strategies: {
+        compact: {
+          enabled: false,
+          shouldCompact: () => false,
+          doCompact: async () => {},
         },
-      });
-      reply += finalized.reply;
-      messages.push({ role: 'assistant', content: finalized.assistantBlocks });
-    }
+        buildApiView: (msgs) => msgs,
+        processToolResult: (result) => result.slice(0, 50000),
+        trackAutoProgress: false,
+        trackReferenceReads: false,
+        emitSkillArtifactTrace: false,
+      },
+    });
+
+    const { reply, totalToolCalls, totalInputTokens, totalOutputTokens, referenceReads } = loopResult;
+    skillNamesDetected = loopResult.skillNamesDetected.length > 0 ? loopResult.skillNamesDetected : skillNamesDetected;
+    skillTriggerType = loopResult.skillTriggerType !== 'auto' ? loopResult.skillTriggerType : skillTriggerType;
+    skillInvocation = loopResult.skillInvocation ?? skillInvocation;
+
     emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note: reply.trim() || '模型没有返回内容。' });
-    // Record skill execution stats
     if (skillNamesDetected.length > 0) {
       try {
-        const taskId = sessionId;
         await appendExecRecord(dataRoot, {
           id: `exec_${taskStartTime.toString(36)}`,
           skillNames: skillNamesDetected,
-          taskId,
+          taskId: sessionId,
           startTime: taskStartTime,
           endTime: Date.now(),
           durationMs: Date.now() - taskStartTime,
@@ -5321,7 +5339,6 @@ function createDesktopModelRunnerWithRegistry(
         });
       } catch { /* stats recording failure is non-critical */ }
     }
-    // Trace: skill execution complete
     if (skillInvocation) {
       appendTrace(dataRoot, {
         ts: Date.now(), taskId: sessionId, skillName: skillInvocation.primarySkill,

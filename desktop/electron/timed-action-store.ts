@@ -97,7 +97,8 @@ export class TimedActionStore {
       runCount: input.runCount ?? 0,
       consecutiveFailures: input.consecutiveFailures ?? 0,
       lastRuntimeTaskId: input.lastRuntimeTaskId,
-      userApprovedAuto: false,
+      // SQLite column default is 0 (for historical rows); new tasks default to auto-execute.
+      userApprovedAuto: true,
       createdAt: now,
       updatedAt: now,
     };
@@ -107,11 +108,12 @@ export class TimedActionStore {
         id, title, description, trigger_kind, trigger_json, executor_kind, executor_json, policy_json,
         status, source, created_by_task_id, next_due_at, last_due_at, run_count,
         consecutive_failures, locked_run_id, locked_at, last_runtime_task_id, last_error,
-        created_at, updated_at
+        user_approved_auto, created_at, updated_at
       ) values (
         @id, @title, @description, @triggerKind, @triggerJson, @executorKind, @executorJson, @policyJson,
         @status, @source, @createdByTaskId, @nextDueAt, @lastDueAt, @runCount,
-        @consecutiveFailures, null, null, @lastRuntimeTaskId, null, @createdAt, @updatedAt
+        @consecutiveFailures, null, null, @lastRuntimeTaskId, null,
+        @userApprovedAuto, @createdAt, @updatedAt
       )
     `).run({
       id: record.id,
@@ -130,6 +132,7 @@ export class TimedActionStore {
       runCount: record.runCount,
       consecutiveFailures: record.consecutiveFailures,
       lastRuntimeTaskId: record.lastRuntimeTaskId ?? null,
+      userApprovedAuto: record.userApprovedAuto ? 1 : 0,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     });

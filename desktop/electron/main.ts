@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, shell, nativeImage, Menu } from 'electron'
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, mkdirSync } from 'node:fs';
-import { createDesktopServices } from './desktop-services.js';
+import { createDesktopServices, resumeOneScriptWorkflow } from './desktop-services.js';
 import { registerDesktopIpc } from './ipc.js';
 import {
   buildBrowserWindowOptions,
@@ -90,6 +90,8 @@ async function createWindow(): Promise<BrowserWindow> {
   ipcMain.handle('desktop:kswarm:start', () => kswarmService.start());
   ipcMain.handle('desktop:kswarm:stop', () => kswarmService.stop());
   ipcMain.handle('desktop:kswarm:restart', () => kswarmService.restart());
+  ipcMain.handle('desktop:kswarm:resumeWorkflowRun', (_event, input) =>
+    resumeOneScriptWorkflow(kswarmService, input?.projectId, input?.workflowRunId));
   let restartRuntimeBridgeService: () => Promise<void> = async () => {};
   ipcMain.handle('desktop:services:getStatus', async () => {
     const snapshot = await kswarmService.getServiceStatus();
@@ -130,7 +132,11 @@ async function createWindow(): Promise<BrowserWindow> {
   await registerDesktopIpc(ipcMain, window, services);
   debugMain('createWindow:ipc-registered');
 
-  await services.recoverStaleTasks();
+  try {
+    await services.recoverStaleTasks();
+  } catch (err) {
+    console.error('[main] recoverStaleTasks failed (startup continues):', err);
+  }
 
   ipcMain.handle('desktop:getConnectorsConfig', () => services.getConnectorsConfig());
   ipcMain.handle('desktop:saveConnectorsConfig', (_event, input) => services.setConnectorsConfig(input));

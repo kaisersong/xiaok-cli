@@ -98,6 +98,7 @@ export const PRELOAD_API_KEYS = [
   'kswarmStart',
   'kswarmStop',
   'kswarmRestart',
+  'kswarmResumeWorkflowRun',
   'onKSwarmStatus',
   'exportTraceBundle',
   'diagnose',
@@ -366,7 +367,7 @@ export interface DesktopApi {
     filePaths: string[];
     context?: TaskCreateContext;
   }): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
-  subscribeTask(taskId: string, handler: (event: DesktopTaskEvent) => void): () => void;
+  subscribeTask(taskId: string, handler: (event: DesktopTaskEvent) => void, sinceIndex?: number): () => void;
   answerQuestion(input: { taskId: string; answer: UserAnswer }): Promise<void>;
   cancelTask(taskId: string): Promise<void>;
   getActiveTask(): Promise<{ taskId: string } | null>;
@@ -433,6 +434,7 @@ export interface DesktopApi {
   kswarmStart(): Promise<void>;
   kswarmStop(): Promise<void>;
   kswarmRestart(): Promise<void>;
+  kswarmResumeWorkflowRun(input: { projectId: string; workflowRunId: string }): Promise<{ restored: boolean; reason?: string; jobId?: string }>;
   onKSwarmStatus(handler: (status: KSwarmServiceStatus) => void): () => void;
   exportTraceBundle(input: DesktopTraceTarget): Promise<{ ok: boolean; path?: string; error?: string }>;
   diagnose(input: DesktopTraceTarget): Promise<unknown>;
@@ -497,13 +499,13 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     importMaterial: (input) => ipcRenderer.invoke('desktop:importMaterial', input) as ReturnType<DesktopApi['importMaterial']>,
     createTask: (input) => ipcRenderer.invoke('desktop:createTask', input) as ReturnType<DesktopApi['createTask']>,
     createTaskWithFiles: (input) => ipcRenderer.invoke('desktop:createTaskWithFiles', input) as ReturnType<DesktopApi['createTaskWithFiles']>,
-    subscribeTask(taskId, handler) {
+    subscribeTask(taskId, handler, sinceIndex) {
       const channel = `desktop:taskEvent:${taskId}`;
       const listener = (_event: unknown, payload: unknown) => {
         handler(payload as DesktopTaskEvent);
       };
       ipcRenderer.on(channel, listener);
-      void ipcRenderer.invoke('desktop:subscribeTask', { taskId });
+      void ipcRenderer.invoke('desktop:subscribeTask', typeof sinceIndex === 'number' ? { taskId, sinceIndex } : { taskId });
       return () => {
         ipcRenderer.off(channel, listener);
       };
@@ -577,6 +579,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     kswarmStart: () => ipcRenderer.invoke('desktop:kswarm:start') as Promise<void>,
     kswarmStop: () => ipcRenderer.invoke('desktop:kswarm:stop') as Promise<void>,
     kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart') as Promise<void>,
+    kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input) as Promise<{ restored: boolean; reason?: string; jobId?: string }>,
     onKSwarmStatus(handler) {
       const channel = 'desktop:kswarm:statusChange';
       const listener = (_event: unknown, payload: unknown) => {

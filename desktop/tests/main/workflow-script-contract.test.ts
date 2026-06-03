@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 
 import {
   createWorkflowScriptPreview,
+  hashWorkflowScript,
   normalizeWorkflowScript,
   parseWorkflowScript,
   validateWorkflowScript,
@@ -145,5 +147,57 @@ await parallel([
       ok: false,
       error: 'workflow_script_parallel_thunk_required',
     });
+  });
+});
+
+// SHARED VECTORS — keep identical with
+// kswarm/test/workflow-script-source.test.js (R1: dual-impl hash consistency).
+const SHARED_VECTORS = [
+  {
+    label: 'plain script',
+    input: 'export const meta = { name: "demo" };\nphase("scan");',
+    normalized: 'export const meta = { name: "demo" };\nphase("scan");',
+  },
+  {
+    label: 'leading/trailing whitespace trimmed',
+    input: '\n\n  export const meta = { name: "demo" };  \n\n',
+    normalized: 'export const meta = { name: "demo" };',
+  },
+  {
+    label: 'js fenced block stripped',
+    input: '```js\nexport const meta = { name: "demo" };\nphase("scan");\n```',
+    normalized: 'export const meta = { name: "demo" };\nphase("scan");',
+  },
+  {
+    label: 'javascript fenced block stripped',
+    input: '```javascript\nexport const meta = { name: "demo" };\n```',
+    normalized: 'export const meta = { name: "demo" };',
+  },
+  {
+    label: 'bare fenced block stripped',
+    input: '```\nexport const meta = { name: "demo" };\n```',
+    normalized: 'export const meta = { name: "demo" };',
+  },
+];
+
+describe('workflow script source hashing (R1 shared vectors)', () => {
+  it('normalizes shared vectors identically to the kswarm pure-node impl', () => {
+    for (const vector of SHARED_VECTORS) {
+      expect(normalizeWorkflowScript(vector.input), vector.label).toBe(vector.normalized);
+    }
+  });
+
+  it('hashes normalized source as plain sha256 for every shared vector', () => {
+    for (const vector of SHARED_VECTORS) {
+      const expected = createHash('sha256').update(vector.normalized).digest('hex');
+      expect(hashWorkflowScript(vector.normalized), vector.label).toBe(expected);
+    }
+  });
+
+  it('produces identical hashes for fenced and unfenced equivalents', () => {
+    const fenced = '```js\nexport const meta = { name: "demo" };\nphase("scan");\n```';
+    const unfenced = 'export const meta = { name: "demo" };\nphase("scan");';
+    expect(hashWorkflowScript(normalizeWorkflowScript(fenced)))
+      .toBe(hashWorkflowScript(normalizeWorkflowScript(unfenced)));
   });
 });

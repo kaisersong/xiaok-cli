@@ -16,10 +16,10 @@ afterEach(() => {
   cleanup();
 });
 
-function renderKanban(tasks: any[], onStartTaskWorkflow?: (taskId: string) => void, projectOverrides: Record<string, unknown> = {}) {
+function renderKanban(tasks: any[], onStartTaskWorkflow?: (taskId: string) => void, projectOverrides: Record<string, unknown> = {}, workflowRunningOwnsProgress = false) {
   return render(
     <LocaleProvider>
-      <KanbanBoard project={{ id: 'proj-story', name: '写一个AI工作小故事', status: 'active', tasks, ...projectOverrides } as any} onStartTaskWorkflow={onStartTaskWorkflow} />
+      <KanbanBoard project={{ id: 'proj-story', name: '写一个AI工作小故事', status: 'active', tasks, ...projectOverrides } as any} onStartTaskWorkflow={onStartTaskWorkflow} workflowRunningOwnsProgress={workflowRunningOwnsProgress} />
     </LocaleProvider>
   );
 }
@@ -178,5 +178,42 @@ describe('KSwarm kanban failure visibility', () => {
     const pending = screen.getByTestId('kanban-column-pending');
     expect(within(pending).getByText('工作流执行')).toBeInTheDocument();
     expect(within(pending).getByText('高质量')).toBeInTheDocument();
+  });
+});
+
+describe('KSwarm kanban dynamic workflow progress display', () => {
+  it('keeps pending tasks in the pending column when no dynamic workflow is running', () => {
+    renderKanban([
+      { id: 'pending-task', title: '动态待处理任务', status: 'pending', assignedAgent: 'worker' },
+    ], undefined, {}, false);
+
+    const pending = screen.getByTestId('kanban-column-pending');
+    const active = screen.getByTestId('kanban-column-active');
+    expect(within(pending).getByText('动态待处理任务')).toBeInTheDocument();
+    expect(within(active).queryByText('动态待处理任务')).not.toBeInTheDocument();
+  });
+
+  it('surfaces pending tasks in the active column while a dynamic workflow is running', () => {
+    renderKanban([
+      { id: 'pending-task', title: '动态待处理任务', status: 'pending', assignedAgent: 'worker' },
+    ], undefined, {}, true);
+
+    const pending = screen.getByTestId('kanban-column-pending');
+    const active = screen.getByTestId('kanban-column-active');
+    expect(within(active).getByText('动态待处理任务')).toBeInTheDocument();
+    expect(within(pending).queryByText('动态待处理任务')).not.toBeInTheDocument();
+  });
+
+  it('does not move non-pending tasks while a dynamic workflow is running', () => {
+    renderKanban([
+      { id: 'blocked-task', title: '阻塞任务', status: 'blocked', assignedAgent: 'worker', blockedReason: '节点阻塞' },
+      { id: 'done-task', title: '完成任务', status: 'done', assignedAgent: 'worker' },
+    ], undefined, {}, true);
+
+    const active = screen.getByTestId('kanban-column-active');
+    const done = screen.getByTestId('kanban-column-done');
+    expect(within(done).getByText('阻塞任务')).toBeInTheDocument();
+    expect(within(done).getByText('完成任务')).toBeInTheDocument();
+    expect(within(active).queryByText('阻塞任务')).not.toBeInTheDocument();
   });
 });

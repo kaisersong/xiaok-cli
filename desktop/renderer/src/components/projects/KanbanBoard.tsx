@@ -13,6 +13,10 @@ import { ArtifactPreviewModal } from './ArtifactPreviewModal';
 interface KanbanBoardProps {
   project: KSwarmProject;
   onStartTaskWorkflow?: (taskId: string) => void;
+  // When a dynamic (script_generated) project workflow is running, kanban tasks
+  // are never transitioned by the workflow and stay 'pending'. Display them as
+  // 进行中 so the board reflects that the project is actively executing.
+  workflowRunningOwnsProgress?: boolean;
 }
 
 interface Column {
@@ -387,7 +391,7 @@ function AddTaskForm({ projectId, onDone }: { projectId: string; onDone(): void 
   );
 }
 
-export function KanbanBoard({ project, onStartTaskWorkflow }: KanbanBoardProps) {
+export function KanbanBoard({ project, onStartTaskWorkflow, workflowRunningOwnsProgress = false }: KanbanBoardProps) {
   const { t } = useLocale();
   const tasks = useMemo(() => (project.tasks || []).filter(isRenderableTask), [project.tasks]);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -430,7 +434,15 @@ export function KanbanBoard({ project, onStartTaskWorkflow }: KanbanBoardProps) 
       <div className="flex flex-1 gap-4 overflow-x-auto px-6 pb-6">
         {COLUMNS.map(col => {
           const Icon = col.icon;
-          const colTasks = tasks.filter(t => col.statuses.includes(t.status))
+          const matchesColumn = (task: KSwarmTask) => {
+            if (workflowRunningOwnsProgress && task.status === 'pending') {
+              // Display-only: surface pending tasks as 进行中 while a dynamic
+              // workflow runs (it never transitions kanban tasks itself).
+              return col.id === 'active';
+            }
+            return col.statuses.includes(task.status);
+          };
+          const colTasks = tasks.filter(matchesColumn)
             .sort((a, b) => {
               // In done column: done first, stopped statuses after
               if (col.id === 'done') {

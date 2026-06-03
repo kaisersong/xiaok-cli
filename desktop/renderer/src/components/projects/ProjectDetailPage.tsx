@@ -286,6 +286,16 @@ function buildSwarmContinueContext(detail: ProjectFullDetail, intervention: Proj
   const downstreamBlockedCount = typeof downstreamRaw === 'number'
     ? downstreamRaw
     : Number(downstreamRaw || 0) || 0;
+  const isScriptWorkflow = intervention.kind === 'script_workflow';
+  const resumeWorkflowRunId = isScriptWorkflow
+    ? (toText(intervention.workflowRunId) || toText(primaryAction?.params?.resumeWorkflowRunId) || '')
+    : '';
+  const strategy = isScriptWorkflow
+    ? 'resume_workflow'
+    : (primaryAction?.strategy || 'needs_conversation');
+  const availableTools = isScriptWorkflow
+    ? ['get_dynamic_workflow_status', 'run_dynamic_workflow_script']
+    : ['continue_project', 'repair_project_task_from_file'];
   return {
     projectId,
     projectName: toText(actionContext.projectName) || detail.project.name,
@@ -296,14 +306,16 @@ function buildSwarmContinueContext(detail: ProjectFullDetail, intervention: Proj
     headline: intervention.headline || '需要处理',
     lastFailure,
     downstreamBlockedCount,
-    strategy: primaryAction?.strategy || 'needs_conversation',
+    strategy,
+    workflowKind: isScriptWorkflow ? 'script_workflow' : 'task_board',
+    resumeWorkflowRunId: resumeWorkflowRunId || undefined,
     expectedPrimaryTaskId: taskId || undefined,
     expectedTaskUpdatedAt: primaryAction?.taskUpdatedAt ?? intervention.lastEventAt ?? undefined,
     continueTool: 'continue_project',
     continueEndpoint: `/projects/${projectId}/continue`,
     repairTool: 'repair_project_task_from_file',
     repairEndpoint: `/projects/${projectId}/intervention/resolve`,
-    availableTools: ['continue_project', 'repair_project_task_from_file'],
+    availableTools,
   };
 }
 
@@ -324,7 +336,18 @@ function buildXiaokInterventionDraft(context: ReturnType<typeof buildSwarmContin
   lines.push(`后续影响：后续 ${context.downstreamBlockedCount || 0} 个任务正在等待。`);
   lines.push(`建议策略：${context.strategy}`);
   lines.push('');
-  if (context.strategy === 'needs_conversation') {
+  if (context.strategy === 'resume_workflow') {
+    lines.push('这是一个动态工作流（dynamic workflow）项目，编排被中断了，需要续跑而不是新建。');
+    lines.push('请先调用 get_dynamic_workflow_status 查看当前卡在哪个节点：');
+    lines.push(`- projectId: ${context.projectId}`);
+    if (context.resumeWorkflowRunId) lines.push(`- workflowRunId: ${context.resumeWorkflowRunId}`);
+    lines.push('');
+    lines.push('确认可以安全续跑后，调用 run_dynamic_workflow_script 续跑，参数使用：');
+    lines.push(`- projectId: ${context.projectId}`);
+    if (context.resumeWorkflowRunId) lines.push(`- resumeWorkflowRunId: ${context.resumeWorkflowRunId}`);
+    lines.push('');
+    lines.push('重要：续跑时不要传 script 参数。已持久化的脚本源会自动恢复并校验，重贴脚本反而可能导致 hash 不一致而失败。');
+  } else if (context.strategy === 'needs_conversation') {
     lines.push('当前状态已经不适合继续自动重试。请先调用 inspect_project 读取项目状态、失败反馈和当前任务相关产物。');
     lines.push(`- projectId: ${context.projectId}`);
     lines.push('');
@@ -683,6 +706,39 @@ export function ProjectDetailPage() {
 
   const handleContinueProject = async (intervention: ProjectIntervention) => {
     if (!projectId || actionLoading !== null) return;
+    // Dynamic (script_generated) workflows have no task lease; the task-board
+    // continue endpoint cannot resume them. "继续推进" now triggers a one-click
+    // direct resume in the desktop main process (rebuild the background job),
+    // distinct from "让小K帮忙" which opens a diagnostic conversation.
+    if (intervention.kind === 'script_workflow') {
+      const workflowRunId = intervention.workflowRunId
+        || intervention.primaryAction?.params?.resumeWorkflowRunId
+        || '';
+      if (!workflowRunId) {
+        showNotice({ action: 'continue', kind: 'error', message: '缺少工作流运行 ID，请改用「让小K帮忙」。' }, 8_000);
+        return;
+      }
+      setActionLoading('continue');
+      try {
+        const api = getDesktopApi() as { kswarmResumeWorkflowRun?: (input: { projectId: string; workflowRunId: string }) => Promise<{ restored: boolean; reason?: string; jobId?: string }> } | null;
+        const result = await api?.kswarmResumeWorkflowRun?.({ projectId, workflowRunId });
+        if (result?.restored || result?.reason === 'already_running') {
+          showNotice({ action: 'continue', kind: 'success', message: '已直接续跑动态工作流。' }, 5_000);
+        } else if (result?.reason === 'no_script_source') {
+          showNotice({ action: 'continue', kind: 'error', message: '该工作流缺少脚本源，无法直接续跑，请改用「让小K帮忙」。' }, 8_000);
+        } else if (result?.reason === 'kswarm_unavailable') {
+          showNotice({ action: 'continue', kind: 'error', message: '内核未就绪，请稍后重试。' }, 8_000);
+        } else {
+          showNotice({ action: 'continue', kind: 'error', message: '直接续跑失败，请改用「让小K帮忙」。' }, 8_000);
+        }
+      } catch {
+        showNotice({ action: 'continue', kind: 'error', message: '直接续跑失败，请稍后重试。' }, 8_000);
+      } finally {
+        await refreshOnce();
+        setActionLoading(null);
+      }
+      return;
+    }
     const primaryAction = intervention.primaryAction;
     setActionLoading('continue');
     try {
@@ -777,6 +833,12 @@ export function ProjectDetailPage() {
   const { project, tasks, activities, humanActions, workspace, plan, planProgress } = detail;
   const latestWorkflowRun = detail.workflowRuns?.[0] || null;
   const workflowHasProjectProgress = workflowOwnsProjectProgress(latestWorkflowRun);
+  const workflowRunningOwnsProgress = Boolean(
+    latestWorkflowRun
+    && latestWorkflowRun.source === 'script_generated'
+    && !latestWorkflowRun.scope?.taskId
+    && latestWorkflowRun.status === 'running',
+  );
   const dispatchableTaskCount = detail.dispatchPlan?.dispatchedTasks?.length
     ?? detail.dispatchPlan?.dispatchable?.length
     ?? tasks.filter(t => t.status === 'pending').length;
@@ -1036,6 +1098,7 @@ export function ProjectDetailPage() {
           <KanbanBoard
             project={{ ...project, tasks } as KSwarmProject}
             onStartTaskWorkflow={workflowUnavailableMessage ? undefined : handleStartTaskWorkflow}
+            workflowRunningOwnsProgress={workflowRunningOwnsProgress}
           />
         )}
         {activeTab === 'agents' && (

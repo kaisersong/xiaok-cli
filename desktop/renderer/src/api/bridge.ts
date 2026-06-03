@@ -253,10 +253,11 @@ export const api = {
 
   subscribeTask(
     taskId: string,
-    handler: (event: DesktopTaskEvent) => void
+    handler: (event: DesktopTaskEvent) => void,
+    sinceIndex?: number
   ): () => void {
     log.info('subscribeTask', taskId);
-    const unsub = window.xiaokDesktop.subscribeTask(taskId, handler);
+    const unsub = window.xiaokDesktop.subscribeTask(taskId, handler, sinceIndex);
     log.info('subscribeTask ok', taskId);
     return unsub;
   },

@@ -491,4 +491,153 @@ await agent('x')`,
       ['GET', '/projects/proj-1/workflows/run-1'],
     ]);
   });
+
+  const WORKFLOW_SCRIPT_HASH = '061d22833b9051b8e1166f7798fb4879db2d973942fbb9a844123203561d806c';
+
+  it('does not require script in the schema so resume can omit it', () => {
+    const { service } = createMockService([]);
+    const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
+    expect(tool.definition.inputSchema.required).toEqual([]);
+  });
+
+  it('persists scriptSource and scriptHash in the proposal body on new create', async () => {
+    const { service, requests } = createMockService([
+      jsonResponse({ ok: true, workflowProposal: { id: 'proposal-1' } }, 201),
+      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'running' } }, 201),
+    ]);
+    const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
+
+    await tool.execute({
+      projectId: 'proj-1',
+      script: workflowScript,
+      requestedBy: 'assistant',
+    });
+
+    expect(requests[0].path).toBe('/projects/proj-1/workflows/script-generated/proposal');
+    expect(requests[0].body).toMatchObject({
+      scriptHash: WORKFLOW_SCRIPT_HASH,
+    });
+    const body = requests[0].body as Record<string, unknown>;
+    expect(typeof body.scriptSource).toBe('string');
+    expect((body.scriptSource as string)).toContain('export const meta');
+  });
+
+  it('recovers the persisted script source when resuming without a script', async () => {
+    const runSnapshot = {
+      id: 'run-1',
+      status: 'running',
+      workflowId: 'project_snapshot_review',
+      scriptHash: WORKFLOW_SCRIPT_HASH,
+      scriptSource: workflowScript,
+      nodes: [{
+        id: 'script-agent-1',
+        kind: 'agent_task',
+        status: 'completed',
+        input: {
+          prompt: '检查项目状态。',
+          label: '项目检查',
+          options: { label: '项目检查' },
+          script: { phaseTitle: '检查项目' },
+        },
+        output: { summary: '项目可推进' },
+      }],
+    };
+    const { service, requests } = createMockService([
+      jsonResponse({ workflowRun: runSnapshot }),
+      jsonResponse({ workflowRun: runSnapshot }),
+      jsonResponse({ workflowRun: runSnapshot }),
+      jsonResponse({ ok: true, nodeId: 'script-agent-2', workflowRun: { id: 'run-1' } }, 201),
+      jsonResponse({ workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-2', status: 'completed', output: { summary: '继续执行核心任务' } }] } }),
+      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'completed' } }, 200),
+    ]);
+    const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
+
+    const output = JSON.parse(await tool.execute({
+      projectId: 'proj-1',
+      requestedBy: 'assistant',
+      assignedAgent: 'xiaok-worker',
+      waitForCompletion: true,
+      resumeWorkflowRunId: 'run-1',
+    })) as Record<string, unknown>;
+
+    expect(output).toMatchObject({
+      ok: true,
+      projectId: 'proj-1',
+      workflowRunId: 'run-1',
+      status: 'completed',
+      result: { summary: '继续执行核心任务' },
+    });
+    // No new proposal/run is created on resume.
+    expect(requests.some((request) => request.path.endsWith('/script-generated/proposal'))).toBe(false);
+  });
+
+  it('returns workflow_script_source_unavailable when resume run has no persisted source', async () => {
+    const { service, requests } = createMockService([
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          status: 'running',
+          workflowId: 'project_snapshot_review',
+          scriptHash: WORKFLOW_SCRIPT_HASH,
+          nodes: [],
+        },
+      }),
+    ]);
+    const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
+
+    const output = JSON.parse(await tool.execute({
+      projectId: 'proj-1',
+      requestedBy: 'assistant',
+      resumeWorkflowRunId: 'run-1',
+    })) as Record<string, unknown>;
+
+    expect(output).toMatchObject({
+      ok: false,
+      error: 'workflow_script_source_unavailable',
+      workflowRunId: 'run-1',
+    });
+    expect(requests.map((request) => request.path)).toEqual(['/projects/proj-1/workflows/run-1']);
+  });
+
+  it('rejects resume when the supplied script hash mismatches the durable run', async () => {
+    const { service } = createMockService([
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          status: 'running',
+          workflowId: 'project_snapshot_review',
+          scriptHash: 'deadbeef'.repeat(8),
+          scriptSource: workflowScript,
+          nodes: [],
+        },
+      }),
+    ]);
+    const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
+
+    const output = JSON.parse(await tool.execute({
+      projectId: 'proj-1',
+      script: workflowScript,
+      requestedBy: 'assistant',
+      resumeWorkflowRunId: 'run-1',
+    })) as Record<string, unknown>;
+
+    expect(output).toMatchObject({
+      ok: false,
+      error: 'workflow_script_source_hash_mismatch',
+      workflowRunId: 'run-1',
+    });
+  });
+
+  it('returns a validation error when creating a new run without any script', async () => {
+    const { service, requests } = createMockService([]);
+    const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
+
+    const output = JSON.parse(await tool.execute({
+      projectId: 'proj-1',
+      requestedBy: 'assistant',
+    })) as Record<string, unknown>;
+
+    expect(output.ok).toBe(false);
+    expect(requests).toEqual([]);
+  });
 });
