@@ -125,7 +125,12 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
   // Collect all artifacts from tasks with their summaries
   const taskOutputs: Array<{ task: KSwarmTask; artifacts: KSwarmArtifact[] }> = [];
   for (const task of tasks) {
-    const artifacts = (task as any).result?.artifacts || [];
+    const rawArtifacts = (task as any).result?.artifacts || [];
+    const artifacts = Array.isArray(rawArtifacts)
+      ? rawArtifacts
+          .map((item: unknown) => normalizeDeliverableFile(item, project.id))
+          .filter((item): item is KSwarmArtifact => item !== null)
+      : [];
     if (artifacts.length > 0) taskOutputs.push({ task, artifacts });
   }
 
@@ -324,8 +329,9 @@ function normalizeDeliverableFile(item: unknown, projectId?: string): KSwarmArti
   const rawPath = stringField(obj, 'path');
   const rawUrl = stringField(obj, 'url');
   const relativePath = stringField(obj, 'relativePath');
-  const displayName = stringField(obj, 'name', 'filename', 'title') || basename(rawPath) || basename(rawUrl) || basename(relativePath);
-  const filename = stringField(obj, 'filename') || displayName;
+  const pathName = basename(rawPath) || basename(relativePath) || basename(rawUrl);
+  const displayName = stringField(obj, 'name', 'filename', 'title', 'label') || pathName;
+  const filename = stringField(obj, 'filename') || pathName || displayName;
   if (!displayName && !filename && !rawPath && !rawUrl) return null;
 
   const type = stringField(obj, 'type', 'format');
@@ -366,7 +372,7 @@ function artifactUrlFromProject(projectId?: string, filename?: string): string |
 function basename(value?: string): string {
   if (!value) return '';
   const withoutQuery = value.split(/[?#]/, 1)[0] || '';
-  const normalized = withoutQuery.replace(/\/+$/, '');
+  const normalized = withoutQuery.replace(/\\/g, '/').replace(/\/+$/, '');
   const idx = normalized.lastIndexOf('/');
   const name = idx >= 0 ? normalized.slice(idx + 1) : normalized;
   try {

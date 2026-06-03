@@ -19,6 +19,14 @@ describe('project artifact actions', () => {
     expect(artifactDisplayName({ filename: 'report.md', mimeType: 'text/markdown' } as any)).toBe('report.md');
   });
 
+  it('normalizes Windows absolute project artifact paths to the KSwarm artifact route', () => {
+    expect(resolveArtifactUrl({
+      projectId: 'proj-win',
+      path: 'C:\\Users\\song\\.kswarm\\projects\\proj-win\\artifacts\\june-global-ai-product-trends.html',
+      mimeType: 'text/html',
+    })).toBe('http://127.0.0.1:4400/projects/proj-win/artifacts/june-global-ai-product-trends.html');
+  });
+
   it('shows generated time after artifact task and mime annotation', () => {
     const generatedAt = new Date(2026, 4, 18, 15, 28, 17).getTime();
 
@@ -195,6 +203,84 @@ describe('project artifact actions', () => {
       expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:4400/projects/proj-1779259929302/artifacts/proj-1779259929302__p4-item1-report.md');
     });
     expect(await screen.findByText(/最终报告/)).toBeInTheDocument();
+  });
+
+  it('opens a top-level workflow deliverable artifact that only has a Windows absolute path', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => '<!doctype html><html><body><h1>国外AI产品动态分析</h1></body></html>',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <LocaleProvider>
+        <DeliverableView
+          project={{
+            id: 'proj-win',
+            name: '国外AI产品动态分析',
+            status: 'delivered',
+            deliverable: {
+              summary: '已生成 HTML 报告',
+              artifacts: [
+                {
+                  path: 'C:\\Users\\song\\.kswarm\\projects\\proj-win\\artifacts\\june-global-ai-product-trends.html',
+                  kind: 'report_html',
+                  mimeType: 'text/html',
+                },
+              ],
+            },
+          } as any}
+          tasks={[]}
+        />
+      </LocaleProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /june-global-ai-product-trends\.html/ }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:4400/projects/proj-win/artifacts/june-global-ai-product-trends.html');
+    });
+    expect(await screen.findByTitle('june-global-ai-product-trends.html')).toBeInTheDocument();
+  });
+
+  it('opens workflow task artifacts with Windows absolute paths through the KSwarm route', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => '<!doctype html><html><body><h1>任务报告</h1></body></html>',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <LocaleProvider>
+        <DeliverableView
+          project={{ id: 'proj-task-win', name: '任务报告项目', status: 'delivered' } as any}
+          tasks={[
+            {
+              id: 'task-1',
+              title: '生成 HTML 报告',
+              status: 'done',
+              result: {
+                summary: '已生成报告',
+                artifacts: [
+                  {
+                    path: 'C:\\Users\\song\\.kswarm\\projects\\proj-task-win\\artifacts\\task-report.html',
+                    kind: 'report_html',
+                    mimeType: 'text/html',
+                  },
+                ],
+              },
+            } as any,
+          ]}
+        />
+      </LocaleProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /task-report\.html/ }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:4400/projects/proj-task-win/artifacts/task-report.html');
+    });
+    expect(await screen.findByTitle('task-report.html')).toBeInTheDocument();
   });
 
   it('shows unlinked workspace artifacts while hiding generated plan files', () => {

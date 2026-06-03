@@ -30,13 +30,22 @@ export function resolveArtifactUrl(artifact: ArtifactLike): string | null {
     return rawUrl;
   }
 
+  const projectId = artifact.projectId?.trim();
   const rawPath = artifact.path?.trim();
+  const rawRelativePath = artifact.relativePath?.trim();
+  const projectArtifactName = artifact.filename?.trim()
+    || basename(rawRelativePath)
+    || basename(rawPath)
+    || artifact.name?.trim();
+  if (projectId && projectArtifactName) {
+    return `${KSWARM_BASE_URL}/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(projectArtifactName)}`;
+  }
+
   if (rawPath) {
     if (rawPath.startsWith('file://')) return rawPath;
     return `file://${rawPath}`;
   }
 
-  const projectId = artifact.projectId?.trim();
   const filename = (artifact.filename || artifact.name)?.trim();
   if (projectId && filename) {
     return `${KSWARM_BASE_URL}/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(filename)}`;
@@ -78,7 +87,7 @@ function isAbsoluteUrl(url: string): boolean {
 function basename(value?: string): string {
   if (!value) return '';
   const withoutQuery = value.split(/[?#]/, 1)[0] || '';
-  const normalized = withoutQuery.replace(/\/+$/, '');
+  const normalized = withoutQuery.replace(/\\/g, '/').replace(/\/+$/, '');
   const idx = normalized.lastIndexOf('/');
   const name = idx >= 0 ? normalized.slice(idx + 1) : normalized;
   try {
