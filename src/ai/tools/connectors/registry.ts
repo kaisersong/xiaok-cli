@@ -111,10 +111,11 @@ export class ConnectorRegistry {
     const primary = this.state.search;
     const fallback = this.state.fallbackSearch;
     const usePrimary = !this.state.invalidSearch.has(primary.name);
+    const timedInput = { ...input, signal: input.signal ?? AbortSignal.timeout(30_000) };
 
     if (usePrimary) {
       try {
-        const hits = await primary.search(input);
+        const hits = await primary.search(timedInput);
         this.resetSearchWindow(primary.name);
         return { hits, primary: primary.name, effective: primary.name };
       } catch (error) {
@@ -125,7 +126,7 @@ export class ConnectorRegistry {
           throw error;
         }
         try {
-          const hits = await fallback.search(input);
+          const hits = await fallback.search(timedInput);
           return {
             hits,
             primary: primary.name,
@@ -140,7 +141,7 @@ export class ConnectorRegistry {
     }
 
     // Primary already marked invalid in this session — go straight to fallback.
-    const hits = await fallback.search(input);
+    const hits = await fallback.search(timedInput);
     return {
       hits,
       primary: primary.name,
@@ -153,10 +154,11 @@ export class ConnectorRegistry {
     const primary = this.state.fetch;
     const fallback = this.state.fallbackFetch;
     const usePrimary = !this.state.invalidFetch.has(primary.name);
+    const timedInput = { ...input, signal: input.signal ?? AbortSignal.timeout(30_000) };
 
     if (usePrimary) {
       try {
-        const result = await primary.fetch(input);
+        const result = await primary.fetch(timedInput);
         this.resetFetchWindow(primary.name);
         return { result, primary: primary.name, effective: primary.name };
       } catch (error) {
@@ -166,7 +168,7 @@ export class ConnectorRegistry {
           throw error;
         }
         try {
-          const result = await fallback.fetch(input);
+          const result = await fallback.fetch(timedInput);
           return {
             result,
             primary: primary.name,
@@ -179,7 +181,7 @@ export class ConnectorRegistry {
       }
     }
 
-    const result = await fallback.fetch(input);
+    const result = await fallback.fetch(timedInput);
     return {
       result,
       primary: primary.name,

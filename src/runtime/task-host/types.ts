@@ -98,6 +98,7 @@ export interface TaskResult {
   artifacts: ArtifactSummary[];
   assumptions?: string[];
   nextSteps?: string[];
+  degraded?: boolean;
 }
 
 export interface SalvageSummary {

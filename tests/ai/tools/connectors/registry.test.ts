@@ -141,3 +141,27 @@ describe('ConnectorRegistry fetch routing', () => {
     expect(outcome.fallback?.reason).toContain('500');
   });
 });
+
+describe('ConnectorRegistry timeout', () => {
+  it('aborts search after timeout when fetch hangs', async () => {
+    const fetchFn = vi.fn(() => new Promise<Response>(() => {}));
+    const registry = new ConnectorRegistry(
+      buildConfig(() => {}),
+      { fetchFn },
+    );
+    await expect(
+      registry.runSearch({ query: 'hang', count: 3, signal: AbortSignal.timeout(50) }),
+    ).rejects.toThrow();
+  });
+
+  it('aborts fetch after timeout when fetch hangs', async () => {
+    const fetchFn = vi.fn(() => new Promise<Response>(() => {}));
+    const registry = new ConnectorRegistry(
+      buildConfig(() => {}),
+      { fetchFn },
+    );
+    await expect(
+      registry.runFetch({ url: 'https://example.com/hang', maxChars: 1000, signal: AbortSignal.timeout(50) }),
+    ).rejects.toThrow();
+  });
+});

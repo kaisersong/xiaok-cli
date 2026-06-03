@@ -52,6 +52,7 @@ export interface InProcessTaskRuntimeHostOptions {
   now?: () => number;
   createTaskId?: () => string;
   createSessionId?: () => string;
+  taskWatchdogMs?: number;
   aheGuards?: {
     artifactEvidence?: boolean;
     recoveryContinuity?: boolean;
@@ -326,6 +327,9 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     this.activeExecutions.set(taskId, { taskId, controller });
     await this.updateSnapshot(taskId, { status: 'running' });
 
+    const watchdogMs = this.options.taskWatchdogMs ?? 30 * 60_000;
+    const watchdogTimer = setTimeout(() => controller.abort(), watchdogMs);
+
     try {
       await this.options.runner({
         taskId,
@@ -368,6 +372,16 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
           this.closeSubscribers(taskId);
           return;
         }
+        if (this.isEmptyDelivery(guardedLatest)) {
+          await this.appendEvent(taskId, {
+            type: 'progress',
+            eventId: `${taskId}:degraded`,
+            message: '任务完成但未产出实质内容，已标记为降级交付。',
+            stage: 'warning',
+          });
+          const currentResult = guardedLatest.result ?? { summary: '', artifacts: [] };
+          await this.updateSnapshot(taskId, { result: { ...currentResult, degraded: true } });
+        }
         await this.updateSnapshot(taskId, { status: 'completed' });
         await this.options.snapshotStore.clearActiveTask(taskId);
         this.closeSubscribers(taskId);
@@ -390,6 +404,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       this.closeSubscribers(taskId);
       throw error;
     } finally {
+      clearTimeout(watchdogTimer);
       this.taskHistories.delete(taskId);
       this.permissionModes.delete(taskId);
       this.activeExecutions.delete(taskId);
@@ -437,6 +452,15 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         skipped: [...skipped, ...built.skipped],
       },
     };
+  }
+
+  private isEmptyDelivery(snapshot: TaskSnapshot): boolean {
+    const summary = snapshot.result?.summary?.trim() ?? '';
+    const isFallbackSummary = !summary || summary === '模型没有返回内容。';
+    const hasArtifacts = (snapshot.result?.artifacts?.length ?? 0) > 0;
+    const hasRecordedArtifacts = snapshot.events.some((e) => e.type === 'artifact_recorded');
+    const hasAssistantOutput = snapshot.events.some((e) => e.type === 'assistant_delta');
+    return isFallbackSummary && !hasArtifacts && !hasRecordedArtifacts && !hasAssistantOutput;
   }
 
   private async appendRuntimeEvent(taskId: string, event: RuntimeEvent): Promise<void> {

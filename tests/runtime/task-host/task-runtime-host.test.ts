@@ -980,6 +980,75 @@ describe('InProcessTaskRuntimeHost', () => {
     });
   });
 
+  it('marks empty delivery as degraded when runner produces no content', async () => {
+    const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+      emitRuntimeEvent({
+        type: 'receipt_emitted',
+        sessionId: 'sess_1',
+        turnId: 'turn_1',
+        intentId: 'intent_1',
+        stepId: 'step_1',
+        note: '模型没有返回内容。',
+      });
+    });
+
+    let taskOrd = 0;
+    const host = new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner,
+      now: () => 200,
+      createTaskId: () => `task_${++taskOrd}`,
+      createSessionId: () => `sess_${taskOrd}`,
+    });
+
+    await host.createTask({
+      prompt: 'KSwarm 动态工作流节点执行。调研本月国外AI产品动态。',
+      materials: [],
+    });
+
+    await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed', 3000);
+    const recovered = await host.recoverTask('task_1');
+    expect(recovered.snapshot.status).toBe('completed');
+    expect(recovered.snapshot.result?.degraded).toBe(true);
+    expect(recovered.snapshot.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'progress',
+        stage: 'warning',
+        message: expect.stringContaining('降级交付'),
+      }),
+    ]));
+  });
+
+  it('aborts execution via watchdog when runner hangs beyond timeout', async () => {
+    const runner = vi.fn<TaskRunner>(async ({ signal }) => {
+      await new Promise<void>((_, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+
+    let taskOrd = 0;
+    const host = new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner,
+      taskWatchdogMs: 50,
+      now: () => 200,
+      createTaskId: () => `task_${++taskOrd}`,
+      createSessionId: () => `sess_${taskOrd}`,
+    });
+
+    await host.createTask({
+      prompt: '帮我写一份报告',
+      materials: [{ materialId: material.materialId }],
+    });
+
+    await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'failed', 3000);
+    const recovered = await host.recoverTask('task_1');
+    expect(recovered.snapshot.status).toBe('failed');
+    expect(recovered.snapshot.salvage?.reason).toBe('aborted');
+  });
+
   function createHost(runner: TaskRunner): InProcessTaskRuntimeHost {
     return new InProcessTaskRuntimeHost({
       materialRegistry,

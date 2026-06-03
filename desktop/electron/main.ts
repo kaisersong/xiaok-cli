@@ -130,6 +130,8 @@ async function createWindow(): Promise<BrowserWindow> {
   await registerDesktopIpc(ipcMain, window, services);
   debugMain('createWindow:ipc-registered');
 
+  await services.recoverStaleTasks();
+
   ipcMain.handle('desktop:getConnectorsConfig', () => services.getConnectorsConfig());
   ipcMain.handle('desktop:saveConnectorsConfig', (_event, input) => services.setConnectorsConfig(input));
   ipcMain.handle('desktop:listConnectorRuntimes', () => services.listConnectorRuntimes());
