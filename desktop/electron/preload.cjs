@@ -88,6 +88,8 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   },
   getSkillDebugConfig: () => ipcRenderer.invoke('desktop:getSkillDebugConfig'),
   saveSkillDebugConfig: (input) => ipcRenderer.invoke('desktop:saveSkillDebugConfig', input),
+  getKswarmConfig: () => ipcRenderer.invoke('desktop:getKswarmConfig'),
+  saveKswarmConfig: (input) => ipcRenderer.invoke('desktop:saveKswarmConfig', input),
   readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }),
   getSkillStats: () => ipcRenderer.invoke('desktop:getSkillStats'),
   getServiceStatus: () => ipcRenderer.invoke('desktop:services:getStatus'),
@@ -97,6 +99,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   kswarmStop: () => ipcRenderer.invoke('desktop:kswarm:stop'),
   kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart'),
   kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input),
+  kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input),
   onKSwarmStatus(handler) {
     const channel = 'desktop:kswarm:statusChange';
     const listener = (_event, payload) => {
@@ -153,4 +156,35 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   saveConnectorsConfig: (input) => ipcRenderer.invoke('desktop:saveConnectorsConfig', input),
   listConnectorRuntimes: () => ipcRenderer.invoke('desktop:listConnectorRuntimes'),
   testConnectorProvider: (kind) => ipcRenderer.invoke('desktop:testConnectorProvider', kind),
+  kswarmProxyGet: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:get', path),
+  kswarmProxyPost: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:post', path, body),
+  kswarmProxyPostJson: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:postJson', path, body),
+  kswarmProxyPut: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:put', path, body),
+  kswarmProxyPatch: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:patch', path, body),
+  kswarmProxyDelete: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:delete', path),
+  kswarmStreamSubscribe: () => ipcRenderer.invoke('desktop:kswarm:stream:subscribe'),
+  kswarmStreamUnsubscribe: () => ipcRenderer.invoke('desktop:kswarm:stream:unsubscribe'),
+  kswarmStreamGetStatus: () => ipcRenderer.invoke('desktop:kswarm:stream:status'),
+  connectionHealthz: (url) => ipcRenderer.invoke('desktop:connection:healthz', url),
+  connectionHealth: (url) => ipcRenderer.invoke('desktop:connection:health', url),
+  onKSwarmWsEvent(handler) {
+    const channel = 'desktop:kswarm:wsEvent';
+    const listener = (_event, payload) => {
+      handler(payload);
+    };
+    ipcRenderer.on(channel, listener);
+    return () => {
+      ipcRenderer.off(channel, listener);
+    };
+  },
+  onKSwarmConnectionStatus(handler) {
+    const channel = 'desktop:kswarm:connectionStatus';
+    const listener = (_event, payload) => {
+      handler(payload);
+    };
+    ipcRenderer.on(channel, listener);
+    return () => {
+      ipcRenderer.off(channel, listener);
+    };
+  },
 });

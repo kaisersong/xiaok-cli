@@ -67,10 +67,14 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
   // Fetch kswarm model catalog when a non-xiaok provider is selected
   useEffect(() => {
     if (isXiaok || !provider) { setKswarmModels([]); return; }
-    fetch(`http://127.0.0.1:4400/llm/models?provider=${provider}`)
-      .then(r => r.json())
-      .then(d => setKswarmModels(d.models ?? []))
-      .catch(() => setKswarmModels([]));
+    const api = (window as any).xiaokDesktop;
+    if (api?.kswarmProxyGet) {
+      api.kswarmProxyGet(`/llm/models?provider=${provider}`)
+        .then((d: any) => setKswarmModels(d?.models ?? []))
+        .catch(() => setKswarmModels([]));
+    } else {
+      setKswarmModels([]);
+    }
   }, [isXiaok, provider]);
 
   if (!open) return null;

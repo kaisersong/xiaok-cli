@@ -1813,6 +1813,8 @@ function GeneralPane() {
   const { locale, setLocale, t } = useLocale();
   const [skillDebug, setSkillDebug] = useState(false);
   const [savingSkillDebug, setSavingSkillDebug] = useState(false);
+  const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(3);
+  const [savingConcurrency, setSavingConcurrency] = useState(false);
   const [serviceStatus, setServiceStatus] = useState<DesktopServiceStatusSnapshot | null>(null);
   const [serviceStatusLoading, setServiceStatusLoading] = useState(true);
   const [serviceStatusError, setServiceStatusError] = useState('');
@@ -1855,6 +1857,23 @@ function GeneralPane() {
       await api.saveSkillDebugConfig({ enabled });
     } finally {
       setSavingSkillDebug(false);
+    }
+  };
+
+  useEffect(() => {
+    api.getKswarmConfig().then(c => {
+      setMaxConcurrentTasks(c.maxConcurrentTasks);
+    });
+  }, []);
+
+  const handleConcurrencyChange = async (value: number) => {
+    const clamped = Math.max(1, Math.min(10, value));
+    setMaxConcurrentTasks(clamped);
+    setSavingConcurrency(true);
+    try {
+      await api.saveKswarmConfig({ maxConcurrentTasks: clamped });
+    } finally {
+      setSavingConcurrency(false);
     }
   };
 
@@ -2027,6 +2046,34 @@ function GeneralPane() {
                 {serviceStatusError}
               </div>
             ) : null}
+          </div>
+        </Card>
+      </Section>
+
+      <Section>
+        <SectionHeader icon={Cpu}>任务并发</SectionHeader>
+        <Card>
+          <p className="text-xs text-[var(--c-text-secondary)] mb-4">
+            同时执行的最大任务数。值越大并行越快，但会占用更多资源。修改后需重启服务生效。
+          </p>
+          <div className="flex items-center gap-4">
+            <input
+              type="range"
+              min={1}
+              max={10}
+              step={1}
+              value={maxConcurrentTasks}
+              onChange={(e) => handleConcurrencyChange(Number(e.target.value))}
+              className="flex-1 accent-[var(--c-accent)]"
+            />
+            <span className="min-w-[2.5rem] text-center text-sm font-medium text-[var(--c-text-heading)]">
+              {maxConcurrentTasks}
+            </span>
+            {savingConcurrency && <Loader2 size={14} className="animate-spin text-[var(--c-text-tertiary)]" />}
+          </div>
+          <div className="mt-2 flex justify-between text-[10px] text-[var(--c-text-tertiary)]">
+            <span>1 (串行)</span>
+            <span>10 (最大并行)</span>
           </div>
         </Card>
       </Section>

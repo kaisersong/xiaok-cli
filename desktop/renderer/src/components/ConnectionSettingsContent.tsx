@@ -192,8 +192,13 @@ export function ConnectionSettingsContent({ initialConfig = null }: Props) {
     }
 
     try {
-      const resp = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(5000) })
-      setTestResult(resp.ok ? 'connected' : 'failed')
+      const desktopApi = (window as any).xiaokDesktop
+      if (desktopApi?.connectionHealthz) {
+        const result = await desktopApi.connectionHealthz(url)
+        setTestResult(result?.ok ? 'connected' : 'failed')
+      } else {
+        setTestResult('failed')
+      }
     } catch {
       setTestResult('failed')
     }

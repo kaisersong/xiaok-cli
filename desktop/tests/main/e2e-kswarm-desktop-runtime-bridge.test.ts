@@ -170,7 +170,7 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
   let tempWorkFolder: string;
 
   beforeEach(() => {
-    const baseDir = join(process.cwd(), '.tmp', 'kswarm-desktop-runtime-e2e');
+    const baseDir = join('/tmp', 'xwk-runtime-e2e');
     mkdirSync(baseDir, { recursive: true });
     tempRoot = mkdtempSync(join(baseDir, 'run-'));
     tempHome = join(tempRoot, 'home');
@@ -308,7 +308,8 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
           runDesktopTask: (input) => services.runKSwarmHandoffTask(input),
           submitResult: (input) => submitKSwarmRuntimeResultToBroker({
             brokerUrl,
-            participantId: input.targetParticipantId || 'xiaok-worker',
+            participantId: 'xiaok-desktop',
+            logicalParticipantId: input.targetParticipantId || 'xiaok-worker',
             projectId: input.projectId,
             taskId: input.taskId,
             runId: input.runId,
@@ -320,32 +321,24 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
         handlePlanApproved: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmPlanApproved(input),
         handleReadinessProbe: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmReadinessProbe(input),
       };
-      const poClient = createKSwarmRuntimeBridgeBrokerClient({
+      const desktopHostClient = createKSwarmRuntimeBridgeBrokerClient({
         brokerUrl,
-        participantId: 'xiaok-po',
-        alias: 'PO-Agent',
-        roles: ['project_owner'],
-        capabilities: ['planning', 'review', 'reporting'],
+        participantId: 'xiaok-desktop',
+        participantKind: 'service',
+        alias: 'Xiaok Desktop',
+        roles: ['desktop_runtime_host'],
+        capabilities: ['planning', 'review', 'writing', 'reporting'],
         bridge: runtimeBridge,
         WebSocketImpl: WebSocket as any,
       });
-      const workerClient = createKSwarmRuntimeBridgeBrokerClient({
-        brokerUrl,
-        participantId: 'xiaok-worker',
-        alias: 'Worker-Agent',
-        roles: ['worker'],
-        capabilities: ['writing', 'reporting'],
-        bridge: runtimeBridge,
-        WebSocketImpl: WebSocket as any,
-      });
-      await Promise.all([poClient.start(), workerClient.start()]);
-      clients.push(poClient, workerClient);
+      await desktopHostClient.start();
+      clients.push(desktopHostClient);
 
       await waitForCondition(
         () => fetchJson<{ participants: Array<{ participantId: string }> }>(`${brokerUrl}/participants`),
         (value) => {
           const ids = new Set(value.participants.map(participant => participant.participantId));
-          return ids.has('xiaok-po') && ids.has('xiaok-worker');
+          return ids.has('xiaok-desktop');
         },
         10_000,
       );
@@ -406,7 +399,8 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
 
       const participants = await fetchJson<{ participants: Array<{ participantId: string }> }>(`${brokerUrl}/participants`);
       const participantIds = participants.participants.map(participant => participant.participantId);
-      expect(participantIds).toEqual(expect.arrayContaining(['kswarm-hub', 'xiaok-po', 'xiaok-worker']));
+      expect(participantIds).toEqual(expect.arrayContaining(['kswarm-hub', 'xiaok-desktop']));
+      expect(participantIds).not.toEqual(expect.arrayContaining(['xiaok-po', 'xiaok-worker']));
       expect(participantIds.some(id => id.startsWith('xiaok-po@proj-'))).toBe(false);
       expect(participantIds.some(id => id.startsWith('xiaok-worker@inst-'))).toBe(false);
     } catch (error) {

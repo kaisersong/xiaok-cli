@@ -7,7 +7,7 @@ import type {
   TaskSnapshot,
   TaskSnapshotStatus,
   TaskUnderstanding,
-} from '../../../src/runtime/task-host/types.js';
+} from '../../shared/task-types';
 
 export interface AppProgressItem {
   eventId: string;

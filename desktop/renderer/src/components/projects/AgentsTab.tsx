@@ -57,7 +57,8 @@ export function AgentsTab() {
     const isWorker = agent.roles?.includes('worker');
     if (isPO && isWorker) return t.projectsAgentRoleAll;
     if (isPO) return t.projectsAgentRolePo;
-    return t.projectsAgentRoleWorker;
+    if (isWorker) return t.projectsAgentRoleWorker;
+    return t.projectsAgentRoleUniversal;
   };
 
   return (

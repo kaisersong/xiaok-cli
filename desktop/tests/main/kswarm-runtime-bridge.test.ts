@@ -82,7 +82,7 @@ describe('kswarm runtime bridge', () => {
     rmSync(outside, { force: true });
   });
 
-  it('registers a desktop runtime participant and executes request_task handoffs from broker websocket', async () => {
+  it('registers a desktop host participant and executes request_task handoffs for targetAgentId', async () => {
     const handled = vi.fn().mockResolvedValue({ ok: true });
     const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
@@ -93,9 +93,10 @@ describe('kswarm runtime bridge', () => {
 
     const client = createKSwarmRuntimeBridgeBrokerClient({
       brokerUrl: 'http://127.0.0.1:4318',
-      participantId: 'xiaok-worker',
-      alias: 'Xiaok Worker',
-      roles: ['worker'],
+      participantId: 'xiaok-desktop',
+      participantKind: 'service',
+      alias: 'Xiaok Desktop',
+      roles: ['desktop_runtime_host'],
       capabilities: ['research', 'report'],
       bridge: { handleTaskHandoff: handled },
       fetchImpl: fetchImpl as never,
@@ -115,6 +116,7 @@ describe('kswarm runtime bridge', () => {
           taskId: 'task-1',
           runId: 'run-1',
           handoffPath: join(rootDir, 'handoffs', 'run-1', 'request.json'),
+          targetAgentId: 'xiaok-worker',
         },
       },
     });
@@ -123,12 +125,12 @@ describe('kswarm runtime bridge', () => {
     expect(posts[0]).toMatchObject({
       url: 'http://127.0.0.1:4318/participants/register',
       body: expect.objectContaining({
-        participantId: 'xiaok-worker',
-        kind: 'agent',
+        participantId: 'xiaok-desktop',
+        kind: 'service',
         inboxMode: 'realtime',
       }),
     });
-    expect(FakeWebSocket.instances[0].url).toBe('ws://127.0.0.1:4318/ws?participantId=xiaok-worker');
+    expect(FakeWebSocket.instances[0].url).toBe('ws://127.0.0.1:4318/ws?participantId=xiaok-desktop');
     expect(handled).toHaveBeenCalledWith(expect.objectContaining({
       handoffPath: join(rootDir, 'handoffs', 'run-1', 'request.json'),
       projectId: 'proj-1',
@@ -136,10 +138,15 @@ describe('kswarm runtime bridge', () => {
       runId: 'run-1',
       targetParticipantId: 'xiaok-worker',
     }));
-    expect(posts.slice(1).map(post => post.body.kind)).toEqual([
-      'accept_task',
-      'report_progress',
-    ]);
+    expect(posts.slice(1).map(post => post.body.kind)).toEqual(['accept_task', 'report_progress']);
+    expect(posts.find(post => post.body.kind === 'accept_task')?.body).toMatchObject({
+      opaque: true,
+      fromParticipantId: 'xiaok-desktop',
+      payload: expect.objectContaining({
+        participantId: 'xiaok-worker',
+        hostParticipantId: 'xiaok-desktop',
+      }),
+    });
   });
 
   it('keeps sending progress heartbeats while a desktop handoff is running', async () => {
@@ -334,7 +341,7 @@ describe('kswarm runtime bridge', () => {
     });
   });
 
-  it('submits desktop runtime results to broker as the target xiaok participant', async () => {
+  it('submits hosted desktop runtime results from the desktop host with logical agent identity in payload', async () => {
     const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
       posts.push({ url, body: JSON.parse(String(init?.body ?? '{}')) });
@@ -343,7 +350,8 @@ describe('kswarm runtime bridge', () => {
 
     const response = await submitKSwarmRuntimeResultToBroker({
       brokerUrl: 'http://127.0.0.1:4318',
-      participantId: 'xiaok-po',
+      participantId: 'xiaok-desktop',
+      logicalParticipantId: 'xiaok-po',
       projectId: 'proj-1',
       taskId: 'task-1',
       runId: 'run-1',
@@ -356,15 +364,22 @@ describe('kswarm runtime bridge', () => {
       url: 'http://127.0.0.1:4318/intents',
       body: expect.objectContaining({
         kind: 'submit_result',
-        fromParticipantId: 'xiaok-po',
+        opaque: true,
+        fromParticipantId: 'xiaok-desktop',
         taskId: 'task-1',
         to: { mode: 'participant', participants: ['kswarm-hub'] },
         payload: expect.objectContaining({
+          participantId: 'xiaok-po',
+          hostParticipantId: 'xiaok-desktop',
           projectId: 'proj-1',
           taskId: 'task-1',
           runId: 'run-1',
           summary: 'done',
-          provenance: expect.objectContaining({ runtimeSource: 'desktop-agent-runtime' }),
+          provenance: expect.objectContaining({
+            runtimeSource: 'desktop-agent-runtime',
+            participantId: 'xiaok-po',
+            hostParticipantId: 'xiaok-desktop',
+          }),
         }),
       }),
     });

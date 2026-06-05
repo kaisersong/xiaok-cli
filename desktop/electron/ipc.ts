@@ -52,6 +52,12 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
     await services.deleteModel(modelId);
     log('info', 'deleteModel ok');
   });
+  ipcMain.handle('desktop:kswarm:startProjectPlanning', async (_event, input) => {
+    log('info', 'startProjectPlanning', { projectId: input?.projectId });
+    const r = services.startProjectPlanning(input);
+    log('info', 'startProjectPlanning ok', { ok: r?.ok });
+    return r;
+  });
   ipcMain.handle('desktop:readClipboardFilePaths', async () => {
     // macOS Finder copy puts file URLs in 'public.file-url' pasteboard type
     // Electron clipboard.read('NSFilenamesPboardType') returns newline-separated paths

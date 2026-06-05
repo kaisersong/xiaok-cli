@@ -5,7 +5,7 @@ import { CanvasPreview } from './CanvasPreview';
 import { ToolsPanel } from './ToolsPanel';
 import { CanvasEmptyState } from './CanvasEmptyState';
 import { api } from '../api';
-import type { DesktopTaskEvent } from '../../../../src/runtime/task-host/types';
+import type { DesktopTaskEvent } from '../../../shared/task-types';
 
 interface CanvasPanelProps {
   events: DesktopTaskEvent[];

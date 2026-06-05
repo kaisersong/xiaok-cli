@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, nativeImage, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, nativeImage, Menu, powerMonitor } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, mkdirSync } from 'node:fs';
@@ -36,7 +36,9 @@ import {
   submitKSwarmRuntimeResultToBroker,
   submitKSwarmWorkflowNodeResultToBroker,
 } from './kswarm-runtime-bridge.js';
-import { XIAOK_PO_SEED_ID, XIAOK_WORKER_SEED_ID } from '../shared/kswarm-seed-contract.js';
+import { XIAOK_DESKTOP_HOST_PARTICIPANT_ID, XIAOK_WORKER_SEED_ID } from '../shared/kswarm-seed-contract.js';
+import { KSwarmStreamBridge } from './kswarm-stream-bridge.js';
+import { registerKSwarmProxy } from './kswarm-ipc-proxy.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -46,7 +48,7 @@ function debugMain(message: string, extra?: unknown): void {
   const suffix = extra === undefined ? '' : ` ${JSON.stringify(extra)}`;
   const line = `[main-debug] ${message}${suffix}`;
   try {
-    const logDir = join(__dirname, '..', '..', '..', '.tmp');
+    const logDir = join(app.getPath('userData'), 'logs');
     mkdirSync(logDir, { recursive: true });
     appendFileSync(join(logDir, 'main-debug.log'), `${new Date().toISOString()} ${line}\n`);
   } catch {}
@@ -121,6 +123,10 @@ async function createWindow(): Promise<BrowserWindow> {
   kswarmService.onStatusChange((status) => {
     window.webContents.send('desktop:kswarm:statusChange', status);
   });
+
+  const kswarmStreamBridge = new KSwarmStreamBridge('ws://127.0.0.1:4400/ws');
+  kswarmStreamBridge.start();
+  registerKSwarmProxy(ipcMain, kswarmStreamBridge);
 
   const { getConfigDir } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
@@ -209,7 +215,11 @@ async function createWindow(): Promise<BrowserWindow> {
       clearTimeout(runtimeBridgeFallbackTimer);
       runtimeBridgeFallbackTimer = null;
     }
-    void kswarmStartPromise.then(() => {
+    void kswarmStartPromise.then(async () => {
+      const { loadConfig } = await import('../../src/utils/config.js');
+      const cfg = await loadConfig();
+      const rawConcurrency = cfg.kswarm?.maxConcurrentTasks ?? 3;
+      const maxConcurrentTasks = Math.max(1, Math.min(10, rawConcurrency));
       const brokerUrl = 'http://127.0.0.1:4318';
       const runtimeBridge = {
         ...createKSwarmRuntimeBridge({
@@ -218,7 +228,8 @@ async function createWindow(): Promise<BrowserWindow> {
         runWorkflowNode: (input) => services.runKSwarmWorkflowNode(input),
         submitResult: (input) => submitKSwarmRuntimeResultToBroker({
           brokerUrl,
-          participantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
+          participantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
+          logicalParticipantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
           projectId: input.projectId,
           taskId: input.taskId,
           runId: input.runId,
@@ -226,7 +237,8 @@ async function createWindow(): Promise<BrowserWindow> {
         }),
         submitWorkflowNodeResult: (input) => submitKSwarmWorkflowNodeResultToBroker({
           brokerUrl,
-          participantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
+          participantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
+          logicalParticipantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
           handoff: input.handoff,
           output: input.output,
           reviewDecision: input.reviewDecision,
@@ -240,19 +252,13 @@ async function createWindow(): Promise<BrowserWindow> {
       runtimeBridgeClients.push(
         createKSwarmRuntimeBridgeBrokerClient({
           brokerUrl,
-          participantId: XIAOK_PO_SEED_ID,
-          alias: 'PO-Agent',
-          roles: ['project_owner'],
+          participantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
+          participantKind: 'service',
+          alias: 'Xiaok Desktop',
+          roles: ['desktop_runtime_host'],
           capabilities: ['research', 'analysis', 'coding', 'testing', 'design', 'planning', 'reporting', 'slides'],
           bridge: runtimeBridge,
-        }),
-        createKSwarmRuntimeBridgeBrokerClient({
-          brokerUrl,
-          participantId: XIAOK_WORKER_SEED_ID,
-          alias: 'Worker-Agent',
-          roles: ['worker'],
-          capabilities: ['research', 'analysis', 'coding', 'testing', 'design', 'planning', 'reporting', 'slides'],
-          bridge: runtimeBridge,
+          maxConcurrentTasks,
         }),
       );
       for (const client of runtimeBridgeClients) {
@@ -266,6 +272,37 @@ async function createWindow(): Promise<BrowserWindow> {
     stopRuntimeBridge();
     startRuntimeBridge();
   };
+
+  let powerSuspendedAtMs = 0;
+  const postRuntimePower = async (path: '/runtime/suspend' | '/runtime/resume', body?: unknown) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2_000);
+    try {
+      await fetch(`http://127.0.0.1:4400${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      console.warn(`[main] kswarm ${path} call failed:`, (error as Error).message);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  powerMonitor.on('suspend', () => {
+    powerSuspendedAtMs = Date.now();
+    debugMain('powerMonitor:suspend');
+    void postRuntimePower('/runtime/suspend');
+  });
+  powerMonitor.on('resume', () => {
+    const sleptMs = powerSuspendedAtMs ? Date.now() - powerSuspendedAtMs : 0;
+    powerSuspendedAtMs = 0;
+    debugMain('powerMonitor:resume');
+    void restartRuntimeBridgeService();
+    void postRuntimePower('/runtime/resume', { sleptMs });
+  });
+
   runtimeBridgeFallbackTimer = setTimeout(startRuntimeBridge, 10_000);
   services.registerMcpTools().then(({ dispose }) => {
     mcpDispose = dispose;
@@ -329,6 +366,7 @@ async function createWindow(): Promise<BrowserWindow> {
 
   app.on('before-quit', () => {
     kswarmService.stop().catch(() => {});
+    kswarmStreamBridge.dispose();
     if (runtimeBridgeFallbackTimer) {
       clearTimeout(runtimeBridgeFallbackTimer);
       runtimeBridgeFallbackTimer = null;
@@ -350,6 +388,10 @@ async function createWindow(): Promise<BrowserWindow> {
   // Skill debug config IPC handlers
   ipcMain.handle('desktop:getSkillDebugConfig', () => services.getSkillDebugConfig());
   ipcMain.handle('desktop:saveSkillDebugConfig', (_event, input: { enabled: boolean }) => services.saveSkillDebugConfig(input));
+
+  // KSwarm config IPC handlers
+  ipcMain.handle('desktop:getKswarmConfig', () => services.getKswarmConfig());
+  ipcMain.handle('desktop:saveKswarmConfig', (_event, input: { maxConcurrentTasks: number }) => services.saveKswarmConfig(input));
 
   // Setup menubar with K icon
   setupMenuBar(window);

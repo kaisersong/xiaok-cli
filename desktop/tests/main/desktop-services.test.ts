@@ -2197,6 +2197,9 @@ describe('desktop services', () => {
         if (path === '/projects/proj-bootstrap/tasks') {
           return new Response(JSON.stringify({ ok: true, taskIds: ['item-1'] }));
         }
+        if (path === '/projects/proj-bootstrap/dispatch') {
+          return new Response(JSON.stringify({ ok: true, dispatched: ['item-1'] }));
+        }
         return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
       },
     };
@@ -2281,12 +2284,14 @@ describe('desktop services', () => {
     releasePlanner();
     await waitFor(() => requests.some(request => request.path === '/projects/proj-bootstrap/plan'));
     await waitFor(() => requests.some(request => request.path === '/projects/proj-bootstrap/tasks'));
+    await waitFor(() => requests.some(request => request.path === '/projects/proj-bootstrap/dispatch'));
 
     expect(requests.map(request => request.path)).toEqual([
       '/agents',
       '/projects',
       '/projects/proj-bootstrap/plan',
       '/projects/proj-bootstrap/tasks',
+      '/projects/proj-bootstrap/dispatch',
     ]);
     expect(requests.find(request => request.path === '/projects/proj-bootstrap/plan')?.body).toMatchObject({
       fromAgent: 'xiaok-po',
@@ -2392,6 +2397,9 @@ describe('desktop services', () => {
         if (path === '/projects/proj-recover/tasks') {
           return new Response(JSON.stringify({ ok: true, taskIds: ['item-1'] }));
         }
+        if (path === '/projects/proj-recover/dispatch') {
+          return new Response(JSON.stringify({ ok: true, dispatched: ['item-1'] }));
+        }
         return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
       },
     };
@@ -2426,12 +2434,169 @@ describe('desktop services', () => {
 
     await waitFor(() => requests.some(request => request.path === '/projects/proj-recover/plan'));
     await waitFor(() => requests.some(request => request.path === '/projects/proj-recover/tasks'));
+    await waitFor(() => requests.some(request => request.path === '/projects/proj-recover/dispatch'));
 
     const jobsData = JSON.parse(readFileSync(join(dataRoot, 'kswarm-initial-plan-bootstrap-jobs.json'), 'utf8'));
     expect(jobsData.jobs).toContainEqual(expect.objectContaining({
       projectId: 'proj-recover',
       status: 'succeeded',
     }));
+  });
+
+  it('keeps the bootstrap job pending when the dispatch phase fails', async () => {
+    const requests: Array<{ path: string }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string) => {
+        requests.push({ path });
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'xiaok-po', name: 'PO-Agent', runtimeType: 'xiaok', roles: ['project_owner'], status: 'idle' },
+              { id: 'xiaok-worker', name: 'Worker-Agent', runtimeType: 'xiaok', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            ok: true,
+            project: { id: 'proj-dispatch-fail', name: 'Dispatch Fail', status: 'created', createdAt: 123 },
+          }), { status: 201 });
+        }
+        if (path === '/projects/proj-dispatch-fail/plan') {
+          return new Response(JSON.stringify({ ok: true, plan: { version: 1 } }));
+        }
+        if (path === '/projects/proj-dispatch-fail/tasks') {
+          return new Response(JSON.stringify({ ok: true, taskIds: ['item-1'] }));
+        }
+        if (path === '/projects/proj-dispatch-fail/dispatch') {
+          return new Response(JSON.stringify({ ok: false, error: 'dispatch_unavailable' }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService,
+      now: () => 300,
+      runner: async ({ sessionId, emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            analysis: 'Plan ok but dispatch will fail.',
+            phases: [{
+              id: 'phase-1',
+              name: '交付',
+              items: [{
+                id: 'item-1',
+                title: '任务一',
+                assignedAgent: 'xiaok-worker',
+                dependencies: [],
+              }],
+            }],
+          }),
+        });
+      },
+    });
+
+    const result = JSON.parse(await services.executeTool('create_project', {
+      name: 'Dispatch Fail',
+      goal: 'Plan succeeds but dispatch fails',
+    }));
+    expect(result).toMatchObject({ projectId: 'proj-dispatch-fail', planningStatus: 'queued' });
+
+    await waitFor(() => requests.some(request => request.path === '/projects/proj-dispatch-fail/dispatch'));
+    await waitFor(() => {
+      const jobsFile = join(rootDir, 'data', 'kswarm-initial-plan-bootstrap-jobs.json');
+      if (!existsSync(jobsFile)) return false;
+      const jobsData = JSON.parse(readFileSync(jobsFile, 'utf8'));
+      const job = jobsData.jobs.find((item: { projectId?: string }) => item.projectId === 'proj-dispatch-fail');
+      return job?.status === 'pending'
+        && job?.attempts === 1
+        && /dispatch_unavailable/.test(job?.lastError || '');
+    }, 3000);
+  });
+
+  it('treats plan_already_exists as non-fatal and still runs tasks and dispatch', async () => {
+    const requests: Array<{ path: string }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string) => {
+        requests.push({ path });
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'xiaok-po', name: 'PO-Agent', runtimeType: 'xiaok', roles: ['project_owner'], status: 'idle' },
+              { id: 'xiaok-worker', name: 'Worker-Agent', runtimeType: 'xiaok', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            ok: true,
+            project: { id: 'proj-replan', name: 'Replan', status: 'created', createdAt: 123 },
+          }), { status: 201 });
+        }
+        if (path === '/projects/proj-replan/plan') {
+          return new Response(JSON.stringify({ ok: false, error: 'plan_already_exists' }), { status: 200 });
+        }
+        if (path === '/projects/proj-replan/tasks') {
+          return new Response(JSON.stringify({ ok: true, taskIds: ['item-1'] }));
+        }
+        if (path === '/projects/proj-replan/dispatch') {
+          return new Response(JSON.stringify({ ok: true, dispatched: ['item-1'] }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService,
+      now: () => 300,
+      runner: async ({ sessionId, emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            analysis: 'Plan already exists, continue to tasks.',
+            phases: [{
+              id: 'phase-1',
+              name: '交付',
+              items: [{
+                id: 'item-1',
+                title: '任务一',
+                assignedAgent: 'xiaok-worker',
+                dependencies: [],
+              }],
+            }],
+          }),
+        });
+      },
+    });
+
+    const result = JSON.parse(await services.executeTool('create_project', {
+      name: 'Replan',
+      goal: 'Plan already exists path',
+    }));
+    expect(result).toMatchObject({ projectId: 'proj-replan', planningStatus: 'queued' });
+
+    await waitFor(() => requests.some(request => request.path === '/projects/proj-replan/dispatch'));
+    await waitFor(() => {
+      const jobsFile = join(rootDir, 'data', 'kswarm-initial-plan-bootstrap-jobs.json');
+      if (!existsSync(jobsFile)) return false;
+      const jobsData = JSON.parse(readFileSync(jobsFile, 'utf8'));
+      const job = jobsData.jobs.find((item: { projectId?: string }) => item.projectId === 'proj-replan');
+      return job?.status === 'succeeded';
+    }, 3000);
+    expect(requests.some(request => request.path === '/projects/proj-replan/tasks')).toBe(true);
+    expect(requests.some(request => request.path === '/projects/proj-replan/dispatch')).toBe(true);
   });
 
   it('forwards workFolder from the chat create_project tool to kswarm', async () => {

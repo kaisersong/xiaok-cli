@@ -57,6 +57,18 @@ describe('kswarm seed contract', () => {
     expect(getPreferredPoAgentId(agents)).toBe('xiaok-po');
     expect(getPreferredWorkerSeedId(agents, 'xiaok-po')).toBe('xiaok-worker');
   });
+
+  it('never auto-selects a role-less or pure-worker agent as PO', () => {
+    expect(getPreferredPoAgentId([
+      { id: 'roleless', name: 'Role-less', runtimeType: 'xiaok' },
+      { id: 'worker-only', name: 'Worker', runtimeType: 'xiaok', roles: ['worker'] },
+    ])).toBeNull();
+
+    expect(getPreferredPoAgentId([
+      { id: 'roleless', name: 'Role-less', runtimeType: 'xiaok' },
+      { id: 'custom-po', name: 'Custom PO', runtimeType: 'xiaok', roles: ['project_owner'] },
+    ])).toBe('custom-po');
+  });
 });
 
 describe('desktop service path contract', () => {

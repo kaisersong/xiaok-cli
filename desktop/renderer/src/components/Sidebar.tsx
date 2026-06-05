@@ -418,6 +418,10 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                     <div
                       className="fixed inset-0 z-40"
                       onClick={() => setShowUpdatePopover(false)}
+                      onKeyDown={(e) => { if (e.key === 'Escape') setShowUpdatePopover(false) }}
+                      role="button"
+                      tabIndex={-1}
+                      aria-label="关闭弹窗"
                     />
                     <div className="absolute bottom-10 right-0 z-50 w-72 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 shadow-lg">
                       <div className="mb-2 flex items-center justify-between">

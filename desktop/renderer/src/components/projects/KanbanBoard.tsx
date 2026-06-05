@@ -4,7 +4,7 @@
  */
 
 import { useState, useMemo } from 'react';
-import { Circle, Loader2, Eye, CheckCircle2, Plus, X as XIcon, Check, AlertCircle, Clock3, Workflow } from 'lucide-react';
+import { Circle, Loader2, Eye, CheckCircle2, Plus, X as XIcon, Check, AlertCircle, Clock3, Workflow, PauseCircle, RotateCcw } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmProject, KSwarmTask, KSwarmArtifact } from '../../hooks/useKSwarmClient';
@@ -180,6 +180,14 @@ function TaskCard({
   const failureReason = task.blockedReason || task.failureReason || task.lastFailureClass || task.failureClass || review?.feedback || '';
   const executionView = getTaskExecutionView(task, projectExecutionMode);
 
+  const recoveryBadge = (() => {
+    if (task.suspendedAt) return { icon: PauseCircle, label: '已暂停 · 待恢复' };
+    if (typeof task.retryNotBefore === 'number' && Number.isFinite(task.retryNotBefore) && task.retryNotBefore > Date.now()) {
+      return { icon: RotateCcw, label: '等待重试' };
+    }
+    return null;
+  })();
+
   const agentName = (id?: string) => {
     if (!id) return '';
     const a = agents.find(a => a.id === id);
@@ -270,6 +278,16 @@ function TaskCard({
             {executionView.reason && <span className="text-[var(--c-text-muted)]">{executionView.reason}</span>}
           </div>
         )}
+
+        {recoveryBadge && (() => {
+          const RecoveryIcon = recoveryBadge.icon;
+          return (
+            <div className="mt-1.5 inline-flex max-w-full items-center gap-1 rounded-full bg-[var(--c-status-warning-text)]/10 px-1.5 py-0.5 text-[10px] text-[var(--c-status-warning-text)]">
+              <RecoveryIcon size={10} className="shrink-0" />
+              <span>{recoveryBadge.label}</span>
+            </div>
+          );
+        })()}
 
         {/* Review result */}
         {review && (

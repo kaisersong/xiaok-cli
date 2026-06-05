@@ -64,6 +64,7 @@ describe('managed xiaok agent payload', () => {
       runtimeType: 'xiaok',
       runtimeSource: 'desktop-agent-runtime',
       runtimePath: null,
+      execution: { mode: 'hosted', hostParticipantId: 'xiaok-desktop' },
       runtimeModel: 'claude-sonnet-4-6',
       provider: null,
       model: null,
@@ -149,6 +150,7 @@ describe('managed xiaok agent payload', () => {
     expect(patch).toMatchObject({
       runtimePath: null,
       runtimeSource: 'desktop-agent-runtime',
+      execution: { mode: 'hosted', hostParticipantId: 'xiaok-desktop' },
       provider: null,
       model: null,
       baseUrl: null,
@@ -189,6 +191,7 @@ describe('managed xiaok agent payload', () => {
 
     expect(patch).toMatchObject({
       runtimePath: null,
+      execution: { mode: 'hosted', hostParticipantId: 'xiaok-desktop' },
       provider: null,
       model: null,
       baseUrl: null,

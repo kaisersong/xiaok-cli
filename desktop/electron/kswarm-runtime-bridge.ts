@@ -183,15 +183,18 @@ interface WebSocketLike {
 }
 
 type WebSocketConstructor = new (url: string) => WebSocketLike;
+type BrokerParticipantKind = 'agent' | 'service' | 'human';
 
 export interface KSwarmRuntimeBridgeBrokerClientOptions {
   brokerUrl?: string;
   participantId: string;
+  participantKind?: BrokerParticipantKind;
   alias?: string;
   roles?: string[];
   capabilities?: string[];
   bridge: KSwarmRuntimeBridge;
   taskHeartbeatIntervalMs?: number;
+  maxConcurrentTasks?: number;
   fetchImpl?: FetchLike;
   WebSocketImpl?: WebSocketConstructor;
 }
@@ -199,6 +202,7 @@ export interface KSwarmRuntimeBridgeBrokerClientOptions {
 export interface KSwarmRuntimeResultBrokerInput {
   brokerUrl?: string;
   participantId: string;
+  logicalParticipantId?: string;
   projectId: string;
   taskId: string;
   runId: string;
@@ -209,6 +213,7 @@ export interface KSwarmRuntimeResultBrokerInput {
 export interface KSwarmWorkflowNodeResultBrokerInput {
   brokerUrl?: string;
   participantId: string;
+  logicalParticipantId?: string;
   handoff: KSwarmWorkflowNodeHandoff;
   output?: Record<string, unknown> | null;
   reviewDecision?: { status: string; reason: string; evidenceRefs?: string[] } | null;
@@ -218,16 +223,22 @@ export interface KSwarmWorkflowNodeResultBrokerInput {
 export async function submitKSwarmRuntimeResultToBroker(input: KSwarmRuntimeResultBrokerInput): Promise<Response> {
   const brokerUrl = normalizeBrokerUrl(input.brokerUrl ?? 'http://127.0.0.1:4318');
   const fetchImpl = input.fetchImpl ?? fetch;
+  const logicalParticipantId = asNonEmptyString(input.logicalParticipantId) || input.participantId;
+  const isHosted = logicalParticipantId !== input.participantId;
   const payload = {
     ...input.result,
     projectId: input.projectId,
     taskId: input.taskId,
     runId: input.runId,
+    participantId: logicalParticipantId,
+    ...(isHosted ? { hostParticipantId: input.participantId } : {}),
     provenance: {
       runtimeSource: 'desktop-agent-runtime',
       ...((input.result.provenance && typeof input.result.provenance === 'object')
         ? input.result.provenance as Record<string, unknown>
         : {}),
+      participantId: logicalParticipantId,
+      ...(isHosted ? { hostParticipantId: input.participantId } : {}),
     },
   };
   return fetchImpl(`${brokerUrl}/intents`, {
@@ -236,6 +247,7 @@ export async function submitKSwarmRuntimeResultToBroker(input: KSwarmRuntimeResu
     body: JSON.stringify({
       intentId: `${input.participantId}-submit_result-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       kind: 'submit_result',
+      opaque: true,
       fromParticipantId: input.participantId,
       taskId: input.taskId,
       threadId: `thread-${input.taskId}`,
@@ -248,6 +260,8 @@ export async function submitKSwarmRuntimeResultToBroker(input: KSwarmRuntimeResu
 export async function submitKSwarmWorkflowNodeResultToBroker(input: KSwarmWorkflowNodeResultBrokerInput): Promise<Response> {
   const brokerUrl = normalizeBrokerUrl(input.brokerUrl ?? 'http://127.0.0.1:4318');
   const fetchImpl = input.fetchImpl ?? fetch;
+  const logicalParticipantId = asNonEmptyString(input.logicalParticipantId) || input.participantId;
+  const isHosted = logicalParticipantId !== input.participantId;
   const payload = {
     projectId: input.handoff.projectId,
     workflowRunId: input.handoff.workflowRunId,
@@ -257,9 +271,12 @@ export async function submitKSwarmWorkflowNodeResultToBroker(input: KSwarmWorkfl
     handoffId: input.handoff.handoffId,
     output: input.output ?? null,
     ...(input.reviewDecision ? { reviewDecision: input.reviewDecision } : {}),
+    participantId: logicalParticipantId,
+    ...(isHosted ? { hostParticipantId: input.participantId } : {}),
     provenance: {
       runtimeSource: 'desktop-agent-runtime',
-      participantId: input.participantId,
+      participantId: logicalParticipantId,
+      ...(isHosted ? { hostParticipantId: input.participantId } : {}),
       producedAt: Date.now(),
     },
   };
@@ -269,6 +286,7 @@ export async function submitKSwarmWorkflowNodeResultToBroker(input: KSwarmWorkfl
     body: JSON.stringify({
       intentId: `${input.participantId}-workflow_node_result-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       kind: 'workflow_node_result',
+      opaque: true,
       fromParticipantId: input.participantId,
       taskId: input.handoff.workflowRunId,
       threadId: `thread-${input.handoff.workflowRunId}`,
@@ -285,6 +303,8 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
   let socket: WebSocketLike | null = null;
   let stopped = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  const maxConcurrentTasks = options.maxConcurrentTasks ?? 3;
+  let activeTaskCount = 0;
 
   async function start(): Promise<void> {
     if (socket) return;
@@ -307,7 +327,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
       await waitForSocketOpen(socket);
       await postJson('/participants/register', {
         participantId: options.participantId,
-        kind: 'agent',
+        kind: options.participantKind ?? 'agent',
         alias: options.alias ?? options.participantId,
         roles: options.roles ?? [],
         capabilities: options.capabilities ?? [],
@@ -359,37 +379,41 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
       return;
     }
     if (event?.kind === 'assign_po' && typeof options.bridge.handleAssignPo === 'function') {
+      const payload = event.payload ?? {};
       await options.bridge.handleAssignPo({
-        payload: event.payload ?? {},
-        targetParticipantId: options.participantId,
+        payload,
+        targetParticipantId: resolveEventTargetParticipantId(event, payload),
       });
       return;
     }
     if (event?.kind === 'review_submission' && typeof options.bridge.handleReviewSubmission === 'function') {
+      const payload = event.payload ?? {};
       await options.bridge.handleReviewSubmission({
-        payload: event.payload ?? {},
-        targetParticipantId: options.participantId,
+        payload,
+        targetParticipantId: resolveEventTargetParticipantId(event, payload),
       });
       return;
     }
     if ((event?.kind === 'respond_approval' || event?.kind === 'plan_approved') && typeof options.bridge.handlePlanApproved === 'function') {
+      const payload = event.payload ?? {};
       await options.bridge.handlePlanApproved({
-        payload: event.payload ?? {},
-        targetParticipantId: options.participantId,
+        payload,
+        targetParticipantId: resolveEventTargetParticipantId(event, payload),
       });
     }
   }
 
   async function handleReadinessProbe(event: BrokerEvent): Promise<void> {
     const payload = event.payload ?? {};
+    const targetParticipantId = resolveEventTargetParticipantId(event, payload);
     const probeId = asNonEmptyString(payload.probeId) || asNonEmptyString(event.taskId) || `probe-${Date.now()}`;
-    const agentId = asNonEmptyString(payload.agentId) || options.participantId;
+    const agentId = asNonEmptyString(payload.agentId) || targetParticipantId;
     let probeResult: Awaited<ReturnType<NonNullable<KSwarmRuntimeBridge['handleReadinessProbe']>>>;
     if (typeof options.bridge.handleReadinessProbe === 'function') {
       try {
         probeResult = await options.bridge.handleReadinessProbe({
           payload,
-          targetParticipantId: options.participantId,
+          targetParticipantId,
         });
       } catch (error) {
         probeResult = {
@@ -404,7 +428,6 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
     await sendIntent('readiness_probe_result', event, {
       probeId,
       agentId,
-      participantId: options.participantId,
       ok: Boolean(probeResult.ok),
       ...(probeResult.ok ? {} : { reason: probeResult.reason || probeResult.error || 'readiness_probe_failed' }),
       runtimeSource: 'desktop-agent-runtime',
@@ -416,6 +439,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
 
   async function handleRequestTask(event: BrokerEvent): Promise<void> {
     const payload = event.payload ?? {};
+    const targetParticipantId = resolveEventTargetParticipantId(event, payload);
     const projectId = asNonEmptyString(payload.projectId);
     const taskId = asNonEmptyString(payload.taskId) || asNonEmptyString(event.taskId);
     const runId = asNonEmptyString(payload.runId);
@@ -431,17 +455,29 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
       return;
     }
 
-    await sendIntent('accept_task', event, { projectId, taskId, runId });
-    await sendIntent('report_progress', event, { projectId, taskId, runId, stage: 'started' });
+    if (activeTaskCount >= maxConcurrentTasks) {
+      await sendTaskFailed(event, {
+        projectId,
+        taskId,
+        runId,
+        failureReason: 'desktop_capacity_full',
+        errorMessage: `desktop runtime at capacity (${maxConcurrentTasks} concurrent tasks)`,
+      });
+      return;
+    }
 
-    const stopHeartbeat = startTaskHeartbeat(event, { projectId, taskId, runId });
+    activeTaskCount++;
+    await sendIntent('accept_task', event, { projectId, taskId, runId }, targetParticipantId);
+    await sendIntent('report_progress', event, { projectId, taskId, runId, stage: 'started' }, targetParticipantId);
+
+    const stopHeartbeat = startTaskHeartbeat(event, { projectId, taskId, runId }, targetParticipantId);
     try {
       const result = await options.bridge.handleTaskHandoff({
         handoffPath,
         projectId,
         taskId,
         runId,
-        targetParticipantId: options.participantId,
+        targetParticipantId,
       });
       if (!result.ok) {
         await sendTaskFailed(event, {
@@ -461,12 +497,14 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
         errorMessage: error instanceof Error ? error.message : String(error),
       });
     } finally {
+      activeTaskCount--;
       stopHeartbeat();
     }
   }
 
   async function handleWorkflowNodeHandoff(event: BrokerEvent): Promise<void> {
     const payload = event.payload ?? {};
+    const targetParticipantId = resolveEventTargetParticipantId(event, payload);
     const handoff = normalizeWorkflowNodeHandoff(payload);
     if (!handoff) {
       await sendIntent('workflow_node_failed', event, {
@@ -488,7 +526,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
       attempt: handoff.attempt,
       handoffId: handoff.handoffId,
       stage: 'started',
-    });
+    }, targetParticipantId);
 
     if (typeof options.bridge.handleWorkflowNodeHandoff !== 'function') {
       await sendIntent('workflow_node_failed', event, {
@@ -496,17 +534,17 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
         workflowRunId: handoff.workflowRunId,
         nodeId: handoff.nodeId,
         attempt: handoff.attempt,
-        handoffId: handoff.handoffId,
-        failureReason: 'workflow_node_handler_missing',
-        errorMessage: 'workflow_node_handler_missing',
-      });
+          handoffId: handoff.handoffId,
+          failureReason: 'workflow_node_handler_missing',
+          errorMessage: 'workflow_node_handler_missing',
+      }, targetParticipantId);
       return;
     }
 
     try {
       const result = await options.bridge.handleWorkflowNodeHandoff({
         handoff,
-        targetParticipantId: options.participantId,
+        targetParticipantId,
       });
       if (!result.ok) {
         await sendIntent('workflow_node_failed', event, {
@@ -517,7 +555,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
           handoffId: handoff.handoffId,
           failureReason: result.error || 'workflow_node_failed',
           errorMessage: result.error || 'workflow_node_failed',
-        });
+        }, targetParticipantId);
       }
     } catch (error) {
       const failureReason = getWorkflowNodeFailureReason(error);
@@ -529,11 +567,11 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
         handoffId: handoff.handoffId,
         failureReason,
         errorMessage: failureReason,
-      });
+      }, targetParticipantId);
     }
   }
 
-  function startTaskHeartbeat(event: BrokerEvent, payload: { projectId: string; taskId: string; runId: string }): () => void {
+  function startTaskHeartbeat(event: BrokerEvent, payload: { projectId: string; taskId: string; runId: string }, targetParticipantId: string): () => void {
     const intervalMs = options.taskHeartbeatIntervalMs ?? 30_000;
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return () => {};
     const timer = setInterval(() => {
@@ -541,7 +579,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
         ...payload,
         stage: 'running',
         telemetry: { lastHeartbeatAt: Date.now() },
-      }).catch(() => {});
+      }, targetParticipantId).catch(() => {});
     }, intervalMs);
     return () => clearInterval(timer);
   }
@@ -550,19 +588,39 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
     await sendIntent('task_failed', event, payload);
   }
 
-  async function sendIntent(kind: string, event: BrokerEvent, payload: Record<string, unknown>): Promise<Response> {
+  async function sendIntent(
+    kind: string,
+    event: BrokerEvent,
+    payload: Record<string, unknown>,
+    targetParticipantId = resolveEventTargetParticipantId(event, payload),
+  ): Promise<Response> {
     return postJson('/intents', {
       intentId: `${options.participantId}-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       kind,
+      opaque: true,
       fromParticipantId: options.participantId,
       taskId: asNonEmptyString(event.taskId) || asNonEmptyString(payload.taskId) || null,
       threadId: asNonEmptyString(event.threadId) || null,
       to: { mode: 'participant', participants: [event.fromParticipantId || 'kswarm-hub'] },
-      payload: {
-        ...payload,
-        participantId: options.participantId,
-      },
+      payload: withRuntimeParticipantPayload(payload, targetParticipantId),
     });
+  }
+
+  function resolveEventTargetParticipantId(event: BrokerEvent, payload: Record<string, unknown> = event.payload ?? {}): string {
+    return asNonEmptyString(payload.targetAgentId)
+      || asNonEmptyString(payload.participantId)
+      || asNonEmptyString(payload.agentId)
+      || options.participantId;
+  }
+
+  function withRuntimeParticipantPayload(payload: Record<string, unknown>, targetParticipantId: string): Record<string, unknown> {
+    const cleanPayload = { ...payload };
+    delete cleanPayload.hostParticipantId;
+    return {
+      ...cleanPayload,
+      participantId: targetParticipantId,
+      ...(targetParticipantId !== options.participantId ? { hostParticipantId: options.participantId } : {}),
+    };
   }
 
   async function postJson(path: string, body: Record<string, unknown>): Promise<Response> {

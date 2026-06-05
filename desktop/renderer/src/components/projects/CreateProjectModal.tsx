@@ -81,7 +81,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
   if (!open) return null;
 
   const poAgents = agents.filter(a => a.roles?.includes('project_owner'));
-  const workerAgents = agents.filter(a => a.id !== poAgent);
+  const workerAgents = agents.filter(a => a.id !== poAgent && (a.roles?.includes('worker') || !a.roles?.length));
 
   const toggleMember = (id: string) => {
     setMembers(prev => {

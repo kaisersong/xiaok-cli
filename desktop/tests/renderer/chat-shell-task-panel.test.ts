@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { DesktopTaskEvent } from '../../../src/runtime/task-host/types.js';
+import type { DesktopTaskEvent } from '../../shared/task-types';
 
 /**
  * Integration tests for ChatShell + TaskPanel interaction logic.

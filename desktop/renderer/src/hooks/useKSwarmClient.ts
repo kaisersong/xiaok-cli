@@ -7,12 +7,13 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-const KSWARM_PORT = 4400;
-const BASE_URL = `http://127.0.0.1:${KSWARM_PORT}`;
-const WS_URL = `ws://127.0.0.1:${KSWARM_PORT}/ws`;
 const RECONNECT_DELAY = 3000;
 const MAX_RECONNECT_DELAY = 60_000;
 const PARTICIPANT_POLL_INTERVAL = 8000;
+
+function getDesktopApi(): any {
+  return typeof window !== 'undefined' ? (window as any).xiaokDesktop : null;
+}
 
 const PROJECT_REFRESH_EVENTS = new Set([
   'project_created',
@@ -68,6 +69,10 @@ export interface KSwarmTask {
   completedAt?: number | string | null;
   createdAt?: number | string;
   updatedAt?: number | string;
+  suspendedAt?: number;
+  recoveryStatus?: string;
+  recoveryReason?: string;
+  retryNotBefore?: number;
   execution?: KSwarmTaskExecution | null;
 }
 
@@ -125,6 +130,13 @@ export interface KSwarmProject {
   taskScores?: Array<{ title: string; agent: string; score: number; comment: string }> | null;
   projectIntervention?: ProjectIntervention | null;
   latestWorkflowRun?: KSwarmWorkflowRun | null;
+}
+
+export interface CreateKSwarmProjectResponse {
+  ok: boolean;
+  project?: KSwarmProject;
+  preparation?: unknown;
+  planningStart?: unknown;
 }
 
 export interface KSwarmDeliverable {
@@ -754,80 +766,70 @@ function formatPrinciplesForPlanningGuidance(principles: PrincipleEntry[]): stri
   return `知识与规则（系统规划指导，不写入用户可见要求）：\n${block}${truncateNote}`;
 }
 
-// ─── HTTP Helpers ─────────────────────────────────────────────────
+// ─── HTTP Helpers (via IPC proxy) ────────────────────────────────
 
 async function httpGet<T>(path: string): Promise<T | null> {
+  const api = getDesktopApi();
+  if (!api?.kswarmProxyGet) return null;
   try {
-    const res = await fetch(`${BASE_URL}${path}`, { cache: 'no-store' });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
+    return await api.kswarmProxyGet(path) as T | null;
+  } catch (err) {
+    console.warn(`[kswarm] GET ${path} failed`, err);
     return null;
   }
 }
 
 async function httpPost<T>(path: string, body?: unknown): Promise<T | null> {
+  const api = getDesktopApi();
+  if (!api?.kswarmProxyPost) return null;
   try {
-    const res = await fetch(`${BASE_URL}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
+    return await api.kswarmProxyPost(path, body) as T | null;
+  } catch (err) {
+    console.warn(`[kswarm] POST ${path} failed`, err);
     return null;
   }
 }
 
 async function httpPostJson<T>(path: string, body?: unknown): Promise<T | null> {
+  const api = getDesktopApi();
+  if (!api?.kswarmProxyPostJson) return null;
   try {
-    const res = await fetch(`${BASE_URL}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const data = await res.json().catch(() => null);
-    if (!data) return null;
-    return { ...data, status: data.status ?? res.status } as T;
-  } catch {
+    return await api.kswarmProxyPostJson(path, body) as T | null;
+  } catch (err) {
+    console.warn(`[kswarm] POST(json) ${path} failed`, err);
     return null;
   }
 }
 
 async function httpPut<T>(path: string, body?: unknown): Promise<T | null> {
+  const api = getDesktopApi();
+  if (!api?.kswarmProxyPut) return null;
   try {
-    const res = await fetch(`${BASE_URL}${path}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
+    return await api.kswarmProxyPut(path, body) as T | null;
+  } catch (err) {
+    console.warn(`[kswarm] PUT ${path} failed`, err);
     return null;
   }
 }
 
 async function httpPatch<T>(path: string, body?: unknown): Promise<T | null> {
+  const api = getDesktopApi();
+  if (!api?.kswarmProxyPatch) return null;
   try {
-    const res = await fetch(`${BASE_URL}${path}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
+    return await api.kswarmProxyPatch(path, body) as T | null;
+  } catch (err) {
+    console.warn(`[kswarm] PATCH ${path} failed`, err);
     return null;
   }
 }
 
 async function httpDelete(path: string): Promise<boolean> {
+  const api = getDesktopApi();
+  if (!api?.kswarmProxyDelete) return false;
   try {
-    const res = await fetch(`${BASE_URL}${path}`, { method: 'DELETE' });
-    return res.ok;
-  } catch {
+    return await api.kswarmProxyDelete(path) as boolean;
+  } catch (err) {
+    console.warn(`[kswarm] DELETE ${path} failed`, err);
     return false;
   }
 }
@@ -841,62 +843,13 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   const [participants, setParticipants] = useState<KSwarmParticipant[]>([]);
   const [lastEvent, setLastEvent] = useState<KSwarmEvent | null>(null);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wsRef = useRef<(() => void) | null>(null);
+  const wsEventRef = useRef<(() => void) | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const reconnectAttemptsRef = useRef(0);
   const connectedRef = useRef(false);
+  const projectsRef = useRef<KSwarmProject[]>([]);
 
-  // ─── WebSocket Connection ─────────────────────────────────────
-
-  const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
-
-    try {
-      const ws = new WebSocket(WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setConnected(true);
-        connectedRef.current = true;
-        reconnectAttemptsRef.current = 0;
-        // Fetch initial state
-        fetchProjects();
-        fetchAgents();
-        fetchParticipants();
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          handleWsMessage(msg);
-        } catch {}
-      };
-
-      ws.onclose = () => {
-        setConnected(false);
-        connectedRef.current = false;
-        wsRef.current = null;
-        scheduleReconnect();
-      };
-
-      ws.onerror = () => {
-        ws.close();
-      };
-    } catch {
-      scheduleReconnect();
-    }
-  }, []);
-
-  function scheduleReconnect() {
-    if (reconnectTimer.current) return;
-    const delay = Math.min(RECONNECT_DELAY * 2 ** reconnectAttemptsRef.current, MAX_RECONNECT_DELAY);
-    reconnectAttemptsRef.current++;
-    reconnectTimer.current = setTimeout(() => {
-      reconnectTimer.current = null;
-      connect();
-    }, delay);
-  }
+  // ─── IPC Stream Connection ─────────────────────────────────────
 
   function handleWsMessage(msg: KSwarmEvent) {
     setLastEvent(msg);
@@ -912,34 +865,51 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   // ─── Lifecycle ────────────────────────────────────────────────
 
   useEffect(() => {
-    connect();
+    const api = getDesktopApi();
+    if (!api) return;
 
-    // Poll participants periodically (only when connected)
+    api.kswarmStreamSubscribe?.();
+
+    const unsubStatus = api.onKSwarmConnectionStatus?.((payload: { status: string }) => {
+      const isConnected = payload.status === 'connected';
+      setConnected(isConnected);
+      connectedRef.current = isConnected;
+      if (isConnected) {
+        fetchProjects();
+        fetchAgents();
+        fetchParticipants();
+      }
+    });
+    wsRef.current = unsubStatus || null;
+
+    const unsubEvent = api.onKSwarmWsEvent?.((payload: KSwarmEvent) => {
+      handleWsMessage(payload);
+    });
+    wsEventRef.current = unsubEvent || null;
+
     pollTimer.current = setInterval(() => {
       if (connectedRef.current) fetchParticipants();
     }, PARTICIPANT_POLL_INTERVAL);
 
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-      if (reconnectTimer.current) {
-        clearTimeout(reconnectTimer.current);
-        reconnectTimer.current = null;
-      }
+      api.kswarmStreamUnsubscribe?.();
+      wsRef.current?.();
+      wsRef.current = null;
+      wsEventRef.current?.();
+      wsEventRef.current = null;
       if (pollTimer.current) {
         clearInterval(pollTimer.current);
         pollTimer.current = null;
       }
     };
-  }, [connect]);
+  }, []);
 
   // ─── Project Actions ──────────────────────────────────────────
 
   const fetchProjects = useCallback(async (): Promise<KSwarmProject[]> => {
     const data = await httpGet<{ projects: KSwarmProject[] }>('/projects');
     const list = data?.projects || [];
+    projectsRef.current = list;
     setProjects(list);
     return list;
   }, []);
@@ -968,13 +938,47 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
       requirements: input.requirements || '',
       principles,
     });
-    const result = await httpPost<KSwarmProject>('/projects', {
+    const response = await httpPost<CreateKSwarmProjectResponse>('/projects', {
       ...input,
       requirements: guidance.visibleRequirements || undefined,
       planningGuidance: guidance.planningGuidance || undefined,
       enableSummary: input.enableSummary ?? true,
+      autoStartPlanning: false,
     });
-    if (result) fetchProjects();
+    // Server returns { ok, project, preparation, planningStart } — unwrap the
+    // project. Treating the whole envelope as a KSwarmProject left id/name
+    // undefined, so the planning bootstrap below enqueued an empty projectId
+    // and the project silently never planned.
+    const result = response?.project ?? null;
+    if (!result || !result.id) {
+      console.error('[createProject] Project create returned no project id', response);
+      return null;
+    }
+    // Because autoStartPlanning:false disables server-side auto planning, the
+    // client MUST successfully enqueue the planning bootstrap; a failure here
+    // would leave the project stuck in "created" forever, so surface it.
+    try {
+      const api = (window as any).xiaokDesktop;
+      if (api?.kswarmStartProjectPlanning) {
+        const enqueueResult = await api.kswarmStartProjectPlanning({
+          projectId: result.id,
+          projectName: result.name,
+          goal: input.goal,
+          requirements: input.requirements || '',
+          planningGuidance: guidance.planningGuidance || '',
+          poAgent: input.poAgent,
+          members: input.members || [],
+        });
+        if (!enqueueResult?.ok) {
+          console.error('[createProject] Planning bootstrap enqueue rejected', enqueueResult);
+        }
+      } else {
+        console.error('[createProject] kswarmStartProjectPlanning API unavailable; project will not plan');
+      }
+    } catch (e) {
+      console.error('[createProject] Failed to enqueue planning bootstrap', e);
+    }
+    fetchProjects();
     return result;
   }, [fetchProjects]);
 
@@ -1016,7 +1020,8 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   }, [fetchProjects]);
 
   const deliverProject = useCallback(async (projectId: string): Promise<boolean> => {
-    const result = await httpPost<{ ok: boolean }>(`/projects/${projectId}/deliver`, {});
+    const fromAgent = projectsRef.current.find((p) => p.id === projectId)?.poAgent;
+    const result = await httpPost<{ ok: boolean }>(`/projects/${projectId}/deliver`, { fromAgent });
     if (result?.ok) fetchProjects();
     return !!result?.ok;
   }, [fetchProjects]);

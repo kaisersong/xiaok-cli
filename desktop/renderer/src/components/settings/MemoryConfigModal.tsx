@@ -443,12 +443,18 @@ function NowledgeDetectButton({
   const detect = useCallback(async () => {
     setState('detecting')
     try {
-      const res = await fetch(`${NOWLEDGE_LOCAL_URL}/health`, { signal: AbortSignal.timeout(3000) })
-      if (res.ok) {
-        onDetected(NOWLEDGE_LOCAL_URL)
-        setState('found')
-        setTimeout(() => setState('idle'), 2500)
-        return
+      const api = (window as any).xiaokDesktop
+      if (api?.connectionHealth) {
+        const result = await Promise.race([
+          api.connectionHealth(NOWLEDGE_LOCAL_URL),
+          new Promise(r => setTimeout(() => r({ ok: false }), 3000)),
+        ])
+        if (result?.ok) {
+          onDetected(NOWLEDGE_LOCAL_URL)
+          setState('found')
+          setTimeout(() => setState('idle'), 2500)
+          return
+        }
       }
     } catch { /* unreachable */ }
     setState('notfound')
@@ -602,11 +608,18 @@ export function MemoryConfigModal({ open, onClose, accessToken, memConfig, onCon
       }
       // 打开 nowledge 弹窗且尚未填 baseUrl 时，自动检测本地实例
       if (provider === 'nowledge' && !nd.baseUrl) {
-        void fetch(`${NOWLEDGE_LOCAL_URL}/health`, { signal: AbortSignal.timeout(3000) })
-          .then((res) => {
-            if (res.ok) setNowledgeDraft((prev) => ({ ...prev, baseUrl: NOWLEDGE_LOCAL_URL, apiKey: prev.apiKey ?? '' }))
+        const api = (window as any).xiaokDesktop
+        if (api?.connectionHealth) {
+          let cancelled = false
+          const timer = setTimeout(() => { /* race timeout */ }, 3000)
+          void Promise.race([
+            api.connectionHealth(NOWLEDGE_LOCAL_URL),
+            new Promise(r => setTimeout(() => r({ ok: false }), 3000)),
+          ]).then((result: any) => {
+            if (!cancelled && result?.ok) setNowledgeDraft((prev) => ({ ...prev, baseUrl: NOWLEDGE_LOCAL_URL, apiKey: prev.apiKey ?? '' }))
           })
-          .catch(() => { /* 未检测到，静默 */ })
+          return () => { cancelled = true; clearTimeout(timer) }
+        }
       }
     }
   }, [open, memConfig, loadBridge, loadProviders, provider])

@@ -793,6 +793,15 @@ export const api = {
     return window.xiaokDesktop.saveSkillDebugConfig(input);
   },
 
+  // KSwarm Config API (IPC)
+  // -----------------------
+  async getKswarmConfig() {
+    return window.xiaokDesktop.getKswarmConfig();
+  },
+  async saveKswarmConfig(input: { maxConcurrentTasks: number }) {
+    return window.xiaokDesktop.saveKswarmConfig(input);
+  },
+
   async getSkillStats() {
     try {
       return await window.xiaokDesktop.getSkillStats();

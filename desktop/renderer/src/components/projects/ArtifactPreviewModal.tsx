@@ -41,9 +41,19 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
           setLoading(false);
           return;
         }
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`${res.status}`);
-        const text = await res.text();
+        const api = (window as any).xiaokDesktop;
+        let text: string;
+        const kswarmBase = 'http://127.0.0.1:4400';
+        if (url.startsWith(kswarmBase) && api?.kswarmProxyGet) {
+          const path = url.slice(kswarmBase.length);
+          const data = await api.kswarmProxyGet(path);
+          if (data === null || data === undefined) throw new Error('fetch failed');
+          text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        } else {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`${res.status}`);
+          text = await res.text();
+        }
         setContent(text);
       } catch (err) {
         setError((err as Error).message);

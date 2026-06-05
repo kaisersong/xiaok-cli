@@ -6,7 +6,7 @@ import { ChatView, type ChatMessage, type ComputerUseActionData, type GeneratedF
 import { CanvasPanel } from './CanvasPanel';
 import { TaskPanel } from './TaskPanel';
 import type { ThreadRecord } from '../api/types';
-import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
+import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
 import { useSidebarCollapse } from '../layouts/AppLayout';
 import { sanitizeUserFacingErrorMessage } from '../lib/error-display';
 import {
