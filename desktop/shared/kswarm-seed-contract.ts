@@ -26,6 +26,7 @@ const SHARED_CAPABILITIES = ['coding', 'testing', 'design', 'planning'];
 
 export const XIAOK_PO_SEED_ID = 'xiaok-po';
 export const XIAOK_WORKER_SEED_ID = 'xiaok-worker';
+export const XIAOK_DESKTOP_HOST_PARTICIPANT_ID = 'xiaok-desktop';
 const XIAOK_LEGACY_SEED_ID = 'xiaok';
 
 export function createXiaokPoSeed(): KSwarmCreateAgentInput {
@@ -95,10 +96,9 @@ export function getPreferredPoAgentId(agents: KSwarmAgentLike[]): string | null 
   const active = agents.filter((agent) => !isArchived(agent));
   return (
     active.find((agent) => agent.id === XIAOK_PO_SEED_ID)?.id ??
-    active.find((agent) => agent.id === XIAOK_LEGACY_SEED_ID)?.id ??
-    active.find((agent) => agent.id === 'cli-xiaok')?.id ??
+    active.find((agent) => agent.id === XIAOK_LEGACY_SEED_ID && hasRole(agent, 'project_owner'))?.id ??
+    active.find((agent) => agent.id === 'cli-xiaok' && hasRole(agent, 'project_owner'))?.id ??
     active.find((agent) => hasRole(agent, 'project_owner'))?.id ??
-    active[0]?.id ??
     null
   );
 }

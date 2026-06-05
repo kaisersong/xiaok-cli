@@ -1,9 +1,13 @@
 /**
  * useRuntimes — React Query hook for fetching runtime list.
- * Replace manual fetch + localStorage pattern with cached queries.
+ * All REST calls routed through main process IPC proxy.
  */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+
+function getApi(): any {
+  return typeof window !== 'undefined' ? (window as any).xiaokDesktop : null;
+}
 
 export const runtimeKeys = {
   all: () => ['runtimes'] as const,
@@ -15,13 +19,13 @@ export function useRuntimes() {
   return useQuery({
     queryKey: runtimeKeys.list(),
     queryFn: async () => {
-      const res = await fetch('http://127.0.0.1:4400/runtimes');
-      if (!res.ok) throw new Error(`Failed to fetch runtimes: ${res.status}`);
-      const data = await res.json();
+      const api = getApi();
+      const data = await api?.kswarmProxyGet('/runtimes');
+      if (!data) throw new Error('Failed to fetch runtimes');
       return data.runtimes || [];
     },
-    staleTime: 60_000,  // 1 minute
-    refetchInterval: 30_000,  // Auto-refresh every 30s
+    staleTime: 60_000,
+    refetchInterval: 30_000,
     retry: 2,
   });
 }
@@ -30,13 +34,13 @@ export function useAgentLiveness() {
   return useQuery({
     queryKey: runtimeKeys.liveness(),
     queryFn: async () => {
-      const res = await fetch('http://127.0.0.1:4400/agents/liveness');
-      if (!res.ok) throw new Error(`Failed to fetch liveness: ${res.status}`);
-      const data = await res.json();
+      const api = getApi();
+      const data = await api?.kswarmProxyGet('/agents/liveness');
+      if (!data) throw new Error('Failed to fetch liveness');
       return data.liveness || {};
     },
-    staleTime: 15_000,  // 15 seconds
-    refetchInterval: 10_000,  // Auto-refresh every 10s
+    staleTime: 15_000,
+    refetchInterval: 10_000,
     retry: 1,
   });
 }

@@ -139,6 +139,9 @@ export interface Config {
       maxPromptTokens?: number;
     };
   };
+  kswarm?: {
+    maxConcurrentTasks?: number;
+  };
 }
 
 const VALID_LEGACY_PROVIDERS = ['claude', 'openai', 'custom'] as const;

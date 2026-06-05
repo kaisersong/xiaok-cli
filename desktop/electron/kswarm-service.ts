@@ -574,6 +574,16 @@ export function createKSwarmService(): KSwarmService {
         ...process.env,
         KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`,
+        ...(await (async () => {
+          try {
+            const cfg = await loadConfig();
+            const raw = cfg.kswarm?.maxConcurrentTasks;
+            if (raw != null) {
+              return { KSWARM_MAX_WORKER_INSTANCES: String(Math.max(1, Math.min(10, raw))) };
+            }
+          } catch {}
+          return {};
+        })()),
       },
     });
     console.log(`[kswarm-service] Spawning kswarm server: ${serverPath}`);

@@ -1817,6 +1817,7 @@ export interface LocaleStrings {
   projectsAgentRoleAll: string;
   projectsAgentRolePo: string;
   projectsAgentRoleWorker: string;
+  projectsAgentRoleUniversal: string;
   projectsAgentNoAgents: string;
   projectsAgentStart: string;
   projectsAgentStop: string;

@@ -1899,6 +1899,7 @@ export const en: LocaleStrings = {
   projectsAgentRoleAll: "All-round",
   projectsAgentRolePo: "Project Owner",
   projectsAgentRoleWorker: "Worker",
+  projectsAgentRoleUniversal: "Universal Worker",
   projectsAgentNoAgents: "No agents yet",
   projectsAgentStart: "Start",
   projectsAgentStop: "Stop",

@@ -988,8 +988,14 @@ export function MemorySettings({ accessToken }: Props) {
                     let baseUrl = memConfig.nowledge?.baseUrl ?? ''
                     if (!baseUrl) {
                       try {
-                        const res = await fetch('http://127.0.0.1:14242/health', { signal: AbortSignal.timeout(3000) })
-                        if (res.ok) baseUrl = 'http://127.0.0.1:14242'
+                        const api = (window as any).xiaokDesktop
+                        if (api?.connectionHealth) {
+                          const result = await Promise.race([
+                            api.connectionHealth('http://127.0.0.1:14242'),
+                            new Promise(r => setTimeout(() => r({ ok: false }), 3000)),
+                          ])
+                          if (result?.ok) baseUrl = 'http://127.0.0.1:14242'
+                        }
                       } catch { /* 未检测到 */ }
                     }
                     const next: MemoryConfig = {

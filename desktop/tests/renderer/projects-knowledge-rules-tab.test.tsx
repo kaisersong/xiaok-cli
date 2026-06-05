@@ -25,6 +25,13 @@ function stubDesktop(principles: any[] = []) {
       listPrinciples: vi.fn().mockResolvedValue(principles),
       savePrinciple: vi.fn().mockResolvedValue({ success: true }),
       deletePrinciple: vi.fn().mockResolvedValue({ success: true }),
+      kswarmProxyGet: vi.fn().mockImplementation(async (path: string) => {
+        if (path === '/quality/knowledge') return qualityKnowledgeResponse;
+        return null;
+      }),
+      kswarmProxyPost: vi.fn().mockImplementation(async (_path: string, _body: unknown) => {
+        return { ok: true };
+      }),
     },
   });
 }
@@ -131,45 +138,49 @@ describe('Knowledge & Rules tab', () => {
   });
 
   it('extracts rules from a knowledge document and applies the confirmed patch', async () => {
-    stubDesktop();
-    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/quality/rules/extract')) {
+    const proxyPostMock = vi.fn().mockImplementation(async (path: string) => {
+      if (path === '/quality/rules/extract') {
         return {
           ok: true,
-          json: async () => ({
-            ok: true,
-            rules: [
-              {
-                id: 'global.research-source-required',
-                packId: 'global',
-                severity: 'hard',
-                appliesTo: ['review'],
-                description: '研究必须引用来源',
-                metadata: { sourceKnowledgeId: 'research.default_knowledge' },
-              },
-            ],
-            patch: {
-              patchId: 'qextract-research-default-knowledge',
-              initiatedBy: 'user',
-              confirmedBy: 'user',
-              trustedInput: true,
-              target: 'user_knowledge_overlay',
-              affectedPacks: ['global'],
-              operations: [],
+          rules: [
+            {
+              id: 'global.research-source-required',
+              packId: 'global',
+              severity: 'hard',
+              appliesTo: ['review'],
+              description: '研究必须引用来源',
+              metadata: { sourceKnowledgeId: 'research.default_knowledge' },
             },
-          }),
-        } as Response;
+          ],
+          patch: {
+            patchId: 'qextract-research-default-knowledge',
+            initiatedBy: 'user',
+            confirmedBy: 'user',
+            trustedInput: true,
+            target: 'user_knowledge_overlay',
+            affectedPacks: ['global'],
+            operations: [],
+          },
+        };
       }
-      if (url.endsWith('/quality/patches/apply')) {
-        expect(init?.method).toBe('POST');
-        return { ok: true, json: async () => ({ ok: true }) } as Response;
+      if (path === '/quality/patches/apply') {
+        return { ok: true };
       }
-      return {
-        ok: true,
-        json: async () => qualityKnowledgeResponse,
-      } as Response;
+      return { ok: true };
     });
-    vi.stubGlobal('fetch', fetchMock);
+    Object.defineProperty(window, 'xiaokDesktop', {
+      configurable: true,
+      value: {
+        listPrinciples: vi.fn().mockResolvedValue([]),
+        savePrinciple: vi.fn().mockResolvedValue({ success: true }),
+        deletePrinciple: vi.fn().mockResolvedValue({ success: true }),
+        kswarmProxyGet: vi.fn().mockImplementation(async (path: string) => {
+          if (path === '/quality/knowledge') return qualityKnowledgeResponse;
+          return null;
+        }),
+        kswarmProxyPost: proxyPostMock,
+      },
+    });
 
     renderTab();
 
@@ -178,9 +189,9 @@ describe('Knowledge & Rules tab', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存规则' }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://127.0.0.1:4400/quality/patches/apply',
-        expect.objectContaining({ method: 'POST' }),
+      expect(proxyPostMock).toHaveBeenCalledWith(
+        '/quality/patches/apply',
+        expect.anything(),
       );
     });
     expect(screen.getByText('规则已保存')).toBeTruthy();

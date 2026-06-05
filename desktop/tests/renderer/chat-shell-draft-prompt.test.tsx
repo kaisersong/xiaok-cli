@@ -191,7 +191,7 @@ describe('ChatShell draft prompt navigation state', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('chat-status')).toHaveTextContent('running');
-      expect(mockSubscribeTask).toHaveBeenCalledWith('task-running', expect.any(Function));
+      expect(mockSubscribeTask).toHaveBeenCalledWith('task-running', expect.any(Function), expect.anything());
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'queue-second' }));

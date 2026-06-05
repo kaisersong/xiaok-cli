@@ -553,8 +553,10 @@ function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
     parallelGroups: (workflowRun.parallelGroups || []).map((group) => {
       const branchNodes = nodesByParallelGroup.get(group.id) || [];
       const branchLabels = branchNodes
-        .map((node) => node.fanoutItemLabel || node.title)
-        .filter(Boolean);
+        .flatMap((node) => {
+          const label = node.fanoutItemLabel || node.title;
+          return label ? [label] : [];
+        });
       return {
         id: group.id,
         label: group.label || group.primitiveId || group.id,

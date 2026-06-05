@@ -1,5 +1,5 @@
 import React from 'react';
-import type { TaskResult, ArtifactSummary } from '../../../../src/runtime/task-host/types';
+import type { TaskResult, ArtifactSummary } from '../../../shared/task-types';
 
 interface PlanStepItem {
   id: string;

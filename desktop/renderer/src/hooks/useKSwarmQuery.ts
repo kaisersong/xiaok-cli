@@ -1,6 +1,7 @@
 /**
  * useKSwarmProjects — React Query hooks for kswarm projects and agents.
  * Replaces the manual fetch + WebSocket pattern with React Query caching.
+ * All REST calls are routed through the main process IPC proxy.
  *
  * Usage:
  *   const { data: projects } = useProjects();
@@ -9,6 +10,30 @@
  */
 
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+
+function getApi(): any {
+  return typeof window !== 'undefined' ? (window as any).xiaokDesktop : null;
+}
+
+async function proxyGet<T>(path: string): Promise<T> {
+  const api = getApi();
+  const data = await api?.kswarmProxyGet(path);
+  if (data === null || data === undefined) throw new Error(`GET ${path} failed`);
+  return data as T;
+}
+
+async function proxyPost<T>(path: string, body?: unknown): Promise<T> {
+  const api = getApi();
+  const data = await api?.kswarmProxyPost(path, body);
+  if (data === null || data === undefined) throw new Error(`POST ${path} failed`);
+  return data as T;
+}
+
+async function proxyDelete(path: string): Promise<void> {
+  const api = getApi();
+  const ok = await api?.kswarmProxyDelete(path);
+  if (!ok) throw new Error(`DELETE ${path} failed`);
+}
 
 // ─── Query Keys ────────────────────────────────────────────────────────
 
@@ -30,9 +55,7 @@ export function useProjects() {
   return useQuery({
     queryKey: projectKeys.list(),
     queryFn: async () => {
-      const res = await fetch('http://127.0.0.1:4400/projects');
-      if (!res.ok) throw new Error(`Failed to fetch projects: ${res.status}`);
-      const data = await res.json();
+      const data = await proxyGet<{ projects: any[] }>('/projects');
       return data.projects || [];
     },
     staleTime: 5_000,
@@ -44,11 +67,7 @@ export function useProjects() {
 export function useProjectDetail(projectId: string) {
   return useQuery({
     queryKey: projectKeys.detail(projectId),
-    queryFn: async () => {
-      const res = await fetch(`http://127.0.0.1:4400/projects/${projectId}`);
-      if (!res.ok) throw new Error(`Failed to fetch project: ${res.status}`);
-      return res.json();
-    },
+    queryFn: () => proxyGet(`/projects/${projectId}`),
     enabled: !!projectId,
     staleTime: 5_000,
     refetchInterval: 10_000,
@@ -59,11 +78,7 @@ export function useProjectDetail(projectId: string) {
 export function useProjectFullDetail(projectId: string) {
   return useQuery({
     queryKey: projectKeys.fullDetail(projectId),
-    queryFn: async () => {
-      const res = await fetch(`http://127.0.0.1:4400/projects/${projectId}`);
-      if (!res.ok) throw new Error(`Failed to fetch project: ${res.status}`);
-      return res.json();
-    },
+    queryFn: () => proxyGet(`/projects/${projectId}`),
     enabled: !!projectId,
     staleTime: 5_000,
     refetchInterval: 5_000,
@@ -84,9 +99,7 @@ export function useAgents() {
   return useQuery({
     queryKey: agentKeys.list(),
     queryFn: async () => {
-      const res = await fetch('http://127.0.0.1:4400/agents');
-      if (!res.ok) throw new Error(`Failed to fetch agents: ${res.status}`);
-      const data = await res.json();
+      const data = await proxyGet<{ agents: any[] }>('/agents');
       return data.agents || [];
     },
     staleTime: 10_000,
@@ -107,15 +120,8 @@ export function useInvalidateAgents() {
 export function useCreateProject() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { name: string; goal: string; poAgent: string; requirements?: string; members?: string[]; workFolder?: string }) => {
-      const res = await fetch('http://127.0.0.1:4400/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
-      });
-      if (!res.ok) throw new Error(`Failed to create project: ${res.status}`);
-      return res.json();
-    },
+    mutationFn: (input: { name: string; goal: string; poAgent: string; requirements?: string; members?: string[]; workFolder?: string }) =>
+      proxyPost('/projects', input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.all() });
     },
@@ -125,11 +131,8 @@ export function useCreateProject() {
 export function useApproveProject() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (projectId: string) => {
-      const res = await fetch(`http://127.0.0.1:4400/projects/${projectId}/approve`, { method: 'POST' });
-      if (!res.ok) throw new Error(`Approve failed: ${res.status}`);
-      return res.json();
-    },
+    mutationFn: (projectId: string) =>
+      proxyPost(`/projects/${projectId}/approve`),
     onMutate: async (projectId) => {
       await qc.cancelQueries({ queryKey: projectKeys.detail(projectId) });
       const previous = qc.getQueryData(projectKeys.detail(projectId));
@@ -153,15 +156,8 @@ export function useApproveProject() {
 export function useCreateAgent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { name: string; roles: string[]; runtimeType?: string; provider?: string; model?: string; instructions?: string }) => {
-      const res = await fetch('http://127.0.0.1:4400/agents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
-      });
-      if (!res.ok) throw new Error(`Failed to create agent: ${res.status}`);
-      return res.json();
-    },
+    mutationFn: (input: { name: string; roles: string[]; runtimeType?: string; provider?: string; model?: string; instructions?: string }) =>
+      proxyPost('/agents', input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentKeys.all() });
     },
@@ -171,11 +167,8 @@ export function useCreateAgent() {
 export function useStartAgent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (agentId: string) => {
-      const res = await fetch(`http://127.0.0.1:4400/agents/${agentId}/start`, { method: 'POST' });
-      if (!res.ok) throw new Error(`Start failed: ${res.status}`);
-      return res.json();
-    },
+    mutationFn: (agentId: string) =>
+      proxyPost(`/agents/${agentId}/start`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentKeys.all() });
     },
@@ -185,11 +178,8 @@ export function useStartAgent() {
 export function useStopAgent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (agentId: string) => {
-      const res = await fetch(`http://127.0.0.1:4400/agents/${agentId}/stop`, { method: 'POST' });
-      if (!res.ok) throw new Error(`Stop failed: ${res.status}`);
-      return res.json();
-    },
+    mutationFn: (agentId: string) =>
+      proxyPost(`/agents/${agentId}/stop`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentKeys.all() });
     },
@@ -199,11 +189,7 @@ export function useStopAgent() {
 export function useArchiveAgent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (agentId: string) => {
-      const res = await fetch(`http://127.0.0.1:4400/agents/${agentId}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(`Archive failed: ${res.status}`);
-      return res.json();
-    },
+    mutationFn: (agentId: string) => proxyDelete(`/agents/${agentId}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentKeys.all() });
     },

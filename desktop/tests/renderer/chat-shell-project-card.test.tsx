@@ -3,7 +3,7 @@ import {
   buildProjectCardMessageFromToolResult,
   buildWorkflowMessageFromToolResult,
 } from '../../renderer/src/components/chatToolResultMessages';
-import { getInlineProjectStatusText } from '../../renderer/src/components/projects/ProjectInlineCard';
+import { getInlineProjectStatusText } from '../../renderer/src/components/projects/project-inline-utils';
 
 describe('ChatShell project card detection', () => {
   it('detects create_project canvas_tool_result and produces project_card message', () => {

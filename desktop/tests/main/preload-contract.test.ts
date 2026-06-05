@@ -70,6 +70,7 @@ describe('preload API contract', () => {
       'kswarmStop',
       'kswarmRestart',
       'kswarmResumeWorkflowRun',
+      'kswarmStartProjectPlanning',
       'onKSwarmStatus',
       'exportTraceBundle',
       'diagnose',

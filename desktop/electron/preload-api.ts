@@ -91,6 +91,8 @@ export const PRELOAD_API_KEYS = [
   'onReminder',
   'getSkillDebugConfig',
   'saveSkillDebugConfig',
+  'getKswarmConfig',
+  'saveKswarmConfig',
   'getSkillStats',
   'getServiceStatus',
   'restartRelatedService',
@@ -99,6 +101,7 @@ export const PRELOAD_API_KEYS = [
   'kswarmStop',
   'kswarmRestart',
   'kswarmResumeWorkflowRun',
+  'kswarmStartProjectPlanning',
   'onKSwarmStatus',
   'exportTraceBundle',
   'diagnose',
@@ -416,6 +419,8 @@ export interface DesktopApi {
   onReminder(handler: (event: { reminderId: string; content: string; createdAt: number }) => void): () => void;
   getSkillDebugConfig(): Promise<{ enabled: boolean }>;
   saveSkillDebugConfig(input: { enabled: boolean }): Promise<{ enabled: boolean }>;
+  getKswarmConfig(): Promise<{ maxConcurrentTasks: number }>;
+  saveKswarmConfig(input: { maxConcurrentTasks: number }): Promise<{ maxConcurrentTasks: number }>;
   getSkillStats(): Promise<Array<{
     skillName: string;
     totalCalls: number;
@@ -435,6 +440,7 @@ export interface DesktopApi {
   kswarmStop(): Promise<void>;
   kswarmRestart(): Promise<void>;
   kswarmResumeWorkflowRun(input: { projectId: string; workflowRunId: string }): Promise<{ restored: boolean; reason?: string; jobId?: string }>;
+  kswarmStartProjectPlanning(input: { projectId: string; projectName: string; goal: string; requirements: string; planningGuidance: string; poAgent: string; members: string[] }): Promise<{ ok: boolean; status?: string; error?: string }>;
   onKSwarmStatus(handler: (status: KSwarmServiceStatus) => void): () => void;
   exportTraceBundle(input: DesktopTraceTarget): Promise<{ ok: boolean; path?: string; error?: string }>;
   diagnose(input: DesktopTraceTarget): Promise<unknown>;
@@ -572,6 +578,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     },
     getSkillDebugConfig: () => ipcRenderer.invoke('desktop:getSkillDebugConfig') as Promise<{ enabled: boolean }>,
     saveSkillDebugConfig: (input) => ipcRenderer.invoke('desktop:saveSkillDebugConfig', input) as Promise<{ enabled: boolean }>,
+    getKswarmConfig: () => ipcRenderer.invoke('desktop:getKswarmConfig') as Promise<{ maxConcurrentTasks: number }>,
+    saveKswarmConfig: (input) => ipcRenderer.invoke('desktop:saveKswarmConfig', input) as Promise<{ maxConcurrentTasks: number }>,
     getSkillStats: () => ipcRenderer.invoke('desktop:getSkillStats') as ReturnType<DesktopApi['getSkillStats']>,
     getServiceStatus: () => ipcRenderer.invoke('desktop:services:getStatus') as Promise<DesktopServiceStatusSnapshot>,
     restartRelatedService: (serviceId) => ipcRenderer.invoke('desktop:services:restart', serviceId) as Promise<void>,
@@ -580,6 +588,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     kswarmStop: () => ipcRenderer.invoke('desktop:kswarm:stop') as Promise<void>,
     kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart') as Promise<void>,
     kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input) as Promise<{ restored: boolean; reason?: string; jobId?: string }>,
+    kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input) as Promise<{ ok: boolean; status?: string; error?: string }>,
     onKSwarmStatus(handler) {
       const channel = 'desktop:kswarm:statusChange';
       const listener = (_event: unknown, payload: unknown) => {

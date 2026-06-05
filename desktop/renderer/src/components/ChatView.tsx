@@ -5,7 +5,7 @@ import { ToolStepsMessage } from './ToolStepsMessage';
 import { ProjectInlineCard } from './projects/ProjectInlineCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import type { ThreadRecord } from '../api/types';
-import type { NeedsUserQuestion, TaskResult } from '../../../../src/runtime/task-host/types';
+import type { NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
 
 export interface ToolStep {
   toolUseId: string;

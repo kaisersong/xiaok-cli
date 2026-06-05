@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 
 import { resolveConfiguredModelBinding } from '../../src/ai/providers/model-binding.js';
 import type { Config } from '../../src/types.js';
+import { XIAOK_DESKTOP_HOST_PARTICIPANT_ID } from '../shared/kswarm-seed-contract.js';
 
 const DEFAULT_CAPABILITIES = [
   'coding',
@@ -30,6 +31,10 @@ const DEFAULT_CAPABILITIES = [
   'slide_generation',
 ];
 const DEFAULT_OUTPUT_CAPABILITIES = ['markdown', 'html', 'report_html'];
+const HOSTED_XIAOK_EXECUTION = {
+  mode: 'hosted',
+  hostParticipantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
+} as const;
 
 export interface ManagedXiaokAgentInput {
   id?: string;
@@ -49,6 +54,7 @@ export interface ManagedXiaokAgentPayload {
   runtimeType: 'xiaok';
   runtimeSource: 'desktop-agent-runtime';
   runtimePath: string | null;
+  execution: typeof HOSTED_XIAOK_EXECUTION;
   runtimeModel: string;
   provider: null;
   model: null;
@@ -111,6 +117,7 @@ export function buildManagedXiaokAgentPayload(
     runtimeType: 'xiaok',
     runtimeSource: 'desktop-agent-runtime',
     runtimePath,
+    execution: HOSTED_XIAOK_EXECUTION,
     runtimeModel: binding.modelEntry.model,
     provider: null,
     model: null,
@@ -171,6 +178,9 @@ export function diffManagedXiaokAgentPatch(
   }
   if (JSON.stringify(current.runtimeHealth ?? null) !== JSON.stringify(desired.runtimeHealth)) {
     patch.runtimeHealth = desired.runtimeHealth;
+  }
+  if (JSON.stringify(current.execution ?? null) !== JSON.stringify(desired.execution)) {
+    patch.execution = desired.execution;
   }
 
   return Object.keys(patch).length > 0 ? patch : null;

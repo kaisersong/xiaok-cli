@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createMermaidConfig, shouldFallbackToMermaidSource } from '../../renderer/src/components/MermaidBlock';
+import { createMermaidConfig, shouldFallbackToMermaidSource } from '../../renderer/src/components/mermaid-utils';
 
 describe('MermaidBlock fallback detection', () => {
   it('falls back to source when mermaid returns a structural SVG without readable diagram text', () => {

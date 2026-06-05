@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialAppState, hydrateAppStateFromSnapshot, reduceAppEvent } from '../../renderer/src/state.js';
-import type { DesktopTaskEvent, TaskSnapshot } from '../../../src/runtime/task-host/types.js';
+import type { DesktopTaskEvent, TaskSnapshot } from '../../shared/task-types';
 
 describe('desktop renderer state', () => {
   it('keeps understanding, needs-user, progress, and result in one cockpit state', () => {

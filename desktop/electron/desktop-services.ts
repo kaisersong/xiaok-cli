@@ -1191,17 +1191,38 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       });
       const tasks = buildKSwarmTasksFromPlan(plan);
 
-      await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/plan`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ plan, fromAgent }),
-      });
-      if (tasks.length > 0) {
-        await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/tasks`, {
+      // Phase 1: submit plan. `plan_already_exists` is non-fatal on retry —
+      // the plan is durable, but tasks/dispatch may still be missing, so we
+      // must continue rather than short-circuit a half-bootstrapped project.
+      try {
+        await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/plan`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ tasks, fromAgent }),
+          body: JSON.stringify({ plan, fromAgent }),
         });
+      } catch (planError) {
+        const message = planError instanceof Error ? planError.message : String(planError);
+        if (message !== 'plan_already_exists') {
+          return { ok: false as const, error: message, phase: 'plan' as const };
+        }
+      }
+
+      // Phase 2: create tasks. Server `addTasksChecked` skips already-existing
+      // task ids, so re-running this phase is idempotent.
+      if (tasks.length > 0) {
+        try {
+          await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/tasks`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ tasks, fromAgent }),
+          });
+        } catch (tasksError) {
+          return {
+            ok: false as const,
+            error: tasksError instanceof Error ? tasksError.message : String(tasksError),
+            phase: 'tasks' as const,
+          };
+        }
       }
       return { ok: true as const };
     } catch (error) {
@@ -1223,10 +1244,27 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         members: input.members,
       },
     });
-    if (!result.ok && result.error === 'plan_already_exists') {
-      return { ok: true as const };
+    if (!result.ok) {
+      return result;
     }
-    return result;
+    // Phase 3: dispatch. Server `/dispatch` is idempotent (only dispatches
+    // pending tasks), so failing the whole job here is safe — the queue will
+    // retry plan(skipped)/tasks(skipped)/dispatch until tasks actually run.
+    // Silently swallowing this left projects planned-but-never-running.
+    try {
+      await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(input.projectId)}/dispatch`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ fromAgent: input.poAgent }),
+      });
+    } catch (dispatchError) {
+      return {
+        ok: false as const,
+        error: dispatchError instanceof Error ? dispatchError.message : String(dispatchError),
+        phase: 'dispatch' as const,
+      };
+    }
+    return { ok: true as const };
   }
 
   async function runKSwarmReviewSubmission({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
@@ -1816,6 +1854,17 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       await saveConfig(config);
       return { enabled: config.skillDebug };
     },
+    async getKswarmConfig() {
+      const config = await loadConfig();
+      return { maxConcurrentTasks: config.kswarm?.maxConcurrentTasks ?? 3 };
+    },
+    async saveKswarmConfig(input: { maxConcurrentTasks: number }) {
+      const config = await loadConfig();
+      const clamped = Math.max(1, Math.min(10, Math.round(input.maxConcurrentTasks)));
+      config.kswarm = { ...(config.kswarm || {}), maxConcurrentTasks: clamped };
+      await saveConfig(config);
+      return { maxConcurrentTasks: clamped };
+    },
     async getSkillStats(): Promise<SkillStats[]> {
       try {
         const records = await loadExecRecords(options.dataRoot);
@@ -2090,6 +2139,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     getDataRoot() {
       return options.dataRoot;
+    },
+    startProjectPlanning(input: { projectId: string; projectName: string; goal: string; requirements: string; planningGuidance: string; poAgent: string; members: string[] }) {
+      return initialPlanBootstrapQueue.enqueue(input);
     },
   };
 }

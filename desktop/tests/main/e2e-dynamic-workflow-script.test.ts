@@ -263,27 +263,29 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
         submitResult: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
         submitWorkflowNodeResult: (input) => submitKSwarmWorkflowNodeResultToBroker({
           brokerUrl,
-          participantId: input.targetParticipantId || 'xiaok-worker',
+          participantId: 'xiaok-desktop',
+          logicalParticipantId: input.targetParticipantId || 'xiaok-worker',
           handoff: input.handoff,
           output: input.output,
           reviewDecision: input.reviewDecision,
         }),
       });
-      const workerClient = createKSwarmRuntimeBridgeBrokerClient({
+      const desktopHostClient = createKSwarmRuntimeBridgeBrokerClient({
         brokerUrl,
-        participantId: 'xiaok-worker',
-        alias: 'Workflow Worker',
-        roles: ['worker'],
+        participantId: 'xiaok-desktop',
+        participantKind: 'service',
+        alias: 'Xiaok Desktop',
+        roles: ['desktop_runtime_host'],
         capabilities: ['project_diagnosis', 'writing'],
         bridge,
         WebSocketImpl: WebSocket as any,
       });
-      await workerClient.start();
-      clients.push(workerClient);
+      await desktopHostClient.start();
+      clients.push(desktopHostClient);
 
       await waitForCondition(
         () => fetchJson<{ participants: Array<{ participantId: string }> }>(`${brokerUrl}/participants`),
-        (value) => value.participants.some(participant => participant.participantId === 'xiaok-worker'),
+        (value) => value.participants.some(participant => participant.participantId === 'xiaok-desktop'),
         10_000,
       );
 
@@ -415,8 +417,18 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
         'artifacts/workflow-report.pdf',
       ]);
     } catch (error) {
+      let brokerReplay = '';
+      try {
+        brokerReplay = JSON.stringify(await fetchJson(`${brokerUrl}/events/replay?limit=50`), null, 2);
+      } catch (replayError) {
+        brokerReplay = `failed to fetch broker replay: ${String(replayError)}`;
+      }
       throw new Error([
         error instanceof Error ? error.stack || error.message : String(error),
+        '--- desktop bridge seen prompts ---',
+        JSON.stringify(seenPrompts, null, 2),
+        '--- intent-broker replay ---',
+        brokerReplay,
         '--- intent-broker logs ---',
         broker.logs(),
         '--- kswarm logs ---',

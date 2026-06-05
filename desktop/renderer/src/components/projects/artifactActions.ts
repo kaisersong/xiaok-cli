@@ -1,6 +1,8 @@
 import type { KSwarmArtifact } from '../../hooks/useKSwarmClient';
 
-const KSWARM_BASE_URL = 'http://127.0.0.1:4400';
+function getKswarmBaseUrl(): string {
+  return 'http://127.0.0.1:4400';
+}
 
 type ArtifactLike = Partial<KSwarmArtifact> & {
   filename?: string;
@@ -26,7 +28,7 @@ export function resolveArtifactUrl(artifact: ArtifactLike): string | null {
   const rawUrl = artifact.url?.trim();
   if (rawUrl) {
     if (isAbsoluteUrl(rawUrl)) return rawUrl;
-    if (rawUrl.startsWith('/')) return `${KSWARM_BASE_URL}${rawUrl}`;
+    if (rawUrl.startsWith('/')) return `${getKswarmBaseUrl()}${rawUrl}`;
     return rawUrl;
   }
 
@@ -38,7 +40,7 @@ export function resolveArtifactUrl(artifact: ArtifactLike): string | null {
     || basename(rawPath)
     || artifact.name?.trim();
   if (projectId && projectArtifactName) {
-    return `${KSWARM_BASE_URL}/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(projectArtifactName)}`;
+    return `${getKswarmBaseUrl()}/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(projectArtifactName)}`;
   }
 
   if (rawPath) {
@@ -48,7 +50,7 @@ export function resolveArtifactUrl(artifact: ArtifactLike): string | null {
 
   const filename = (artifact.filename || artifact.name)?.trim();
   if (projectId && filename) {
-    return `${KSWARM_BASE_URL}/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(filename)}`;
+    return `${getKswarmBaseUrl()}/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(filename)}`;
   }
 
   return null;

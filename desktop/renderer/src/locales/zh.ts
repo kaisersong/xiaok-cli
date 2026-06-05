@@ -1879,6 +1879,7 @@ export const zh: LocaleStrings = {
   projectsAgentRoleAll: "全能型",
   projectsAgentRolePo: "项目负责人",
   projectsAgentRoleWorker: "执行者",
+  projectsAgentRoleUniversal: "通用执行者",
   projectsAgentNoAgents: "还没有智能体",
   projectsAgentStart: "启动",
   projectsAgentStop: "停止",
