@@ -631,6 +631,8 @@ npm run dev -- --help  # 从源码运行
 
 ## 版本日志
 
+**v1.4.0** — 多任务并行执行与中断恢复：桌面端 Worker agent 现可同时并行执行最多 3 个任务（可在 设置 > 通用 > 任务并发 中配置 1-10），消除此前的单任务串行瓶颈；通过 Electron powerMonitor 检测系统休眠/唤醒，优雅暂停任务并自动刷新 lease 恢复执行；崩溃安全的原子状态持久化；网络中断后 agent 重连的 20 秒宽限延迟恢复；卡住运行 watchdog 容忍时间提升至 5 分钟以适应休眠转换；集成 KSwarm v0.9.0 并行调度策略。
+
 **v1.3.14** — 流式与动态工作流可靠性版本：Anthropic、OpenAI Chat Completions、OpenAI Responses 适配器把 `ERR_STREAM_PREMATURE_CLOSE`、`ECONNRESET`、`ETIMEDOUT`、`EPIPE`、`Premature close`、`socket hang up`、`terminated`、`fetch failed` 识别为可重试传输错误，但只要本次尝试已经向消费端产出 chunk 就禁止重试，避免向用户重复输出；OpenAI Chat 路径还新增 5 分钟单次流超时与 AbortController。`InProcessTaskRuntimeHost.recoverTask` 在进程重启后会对仍然标记 `running` 但无活跃执行的任务做抢救，转为 `failed` 并写入 `stale_running_task_recovered` 抢救摘要。桌面端 `runKSwarmRuntimeTextTask` 现在会在传输类故障下重试一次，并暴露真实失败原因。新增 `render_report_artifact` 工具，把完整 `.report.md` IR 渲染为动态工作流最终报告 HTML 产物；Worker / final-output / generic 节点 prompt 强制使用 renderer，不再读取插件内部文件或手写 HTML。AGENTS.md 公开了适用于 xiaok-cli、kswarm、intent-broker、kai-xiaok-plugins 的跨平台兼容规则，覆盖 path 拼接、macOS / Windows 平台守卫、`child_process` shell 语法限制等。
 
 **v1.3.13** — 并行动动态 workflow 加固版本：动态 workflow script 现在可以在同一个 KSwarm run 上复用已完成 primitive 输出继续执行，也可以通过只读状态查询工具从 KSwarm snapshot 汇总 run / node / parallel group / checkpoint / gate / delivery 状态。专业 `report_final_review` E2E 会产出 HTML/PDF，并验证 workflow run、gate decision、项目 deliverable、artifact provenance 和任务看板一致。KSwarm 会为成功的 script workflow 写入 passed gate decision；设计和对抗性评审文档也记录了自动 job replay、durable user-input pause/resume 的后续边界。

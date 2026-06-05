@@ -12,6 +12,7 @@ coverage/
 .vscode/
 .idea/
 *.tsbuildinfo
+*.bak
 
 # 测试临时文件
 test-*.exp
