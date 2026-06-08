@@ -198,6 +198,9 @@
 - 首次提交输入后，startup welcome card 应保持在输入上方，直到正常 terminal scrolling 将其滚走；不要在首次 submit 时清空 content region。
 - `Thinking`、`Working` 等 live activity 渲染在 input footer 上方的 activity row，activity 和 `❯` 之间保留一行空白 gap。
 - activity line 不应重复 footer status fields，例如 model、mode、tokens、project。
+- 忙碌/streaming 状态下按 `ESC` 是当前 turn 的用户中断请求，不是失败态；`AbortError` 必须沿 runtime 原样冒泡到 chat 层处理，不能被 normalize 成普通 tool/model failure。
+- ESC 中断必须保留用户 draft 和 queued input，不能清空输入缓冲；`XIAOK_NO_ESC_INTERRUPT=1` 时应退回旧行为。
+- abort 后的 Stop/auto-continue 路径不能继续消耗 aborted turn；broker/runtime 事件应使用 `turn_aborted` + `turn_stop(reason: 'user_aborted')` 表达用户中断。
 - terminal frontend focused 验证示例：
   ```bash
   npm run build

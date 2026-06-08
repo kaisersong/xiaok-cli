@@ -157,6 +157,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   listConnectorRuntimes: () => ipcRenderer.invoke('desktop:listConnectorRuntimes'),
   testConnectorProvider: (kind) => ipcRenderer.invoke('desktop:testConnectorProvider', kind),
   kswarmProxyGet: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:get', path),
+  kswarmProxyGetText: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:getText', path),
   kswarmProxyPost: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:post', path, body),
   kswarmProxyPostJson: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:postJson', path, body),
   kswarmProxyPut: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:put', path, body),

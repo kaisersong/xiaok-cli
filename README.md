@@ -19,6 +19,17 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.4.1:**
+
+- **Artifact Preview Fix**: Project deliverable artifacts (Markdown, HTML, plain text) now load correctly in the preview panel. The previous release used a JSON-parsing proxy for all kswarm GET requests, causing artifact content to throw a parse error and display "加载失败: fetch failed". A dedicated raw-text IPC proxy (`kswarmProxyGetText`) is now used for artifact content fetches.
+- **App Packaging Fix**: Resolved a packaging failure caused by a stale `release/mac-arm64` directory, and switched to `ditto` for macOS app installation to preserve extended attributes and bundle structure.
+
+**What's New in v1.4.2:**
+
+- **ESC Streaming Interrupt**: Pressing `ESC` while the terminal assistant is streaming output now aborts the active model/tool turn instead of waiting for completion. Xiaok preserves the input draft and queued text, records the turn as user-aborted, and prevents the aborted Stop-hook path from auto-continuing.
+- **Abort-Safe Runtime Pipeline**: Anthropic, OpenAI Chat Completions, and OpenAI Responses streams now receive a shared `AbortSignal`, skip retries for true `AbortError`s, and clean up stream timeout controllers on all exit paths. Runtime, compacting, subagent, and tool execution layers propagate the same signal so user interruption is treated separately from transport failures.
+- **Desktop Handoff Cancellation**: KSwarm runtime bridge handoffs now accept cancellation signals and report `task_cancelled` for user-aborted desktop tasks instead of misclassifying them as failed.
+
 **What's New in v1.3.14:**
 
 - **Streaming Retry Hardening**: Anthropic, OpenAI Chat Completions, and OpenAI Responses adapters now detect `ERR_STREAM_PREMATURE_CLOSE`, `ECONNRESET`, `ETIMEDOUT`, `EPIPE`, `Premature close`, `socket hang up`, `terminated`, and `fetch failed` as retryable transport errors. Once any stream chunk has been emitted to the consumer, retry is disabled to prevent duplicate output. The OpenAI Chat Completions adapter also gained a 5-minute per-stream timeout and abort controller.
@@ -630,6 +641,10 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.4.2** — ESC interrupt release: terminal streaming turns can be aborted with `ESC` while preserving drafts and queued input, emitting a user-aborted turn instead of a failed turn. Model adapters, runtime core, compact runner, subagents, and tool execution now share abort signals and avoid retrying true `AbortError`s. Desktop KSwarm handoffs propagate cancellation through the runtime bridge and surface user aborts as `task_cancelled`.
+
+**v1.4.1** — Desktop artifact preview fix: project deliverable artifacts (Markdown, HTML, plain text) now load correctly in the desktop preview panel. Introduced a dedicated raw-text IPC proxy (`kswarmProxyGetText`) for artifact content fetches, replacing the JSON-only proxy that caused "fetch failed" errors for all non-JSON artifact types. Also fixed macOS app packaging to use `ditto` for bundle installation.
 
 **v1.4.0** — Multi-task parallel execution and interruption recovery: desktop worker agents now execute up to 3 tasks concurrently (configurable 1-10 via Settings > General > Task Concurrency), removing the previous single-task serialization bottleneck; system sleep/wake detection via Electron powerMonitor with graceful task suspension and automatic lease-refresh resume; crash-safe atomic state persistence; deferred recovery with 20s grace period for agents reconnecting after network interruption; stalled-run watchdog tolerance bumped to 5 minutes to accommodate sleep transitions; KSwarm v0.9.0 integration with parallel dispatch policy.
 

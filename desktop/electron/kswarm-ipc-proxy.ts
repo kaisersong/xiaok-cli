@@ -1,16 +1,21 @@
 import type { IpcMain } from 'electron';
+import type { KSwarmService } from './kswarm-service.js';
 import { KSwarmStreamBridge } from './kswarm-stream-bridge.js';
 
-const KSWARM_BASE = 'http://127.0.0.1:4400';
-
-async function kswarmFetch<T>(method: string, path: string, body?: unknown): Promise<T | null> {
+async function kswarmFetch<T>(
+  service: Pick<KSwarmService, 'request'> | null,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T | null> {
+  if (!service) return null;
   try {
     const opts: RequestInit = {
       method,
       headers: { 'Content-Type': 'application/json' },
     };
     if (body !== undefined) opts.body = JSON.stringify(body);
-    const res = await fetch(`${KSWARM_BASE}${path}`, opts);
+    const res = await service.request(path, opts);
     if (!res.ok) return null;
     const text = await res.text();
     return text ? JSON.parse(text) : null;
@@ -19,14 +24,20 @@ async function kswarmFetch<T>(method: string, path: string, body?: unknown): Pro
   }
 }
 
-async function kswarmFetchRaw(method: string, path: string, body?: unknown): Promise<{ ok: boolean; status: number; data: unknown }> {
+async function kswarmFetchRaw(
+  service: Pick<KSwarmService, 'request'> | null,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<{ ok: boolean; status: number; data: unknown }> {
+  if (!service) return { ok: false, status: 0, data: null };
   try {
     const opts: RequestInit = {
       method,
       headers: { 'Content-Type': 'application/json' },
     };
     if (body !== undefined) opts.body = JSON.stringify(body);
-    const res = await fetch(`${KSWARM_BASE}${path}`, opts);
+    const res = await service.request(path, opts);
     const data = await res.json().catch(() => null);
     return { ok: res.ok, status: res.status, data };
   } catch {
@@ -34,28 +45,50 @@ async function kswarmFetchRaw(method: string, path: string, body?: unknown): Pro
   }
 }
 
-export function registerKSwarmProxy(ipcMain: IpcMain, bridge: KSwarmStreamBridge): void {
+async function kswarmFetchText(
+  service: Pick<KSwarmService, 'request'> | null,
+  path: string,
+): Promise<string | null> {
+  if (!service) return null;
+  try {
+    const res = await service.request(path, { method: 'GET' });
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+export function registerKSwarmProxy(
+  ipcMain: IpcMain,
+  bridge: KSwarmStreamBridge,
+  kswarmService: Pick<KSwarmService, 'request'> | null = null,
+): void {
   ipcMain.handle('desktop:kswarm:proxy:get', (_event, path: string) =>
-    kswarmFetch('GET', path));
+    kswarmFetch(kswarmService, 'GET', path));
+
+  ipcMain.handle('desktop:kswarm:proxy:getText', (_event, path: string) =>
+    kswarmFetchText(kswarmService, path));
 
   ipcMain.handle('desktop:kswarm:proxy:post', (_event, path: string, body?: unknown) =>
-    kswarmFetch('POST', path, body));
+    kswarmFetch(kswarmService, 'POST', path, body));
 
   ipcMain.handle('desktop:kswarm:proxy:postJson', async (_event, path: string, body?: unknown) => {
-    const result = await kswarmFetchRaw('POST', path, body);
+    const result = await kswarmFetchRaw(kswarmService, 'POST', path, body);
     if (!result.data) return null;
     return { ...(result.data as Record<string, unknown>), status: (result.data as any).status ?? result.status };
   });
 
   ipcMain.handle('desktop:kswarm:proxy:put', (_event, path: string, body?: unknown) =>
-    kswarmFetch('PUT', path, body));
+    kswarmFetch(kswarmService, 'PUT', path, body));
 
   ipcMain.handle('desktop:kswarm:proxy:patch', (_event, path: string, body?: unknown) =>
-    kswarmFetch('PATCH', path, body));
+    kswarmFetch(kswarmService, 'PATCH', path, body));
 
   ipcMain.handle('desktop:kswarm:proxy:delete', async (_event, path: string) => {
     try {
-      const res = await fetch(`${KSWARM_BASE}${path}`, { method: 'DELETE' });
+      if (!kswarmService) return false;
+      const res = await kswarmService.request(path, { method: 'DELETE' });
       return res.ok;
     } catch {
       return false;

@@ -19,6 +19,17 @@
 | **重命名任务延迟** | 27.6s | 180.8s | **-85%** |
 | **Token 效率** | 100% | 250% | **-60%** |
 
+**v1.4.1 新特性：**
+
+- **产物预览修复**：项目交付物（Markdown、HTML、纯文本）现在可以在预览面板中正确加载。此前版本对所有 kswarm GET 请求统一使用 JSON 解析代理，导致文本类产物内容解析抛出异常，显示"加载失败: fetch failed"。现在引入专用的原始文本 IPC 代理（`kswarmProxyGetText`）用于产物内容请求。
+- **应用打包修复**：修复了因 `release/mac-arm64` 目录残留导致的打包失败，改用 `ditto` 安装 macOS 应用包以保留扩展属性和 bundle 结构。
+
+**v1.4.2 新特性：**
+
+- **ESC 流式中断**：终端 assistant 正在 streaming 输出时按 `ESC`，会中断当前 model/tool turn，而不是等待本轮自然结束。Xiaok 会保留输入 draft 和 queued text，把本轮记录为用户中断，并阻止已中断的 Stop-hook 路径继续 auto-continue。
+- **Abort-safe Runtime Pipeline**：Anthropic、OpenAI Chat Completions、OpenAI Responses 流现在共享 `AbortSignal`，真实 `AbortError` 不再进入 retry，stream timeout controller 在所有退出路径都会清理。runtime、compact、subagent、tool execution 层都会透传同一个 signal，把用户中断和传输失败分开处理。
+- **Desktop Handoff 取消**：KSwarm runtime bridge handoff 现在接收取消 signal；用户中断的 desktop task 会报告 `task_cancelled`，不再被误归类为 failed。
+
 **v1.3.14 新特性：**
 
 - **流式重试加固**：Anthropic、OpenAI Chat Completions、OpenAI Responses 适配器现在会把 `ERR_STREAM_PREMATURE_CLOSE`、`ECONNRESET`、`ETIMEDOUT`、`EPIPE`、`Premature close`、`socket hang up`、`terminated`、`fetch failed` 识别为可重试的传输错误。一旦本次尝试已经向消费端产出了 chunk，就立即放弃重试，避免重复输出。OpenAI Chat Completions 适配器还新增 5 分钟单次流超时与 AbortController。
@@ -630,6 +641,10 @@ npm run dev -- --help  # 从源码运行
 ---
 
 ## 版本日志
+
+**v1.4.2** — ESC 中断版本：终端 streaming turn 可用 `ESC` 中断，同时保留 draft 和 queued input，并把本轮记录为 user-aborted 而不是 failed。Model adapters、runtime core、compact runner、subagents 和 tool execution 现在共享 abort signal，并且不会 retry 真实 `AbortError`。Desktop KSwarm handoff 会透传取消 signal，并把用户中断暴露为 `task_cancelled`。
+
+**v1.4.1** — 桌面端产物预览修复：项目交付物（Markdown、HTML、纯文本）现在可在桌面预览面板中正确加载。引入专用原始文本 IPC 代理（`kswarmProxyGetText`）用于产物内容请求，替换此前导致所有非 JSON 产物类型出现"fetch failed"错误的 JSON-only 代理。同时修复了 macOS 应用打包改用 `ditto` 安装 bundle 的问题。
 
 **v1.4.0** — 多任务并行执行与中断恢复：桌面端 Worker agent 现可同时并行执行最多 3 个任务（可在 设置 > 通用 > 任务并发 中配置 1-10），消除此前的单任务串行瓶颈；通过 Electron powerMonitor 检测系统休眠/唤醒，优雅暂停任务并自动刷新 lease 恢复执行；崩溃安全的原子状态持久化；网络中断后 agent 重连的 20 秒宽限延迟恢复；卡住运行 watchdog 容忍时间提升至 5 分钟以适应休眠转换；集成 KSwarm v0.9.0 并行调度策略。
 

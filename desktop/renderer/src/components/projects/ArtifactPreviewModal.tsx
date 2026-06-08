@@ -44,11 +44,11 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
         const api = (window as any).xiaokDesktop;
         let text: string;
         const kswarmBase = 'http://127.0.0.1:4400';
-        if (url.startsWith(kswarmBase) && api?.kswarmProxyGet) {
+        if (url.startsWith(kswarmBase) && api?.kswarmProxyGetText) {
           const path = url.slice(kswarmBase.length);
-          const data = await api.kswarmProxyGet(path);
+          const data = await api.kswarmProxyGetText(path);
           if (data === null || data === undefined) throw new Error('fetch failed');
-          text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+          text = data;
         } else {
           const res = await fetch(url);
           if (!res.ok) throw new Error(`${res.status}`);
