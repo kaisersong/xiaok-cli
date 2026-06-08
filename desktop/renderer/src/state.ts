@@ -77,6 +77,9 @@ export function reduceAppEvent(state: AppState, event: DesktopTaskEvent): AppSta
   if (event.type === 'assistant_delta') {
     return { ...state, status: 'running', currentQuestion: null, assistantText: state.assistantText + event.delta };
   }
+  if (event.type === 'task_cancelled') {
+    return { ...state, status: 'cancelled', currentQuestion: null };
+  }
   if (event.type === 'result') {
     return {
       ...state,

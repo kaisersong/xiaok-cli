@@ -45,7 +45,7 @@ export class Agent {
 
   async runTurn(userInput: string | MessageBlock[], onChunk: OnChunk, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) {
-      throw new Error('agent aborted');
+      throw new DOMException('agent aborted', 'AbortError');
     }
 
     const turnId = `turn_${(this.turnCount += 1)}`;
@@ -138,6 +138,12 @@ export class Agent {
         sessionId: this.sessionId,
         turnId,
       });
+      this.options.hooks.emit({
+        type: 'turn_stop',
+        sessionId: this.sessionId,
+        turnId,
+        reason: 'completed',
+      });
       return;
     }
 
@@ -148,6 +154,12 @@ export class Agent {
         turnId,
         error: event.error,
       });
+      this.options.hooks.emit({
+        type: 'turn_stop',
+        sessionId: this.sessionId,
+        turnId,
+        reason: 'error',
+      });
       return;
     }
 
@@ -156,6 +168,13 @@ export class Agent {
         type: 'turn_aborted',
         sessionId: this.sessionId,
         turnId,
+        partialText: event.partialText,
+      });
+      this.options.hooks.emit({
+        type: 'turn_stop',
+        sessionId: this.sessionId,
+        turnId,
+        reason: 'user_aborted',
       });
       return;
     }

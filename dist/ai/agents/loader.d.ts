@@ -3,6 +3,7 @@ export interface CustomAgentDef {
     systemPrompt: string;
     allowedTools?: string[];
     model?: string;
+    modelCapability?: string;
     maxIterations?: number;
     background?: boolean;
     isolation?: 'shared' | 'worktree';

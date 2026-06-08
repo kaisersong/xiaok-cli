@@ -1,8 +1,11 @@
+import { isAbortError } from '../runtime/abort-utils.js';
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 const MAX_RETRIES = 2;
 function isRetryableError(error) {
+    if (isAbortError(error))
+        return false;
     if (error instanceof Error) {
-        if (error.name === 'AbortError' || error.name === 'TimeoutError')
+        if (error.name === 'TimeoutError')
             return true;
         const record = error;
         const code = typeof record.code === 'string' ? record.code : '';
@@ -38,12 +41,12 @@ export class OpenAIResponsesAdapter {
     cloneWithModel(model) {
         return new OpenAIResponsesAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders, this.capabilityOverrides);
     }
-    async *stream(messages, tools, systemPrompt) {
+    async *stream(messages, tools, systemPrompt, options) {
         let attempt = 0;
         while (true) {
             let emittedAny = false;
             try {
-                for await (const chunk of this.streamOnce(messages, tools, systemPrompt)) {
+                for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options?.signal)) {
                     emittedAny = true;
                     yield chunk;
                 }
@@ -59,9 +62,12 @@ export class OpenAIResponsesAdapter {
             }
         }
     }
-    async *streamOnce(messages, tools, systemPrompt) {
+    async *streamOnce(messages, tools, systemPrompt, signal) {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+        const mergedSignal = signal
+            ? AbortSignal.any([controller.signal, signal])
+            : controller.signal;
         const endpoint = new URL('responses', ensureTrailingSlash(this.baseUrl)).toString();
         let response;
         try {
@@ -84,14 +90,16 @@ export class OpenAIResponsesAdapter {
                         }))
                         : undefined,
                 }),
-                signal: controller.signal,
+                signal: mergedSignal,
             });
         }
         catch (error) {
             clearTimeout(timer);
             throw error;
         }
-        clearTimeout(timer);
+        finally {
+            clearTimeout(timer);
+        }
         if (!response.ok) {
             throw new Error(`${response.status} ${await response.text()}`);
         }

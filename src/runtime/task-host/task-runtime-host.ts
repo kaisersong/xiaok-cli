@@ -296,7 +296,17 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   }
 
   async getActiveTasks(): Promise<{ taskId: string }[]> {
-    return this.options.snapshotStore.getActiveTasks();
+    const refs = await this.options.snapshotStore.getActiveTasks();
+    const activeRefs: { taskId: string }[] = [];
+    for (const ref of refs) {
+      const snapshot = await this.options.snapshotStore.recoverTask(ref.taskId);
+      if (!snapshot || TERMINAL_STATUSES.has(snapshot.status)) {
+        await this.options.snapshotStore.clearActiveTask(ref.taskId);
+        continue;
+      }
+      activeRefs.push(ref);
+    }
+    return activeRefs;
   }
 
   async getActiveTask(): Promise<{ taskId: string } | null> {
@@ -550,6 +560,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       }
       const next: TaskSnapshot = {
         ...snapshot,
+        status: event.type === 'task_cancelled' ? 'cancelled' : snapshot.status,
         events: [...snapshot.events, event],
         result: nextResult,
         salvage: event.type === 'salvage' ? event.salvage : snapshot.salvage,

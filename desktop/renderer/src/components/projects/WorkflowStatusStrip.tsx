@@ -175,7 +175,7 @@ export function WorkflowStatusStrip({
         <div
           role="dialog"
           aria-label={dialogLabel}
-          className="absolute left-0 top-full z-50 mt-2 w-[min(560px,calc(100vw-48px))] rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-secondary)] shadow-xl"
+          className="absolute left-0 top-full z-50 mt-2 max-h-[min(72vh,640px)] w-[min(560px,calc(100vw-48px))] overflow-y-auto rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-secondary)] shadow-xl"
         >
           <div className="flex flex-wrap items-start gap-2">
             <span className="flex min-w-0 items-center gap-1.5 text-[12px] font-semibold">

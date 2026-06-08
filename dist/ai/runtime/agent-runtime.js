@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { isAbortError } from './abort-utils.js';
 import { buildPromptCacheSegments, resolveModelCapabilities, } from './model-capabilities.js';
 import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
 import { CompactRunner } from './compact-runner.js';
@@ -51,26 +52,43 @@ export class AgentRuntime {
         this.promptSnapshot = promptSnapshot;
     }
     async run(input, onEvent, externalSignal) {
-        this.throwIfAborted(externalSignal);
+        if (externalSignal?.aborted) {
+            throw new DOMException('agent aborted', 'AbortError');
+        }
         const run = this.controller.startRun();
         onEvent({ type: 'run_started', runId: run.runId });
-        if (typeof input === 'string') {
-            this.session.appendUserText(input);
-            if (this.memoryStore?.writeRawMessage) {
-                const sessionKey = this.promptSnapshot?.id?.slice(0, 16) ?? 'cli';
-                this.memoryStore.writeRawMessage(sessionKey, 'user', input).catch(() => { });
-            }
-        }
-        else {
-            this.session.appendUserBlocks(input);
-        }
+        const mergedSignal = externalSignal
+            ? AbortSignal.any([run.signal, externalSignal])
+            : run.signal;
+        let currentAssistantBlocks = [];
+        let assistantBlocksCommitted = false;
+        let toolResults = [];
+        let executedToolIds = new Set();
         try {
+            if (mergedSignal.aborted) {
+                onEvent({ type: 'run_aborted', runId: run.runId });
+                throw new DOMException('agent aborted', 'AbortError');
+            }
+            if (typeof input === 'string') {
+                this.session.appendUserText(input);
+                if (this.memoryStore?.writeRawMessage) {
+                    const sessionKey = this.promptSnapshot?.id?.slice(0, 16) ?? 'cli';
+                    this.memoryStore.writeRawMessage(sessionKey, 'user', input).catch(() => { });
+                }
+            }
+            else {
+                this.session.appendUserBlocks(input);
+            }
             let iteration = 0;
             let emptyRetries = 0;
             const verificationToolCalls = [];
             let codeMutatingToolSeen = false;
             while (true) {
-                this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
+                this.throwIfAborted(mergedSignal, onEvent, run.runId);
+                currentAssistantBlocks = [];
+                assistantBlocksCommitted = false;
+                toolResults = [];
+                executedToolIds = new Set();
                 // Check if we've reached the max iterations limit (Claude Code style)
                 if (this.maxIterations !== undefined && iteration >= this.maxIterations) {
                     onEvent({
@@ -86,9 +104,12 @@ export class AgentRuntime {
                     const messages = this.session.getMessages();
                     let summaryText;
                     try {
-                        summaryText = await this.compactRunner.run(messages);
+                        summaryText = await this.compactRunner.run(messages, mergedSignal);
                     }
                     catch (compactError) {
+                        if (isAbortError(compactError)) {
+                            throw compactError;
+                        }
                         onEvent({
                             type: 'compact_failed',
                             runId: run.runId,
@@ -105,33 +126,32 @@ export class AgentRuntime {
                     });
                     await this.injectMemoryAfterCompact();
                 }
-                const assistantBlocks = [];
-                for await (const chunk of this.adapter.stream(this.session.getMessages(), this.registry.getToolDefinitions(), this.systemPrompt, this.buildInvocationOptions())) {
-                    this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
+                for await (const chunk of this.adapter.stream(this.session.getMessages(), this.registry.getToolDefinitions(), this.systemPrompt, this.buildInvocationOptions(mergedSignal))) {
+                    this.throwIfAborted(mergedSignal, onEvent, run.runId);
                     if (chunk.type === 'text') {
                         // Merge consecutive text blocks to avoid fragmented storage
-                        const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+                        const lastBlock = currentAssistantBlocks[currentAssistantBlocks.length - 1];
                         if (lastBlock?.type === 'text') {
                             lastBlock.text += chunk.delta;
                         }
                         else {
-                            assistantBlocks.push({ type: 'text', text: chunk.delta });
+                            currentAssistantBlocks.push({ type: 'text', text: chunk.delta });
                         }
                         onEvent({ type: 'assistant_text', runId: run.runId, delta: chunk.delta });
                         continue;
                     }
                     if (chunk.type === 'thinking') {
-                        const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+                        const lastBlock = currentAssistantBlocks[currentAssistantBlocks.length - 1];
                         if (lastBlock?.type === 'thinking') {
                             lastBlock.thinking += chunk.delta;
                         }
                         else {
-                            assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
+                            currentAssistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
                         }
                         continue;
                     }
                     if (chunk.type === 'tool_use') {
-                        assistantBlocks.push(chunk);
+                        currentAssistantBlocks.push(chunk);
                         continue;
                     }
                     if (chunk.type === 'usage') {
@@ -143,7 +163,7 @@ export class AgentRuntime {
                         break;
                     }
                 }
-                const hasVisibleOutput = assistantBlocks.some((block) => block.type === 'text' || block.type === 'tool_use');
+                const hasVisibleOutput = currentAssistantBlocks.some((block) => block.type === 'text' || block.type === 'tool_use');
                 if (!hasVisibleOutput) {
                     // 模型只返回了 thinking（无 text/tool_use），视为空响应自动重试
                     if (emptyRetries < AgentRuntime.MAX_EMPTY_RETRIES) {
@@ -154,17 +174,18 @@ export class AgentRuntime {
                 }
                 // 成功收到响应，重置空响应计数器
                 emptyRetries = 0;
-                this.session.appendAssistantBlocks(assistantBlocks);
-                const toolCalls = assistantBlocks.filter((block) => block.type === 'tool_use');
+                this.session.appendAssistantBlocks(currentAssistantBlocks);
+                assistantBlocksCommitted = true;
+                const toolCalls = currentAssistantBlocks.filter((block) => block.type === 'tool_use');
                 if (toolCalls.length === 0) {
                     this.emitVerificationGuardIfNeeded(input, verificationToolCalls, codeMutatingToolSeen, run.runId, onEvent);
                     onEvent({ type: 'run_completed', runId: run.runId });
                     return;
                 }
-                const toolResults = [];
-                const toolExecutionContext = this.buildToolExecutionContext();
+                toolResults = [];
+                const toolExecutionContext = this.buildToolExecutionContext(mergedSignal);
                 for (const toolCall of toolCalls) {
-                    this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
+                    this.throwIfAborted(mergedSignal, onEvent, run.runId);
                     onEvent({
                         type: 'tool_started',
                         runId: run.runId,
@@ -173,6 +194,7 @@ export class AgentRuntime {
                     });
                     const result = await this.registry.executeTool(toolCall.name, toolCall.input, toolExecutionContext);
                     const ok = !result.startsWith('Error');
+                    executedToolIds.add(toolCall.id);
                     verificationToolCalls.push({
                         id: toolCall.id,
                         name: toolCall.name,
@@ -203,11 +225,54 @@ export class AgentRuntime {
                     });
                 }
                 this.session.appendUserToolResults(toolResults);
+                toolResults = [];
+                executedToolIds = new Set();
                 iteration += 1;
             }
         }
         catch (error) {
-            if (this.isAbortError(error)) {
+            if (isAbortError(error)) {
+                const partialSentinel = '\n\n[partial - interrupted by user]';
+                const blocks = currentAssistantBlocks.map((block) => ({ ...block }));
+                if (!assistantBlocksCommitted && blocks.length > 0) {
+                    const lastTextIndex = blocks.map((block) => block.type).lastIndexOf('text');
+                    if (lastTextIndex >= 0) {
+                        const textBlock = blocks[lastTextIndex];
+                        if (textBlock.type === 'text') {
+                            blocks[lastTextIndex] = {
+                                ...textBlock,
+                                text: `${textBlock.text}${partialSentinel}`,
+                            };
+                        }
+                    }
+                    this.session.appendAssistantBlocks(blocks);
+                    assistantBlocksCommitted = true;
+                }
+                const seenToolResultIds = new Set(toolResults
+                    .filter((block) => block.type === 'tool_result')
+                    .map((block) => block.tool_use_id));
+                const syntheticToolResults = blocks
+                    .filter((block) => block.type === 'tool_use')
+                    .filter((toolCall) => !executedToolIds.has(toolCall.id) && !seenToolResultIds.has(toolCall.id))
+                    .map((toolCall) => {
+                    seenToolResultIds.add(toolCall.id);
+                    return {
+                        type: 'tool_result',
+                        tool_use_id: toolCall.id,
+                        content: '[user-cancelled]',
+                        is_error: true,
+                    };
+                });
+                const mergedToolResults = [...toolResults, ...syntheticToolResults];
+                if (mergedToolResults.length > 0) {
+                    this.session.appendUserToolResults(mergedToolResults);
+                    toolResults = [];
+                }
+                const partialText = blocks
+                    .filter((block) => block.type === 'text')
+                    .map((block) => block.text)
+                    .join('');
+                onEvent({ type: 'run_aborted', runId: run.runId, partialText });
                 throw error;
             }
             const normalized = error instanceof Error ? error : new Error(String(error));
@@ -218,17 +283,12 @@ export class AgentRuntime {
             this.controller.completeRun(run.runId);
         }
     }
-    throwIfAborted(activeSignal, externalSignal, onEvent, runId) {
-        if (!activeSignal?.aborted && !externalSignal?.aborted) {
+    throwIfAborted(signal, onEvent, runId) {
+        if (!signal.aborted) {
             return;
         }
-        if (onEvent && runId) {
-            onEvent({ type: 'run_aborted', runId });
-        }
-        throw new Error('agent aborted');
-    }
-    isAbortError(error) {
-        return error instanceof Error && /aborted/i.test(error.message);
+        onEvent({ type: 'run_aborted', runId });
+        throw new DOMException('agent aborted', 'AbortError');
     }
     refreshModelPolicy() {
         const capabilities = resolveModelCapabilities(this.adapter);
@@ -236,9 +296,9 @@ export class AgentRuntime {
         this.compactThreshold = this.compactThresholdOverride ?? capabilities.compactThreshold;
         this.supportsPromptCaching = capabilities.supportsPromptCaching;
     }
-    buildInvocationOptions() {
+    buildInvocationOptions(signal) {
         if (!this.supportsPromptCaching) {
-            return undefined;
+            return signal ? { signal } : undefined;
         }
         const toolDefinitions = this.registry.getToolDefinitions()
             .slice()
@@ -254,9 +314,10 @@ export class AgentRuntime {
             : this.systemPrompt;
         return {
             promptCache: buildPromptCacheSegments(systemPromptInput, toolDefinitions, this.session.getMessages()),
+            signal,
         };
     }
-    buildToolExecutionContext() {
+    buildToolExecutionContext(signal) {
         const toolDefinitions = this.registry.getToolDefinitions()
             .slice()
             .sort((left, right) => left.name.localeCompare(right.name));
@@ -272,6 +333,7 @@ export class AgentRuntime {
             promptCache: this.supportsPromptCaching
                 ? buildPromptCacheSegments(this.systemPrompt, toolDefinitions, this.session.getMessages())
                 : undefined,
+            signal,
         };
     }
     emitVerificationGuardIfNeeded(input, toolCalls, codeMutatingToolSeen, runId, onEvent) {

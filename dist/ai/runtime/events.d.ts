@@ -55,5 +55,6 @@ export type AgentRuntimeEvent = {
 } | {
     type: 'run_aborted';
     runId: string;
+    partialText?: string;
 };
 export declare function toLegacyStreamChunk(event: AgentRuntimeEvent): StreamChunk | null;

@@ -1,5 +1,6 @@
 import type { ModelAdapter, Message, StreamChunk, ToolDefinition } from '../../types.js';
-import type { ModelCapabilities } from '../runtime/model-capabilities.js';
+import { isAbortError } from '../runtime/abort-utils.js';
+import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
 
 type ResponsesUsage = {
   input_tokens?: number;
@@ -19,8 +20,9 @@ const STREAM_TIMEOUT_MS = 5 * 60_000;
 const MAX_RETRIES = 2;
 
 function isRetryableError(error: unknown): boolean {
+  if (isAbortError(error)) return false;
   if (error instanceof Error) {
-    if (error.name === 'AbortError' || error.name === 'TimeoutError') return true;
+    if (error.name === 'TimeoutError') return true;
     const record = error as unknown as Record<string, unknown>;
     const code = typeof record.code === 'string' ? record.code : '';
     if (/ERR_STREAM_PREMATURE_CLOSE|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR/i.test(code)) return true;
@@ -70,12 +72,13 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     messages: Message[],
     tools: ToolDefinition[],
     systemPrompt: string,
+    options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
     let attempt = 0;
     while (true) {
       let emittedAny = false;
       try {
-        for await (const chunk of this.streamOnce(messages, tools, systemPrompt)) {
+        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options?.signal)) {
           emittedAny = true;
           yield chunk;
         }
@@ -94,9 +97,13 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     messages: Message[],
     tools: ToolDefinition[],
     systemPrompt: string,
+    signal?: AbortSignal,
   ): AsyncIterable<StreamChunk> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+    const mergedSignal = signal
+      ? AbortSignal.any([controller.signal, signal])
+      : controller.signal;
     const endpoint = new URL('responses', ensureTrailingSlash(this.baseUrl)).toString();
     let response: Response;
     try {
@@ -119,13 +126,14 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
               }))
             : undefined,
         }),
-        signal: controller.signal,
+        signal: mergedSignal,
       });
     } catch (error) {
       clearTimeout(timer);
       throw error;
+    } finally {
+      clearTimeout(timer);
     }
-    clearTimeout(timer);
 
     if (!response.ok) {
       throw new Error(`${response.status} ${await response.text()}`);

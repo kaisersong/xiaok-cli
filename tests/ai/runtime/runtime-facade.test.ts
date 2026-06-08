@@ -137,4 +137,64 @@ describe('RuntimeFacade', () => {
 
     expect(agent.runTurn).toHaveBeenCalledWith('hello', expect.any(Function), undefined);
   });
+
+  it('rethrows abort errors and rolls back skill dedupe for the next turn', async () => {
+    const promptBuilder = {
+      build: vi.fn().mockResolvedValue({
+        id: 'prompt_1',
+        rendered: 'system',
+        memoryRefs: [],
+        segments: [],
+        createdAt: 1,
+        cwd: '/repo',
+        channel: 'chat',
+      }),
+    };
+    const sessionState = { attachPromptSnapshot: vi.fn() };
+    const abortError = new DOMException('agent aborted', 'AbortError');
+    const agent = {
+      getSessionState: vi.fn(() => sessionState),
+      setPromptSnapshot: vi.fn(),
+      setSystemPrompt: vi.fn(),
+      runTurn: vi.fn()
+        .mockRejectedValueOnce(abortError)
+        .mockResolvedValueOnce(undefined),
+    };
+
+    const facade = new RuntimeFacade({
+      promptBuilder,
+      getPromptInput: async () => ({
+        enterpriseId: null,
+        devApp: null,
+        budget: 2000,
+        skills: [],
+        deferredTools: [],
+        agents: [],
+        pluginCommands: [],
+        lspDiagnostics: '',
+      }),
+      agent,
+      getSkillEntries: () => [
+        { name: 'review', listing: '- review: inspect changes' },
+      ],
+    });
+
+    await expect(facade.runTurn({ sessionId: 'sess_1', cwd: '/repo', source: 'chat', input: 'hello' }, () => {}))
+      .rejects.toBe(abortError);
+
+    await facade.runTurn({ sessionId: 'sess_1', cwd: '/repo', source: 'chat', input: 'hello again' }, () => {});
+
+    expect(agent.runTurn).toHaveBeenNthCalledWith(
+      2,
+      [
+        expect.objectContaining({
+          type: 'text',
+          text: expect.stringContaining('- review: inspect changes'),
+        }),
+        { type: 'text', text: 'hello again' },
+      ],
+      expect.any(Function),
+      undefined,
+    );
+  });
 });

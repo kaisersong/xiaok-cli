@@ -195,6 +195,35 @@ describe('DesktopTaskEvent projection', () => {
     expect((desktopEvent! as any).stage).toBe('failed');
   });
 
+  it('projects user aborts to desktop cancellation events without exposing turn_stop lifecycle noise', () => {
+    const events = projectRuntimeEventsToDesktopEvents({
+      taskId: 'task_1',
+      events: [
+        {
+          type: 'turn_aborted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          partialText: 'partial answer',
+        },
+        {
+          type: 'turn_stop',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          reason: 'user_aborted',
+        },
+      ],
+    });
+
+    expect(events).toEqual([
+      {
+        type: 'task_cancelled',
+        taskId: 'task_1',
+        reason: 'user_aborted',
+        partialText: 'partial answer',
+      },
+    ]);
+  });
+
   it('projects file_changed events correctly', () => {
     const runtimeEvent: RuntimeEvent = {
       type: 'file_changed',

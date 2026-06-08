@@ -46,4 +46,21 @@ describe('CompactRunner', () => {
 
     expect(capturedTools).toEqual([]);
   });
+
+  it('passes abort signal through to adapter stream options', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, _systemPrompt, options) => {
+        capturedSignal = (options as { signal?: AbortSignal } | undefined)?.signal;
+        return textStream('summary');
+      },
+    };
+
+    const controller = new AbortController();
+    const runner = new CompactRunner(adapter);
+    await runner.run([{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], controller.signal);
+
+    expect(capturedSignal).toBe(controller.signal);
+  });
 });

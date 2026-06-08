@@ -6,11 +6,16 @@ export async function executeNamedSubAgent(options) {
     const systemPromptBase = await options.buildSystemPrompt(cwd);
     const systemPrompt = [systemPromptBase, options.agentDef.systemPrompt].filter(Boolean).join('\n\n');
     const baseAdapter = options.adapter();
-    const adapter = resolveSubAgentAdapter(baseAdapter, options.agentDef.model);
+    const adapter = resolveSubAgentAdapter(baseAdapter, options.agentDef.model, options.agentDef.modelCapability, options.forkContext);
     const agent = new Agent(adapter, registry, systemPrompt, {
         maxIterations: options.agentDef.maxIterations,
     });
     const chunks = [];
+    const parentSignal = options.forkContext?.signal;
+    const childController = new AbortController();
+    const childSignal = parentSignal
+        ? AbortSignal.any([childController.signal, parentSignal])
+        : childController.signal;
     if (options.forkContext?.session) {
         agent.restoreSession(options.forkContext.session);
     }
@@ -19,7 +24,7 @@ export async function executeNamedSubAgent(options) {
             if (chunk.type === 'text') {
                 chunks.push(chunk.delta);
             }
-        });
+        }, childSignal);
     }
     finally {
         if (resolved.allocation && resolved.allocation.cleanup === 'delete') {
@@ -28,11 +33,30 @@ export async function executeNamedSubAgent(options) {
     }
     return chunks.join('').trim();
 }
-function resolveSubAgentAdapter(adapter, modelOverride) {
-    if (!modelOverride || !supportsModelClone(adapter)) {
-        return adapter;
+function resolveSubAgentAdapter(adapter, modelOverride, capabilityOverride, ctx) {
+    if (modelOverride && capabilityOverride) {
+        throw new Error('model and modelCapability are mutually exclusive');
     }
-    return adapter.cloneWithModel(modelOverride);
+    if (modelOverride) {
+        if (!supportsModelClone(adapter))
+            return adapter;
+        return adapter.cloneWithModel(modelOverride);
+    }
+    if (capabilityOverride) {
+        if (!ctx?.settingsStore)
+            throw new Error('settings context required for capability routing');
+        const resolved = resolveCapability(capabilityOverride, ctx);
+        if (!resolved)
+            throw new Error(`unknown capability: ${capabilityOverride}`);
+        if (!supportsModelClone(adapter))
+            throw new Error('model clone required for capability routing');
+        return adapter.cloneWithModel(resolved);
+    }
+    return adapter;
+}
+function resolveCapability(capability, ctx) {
+    const settings = ctx.settingsStore?.getSettings();
+    return settings?.modelCapabilities?.[capability] || null;
 }
 function supportsModelClone(adapter) {
     return typeof adapter.cloneWithModel === 'function';

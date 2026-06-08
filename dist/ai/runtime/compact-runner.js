@@ -7,7 +7,7 @@ export class CompactRunner {
     constructor(adapter) {
         this.adapter = adapter;
     }
-    async run(messages) {
+    async run(messages, signal) {
         const summaryRequest = {
             role: 'user',
             content: [{
@@ -17,7 +17,7 @@ export class CompactRunner {
         };
         const chunks = [];
         for await (const chunk of this.adapter.stream([...messages, summaryRequest], [], // no tools — enforced by NO_TOOLS_PREAMBLE
-        NO_TOOLS_PREAMBLE)) {
+        NO_TOOLS_PREAMBLE, signal ? { signal } : undefined)) {
             if (chunk.type === 'text')
                 chunks.push(chunk.delta);
         }

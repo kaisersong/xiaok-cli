@@ -24,6 +24,10 @@ export interface ModelInvocationOptions {
   promptCache?: PromptCacheSegments;
 }
 
+export interface StreamOptions extends ModelInvocationOptions {
+  signal?: AbortSignal;
+}
+
 export interface ModelCapabilities {
   contextLimit: number;
   compactThreshold: number;
@@ -37,7 +41,7 @@ export interface CapabilityAwareAdapter extends ModelAdapter {
     messages: Message[],
     tools: ToolDefinition[],
     systemPrompt: string,
-    options?: ModelInvocationOptions,
+    options?: StreamOptions,
   ): AsyncIterable<import('../../types.js').StreamChunk>;
 }
 

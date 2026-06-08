@@ -340,7 +340,7 @@ describe('InProcessTaskRuntimeHost', () => {
     });
 
     await host.createTask({ prompt: '第一个任务', materials: [{ materialId: material.materialId }] });
-    await waitFor(() => host.isExecutingForTest('task_1'));
+    await waitFor(() => Boolean(resolveTask1));
 
     // Submit second task — should NOT cancel first, both run in parallel
     await host.createTask({ prompt: '第二个任务', materials: [{ materialId: material.materialId }] });
@@ -370,7 +370,7 @@ describe('InProcessTaskRuntimeHost', () => {
       prompt: '生成 A 客户方案 PPT',
       materials: [{ materialId: material.materialId }],
     });
-    await waitFor(() => firstHost.isExecutingForTest(created.taskId));
+    await waitFor(() => Boolean(releaseFirstRunner));
     releaseFirstRunner?.();
 
     const restartedRegistry = new MaterialRegistry({
@@ -428,12 +428,14 @@ describe('InProcessTaskRuntimeHost', () => {
 
   it('cancels active execution and aborts the runner', async () => {
     let observedAbort = false;
+    let runnerReady = false;
     const runner: TaskRunner = async ({ signal }) => {
       await new Promise<void>((resolve) => {
         signal.addEventListener('abort', () => {
           observedAbort = true;
           resolve();
         }, { once: true });
+        runnerReady = true;
       });
     };
     const host = createHost(runner);
@@ -442,7 +444,7 @@ describe('InProcessTaskRuntimeHost', () => {
       materials: [{ materialId: material.materialId }],
     });
 
-    await waitFor(() => host.isExecutingForTest('task_1'));
+    await waitFor(() => runnerReady);
     await host.cancelTask('task_1');
 
     expect(observedAbort).toBe(true);
@@ -577,11 +579,13 @@ describe('InProcessTaskRuntimeHost', () => {
   it('passes history from cancelled context task to the next runner call', async () => {
     let callCount = 0;
     let historyOnSecondCall: Array<{ role: string; content: string }> = [];
+    let firstRunnerReady = false;
     const runner: TaskRunner = async ({ signal, history, emitRuntimeEvent }) => {
       callCount++;
       if (callCount === 1) {
         await new Promise<void>((resolve) => {
           signal.addEventListener('abort', () => resolve(), { once: true });
+          firstRunnerReady = true;
         });
         throw new Error('task cancelled');
       }
@@ -606,7 +610,7 @@ describe('InProcessTaskRuntimeHost', () => {
     });
 
     await host.createTask({ prompt: '每天晚上11点同步mydocs', materials: [{ materialId: material.materialId }] });
-    await waitFor(() => host.isExecutingForTest('task_1'));
+    await waitFor(() => firstRunnerReady);
     await host.cancelTask('task_1');
     await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'cancelled');
     // Let finally block complete

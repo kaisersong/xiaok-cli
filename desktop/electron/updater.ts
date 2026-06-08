@@ -25,6 +25,17 @@ let mainWindow: BrowserWindow | null = null;
 let isDevMode = false;
 let autoUpdater: any = null;
 let autoUpdaterEventsRegistered = false;
+const STARTUP_UPDATE_RETRY_DELAY_MS = 60_000;
+
+interface StartupUpdateCheckOptions {
+  retryDelayMs?: number;
+  onError: (error: Error) => void;
+  setTimer?: (callback: () => void | Promise<void>, delayMs: number) => unknown;
+}
+
+interface StartupAutoUpdater {
+  checkForUpdatesAndNotify: () => Promise<unknown> | unknown;
+}
 
 export function resolveAutoUpdaterExport(module: unknown): any | null {
   if (!module || typeof module !== 'object') return null;
@@ -53,6 +64,31 @@ function isDevelopmentMode(): boolean {
     return true;
   }
   return false;
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+export async function runStartupUpdateCheck(
+  updater: StartupAutoUpdater,
+  options: StartupUpdateCheckOptions,
+): Promise<void> {
+  const retryDelayMs = options.retryDelayMs ?? STARTUP_UPDATE_RETRY_DELAY_MS;
+  const setTimer = options.setTimer ?? ((callback, delayMs) => setTimeout(callback, delayMs));
+
+  try {
+    await updater.checkForUpdatesAndNotify();
+  } catch (error) {
+    options.onError(toError(error));
+    setTimer(async () => {
+      try {
+        await updater.checkForUpdatesAndNotify();
+      } catch (retryError) {
+        options.onError(toError(retryError));
+      }
+    }, retryDelayMs);
+  }
 }
 
 async function loadAutoUpdater(): Promise<boolean> {
@@ -144,12 +180,16 @@ export async function setupAutoUpdater(window: BrowserWindow): Promise<void> {
   registerAutoUpdaterEvents();
 
   // Check for updates immediately on startup
-  autoUpdater.checkForUpdatesAndNotify().catch((error: Error) => {
-    setUpdateStatus({
-      checking: false,
-      downloading: false,
-      error: error.message,
-    });
+  void runStartupUpdateCheck(autoUpdater, {
+    retryDelayMs: STARTUP_UPDATE_RETRY_DELAY_MS,
+    onError: (error) => {
+      setUpdateStatus({
+        checking: false,
+        downloading: false,
+        installing: false,
+        error: error.message,
+      });
+    },
   });
 
   // Also check periodically (every 4 hours)

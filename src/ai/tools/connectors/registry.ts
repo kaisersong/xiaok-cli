@@ -115,7 +115,7 @@ export class ConnectorRegistry {
 
     if (usePrimary) {
       try {
-        const hits = await primary.search(timedInput);
+        const hits = await runWithAbortSignal(primary.search(timedInput), timedInput.signal);
         this.resetSearchWindow(primary.name);
         return { hits, primary: primary.name, effective: primary.name };
       } catch (error) {
@@ -126,7 +126,7 @@ export class ConnectorRegistry {
           throw error;
         }
         try {
-          const hits = await fallback.search(timedInput);
+          const hits = await runWithAbortSignal(fallback.search(timedInput), timedInput.signal);
           return {
             hits,
             primary: primary.name,
@@ -141,7 +141,7 @@ export class ConnectorRegistry {
     }
 
     // Primary already marked invalid in this session — go straight to fallback.
-    const hits = await fallback.search(timedInput);
+    const hits = await runWithAbortSignal(fallback.search(timedInput), timedInput.signal);
     return {
       hits,
       primary: primary.name,
@@ -158,7 +158,7 @@ export class ConnectorRegistry {
 
     if (usePrimary) {
       try {
-        const result = await primary.fetch(timedInput);
+        const result = await runWithAbortSignal(primary.fetch(timedInput), timedInput.signal);
         this.resetFetchWindow(primary.name);
         return { result, primary: primary.name, effective: primary.name };
       } catch (error) {
@@ -168,7 +168,7 @@ export class ConnectorRegistry {
           throw error;
         }
         try {
-          const result = await fallback.fetch(timedInput);
+          const result = await runWithAbortSignal(fallback.fetch(timedInput), timedInput.signal);
           return {
             result,
             primary: primary.name,
@@ -181,7 +181,7 @@ export class ConnectorRegistry {
       }
     }
 
-    const result = await fallback.fetch(timedInput);
+    const result = await runWithAbortSignal(fallback.fetch(timedInput), timedInput.signal);
     return {
       result,
       primary: primary.name,
@@ -293,4 +293,37 @@ function describeFetchError(error: unknown): string {
     return `${error.kind}${status}: ${error.message}`;
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+function runWithAbortSignal<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return operation;
+  if (signal.aborted) return Promise.reject(getAbortReason(signal));
+
+  return new Promise<T>((resolve, reject) => {
+    const cleanup = () => {
+      signal.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(getAbortReason(signal));
+    };
+
+    signal.addEventListener('abort', onAbort, { once: true });
+    operation.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
+function getAbortReason(signal: AbortSignal): unknown {
+  if (signal.reason instanceof Error) return signal.reason;
+  if (signal.reason) return signal.reason;
+  return new DOMException('operation aborted', 'AbortError');
 }

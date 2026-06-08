@@ -23,7 +23,7 @@ export type AgentRuntimeEvent =
   | { type: 'max_iterations_reached'; runId: string; maxIterations: number; currentIteration: number }
   | { type: 'run_completed'; runId: string }
   | { type: 'run_failed'; runId: string; error: Error }
-  | { type: 'run_aborted'; runId: string };
+  | { type: 'run_aborted'; runId: string; partialText?: string };
 
 export function toLegacyStreamChunk(event: AgentRuntimeEvent): StreamChunk | null {
   if (event.type === 'assistant_text') {

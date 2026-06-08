@@ -19,6 +19,21 @@ describe('project artifact actions', () => {
     expect(artifactDisplayName({ filename: 'report.md', mimeType: 'text/markdown' } as any)).toBe('report.md');
   });
 
+  it('repairs malformed project artifact URLs before opening them', () => {
+    expect(resolveArtifactUrl({
+      projectId: 'proj-a',
+      url: 'artifacts/report.md',
+    })).toBe('http://127.0.0.1:4400/projects/proj-a/artifacts/report.md');
+    expect(resolveArtifactUrl({
+      projectId: 'proj-a',
+      url: '/projects/proj-a/artifacts/artifacts/report.md',
+    })).toBe('http://127.0.0.1:4400/projects/proj-a/artifacts/report.md');
+    expect(resolveArtifactUrl({
+      projectId: 'proj-a',
+      url: '/Users/song/.kswarm/projects/proj-a/artifacts/report.md',
+    })).toBe('http://127.0.0.1:4400/projects/proj-a/artifacts/report.md');
+  });
+
   it('normalizes Windows absolute project artifact paths to the KSwarm artifact route', () => {
     expect(resolveArtifactUrl({
       projectId: 'proj-win',

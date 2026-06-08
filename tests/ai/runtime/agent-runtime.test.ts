@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ModelAdapter, StreamChunk, ToolDefinition } from '../../../src/types.js';
 import { AgentRunController } from '../../../src/ai/runtime/controller.js';
 import { AgentRuntime } from '../../../src/ai/runtime/agent-runtime.js';
@@ -320,6 +320,135 @@ describe('AgentRuntime', () => {
     expect(promptCache.systemPrompt[0]).not.toHaveProperty('cache_control');
   });
 
+  it('passes external abort signal into model invocation options', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const adapter: ModelAdapter & {
+      stream: (
+        messages: Parameters<ModelAdapter['stream']>[0],
+        tools: Parameters<ModelAdapter['stream']>[1],
+        systemPrompt: Parameters<ModelAdapter['stream']>[2],
+        options?: { signal?: AbortSignal },
+      ) => AsyncIterable<StreamChunk>;
+    } = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, _systemPrompt, options) => {
+        capturedSignal = options?.signal;
+        return mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    const controller = new AbortController();
+    await runtime.run('hi', () => {}, controller.signal);
+
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal?.aborted).toBe(false);
+    controller.abort();
+    expect(capturedSignal?.aborted).toBe(true);
+  });
+
+  it('does not start a run when the external signal is already aborted', async () => {
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () => mockStream([{ type: 'text', delta: 'ignored' }, { type: 'done' }]),
+    };
+    const controller = new AgentRunController();
+    const startRun = vi.spyOn(controller, 'startRun');
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session: new AgentSessionState(),
+      controller,
+      systemPrompt: 'system',
+    });
+    const abortController = new AbortController();
+    abortController.abort();
+
+    await expect(runtime.run('hi', () => {}, abortController.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    expect(startRun).not.toHaveBeenCalled();
+  });
+
+  it('persists partial assistant text with sentinel and emits partialText when aborted mid-stream', async () => {
+    const controller = new AbortController();
+    const session = new AgentSessionState();
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: async function* () {
+        yield { type: 'text', delta: 'partial answer' };
+        controller.abort();
+        yield { type: 'done' };
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    const events: Array<{ type: string; partialText?: string }> = [];
+    await expect(runtime.run('hi', (event) => {
+      events.push(event);
+    }, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+
+    const abortEvent = events.findLast((event) => event.type === 'run_aborted');
+    expect(abortEvent?.partialText).toContain('partial answer');
+    expect(abortEvent?.partialText).toContain('[partial');
+    const assistant = session.getMessages().find((message) => message.role === 'assistant');
+    expect(assistant?.content).toContainEqual(expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('partial answer'),
+    }));
+    expect(JSON.stringify(assistant?.content)).toContain('[partial');
+  });
+
+  it('adds synthetic cancelled tool results for unexecuted tool calls when aborted before tool execution', async () => {
+    const controller = new AbortController();
+    const session = new AgentSessionState();
+    const executeTool = vi.fn(async () => 'should not run');
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: async function* () {
+        yield { type: 'tool_use', id: 'tu_pending', name: 'read', input: { file: 'a.ts' } };
+        controller.abort();
+        yield { type: 'done' };
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock({ executeTool }) as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    await expect(runtime.run('hi', () => {}, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+
+    expect(executeTool).not.toHaveBeenCalled();
+    const messages = session.getMessages();
+    expect(messages.some((message) => message.content.some((block) =>
+      block.type === 'tool_use' && block.id === 'tu_pending'
+    ))).toBe(true);
+    expect(messages.some((message) => message.content.some((block) =>
+      block.type === 'tool_result'
+      && block.tool_use_id === 'tu_pending'
+      && block.content === '[user-cancelled]'
+    ))).toBe(true);
+  });
+
   it('fails explicitly when the model returns no text, tool call, or usage', async () => {
     const adapter: ModelAdapter = {
       getModelName: () => 'mock',
@@ -438,6 +567,44 @@ describe('AgentRuntime', () => {
         memoryRefs: ['mem_1'],
       },
     });
+  });
+
+  it('passes abort signal into tool execution context', async () => {
+    let capturedContext: { signal?: AbortSignal } | undefined;
+    let streamCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () => {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          return mockStream([
+            { type: 'tool_use', id: 'tu_1', name: 'read', input: { file: 'a.ts' } },
+            { type: 'done' },
+          ]);
+        }
+        return mockStream([{ type: 'text', delta: 'done' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock({
+        executeTool: async (_name, _input, context) => {
+          capturedContext = context as { signal?: AbortSignal };
+          return 'ok';
+        },
+      }) as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    const controller = new AbortController();
+    await runtime.run('hi', () => {}, controller.signal);
+
+    expect(capturedContext?.signal).toBeDefined();
+    expect(capturedContext?.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(capturedContext?.signal?.aborted).toBe(true);
   });
 
   it('emits a verification guard warning when a code task finishes after edits without tests', async () => {

@@ -1,5 +1,5 @@
 import type { ModelAdapter, Message, StreamChunk, ToolDefinition } from '../../types.js';
-import type { ModelCapabilities } from '../runtime/model-capabilities.js';
+import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
 export declare class OpenAIResponsesAdapter implements ModelAdapter {
     private readonly apiKey;
     private readonly baseUrl?;
@@ -10,6 +10,6 @@ export declare class OpenAIResponsesAdapter implements ModelAdapter {
     getModelName(): string;
     getCapabilities(): Partial<ModelCapabilities>;
     cloneWithModel(model: string): OpenAIResponsesAdapter;
-    stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string): AsyncIterable<StreamChunk>;
+    stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions): AsyncIterable<StreamChunk>;
     private streamOnce;
 }

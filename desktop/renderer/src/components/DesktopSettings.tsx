@@ -2059,6 +2059,7 @@ function GeneralPane() {
           <div className="flex items-center gap-4">
             <input
               type="range"
+              aria-label="最大并发任务数"
               min={1}
               max={10}
               step={1}

@@ -15,6 +15,12 @@ export type RuntimeEvent = {
     type: 'turn_aborted';
     sessionId: string;
     turnId: string;
+    partialText?: string;
+} | {
+    type: 'turn_stop';
+    sessionId: string;
+    turnId: string;
+    reason: 'completed' | 'user_aborted' | 'error';
 } | {
     type: 'intent_created';
     sessionId: string;

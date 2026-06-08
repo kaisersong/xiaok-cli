@@ -1,12 +1,14 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
-import type { CachedToolDefinition, ModelCapabilities, ModelInvocationOptions, SystemPromptBlock } from '../runtime/model-capabilities.js';
+import { isAbortError } from '../runtime/abort-utils.js';
+import type { CachedToolDefinition, ModelCapabilities, StreamOptions, SystemPromptBlock } from '../runtime/model-capabilities.js';
 
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 
 function isRetryableError(error: unknown): boolean {
+  if (isAbortError(error)) return false;
   if (error instanceof Error) {
     const record = error as unknown as Record<string, unknown>;
     const status = record.status;
@@ -78,19 +80,21 @@ export class ClaudeAdapter implements ModelAdapter {
     messages: Message[],
     tools: ToolDefinition[],
     systemPrompt: string,
-    options?: ModelInvocationOptions,
+    options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
     let attempt = 0;
     while (true) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+      const signal = options?.signal
+        ? AbortSignal.any([controller.signal, options.signal])
+        : controller.signal;
       let emittedAny = false;
       try {
-        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, controller.signal)) {
+        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, signal)) {
           emittedAny = true;
           yield chunk;
         }
-        clearTimeout(timer);
         return;
       } catch (error) {
         clearTimeout(timer);
@@ -101,6 +105,8 @@ export class ClaudeAdapter implements ModelAdapter {
         const delayMs = Math.min(1000 * 2 ** attempt, 16000);
         await sleep(delayMs);
         attempt += 1;
+      } finally {
+        clearTimeout(timer);
       }
     }
   }
@@ -109,7 +115,7 @@ export class ClaudeAdapter implements ModelAdapter {
     messages: Message[],
     tools: ToolDefinition[],
     systemPrompt: string,
-    options?: ModelInvocationOptions,
+    options?: StreamOptions,
     signal?: AbortSignal,
   ): AsyncIterable<StreamChunk> {
     const sourceMessages = options?.promptCache?.messages ?? messages;

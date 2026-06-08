@@ -1,14 +1,17 @@
 import { Agent as HttpAgent } from 'node:http';
 import { Agent as HttpsAgent } from 'node:https';
 import OpenAI from 'openai';
+import { isAbortError } from '../runtime/abort-utils.js';
 import { estimateTokens } from '../runtime/usage.js';
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 const KIMI_CODING_COMPAT_USER_AGENT = 'claude-code/1.0';
 function isRetryableError(error) {
+    if (isAbortError(error))
+        return false;
     if (error instanceof Error) {
-        if (error.name === 'AbortError' || error.name === 'TimeoutError')
+        if (error.name === 'TimeoutError')
             return true;
         const record = error;
         const status = record.status;
@@ -189,13 +192,15 @@ export class OpenAIAdapter {
         while (true) {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+            const signal = options?.signal
+                ? AbortSignal.any([controller.signal, options.signal])
+                : controller.signal;
             let emittedAny = false;
             try {
-                for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, controller.signal)) {
+                for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, signal)) {
                     emittedAny = true;
                     yield chunk;
                 }
-                clearTimeout(timer);
                 return;
             }
             catch (error) {
@@ -207,6 +212,9 @@ export class OpenAIAdapter {
                 const delayMs = Math.min(1000 * 2 ** attempt, 16000);
                 await sleep(delayMs);
                 attempt += 1;
+            }
+            finally {
+                clearTimeout(timer);
             }
         }
     }

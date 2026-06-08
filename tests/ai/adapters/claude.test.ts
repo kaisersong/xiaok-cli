@@ -182,6 +182,35 @@ describe('ClaudeAdapter', () => {
     });
   });
 
+  it('propagates external abort signal to Anthropic stream requests', async () => {
+    const { ClaudeAdapter } = await import('../../../src/ai/adapters/claude.js');
+
+    let capturedOptions: { signal?: AbortSignal } | undefined;
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'message_stop' };
+      },
+    };
+
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const instance = new Anthropic({ apiKey: 'test' });
+    vi.spyOn(instance.messages, 'stream').mockImplementation((_params: unknown, options: unknown) => {
+      capturedOptions = options as { signal?: AbortSignal };
+      return mockStream as never;
+    });
+
+    const adapter = new ClaudeAdapter('test-key', 'claude-opus-4-6');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const controller = new AbortController();
+    for await (const _ of adapter.stream([], [], 'system', { signal: controller.signal } as never)) { /* consume */ }
+
+    expect(capturedOptions?.signal).toBeDefined();
+    expect(capturedOptions?.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(capturedOptions?.signal?.aborted).toBe(true);
+  });
+
   it('retries up to 3 times on 529 overload then succeeds', async () => {
     vi.useFakeTimers();
     const { ClaudeAdapter } = await import('../../../src/ai/adapters/claude.js');

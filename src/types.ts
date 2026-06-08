@@ -15,7 +15,11 @@ export interface ModelAdapter {
   stream(
     messages: Message[],
     tools: ToolDefinition[],
-    systemPrompt: string
+    systemPrompt: string,
+    options?: {
+      promptCache?: PromptCacheSegments;
+      signal?: AbortSignal;
+    },
   ): AsyncIterable<StreamChunk>;
   getModelName(): string;
 }
@@ -49,6 +53,10 @@ export interface ToolExecutionContext {
   toolDefinitions: ToolDefinition[];
   promptCache?: PromptCacheSegments;
   promptSnapshot?: PromptSnapshot;
+  settingsStore?: {
+    getSettings(): { modelCapabilities?: Record<string, string> };
+  };
+  signal?: AbortSignal;
 }
 
 export type PermissionClass = 'safe' | 'write' | 'bash';

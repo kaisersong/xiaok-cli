@@ -64,6 +64,7 @@ type ClipboardImageSaver = () => string | null;
 export interface BusyCaptureOptions {
   placeholder?: string;
   onDeactivate?: (reason: 'disabled' | 'stopped' | 'ui_error') => void;
+  onAbortRequest?: () => void;
 }
 
 export interface BusyCaptureHandle {
@@ -73,6 +74,7 @@ export interface BusyCaptureHandle {
   consumeQueued(): string | null;
   getSnapshot(): QueuedInputSnapshot;
   isActive(): boolean;
+  isPaused(): boolean;
 }
 
 function createDisabledBusyCapture(): BusyCaptureHandle {
@@ -88,6 +90,9 @@ function createDisabledBusyCapture(): BusyCaptureHandle {
       return state.getSnapshot();
     },
     isActive() {
+      return false;
+    },
+    isPaused() {
       return false;
     },
   };
@@ -486,6 +491,11 @@ export class InputReader {
           return toEngineSnapshot();
         },
         onCancel: () => {
+          if (options.onAbortRequest) {
+            options.onAbortRequest();
+            render();
+            return toEngineSnapshot();
+          }
           handleEscape();
           return toEngineSnapshot();
         },
@@ -570,6 +580,9 @@ export class InputReader {
       },
       isActive() {
         return active && !paused;
+      },
+      isPaused() {
+        return active && paused;
       },
     };
 

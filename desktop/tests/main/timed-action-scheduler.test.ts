@@ -99,6 +99,28 @@ describe('TimedActionScheduler', () => {
     resolveAgent?.();
   });
 
+  it('uses a 30 minute default lease before releasing stale scheduled task claims', async () => {
+    store.createAction({
+      id: 'leased_agent',
+      title: '长租约任务',
+      trigger: { kind: 'once', at: 1_000 },
+      executor: { kind: 'agent_task', prompt: '长任务' },
+      source: 'agent',
+      now: 0,
+    });
+    const [claimed] = store.claimDueActions(1_000, 1);
+    expect(claimed.action.id).toBe('leased_agent');
+
+    const scheduler = new TimedActionScheduler(store, {
+      executors: {},
+      now: () => 10 * 60_000,
+    });
+    await scheduler.runOnce('startup_recovery');
+
+    expect(store.getAction('leased_agent')?.lockedRunId).toBe(claimed.runId);
+    expect(store.listRuns('leased_agent')[0]).toMatchObject({ status: 'claimed' });
+  });
+
   it('notifies owner when an agent scheduled task creates a runtime task', async () => {
     store.createAction({
       id: 'dream',

@@ -708,6 +708,8 @@ describe('WorkflowStatusStrip', () => {
     fireEvent.click(screen.getByRole('button', { name: /并行报告复核/ }));
 
     const dialog = screen.getByRole('dialog', { name: '工作流详情' });
+    expect(dialog.className).toContain('max-h-[min(72vh,640px)]');
+    expect(dialog.className).toContain('overflow-y-auto');
     expect(dialog).toHaveTextContent('脚本检查点：3/3');
     expect(dialog).toHaveTextContent('并行编排');
     expect(dialog).toHaveTextContent('两路复核');

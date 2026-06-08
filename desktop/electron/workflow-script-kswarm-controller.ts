@@ -128,8 +128,90 @@ export function createKSwarmWorkflowScriptController({
       if (!parallelGroupId) throw workflowScriptKSwarmError('workflow_script_parallel_group_missing', 'KSwarm did not return a workflow parallel group id');
       return { parallelGroupId };
     },
+    async reserveBudget(input: { runId: string; nodeId: string; tokens: number }): Promise<{ reserved: boolean; attemptId: string }> {
+      const reserved = await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(input.runId)}/budget/reserve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ nodeId: input.nodeId, tokens: input.tokens }),
+      });
+      const body = readRecord(reserved);
+      return {
+        reserved: body.reserved === true,
+        attemptId: readString(body.attemptId),
+      };
+    },
+    async consumeBudget(input: { runId: string; nodeId: string; attemptId: string; reserved: number; actual: number; usageSource: 'provider' | 'estimate' }): Promise<void> {
+      await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(input.runId)}/budget/events`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          type: 'budget_consumed',
+          nodeId: input.nodeId,
+          attemptId: input.attemptId,
+          reserved: input.reserved,
+          actual: input.actual,
+          usageSource: input.usageSource,
+        }),
+      });
+    },
+    async releaseBudget(input: { runId: string; nodeId: string; attemptId: string; tokens: number }): Promise<void> {
+      await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(input.runId)}/budget/events`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          type: 'budget_released',
+          nodeId: input.nodeId,
+          attemptId: input.attemptId,
+          tokens: input.tokens,
+        }),
+      });
+    },
+    async checkRemainingBudget(runId: string): Promise<number> {
+      const remaining = await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(runId)}/budget/remaining`);
+      return Math.max(0, Number(readRecord(readRecord(remaining).budget).remaining || 0));
+    },
+    async verifyEvidence(input): Promise<{ ok: boolean; failures: string[]; warnings: string[] }> {
+      const verified = await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(input.runId)}/nodes/${encodeURIComponent(input.nodeId)}/verify-evidence`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          result: input.result,
+          workspaceRoot: input.workspaceRoot,
+          checks: input.checks,
+        }),
+      });
+      const verdict = readRecord(readRecord(verified).verdict);
+      return {
+        ok: verdict.ok === true,
+        failures: readStringArray(verdict.failures),
+        warnings: readStringArray(verdict.warnings),
+      };
+    },
+    async markNodeIntervention(input: { runId: string; nodeId: string; failures: string[] }): Promise<void> {
+      await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(input.runId)}/nodes/${encodeURIComponent(input.nodeId)}/action`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'needs_manual_intervention', failures: input.failures }),
+      });
+    },
+    async markBranchSkipped(input: { runId: string; nodeId: string; label: string }): Promise<void> {
+      await requestKSwarmJson(kswarmService, `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(input.runId)}/nodes/${encodeURIComponent(input.nodeId)}/action`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'skip', label: input.label, reason: 'budget_skipped' }),
+      });
+    },
     async createAgentNode(input: WorkflowScriptAgentInput): Promise<unknown> {
-      if (reuseCompletedPrimitives) {
+      if (reuseCompletedPrimitives && input.nodeId && !input.forceRetry) {
+        const reusableById = await findReusableAgentNodeById({
+          kswarmService,
+          projectId,
+          workflowRunId,
+          input,
+        });
+        if (reusableById.found) return reusableById.output;
+      }
+      if (reuseCompletedPrimitives && !input.forceRetry) {
         const reusable = await findReusableAgentNode({
           kswarmService,
           projectId,
@@ -159,6 +241,8 @@ export function createKSwarmWorkflowScriptController({
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
+          nodeId: input.nodeId,
+          attemptId: input.attemptId,
           phaseTitle: input.phaseTitle || '动态执行',
           label: input.label,
           prompt: input.prompt,
@@ -171,6 +255,7 @@ export function createKSwarmWorkflowScriptController({
           required: input.required,
           outputSchema: input.outputSchema,
           evidenceRequired: input.evidenceRequired,
+          modelCapability: input.modelCapability,
         }),
       });
       const nodeId = readString(readRecord(created).nodeId) || inferLatestScriptNodeId(readRecord(readRecord(created).workflowRun));
@@ -202,10 +287,11 @@ async function findReusableParallelGroupId({
   const groups = Array.isArray(workflowRun.parallelGroups) ? workflowRun.parallelGroups.filter(isRecord) : [];
   const match = groups.find(group => {
     const status = readString(group.status);
+    const persistedTotalCount = Number(group.totalCount || 0);
     return readString(group.primitiveId) === input.primitiveId
       && readString(group.kind) === input.kind
       && readString(group.label) === input.label
-      && Number(group.totalCount || 0) === input.totalCount
+      && persistedTotalCount >= input.totalCount
       && status !== 'cancelled';
   });
   return readString(match?.id) || null;
@@ -236,13 +322,37 @@ async function findReusableAgentNode({
   return { found: false, output: null, retryableNodeId: readString(retryable?.id) || null };
 }
 
+async function findReusableAgentNodeById({
+  kswarmService,
+  projectId,
+  workflowRunId,
+  input,
+}: {
+  kswarmService: KSwarmService;
+  projectId: string;
+  workflowRunId: string;
+  input: WorkflowScriptAgentInput;
+}): Promise<{ found: boolean; output: unknown }> {
+  const detail = await requestKSwarmJson(
+    kswarmService,
+    `/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowRunId)}/nodes/${encodeURIComponent(input.nodeId || '')}`,
+  );
+  const node = readRecord(readRecord(detail).node);
+  if (!workflowScriptNodeMatchesInput(node, input)) return { found: false, output: null };
+  if (readString(node.status) !== 'completed') return { found: false, output: null };
+  return {
+    found: true,
+    output: node.result ?? node.output ?? null,
+  };
+}
+
 function workflowScriptNodeMatchesInput(node: Record<string, unknown>, input: WorkflowScriptAgentInput): boolean {
     const nodeInput = readRecord(node.input);
     const script = readRecord(nodeInput.script);
     return readString(node.kind) === 'agent_task'
       && readString(nodeInput.prompt) === input.prompt
       && readString(nodeInput.label) === input.label
-      && readString(script.phaseTitle) === (input.phaseTitle || '动态执行')
+      && (input.phaseTitle == null || readString(script.phaseTitle) === input.phaseTitle)
       && nullableString(node.parallelGroupId) === nullableString(input.parallelGroupId)
       && nullableString(node.fanoutItemKey) === nullableString(input.fanoutItemKey)
       && nullableString(node.fanoutItemLabel) === nullableString(input.fanoutItemLabel)
@@ -253,7 +363,7 @@ function workflowScriptNodeMatchesInput(node: Record<string, unknown>, input: Wo
 function workflowScriptPipelineStageMatches(node: Record<string, unknown>, input: WorkflowScriptAgentInput): boolean {
   const nodeStage = nullableNumber(node.pipelineStageIndex);
   const inputStage = nullableNumber(input.pipelineStageIndex);
-  if (inputStage === null && nullableString(input.fanoutItemKey) && nodeStage === 0) return true;
+  if (inputStage === null && nodeStage === 0) return true;
   return nodeStage === inputStage;
 }
 
@@ -344,6 +454,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(readString).filter(Boolean) : [];
 }
 
 function nullableString(value: unknown): string | null {

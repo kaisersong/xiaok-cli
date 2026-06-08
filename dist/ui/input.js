@@ -40,6 +40,9 @@ function createDisabledBusyCapture() {
         isActive() {
             return false;
         },
+        isPaused() {
+            return false;
+        },
     };
 }
 function buildQueuedOverlayLines(text) {
@@ -390,6 +393,11 @@ export class InputReader {
                     return toEngineSnapshot();
                 },
                 onCancel: () => {
+                    if (options.onAbortRequest) {
+                        options.onAbortRequest();
+                        render();
+                        return toEngineSnapshot();
+                    }
                     handleEscape();
                     return toEngineSnapshot();
                 },
@@ -477,6 +485,9 @@ export class InputReader {
             },
             isActive() {
                 return active && !paused;
+            },
+            isPaused() {
+                return active && paused;
             },
         };
         if (this.busyCapture) {

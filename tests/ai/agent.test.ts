@@ -117,7 +117,43 @@ describe('Agent', () => {
     const controller = new AbortController();
     controller.abort();
 
-    await expect(agent.runTurn('hi', () => {}, controller.signal)).rejects.toThrow(/aborted/i);
+    await expect(agent.runTurn('hi', () => {}, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+  });
+
+  it('emits turn_aborted with partial text and turn_stop when a run is interrupted', async () => {
+    const { Agent } = await import('../../src/ai/agent.js');
+    const controller = new AbortController();
+    const adapter: ModelAdapter = {
+      stream: async function* () {
+        yield { type: 'text', delta: 'partial answer' };
+        controller.abort();
+        yield { type: 'done' };
+      },
+    };
+    const registry = createRegistryMock();
+    const events: unknown[] = [];
+    const agent = new Agent(adapter, registry as never, 'system', {
+      hooks: {
+        emit: (event) => {
+          events.push(event);
+        },
+      },
+    });
+
+    await expect(agent.runTurn('hi', () => {}, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn_aborted',
+      partialText: expect.stringContaining('partial answer'),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn_stop',
+      reason: 'user_aborted',
+    }));
   });
 
   it('forwards usage chunks while streaming', async () => {
@@ -172,7 +208,7 @@ describe('Agent', () => {
 
   it('emits turn lifecycle events through runtime hooks', async () => {
     const { Agent } = await import('../../src/ai/agent.js');
-    const events: string[] = [];
+    const events: unknown[] = [];
     const adapter: ModelAdapter = {
       stream: () => mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]),
     };
@@ -180,14 +216,22 @@ describe('Agent', () => {
     const agent = new Agent(adapter, registry as never, 'system', {
       hooks: {
         emit: (event) => {
-          events.push(event.type);
+          events.push(event);
         },
       },
     });
 
     await agent.runTurn('hi', () => {});
 
-    expect(events).toEqual(['turn_started', 'turn_completed']);
+    expect(events.map((event) => (event as { type: string }).type)).toEqual([
+      'turn_started',
+      'turn_completed',
+      'turn_stop',
+    ]);
+    expect(events.at(-1)).toMatchObject({
+      type: 'turn_stop',
+      reason: 'completed',
+    });
   });
 
   it('emits tool lifecycle events through runtime hooks', async () => {
@@ -224,7 +268,7 @@ describe('Agent', () => {
 
   it('emits failure lifecycle events through runtime hooks', async () => {
     const { Agent } = await import('../../src/ai/agent.js');
-    const events: string[] = [];
+    const events: unknown[] = [];
     const adapter: ModelAdapter = {
       stream: () => {
         throw new Error('tool_failed');
@@ -234,14 +278,22 @@ describe('Agent', () => {
     const agent = new Agent(adapter, registry as never, 'system', {
       hooks: {
         emit: (event) => {
-          events.push(event.type);
+          events.push(event);
         },
       },
     });
 
     await expect(agent.runTurn('hi', () => {})).rejects.toThrow('tool_failed');
 
-    expect(events).toEqual(['turn_started', 'turn_failed']);
+    expect(events.map((event) => (event as { type: string }).type)).toEqual([
+      'turn_started',
+      'turn_failed',
+      'turn_stop',
+    ]);
+    expect(events.at(-1)).toMatchObject({
+      type: 'turn_stop',
+      reason: 'error',
+    });
   });
 
   it('uses an updated system prompt for subsequent turns', async () => {

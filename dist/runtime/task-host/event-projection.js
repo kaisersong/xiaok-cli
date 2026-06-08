@@ -1,3 +1,4 @@
+import { A2UI_MIME_TYPE, isA2UIMimeType, summarizeRenderUiInput } from '../../a2ui/index.js';
 export function projectRuntimeEventToDesktopEvent(input) {
     const { event, taskId } = input;
     if (event.type === 'turn_started') {
@@ -95,6 +96,8 @@ export function projectRuntimeEventToDesktopEvent(input) {
     }
     if (event.type === 'tool_started' || event.type === 'pre_tool_use') {
         const toolName = event.toolName;
+        if (event.type === 'pre_tool_use' && toolName === 'render_ui')
+            return null;
         const toolInput = event.toolInput;
         return {
             type: 'progress',
@@ -105,6 +108,11 @@ export function projectRuntimeEventToDesktopEvent(input) {
     }
     if (event.type === 'tool_finished' || event.type === 'post_tool_use') {
         const toolName = event.toolName;
+        if (event.type === 'post_tool_use' && toolName === 'render_ui') {
+            const artifact = renderUiArtifactFromToolResponse(event.toolUseId, event.turnId, event.toolResponse);
+            if (artifact)
+                return artifact;
+        }
         const ok = event.type === 'tool_finished' ? event.ok : true;
         return {
             type: 'progress',
@@ -126,6 +134,17 @@ export function projectRuntimeEventToDesktopEvent(input) {
             type: 'progress_plan_reported',
             steps: event.steps,
         };
+    }
+    if (event.type === 'turn_aborted') {
+        return {
+            type: 'task_cancelled',
+            taskId,
+            reason: 'user_aborted',
+            ...(event.partialText ? { partialText: event.partialText } : {}),
+        };
+    }
+    if (event.type === 'turn_stop') {
+        return null;
     }
     if (event.type === 'turn_failed') {
         return {
@@ -158,13 +177,17 @@ export function projectRuntimeEventsToDesktopEvents(input) {
  */
 function projectRuntimeEventToCanvasEvents(event) {
     if (event.type === 'pre_tool_use') {
+        const display = event.toolName === 'render_ui' ? summarizeRenderUiInput(event.toolInput) : null;
         return [{
                 type: 'canvas_tool_call',
                 toolName: event.toolName,
-                input: event.toolInput,
+                input: display
+                    ? { title: display.title, sectionCount: display.sectionCount, payloadBytes: display.payloadBytes, redacted: true }
+                    : event.toolInput,
                 toolUseId: event.toolUseId,
                 eventId: `${event.turnId}:canvas:${event.toolUseId}:call`,
                 ts: Date.now(),
+                ...(display ? { displayInputSummary: display.summary } : {}),
             }];
     }
     if (event.type === 'post_tool_use') {
@@ -214,11 +237,54 @@ function normalizeArtifactKind(kind) {
         return 'xlsx';
     if (normalized === 'html')
         return 'html';
+    if (normalized === 'a2ui')
+        return 'a2ui';
     if (normalized === 'image' || normalized === 'png' || normalized === 'jpg' || normalized === 'jpeg')
         return 'image';
     if (normalized === 'text' || normalized === 'markdown' || normalized === 'md')
         return 'text';
     return 'other';
+}
+function renderUiArtifactFromToolResponse(toolUseId, turnId, response) {
+    const parsed = typeof response === 'string' ? parseJsonObject(response) : response;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+        return null;
+    const record = parsed;
+    if (record.ok !== true)
+        return null;
+    const mimeType = typeof record.mimeType === 'string' ? record.mimeType : '';
+    if (!isA2UIMimeType(mimeType))
+        return null;
+    const filePath = typeof record.artifactPath === 'string' && record.artifactPath.trim()
+        ? record.artifactPath.trim()
+        : typeof record.output_path === 'string' ? record.output_path.trim() : '';
+    if (!filePath)
+        return null;
+    const label = typeof record.title === 'string' && record.title.trim()
+        ? record.title.trim()
+        : filePath.split(/[\\/]/).pop() || 'A2UI artifact';
+    return {
+        type: 'artifact_recorded',
+        artifactId: `artifact_${toolUseId}`,
+        kind: 'a2ui',
+        label,
+        filePath,
+        previewAvailable: true,
+        turnId,
+        creator: 'agent',
+        mimeType: mimeType || A2UI_MIME_TYPE,
+    };
+}
+function parseJsonObject(value) {
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? parsed
+            : null;
+    }
+    catch {
+        return null;
+    }
 }
 export function planStepFromStage(id, label) {
     return { id, label, status: 'running' };

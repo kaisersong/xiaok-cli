@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type CSSProperties } from 'react';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Search, X, Bolt, Pencil, RefreshCw, Clock, FolderKanban, ExternalLink } from 'lucide-react';
+import { Plus, Search, X, Bolt, Pencil, RefreshCw, Clock, FolderKanban, ExternalLink, AlertTriangle } from 'lucide-react';
 import { api, type ThreadRecord } from '../api';
 import { useKSwarm } from '../contexts/KSwarmContext';
 import { useLocale } from '../contexts/LocaleContext';
@@ -157,8 +157,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   useEffect(() => {
     const unsub = api.onUpdateStatus((status) =>
       setUpdateStatus(prev => ({
-        ...status,
-        currentVersion: status.currentVersion ?? prev?.currentVersion,
+        ...(status as UpdateStatus),
+        currentVersion: (status as UpdateStatus).currentVersion ?? prev?.currentVersion,
       })),
     );
     api.getUpdateStatus().then(setUpdateStatus).catch(() => {});
@@ -223,13 +223,23 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const hideThreadList = activeNav === 'scheduled' || activeNav === 'projects';
   const updateVersion = updateStatus?.version || '新版本';
   const currentVersion = updateStatus?.currentVersion;
-  const showUpdateReminder = Boolean(updateStatus && (
+  const updateError = updateStatus?.error;
+  const hasActiveUpdate = Boolean(updateStatus && (
     updateStatus.available ||
     updateStatus.downloading ||
     updateStatus.downloaded ||
     updateStatus.installing
   ));
-  const updateReminderLabel = `升级到 ${updateVersion}`;
+  const hasUpdateFailure = Boolean(updateError && !hasActiveUpdate);
+  const showUpdateReminder = Boolean(updateStatus && (hasActiveUpdate || updateError));
+  const updateReminderLabel = hasUpdateFailure ? '更新检查失败' : `升级到 ${updateVersion}`;
+  const updatePopoverTitle = hasUpdateFailure ? '更新检查失败' : '发现新版本';
+  const updateReminderTitle = hasUpdateFailure
+    ? `更新检查失败: ${updateError}，点击查看下载方式`
+    : `发现新版本: v${updateVersion}，点击查看更新方式`;
+  const updateReminderButtonClassName = hasUpdateFailure
+    ? 'inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 text-xs font-medium text-amber-800 transition-[background-color,color,transform] duration-[60ms] hover:bg-amber-100 active:scale-[0.96]'
+    : 'inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--c-accent)] px-2 text-xs font-medium text-white transition-[background-color,color,transform] duration-[60ms] hover:opacity-90 active:scale-[0.96]';
   const scheduledListClassName = activeNav === 'new'
     ? 'flex flex-col gap-0 max-h-[90px] overflow-y-auto'
     : 'flex flex-col gap-0';
@@ -406,10 +416,10 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                   onClick={handleUpdateReminderClick}
                   aria-label={updateReminderLabel}
                   aria-expanded={showUpdatePopover}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--c-accent)] px-2 text-xs font-medium text-white transition-[background-color,color,transform] duration-[60ms] hover:opacity-90 active:scale-[0.96]"
-                  title={`发现新版本: v${updateVersion}，点击查看更新方式`}
+                  className={updateReminderButtonClassName}
+                  title={updateReminderTitle}
                 >
-                  <RefreshCw size={14} />
+                  {hasUpdateFailure ? <AlertTriangle size={14} /> : <RefreshCw size={14} />}
                   <span>{updateReminderLabel}</span>
                 </button>
 
@@ -425,7 +435,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                     />
                     <div className="absolute bottom-10 right-0 z-50 w-72 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 shadow-lg">
                       <div className="mb-2 flex items-center justify-between">
-                        <span className="text-sm font-semibold text-[var(--c-text-heading)]">发现新版本</span>
+                        <span className="text-sm font-semibold text-[var(--c-text-heading)]">{updatePopoverTitle}</span>
                         <button
                           type="button"
                           onClick={() => setShowUpdatePopover(false)}
@@ -440,14 +450,24 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                         {currentVersion && (
                           <>
                             <span className="rounded bg-[var(--c-bg-deep)] px-1.5 py-0.5 font-mono">v{currentVersion}</span>
-                            <span>→</span>
+                            {!hasUpdateFailure && <span>→</span>}
                           </>
                         )}
-                        <span className="rounded bg-[var(--c-accent)]/10 px-1.5 py-0.5 font-mono font-semibold text-[var(--c-accent)]">v{updateVersion}</span>
+                        {!hasUpdateFailure && (
+                          <span className="rounded bg-[var(--c-accent)]/10 px-1.5 py-0.5 font-mono font-semibold text-[var(--c-accent)]">v{updateVersion}</span>
+                        )}
                       </div>
 
+                      {hasUpdateFailure && updateError && (
+                        <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs leading-relaxed text-amber-800">
+                          {updateError}
+                        </p>
+                      )}
+
                       <p className="mb-3 text-xs leading-relaxed text-[var(--c-text-secondary)]">
-                        请前往 GitHub 下载最新版本，下载后将应用拖入「应用程序」覆盖安装即可。
+                        {hasUpdateFailure
+                          ? '自动更新检查失败。请前往 GitHub 下载最新版，下载后将应用拖入「应用程序」覆盖安装即可。'
+                          : '请前往 GitHub 下载最新版本，下载后将应用拖入「应用程序」覆盖安装即可。'}
                       </p>
 
                       <button

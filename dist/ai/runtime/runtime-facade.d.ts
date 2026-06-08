@@ -26,4 +26,5 @@ export declare class RuntimeFacade {
     /** Reset deduplication state (e.g. after skill install/uninstall). */
     resetSkillTracking(): void;
     private buildInput;
+    private rollbackSkillNames;
 }

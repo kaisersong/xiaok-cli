@@ -62,6 +62,8 @@ describe('preload API contract', () => {
       'onReminder',
       'getSkillDebugConfig',
       'saveSkillDebugConfig',
+      'getKswarmConfig',
+      'saveKswarmConfig',
       'getSkillStats',
       'getServiceStatus',
       'restartRelatedService',

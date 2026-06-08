@@ -41,7 +41,6 @@ export declare class AgentRuntime {
     setPromptSnapshot(promptSnapshot: PromptSnapshot | undefined): void;
     run(input: string | MessageBlock[], onEvent: (event: AgentRuntimeEvent) => void, externalSignal?: AbortSignal): Promise<void>;
     private throwIfAborted;
-    private isAbortError;
     private refreshModelPolicy;
     private buildInvocationOptions;
     private buildToolExecutionContext;

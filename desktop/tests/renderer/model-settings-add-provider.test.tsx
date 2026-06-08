@@ -68,6 +68,8 @@ beforeEach(() => {
   vi.mocked(api.deleteModel).mockResolvedValue(undefined)
   // Other panes call these on mount
   vi.mocked(api.getSkillDebugConfig).mockResolvedValue({ enabled: false })
+  vi.mocked(api.getKswarmConfig).mockResolvedValue({ maxConcurrentTasks: 3 })
+  vi.mocked(api.saveKswarmConfig).mockResolvedValue({ maxConcurrentTasks: 3 })
   vi.mocked(api.listSkills).mockResolvedValue([])
   vi.mocked(api.listChannels).mockResolvedValue([])
   vi.mocked(api.listMCPInstalls).mockResolvedValue([])

@@ -996,8 +996,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     toolRegistry: registry,
   });
 
-  async function runKSwarmHandoffTask({ handoff, targetParticipantId }: { handoff: KSwarmTaskHandoff; targetParticipantId?: string }) {
-    const artifactsDir = handoff.project.artifactsDir || (handoff.project.workFolder ? `${handoff.project.workFolder}/artifacts` : '');
+  async function runKSwarmHandoffTask({ handoff, targetParticipantId, signal }: { handoff: KSwarmTaskHandoff; targetParticipantId?: string; signal?: AbortSignal }) {
+    const throwIfAborted = () => {
+      if (signal?.aborted) {
+        throw new DOMException('agent aborted', 'AbortError');
+      }
+    };
+
+    throwIfAborted();
+    const artifactsDir = handoff.project.artifactsDir || (handoff.project.workFolder ? join(handoff.project.workFolder, 'artifacts') : '');
     const workspaceRoot = handoff.project.workFolder || (artifactsDir ? dirname(artifactsDir) : process.cwd());
     const taskHost = createKSwarmTaskHost(workspaceRoot);
     const runStartedAt = Date.now();
@@ -1020,42 +1027,53 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，把产物文件写入上面的产物目录，使用文件路径作为交接依据，并返回 result manifest。',
     ].filter(Boolean).join('\n');
     const created = await taskHost.createTask({ prompt, materials: [] });
-    const deadline = Date.now() + 10 * 60 * 1000;
-    while (Date.now() < deadline) {
-      const recovered = await taskHost.recoverTask(created.taskId);
-      if (recovered.snapshot.status === 'completed') {
-        const resultEvent = [...recovered.snapshot.events].reverse().find(event => event.type === 'result');
-        const artifactEvents = recovered.snapshot.events.filter(event => event.type === 'artifact_recorded');
-        const eventArtifacts = artifactEvents.map(event => ({
-          path: (event as any).filePath || (event as any).path,
-          kind: inferKSwarmArtifactKind((event as any).kind, (event as any).label),
-          label: (event as any).label,
-        })).filter(artifact => artifact.path);
-        const discoveredArtifacts = discoverKSwarmArtifactsFromDirectory({
-          artifactsDir,
-          runStartedAt,
-          knownPaths: eventArtifacts.map(artifact => artifact.path),
-        });
-        const artifacts = [...eventArtifacts, ...discoveredArtifacts];
-        if (artifacts.length === 0 && requiresArtifactEvidence) {
-          throw new Error('artifact_evidence_missing');
+    const cancelCreatedTask = () => {
+      void taskHost.cancelTask(created.taskId).catch(() => {});
+    };
+    signal?.addEventListener('abort', cancelCreatedTask, { once: true });
+    try {
+      throwIfAborted();
+      const deadline = Date.now() + 10 * 60 * 1000;
+      while (Date.now() < deadline) {
+        throwIfAborted();
+        const recovered = await taskHost.recoverTask(created.taskId);
+        throwIfAborted();
+        if (recovered.snapshot.status === 'completed') {
+          const resultEvent = [...recovered.snapshot.events].reverse().find(event => event.type === 'result');
+          const artifactEvents = recovered.snapshot.events.filter(event => event.type === 'artifact_recorded');
+          const eventArtifacts = artifactEvents.map(event => ({
+            path: (event as any).filePath || (event as any).path,
+            kind: inferKSwarmArtifactKind((event as any).kind, (event as any).label),
+            label: (event as any).label,
+          })).filter(artifact => artifact.path);
+          const discoveredArtifacts = discoverKSwarmArtifactsFromDirectory({
+            artifactsDir,
+            runStartedAt,
+            knownPaths: eventArtifacts.map(artifact => artifact.path),
+          });
+          const artifacts = [...eventArtifacts, ...discoveredArtifacts];
+          if (artifacts.length === 0 && requiresArtifactEvidence) {
+            throw new Error('artifact_evidence_missing');
+          }
+          return {
+            summary: resultEvent?.type === 'result' ? resultEvent.result.summary : 'completed',
+            artifacts,
+            provenance: {
+              runtimeSource: 'desktop-agent-runtime',
+              producingAgent: targetParticipantId || 'xiaok-worker',
+              desktopTaskId: created.taskId,
+            },
+          };
         }
-        return {
-          summary: resultEvent?.type === 'result' ? resultEvent.result.summary : 'completed',
-          artifacts,
-          provenance: {
-            runtimeSource: 'desktop-agent-runtime',
-            producingAgent: targetParticipantId || 'xiaok-worker',
-            desktopTaskId: created.taskId,
-          },
-        };
+        if (recovered.snapshot.status === 'failed' || recovered.snapshot.status === 'cancelled') {
+          throw new Error(`desktop_task_${recovered.snapshot.status}`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
-      if (recovered.snapshot.status === 'failed' || recovered.snapshot.status === 'cancelled') {
-        throw new Error(`desktop_task_${recovered.snapshot.status}`);
-      }
-      await new Promise(resolve => setTimeout(resolve, 500));
+      throw new Error('desktop_task_timeout');
+    } finally {
+      signal?.removeEventListener('abort', cancelCreatedTask);
     }
-    throw new Error('desktop_task_timeout');
   }
 
   async function runKSwarmReadinessProbe({ targetParticipantId }: { targetParticipantId?: string } = {}) {
@@ -1145,7 +1163,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
 
     const output = normalizeKSwarmWorkflowNodeOutput(isRecord(parsed.output) ? parsed.output : parsed, summary);
-    const mergedArtifacts = mergeKSwarmArtifacts(output.artifacts, artifacts);
+    const mergedArtifacts = mergeKSwarmArtifacts(output.artifacts, artifacts, { artifactsDir });
     if (deliverableNode) {
       if (mergedArtifacts.length === 0) {
         throw new Error('workflow_artifact_evidence_missing');
@@ -1155,7 +1173,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           ...output,
           artifacts: mergedArtifacts,
           ...(artifactsDir ? { workFolder: workspaceRoot, workspacePath: workspaceRoot } : {}),
-          evidenceRefs: mergeKSwarmEvidenceRefs(output.evidenceRefs, mergedArtifacts),
+          evidenceRefs: mergeKSwarmEvidenceRefs(output.evidenceRefs, mergedArtifacts, { artifactsDir }),
         },
         reviewDecision: null,
       };
@@ -1166,7 +1184,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         ...output,
         ...(mergedArtifacts.length > 0 ? {
           artifacts: mergedArtifacts,
-          evidenceRefs: mergeKSwarmEvidenceRefs(output.evidenceRefs, mergedArtifacts),
+          evidenceRefs: mergeKSwarmEvidenceRefs(output.evidenceRefs, mergedArtifacts, { artifactsDir }),
           ...(artifactsDir ? { workFolder: workspaceRoot, workspacePath: workspaceRoot } : {}),
         } : {}),
       },
@@ -2451,16 +2469,18 @@ function isKSwarmProjectDeliverableWorkflowNode(handoff: KSwarmWorkflowNodeHando
 function mergeKSwarmArtifacts(
   rawArtifacts: unknown,
   discoveredArtifacts: Array<{ path: string; kind: string; label?: string }> = [],
+  options: { artifactsDir?: string } = {},
 ) {
   const merged = new Map<string, { path: string; kind: string; label?: string }>();
   const add = (artifact: unknown) => {
     if (!isRecord(artifact)) return;
-    const path = readString(artifact.path) || readString(artifact.relativePath) || readString(artifact.filename);
-    if (!path) return;
-    merged.set(path, {
-      path,
-      kind: inferKSwarmArtifactKind(readString(artifact.kind) || readString(artifact.type), readString(artifact.label) || readString(artifact.filename) || path),
-      label: readString(artifact.label) || readString(artifact.filename) || basename(path),
+    const rawPath = readString(artifact.path) || readString(artifact.relativePath) || readString(artifact.filename);
+    const normalizedPath = normalizeKSwarmArtifactManifestPath(rawPath, options);
+    if (!normalizedPath) return;
+    merged.set(normalizedPath, {
+      path: normalizedPath,
+      kind: inferKSwarmArtifactKind(readString(artifact.kind) || readString(artifact.type), readString(artifact.label) || readString(artifact.filename) || normalizedPath),
+      label: readString(artifact.label) || readString(artifact.filename) || basename(normalizedPath),
     });
   };
   if (Array.isArray(rawArtifacts)) {
@@ -2470,12 +2490,37 @@ function mergeKSwarmArtifacts(
   return [...merged.values()];
 }
 
-function mergeKSwarmEvidenceRefs(rawEvidenceRefs: unknown, artifacts: Array<{ path: string }>) {
-  const refs = new Set(readStringArray(rawEvidenceRefs));
+function normalizeKSwarmArtifactManifestPath(rawPath: string, options: { artifactsDir?: string } = {}): string {
+  const value = readString(rawPath);
+  if (!value) return '';
+  const withoutQuery = value.split(/[?#]/, 1)[0] || value;
+  const artifactsDir = readString(options.artifactsDir);
+  if (artifactsDir && isAbsolute(withoutQuery)) {
+    const relativeToArtifacts = relative(resolve(artifactsDir), resolve(withoutQuery)).replace(/\\/g, '/');
+    if (relativeToArtifacts && !relativeToArtifacts.startsWith('..') && !isAbsolute(relativeToArtifacts)) {
+      return `artifacts/${relativeToArtifacts}`;
+    }
+  }
+  const normalized = withoutQuery.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normalized) return '';
+  if (normalized.startsWith('artifacts/')) return `artifacts/${basename(normalized)}`;
+  if (normalized.includes('/artifacts/')) return `artifacts/${basename(normalized)}`;
+  return `artifacts/${basename(normalized)}`;
+}
+
+function mergeKSwarmEvidenceRefs(rawEvidenceRefs: unknown, artifacts: Array<{ path: string }>, options: { artifactsDir?: string } = {}) {
+  const refs = new Set(readStringArray(rawEvidenceRefs).map(ref => normalizeKSwarmEvidenceRef(ref, options)));
   for (const artifact of artifacts) {
     if (artifact.path) refs.add(`artifact:${artifact.path}`);
   }
   return [...refs];
+}
+
+function normalizeKSwarmEvidenceRef(ref: string, options: { artifactsDir?: string } = {}): string {
+  const value = readString(ref);
+  if (!value.startsWith('artifact:')) return value;
+  const artifactPath = normalizeKSwarmArtifactManifestPath(value.slice('artifact:'.length), options);
+  return artifactPath ? `artifact:${artifactPath}` : value;
 }
 
 function buildKSwarmAssignPoPrompt(payload: Record<string, unknown>, fallbackWorkerId: string): string {
@@ -4185,7 +4230,7 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           });
         }
       }
-      if (ok && !isToolName(toolCall.name, 'write')) {
+      if (ok && !isToolName(toolCall.name, 'write') && !isToolName(toolCall.name, 'render_ui')) {
         const filePath = resolveToolOutputArtifactPath(runtimeToolInput, result, { toolName: toolCall.name, toolStartedAt });
         if (filePath) {
           ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });

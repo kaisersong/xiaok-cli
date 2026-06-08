@@ -51,9 +51,11 @@ function renderSidebar(status: {
   available: boolean;
   downloading: boolean;
   downloaded: boolean;
+  installing?: boolean;
   progress: number;
   version?: string;
   currentVersion?: string;
+  error?: string;
 }, initialEntry = '/', threads: unknown[] = []) {
   mockApi.listThreads.mockResolvedValue(threads);
   mockApi.getThread.mockResolvedValue(null);
@@ -159,6 +161,36 @@ describe('Sidebar update reminder', () => {
 
     expect(mockApi.checkForUpdates).not.toHaveBeenCalled();
     expect(mockApi.quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it('shows a manual download recovery when update checks fail', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+
+    renderSidebar({
+      checking: false,
+      available: false,
+      downloading: false,
+      downloaded: false,
+      progress: 0,
+      currentVersion: '1.4.0',
+      error: 'Cannot find latest-mac.yml',
+    });
+
+    const button = await screen.findByRole('button', { name: '更新检查失败' });
+    fireEvent.click(button);
+
+    expect(await screen.findAllByText('更新检查失败')).toHaveLength(2);
+    expect(screen.getByText('v1.4.0')).toBeInTheDocument();
+    expect(screen.getByText(/Cannot find latest-mac.yml/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /前往 GitHub 下载/ }));
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://github.com/kaisersong/xiaok-cli/releases/latest',
+      '_blank',
+      'noopener,noreferrer',
+    );
+
+    openSpy.mockRestore();
   });
 
   it('lists scheduled tasks without a three-row nested scroll container on scheduled page', async () => {

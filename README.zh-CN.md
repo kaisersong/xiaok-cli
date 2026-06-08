@@ -26,6 +26,9 @@
 
 **v1.4.2 新特性：**
 
+- **交互式 A2UI 看板产物**：Xiaok Desktop 现在可以在对话中直接回放安全的只读 A2UI 产物，支持标题、说明文本、指标、列表、表格、分割线和结论等 section。渲染器只接受小型安全组件目录，不接收 raw HTML，因此看板式交付物可检查、可沙箱化。
+- **自然语言看板请求链路**：A2UI 路径新增基于 `/Applications/xiaok.app` 已安装应用的 E2E 覆盖，测试输入是自然语言的复杂 AI 产品运营看板需求，而不是内部工具名。测试会验证真实打包应用中产物可以内联渲染，并且步骤摘要保持简洁。
+- **工具名隐藏与 section 兼容**：用户可见的 tool step 不再显示内部看板工具名，而是显示 `dashboard [A2UI]`。A2UI validator 同时支持常见的 `type` / `text` section alias，并返回更具体的校验错误，修复了原先有效看板请求也可能触发"未知 section"的问题。
 - **ESC 流式中断**：终端 assistant 正在 streaming 输出时按 `ESC`，会中断当前 model/tool turn，而不是等待本轮自然结束。Xiaok 会保留输入 draft 和 queued text，把本轮记录为用户中断，并阻止已中断的 Stop-hook 路径继续 auto-continue。
 - **Abort-safe Runtime Pipeline**：Anthropic、OpenAI Chat Completions、OpenAI Responses 流现在共享 `AbortSignal`，真实 `AbortError` 不再进入 retry，stream timeout controller 在所有退出路径都会清理。runtime、compact、subagent、tool execution 层都会透传同一个 signal，把用户中断和传输失败分开处理。
 - **Desktop Handoff 取消**：KSwarm runtime bridge handoff 现在接收取消 signal；用户中断的 desktop task 会报告 `task_cancelled`，不再被误归类为 failed。
@@ -642,7 +645,7 @@ npm run dev -- --help  # 从源码运行
 
 ## 版本日志
 
-**v1.4.2** — ESC 中断版本：终端 streaming turn 可用 `ESC` 中断，同时保留 draft 和 queued input，并把本轮记录为 user-aborted 而不是 failed。Model adapters、runtime core、compact runner、subagents 和 tool execution 现在共享 abort signal，并且不会 retry 真实 `AbortError`。Desktop KSwarm handoff 会透传取消 signal，并把用户中断暴露为 `task_cancelled`。
+**v1.4.2** — A2UI 看板与中断版本：Desktop 可以在对话中直接回放安全的只读 A2UI 看板产物，支持指标、列表、表格和结论 section，并用 `/Applications/xiaok.app` 已安装应用 E2E 覆盖自然语言看板需求，不在用户路径中暴露内部工具名。用户可见 tool step 现在显示为 `dashboard [A2UI]`，原始看板 payload 保持 redacted，section validator 支持常见 alias，并避免有效看板请求触发"未知 section"。终端 streaming turn 也可用 `ESC` 中断，同时保留 draft 和 queued input，并把本轮记录为 user-aborted 而不是 failed。Model adapters、runtime core、compact runner、subagents 和 tool execution 共享 abort signal，不会 retry 真实 `AbortError`；Desktop KSwarm handoff 会透传取消 signal，并把用户中断暴露为 `task_cancelled`。
 
 **v1.4.1** — 桌面端产物预览修复：项目交付物（Markdown、HTML、纯文本）现在可在桌面预览面板中正确加载。引入专用原始文本 IPC 代理（`kswarmProxyGetText`）用于产物内容请求，替换此前导致所有非 JSON 产物类型出现"fetch failed"错误的 JSON-only 代理。同时修复了 macOS 应用打包改用 `ditto` 安装 bundle 的问题。
 

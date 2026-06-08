@@ -18,6 +18,9 @@ export interface PromptCacheSegments {
 export interface ModelInvocationOptions {
     promptCache?: PromptCacheSegments;
 }
+export interface StreamOptions extends ModelInvocationOptions {
+    signal?: AbortSignal;
+}
 export interface ModelCapabilities {
     contextLimit: number;
     compactThreshold: number;
@@ -26,7 +29,7 @@ export interface ModelCapabilities {
 }
 export interface CapabilityAwareAdapter extends ModelAdapter {
     getCapabilities?(): Partial<ModelCapabilities>;
-    stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: ModelInvocationOptions): AsyncIterable<import('../../types.js').StreamChunk>;
+    stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions): AsyncIterable<import('../../types.js').StreamChunk>;
 }
 export declare const DEFAULT_MODEL_CAPABILITIES: ModelCapabilities;
 export declare function modelCapabilitiesFromFlags(capabilities?: string[]): Partial<ModelCapabilities>;

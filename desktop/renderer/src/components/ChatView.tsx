@@ -1,16 +1,20 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import remarkGfm from 'remark-gfm';
 import { ChatInput } from './ChatInput';
 import { ToolStepsMessage } from './ToolStepsMessage';
 import { ProjectInlineCard } from './projects/ProjectInlineCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { A2uiArtifactBlock } from './a2ui/A2uiArtifactBlock';
+import { api } from '../api';
 import type { ThreadRecord } from '../api/types';
-import type { NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
+import type { ArtifactSummary, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
+import { A2UI_MIME_TYPE, isA2UIMimeType } from '../../../../src/a2ui/index.js';
 
 export interface ToolStep {
   toolUseId: string;
   toolName: string;
   input: unknown;
+  displayInputSummary?: string;
   status: 'running' | 'done' | 'error';
   response?: string;
   startedAt?: number;
@@ -333,6 +337,16 @@ function ResultCard({
       {result?.artifacts && result.artifacts.length > 0 && (
         <div className="mt-3 flex flex-col gap-2">
           {result.artifacts.map(a => {
+            if (isA2uiArtifact(a)) {
+              return (
+                <A2uiResultArtifactPreview
+                  key={a.artifactId}
+                  artifact={a}
+                  onArtifactClick={onArtifactClick}
+                  onArtifactOpenExternal={onArtifactOpenExternal}
+                />
+              );
+            }
             const ext = a.title?.split('.').pop()?.toUpperCase() || 'FILE';
             return (
               <button
@@ -387,6 +401,102 @@ function ResultCard({
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+function isA2uiArtifact(artifact: ArtifactSummary): boolean {
+  return artifact.kind === 'a2ui'
+    || isA2UIMimeType(artifact.mimeType)
+    || artifact.title.endsWith('.a2ui.json')
+    || Boolean(artifact.filePath?.endsWith('.a2ui.json'));
+}
+
+function A2uiResultArtifactPreview({
+  artifact,
+  onArtifactClick,
+  onArtifactOpenExternal,
+}: {
+  artifact: ArtifactSummary;
+  onArtifactClick?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
+  onArtifactOpenExternal?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
+}) {
+  const [content, setContent] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setContent(null);
+    setFailed(false);
+    if (!artifact.filePath) {
+      setFailed(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+    api.readFileContent(artifact.filePath)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.error) {
+          setFailed(true);
+          return;
+        }
+        setContent(result.content);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [artifact.artifactId, artifact.filePath]);
+
+  const info = {
+    artifactId: artifact.artifactId,
+    title: artifact.title,
+    kind: artifact.kind,
+    filePath: artifact.filePath,
+  };
+  return (
+    <div
+      className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3"
+      data-testid={`a2ui-artifact-${artifact.title}`}
+    >
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-[var(--c-text-heading)]">{artifact.title}</div>
+          <div className="text-xs text-[var(--c-text-tertiary)]">Interactive UI · A2UI</div>
+        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
+            else onArtifactClick?.(info);
+          }}
+          className="shrink-0 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-hover)]"
+          data-testid={`generated-file-${artifact.title}`}
+        >
+          打开
+        </button>
+      </div>
+      {failed ? (
+        <div role="alert" className="text-sm text-[var(--c-text-secondary)]">无法加载该交互式 UI</div>
+      ) : content === null ? (
+        <div className="text-sm text-[var(--c-text-tertiary)]">正在解析交互式 UI...</div>
+      ) : (
+        <A2uiArtifactBlock
+          content={content}
+          artifactRef={{
+            artifactId: artifact.artifactId,
+            type: 'artifact',
+            title: artifact.title,
+            filename: artifact.title,
+            key: artifact.filePath,
+            mime_type: artifact.mimeType || A2UI_MIME_TYPE,
+            size: artifact.sizeBytes,
+          }}
+        />
       )}
     </div>
   );

@@ -32,6 +32,7 @@ type ClipboardImageSaver = () => string | null;
 export interface BusyCaptureOptions {
     placeholder?: string;
     onDeactivate?: (reason: 'disabled' | 'stopped' | 'ui_error') => void;
+    onAbortRequest?: () => void;
 }
 export interface BusyCaptureHandle {
     pause(): void;
@@ -40,6 +41,7 @@ export interface BusyCaptureHandle {
     consumeQueued(): string | null;
     getSnapshot(): QueuedInputSnapshot;
     isActive(): boolean;
+    isPaused(): boolean;
 }
 /** 向左找词边界（Ctrl+W / Alt+Left 用） */
 export declare function wordBoundaryLeft(text: string, cursor: number): number;

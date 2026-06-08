@@ -191,7 +191,17 @@ export class InProcessTaskRuntimeHost {
         this.closeSubscribers(taskId);
     }
     async getActiveTasks() {
-        return this.options.snapshotStore.getActiveTasks();
+        const refs = await this.options.snapshotStore.getActiveTasks();
+        const activeRefs = [];
+        for (const ref of refs) {
+            const snapshot = await this.options.snapshotStore.recoverTask(ref.taskId);
+            if (!snapshot || TERMINAL_STATUSES.has(snapshot.status)) {
+                await this.options.snapshotStore.clearActiveTask(ref.taskId);
+                continue;
+            }
+            activeRefs.push(ref);
+        }
+        return activeRefs;
     }
     async getActiveTask() {
         const tasks = await this.getActiveTasks();
@@ -431,6 +441,7 @@ export class InProcessTaskRuntimeHost {
             }
             const next = {
                 ...snapshot,
+                status: event.type === 'task_cancelled' ? 'cancelled' : snapshot.status,
                 events: [...snapshot.events, event],
                 result: nextResult,
                 salvage: event.type === 'salvage' ? event.salvage : snapshot.salvage,

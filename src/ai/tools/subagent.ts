@@ -50,6 +50,7 @@ interface SubAgentInvocation {
   description?: string;   // Short task description (required for inline mode)
   prompt: string;         // Detailed task instructions
   model?: string;         // Optional model override
+  modelCapability?: string;
   tools?: string[];       // Allowed tools for inline agent
   isolation?: 'none' | 'worktree';
   background?: boolean;
@@ -71,6 +72,7 @@ export function createSubAgentTool(options: SubAgentToolOptions): Tool {
           description: { type: 'string', description: 'Short task description (for inline agents)' },
           prompt: { type: 'string', description: 'Detailed task instructions' },
           model: { type: 'string', description: 'Optional model override' },
+          modelCapability: { type: 'string', description: 'Optional model capability route' },
           tools: { type: 'array', items: { type: 'string' }, description: 'Allowed tools for inline agent' },
           isolation: { type: 'string', enum: ['none', 'worktree'] },
           background: { type: 'boolean' },
@@ -158,6 +160,7 @@ function buildAgentDef(agents: CustomAgentDef[], invocation: SubAgentInvocation)
     systemPrompt: '',
     allowedTools: inlineTools.length > 0 ? inlineTools : undefined,
     model: invocation.model,
+    modelCapability: invocation.modelCapability,
     maxIterations: 50,
     isolation: invocation.isolation === 'worktree' ? 'worktree' : undefined,
     cleanup: 'keep',

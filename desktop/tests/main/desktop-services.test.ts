@@ -332,6 +332,32 @@ describe('desktop services', () => {
     });
   });
 
+  it('cancels a kswarm handoff task when its runtime signal is aborted', async () => {
+    const controller = new AbortController();
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner: async () => {
+        controller.abort();
+      },
+    });
+
+    await expect(services.runKSwarmHandoffTask({
+      handoff: {
+        kind: 'kswarm_task_handoff_v1',
+        runId: 'run-1',
+        project: { id: 'proj-1', name: 'Project', goal: 'Write report', requirements: '', artifactsDir: join(rootDir, 'artifacts') },
+        task: {
+          id: 'proj-1__item-1',
+          title: 'Write',
+        },
+      },
+      targetParticipantId: 'xiaok-po',
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('runs a task workflow node without reporting system plan artifacts as deliverables', async () => {
     const workFolder = join(rootDir, 'workflow-project');
     const artifactsDir = join(workFolder, 'artifacts');
@@ -389,9 +415,9 @@ describe('desktop services', () => {
 
     expect(receivedPrompt).toContain('真实 workflow run ID 是 wf-proj-workflow-po-generated-task-workflow-1');
     expect(result.output?.artifacts).toEqual([
-      { path: finalArtifactPath, kind: 'markdown', label: 'workflow-final-report.md' },
+      { path: 'artifacts/workflow-final-report.md', kind: 'markdown', label: 'workflow-final-report.md' },
     ]);
-    expect(result.output?.evidenceRefs).toEqual([`artifact:${finalArtifactPath}`]);
+    expect(result.output?.evidenceRefs).toEqual(['artifact:artifacts/workflow-final-report.md']);
   });
 
   it('runs a project workflow node as a whole-project deliverable producer', async () => {
@@ -451,9 +477,9 @@ describe('desktop services', () => {
     expect(receivedPrompt).toContain('真实 workflow run ID 是 wf-proj-project-workflow-po-generated-project-workflow-1');
     expect(receivedPrompt).not.toContain('sourceTask 是唯一工作范围');
     expect(result.output?.artifacts).toEqual([
-      { path: finalArtifactPath, kind: 'markdown', label: 'project-final-report.md' },
+      { path: 'artifacts/project-final-report.md', kind: 'markdown', label: 'project-final-report.md' },
     ]);
-    expect(result.output?.evidenceRefs).toEqual([`artifact:${finalArtifactPath}`]);
+    expect(result.output?.evidenceRefs).toEqual(['artifact:artifacts/project-final-report.md']);
   });
 
   it('runs a script-generated workflow agent node from the node prompt instead of project diagnosis', async () => {
@@ -511,8 +537,9 @@ describe('desktop services', () => {
     expect(receivedPrompt).not.toContain('请检查项目状态、任务状态、阻塞点和下一步建议');
     expect(result.output?.summary).toBe('脚本节点报告已生成。');
     expect(result.output?.artifacts).toEqual([
-      { path: finalArtifactPath, kind: 'markdown', label: 'script-agent-report.md' },
+      { path: 'artifacts/script-agent-report.md', kind: 'markdown', label: 'script-agent-report.md' },
     ]);
+    expect(result.output?.evidenceRefs).toEqual(['artifact:artifacts/script-agent-report.md']);
   });
 
   it('falls back to raw markdown summary when a script node returns non-JSON output', async () => {
@@ -617,7 +644,7 @@ describe('desktop services', () => {
     expect(runner).toHaveBeenCalledTimes(2);
     expect(result.output?.summary).toBe('重试后脚本节点报告已生成。');
     expect(result.output?.artifacts).toEqual([
-      { path: finalArtifactPath, kind: 'markdown', label: 'retry-script-agent-report.md' },
+      { path: 'artifacts/retry-script-agent-report.md', kind: 'markdown', label: 'retry-script-agent-report.md' },
     ]);
   });
 

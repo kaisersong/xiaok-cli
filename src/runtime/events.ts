@@ -2,7 +2,8 @@ export type RuntimeEvent =
   | { type: 'turn_started'; sessionId: string; turnId: string }
   | { type: 'turn_completed'; sessionId: string; turnId: string }
   | { type: 'turn_failed'; sessionId: string; turnId: string; error: Error }
-  | { type: 'turn_aborted'; sessionId: string; turnId: string }
+  | { type: 'turn_aborted'; sessionId: string; turnId: string; partialText?: string }
+  | { type: 'turn_stop'; sessionId: string; turnId: string; reason: 'completed' | 'user_aborted' | 'error' }
   | { type: 'intent_created'; sessionId: string; turnId: string; intentId: string; templateId: string; deliverable: string; riskTier: 'low' | 'medium' | 'high' }
   | { type: 'stage_activated'; sessionId: string; turnId: string; intentId: string; stageId: string; label: string; order: number; totalStages: number }
   | { type: 'step_activated'; sessionId: string; turnId: string; intentId: string; stepId: string }

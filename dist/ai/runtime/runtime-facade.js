@@ -1,3 +1,4 @@
+import { isAbortError } from './abort-utils.js';
 import { normalizeRuntimeError } from './runtime-errors.js';
 export class RuntimeFacade {
     options;
@@ -7,6 +8,8 @@ export class RuntimeFacade {
         this.options = options;
     }
     async runTurn(request, onChunk, signal) {
+        const newSkillsThisTurn = [];
+        let input;
         try {
             const promptSnapshot = await this.options.promptBuilder.build({
                 ...(await this.options.getPromptInput(request.cwd)),
@@ -16,11 +19,25 @@ export class RuntimeFacade {
             this.options.agent.getSessionState().attachPromptSnapshot(promptSnapshot.id, promptSnapshot.memoryRefs, promptSnapshot.cwd);
             this.options.agent.setPromptSnapshot(promptSnapshot);
             this.options.agent.setSystemPrompt(promptSnapshot.rendered);
-            const input = this.buildInput(request.input);
+            input = this.buildInput(request.input, newSkillsThisTurn);
+        }
+        catch (buildError) {
+            if (isAbortError(buildError)) {
+                this.rollbackSkillNames(newSkillsThisTurn);
+                throw buildError;
+            }
+            const normalized = normalizeRuntimeError(buildError);
+            throw new Error(`${normalized.code}: ${normalized.message}`);
+        }
+        try {
             await this.options.agent.runTurn(input, onChunk, signal);
         }
-        catch (error) {
-            const normalized = normalizeRuntimeError(error);
+        catch (runError) {
+            if (isAbortError(runError)) {
+                this.rollbackSkillNames(newSkillsThisTurn);
+                throw runError;
+            }
+            const normalized = normalizeRuntimeError(runError);
             throw new Error(`${normalized.code}: ${normalized.message}`);
         }
     }
@@ -28,7 +45,7 @@ export class RuntimeFacade {
     resetSkillTracking() {
         this.sentSkillNames.clear();
     }
-    buildInput(input) {
+    buildInput(input, newSkillsThisTurn) {
         const reminderBlock = this.options.getIntentReminderBlock?.();
         // Compute new skills not yet seen by the agent (CC dedup: only send new ones).
         const allEntries = this.options.getSkillEntries?.() ?? [];
@@ -39,8 +56,10 @@ export class RuntimeFacade {
         }
         if (newEntries.length > 0) {
             // Mark as sent before running (mirrors CC's O.add loop).
-            for (const e of newEntries)
+            for (const e of newEntries) {
                 this.sentSkillNames.add(e.name);
+                newSkillsThisTurn.push(e.name);
+            }
             const listing = newEntries.map((e) => e.listing).join('\n');
             prefixBlocks.push({
                 type: 'text',
@@ -54,5 +73,10 @@ export class RuntimeFacade {
             ? [{ type: 'text', text: input }]
             : input;
         return [...prefixBlocks, ...inputBlocks];
+    }
+    rollbackSkillNames(names) {
+        for (const name of names) {
+            this.sentSkillNames.delete(name);
+        }
     }
 }

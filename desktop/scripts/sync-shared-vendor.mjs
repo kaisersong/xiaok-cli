@@ -117,8 +117,8 @@ async function main() {
   const manifest = getSourceManifest();
   writeBuildMeta(manifest, dirty);
 
-  if (dirty) {
-    console.log('[hint] vendor written to disk but NOT staged due to dirty source');
+  if (allowDirty) {
+    console.log('[hint] vendor written to disk but NOT staged due to --allow-dirty');
     process.exit(2);
   }
 

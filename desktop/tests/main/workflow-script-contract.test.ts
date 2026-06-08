@@ -148,6 +148,50 @@ await parallel([
       error: 'workflow_script_parallel_thunk_required',
     });
   });
+
+  it('records resumable workflow metadata and rejects resumable scripts with loops', () => {
+    const resumable = `export const meta = { name: 'resume_demo', description: 'resume demo', resumable: true }
+phase('扫描')
+await agent('扫描项目', { label: '扫描' })`;
+
+    const result = validateWorkflowScript(resumable);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.normalized.analysis).toMatchObject({
+      resumable: true,
+      hasLoop: false,
+    });
+
+    expect(validateWorkflowScript(`export const meta = { name: 'loop_resume', description: 'loop resume', resumable: true }
+for (const item of [1, 2]) {
+  await agent('扫描 ' + item)
+}`)).toMatchObject({
+      ok: false,
+      error: 'workflow_script_resumable_loop_forbidden',
+      message: 'resumable script must not contain loops',
+    });
+  });
+
+  it('preserves validation policy for budget and evidence gate in previews', () => {
+    const preview = createWorkflowScriptPreview(validScript, {
+      projectId: 'proj-script',
+      policy: {
+        budget: { maxTokens: 1000, defaultEstimateMultiplier: 2 },
+        evidenceGate: {
+          maxRetry: 2,
+          retryPolicy: 'refetch',
+          checks: [{ kind: 'output_schema', requiredKeys: ['summary'] }],
+        },
+      },
+    });
+
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) throw new Error(preview.error);
+    expect(preview.policy).toMatchObject({
+      budget: { maxTokens: 1000, defaultEstimateMultiplier: 2 },
+      evidenceGate: { maxRetry: 2, retryPolicy: 'refetch' },
+    });
+  });
 });
 
 // SHARED VECTORS — keep identical with

@@ -4,11 +4,12 @@ import type { ToolRegistry } from '../tools/index.js';
 import type { PromptSnapshot } from '../prompts/types.js';
 import { AgentRunController } from './controller.js';
 import type { AgentRuntimeEvent } from './events.js';
+import { isAbortError } from './abort-utils.js';
 import {
   buildPromptCacheSegments,
   resolveModelCapabilities,
   type CapabilityAwareAdapter,
-  type ModelInvocationOptions,
+  type StreamOptions,
 } from './model-capabilities.js';
 import { AgentSessionState } from './session.js';
 import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
@@ -89,27 +90,47 @@ export class AgentRuntime {
     onEvent: (event: AgentRuntimeEvent) => void,
     externalSignal?: AbortSignal,
   ): Promise<void> {
-    this.throwIfAborted(externalSignal);
+    if (externalSignal?.aborted) {
+      throw new DOMException('agent aborted', 'AbortError');
+    }
 
     const run = this.controller.startRun();
     onEvent({ type: 'run_started', runId: run.runId });
-    if (typeof input === 'string') {
-      this.session.appendUserText(input);
-      if (this.memoryStore?.writeRawMessage) {
-        const sessionKey = this.promptSnapshot?.id?.slice(0, 16) ?? 'cli';
-        this.memoryStore.writeRawMessage(sessionKey, 'user', input).catch(() => {});
-      }
-    } else {
-      this.session.appendUserBlocks(input);
-    }
+    const mergedSignal = externalSignal
+      ? AbortSignal.any([run.signal, externalSignal])
+      : run.signal;
+
+    let currentAssistantBlocks: MessageBlock[] = [];
+    let assistantBlocksCommitted = false;
+    let toolResults: MessageBlock[] = [];
+    let executedToolIds = new Set<string>();
 
     try {
+      if (mergedSignal.aborted) {
+        onEvent({ type: 'run_aborted', runId: run.runId });
+        throw new DOMException('agent aborted', 'AbortError');
+      }
+
+      if (typeof input === 'string') {
+        this.session.appendUserText(input);
+        if (this.memoryStore?.writeRawMessage) {
+          const sessionKey = this.promptSnapshot?.id?.slice(0, 16) ?? 'cli';
+          this.memoryStore.writeRawMessage(sessionKey, 'user', input).catch(() => {});
+        }
+      } else {
+        this.session.appendUserBlocks(input);
+      }
+
       let iteration = 0;
       let emptyRetries = 0;
       const verificationToolCalls: TraceToolCall[] = [];
       let codeMutatingToolSeen = false;
       while (true) {
-        this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
+        this.throwIfAborted(mergedSignal, onEvent, run.runId);
+        currentAssistantBlocks = [];
+        assistantBlocksCommitted = false;
+        toolResults = [];
+        executedToolIds = new Set<string>();
 
         // Check if we've reached the max iterations limit (Claude Code style)
         if (this.maxIterations !== undefined && iteration >= this.maxIterations) {
@@ -127,8 +148,11 @@ export class AgentRuntime {
           const messages = this.session.getMessages();
           let summaryText: string;
           try {
-            summaryText = await this.compactRunner.run(messages);
+            summaryText = await this.compactRunner.run(messages, mergedSignal);
           } catch (compactError) {
+            if (isAbortError(compactError)) {
+              throw compactError;
+            }
             onEvent({
               type: 'compact_failed',
               runId: run.runId,
@@ -146,39 +170,38 @@ export class AgentRuntime {
           await this.injectMemoryAfterCompact();
         }
 
-        const assistantBlocks: MessageBlock[] = [];
         for await (const chunk of (this.adapter as CapabilityAwareAdapter).stream(
           this.session.getMessages(),
           this.registry.getToolDefinitions(),
           this.systemPrompt,
-          this.buildInvocationOptions(),
+          this.buildInvocationOptions(mergedSignal),
         )) {
-          this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
+          this.throwIfAborted(mergedSignal, onEvent, run.runId);
 
           if (chunk.type === 'text') {
             // Merge consecutive text blocks to avoid fragmented storage
-            const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+            const lastBlock = currentAssistantBlocks[currentAssistantBlocks.length - 1];
             if (lastBlock?.type === 'text') {
               lastBlock.text += chunk.delta;
             } else {
-              assistantBlocks.push({ type: 'text', text: chunk.delta });
+              currentAssistantBlocks.push({ type: 'text', text: chunk.delta });
             }
             onEvent({ type: 'assistant_text', runId: run.runId, delta: chunk.delta });
             continue;
           }
 
           if (chunk.type === 'thinking') {
-            const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+            const lastBlock = currentAssistantBlocks[currentAssistantBlocks.length - 1];
             if (lastBlock?.type === 'thinking') {
               lastBlock.thinking += chunk.delta;
             } else {
-              assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
+              currentAssistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
             }
             continue;
           }
 
           if (chunk.type === 'tool_use') {
-            assistantBlocks.push(chunk);
+            currentAssistantBlocks.push(chunk);
             continue;
           }
 
@@ -193,7 +216,7 @@ export class AgentRuntime {
           }
         }
 
-        const hasVisibleOutput = assistantBlocks.some(
+        const hasVisibleOutput = currentAssistantBlocks.some(
           (block) => block.type === 'text' || block.type === 'tool_use',
         );
         if (!hasVisibleOutput) {
@@ -208,19 +231,20 @@ export class AgentRuntime {
         // 成功收到响应，重置空响应计数器
         emptyRetries = 0;
 
-        this.session.appendAssistantBlocks(assistantBlocks);
+        this.session.appendAssistantBlocks(currentAssistantBlocks);
+        assistantBlocksCommitted = true;
 
-        const toolCalls = assistantBlocks.filter((block): block is ToolCall => block.type === 'tool_use');
+        const toolCalls = currentAssistantBlocks.filter((block): block is ToolCall => block.type === 'tool_use');
         if (toolCalls.length === 0) {
           this.emitVerificationGuardIfNeeded(input, verificationToolCalls, codeMutatingToolSeen, run.runId, onEvent);
           onEvent({ type: 'run_completed', runId: run.runId });
           return;
         }
 
-        const toolResults: MessageBlock[] = [];
-        const toolExecutionContext = this.buildToolExecutionContext();
+        toolResults = [];
+        const toolExecutionContext = this.buildToolExecutionContext(mergedSignal);
         for (const toolCall of toolCalls) {
-          this.throwIfAborted(run.signal, externalSignal, onEvent, run.runId);
+          this.throwIfAborted(mergedSignal, onEvent, run.runId);
           onEvent({
             type: 'tool_started',
             runId: run.runId,
@@ -230,6 +254,7 @@ export class AgentRuntime {
 
           const result = await this.registry.executeTool(toolCall.name, toolCall.input, toolExecutionContext);
           const ok = !result.startsWith('Error');
+          executedToolIds.add(toolCall.id);
           verificationToolCalls.push({
             id: toolCall.id,
             name: toolCall.name,
@@ -261,10 +286,58 @@ export class AgentRuntime {
         }
 
         this.session.appendUserToolResults(toolResults);
+        toolResults = [];
+        executedToolIds = new Set<string>();
         iteration += 1;
       }
     } catch (error) {
-      if (this.isAbortError(error)) {
+      if (isAbortError(error)) {
+        const partialSentinel = '\n\n[partial - interrupted by user]';
+        const blocks = currentAssistantBlocks.map((block) => ({ ...block })) as MessageBlock[];
+
+        if (!assistantBlocksCommitted && blocks.length > 0) {
+          const lastTextIndex = blocks.map((block) => block.type).lastIndexOf('text');
+          if (lastTextIndex >= 0) {
+            const textBlock = blocks[lastTextIndex];
+            if (textBlock.type === 'text') {
+              blocks[lastTextIndex] = {
+                ...textBlock,
+                text: `${textBlock.text}${partialSentinel}`,
+              };
+            }
+          }
+          this.session.appendAssistantBlocks(blocks);
+          assistantBlocksCommitted = true;
+        }
+
+        const seenToolResultIds = new Set(
+          toolResults
+            .filter((block): block is Extract<MessageBlock, { type: 'tool_result' }> => block.type === 'tool_result')
+            .map((block) => block.tool_use_id),
+        );
+        const syntheticToolResults: MessageBlock[] = blocks
+          .filter((block): block is ToolCall => block.type === 'tool_use')
+          .filter((toolCall) => !executedToolIds.has(toolCall.id) && !seenToolResultIds.has(toolCall.id))
+          .map((toolCall) => {
+            seenToolResultIds.add(toolCall.id);
+            return {
+              type: 'tool_result' as const,
+              tool_use_id: toolCall.id,
+              content: '[user-cancelled]',
+              is_error: true,
+            };
+          });
+        const mergedToolResults = [...toolResults, ...syntheticToolResults];
+        if (mergedToolResults.length > 0) {
+          this.session.appendUserToolResults(mergedToolResults);
+          toolResults = [];
+        }
+
+        const partialText = blocks
+          .filter((block): block is Extract<MessageBlock, { type: 'text' }> => block.type === 'text')
+          .map((block) => block.text)
+          .join('');
+        onEvent({ type: 'run_aborted', runId: run.runId, partialText });
         throw error;
       }
 
@@ -277,24 +350,17 @@ export class AgentRuntime {
   }
 
   private throwIfAborted(
-    activeSignal?: AbortSignal,
-    externalSignal?: AbortSignal,
-    onEvent?: (event: AgentRuntimeEvent) => void,
-    runId?: string,
+    signal: AbortSignal,
+    onEvent: (event: AgentRuntimeEvent) => void,
+    runId: string,
   ): void {
-    if (!activeSignal?.aborted && !externalSignal?.aborted) {
+    if (!signal.aborted) {
       return;
     }
 
-    if (onEvent && runId) {
-      onEvent({ type: 'run_aborted', runId });
-    }
+    onEvent({ type: 'run_aborted', runId });
 
-    throw new Error('agent aborted');
-  }
-
-  private isAbortError(error: unknown): boolean {
-    return error instanceof Error && /aborted/i.test(error.message);
+    throw new DOMException('agent aborted', 'AbortError');
   }
 
   private refreshModelPolicy(): void {
@@ -304,9 +370,9 @@ export class AgentRuntime {
     this.supportsPromptCaching = capabilities.supportsPromptCaching;
   }
 
-  private buildInvocationOptions(): ModelInvocationOptions | undefined {
+  private buildInvocationOptions(signal?: AbortSignal): StreamOptions | undefined {
     if (!this.supportsPromptCaching) {
-      return undefined;
+      return signal ? { signal } : undefined;
     }
 
     const toolDefinitions = this.registry.getToolDefinitions()
@@ -330,10 +396,11 @@ export class AgentRuntime {
         toolDefinitions,
         this.session.getMessages(),
       ),
+      signal,
     };
   }
 
-  private buildToolExecutionContext(): ToolExecutionContext {
+  private buildToolExecutionContext(signal?: AbortSignal): ToolExecutionContext {
     const toolDefinitions = this.registry.getToolDefinitions()
       .slice()
       .sort((left, right) => left.name.localeCompare(right.name));
@@ -350,6 +417,7 @@ export class AgentRuntime {
       promptCache: this.supportsPromptCaching
         ? buildPromptCacheSegments(this.systemPrompt, toolDefinitions, this.session.getMessages())
         : undefined,
+      signal,
     };
   }
 

@@ -1,6 +1,8 @@
 import { useRef, useEffect } from 'react'
 import { ArtifactIframe, type ArtifactIframeHandle, type ArtifactAction } from './ArtifactIframe'
 import type { ArtifactRef } from '../storage'
+import { isA2UIMimeType } from '../../../../src/a2ui/index.js'
+import { A2uiArtifactBlock } from './a2ui/A2uiArtifactBlock'
 
 export type StreamingArtifactEntry = {
   toolCallIndex: number
@@ -10,6 +12,7 @@ export type StreamingArtifactEntry = {
   title?: string
   filename?: string
   display?: 'inline' | 'panel'
+  kind?: string
   content?: string
   loadingMessages?: string[]
   complete: boolean
@@ -45,9 +48,36 @@ export function ArtifactStreamBlock({ entry, accessToken, compact = false, onAct
 
   const isInline = entry.display !== 'panel'
   const title = entry.title || entry.filename || 'Artifact'
+  const artifactMime = entry.artifactRef?.mime_type
+  const isA2ui = entry.kind === 'a2ui' || isA2UIMimeType(artifactMime)
 
   if (entry.artifactRef && !isInline) {
     return null
+  }
+
+  if (isA2ui && (entry.artifactRef || entry.content)) {
+    const artifactRef = entry.artifactRef ?? {
+      artifactId: entry.toolCallId || `a2ui-${entry.toolCallIndex}`,
+      type: 'artifact',
+      title,
+      filename: entry.filename,
+      mime_type: 'application/vnd.xiaok.a2ui+json',
+    }
+    return (
+      <div style={{ margin: compact ? '0 0 2px' : '8px 0', maxWidth: '720px' }}>
+        <div style={{
+          fontSize: compact ? '13px' : '12px',
+          fontWeight: compact ? 400 : 500,
+          color: 'var(--c-text-secondary)',
+          marginBottom: compact ? '2px' : '6px',
+          lineHeight: compact ? '20px' : undefined,
+          padding: compact ? '4px 0 2px' : undefined,
+        }}>
+          {title}
+        </div>
+        <A2uiArtifactBlock artifactRef={artifactRef} accessToken={accessToken} content={entry.content} />
+      </div>
+    )
   }
 
   // already have static artifact? render static iframe

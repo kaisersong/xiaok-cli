@@ -18,6 +18,8 @@ vi.mock('../../renderer/src/api/bridge', () => ({
   api: {
     getSkillDebugConfig: vi.fn().mockResolvedValue({ enabled: false }),
     saveSkillDebugConfig: vi.fn().mockResolvedValue({ enabled: false }),
+    getKswarmConfig: vi.fn().mockResolvedValue({ maxConcurrentTasks: 3 }),
+    saveKswarmConfig: vi.fn().mockResolvedValue({ maxConcurrentTasks: 3 }),
     listMCPInstalls: vi.fn().mockResolvedValue([]),
     listPluginMcpServers: mocks.listPluginMcpServers,
     listPluginDependencyStatuses: mocks.listPluginDependencyStatuses,

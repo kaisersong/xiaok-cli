@@ -25,22 +25,26 @@ export function artifactDisplayName(artifact: ArtifactLike): string {
 }
 
 export function resolveArtifactUrl(artifact: ArtifactLike): string | null {
+  const projectId = artifact.projectId?.trim();
   const rawUrl = artifact.url?.trim();
   if (rawUrl) {
-    if (isAbsoluteUrl(rawUrl)) return rawUrl;
+    if (isAbsoluteUrl(rawUrl) && !rawUrl.startsWith('file:')) return rawUrl;
+    const projectArtifactName = projectId ? projectArtifactFilenameFromReference(rawUrl) : '';
+    if (projectId && projectArtifactName) return projectArtifactUrl(projectId, projectArtifactName);
     if (rawUrl.startsWith('/')) return `${getKswarmBaseUrl()}${rawUrl}`;
     return rawUrl;
   }
 
-  const projectId = artifact.projectId?.trim();
   const rawPath = artifact.path?.trim();
   const rawRelativePath = artifact.relativePath?.trim();
   const projectArtifactName = artifact.filename?.trim()
+    || projectArtifactFilenameFromReference(rawRelativePath)
+    || projectArtifactFilenameFromReference(rawPath)
     || basename(rawRelativePath)
     || basename(rawPath)
     || artifact.name?.trim();
   if (projectId && projectArtifactName) {
-    return `${getKswarmBaseUrl()}/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(projectArtifactName)}`;
+    return projectArtifactUrl(projectId, projectArtifactName);
   }
 
   if (rawPath) {
@@ -50,7 +54,7 @@ export function resolveArtifactUrl(artifact: ArtifactLike): string | null {
 
   const filename = (artifact.filename || artifact.name)?.trim();
   if (projectId && filename) {
-    return `${getKswarmBaseUrl()}/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(filename)}`;
+    return projectArtifactUrl(projectId, filename);
   }
 
   return null;
@@ -84,6 +88,23 @@ export function formatArtifactGeneratedTime(artifact: ArtifactLike): string | nu
 
 function isAbsoluteUrl(url: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(url);
+}
+
+function projectArtifactUrl(projectId: string, filename: string): string {
+  return `${getKswarmBaseUrl()}/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(filename)}`;
+}
+
+function projectArtifactFilenameFromReference(value?: string): string {
+  if (!value) return '';
+  const normalized = value.replace(/\\/g, '/');
+  if (
+    normalized.startsWith('artifacts/') ||
+    normalized.includes('/artifacts/') ||
+    normalized.includes('/.kswarm/projects/')
+  ) {
+    return basename(normalized);
+  }
+  return '';
 }
 
 function basename(value?: string): string {

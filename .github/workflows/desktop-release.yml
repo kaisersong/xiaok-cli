@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create GitHub Release
-        run: gh release create "${{ github.ref_name }}" --title "Desktop ${{ github.ref_name }}" --generate-notes --latest || true
+      - name: Create Draft GitHub Release
+        run: gh release create "${{ github.ref_name }}" --title "Desktop ${{ github.ref_name }}" --generate-notes --draft || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -160,7 +160,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify desktop updater release assets
+      - name: Verify draft desktop updater release assets
+        run: node scripts/verify-desktop-release.mjs "${{ github.ref_name }}" --prepublish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GitHub Release as latest
+        run: gh release edit "${{ github.ref_name }}" --draft=false --latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify published desktop updater release assets
         run: node scripts/verify-desktop-release.mjs "${{ github.ref_name }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

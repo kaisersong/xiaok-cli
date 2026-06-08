@@ -195,3 +195,118 @@ describe('subagent-executor registry isolation', () => {
     expect(capturedAllowedTools).toBeUndefined();
   });
 });
+
+describe('subagent-executor model capability routing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('resolves agent modelCapability through ToolExecutionContext settingsStore before dispatch', async () => {
+    const clonedAdapter = { ...mockAdapter, getModelName: () => 'gpt-5.4-deep' } as unknown as ModelAdapter;
+    const baseAdapter = {
+      ...mockAdapter,
+      cloneWithModel: vi.fn().mockReturnValue(clonedAdapter),
+    } as unknown as ModelAdapter & { cloneWithModel: (model: string) => ModelAdapter };
+
+    await executeNamedSubAgent({
+      agentDef: {
+        name: 'reviewer',
+        systemPrompt: '',
+        source: 'builtin',
+        modelCapability: 'deep-reviewer',
+      } as any,
+      prompt: 'test',
+      sessionId: 'session-1',
+      adapter: () => baseAdapter,
+      createRegistry: () => mockRegistry,
+      buildSystemPrompt: async () => 'prompt',
+      forkContext: {
+        settingsStore: {
+          getSettings: () => ({
+            modelCapabilities: {
+              'deep-reviewer': 'gpt-5.4-deep',
+            },
+          }),
+        },
+      } as any,
+    });
+
+    expect(baseAdapter.cloneWithModel).toHaveBeenCalledWith('gpt-5.4-deep');
+    expect(Agent).toHaveBeenCalled();
+    expect((Agent as any).mock.calls[0][0]).toBe(clonedAdapter);
+  });
+
+  it('rejects unknown modelCapability before constructing the subagent', async () => {
+    const baseAdapter = {
+      ...mockAdapter,
+      cloneWithModel: vi.fn(),
+    } as unknown as ModelAdapter & { cloneWithModel: (model: string) => ModelAdapter };
+
+    await expect(executeNamedSubAgent({
+      agentDef: {
+        name: 'reviewer',
+        systemPrompt: '',
+        source: 'builtin',
+        modelCapability: 'missing-capability',
+      } as any,
+      prompt: 'test',
+      sessionId: 'session-1',
+      adapter: () => baseAdapter,
+      createRegistry: () => mockRegistry,
+      buildSystemPrompt: async () => 'prompt',
+      forkContext: {
+        settingsStore: {
+          getSettings: () => ({ modelCapabilities: {} }),
+        },
+      } as any,
+    })).rejects.toThrow('unknown capability: missing-capability');
+
+    expect(baseAdapter.cloneWithModel).not.toHaveBeenCalled();
+    expect(Agent).not.toHaveBeenCalled();
+  });
+});
+
+describe('subagent-executor abort signal propagation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('passes a child signal that aborts when the parent context signal aborts', async () => {
+    const parentController = new AbortController();
+
+    await executeNamedSubAgent({
+      agentDef: { name: 'test', systemPrompt: '', source: 'builtin' },
+      prompt: 'test',
+      sessionId: 'session-1',
+      adapter: () => mockAdapter,
+      createRegistry: () => mockRegistry,
+      buildSystemPrompt: async () => 'prompt',
+      forkContext: {
+        signal: parentController.signal,
+      } as any,
+    });
+
+    const agentInstance = (Agent as any).mock.results[0].value;
+    const childSignal = agentInstance.runTurn.mock.calls[0][2] as AbortSignal | undefined;
+    expect(childSignal).toBeDefined();
+    expect(childSignal?.aborted).toBe(false);
+    parentController.abort();
+    expect(childSignal?.aborted).toBe(true);
+  });
+
+  it('passes an independent child signal even without a parent context signal', async () => {
+    await executeNamedSubAgent({
+      agentDef: { name: 'test', systemPrompt: '', source: 'builtin' },
+      prompt: 'test',
+      sessionId: 'session-1',
+      adapter: () => mockAdapter,
+      createRegistry: () => mockRegistry,
+      buildSystemPrompt: async () => 'prompt',
+    });
+
+    const agentInstance = (Agent as any).mock.results[0].value;
+    const childSignal = agentInstance.runTurn.mock.calls[0][2] as AbortSignal | undefined;
+    expect(childSignal).toBeDefined();
+    expect(childSignal?.aborted).toBe(false);
+  });
+});

@@ -39,6 +39,7 @@ import {
 import { XIAOK_DESKTOP_HOST_PARTICIPANT_ID, XIAOK_WORKER_SEED_ID } from '../shared/kswarm-seed-contract.js';
 import { KSwarmStreamBridge } from './kswarm-stream-bridge.js';
 import { registerKSwarmProxy } from './kswarm-ipc-proxy.js';
+import { configureDefaultRemoteDebugging } from './remote-debugging.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -66,6 +67,8 @@ process.on('unhandledRejection', (reason) => {
 process.on('exit', (code) => {
   debugMain('process exit', { code });
 });
+const remoteDebuggingConfig = configureDefaultRemoteDebugging(app.commandLine, process.argv);
+debugMain('remote-debugging:configured', remoteDebuggingConfig);
 const singleInstanceDisabled = process.env.XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE === '1';
 const singleInstanceLock = singleInstanceDisabled ? true : app.requestSingleInstanceLock();
 if (singleInstanceDisabled) {
@@ -126,7 +129,7 @@ async function createWindow(): Promise<BrowserWindow> {
 
   const kswarmStreamBridge = new KSwarmStreamBridge('ws://127.0.0.1:4400/ws');
   kswarmStreamBridge.start();
-  registerKSwarmProxy(ipcMain, kswarmStreamBridge);
+  registerKSwarmProxy(ipcMain, kswarmStreamBridge, kswarmService);
 
   const { getConfigDir } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
@@ -221,9 +224,10 @@ async function createWindow(): Promise<BrowserWindow> {
       const rawConcurrency = cfg.kswarm?.maxConcurrentTasks ?? 3;
       const maxConcurrentTasks = Math.max(1, Math.min(10, rawConcurrency));
       const brokerUrl = 'http://127.0.0.1:4318';
+      const kswarmHandoffRoots = [join(app.getPath('home'), '.kswarm', 'handoff-packages')];
       const runtimeBridge = {
         ...createKSwarmRuntimeBridge({
-        allowedRoots: [join(app.getPath('home'), '.kswarm', 'handoff-packages')],
+        allowedRoots: kswarmHandoffRoots,
         runDesktopTask: (input) => services.runKSwarmHandoffTask(input),
         runWorkflowNode: (input) => services.runKSwarmWorkflowNode(input),
         submitResult: (input) => submitKSwarmRuntimeResultToBroker({
@@ -257,6 +261,7 @@ async function createWindow(): Promise<BrowserWindow> {
           alias: 'Xiaok Desktop',
           roles: ['desktop_runtime_host'],
           capabilities: ['research', 'analysis', 'coding', 'testing', 'design', 'planning', 'reporting', 'slides'],
+          allowedRoots: kswarmHandoffRoots,
           bridge: runtimeBridge,
           maxConcurrentTasks,
         }),

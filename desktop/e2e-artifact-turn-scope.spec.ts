@@ -163,7 +163,7 @@ test.describe('artifact turn scoping', () => {
     await expect(currentPrompt).toBeVisible({ timeout: 10_000 });
     await expect(oldFile).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-testid="generated-file-current-turn.pdf"]')).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText('Thinking...')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Write .*current-turn\.pdf/ })).toBeVisible({ timeout: 10_000 });
 
     const positions = await page.evaluate(() => {
       const oldFile = document.querySelector('[data-testid="generated-file-old-turn.md"]');

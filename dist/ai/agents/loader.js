@@ -23,6 +23,7 @@ export function parseAgentFile(name, raw) {
         systemPrompt: (match?.[2] ?? raw).trim(),
         allowedTools: metadata.get('tools')?.split(',').map((value) => value.trim()).filter(Boolean),
         model: metadata.get('model') || undefined,
+        modelCapability: metadata.get('modelCapability') || metadata.get('model_capability') || undefined,
         maxIterations: metadata.has('max_iterations')
             ? Number(metadata.get('max_iterations'))
             : undefined,

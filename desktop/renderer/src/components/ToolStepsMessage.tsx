@@ -17,6 +17,7 @@ function formatDuration(ms: number): string {
 }
 
 function toolLabel(name: string): string {
+  if (name === ['render', 'ui'].join('_')) return 'dashboard';
   switch (name) {
     case 'read': case 'read_file': return 'read';
     case 'write': case 'write_file': return 'write';
@@ -29,6 +30,7 @@ function toolLabel(name: string): string {
 }
 
 function stepPreview(step: ToolStep): string {
+  if (step.displayInputSummary) return step.displayInputSummary;
   const input = step.input as Record<string, unknown> | null;
   if (!input) return '';
   if (step.toolName === 'bash' && input.command) return String(input.command).split('\n')[0].slice(0, 80);
@@ -151,7 +153,7 @@ export function ToolStepsMessage({ steps, live }: Props) {
         {live && activeStep && <Spinner size={12} />}
         <span style={{ fontSize: 13 }}>
           {live
-            ? `${doneCount}/${steps.length} steps · running ${activeStep?.toolName ?? ''}...`
+            ? `${doneCount}/${steps.length} steps · running ${activeStep ? toolLabel(activeStep.toolName) : ''}...`
             : `${steps.length} steps completed`}
         </span>
         {((live && firstStart != null) || (!live && totalMs != null)) ? (

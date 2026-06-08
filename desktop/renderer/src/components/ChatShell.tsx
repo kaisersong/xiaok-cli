@@ -15,7 +15,7 @@ import {
 } from './chatToolResultMessages';
 
 const log = createLogger('ChatShell');
-const ARTIFACT_KINDS = new Set<ArtifactKind>(['pptx', 'pdf', 'docx', 'xlsx', 'html', 'image', 'text', 'other']);
+const ARTIFACT_KINDS = new Set<ArtifactKind>(['pptx', 'pdf', 'docx', 'xlsx', 'html', 'image', 'text', 'a2ui', 'other']);
 const THREAD_DRAFT_STORAGE_PREFIX = 'xiaok.threadDraft.';
 const LEGACY_SWARM_CONTEXT_KEY = 'xiaok.swarmContinueContext';
 
@@ -45,8 +45,22 @@ function artifactSummaryFromEvent(event: Extract<DesktopTaskEvent, { type: 'arti
     createdAt: event.turnId,
     previewAvailable: event.previewAvailable,
     filePath: event.filePath,
+    mimeType: event.mimeType,
     creator: event.creator ?? 'agent',
   };
+}
+
+function mergeTaskResultArtifacts(result: TaskResult, artifacts: ArtifactSummary[]): TaskResult {
+  if (artifacts.length === 0) return result;
+  const merged = [...(result.artifacts || [])];
+  const seen = new Set(merged.map((artifact) => artifact.artifactId || artifact.filePath || artifact.title));
+  for (const artifact of artifacts) {
+    const key = artifact.artifactId || artifact.filePath || artifact.title;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(artifact);
+  }
+  return { ...result, artifacts: merged };
 }
 
 function readStoredThreadDraft(threadId: string | undefined): StoredThreadDraft | null {
@@ -273,6 +287,21 @@ export function ChatShell() {
         setStatus('running');
         break;
       }
+      case 'task_cancelled': {
+        const partialText = (event as { type: 'task_cancelled'; partialText?: string }).partialText || streamRef.current;
+        streamRef.current = '';
+        setStreamingText('');
+        if (partialText.trim()) {
+          setMessages(prev => [...prev, {
+            id: `msg-${Date.now()}-assistant-cancelled`,
+            role: 'assistant',
+            content: partialText,
+          }]);
+        }
+        setCurrentQuestion(null);
+        setStatus('idle');
+        break;
+      }
       case 'artifact_recorded': {
         const artifact = artifactSummaryFromEvent(event);
         setResult(prev => {
@@ -289,12 +318,16 @@ export function ChatShell() {
       }
       case 'result': {
         const r = (event as { type: 'result'; result: TaskResult }).result;
+        const recordedArtifacts = currentTaskEventsRef.current
+          .filter((e): e is Extract<DesktopTaskEvent, { type: 'artifact_recorded' }> => e.type === 'artifact_recorded')
+          .map(artifactSummaryFromEvent);
+        const resultWithArtifacts = mergeTaskResultArtifacts(r, recordedArtifacts);
         const hasGeneratedFiles = currentTaskEventsRef.current.some(
           e => (e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
             && (e as { input: Record<string, unknown> }).input?.file_path)
           || (e.type === 'artifact_recorded' && (e as { kind?: string }).kind === 'html')
         );
-        if (r.artifacts && r.artifacts.length > 0) {
+        if (resultWithArtifacts.artifacts && resultWithArtifacts.artifacts.length > 0) {
           const finalContent = streamRef.current.trim();
           // Clear streaming FIRST to prevent one-frame duplicate display
           streamRef.current = '';
@@ -306,7 +339,7 @@ export function ChatShell() {
               content: finalContent,
             }]);
           }
-          setResult(r);
+          setResult(resultWithArtifacts);
           setStatus('completed');
           // Only set title if thread has no title yet (preserve user's prompt as title)
           if (taskId && !thread?.title) {
@@ -318,7 +351,7 @@ export function ChatShell() {
           // Clear streaming FIRST to prevent one-frame duplicate display
           streamRef.current = '';
           setStreamingText('');
-          setResult(r);
+          setResult(resultWithArtifacts);
           if (finalText.trim()) {
             setMessages(prev => [...prev, {
               id: `msg-${Date.now()}-assistant`,
@@ -373,10 +406,10 @@ export function ChatShell() {
         break;
       }
       case 'canvas_tool_call': {
-        const ev = event as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string };
+        const ev = event as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string; displayInputSummary?: string };
         // report_progress is handled by TaskPanel, don't show in ToolStepsMessage
         if (ev.toolName === 'report_progress') break;
-        const newStep: ToolStep = { toolUseId: ev.toolUseId, toolName: ev.toolName, input: ev.input, status: 'running', startedAt: Date.now() };
+        const newStep: ToolStep = { toolUseId: ev.toolUseId, toolName: ev.toolName, input: ev.input, displayInputSummary: ev.displayInputSummary, status: 'running', startedAt: Date.now() };
         toolStepsActiveRef.current = true;
         setMessages(prev => {
           const cleaned = prev.filter(m => m.role !== 'progress' || (m.stage !== 'tool' && m.stage !== 'completed' && m.stage !== 'failed'));
@@ -491,10 +524,10 @@ export function ChatShell() {
         }
         if (ev.type === 'canvas_tool_call') {
           replayEvents.push(ev);
-          const evC = ev as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string; ts?: number };
+          const evC = ev as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string; ts?: number; displayInputSummary?: string };
           // Skip report_progress from ToolSteps display (handled by TaskPanel)
           if (evC.toolName === 'report_progress') continue;
-          replayToolSteps.push({ toolUseId: evC.toolUseId, toolName: evC.toolName, input: evC.input, status: 'done', startedAt: evC.ts });
+          replayToolSteps.push({ toolUseId: evC.toolUseId, toolName: evC.toolName, input: evC.input, displayInputSummary: evC.displayInputSummary, status: 'done', startedAt: evC.ts });
           if (!replayToolMsgId) replayToolMsgId = `msg-tool-steps-${evC.eventId}`;
           continue;
         }
@@ -538,11 +571,20 @@ export function ChatShell() {
         } else if (ev.type === 'assistant_delta') {
           accumulated += (ev as { delta: string }).delta;
           lastProgress = null;
+        } else if (ev.type === 'task_cancelled') {
+          const partialText = (ev as { partialText?: string }).partialText || accumulated;
+          if (partialText.trim()) {
+            msgs.push({
+              id: `msg-assistant-cancelled-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              role: 'assistant',
+              content: partialText,
+            });
+          }
+          accumulated = '';
+          lastProgress = null;
         } else if (ev.type === 'result') {
           const r = (ev as { result: TaskResult }).result;
-          const resultWithArtifacts = replayArtifacts.length > 0
-            ? { ...r, artifacts: [...(r.artifacts || []), ...replayArtifacts] }
-            : r;
+          const resultWithArtifacts = mergeTaskResultArtifacts(r, replayArtifacts);
           const assistantContent = accumulated || r.summary;
           if (accumulated || r.summary) {
             msgs.push({

@@ -2,6 +2,7 @@ import vm from 'node:vm';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import {
+  type EvidenceCheck,
   parseWorkflowScript,
   validateWorkflowScript,
   type WorkflowScriptAnalysis,
@@ -24,6 +25,12 @@ export interface WorkflowScriptAgentInput {
   required?: boolean;
   outputSchema?: Record<string, unknown> | null;
   evidenceRequired?: boolean;
+  nodeId?: string;
+  attemptId?: string;
+  forceRetry?: boolean;
+  workflowRunId?: string;
+  workspaceRoot?: string;
+  modelCapability?: string;
 }
 
 export interface WorkflowScriptPhaseInput {
@@ -69,6 +76,13 @@ export interface WorkflowScriptController {
   emitLog?(input: WorkflowScriptLogInput): Promise<void> | void;
   requestUserInput?(input: WorkflowScriptUserInputRequest): Promise<unknown>;
   beginParallelGroup?(input: WorkflowScriptParallelGroupInput): Promise<WorkflowScriptParallelGroupResult> | WorkflowScriptParallelGroupResult;
+  reserveBudget?(input: { runId: string; nodeId: string; tokens: number }): Promise<{ reserved: boolean; attemptId: string }>;
+  consumeBudget?(input: { runId: string; nodeId: string; attemptId: string; reserved: number; actual: number; usageSource: 'provider' | 'estimate' }): Promise<void>;
+  releaseBudget?(input: { runId: string; nodeId: string; attemptId: string; tokens: number }): Promise<void>;
+  checkRemainingBudget?(runId: string): Promise<number>;
+  verifyEvidence?(input: { runId: string; nodeId: string; result: unknown; workspaceRoot: string; checks: EvidenceCheck[] }): Promise<{ ok: boolean; failures: string[]; warnings: string[] }>;
+  markNodeIntervention?(input: { runId: string; nodeId: string; failures: string[] }): Promise<void>;
+  markBranchSkipped?(input: { runId: string; nodeId: string; label: string }): Promise<void>;
 }
 
 export interface WorkflowScriptRuntimeOptions {
@@ -76,6 +90,8 @@ export interface WorkflowScriptRuntimeOptions {
   concurrency?: number;
   policy?: WorkflowScriptValidationPolicy;
   syncTimeoutMs?: number;
+  workflowRunId?: string;
+  workspaceRoot?: string;
 }
 
 export interface WorkflowScriptRunResult {
@@ -109,6 +125,8 @@ export async function runWorkflowScript(
     concurrency = 4,
     policy = {},
     syncTimeoutMs = 1_000,
+    workflowRunId,
+    workspaceRoot = process.cwd(),
   }: WorkflowScriptRuntimeOptions,
 ): Promise<WorkflowScriptRunResult> {
   if (!controller || typeof controller.createAgentNode !== 'function') {
@@ -122,7 +140,9 @@ export async function runWorkflowScript(
 
   const parsed = parseWorkflowScript(script);
   const { meta, scriptHash, analysis } = validation.normalized;
+  const activePolicy = validation.normalized.policy;
   const workflowId = meta.name;
+  const runId = workflowRunId || workflowId;
   const limit = createConcurrencyLimiter(concurrency);
   let currentPhaseTitle: string | null = null;
   let phaseSequence = 0;
@@ -147,10 +167,16 @@ export async function runWorkflowScript(
     const normalizedPrompt = normalizeRequiredString(prompt, 'workflow_script_agent_prompt_required');
     const normalizedOptions = normalizeOptions(options);
     agentSequence += 1;
+    const nodeId = `node-${runId}-${agentSequence}`;
     const label = normalizeOptionalString(normalizedOptions?.label) || `动态任务 ${agentSequence}`;
     const phaseTitle = normalizeOptionalString(normalizedOptions?.phaseTitle)
       || normalizeOptionalString(normalizedOptions?.phase)
       || currentPhaseTitle;
+    const model = normalizeOptionalString(normalizedOptions?.model);
+    const modelCapability = normalizeOptionalString(normalizedOptions?.modelCapability);
+    if (model && modelCapability) {
+      throw workflowScriptError('model_and_capability_mutually_exclusive', 'cannot specify both model and modelCapability');
+    }
     const activeBranch = branchContext.getStore();
     const input: WorkflowScriptAgentInput = {
       prompt: normalizedPrompt,
@@ -160,6 +186,10 @@ export async function runWorkflowScript(
       sequence: agentSequence,
       scriptHash,
       workflowId,
+      workflowRunId: runId,
+      nodeId,
+      workspaceRoot,
+      modelCapability: modelCapability || undefined,
       parallelGroupId: activeBranch?.parallelGroupId || null,
       fanoutItemKey: activeBranch?.fanoutItemKey || null,
       fanoutItemLabel: activeBranch?.fanoutItemLabel || null,
@@ -168,7 +198,98 @@ export async function runWorkflowScript(
       outputSchema: normalizeSchema(normalizedOptions?.schema),
       evidenceRequired: normalizedOptions?.evidenceRequired === true,
     };
-    return limit(() => controller.createAgentNode(input));
+    return limit(() => runAgentAttempt(input, normalizedOptions));
+  }
+
+  async function runAgentAttempt(input: WorkflowScriptAgentInput, options: Record<string, unknown> | null): Promise<unknown> {
+    const budgetPolicy = activePolicy.budget;
+    const evidenceGate = activePolicy.evidenceGate;
+    const estimate = estimateTokens(input.prompt, options, budgetPolicy?.defaultEstimateMultiplier || 1);
+    let lastAttemptConsumed = false;
+    let lastAttemptId: string | undefined;
+
+    async function reserveAttempt(): Promise<string | undefined> {
+      if (!budgetPolicy) return undefined;
+      assertBudgetController();
+      const reservation = await controller.reserveBudget!({ runId, nodeId: input.nodeId!, tokens: estimate });
+      if (!reservation.reserved) {
+        throw workflowScriptError('budget_exceeded', `node ${input.nodeId} exceeded workflow budget`);
+      }
+      lastAttemptConsumed = false;
+      lastAttemptId = reservation.attemptId;
+      return reservation.attemptId;
+    }
+
+    async function dispatchAndConsume(attemptId: string | undefined, forceRetry = false): Promise<unknown> {
+      const result = await controller.createAgentNode({
+        ...input,
+        attemptId,
+        forceRetry: forceRetry || undefined,
+      });
+      if (budgetPolicy && attemptId) {
+        const usage = readUsage(result, estimate);
+        await controller.consumeBudget!({
+          runId,
+          nodeId: input.nodeId!,
+          attemptId,
+          reserved: estimate,
+          actual: usage.actual,
+          usageSource: usage.source,
+        });
+        lastAttemptConsumed = true;
+      }
+      return result;
+    }
+
+    try {
+      const firstAttemptId = await reserveAttempt();
+      let currentResult = await dispatchAndConsume(firstAttemptId);
+      if (!evidenceGate) return currentResult;
+      assertEvidenceController();
+      let retry = 0;
+      while (retry < evidenceGate.maxRetry) {
+        const verdict = await controller.verifyEvidence!({
+          runId,
+          nodeId: input.nodeId!,
+          result: currentResult,
+          workspaceRoot,
+          checks: evidenceGate.checks,
+        });
+        if (verdict.ok) return currentResult;
+        retry += 1;
+        if (retry >= evidenceGate.maxRetry) {
+          await controller.markNodeIntervention!({ runId, nodeId: input.nodeId!, failures: verdict.failures });
+          throw workflowScriptError(
+            'evidence_max_retry_exceeded',
+            `node ${input.nodeId} failed evidence check after ${evidenceGate.maxRetry} retries`,
+          );
+        }
+        const retryAttemptId = await reserveAttempt();
+        currentResult = await dispatchAndConsume(retryAttemptId, true);
+      }
+      return currentResult;
+    } catch (error) {
+      if (budgetPolicy && !lastAttemptConsumed && lastAttemptId) {
+        await controller.releaseBudget!({ runId, nodeId: input.nodeId!, attemptId: lastAttemptId, tokens: estimate });
+      }
+      throw error;
+    }
+  }
+
+  function assertBudgetController(): void {
+    for (const name of ['reserveBudget', 'consumeBudget', 'releaseBudget', 'checkRemainingBudget', 'markBranchSkipped'] as const) {
+      if (typeof controller[name] !== 'function') {
+        throw workflowScriptError('workflow_script_budget_controller_required', `budget policy requires controller.${name}`);
+      }
+    }
+  }
+
+  function assertEvidenceController(): void {
+    for (const name of ['verifyEvidence', 'markNodeIntervention'] as const) {
+      if (typeof controller[name] !== 'function') {
+        throw workflowScriptError('workflow_script_evidence_controller_required', `evidence gate requires controller.${name}`);
+      }
+    }
   }
 
   async function parallel(items: unknown, options: unknown = null): Promise<unknown[]> {
@@ -205,6 +326,41 @@ export async function runWorkflowScript(
         }, () => runParallelThunk(item)),
       };
     });
+    if (activePolicy.budget) {
+      assertBudgetController();
+      const estimates = items.map(item => estimateFromThunk(item, activePolicy.budget?.defaultEstimateMultiplier || 1));
+      const totalEstimate = estimates.reduce((total, estimate) => total + estimate, 0);
+      const remaining = await controller.checkRemainingBudget!(runId);
+      if (totalEstimate > remaining) {
+        const results: unknown[] = [];
+        let spent = 0;
+        const baseSequence = agentSequence + 1;
+        for (const [index, task] of tasks.entries()) {
+          if (spent + estimates[index] <= remaining) {
+            try {
+              results.push(await task.run());
+            } catch (error) {
+              results.push(formatParallelBranchFailure(error, task.label));
+            }
+            spent += estimates[index];
+            continue;
+          }
+          const branchLabel = `分支 ${index + 1}`;
+          await controller.markBranchSkipped!({
+            runId,
+            nodeId: `node-${runId}-${baseSequence + index}`,
+            label: branchLabel,
+          });
+          results.push({
+            ok: false,
+            error: 'budget_skipped',
+            message: `branch ${index + 1} skipped: budget exceeded`,
+            branch: branchLabel,
+          });
+        }
+        return results;
+      }
+    }
     if (failurePolicy === 'collect_errors') {
       const settled = await Promise.allSettled(tasks.map(task => task.run()));
       return settled.map((item, index) => item.status === 'fulfilled'
@@ -420,6 +576,30 @@ function normalizeSchema(value: unknown): Record<string, unknown> | null {
   }
   assertJsonSerializable(value, 'workflow_script_schema_not_serializable');
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function estimateTokens(prompt: string, options: Record<string, unknown> | null, multiplier: number): number {
+  const explicit = Number(options?.estimatedTokens);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.ceil(explicit);
+  const base = Math.max(1, Math.ceil(prompt.length / 4));
+  return Math.ceil(base * Math.max(1, multiplier));
+}
+
+function estimateFromThunk(item: unknown, multiplier: number): number {
+  if (typeof item !== 'function') return Math.ceil(Math.max(1, multiplier));
+  const source = Function.prototype.toString.call(item);
+  const match = source.match(/\bestimatedTokens\s*:\s*(\d+(?:\.\d+)?)/);
+  if (match) return Math.ceil(Number(match[1]));
+  return Math.ceil(Math.max(1, multiplier));
+}
+
+function readUsage(result: unknown, estimate: number): { actual: number; source: 'provider' | 'estimate' } {
+  const record = result && typeof result === 'object' ? result as { usage?: { totalTokens?: unknown } } : {};
+  const totalTokens = Number(record.usage?.totalTokens);
+  if (Number.isFinite(totalTokens) && totalTokens >= 0) {
+    return { actual: Math.ceil(totalTokens), source: 'provider' };
+  }
+  return { actual: estimate, source: 'estimate' };
 }
 
 function normalizeFailurePolicy(value: unknown): 'required_all' | 'collect_errors' | 'fail_fast' | 'quorum' {

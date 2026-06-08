@@ -10,6 +10,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 const RECONNECT_DELAY = 3000;
 const MAX_RECONNECT_DELAY = 60_000;
 const PARTICIPANT_POLL_INTERVAL = 8000;
+const INITIAL_SNAPSHOT_RETRY_DELAYS_MS = [1000, 2500, 5000, 10_000];
 
 function getDesktopApi(): any {
   return typeof window !== 'undefined' ? (window as any).xiaokDesktop : null;
@@ -848,6 +849,8 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const connectedRef = useRef(false);
   const projectsRef = useRef<KSwarmProject[]>([]);
+  const agentsRef = useRef<KSwarmAgent[]>([]);
+  const participantsRef = useRef<KSwarmParticipant[]>([]);
 
   // ─── IPC Stream Connection ─────────────────────────────────────
 
@@ -867,18 +870,73 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   useEffect(() => {
     const api = getDesktopApi();
     if (!api) return;
+    let disposed = false;
+    let snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    let snapshotRetryAttempt = 0;
 
-    api.kswarmStreamSubscribe?.();
+    const clearSnapshotRetry = () => {
+      if (snapshotRetryTimer) {
+        clearTimeout(snapshotRetryTimer);
+        snapshotRetryTimer = null;
+      }
+    };
 
-    const unsubStatus = api.onKSwarmConnectionStatus?.((payload: { status: string }) => {
-      const isConnected = payload.status === 'connected';
+    const scheduleSnapshotRetry = () => {
+      if (disposed || snapshotRetryTimer || snapshotRetryAttempt >= INITIAL_SNAPSHOT_RETRY_DELAYS_MS.length) {
+        return;
+      }
+      const delay = INITIAL_SNAPSHOT_RETRY_DELAYS_MS[snapshotRetryAttempt];
+      snapshotRetryAttempt++;
+      snapshotRetryTimer = setTimeout(() => {
+        snapshotRetryTimer = null;
+        loadSnapshot({ retryOnFailure: true });
+      }, delay);
+    };
+
+    const loadSnapshot = async ({ retryOnFailure }: { retryOnFailure: boolean }) => {
+      const [projectData, agentData, participantData] = await Promise.all([
+        httpGet<{ projects: KSwarmProject[] }>('/projects'),
+        httpGet<{ agents: KSwarmAgent[] }>('/agents'),
+        httpGet<{ participants: KSwarmParticipant[] }>('/participants'),
+      ]);
+      if (disposed) return;
+
+      const projectList = Array.isArray(projectData?.projects) ? projectData.projects : null;
+      if (projectList) {
+        projectsRef.current = projectList;
+        setProjects(projectList);
+        snapshotRetryAttempt = 0;
+        clearSnapshotRetry();
+      } else if (retryOnFailure) {
+        scheduleSnapshotRetry();
+      }
+
+      const agentList = Array.isArray(agentData?.agents) ? agentData.agents : null;
+      if (agentList) {
+        agentsRef.current = agentList;
+        setAgents(agentList);
+      }
+
+      const participantList = Array.isArray(participantData?.participants) ? participantData.participants : null;
+      if (participantList) {
+        participantsRef.current = participantList;
+        setParticipants(participantList);
+      }
+    };
+
+    const applyConnectionStatus = (status?: string) => {
+      if (disposed) return;
+      const isConnected = status === 'connected';
+      const wasConnected = connectedRef.current;
       setConnected(isConnected);
       connectedRef.current = isConnected;
-      if (isConnected) {
-        fetchProjects();
-        fetchAgents();
-        fetchParticipants();
+      if (isConnected && !wasConnected) {
+        loadSnapshot({ retryOnFailure: true });
       }
+    };
+
+    const unsubStatus = api.onKSwarmConnectionStatus?.((payload: { status: string }) => {
+      applyConnectionStatus(payload.status);
     });
     wsRef.current = unsubStatus || null;
 
@@ -887,11 +945,21 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     });
     wsEventRef.current = unsubEvent || null;
 
+    api.kswarmStreamSubscribe?.();
+    Promise.resolve(api.kswarmStreamGetStatus?.())
+      .then((payload: { status?: string } | undefined) => {
+        applyConnectionStatus(payload?.status);
+      })
+      .catch(() => {});
+
+    loadSnapshot({ retryOnFailure: true });
+
     pollTimer.current = setInterval(() => {
       if (connectedRef.current) fetchParticipants();
     }, PARTICIPANT_POLL_INTERVAL);
 
     return () => {
+      disposed = true;
       api.kswarmStreamUnsubscribe?.();
       wsRef.current?.();
       wsRef.current = null;
@@ -901,6 +969,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
         clearInterval(pollTimer.current);
         pollTimer.current = null;
       }
+      clearSnapshotRetry();
     };
   }, []);
 
@@ -908,7 +977,10 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
 
   const fetchProjects = useCallback(async (): Promise<KSwarmProject[]> => {
     const data = await httpGet<{ projects: KSwarmProject[] }>('/projects');
-    const list = data?.projects || [];
+    if (!Array.isArray(data?.projects)) {
+      return projectsRef.current;
+    }
+    const list = data.projects;
     projectsRef.current = list;
     setProjects(list);
     return list;
@@ -1105,14 +1177,22 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
 
   const fetchAgents = useCallback(async (): Promise<KSwarmAgent[]> => {
     const data = await httpGet<{ agents: KSwarmAgent[] }>('/agents');
-    const list = data?.agents || [];
+    if (!Array.isArray(data?.agents)) {
+      return agentsRef.current;
+    }
+    const list = data.agents;
+    agentsRef.current = list;
     setAgents(list);
     return list;
   }, []);
 
   const fetchParticipants = useCallback(async (): Promise<KSwarmParticipant[]> => {
     const data = await httpGet<{ participants: KSwarmParticipant[] }>('/participants');
-    const list = data?.participants || [];
+    if (!Array.isArray(data?.participants)) {
+      return participantsRef.current;
+    }
+    const list = data.participants;
+    participantsRef.current = list;
     setParticipants(list);
     return list;
   }, []);

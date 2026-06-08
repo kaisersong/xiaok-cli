@@ -1,18 +1,23 @@
 import { test, expect } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { join } from 'node:path';
 
-const APP_PATH = '/Users/song/projects/xiaok-cli/desktop/release/mac-arm64/xiaok.app/Contents/MacOS/xiaok';
+const APP_PATH = process.env.XIAOK_E2E_APP_PATH
+  ?? join(process.cwd(), 'release/mac-arm64/xiaok.app/Contents/MacOS/xiaok');
 
 test.describe('Task switching', () => {
   test('sidebar shows "最近" label and selection state', async () => {
-    const app = await electron.launch({ executablePath: APP_PATH });
+    const app = await electron.launch({
+      executablePath: APP_PATH,
+      env: { ...process.env, XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE: '1' },
+    });
     const page = await app.firstWindow();
     await page.waitForTimeout(5000);
 
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(`PAGE ERROR: ${e.message}`));
 
-    const recentLabel = page.locator('text=最近');
+    const recentLabel = page.locator('aside').getByText('最近', { exact: true }).first();
     await expect(recentLabel).toBeVisible({ timeout: 5000 });
 
     await page.screenshot({ path: 'test-results/sidebar-recent-label.png' });
@@ -21,7 +26,10 @@ test.describe('Task switching', () => {
   });
 
   test('selected task has bold styling', async () => {
-    const app = await electron.launch({ executablePath: APP_PATH });
+    const app = await electron.launch({
+      executablePath: APP_PATH,
+      env: { ...process.env, XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE: '1' },
+    });
     const page = await app.firstWindow();
     await page.waitForTimeout(5000);
 
@@ -58,7 +66,10 @@ test.describe('Task switching', () => {
   });
 
   test('task content loads correctly for threads with real tasks', async () => {
-    const app = await electron.launch({ executablePath: APP_PATH });
+    const app = await electron.launch({
+      executablePath: APP_PATH,
+      env: { ...process.env, XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE: '1' },
+    });
     const page = await app.firstWindow();
     await page.waitForTimeout(5000);
 
@@ -111,7 +122,10 @@ test.describe('Task switching', () => {
   });
 
   test('rapid task switching does not cause content mix', async () => {
-    const app = await electron.launch({ executablePath: APP_PATH });
+    const app = await electron.launch({
+      executablePath: APP_PATH,
+      env: { ...process.env, XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE: '1' },
+    });
     const page = await app.firstWindow();
     await page.waitForTimeout(5000);
 
@@ -156,7 +170,10 @@ test.describe('Task switching', () => {
   });
 
   test('switching between threads shows different content', async () => {
-    const app = await electron.launch({ executablePath: APP_PATH });
+    const app = await electron.launch({
+      executablePath: APP_PATH,
+      env: { ...process.env, XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE: '1' },
+    });
     const page = await app.firstWindow();
     await page.waitForTimeout(5000);
 

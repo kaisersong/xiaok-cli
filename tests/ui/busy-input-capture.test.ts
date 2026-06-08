@@ -80,9 +80,11 @@ describe('InputReader busy capture', () => {
 
     try {
       const capture = reader.startBusyCapture({ placeholder: 'Finishing response...' });
+      expect(capture.isPaused()).toBe(false);
       harness.send('排队前');
 
       const pending = reader.read('> ');
+      expect(capture.isPaused()).toBe(true);
       harness.send('prompt answer');
       harness.send('\r');
       await expect(pending).resolves.toBe('prompt answer');
@@ -93,7 +95,30 @@ describe('InputReader busy capture', () => {
       expect(capture.getSnapshot().draft).toBe('排队前');
       expect(capture.consumeQueued()).toBeNull();
       capture.stop();
+      expect(capture.isPaused()).toBe(false);
       expect(harness.emitter.listenerCount('data')).toBe(0);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('routes escape to abort request while preserving the busy draft', () => {
+    const harness = createTtyHarness();
+    const reader = new InputReader(new ReplRenderer(process.stdout));
+    const onAbortRequest = vi.fn();
+
+    try {
+      const capture = reader.startBusyCapture({
+        placeholder: 'Finishing response...',
+        onAbortRequest,
+      });
+      harness.send('不要丢');
+      harness.send('\x1b');
+
+      expect(onAbortRequest).toHaveBeenCalledOnce();
+      expect(capture.getSnapshot().draft).toBe('不要丢');
+      expect(capture.getSnapshot().queued).toBeNull();
+      capture.stop();
     } finally {
       harness.restore();
     }

@@ -805,6 +805,7 @@ describe('scroll-region prompt frame ownership', () => {
     const previousTmux = process.env.TMUX;
     const harness = createTtyHarness(80, 24);
     const manager = new ScrollRegionManager(process.stdout);
+    const promptGlyph = process.platform === 'win32' ? '>' : '❯';
 
     try {
       process.env.TMUX = 'tmux-test,1,0';
@@ -836,7 +837,7 @@ describe('scroll-region prompt frame ownership', () => {
       });
 
       const lines = harness.screen.lines();
-      const promptRows = lines.filter((line) => line.includes('> Type your message...'));
+      const promptRows = lines.filter((line) => line.includes(`${promptGlyph} Type your message...`));
       const statusRows = lines.filter((line) => line.includes('gpt-terminal-e2e · 4% · project'));
 
       expect(lines.some((line) => line.includes('/mode'))).toBe(false);
@@ -2213,6 +2214,7 @@ describe('streaming cursor handoff', () => {
     const harness = createTtyHarness(120, 24);
     const manager = new ScrollRegionManager(process.stdout);
     const markdown = new MarkdownRenderer();
+    const promptGlyph = process.platform === 'win32' ? '>' : '❯';
     const firstResponse = [
       '适合中午的：',
       '',
@@ -2262,7 +2264,7 @@ describe('streaming cursor handoff', () => {
       manager.renderActivity('⠋ Thinking · 1s');
 
       const lines = harness.screen.lines();
-      const promptIndex = lines.findIndex((line) => line.includes('> Finishing response...'));
+      const promptIndex = lines.findIndex((line) => line.includes(`${promptGlyph} Finishing response...`));
       expect(promptIndex).toBeGreaterThanOrEqual(0);
 
       let cursor = promptIndex - 1;

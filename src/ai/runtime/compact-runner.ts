@@ -8,7 +8,7 @@ Write in past tense. Be concise but complete.`;
 export class CompactRunner {
   constructor(private readonly adapter: ModelAdapter) {}
 
-  async run(messages: Message[]): Promise<string> {
+  async run(messages: Message[], signal?: AbortSignal): Promise<string> {
     const summaryRequest: Message = {
       role: 'user',
       content: [{
@@ -22,6 +22,7 @@ export class CompactRunner {
       [...messages, summaryRequest],
       [], // no tools — enforced by NO_TOOLS_PREAMBLE
       NO_TOOLS_PREAMBLE,
+      signal ? { signal } : undefined,
     )) {
       if (chunk.type === 'text') chunks.push(chunk.delta);
     }

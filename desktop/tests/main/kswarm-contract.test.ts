@@ -109,6 +109,7 @@ describe('desktop service path contract', () => {
     expect(fromEntries).toContain('../../kswarm/node_modules/ws');
     expect(fromEntries).toContain('../../intent-broker/src');
     expect(fromEntries).toContain('../../intent-broker/package.json');
+    expect(fromEntries).toContain('../../intent-broker/bin');
     expect(fromEntries).toContain('../../intent-broker/adapters');
     expect(fromEntries).toContain('../../intent-broker/node_modules/ws');
     expect(fromEntries).toContain('.generated/kswarm/scripts/auto-worker.js');
@@ -133,5 +134,11 @@ describe('desktop service path contract', () => {
     );
     expect(intentBrokerAdaptersEntry?.filter).toContain('!**/.env');
     expect(intentBrokerAdaptersEntry?.filter).toContain('!**/.env.*');
+
+    const intentBrokerBinEntry = builderConfig.extraResources.find(
+      (entry) => entry.from === '../../intent-broker/bin',
+    );
+    expect(intentBrokerBinEntry?.to).toBe('services/intent-broker/bin');
+    expect(intentBrokerBinEntry?.filter).toContain('**/*.js');
   });
 });

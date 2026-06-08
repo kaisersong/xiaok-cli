@@ -81,7 +81,7 @@ export type UserAnswer = {
     materialId: string;
     role: MaterialRole;
 };
-export type ArtifactKind = 'pptx' | 'pdf' | 'docx' | 'xlsx' | 'html' | 'image' | 'text' | 'other';
+export type ArtifactKind = 'pptx' | 'pdf' | 'docx' | 'xlsx' | 'html' | 'image' | 'text' | 'a2ui' | 'other';
 export interface ArtifactSummary {
     artifactId: string;
     kind: ArtifactKind;
@@ -89,6 +89,7 @@ export interface ArtifactSummary {
     createdAt: string;
     previewAvailable: boolean;
     filePath?: string;
+    mimeType?: string;
     sizeBytes?: number;
     sourceMaterialIds?: string[];
     creator?: string;
@@ -126,6 +127,11 @@ export type DesktopTaskEvent = {
     type: 'needs_user';
     question: NeedsUserQuestion;
 } | {
+    type: 'task_cancelled';
+    taskId: string;
+    reason: string;
+    partialText?: string;
+} | {
     type: 'result';
     result: TaskResult;
 } | {
@@ -137,6 +143,7 @@ export type DesktopTaskEvent = {
     previewAvailable: boolean;
     turnId: string;
     creator?: string;
+    mimeType?: string;
 } | {
     type: 'salvage';
     salvage: SalvageSummary;
@@ -150,6 +157,7 @@ export type DesktopTaskEvent = {
     toolUseId: string;
     eventId: string;
     ts?: number;
+    displayInputSummary?: string;
 } | {
     type: 'canvas_tool_result';
     toolName: string;

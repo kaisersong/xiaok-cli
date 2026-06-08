@@ -14,6 +14,7 @@ import { webSearchTool } from './web-search.js';
 import { installSkillTool } from './install-skill.js';
 import { uninstallSkillTool } from './uninstall-skill.js';
 import { validateSkillTool } from './validate-skill.js';
+import { createRenderUiTool } from './render-ui.js';
 import { buildCapabilityToolDefinition, buildToolSearchEntry, dedupeToolSearchEntries, getCanonicalToolId, selectToolEntries, } from './tool-identity.js';
 export function buildToolList(skillTool, workspace, extraTools = []) {
     const tools = [
@@ -28,6 +29,7 @@ export function buildToolList(skillTool, workspace, extraTools = []) {
         installSkillTool,
         uninstallSkillTool,
         validateSkillTool,
+        createRenderUiTool(workspace),
         ...extraTools,
     ];
     if (skillTool)

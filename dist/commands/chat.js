@@ -58,6 +58,7 @@ import { createLogger } from '../utils/logger.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
 import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
 import { executeNamedSubAgent } from '../ai/agents/subagent-executor.js';
+import { isAbortError } from '../ai/runtime/abort-utils.js';
 import { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
 import { SessionIntentDelegationStore, createEmptySessionIntentLedger } from '../runtime/intent-delegation/store.js';
 import { SessionSkillEvalStore } from '../runtime/intent-delegation/skill-eval-store.js';
@@ -241,6 +242,8 @@ async function runChat(initialInput, opts) {
     let skillCatalogWatcher;
     let activeBusyCapture = null;
     let stopBusyCapture = () => { };
+    let currentTurnAbortController = null;
+    let skipStopHookAutoContinue = false;
     let activeIntentReminderBlock;
     let currentTurnIntentPlan;
     let currentTurnStageIndex = 0;
@@ -256,6 +259,26 @@ async function runChat(initialInput, opts) {
         : createEmptySessionSkillExecutionState(Date.now());
     const skillAdherenceStore = new FileSkillAdherenceStore();
     let activeSkillInvocationId = null;
+    const requestCurrentTurnAbort = () => {
+        if (process.env['XIAOK_NO_ESC_INTERRUPT'] === '1') {
+            return;
+        }
+        currentTurnAbortController?.abort();
+    };
+    const runRuntimeTurn = async (request, onChunk) => {
+        const previousController = currentTurnAbortController;
+        const controller = new AbortController();
+        currentTurnAbortController = controller;
+        try {
+            const abortContext = { signal: controller.signal };
+            await runtimeFacade.runTurn(request, onChunk, abortContext.signal);
+        }
+        finally {
+            if (currentTurnAbortController === controller) {
+                currentTurnAbortController = previousController;
+            }
+        }
+    };
     try {
         currentIntentLedger = initializeChatIntentLedger(persistedIntentLedger, sessionId, instanceId, ownershipMode, {
             confirmHighRiskTakeover: opts.confirmHighRiskTakeover,
@@ -464,7 +487,6 @@ async function runChat(initialInput, opts) {
         }),
     ];
     const initialPromptSnapshot = await buildPromptSnapshot();
-    const capabilityHealthNotice = buildCapabilityHealthNotice(platform.health);
     const persistedPermissionSettings = await loadSettings(cwd);
     const persistedPermissionRules = mergeRules(persistedPermissionSettings);
     const permissionManager = new PermissionManager({
@@ -864,6 +886,7 @@ async function runChat(initialInput, opts) {
         activeBusyCapture?.stop();
         activeBusyCapture = inputReader.startBusyCapture({
             placeholder: getFooterInputPrompt(),
+            onAbortRequest: requestCurrentTurnAbort,
         });
     }
     let askUserQuestionPromptActive = false;
@@ -948,6 +971,13 @@ async function runChat(initialInput, opts) {
         else {
             writeError(String(error));
         }
+        renderFooterChrome();
+    };
+    const handleTurnAbort = () => {
+        clearLongThinkingTimer();
+        endStreamingPhaseForInterrupt();
+        runtimeState.markInputReady();
+        resetTurnChrome();
         renderFooterChrome();
     };
     const getFooterInputPrompt = () => runtimeState.getFooterInputPrompt();
@@ -1151,7 +1181,7 @@ async function runChat(initialInput, opts) {
     const runStrictContinuationTurn = async (input) => {
         let continuationText = '';
         await maybePrepareFreshContextHandoff();
-        await runtimeFacade.runTurn({
+        await runRuntimeTurn({
             sessionId,
             cwd,
             source: 'chat',
@@ -1719,6 +1749,8 @@ async function runChat(initialInput, opts) {
             process.stdout.write('\n');
         }
         try {
+            await platform.mcpReady;
+            const capabilityHealthNotice = buildCapabilityHealthNotice(platform.health);
             if (capabilityHealthNotice) {
                 process.stderr.write(`${capabilityHealthNotice}\n`);
             }
@@ -1732,7 +1764,7 @@ async function runChat(initialInput, opts) {
             }
             await primeTurnIntentPlan();
             await maybePrepareFreshContextHandoff();
-            await runtimeFacade.runTurn({
+            await runRuntimeTurn({
                 sessionId,
                 cwd,
                 source: 'chat',
@@ -2244,6 +2276,13 @@ async function runChat(initialInput, opts) {
             resetTurnChrome();
             void refreshIntentLedger().then(renderIntentSummaryLine);
         });
+        runtimeHooks.on('turn_stop', (event) => {
+            if (event.reason === 'user_aborted') {
+                skipStopHookAutoContinue = true;
+                return;
+            }
+            skipStopHookAutoContinue = false;
+        });
         // Context 压缩通知
         runtimeHooks.on('compact_triggered', () => {
             log.info('compact_triggered');
@@ -2352,8 +2391,7 @@ async function runChat(initialInput, opts) {
                 renderFooterChrome();
             }
             const shellEscape = parseShellEscapeInput(trimmed);
-            const slash = parseSlashCommand(trimmed);
-            const shouldPrimeNormalTurnChrome = shellEscape === null && slash === null;
+            const shouldPrimeNormalTurnChrome = shellEscape === null && !trimmed.startsWith('/');
             let normalInputTurnChromeStarted = false;
             if (shouldPrimeNormalTurnChrome) {
                 mdRenderer.reset();
@@ -2612,6 +2650,7 @@ async function runChat(initialInput, opts) {
                 process.stdout.write(formatSubmittedInput(trimmed));
             }
             // 斜杠命令：直接触发对应 skill
+            const slash = parseSlashCommand(trimmed);
             if (slash) {
                 let skill = findSkillByCommandName(skills, slash.skillName);
                 if (!skill) {
@@ -2672,7 +2711,7 @@ async function runChat(initialInput, opts) {
                                 scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
                             }
                             await maybePrepareFreshContextHandoff();
-                            await runtimeFacade.runTurn({
+                            await runRuntimeTurn({
                                 sessionId,
                                 cwd,
                                 source: 'chat',
@@ -2711,8 +2750,13 @@ async function runChat(initialInput, opts) {
                         }
                     }
                     catch (e) {
-                        stashQueuedInputIfAny();
-                        handleTurnFailure(e);
+                        if (isAbortError(e)) {
+                            handleTurnAbort();
+                        }
+                        else {
+                            stashQueuedInputIfAny();
+                            handleTurnFailure(e);
+                        }
                     }
                     if (!scrollRegion.isActive()) {
                         process.stdout.write('\n');
@@ -2760,7 +2804,7 @@ async function runChat(initialInput, opts) {
                 let lastAssistantText = '';
                 await primeTurnIntentPlan(true);
                 await maybePrepareFreshContextHandoff();
-                await runtimeFacade.runTurn({
+                await runRuntimeTurn({
                     sessionId,
                     cwd,
                     source: 'chat',
@@ -2813,7 +2857,7 @@ async function runChat(initialInput, opts) {
                     });
                     stopResult = { ok: false };
                 }
-                if (stopResult.preventContinuation && stopResult.message) {
+                if (!skipStopHookAutoContinue && stopResult.preventContinuation && stopResult.message) {
                     // broker 返回 block + message：把 message 作为下一轮输入自动继续
                     if (scrollRegion.isActive() && !terminalUiSuspended) {
                         scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
@@ -2836,27 +2880,45 @@ async function runChat(initialInput, opts) {
                         scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
                     }
                     await maybePrepareFreshContextHandoff();
-                    await runtimeFacade.runTurn({
-                        sessionId,
-                        cwd,
-                        source: 'chat',
-                        input: continueBlocks,
-                    }, (chunk) => {
-                        if (chunk.type === 'text') {
-                            noteVisibleAssistantText(chunk.delta);
-                            lastAssistantText += chunk.delta;
-                            if (/\S/.test(chunk.delta)) {
-                                runtimeState.noteResponseStarted();
-                                ensureStreamingPhase();
+                    const previousController = currentTurnAbortController;
+                    const autoContinueController = new AbortController();
+                    currentTurnAbortController = autoContinueController;
+                    try {
+                        await runtimeFacade.runTurn({
+                            sessionId,
+                            cwd,
+                            source: 'chat',
+                            input: continueBlocks,
+                        }, (chunk) => {
+                            if (chunk.type === 'text') {
+                                noteVisibleAssistantText(chunk.delta);
+                                lastAssistantText += chunk.delta;
+                                if (/\S/.test(chunk.delta)) {
+                                    runtimeState.noteResponseStarted();
+                                    ensureStreamingPhase();
+                                }
+                                streamingSegmentText += chunk.delta;
+                                mdRenderer.write(chunk.delta);
                             }
-                            streamingSegmentText += chunk.delta;
-                            mdRenderer.write(chunk.delta);
+                            if (chunk.type === 'usage') {
+                                statusBar.update(chunk.usage);
+                                scrollRegion.updateStatusLine(statusBar.getStatusLine());
+                            }
+                        }, autoContinueController.signal);
+                    }
+                    catch (e) {
+                        if (isAbortError(e)) {
+                            // Abort already emitted turn_aborted/turn_stop; keep the UI state from those hooks.
                         }
-                        if (chunk.type === 'usage') {
-                            statusBar.update(chunk.usage);
-                            scrollRegion.updateStatusLine(statusBar.getStatusLine());
+                        else {
+                            throw e;
                         }
-                    });
+                    }
+                    finally {
+                        if (currentTurnAbortController === autoContinueController) {
+                            currentTurnAbortController = previousController;
+                        }
+                    }
                     flushStreamingMarkdown();
                     lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);
                     await finalizeCurrentTurnIntentIfNeeded();
@@ -2876,8 +2938,13 @@ async function runChat(initialInput, opts) {
             }
             catch (e) {
                 clearTurnIntentContext();
-                stashQueuedInputIfAny();
-                handleTurnFailure(e);
+                if (isAbortError(e)) {
+                    handleTurnAbort();
+                }
+                else {
+                    stashQueuedInputIfAny();
+                    handleTurnFailure(e);
+                }
             }
             runtimeState.deactivateTurn();
             stopActivity();

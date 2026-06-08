@@ -9,6 +9,8 @@ export default defineConfig({
     'e2e-diff-verify.spec.ts',
     'e2e-kswarm.spec.ts',
     'e2e-artifact-turn-scope.spec.ts',
+    'e2e-a2ui-artifact.spec.ts',
+    'e2e-a2ui-artifact-installed.spec.ts',
     'e2e-windows-smoke.spec.ts',
   ],
   fullyParallel: false,

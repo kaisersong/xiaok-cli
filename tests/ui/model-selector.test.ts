@@ -117,6 +117,7 @@ describe('buildModelOptions', () => {
     const harness = createTtyHarness(80, 24);
     const renderer = new ReplRenderer(process.stdout);
     const scrollRegion = new ScrollRegionManager(process.stdout);
+    const promptGlyph = process.platform === 'win32' ? '>' : '❯';
 
     try {
       process.env.TMUX = 'tmux-test,1,0';
@@ -151,7 +152,7 @@ describe('buildModelOptions', () => {
         expect(lines.some((line) => line.includes('Kimi Default'))).toBe(true);
         expect(lines.some((line) => line.includes('/mode'))).toBe(false);
         expect(lines.some((line) => line.includes('/models'))).toBe(false);
-        expect(lines.some((line) => line.includes('> Type your message...'))).toBe(true);
+        expect(lines.some((line) => line.includes(`${promptGlyph} Type your message...`))).toBe(true);
       });
 
       harness.send('\x1b');

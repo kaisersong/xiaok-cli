@@ -11,6 +11,7 @@ export interface WorkflowScriptMeta {
   description: string;
   whenToUse?: string;
   phases?: WorkflowScriptMetaPhase[];
+  resumable?: boolean;
 }
 
 export interface WorkflowScriptAnalysis {
@@ -20,11 +21,48 @@ export interface WorkflowScriptAnalysis {
   pipelineCallCount: number;
   requestUserInputCallCount: number;
   runtimePhaseTitles: string[];
+  resumable: boolean;
+  hasLoop: boolean;
 }
 
 export interface WorkflowScriptValidationPolicy {
   maxScriptBytes?: number;
   maxAgentCalls?: number;
+  budget?: {
+    maxTokens: number;
+    defaultEstimateMultiplier?: number;
+  };
+  evidenceGate?: EvidenceGate;
+  maxAgentRetry?: number;
+  maxWorkflowRetry?: number;
+}
+
+export interface EvidenceGate {
+  checks: EvidenceCheck[];
+  maxRetry?: number;
+  retryPolicy?: 'refetch';
+}
+
+export type EvidenceCheck =
+  | { kind: 'output_schema'; requiredKeys: string[] }
+  | { kind: 'output_size'; minChars: number }
+  | { kind: 'artifact_exists'; path: string }
+  | { kind: 'test_command'; command: string; expectExitCode: number };
+
+export interface NormalizedWorkflowScriptValidationPolicy {
+  maxScriptBytes: number;
+  maxAgentCalls: number;
+  budget?: {
+    maxTokens: number;
+    defaultEstimateMultiplier: number;
+  };
+  evidenceGate?: {
+    checks: EvidenceCheck[];
+    maxRetry: number;
+    retryPolicy: 'refetch';
+  };
+  maxAgentRetry: number;
+  maxWorkflowRetry: number;
 }
 
 export type WorkflowScriptValidationResult =
@@ -34,7 +72,7 @@ export type WorkflowScriptValidationResult =
         meta: WorkflowScriptMeta;
         scriptHash: string;
         analysis: WorkflowScriptAnalysis;
-        policy: Required<WorkflowScriptValidationPolicy>;
+        policy: NormalizedWorkflowScriptValidationPolicy;
       };
     }
   | {
@@ -63,6 +101,7 @@ export type WorkflowScriptPreview =
       phases: Array<{ id: string; title: string; detail: string | null }>;
       scriptHash: string;
       analysis: WorkflowScriptAnalysis;
+      policy: NormalizedWorkflowScriptValidationPolicy;
     }
   | { ok: false; error: string; message?: string };
 
@@ -72,9 +111,11 @@ export interface ParsedWorkflowScript {
   script: string;
 }
 
-const DEFAULT_SCRIPT_POLICY: Required<WorkflowScriptValidationPolicy> = {
+const DEFAULT_SCRIPT_POLICY: NormalizedWorkflowScriptValidationPolicy = {
   maxScriptBytes: 20_000,
   maxAgentCalls: 32,
+  maxAgentRetry: 3,
+  maxWorkflowRetry: 2,
 };
 
 const RESERVED_META_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -156,7 +197,7 @@ export function validateWorkflowScript(
     return errorResult(error);
   }
 
-  const limits: Required<WorkflowScriptValidationPolicy> = { ...DEFAULT_SCRIPT_POLICY, ...policy };
+  const limits = normalizeValidationPolicy(policy);
   const byteLength = Buffer.byteLength(text, 'utf8');
   if (byteLength > limits.maxScriptBytes) {
     return {
@@ -190,7 +231,14 @@ export function validateWorkflowScript(
     };
   }
 
-  const analysis = analyzeWorkflowScriptBody(parsed.body);
+  const analysis = analyzeWorkflowScriptBody(parsed.body, parsed.meta);
+  if (analysis.resumable && analysis.hasLoop) {
+    return {
+      ok: false,
+      error: 'workflow_script_resumable_loop_forbidden',
+      message: 'resumable script must not contain loops',
+    };
+  }
   if (analysis.agentCallCount === 0) {
     return {
       ok: false,
@@ -237,7 +285,7 @@ export function createWorkflowScriptPreview(
   const validation = validateWorkflowScript(script, { policy });
   if (!validation.ok) return validation;
 
-  const { meta, scriptHash, analysis } = validation.normalized;
+  const { meta, scriptHash, analysis, policy: normalizedPolicy } = validation.normalized;
   const phases = Array.isArray(meta.phases) && meta.phases.length > 0
     ? meta.phases.map((phase, index) => ({
         id: `phase-${index + 1}`,
@@ -266,7 +314,37 @@ export function createWorkflowScriptPreview(
     phases,
     scriptHash,
     analysis,
+    policy: normalizedPolicy,
   };
+}
+
+function normalizeValidationPolicy(policy: WorkflowScriptValidationPolicy = {}): NormalizedWorkflowScriptValidationPolicy {
+  const normalized: NormalizedWorkflowScriptValidationPolicy = {
+    maxScriptBytes: Number.isFinite(Number(policy.maxScriptBytes)) ? Number(policy.maxScriptBytes) : DEFAULT_SCRIPT_POLICY.maxScriptBytes,
+    maxAgentCalls: Number.isFinite(Number(policy.maxAgentCalls)) ? Number(policy.maxAgentCalls) : DEFAULT_SCRIPT_POLICY.maxAgentCalls,
+    maxAgentRetry: Number.isFinite(Number(policy.maxAgentRetry)) ? Number(policy.maxAgentRetry) : DEFAULT_SCRIPT_POLICY.maxAgentRetry,
+    maxWorkflowRetry: Number.isFinite(Number(policy.maxWorkflowRetry)) ? Number(policy.maxWorkflowRetry) : DEFAULT_SCRIPT_POLICY.maxWorkflowRetry,
+  };
+  if (policy.budget) {
+    normalized.budget = {
+      maxTokens: Math.max(0, Number(policy.budget.maxTokens || 0)),
+      defaultEstimateMultiplier: Number.isFinite(Number(policy.budget.defaultEstimateMultiplier))
+        ? Math.max(1, Number(policy.budget.defaultEstimateMultiplier))
+        : 2,
+    };
+  }
+  if (policy.evidenceGate) {
+    normalized.evidenceGate = {
+      checks: Array.isArray(policy.evidenceGate.checks)
+        ? JSON.parse(JSON.stringify(policy.evidenceGate.checks)) as EvidenceCheck[]
+        : [],
+      maxRetry: Number.isFinite(Number(policy.evidenceGate.maxRetry))
+        ? Math.max(1, Number(policy.evidenceGate.maxRetry))
+        : 3,
+      retryPolicy: 'refetch',
+    };
+  }
+  return normalized;
 }
 
 function hasEagerParallelAgentCall(body: string): boolean {
@@ -282,6 +360,7 @@ function validateWorkflowMeta(meta: unknown): { ok: true; meta: WorkflowScriptMe
   if (!/^[a-z][a-z0-9_]{1,80}$/.test(value.name)) return { ok: false, error: 'workflow_script_meta_name_invalid' };
   if (typeof value.description !== 'string' || !value.description.trim()) return { ok: false, error: 'workflow_script_meta_description_required' };
   if (value.whenToUse !== undefined && typeof value.whenToUse !== 'string') return { ok: false, error: 'workflow_script_meta_when_to_use_invalid' };
+  if (value.resumable !== undefined && typeof value.resumable !== 'boolean') return { ok: false, error: 'workflow_script_meta_resumable_invalid' };
   if (value.phases !== undefined) {
     if (!Array.isArray(value.phases)) return { ok: false, error: 'workflow_script_meta_phases_invalid' };
     for (const phase of value.phases) {
@@ -294,7 +373,7 @@ function validateWorkflowMeta(meta: unknown): { ok: true; meta: WorkflowScriptMe
   return { ok: true, meta: value as WorkflowScriptMeta };
 }
 
-function analyzeWorkflowScriptBody(body: string): WorkflowScriptAnalysis {
+function analyzeWorkflowScriptBody(body: string, meta: WorkflowScriptMeta): WorkflowScriptAnalysis {
   const stripped = stripStringsAndComments(body);
   return {
     agentCallCount: countNamedCalls(stripped, 'agent'),
@@ -303,7 +382,13 @@ function analyzeWorkflowScriptBody(body: string): WorkflowScriptAnalysis {
     pipelineCallCount: countNamedCalls(stripped, 'pipeline'),
     requestUserInputCallCount: countDottedCalls(stripped, 'workflow', 'requestUserInput'),
     runtimePhaseTitles: collectRuntimePhaseTitles(body),
+    resumable: meta.resumable === true,
+    hasLoop: hasLoopSyntax(stripped),
   };
+}
+
+function hasLoopSyntax(strippedBody: string): boolean {
+  return /\b(?:for|while)\s*\(/.test(strippedBody) || /\bdo\s*\{/.test(strippedBody);
 }
 
 function findForbiddenApi(body: string): string | null {

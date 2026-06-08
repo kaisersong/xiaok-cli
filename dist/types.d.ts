@@ -8,7 +8,10 @@ import type { ModelConfigEntry, ProviderConfig, ProviderId } from './ai/provider
 import type { IntentBoundaryConfig } from './ai/intent-delegation/boundary-types.js';
 export type { MessageBlock, UsageStats };
 export interface ModelAdapter {
-    stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string): AsyncIterable<StreamChunk>;
+    stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: {
+        promptCache?: PromptCacheSegments;
+        signal?: AbortSignal;
+    }): AsyncIterable<StreamChunk>;
     getModelName(): string;
 }
 export type StreamChunk = {
@@ -51,6 +54,12 @@ export interface ToolExecutionContext {
     toolDefinitions: ToolDefinition[];
     promptCache?: PromptCacheSegments;
     promptSnapshot?: PromptSnapshot;
+    settingsStore?: {
+        getSettings(): {
+            modelCapabilities?: Record<string, string>;
+        };
+    };
+    signal?: AbortSignal;
 }
 export type PermissionClass = 'safe' | 'write' | 'bash';
 export interface Tool {
@@ -145,6 +154,9 @@ export interface Config {
             compactIntervalMs?: number;
             maxPromptTokens?: number;
         };
+    };
+    kswarm?: {
+        maxConcurrentTasks?: number;
     };
 }
 export declare const DEFAULT_INTENT_BOUNDARY_CONFIG: IntentBoundaryConfig;

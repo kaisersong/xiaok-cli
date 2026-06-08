@@ -53,6 +53,11 @@
       "to": "services/intent-broker/package.json"
     },
     {
+      "from": "../../intent-broker/bin",
+      "to": "services/intent-broker/bin",
+      "filter": ["**/*.js"]
+    },
+    {
       "from": "../../intent-broker/adapters",
       "to": "services/intent-broker/adapters",
       "filter": ["**/*", "!**/node_modules/**", "!**/.env", "!**/.env.*"]

@@ -90,9 +90,21 @@ export class KSwarmStreamBridge {
       };
 
       ws.onerror = () => {
-        ws.close();
+        this.closeErroredSocket(ws);
       };
     } catch {
+      this.scheduleReconnect();
+    }
+  }
+
+  private closeErroredSocket(ws: WebSocket): void {
+    if (this.ws !== ws) return;
+    if (ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) return;
+    try {
+      ws.close();
+    } catch {
+      this.ws = null;
+      this.setConnectionStatus('disconnected');
       this.scheduleReconnect();
     }
   }

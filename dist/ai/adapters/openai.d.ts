@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
-import type { ModelCapabilities, ModelInvocationOptions } from '../runtime/model-capabilities.js';
+import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
 export declare class OpenAIAdapter implements ModelAdapter {
     client: OpenAI;
     private readonly apiKey;
@@ -14,6 +14,6 @@ export declare class OpenAIAdapter implements ModelAdapter {
     getCapabilities(): Partial<ModelCapabilities>;
     dispose(): void;
     cloneWithModel(model: string): OpenAIAdapter;
-    stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: ModelInvocationOptions): AsyncIterable<StreamChunk>;
+    stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions): AsyncIterable<StreamChunk>;
     private streamOnce;
 }

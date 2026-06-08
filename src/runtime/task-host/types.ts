@@ -79,7 +79,7 @@ export type UserAnswer =
   | { questionId: string; type: 'materials'; materialIds: string[] }
   | { questionId: string; type: 'role_update'; materialId: string; role: MaterialRole };
 
-export type ArtifactKind = 'pptx' | 'pdf' | 'docx' | 'xlsx' | 'html' | 'image' | 'text' | 'other';
+export type ArtifactKind = 'pptx' | 'pdf' | 'docx' | 'xlsx' | 'html' | 'image' | 'text' | 'a2ui' | 'other';
 
 export interface ArtifactSummary {
   artifactId: string;
@@ -88,6 +88,7 @@ export interface ArtifactSummary {
   createdAt: string;
   previewAvailable: boolean;
   filePath?: string;
+  mimeType?: string;
   sizeBytes?: number;
   sourceMaterialIds?: string[];
   creator?: string; // e.g. "agent", "skill:report", "tool:Write"
@@ -113,12 +114,13 @@ export type DesktopTaskEvent =
   | { type: 'progress'; message: string; stage?: string; eventId: string }
   | { type: 'assistant_delta'; delta: string; eventId: string }
   | { type: 'needs_user'; question: NeedsUserQuestion }
+  | { type: 'task_cancelled'; taskId: string; reason: string; partialText?: string }
   | { type: 'result'; result: TaskResult }
-  | { type: 'artifact_recorded'; artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string; creator?: string }
+  | { type: 'artifact_recorded'; artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string; creator?: string; mimeType?: string }
   | { type: 'salvage'; salvage: SalvageSummary }
   | { type: 'error'; message: string }
   // Canvas events (appended, do not replace existing progress events)
-  | { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string; ts?: number }
+  | { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string; ts?: number; displayInputSummary?: string }
   | { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string; eventId: string; ts?: number }
   | { type: 'canvas_file_changed'; filePath: string; change: 'add' | 'change' | 'unlink'; eventId: string }
   // TaskPanel progress (from report_progress tool)

@@ -47,7 +47,7 @@ export class TimedActionScheduler {
     this.executorTimeoutMs = options.executorTimeoutMs ?? 5 * 60_000;
     this.maxClaimPerTick = options.maxClaimPerTick ?? 20;
     this.maxAgentConcurrent = options.maxAgentConcurrent ?? 2;
-    this.staleAfterMs = options.staleAfterMs ?? this.executorTimeoutMs;
+    this.staleAfterMs = options.staleAfterMs ?? 30 * 60_000;
   }
 
   start(): void {

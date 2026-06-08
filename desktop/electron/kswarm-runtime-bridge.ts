@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
+import { isAbortError } from '../../src/ai/runtime/abort-utils.js';
 
 export interface KSwarmTaskHandoff {
   kind: 'kswarm_task_handoff_v1';
@@ -34,6 +35,7 @@ export interface KSwarmWorkflowNodeHandoff {
   attempt: number;
   handoffId: string;
   input?: Record<string, unknown> | null;
+  handoffPath?: string | null;
   project?: {
     id: string;
     name?: string;
@@ -45,7 +47,7 @@ export interface KSwarmWorkflowNodeHandoff {
 
 export interface KSwarmRuntimeBridgeOptions {
   allowedRoots?: string[];
-  runDesktopTask(input: { handoff: KSwarmTaskHandoff; targetParticipantId?: string }): Promise<{
+  runDesktopTask(input: { handoff: KSwarmTaskHandoff; targetParticipantId?: string; signal?: AbortSignal }): Promise<{
     summary: string;
     artifacts?: Array<{ path: string; kind: string; label?: string }>;
     provenance?: Record<string, unknown>;
@@ -70,12 +72,15 @@ export interface KSwarmRuntimeBridgeOptions {
 }
 
 export function createKSwarmRuntimeBridge(options: KSwarmRuntimeBridgeOptions) {
+  const activeTaskControllers = new Map<string, AbortController>();
+
   async function handleTaskHandoff(input: {
     handoffPath: string;
     projectId: string;
     taskId: string;
     runId: string;
     targetParticipantId?: string;
+    signal?: AbortSignal;
   }): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!isAllowedPath(input.handoffPath, options.allowedRoots)) {
       return { ok: false, error: 'handoff_path_outside_allowed_roots' };
@@ -85,25 +90,41 @@ export function createKSwarmRuntimeBridge(options: KSwarmRuntimeBridgeOptions) {
     if (handoff.kind !== 'kswarm_task_handoff_v1') return { ok: false, error: 'invalid_handoff_kind' };
     if (handoff.runId !== input.runId) return { ok: false, error: 'run_id_mismatch' };
 
-    const executed = await options.runDesktopTask({ handoff, targetParticipantId: input.targetParticipantId });
-    const result = {
-      summary: executed.summary,
-      artifacts: executed.artifacts ?? [],
-      ...(handoff.project.workFolder ? { workFolder: handoff.project.workFolder, workspacePath: handoff.project.workFolder } : {}),
-      provenance: {
-        runtimeSource: 'desktop-agent-runtime',
-        ...(executed.provenance ?? {}),
-      },
-    };
-    const response = await options.submitResult({
-      projectId: input.projectId,
-      taskId: input.taskId,
-      runId: input.runId,
-      targetParticipantId: input.targetParticipantId,
-      result,
-    });
-    if (!response.ok) return { ok: false, error: `submit_failed:${response.status}` };
-    return { ok: true };
+    const controller = new AbortController();
+    activeTaskControllers.set(input.taskId, controller);
+    const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal;
+    try {
+      const executed = await options.runDesktopTask({
+        handoff,
+        targetParticipantId: input.targetParticipantId,
+        signal,
+      });
+      const result = {
+        summary: executed.summary,
+        artifacts: executed.artifacts ?? [],
+        ...(handoff.project.workFolder ? { workFolder: handoff.project.workFolder, workspacePath: handoff.project.workFolder } : {}),
+        provenance: {
+          runtimeSource: 'desktop-agent-runtime',
+          ...(executed.provenance ?? {}),
+        },
+      };
+      const response = await options.submitResult({
+        projectId: input.projectId,
+        taskId: input.taskId,
+        runId: input.runId,
+        targetParticipantId: input.targetParticipantId,
+        result,
+      });
+      if (!response.ok) return { ok: false, error: `submit_failed:${response.status}` };
+      return { ok: true };
+    } catch (error) {
+      if (signal.aborted || isAbortError(error)) {
+        return { ok: false, error: 'task_cancelled:user_aborted' };
+      }
+      throw error;
+    } finally {
+      activeTaskControllers.delete(input.taskId);
+    }
   }
 
   async function handleWorkflowNodeHandoff(input: {
@@ -124,7 +145,11 @@ export function createKSwarmRuntimeBridge(options: KSwarmRuntimeBridgeOptions) {
     return { ok: true };
   }
 
-  return { handleTaskHandoff, handleWorkflowNodeHandoff };
+  function cancelTask(taskId: string): void {
+    activeTaskControllers.get(taskId)?.abort();
+  }
+
+  return { handleTaskHandoff, handleWorkflowNodeHandoff, cancelTask };
 }
 
 export interface KSwarmRuntimeBridge {
@@ -134,7 +159,9 @@ export interface KSwarmRuntimeBridge {
     taskId: string;
     runId: string;
     targetParticipantId?: string;
+    signal?: AbortSignal;
   }): Promise<{ ok: true } | { ok: false; error: string }>;
+  cancelTask?(taskId: string): void;
   handleWorkflowNodeHandoff?(input: {
     handoff: KSwarmWorkflowNodeHandoff;
     targetParticipantId?: string;
@@ -192,6 +219,7 @@ export interface KSwarmRuntimeBridgeBrokerClientOptions {
   alias?: string;
   roles?: string[];
   capabilities?: string[];
+  allowedRoots?: string[];
   bridge: KSwarmRuntimeBridge;
   taskHeartbeatIntervalMs?: number;
   maxConcurrentTasks?: number;
@@ -305,6 +333,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   const maxConcurrentTasks = options.maxConcurrentTasks ?? 3;
   let activeTaskCount = 0;
+  const activeTaskControllers = new Map<string, AbortController>();
 
   async function start(): Promise<void> {
     if (socket) return;
@@ -370,6 +399,10 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
       await handleRequestTask(event);
       return;
     }
+    if (event?.kind === 'cancel_task') {
+      handleCancelTask(event);
+      return;
+    }
     if (event?.kind === 'workflow_node_handoff') {
       await handleWorkflowNodeHandoff(event);
       return;
@@ -422,7 +455,11 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
         };
       }
     } else {
-      probeResult = { ok: false, reason: 'readiness_handler_missing' };
+      probeResult = {
+        ok: true,
+        capabilities: options.capabilities ?? [],
+        outputCapabilities: [],
+      };
     }
 
     await sendIntent('readiness_probe_result', event, {
@@ -467,6 +504,8 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
     }
 
     activeTaskCount++;
+    const controller = new AbortController();
+    activeTaskControllers.set(taskId, controller);
     await sendIntent('accept_task', event, { projectId, taskId, runId }, targetParticipantId);
     await sendIntent('report_progress', event, { projectId, taskId, runId, stage: 'started' }, targetParticipantId);
 
@@ -478,17 +517,36 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
         taskId,
         runId,
         targetParticipantId,
+        signal: controller.signal,
       });
       if (!result.ok) {
-        await sendTaskFailed(event, {
+        if (isTaskCancelledResult(result.error)) {
+          await sendTaskCancelled(event, {
+            projectId,
+            taskId,
+            runId,
+            reason: getTaskCancelledReason(result.error),
+          });
+        } else {
+          await sendTaskFailed(event, {
+            projectId,
+            taskId,
+            runId,
+            failureReason: result.error || 'desktop_runtime_failed',
+            errorMessage: result.error || 'desktop_runtime_failed',
+          });
+        }
+      }
+    } catch (error) {
+      if (isAbortError(error)) {
+        await sendTaskCancelled(event, {
           projectId,
           taskId,
           runId,
-          failureReason: result.error || 'desktop_runtime_failed',
-          errorMessage: result.error || 'desktop_runtime_failed',
+          reason: 'user_aborted',
         });
+        return;
       }
-    } catch (error) {
       await sendTaskFailed(event, {
         projectId,
         taskId,
@@ -498,14 +556,37 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
       });
     } finally {
       activeTaskCount--;
+      activeTaskControllers.delete(taskId);
       stopHeartbeat();
     }
+  }
+
+  function handleCancelTask(event: BrokerEvent): void {
+    const payload = event.payload ?? {};
+    const taskId = asNonEmptyString(payload.taskId) || asNonEmptyString(event.taskId);
+    if (!taskId) return;
+    activeTaskControllers.get(taskId)?.abort();
+    options.bridge.cancelTask?.(taskId);
   }
 
   async function handleWorkflowNodeHandoff(event: BrokerEvent): Promise<void> {
     const payload = event.payload ?? {};
     const targetParticipantId = resolveEventTargetParticipantId(event, payload);
-    const handoff = normalizeWorkflowNodeHandoff(payload);
+    let handoff: KSwarmWorkflowNodeHandoff | null = null;
+    try {
+      handoff = await resolveWorkflowNodeHandoff(payload, options.allowedRoots);
+    } catch (error) {
+      await sendIntent('workflow_node_failed', event, {
+        projectId: asNonEmptyString(payload.projectId),
+        workflowRunId: asNonEmptyString(payload.workflowRunId),
+        nodeId: asNonEmptyString(payload.nodeId),
+        attempt: payload.attempt,
+        handoffId: asNonEmptyString(payload.handoffId),
+        failureReason: getWorkflowNodeFailureReason(error),
+        errorMessage: getWorkflowNodeFailureReason(error),
+      }, targetParticipantId);
+      return;
+    }
     if (!handoff) {
       await sendIntent('workflow_node_failed', event, {
         projectId: asNonEmptyString(payload.projectId),
@@ -588,6 +669,10 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
     await sendIntent('task_failed', event, payload);
   }
 
+  async function sendTaskCancelled(event: BrokerEvent, payload: Record<string, unknown>): Promise<void> {
+    await sendIntent('task_cancelled', event, payload);
+  }
+
   async function sendIntent(
     kind: string,
     event: BrokerEvent,
@@ -659,6 +744,16 @@ function getWorkflowNodeFailureReason(error: unknown): string {
   return firstLine.length > 500 ? `${firstLine.slice(0, 497)}...` : firstLine;
 }
 
+function isTaskCancelledResult(error: string | undefined): boolean {
+  return error === 'task_cancelled' || Boolean(error?.startsWith('task_cancelled:'));
+}
+
+function getTaskCancelledReason(error: string | undefined): string {
+  if (!error) return 'user_aborted';
+  const [, reason] = error.split(':', 2);
+  return reason || 'user_aborted';
+}
+
 function parseBrokerMessage(data: unknown): { type?: string; event?: unknown } | null {
   try {
     if (typeof data === 'string') return JSON.parse(data) as { type?: string; event?: unknown };
@@ -667,6 +762,35 @@ function parseBrokerMessage(data: unknown): { type?: string; event?: unknown } |
     return null;
   }
   return null;
+}
+
+async function resolveWorkflowNodeHandoff(payload: Record<string, unknown>, allowedRoots?: string[]): Promise<KSwarmWorkflowNodeHandoff | null> {
+  const compact = normalizeWorkflowNodeHandoff(payload);
+  const handoffPath = asNonEmptyString(payload.handoffPath);
+  if (!handoffPath) return compact;
+  if (!isAllowedPath(handoffPath, allowedRoots)) {
+    throw new Error('workflow_handoff_path_outside_allowed_roots');
+  }
+  const raw = await readFile(handoffPath, 'utf-8');
+  const fromFile = JSON.parse(raw) as unknown;
+  if (!isRecord(fromFile)) throw new Error('workflow_handoff_file_invalid');
+  const handoff = normalizeWorkflowNodeHandoff(fromFile);
+  if (!handoff) return null;
+  if (compact && !sameWorkflowNodeHandoffIdentity(compact, handoff)) {
+    throw new Error('workflow_handoff_file_identity_mismatch');
+  }
+  return {
+    ...handoff,
+    handoffPath,
+  };
+}
+
+function sameWorkflowNodeHandoffIdentity(a: KSwarmWorkflowNodeHandoff, b: KSwarmWorkflowNodeHandoff): boolean {
+  return a.projectId === b.projectId
+    && a.workflowRunId === b.workflowRunId
+    && a.nodeId === b.nodeId
+    && a.handoffId === b.handoffId
+    && Number(a.attempt) === Number(b.attempt);
 }
 
 function normalizeWorkflowNodeHandoff(payload: Record<string, unknown>): KSwarmWorkflowNodeHandoff | null {
@@ -689,6 +813,7 @@ function normalizeWorkflowNodeHandoff(payload: Record<string, unknown>): KSwarmW
     attempt,
     handoffId,
     input: isRecord(payload.input) ? payload.input : null,
+    handoffPath: asNonEmptyString(payload.handoffPath) || null,
     project: isRecord(payload.project) ? {
       id: asNonEmptyString(payload.project.id) || projectId,
       name: asNonEmptyString(payload.project.name),

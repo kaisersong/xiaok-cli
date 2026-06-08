@@ -9,9 +9,10 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { join, dirname } from 'node:path';
+import { createHash } from 'node:crypto';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { app } from 'electron';
 import {
   buildSeedAgentReconciliationPlan,
@@ -128,6 +129,30 @@ export async function requestWithFallbackBaseUrls(options: {
   throw new KSwarmUnavailableError(lastError?.message ?? 'all service endpoints failed');
 }
 
+export function resolveIntentBrokerRuntimeRoot(userDataPath: string): string {
+  return join(userDataPath, 'services', 'intent-broker');
+}
+
+export function buildIntentBrokerServiceEnv(options: {
+  baseEnv?: NodeJS.ProcessEnv;
+  cwd: string;
+  port: number;
+  repoRoot?: string;
+}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...(options.baseEnv ?? process.env), PORT: String(options.port) };
+  const repoRoot = options.repoRoot || options.cwd;
+
+  if (repoRoot !== options.cwd) {
+    env.INTENT_BROKER_REPO_ROOT ||= repoRoot;
+    env.INTENT_BROKER_CONFIG ||= join(repoRoot, 'intent-broker.config.json');
+    env.INTENT_BROKER_LOCAL_CONFIG ||= join(options.cwd, 'intent-broker.local.json');
+    env.INTENT_BROKER_DB ||= join(options.cwd, '.tmp', 'intent-broker.db');
+    env.INTENT_BROKER_HEARTBEAT_PATH ||= join(options.cwd, '.tmp', 'broker.heartbeat.json');
+  }
+
+  return env;
+}
+
 function resolveBrokerLaunchSpec(): ServiceLaunchSpec | null {
   const envPath = process.env.BROKER_SERVER_PATH;
   if (envPath && existsSync(envPath)) {
@@ -139,10 +164,12 @@ function resolveBrokerLaunchSpec(): ServiceLaunchSpec | null {
   }
 
   if (app.isPackaged) {
-    const entryPath = join(process.resourcesPath, 'services', 'intent-broker', 'src', 'cli.js');
+    const repoRoot = join(process.resourcesPath, 'services', 'intent-broker');
+    const entryPath = join(repoRoot, 'src', 'cli.js');
     if (existsSync(entryPath)) {
       return {
-        cwd: join(process.resourcesPath, 'services', 'intent-broker'),
+        cwd: resolveIntentBrokerRuntimeRoot(app.getPath('userData')),
+        repoRoot,
         entryPath,
         nodeArgs: ['--experimental-sqlite', entryPath],
       };
@@ -225,13 +252,72 @@ export function hasDynamicWorkflowSupport(body: Record<string, unknown> | null):
   return Array.isArray(features) && features.includes(DYNAMIC_WORKFLOW_FEATURE);
 }
 
+export function getKSwarmHealthServiceEntryPath(body: Record<string, unknown> | null): string | null {
+  const service = body?.service;
+  if (!service || typeof service !== 'object' || Array.isArray(service)) return null;
+  const entryPath = (service as Record<string, unknown>).entryPath;
+  return typeof entryPath === 'string' && entryPath.length > 0 ? entryPath : null;
+}
+
+export function getKSwarmHealthServiceSourceHash(body: Record<string, unknown> | null): string | null {
+  const service = body?.service;
+  if (!service || typeof service !== 'object' || Array.isArray(service)) return null;
+  const sourceHash = (service as Record<string, unknown>).sourceHash;
+  return typeof sourceHash === 'string' && sourceHash.length > 0 ? sourceHash : null;
+}
+
+export function computeKSwarmServiceSourceHash(entryPath: string | null): string | null {
+  if (!entryPath) return null;
+  const sourceRoot = dirname(dirname(resolve(entryPath)));
+  try {
+    const hash = createHash('sha256');
+    const visit = (dir: string) => {
+      const entries = readdirSync(dir, { withFileTypes: true })
+        .sort((a, b) => a.name.localeCompare(b.name));
+      for (const entry of entries) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          visit(path);
+          continue;
+        }
+        if (!entry.isFile() || !/\.(js|json)$/.test(entry.name)) continue;
+        hash.update(relative(sourceRoot, path));
+        hash.update('\0');
+        hash.update(readFileSync(path));
+        hash.update('\0');
+      }
+    };
+    visit(sourceRoot);
+    return hash.digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+export function doesKSwarmHealthMatchExpectedService(
+  body: Record<string, unknown> | null,
+  expectedEntryPath: string | null,
+  expectedSourceHash: string | null = null,
+): boolean {
+  if (!expectedEntryPath) return true;
+  const actualEntryPath = getKSwarmHealthServiceEntryPath(body);
+  if (!actualEntryPath || resolve(actualEntryPath) !== resolve(expectedEntryPath)) return false;
+  if (!expectedSourceHash) return true;
+  return getKSwarmHealthServiceSourceHash(body) === expectedSourceHash;
+}
+
 export function shouldAdoptExistingKSwarmService(input: {
   hasOwnedChild: boolean;
   healthOk: boolean;
   brokerReady?: boolean;
   dynamicWorkflowReady?: boolean;
+  serviceIdentityMatches?: boolean;
 }): boolean {
-  return input.healthOk && input.brokerReady !== false && input.dynamicWorkflowReady !== false && !input.hasOwnedChild;
+  return input.healthOk
+    && input.brokerReady !== false
+    && input.dynamicWorkflowReady !== false
+    && input.serviceIdentityMatches !== false
+    && !input.hasOwnedChild;
 }
 
 export interface KSwarmService {
@@ -483,10 +569,15 @@ export function createKSwarmService(): KSwarmService {
       return true; // May be running externally
     }
 
-    const nodeRuntime = resolveBackgroundNodeRuntime({
-      env: { ...process.env, PORT: String(BROKER_PORT) },
+    const brokerEnv = buildIntentBrokerServiceEnv({
+      baseEnv: process.env,
+      cwd: brokerLaunch.cwd,
+      port: BROKER_PORT,
+      repoRoot: brokerLaunch.repoRoot,
     });
+    const nodeRuntime = resolveBackgroundNodeRuntime({ env: brokerEnv });
     console.log(`[kswarm-service] Spawning broker: ${brokerLaunch.entryPath}`);
+    mkdirSync(brokerLaunch.cwd, { recursive: true });
     brokerChild = spawn(nodeRuntime.command, brokerLaunch.nodeArgs, buildBackgroundNodeSpawnOptions({
       cwd: brokerLaunch.cwd,
       env: nodeRuntime.env,
@@ -516,12 +607,23 @@ export function createKSwarmService(): KSwarmService {
     const existingHealth = await fetchHealthJsonFromUrls(KSWARM_HEALTH_URLS);
     const existingHealthy = existingHealth.ok;
     const dynamicWorkflowReady = hasDynamicWorkflowSupport(existingHealth.body);
+    const serverPath = resolveServicePath('kswarm', 'src/server/index.js');
+    const expectedSourceHash = computeKSwarmServiceSourceHash(serverPath);
+    const serviceIdentityMatches = doesKSwarmHealthMatchExpectedService(existingHealth.body, serverPath, expectedSourceHash);
     let brokerReady = await brokerHealthCheck();
+    if (existingHealthy && serverPath && !serviceIdentityMatches && !child) {
+      lastError = `existing kswarm service on port ${KSWARM_PORT} does not match bundled service`;
+      console.warn(`[kswarm-service] ${lastError}`);
+      running = false;
+      notifyListeners();
+      return;
+    }
     if (shouldAdoptExistingKSwarmService({
       hasOwnedChild: Boolean(child),
       healthOk: existingHealthy,
       brokerReady,
       dynamicWorkflowReady,
+      serviceIdentityMatches,
     })) {
       console.log(`[kswarm-service] Adopting existing healthy kswarm service on port ${KSWARM_PORT}`);
       await reconcileSeedAgents();
@@ -555,7 +657,6 @@ export function createKSwarmService(): KSwarmService {
       return;
     }
 
-    const serverPath = resolveServicePath('kswarm', 'src/server/index.js');
     if (!serverPath) {
       lastError = 'kswarm server entry not found';
       console.error('[kswarm-service]', lastError);

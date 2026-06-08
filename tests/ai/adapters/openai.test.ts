@@ -482,6 +482,35 @@ describe('OpenAIAdapter', () => {
     expect(JSON.stringify(capturedParams)).not.toContain('cached system');
   });
 
+  it('propagates external abort signal to OpenAI requests', async () => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    let capturedOptions: { signal?: AbortSignal } | undefined;
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    };
+
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (_params: unknown, options: unknown) => {
+      capturedOptions = options as { signal?: AbortSignal };
+      return mockStream as never;
+    });
+
+    const adapter = new OpenAIAdapter('test-key', 'gpt-4o');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const controller = new AbortController();
+    for await (const _ of adapter.stream([], [], 'system', { signal: controller.signal } as never)) { /* consume */ }
+
+    expect(capturedOptions?.signal).toBeDefined();
+    expect(capturedOptions?.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(capturedOptions?.signal?.aborted).toBe(true);
+  });
+
   it('serializes image blocks into OpenAI image_url content parts', async () => {
     const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
 
@@ -574,6 +603,38 @@ describe('OpenAIAdapter', () => {
 
     expect(calls).toBe(2);
     expect(chunks).toEqual(['ok']);
+    vi.useRealTimers();
+  });
+
+  it('does not retry AbortError failures', async () => {
+    vi.useFakeTimers();
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+
+    let calls = 0;
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+      calls += 1;
+      throw Object.assign(new Error('user aborted'), { name: 'AbortError' });
+    });
+
+    const adapter = new OpenAIAdapter('test-key', 'gpt-4o');
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    let caughtError: Error | undefined;
+    const streamPromise = (async () => {
+      try {
+        for await (const _ of adapter.stream([], [], 'sys')) { /* drain */ }
+      } catch (e) {
+        caughtError = e as Error;
+      }
+    })();
+
+    await vi.runAllTimersAsync();
+    await streamPromise;
+
+    expect(calls).toBe(1);
+    expect(caughtError?.name).toBe('AbortError');
     vi.useRealTimers();
   });
 

@@ -2,7 +2,8 @@ import { Agent as HttpAgent } from 'node:http';
 import { Agent as HttpsAgent } from 'node:https';
 import OpenAI from 'openai';
 import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
-import type { ModelCapabilities, ModelInvocationOptions } from '../runtime/model-capabilities.js';
+import { isAbortError } from '../runtime/abort-utils.js';
+import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
 import { estimateTokens } from '../runtime/usage.js';
 
 const MAX_RETRIES = 3;
@@ -11,8 +12,9 @@ const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 const KIMI_CODING_COMPAT_USER_AGENT = 'claude-code/1.0';
 
 function isRetryableError(error: unknown): boolean {
+  if (isAbortError(error)) return false;
   if (error instanceof Error) {
-    if (error.name === 'AbortError' || error.name === 'TimeoutError') return true;
+    if (error.name === 'TimeoutError') return true;
     const record = error as unknown as Record<string, unknown>;
     const status = record.status;
     if (typeof status === 'number' && RETRYABLE_STATUS.has(status)) return true;
@@ -236,19 +238,21 @@ export class OpenAIAdapter implements ModelAdapter {
     messages: Message[],
     tools: ToolDefinition[],
     systemPrompt: string,
-    options?: ModelInvocationOptions,
+    options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
     let attempt = 0;
     while (true) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+      const signal = options?.signal
+        ? AbortSignal.any([controller.signal, options.signal])
+        : controller.signal;
       let emittedAny = false;
       try {
-        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, controller.signal)) {
+        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, signal)) {
           emittedAny = true;
           yield chunk;
         }
-        clearTimeout(timer);
         return;
       } catch (error) {
         clearTimeout(timer);
@@ -259,6 +263,8 @@ export class OpenAIAdapter implements ModelAdapter {
         const delayMs = Math.min(1000 * 2 ** attempt, 16000);
         await sleep(delayMs);
         attempt += 1;
+      } finally {
+        clearTimeout(timer);
       }
     }
   }
@@ -267,7 +273,7 @@ export class OpenAIAdapter implements ModelAdapter {
     messages: Message[],
     tools: ToolDefinition[],
     systemPrompt: string,
-    _options?: ModelInvocationOptions,
+    _options?: StreamOptions,
     signal?: AbortSignal,
   ): AsyncIterable<StreamChunk> {
     const openaiMessages: OpenAI.ChatCompletionMessageParam[] = [

@@ -1,16 +1,27 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { _electron as electron } from '@playwright/test'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { test, expect } from '@playwright/test'
 
 let electronApp: ElectronApplication
 let page: Page
+let userDataDir: string | null = null
+const APP_PATH = process.env.XIAOK_E2E_APP_PATH
+  ?? join(process.cwd(), 'release/mac-arm64/xiaok.app/Contents/MacOS/xiaok')
 
 test.describe('Diff Visualization E2E', () => {
   test.beforeAll(async () => {
+    userDataDir = mkdtempSync(join(tmpdir(), 'xiaok-e2e-diff-'))
     electronApp = await electron.launch({
-      executablePath: '/Users/song/projects/xiaok-cli/desktop/release/mac-arm64/xiaok.app/Contents/MacOS/xiaok',
-      args: [],
-      cwd: '/Users/song/projects/xiaok-cli/desktop',
+      executablePath: APP_PATH,
+      args: [`--user-data-dir=${userDataDir}`],
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE: '1',
+      },
     })
 
     page = await electronApp.firstWindow()
@@ -31,6 +42,7 @@ test.describe('Diff Visualization E2E', () => {
   test.afterAll(async () => {
     await page.screenshot({ path: 'test-results/diff-e2e-final.png' }).catch(() => {})
     await electronApp.close().catch(() => {})
+    if (userDataDir) rmSync(userDataDir, { recursive: true, force: true })
   })
 
   test('Edit tool shows diff visualization in ToolStepsMessage', async () => {
@@ -50,10 +62,14 @@ test.describe('Diff Visualization E2E', () => {
     await expect(textarea).toBeVisible({ timeout: 10000 })
 
     const marker = `diff-e2e-${Date.now()}`
-    await textarea.fill(`用 edit 工具把 /Users/song/projects/xiaok-cli/desktop/renderer/src/styles/index.css 里的第一行 @import 'tailwindcss'; 替换成 @import 'tailwindcss'; /* ${marker} */。只用 edit 工具。`)
+    const prompt = `用 edit 工具把 /Users/song/projects/xiaok-cli/desktop/renderer/src/styles/index.css 里的第一行 @import 'tailwindcss'; 替换成 @import 'tailwindcss'; /* ${marker} */。只用 edit 工具。`
+    await textarea.fill(prompt)
+    await expect(textarea).toHaveValue(prompt)
 
-    const sendBtn = page.locator('button[type="submit"]')
-    await sendBtn.first().click()
+    const inputForm = textarea.locator('xpath=ancestor::form[1]')
+    const sendBtn = inputForm.locator('button[type="submit"]')
+    await expect(sendBtn).toBeEnabled({ timeout: 5000 })
+    await sendBtn.click()
     await page.waitForTimeout(3000)
     await page.screenshot({ path: 'test-results/diff-e2e-02-sent.png' })
 
@@ -107,11 +123,10 @@ test.describe('Diff Visualization E2E', () => {
 
     // Click the edit step row to expand its response
     // The edit step button contains "edit" plus params
-    const editStep = page.locator('button').filter({ hasText: /edit/ }).filter({ hasText: /file_path/ })
-    if (await editStep.count() > 0) {
-      await editStep.last().click()
-      await page.waitForTimeout(1000)
-    }
+    const editStep = page.getByRole('button', { name: /edit\s+index\.css/i }).last()
+    await expect(editStep).toBeVisible({ timeout: 10000 })
+    await editStep.click()
+    await page.waitForTimeout(1000)
     await page.screenshot({ path: 'test-results/diff-e2e-04-step-expanded.png' })
 
     // Step 5: Check for DiffView / Pierre rendering

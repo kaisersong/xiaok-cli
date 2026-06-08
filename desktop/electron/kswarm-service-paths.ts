@@ -52,6 +52,7 @@ export interface ServiceLaunchSpec {
   cwd: string;
   entryPath: string;
   nodeArgs: string[];
+  repoRoot?: string;
 }
 
 export function getDevelopmentBrokerLaunchSpec(

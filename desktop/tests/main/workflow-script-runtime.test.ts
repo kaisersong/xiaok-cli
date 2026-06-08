@@ -245,4 +245,172 @@ workflow.block({ reason: '缺少 HTML 交付物', evidenceRefs: ['artifacts/repo
       evidenceRefs: ['artifacts/report.md'],
     });
   });
+
+  it('reserves and consumes budget with stable run/node/attempt ids', async () => {
+    const calls: string[] = [];
+    const controller = {
+      async reserveBudget(input: any) {
+        calls.push(`reserve:${input.runId}:${input.nodeId}:${input.tokens}`);
+        return { reserved: true, attemptId: `${input.nodeId}-attempt-1` };
+      },
+      async consumeBudget(input: any) {
+        calls.push(`consume:${input.runId}:${input.nodeId}:${input.attemptId}:${input.reserved}:${input.actual}:${input.usageSource}`);
+      },
+      async releaseBudget(input: any) {
+        calls.push(`release:${input.runId}:${input.nodeId}:${input.attemptId}:${input.tokens}`);
+      },
+      async checkRemainingBudget() {
+        return 100;
+      },
+      async markBranchSkipped() {},
+      async createAgentNode(input: any) {
+        calls.push(`dispatch:${input.nodeId}:${input.attemptId}`);
+        return { summary: 'ok', usage: { totalTokens: 17 } };
+      },
+    };
+
+    await runWorkflowScript(
+      `export const meta = { name: 'budget_demo', description: 'budget demo' }
+return await agent('检查报告', { label: '检查', estimatedTokens: 20 })`,
+      {
+        workflowRunId: 'run-1',
+        controller,
+        policy: { budget: { maxTokens: 100, defaultEstimateMultiplier: 1 } },
+      } as any,
+    );
+
+    expect(calls).toEqual([
+      'reserve:run-1:node-run-1-1:20',
+      'dispatch:node-run-1-1:node-run-1-1-attempt-1',
+      'consume:run-1:node-run-1-1:node-run-1-1-attempt-1:20:17:provider',
+    ]);
+  });
+
+  it('retries evidence failures with a fresh attempt and bypasses completed-node cache', async () => {
+    const dispatches: Array<{ nodeId: string; attemptId: string; forceRetry?: boolean }> = [];
+    const consumed: string[] = [];
+    let attempt = 0;
+    let verifyCount = 0;
+    const controller = {
+      async reserveBudget(input: any) {
+        attempt += 1;
+        return { reserved: true, attemptId: `${input.nodeId}-attempt-${attempt}` };
+      },
+      async consumeBudget(input: any) {
+        consumed.push(`${input.nodeId}:${input.attemptId}:${input.actual}`);
+      },
+      async releaseBudget() {},
+      async checkRemainingBudget() {
+        return 100;
+      },
+      async markBranchSkipped() {},
+      async markNodeIntervention() {
+        throw new Error('should not need intervention');
+      },
+      async verifyEvidence(input: any) {
+        verifyCount += 1;
+        expect(input.runId).toBe('run-ev');
+        expect(input.nodeId).toBe('node-run-ev-1');
+        return verifyCount === 1
+          ? { ok: false, failures: ['missing summary'], warnings: [] }
+          : { ok: true, failures: [], warnings: ['short output'] };
+      },
+      async createAgentNode(input: any) {
+        dispatches.push({ nodeId: input.nodeId, attemptId: input.attemptId, forceRetry: input.forceRetry });
+        return input.forceRetry
+          ? { summary: 'second', usage: { totalTokens: 8 } }
+          : { text: 'first', usage: { totalTokens: 7 } };
+      },
+    };
+
+    const result = await runWorkflowScript(
+      `export const meta = { name: 'evidence_demo', description: 'evidence demo' }
+return await agent('生成报告', { label: '生成', estimatedTokens: 10 })`,
+      {
+        workflowRunId: 'run-ev',
+        workspaceRoot: '/tmp/workspace',
+        controller,
+        policy: {
+          budget: { maxTokens: 100, defaultEstimateMultiplier: 1 },
+          evidenceGate: {
+            maxRetry: 2,
+            retryPolicy: 'refetch',
+            checks: [{ kind: 'output_schema', requiredKeys: ['summary'] }],
+          },
+        },
+      } as any,
+    );
+
+    expect(result.result).toEqual({ summary: 'second', usage: { totalTokens: 8 } });
+    expect(dispatches).toEqual([
+      { nodeId: 'node-run-ev-1', attemptId: 'node-run-ev-1-attempt-1', forceRetry: undefined },
+      { nodeId: 'node-run-ev-1', attemptId: 'node-run-ev-1-attempt-2', forceRetry: true },
+    ]);
+    expect(consumed).toEqual([
+      'node-run-ev-1:node-run-ev-1-attempt-1:7',
+      'node-run-ev-1:node-run-ev-1-attempt-2:8',
+    ]);
+  });
+
+  it('rejects agent options that specify both model and modelCapability before dispatch', async () => {
+    let dispatched = false;
+    await expect(runWorkflowScript(
+      `export const meta = { name: 'model_capability_demo', description: 'model capability demo' }
+await agent('分析', { model: 'gpt-5.4', modelCapability: 'deep-reviewer' })`,
+      {
+        controller: {
+          async createAgentNode() {
+            dispatched = true;
+            return { ok: true };
+          },
+        },
+      },
+    )).rejects.toMatchObject({ code: 'model_and_capability_mutually_exclusive' });
+    expect(dispatched).toBe(false);
+  });
+
+  it('marks parallel branches as budget_skipped when best-effort remaining budget is exhausted', async () => {
+    const skipped: Array<{ nodeId: string; label: string }> = [];
+    const dispatched: string[] = [];
+    const result = await runWorkflowScript(
+      `export const meta = { name: 'parallel_budget_demo', description: 'parallel budget demo' }
+return await parallel([
+  () => agent('分支一', { label: '分支一', estimatedTokens: 30 }),
+  () => agent('分支二', { label: '分支二', estimatedTokens: 30 }),
+  () => agent('分支三', { label: '分支三', estimatedTokens: 30 }),
+])`,
+      {
+        workflowRunId: 'run-par',
+        controller: {
+          async checkRemainingBudget() {
+            return 50;
+          },
+          async reserveBudget(input: any) {
+            return { reserved: true, attemptId: `${input.nodeId}-attempt-1` };
+          },
+          async consumeBudget() {},
+          async releaseBudget() {},
+          async markBranchSkipped(input: any) {
+            skipped.push({ nodeId: input.nodeId, label: input.label });
+          },
+          async createAgentNode(input: any) {
+            dispatched.push(input.label);
+            return { summary: input.label };
+          },
+        },
+        policy: { budget: { maxTokens: 50, defaultEstimateMultiplier: 1 } },
+      } as any,
+    );
+
+    expect(dispatched).toEqual(['分支一']);
+    expect(skipped).toEqual([
+      { nodeId: 'node-run-par-2', label: '分支 2' },
+      { nodeId: 'node-run-par-3', label: '分支 3' },
+    ]);
+    expect(result.result).toEqual([
+      { summary: '分支一' },
+      { ok: false, error: 'budget_skipped', message: 'branch 2 skipped: budget exceeded', branch: '分支 2' },
+      { ok: false, error: 'budget_skipped', message: 'branch 3 skipped: budget exceeded', branch: '分支 3' },
+    ]);
+  });
 });

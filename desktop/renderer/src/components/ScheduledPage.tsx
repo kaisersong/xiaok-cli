@@ -367,7 +367,7 @@ export function ScheduledPage() {
 
     if (modalMode === 'create') {
       const intervalMinutes = formScheduleConfig?.intervalMinutes ?? 60;
-      if ((formFrequency === 'hourly' || formFrequency === 'interval') && intervalMinutes <= 30 && !confirmHighFreq) {
+      if (formFrequency === 'hourly' && intervalMinutes <= 30 && !confirmHighFreq) {
         setConfirmHighFreq(true);
         return;
       }

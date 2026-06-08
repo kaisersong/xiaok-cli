@@ -112,6 +112,28 @@ describe('chat terminal layout', () => {
     expect(failureHandlerUses).toBeGreaterThanOrEqual(2);
   });
 
+  it('wires ESC abort controllers through chat runtime turns and auto-continue', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+
+    expect(source).toContain("import { isAbortError } from '../ai/runtime/abort-utils.js';");
+    expect(source).toContain('let currentTurnAbortController: AbortController | null = null;');
+    expect(source).toContain('const requestCurrentTurnAbort = (): void => {');
+    expect(source).toContain('onAbortRequest: requestCurrentTurnAbort');
+    expect(source).toContain('controller.signal');
+    expect(source).toContain("runtimeHooks.on('turn_stop'");
+    expect(source).toContain("event.reason === 'user_aborted'");
+    expect(source).toContain('autoContinueController.signal');
+    expect(source).toContain('isAbortError(e)');
+  });
+
+  it('does not render AbortError as a failed turn error after ESC', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+
+    expect(source).toContain('const handleTurnAbort = (): void => {');
+    expect(source).toContain('if (isAbortError(e)) {\n            handleTurnAbort();');
+    expect(source).toContain('if (isAbortError(e)) {\n        handleTurnAbort();');
+  });
+
   it('should render the status line inside the prompt renderer instead of after assistant output', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 

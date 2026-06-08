@@ -171,7 +171,7 @@ function interpretExitCode(result, eventName) {
 // ---------------------------------------------------------------------------
 // Executors
 // ---------------------------------------------------------------------------
-async function executeCommand(config, timeoutMs, payloadJson) {
+async function executeCommand(config, timeoutMs, payloadJson, extraEnv) {
     return new Promise((resolve, reject) => {
         let stdout = '';
         let stderr = '';
@@ -179,6 +179,7 @@ async function executeCommand(config, timeoutMs, payloadJson) {
             shell: config.shell || undefined,
             env: {
                 ...process.env,
+                ...extraEnv,
                 XIAOK_HOOK_PAYLOAD: payloadJson,
             },
         });
@@ -207,11 +208,12 @@ async function executeCommand(config, timeoutMs, payloadJson) {
         });
     });
 }
-function executeCommandAsync(config, payloadJson, onRewake) {
+function executeCommandAsync(config, payloadJson, onRewake, extraEnv) {
     const child = exec(config.command, {
         shell: config.shell || undefined,
         env: {
             ...process.env,
+            ...extraEnv,
             XIAOK_HOOK_PAYLOAD: payloadJson,
         },
     });
@@ -316,6 +318,10 @@ export function createHooksRunner(config = {}) {
             return merged;
         }
         const payloadJson = buildPayload(eventName, payload, ctx);
+        const extraEnv = {};
+        if (ctx.session_id) {
+            extraEnv['XIAOK_CODE_SESSION_ID'] = ctx.session_id;
+        }
         for (const hook of allHooks) {
             if (!shouldMatch(hook, eventName, payload))
                 continue;
@@ -332,7 +338,7 @@ export function createHooksRunner(config = {}) {
                 const cmdConfig = hook;
                 executeCommandAsync(cmdConfig, payloadJson, hook.asyncRewake
                     ? () => config.onAsyncRewake?.(eventName, payload)
-                    : undefined);
+                    : undefined, extraEnv);
                 merged.async = true;
                 continue;
             }
@@ -346,7 +352,7 @@ export function createHooksRunner(config = {}) {
                     result = await executePrompt(hook, payloadJson, config.promptExecutor);
                 }
                 else {
-                    result = await executeCommand(hook, timeout, payloadJson);
+                    result = await executeCommand(hook, timeout, payloadJson, extraEnv);
                 }
                 const interpreted = interpretExitCode(result, eventName);
                 if (interpreted.ok === false) {

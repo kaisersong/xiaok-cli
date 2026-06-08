@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildBackgroundNodeSpawnOptions,
+  buildIntentBrokerServiceEnv,
+  doesKSwarmHealthMatchExpectedService,
   KSwarmUnavailableError,
   nextHealthFailureCount,
   requestWithFallbackBaseUrls,
   resolveBackgroundNodeRuntime,
+  resolveIntentBrokerRuntimeRoot,
   shouldAdoptExistingKSwarmService,
   shouldRestartAfterHealthFailures,
   uniqueServiceUrls,
@@ -132,9 +135,45 @@ describe('kswarm service spawn options', () => {
     expect(runtime.command).toBe('/opt/homebrew/bin/node');
     expect(runtime.env.ELECTRON_RUN_AS_NODE).toBeUndefined();
   });
+
+  it('keeps packaged intent-broker runtime state outside the signed app bundle', () => {
+    const userData = '/Users/song/Library/Application Support/xiaok';
+    const runtimeRoot = resolveIntentBrokerRuntimeRoot(userData);
+    const repoRoot = '/Applications/xiaok.app/Contents/Resources/services/intent-broker';
+    const env = buildIntentBrokerServiceEnv({
+      baseEnv: {},
+      cwd: runtimeRoot,
+      port: 4318,
+      repoRoot,
+    });
+
+    expect(runtimeRoot).toBe('/Users/song/Library/Application Support/xiaok/services/intent-broker');
+    expect(env.PORT).toBe('4318');
+    expect(env.INTENT_BROKER_REPO_ROOT).toBe(repoRoot);
+    expect(env.INTENT_BROKER_CONFIG).toBe(`${repoRoot}/intent-broker.config.json`);
+    expect(env.INTENT_BROKER_LOCAL_CONFIG).toBe(`${runtimeRoot}/intent-broker.local.json`);
+    expect(env.INTENT_BROKER_DB).toBe(`${runtimeRoot}/.tmp/intent-broker.db`);
+    expect(env.INTENT_BROKER_HEARTBEAT_PATH).toBe(`${runtimeRoot}/.tmp/broker.heartbeat.json`);
+  });
 });
 
 describe('kswarm service external adoption', () => {
+  it('requires service source identity to match when an expected source hash is available', () => {
+    const entryPath = '/tmp/xiaok.app/Contents/Resources/services/kswarm/src/server/index.js';
+
+    expect(doesKSwarmHealthMatchExpectedService({
+      service: { entryPath, sourceHash: 'hash-new' },
+    }, entryPath, 'hash-new')).toBe(true);
+
+    expect(doesKSwarmHealthMatchExpectedService({
+      service: { entryPath, sourceHash: 'hash-old' },
+    }, entryPath, 'hash-new')).toBe(false);
+
+    expect(doesKSwarmHealthMatchExpectedService({
+      service: { entryPath },
+    }, entryPath, 'hash-new')).toBe(false);
+  });
+
   it('adopts an already healthy service when desktop does not own a child process', () => {
     expect(shouldAdoptExistingKSwarmService({ hasOwnedChild: false, healthOk: true })).toBe(true);
   });
@@ -153,6 +192,16 @@ describe('kswarm service external adoption', () => {
       healthOk: true,
       brokerReady: true,
       dynamicWorkflowReady: false,
+    })).toBe(false);
+  });
+
+  it('does not adopt a healthy dynamic-workflow service with a mismatched service identity', () => {
+    expect(shouldAdoptExistingKSwarmService({
+      hasOwnedChild: false,
+      healthOk: true,
+      brokerReady: true,
+      dynamicWorkflowReady: true,
+      serviceIdentityMatches: false,
     })).toBe(false);
   });
 

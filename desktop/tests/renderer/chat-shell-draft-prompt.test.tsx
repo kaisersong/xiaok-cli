@@ -24,6 +24,8 @@ vi.mock('../../renderer/src/api', () => ({
   },
 }));
 
+const DASHBOARD_TOOL_NAME = ['render', 'ui'].join('_');
+
 vi.mock('../../renderer/src/components/ChatView', () => ({
   ChatView: ({
     prompt,
@@ -33,14 +35,22 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     onSubmit,
     messages,
     generatedFiles,
+    result,
   }: {
     prompt: string;
     queuedText?: string | null;
     status?: string;
     onQueue?: (text: string) => void;
     onSubmit?: (text: string, files?: Array<{ filePath: string; name: string }>) => void;
-    messages?: Array<{ id: string; role: string; content: string; generatedFiles?: Array<{ filePath: string; name: string }> }>;
+    messages?: Array<{
+      id: string;
+      role: string;
+      content: string;
+      generatedFiles?: Array<{ filePath: string; name: string }>;
+      result?: { artifacts?: Array<{ title: string; kind: string; mimeType?: string }> } | null;
+    }>;
     generatedFiles?: Array<{ filePath: string; name: string }>;
+    result?: { artifacts?: Array<{ title: string; kind: string; mimeType?: string }> } | null;
   }) => (
     <div>
       <textarea aria-label="chat-input" readOnly value={prompt} />
@@ -52,7 +62,17 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
           {message.generatedFiles?.map((file) => (
             <span key={file.filePath}>{file.name}</span>
           ))}
+          {message.result?.artifacts?.map((artifact) => (
+            <span key={`${artifact.kind}:${artifact.title}`}>
+              {artifact.kind}:{artifact.title}:{artifact.mimeType}
+            </span>
+          ))}
         </div>
+      ))}</div>
+      <div data-testid="current-result-artifacts">{result?.artifacts?.map((artifact) => (
+        <span key={`${artifact.kind}:${artifact.title}`}>
+          {artifact.kind}:{artifact.title}:{artifact.mimeType}
+        </span>
       ))}</div>
       <div data-testid="generated-files">{generatedFiles?.map((file) => (
         <div key={file.filePath}>{file.name}</div>
@@ -473,6 +493,121 @@ describe('ChatShell draft prompt navigation state', () => {
       expect(screen.getByTestId('generated-files')).toHaveTextContent('current-turn.pdf');
     });
     expect(screen.getByTestId('generated-files')).not.toHaveTextContent('old-turn.md');
+  });
+
+  it('replays A2UI artifacts recorded before a result even when the final result has no artifacts', async () => {
+    mockGetThread.mockResolvedValue({
+      id: 'thread-a2ui-replay',
+      title: 'A2UI replay',
+      status: 'idle',
+      mode: 'work',
+      createdAt: 1779000000000,
+      updatedAt: 1779000000000,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: 'task-a2ui',
+      taskIds: ['task-a2ui'],
+    });
+    mockRecoverTask.mockResolvedValue({
+      snapshot: {
+        taskId: 'task-a2ui',
+        sessionId: 'sess-a2ui',
+        status: 'completed',
+        prompt: '生成 A2UI 看板',
+        materials: [],
+        events: [
+          { type: 'task_started', taskId: 'task-a2ui' },
+          {
+            type: 'artifact_recorded',
+            artifactId: 'artifact-a2ui',
+            kind: 'a2ui',
+            label: 'ops.a2ui.json',
+            filePath: '/tmp/ops.a2ui.json',
+            previewAvailable: true,
+            turnId: 'turn-a2ui',
+            creator: `tool:${DASHBOARD_TOOL_NAME}`,
+            mimeType: 'application/vnd.xiaok.a2ui+json',
+          },
+          { type: 'result', result: { summary: '已生成 A2UI 看板', artifacts: [] } },
+        ],
+        result: { summary: '已生成 A2UI 看板', artifacts: [] },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/t/thread-a2ui-replay']}>
+        <Routes>
+          <Route path="/t/:taskId" element={<ChatShell />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-messages')).toHaveTextContent('a2ui:ops.a2ui.json:application/vnd.xiaok.a2ui+json');
+    });
+  });
+
+  it('merges live A2UI artifact_recorded events into an empty final result', async () => {
+    let subscribedHandler: ((event: { type: string; [key: string]: unknown }) => void) | null = null;
+    mockGetThread.mockResolvedValue({
+      id: 'thread-a2ui-live',
+      title: 'A2UI live',
+      status: 'idle',
+      mode: 'work',
+      createdAt: 1779000000000,
+      updatedAt: 1779000000000,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: null,
+      taskIds: [],
+    });
+    mockCreateTask.mockResolvedValue({ taskId: 'task-a2ui-live' });
+    mockUpdateThreadTaskId.mockResolvedValue(undefined);
+    mockUpdateThreadTitle.mockResolvedValue(undefined);
+    mockSubscribeTask.mockImplementation((_taskId, handler) => {
+      subscribedHandler = handler as typeof subscribedHandler;
+      return () => {};
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/t/thread-a2ui-live']}>
+        <Routes>
+          <Route path="/t/:taskId" element={<ChatShell />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'submit-now' }));
+
+    await waitFor(() => {
+      expect(mockSubscribeTask).toHaveBeenCalledWith('task-a2ui-live', expect.any(Function));
+    });
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'artifact_recorded',
+        artifactId: 'artifact-a2ui-live',
+        kind: 'a2ui',
+        label: 'live.a2ui.json',
+        filePath: '/tmp/live.a2ui.json',
+        previewAvailable: true,
+        turnId: 'turn-a2ui-live',
+        creator: `tool:${DASHBOARD_TOOL_NAME}`,
+        mimeType: 'application/vnd.xiaok.a2ui+json',
+      });
+      subscribedHandler?.({
+        type: 'result',
+        result: { summary: '已生成 live A2UI', artifacts: [] },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-result-artifacts')).toHaveTextContent('a2ui:live.a2ui.json:application/vnd.xiaok.a2ui+json');
+    });
   });
 
   it('restores a stored project-help draft when sidebar navigation has no route state', async () => {
