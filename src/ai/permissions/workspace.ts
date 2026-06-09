@@ -1,7 +1,27 @@
-import { resolve, sep } from 'path';
+import { resolve, sep, dirname, basename } from 'path';
+import { realpathSync, existsSync, lstatSync } from 'fs';
 
 function normalizeForComparison(filePath: string): string {
   return process.platform === 'win32' ? filePath.toLowerCase() : filePath;
+}
+
+function resolveRealPath(filePath: string): string {
+  try {
+    return realpathSync(filePath);
+  } catch {
+    const parent = dirname(filePath);
+    if (parent === filePath) return filePath;
+    return resolve(resolveRealPath(parent), basename(filePath));
+  }
+}
+
+function isSymlinkEscape(filePath: string, workspaceRoot: string): boolean {
+  const realRoot = resolveRealPath(workspaceRoot);
+  const realPath = resolveRealPath(filePath);
+  const normalizedPath = normalizeForComparison(realPath);
+  const normalizedRoot = normalizeForComparison(realRoot);
+  const rootPrefix = normalizedRoot.endsWith(sep) ? normalizedRoot : `${normalizedRoot}${sep}`;
+  return normalizedPath !== normalizedRoot && !normalizedPath.startsWith(rootPrefix);
 }
 
 export function assertWorkspacePath(
@@ -10,7 +30,6 @@ export function assertWorkspacePath(
   mode: 'read' | 'write',
   allowOutsideCwd = false,
 ): string {
-  // 对于绝对路径，直接使用；对于相对路径，相对于 cwd 解析
   const resolvedPath = resolve(filePath);
 
   if (allowOutsideCwd) {
@@ -24,6 +43,10 @@ export function assertWorkspacePath(
 
   if (normalizedPath !== normalizedRoot && !normalizedPath.startsWith(rootPrefix)) {
     throw new Error(`Path outside workspace for ${mode}: ${filePath}`);
+  }
+
+  if (mode === 'write' && isSymlinkEscape(resolvedPath, workspaceRoot)) {
+    throw new Error(`Symlink target outside workspace for write: ${filePath}`);
   }
 
   return resolvedPath;

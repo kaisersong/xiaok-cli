@@ -9,6 +9,9 @@ import { runMigrations } from './migrations.js';
 import { EmbeddingClient, type EmbeddingConfig } from './embedding.js';
 import { hybridSearch } from './retrieval.js';
 import { compactL0toL1, compactL1toL2, compactL2toL3 } from './compaction.js';
+import { createLogger } from '../../utils/logger.js';
+
+const logger = createLogger('memory:layered-store');
 import { segmentChinese } from './segment.js';
 import { MODEL_REGISTRY } from './model-registry.js';
 
@@ -126,7 +129,9 @@ export class LayeredMemoryStore implements MemoryStore {
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(id, JSON.stringify([id]), record.title, JSON.stringify(record.tags || []), scope, memType, cwd);
 
-    this.embeddingClient.embedAndStore(id, 1, `${record.title} ${record.summary}`).catch(() => {});
+    this.embeddingClient.embedAndStore(id, 1, `${record.title} ${record.summary}`).catch((err) => {
+      logger.warn('embedAndStore failed', { id, error: err instanceof Error ? err.message : String(err) });
+    });
   }
 
   async listRelevant(input: { cwd: string; query: string; typeFilter?: MemoryType }): Promise<MemoryRecord[]> {
@@ -345,7 +350,9 @@ export class LayeredMemoryStore implements MemoryStore {
     if (this.compactTimer) {
       clearInterval(this.compactTimer);
     }
-    this.embeddingClient.close().catch(() => {});
+    this.embeddingClient.close().catch((err) => {
+      logger.debug('embeddingClient.close failed', { error: err instanceof Error ? err.message : String(err) });
+    });
     this.db.close();
   }
 

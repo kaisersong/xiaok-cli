@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, nativeImage, Menu, powerMonitor } from 'electron';
+import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, mkdirSync } from 'node:fs';
@@ -370,7 +370,9 @@ async function createWindow(): Promise<BrowserWindow> {
   });
 
   app.on('before-quit', () => {
-    kswarmService.stop().catch(() => {});
+    kswarmService.stop().catch((err) => {
+      debugMain('kswarmService.stop failed', err instanceof Error ? err.message : String(err));
+    });
     kswarmStreamBridge.dispose();
     if (runtimeBridgeFallbackTimer) {
       clearTimeout(runtimeBridgeFallbackTimer);
@@ -404,7 +406,9 @@ async function createWindow(): Promise<BrowserWindow> {
 
   // Setup auto-updater (production only)
   if (process.env.NODE_ENV !== 'development' && !process.env.XIAOK_DESKTOP_DEV_SERVER) {
-    setupAutoUpdater(window).catch(() => {});
+    setupAutoUpdater(window).catch((err) => {
+      debugMain('setupAutoUpdater failed', err instanceof Error ? err.message : String(err));
+    });
   }
   debugMain('createWindow:before-load');
 
@@ -441,6 +445,33 @@ async function createWindow(): Promise<BrowserWindow> {
   });
 
   const devServer = process.env['XIAOK_DESKTOP_DEV_SERVER'];
+
+  // CSP — Report-Only mode to observe violations before enforcing
+  const isDev = !!devServer;
+  const cspDirectives = [
+    "default-src 'self'",
+    `script-src 'self'${isDev ? " 'unsafe-eval'" : ''}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "font-src 'self' data:",
+    `connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:* https:${isDev ? ' ws://localhost:*' : ''}`,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; ');
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    if (details.resourceType === 'mainFrame' || details.resourceType === 'subFrame') {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy-Report-Only': [cspDirectives],
+        },
+      });
+    } else {
+      callback({});
+    }
+  });
+
   if (devServer) {
     await window.loadURL(devServer);
   } else {

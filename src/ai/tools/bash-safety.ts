@@ -21,6 +21,8 @@ const BLOCK_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: />\s*\/dev\/[sh]d[a-z]/, reason: 'raw device write' },
   { pattern: /chmod\s+-R\s+777\s+\/\s*$/, reason: 'chmod 777 /' },
   { pattern: /\b(curl|wget)\s+[^\|]*\|\s*(sh|bash|zsh)\b/, reason: 'remote code execution via pipe' },
+  { pattern: /\b(base64|openssl)\s+[^\|]*(-d|--decode|-D|dec)\b[^\|]*\|\s*(sh|bash|zsh)\b/, reason: 'encoded payload piped to shell' },
+  { pattern: /\|\s*(sh|bash|zsh)\s*$/, reason: 'arbitrary pipe to shell interpreter' },
 ];
 
 const WARN_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
@@ -38,6 +40,9 @@ const WARN_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bkillall\b/, reason: 'killall (may trigger sudo on macOS)' },
   { pattern: /chmod\s+[^\s]*-R/, reason: 'recursive chmod' },
   { pattern: /chown\s+[^\s]*-R/, reason: 'recursive chown' },
+  { pattern: /\b(python[23]?|ruby|perl|node)\s+(-[ce]|--eval)\b/, reason: 'interpreter eval may execute system commands' },
+  { pattern: /\|\s*(python[23]?|ruby|perl|node)\b/, reason: 'pipe to interpreter' },
+  { pattern: /(?:^|[;&|]\s*)eval\b/, reason: 'eval executes dynamically constructed commands' },
 ];
 
 const AUTO_PROMPT_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [

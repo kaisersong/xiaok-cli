@@ -3,6 +3,9 @@ import { join } from 'node:path';
 import type { ToolRegistry } from '../tools/index.js';
 import type { PromptSnapshot } from '../prompts/types.js';
 import { AgentRunController } from './controller.js';
+import { createLogger } from '../../utils/logger.js';
+
+const logger = createLogger('agent-runtime');
 import type { AgentRuntimeEvent } from './events.js';
 import { isAbortError } from './abort-utils.js';
 import {
@@ -115,7 +118,9 @@ export class AgentRuntime {
         this.session.appendUserText(input);
         if (this.memoryStore?.writeRawMessage) {
           const sessionKey = this.promptSnapshot?.id?.slice(0, 16) ?? 'cli';
-          this.memoryStore.writeRawMessage(sessionKey, 'user', input).catch(() => {});
+          this.memoryStore.writeRawMessage(sessionKey, 'user', input).catch((err) => {
+            logger.warn('writeRawMessage failed', { error: err instanceof Error ? err.message : String(err) });
+          });
         }
       } else {
         this.session.appendUserBlocks(input);
