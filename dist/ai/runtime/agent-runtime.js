@@ -1,4 +1,6 @@
 import { join } from 'node:path';
+import { createLogger } from '../../utils/logger.js';
+const logger = createLogger('agent-runtime');
 import { isAbortError } from './abort-utils.js';
 import { buildPromptCacheSegments, resolveModelCapabilities, } from './model-capabilities.js';
 import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
@@ -73,7 +75,9 @@ export class AgentRuntime {
                 this.session.appendUserText(input);
                 if (this.memoryStore?.writeRawMessage) {
                     const sessionKey = this.promptSnapshot?.id?.slice(0, 16) ?? 'cli';
-                    this.memoryStore.writeRawMessage(sessionKey, 'user', input).catch(() => { });
+                    this.memoryStore.writeRawMessage(sessionKey, 'user', input).catch((err) => {
+                        logger.warn('writeRawMessage failed', { error: err instanceof Error ? err.message : String(err) });
+                    });
                 }
             }
             else {
