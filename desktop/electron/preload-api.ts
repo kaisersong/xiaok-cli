@@ -234,6 +234,17 @@ export interface DesktopMCPInput {
   args?: string[];
 }
 
+export type PluginMcpErrorCategory = 'python_version_too_old' | 'python_module_missing';
+
+export interface PluginMcpErrorDetail {
+  category: PluginMcpErrorCategory | null;
+  message: string;
+  detectedVersion?: string;
+  requiredVersion?: string;
+  command?: string;
+  missingModule?: string;
+}
+
 export interface PluginMcpServerView {
   name: string;
   pluginName: string;
@@ -241,6 +252,7 @@ export interface PluginMcpServerView {
   connected: boolean;
   enabled: boolean;
   lastError?: string;
+  lastErrorDetail?: PluginMcpErrorDetail;
 }
 
 export interface PluginDependencyStatusView {

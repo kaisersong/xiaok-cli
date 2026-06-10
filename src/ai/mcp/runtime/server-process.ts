@@ -78,13 +78,19 @@ export function decodeMcpFrames(input: string): McpRuntimeResponse[] {
 }
 
 export function createStdioMcpTransport(
-  child: Pick<ChildProcessWithoutNullStreams, 'stdin' | 'stdout' | 'on' | 'off'>,
-): McpRuntimeTransport & { notify(message: { jsonrpc: '2.0'; method: string; params?: Record<string, unknown> }): void; dispose(): void } {
+  child: Pick<ChildProcessWithoutNullStreams, 'stdin' | 'stdout' | 'stderr' | 'on' | 'off'>,
+): McpRuntimeTransport & { notify(message: { jsonrpc: '2.0'; method: string; params?: Record<string, unknown> }): void; getStderrTail(): string; dispose(): void } {
   let buffer = '';
+  let stderrTail = '';
+  const STDERR_TAIL_LIMIT = 4096;
   const pending = new Map<number, {
     resolve: (message: McpRuntimeResponse) => void;
     reject: (error: Error) => void;
   }>();
+
+  const handleStderr = (chunk: Buffer | string) => {
+    stderrTail = (stderrTail + chunk.toString()).slice(-STDERR_TAIL_LIMIT);
+  };
 
   const handleStdout = (chunk: Buffer | string) => {
     buffer += chunk.toString();
@@ -146,6 +152,7 @@ export function createStdioMcpTransport(
   };
 
   child.stdout.on('data', handleStdout);
+  child.stderr.on('data', handleStderr);
   child.on('error', handleError);
   child.on('exit', handleExit);
 
@@ -159,9 +166,13 @@ export function createStdioMcpTransport(
     notify(message: { jsonrpc: '2.0'; method: string; params?: Record<string, unknown> }) {
       child.stdin.write(JSON.stringify(message) + '\n');
     },
+    getStderrTail() {
+      return stderrTail;
+    },
     dispose() {
       failPending(new Error('MCP server transport disposed before responding'));
       child.stdout.off('data', handleStdout);
+      child.stderr.off('data', handleStderr);
       child.off('error', handleError);
       child.off('exit', handleExit);
     },

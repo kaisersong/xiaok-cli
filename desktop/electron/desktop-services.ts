@@ -42,6 +42,7 @@ import { maybePersistToolResult, buildViewForAPI, shouldAutoCompact, compactConv
 import { startMcpServerProcess, createStdioMcpTransport } from '../../src/ai/mcp/runtime/server-process.js';
 import { createMcpRuntimeClient } from '../../src/ai/mcp/runtime/client.js';
 import { buildMcpRuntimeTools } from '../../src/ai/mcp/runtime/tools.js';
+import { classifyMcpStartupError, type McpErrorDetail } from './mcp-error-classifier.js';
 import { loadPlugins } from '../../src/platform/plugins/loader.js';
 import {
   buildOfficialInstallerExecution,
@@ -637,6 +638,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     connected: boolean;
     enabled: boolean;
     lastError?: string;
+    lastErrorDetail?: McpErrorDetail;
   }
   const pluginMcpServers: PluginMcpServerState[] = [];
   const pluginMcpDisposers: Array<{ name: string; pluginName: string; dispose: () => void }> = [];
@@ -837,6 +839,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             });
             continue;
           }
+          let transportRef: { getStderrTail(): string } | null = null;
+          let resolvedCommand: string | undefined;
           try {
             const launch = await resolvePluginMcpLaunch(plugin.name, server.name, server.command, server.args ?? []);
             // Use managed venv python if available for Python MCP servers
@@ -847,6 +851,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               : isNodeServer
                 ? (process.env.XIAOK_NODE_CMD || process.execPath)
                 : launch.command;
+            resolvedCommand = command;
             prelaunchCuaDriverDaemonForMcp(server.name, command);
             const baseEnv = 'env' in server ? (server as { env?: Record<string, string> }).env : undefined;
             const runtimeEnv = isPythonServer
@@ -859,6 +864,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               env: runtimeEnv,
             });
             const transport = createStdioMcpTransport(proc.child);
+            transportRef = transport;
             const client = createMcpRuntimeClient(transport);
             await client.initialize();
             const schemas = await client.listTools();
@@ -911,6 +917,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               enabled: true,
             });
           } catch (e) {
+            const baseMessage = e instanceof Error ? e.message : String(e);
+            const stderrTail = transportRef?.getStderrTail() ?? '';
+            const combinedDetail = stderrTail ? `${baseMessage}\n${stderrTail}` : baseMessage;
+            const errorDetail = classifyMcpStartupError(combinedDetail, resolvedCommand);
             if (server.name === 'cua-driver') {
               computerUseBackend = null;
               computerUseUnavailableError = mapComputerUseStartupError(e);
@@ -925,7 +935,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               toolCount: 0,
               connected: false,
               enabled: true,
-              lastError: e instanceof Error ? e.message : String(e),
+              lastError: baseMessage,
+              lastErrorDetail: errorDetail,
             });
           }
         }

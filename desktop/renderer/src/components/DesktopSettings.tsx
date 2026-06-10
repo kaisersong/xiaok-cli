@@ -35,6 +35,7 @@ import {
 import { api } from '../api';
 import { LocalMemoryStatsCard } from './settings/LocalMemoryStatsCard';
 import { MemoryModelSettings } from './settings/MemoryModelSettings';
+import { McpErrorRemediationBanner } from './settings/McpErrorRemediationBanner';
 import type {
   DesktopModelConfigSnapshot,
   DesktopRelatedServiceId,
@@ -1278,7 +1279,7 @@ interface PluginDependencyStatus {
 
 function McpPane() {
   const [installs, setInstalls] = useState<MCPInstallConfig[]>([]);
-  const [pluginServers, setPluginServers] = useState<Array<{ name: string; pluginName: string; toolCount: number; connected: boolean; enabled: boolean; lastError?: string }>>([]);
+  const [pluginServers, setPluginServers] = useState<Array<{ name: string; pluginName: string; toolCount: number; connected: boolean; enabled: boolean; lastError?: string; lastErrorDetail?: { category: 'python_version_too_old' | 'python_module_missing' | null; message: string; detectedVersion?: string; requiredVersion?: string; command?: string; missingModule?: string } }>>([]);
   const [dependencies, setDependencies] = useState<PluginDependencyStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -1610,7 +1611,7 @@ function McpPane() {
                       <div className="text-xs text-[var(--c-text-secondary)]">
                         {server.pluginName} · {server.toolCount} tools
                       </div>
-                      {!server.connected && server.lastError && (
+                      {!server.connected && server.lastError && !server.lastErrorDetail?.category && (
                         <div className="mt-1 max-w-[420px] truncate text-xs text-[var(--c-text-tertiary)]">
                           {server.lastError}
                         </div>
@@ -1621,6 +1622,9 @@ function McpPane() {
                     {server.connected ? '已连接' : '未连接'}
                   </span>
                 </div>
+                {!server.connected && server.lastErrorDetail?.category && (
+                  <McpErrorRemediationBanner detail={server.lastErrorDetail} serverName={server.name} />
+                )}
               </Card>
             ))}
           </div>

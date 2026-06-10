@@ -88,6 +88,40 @@ describe('DesktopSettings MCP pane', () => {
     }, { timeout: 5_000 });
   });
 
+  it('shows a Python version hint banner when a plugin MCP server fails with python_version_too_old', async () => {
+    mocks.listPluginMcpServers.mockReset();
+    mocks.listPluginMcpServers.mockResolvedValue([
+      {
+        name: 'slide-renderer',
+        pluginName: 'kai-slide-creator',
+        toolCount: 0,
+        connected: false,
+        enabled: true,
+        lastError: 'Requires Python >=3.10',
+        lastErrorDetail: {
+          category: 'python_version_too_old',
+          message: 'Requires Python >=3.10',
+          requiredVersion: '3.10',
+          command: 'python3',
+        },
+      },
+    ]);
+
+    render(
+      <LocaleProvider>
+        <DesktopSettings onClose={() => {}} />
+      </LocaleProvider>,
+    );
+
+    await screen.findByRole('button', { name: 'MCP 服务器' });
+    fireEvent.click(screen.getByRole('button', { name: 'MCP 服务器' }));
+
+    await screen.findByText('slide-renderer');
+    expect(screen.getByText(/需要 Python 3\.10/)).toBeInTheDocument();
+    expect(screen.getByText('官网下载')).toBeInTheDocument();
+    expect(screen.getByText('brew install python@3.12')).toBeInTheDocument();
+  });
+
   it('sets up Computer Use by installing the plugin before running the Driver installer', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     mocks.listPluginMcpServers.mockResolvedValue([]);
