@@ -26,6 +26,36 @@ describe('createMemoryStoreAsync - default store', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('should use XIAOK_CONFIG_DIR for the default layered database when HOME is missing', async () => {
+    const originalHome = process.env.HOME;
+    const originalConfigDir = process.env.XIAOK_CONFIG_DIR;
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaok-defstore-config-'));
+    let store: Awaited<ReturnType<typeof createMemoryStoreAsync>> | undefined;
+
+    try {
+      delete process.env.HOME;
+      process.env.XIAOK_CONFIG_DIR = tmpDir;
+
+      store = await createMemoryStoreAsync();
+
+      expect(typeof store.getStats).toBe('function');
+      expect(fs.existsSync(path.join(tmpDir, 'memory.db'))).toBe(true);
+    } finally {
+      store?.close?.();
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalConfigDir === undefined) {
+        delete process.env.XIAOK_CONFIG_DIR;
+      } else {
+        process.env.XIAOK_CONFIG_DIR = originalConfigDir;
+      }
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('should create FileMemoryStore when type is file', async () => {
     const store = await createMemoryStoreAsync({ type: 'file' });
     expect(store).toBeDefined();

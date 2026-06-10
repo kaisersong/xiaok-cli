@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
 import type { MemoryStore, MemoryRecord, MemoryType } from './store.js';
 import type { ModelAdapter, Message } from '../../types.js';
+import { getConfigDir } from '../../utils/config.js';
 import { runMigrations } from './migrations.js';
 import { EmbeddingClient, type EmbeddingConfig } from './embedding.js';
 import { hybridSearch } from './retrieval.js';
@@ -29,7 +30,7 @@ export function resolveLayeredConfig(config?: Record<string, unknown>): LayeredM
   const registryEntry = MODEL_REGISTRY.find(m => m.id === modelId);
   const defaultDims = provider === 'api' ? 768 : (registryEntry?.dims ?? 384);
   return {
-    dbPath: c.dbPath ?? path.join(process.env.HOME || '/tmp', '.xiaok', 'memory.db'),
+    dbPath: c.dbPath ?? path.join(getConfigDir(), 'memory.db'),
     embedding: {
       provider,
       apiUrl: c.embedding?.apiUrl ?? 'http://localhost:11434/v1',
