@@ -879,7 +879,7 @@ export function ChatShell() {
       unsubRef.current = api.subscribeTask(newTaskId, handleEvent);
     } catch (e) {
       const displayMessage = sanitizeUserFacingErrorMessage(e, '任务创建失败，请检查模型配置或稍后重试。');
-      log.error('handleSubmit error', JSON.stringify({ message: displayMessage }));
+      log.error('handleSubmit error', JSON.stringify({ message: displayMessage, raw: e instanceof Error ? e.message : String(e) }));
       setMessages(prev => [...prev, {
         id: `msg-${Date.now()}-err`,
         role: 'assistant',

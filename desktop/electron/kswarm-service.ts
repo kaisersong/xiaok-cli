@@ -49,6 +49,7 @@ const MAX_RESTART_DELAY_MS = 30_000;
 const MAX_RESTART_ATTEMPTS = 10;
 const REQUEST_TIMEOUT_MS = 30_000;
 const DYNAMIC_WORKFLOW_FEATURE = 'dynamic_workflows';
+const WORKFLOW_PATTERN_SCHEMA_VERSION = 'kswarm_workflow_patterns_v1';
 
 /**
  * Resolve service paths:
@@ -249,7 +250,20 @@ export function resolveBackgroundNodeRuntime(options: {
 
 export function hasDynamicWorkflowSupport(body: Record<string, unknown> | null): boolean {
   const features = body?.features;
-  return Array.isArray(features) && features.includes(DYNAMIC_WORKFLOW_FEATURE);
+  return Array.isArray(features)
+    && features.includes(DYNAMIC_WORKFLOW_FEATURE)
+    && hasWorkflowPatternCapabilities(body);
+}
+
+export function hasWorkflowPatternCapabilities(body: Record<string, unknown> | null): boolean {
+  const capabilities = body?.workflowCapabilities;
+  if (!capabilities || typeof capabilities !== 'object' || Array.isArray(capabilities)) return false;
+  const schemaVersion = (capabilities as Record<string, unknown>).schemaVersion;
+  const compiledContract = (capabilities as Record<string, unknown>).compiledContract;
+  const patternPublicView = (capabilities as Record<string, unknown>).patternPublicView;
+  return schemaVersion === WORKFLOW_PATTERN_SCHEMA_VERSION
+    && compiledContract === true
+    && patternPublicView === true;
 }
 
 export function getKSwarmHealthServiceEntryPath(body: Record<string, unknown> | null): string | null {

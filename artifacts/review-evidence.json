@@ -1,0 +1,86 @@
+{
+  "verdict": "needs_improvement",
+  "overall_score": 6.5,
+  "findings": [
+    {
+      "id": "F-001",
+      "severity": "high",
+      "category": "god_object",
+      "title": "chat.ts 是 God Object",
+      "file": "src/commands/chat.ts",
+      "lines": "1-3440",
+      "evidence": "3440 行，55+ 外部导入，承担 AI 运行时、技能、权限、意图委派、UI、会话管理等全部职责",
+      "recommendation": "拆分为 ChatCommand + AIRuntimeBootstrap + ChatTurnLoop"
+    },
+    {
+      "id": "F-002",
+      "severity": "high",
+      "category": "circular_dependency",
+      "title": "ai/ ↔ runtime/ 循环依赖",
+      "file": "src/ai/tools/index.ts, src/runtime/stage/executor.ts",
+      "lines": "index.ts:7, executor.ts:14",
+      "evidence": "ai/tools 导入 runtime/guards；runtime/stage 导入 ai/tools, ai/skills",
+      "recommendation": "提取共享接口到 contracts/，依赖反转"
+    },
+    {
+      "id": "F-003",
+      "severity": "medium",
+      "category": "split_logic",
+      "title": "意图委派系统逻辑分裂",
+      "file": "src/ai/intent-delegation/, src/runtime/intent-delegation/",
+      "lines": "两个目录共 19 文件",
+      "evidence": "planner/matcher/boundary 在 ai/ 侧，dispatcher/handoff/sync 在 runtime/ 侧，双向导入",
+      "recommendation": "合并为单一 intent-delegation 模块"
+    },
+    {
+      "id": "F-004",
+      "severity": "medium",
+      "category": "naming_conflict",
+      "title": "ai/runtime/ 与 runtime/ 命名冲突",
+      "file": "src/ai/runtime/, src/runtime/",
+      "lines": "两个目录",
+      "evidence": "ai/runtime/ 是 Agent 执行引擎，runtime/ 是进程级运行时服务，语义不同但同名",
+      "recommendation": "ai/runtime/ 重命名为 ai/engine/"
+    },
+    {
+      "id": "F-005",
+      "severity": "medium",
+      "category": "code_duplication",
+      "title": "chat.ts 与 yzj.ts 重复 AI 初始化",
+      "file": "src/commands/chat.ts, src/commands/yzj.ts",
+      "lines": "chat.ts:330-800, yzj.ts:350-500",
+      "evidence": "两处独立初始化 Agent/PromptBuilder/MemoryStore/PermissionManager/SkillCatalog",
+      "recommendation": "提取 createAIRuntime() 工厂函数"
+    },
+    {
+      "id": "F-006",
+      "severity": "low",
+      "category": "incomplete_abstraction",
+      "title": "RuntimeFacade 封装不完整",
+      "file": "src/ai/runtime/runtime-facade.ts",
+      "lines": "1-100",
+      "evidence": "只封装 runTurn 主循环，命令层仍需直接初始化所有 AI 组件",
+      "recommendation": "扩展为完整 Application 生命周期"
+    },
+    {
+      "id": "F-007",
+      "severity": "low",
+      "category": "deprecated_code",
+      "title": "@deprecated 代码残留",
+      "file": "src/ai/context/yzj-context.ts, src/runtime/task-host/types.ts, src/platform/plugins/runtime.ts",
+      "lines": "yzj-context.ts:23, types.ts:180, runtime.ts:19",
+      "evidence": "多处 @deprecated JSDoc 标注但未移除的接口",
+      "recommendation": "移除弃用接口"
+    }
+  ],
+  "dimensions": {
+    "module_clarity": { "score": 6, "note": "9 大模块划分合理，但 ai/runtime 与 runtime 命名重叠" },
+    "coupling": { "score": 5, "note": "commands 过重耦合 ai 内部，ai ↔ runtime 循环依赖" },
+    "interface_abstraction": { "score": 6, "note": "RuntimeFacade 存在但封装不完整，大量绕过" },
+    "single_responsibility": { "score": 4, "note": "chat.ts God Object 严重违反 SRP" },
+    "circular_dependency": { "score": 4, "note": "ai/ ↔ runtime/ 已验证循环依赖" }
+  },
+  "methodology": "静态导入图分析 + 文件行数统计 + 手工代码审查关键路径",
+  "reviewer": "xiaok (KualityForge review via repair_project_task)",
+  "reviewed_at": "2026-06-03"
+}

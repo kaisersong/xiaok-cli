@@ -2779,7 +2779,7 @@ export async function recoverInterruptedScriptWorkflows(kswarmService: KSwarmSer
   }
 
   // Global cap (across all projects) to avoid flooding the runtime during cold boot.
-  const maxRestarts = 20;
+  const maxRestarts = 3;
   let restarted = 0;
   for (const project of projects) {
     if (restarted >= maxRestarts) break;

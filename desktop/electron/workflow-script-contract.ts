@@ -12,6 +12,9 @@ export interface WorkflowScriptMeta {
   whenToUse?: string;
   phases?: WorkflowScriptMetaPhase[];
   resumable?: boolean;
+  pattern?: WorkflowPattern;
+  outputKind?: WorkflowOutputKind;
+  riskClass?: WorkflowRiskClass;
 }
 
 export interface WorkflowScriptAnalysis {
@@ -20,10 +23,39 @@ export interface WorkflowScriptAnalysis {
   parallelCallCount: number;
   pipelineCallCount: number;
   requestUserInputCallCount: number;
+  loopUntilCallCount: number;
+  agentOptionRoles: string[];
+  agentOptionTrustLevels: string[];
+  stableKeyCount: number;
+  agentInputRefCount: number;
+  agentSourceRefCount: number;
   runtimePhaseTitles: string[];
   resumable: boolean;
   hasLoop: boolean;
 }
+
+export type WorkflowPattern =
+  | 'deliver_review_reduce'
+  | 'classify_and_act'
+  | 'fanout_synthesize'
+  | 'adversarial_verify'
+  | 'generate_filter'
+  | 'tournament'
+  | 'bounded_loop_until_done'
+  | 'root_cause_hypothesis_race'
+  | 'quarantine_triage'
+  | 'rule_mining';
+
+export type WorkflowOutputKind =
+  | 'diagnosis'
+  | 'task_deliverable'
+  | 'project_deliverable'
+  | 'ranking'
+  | 'verification'
+  | 'rule_candidates'
+  | 'triage_actions';
+
+export type WorkflowRiskClass = 'read_only' | 'artifact_write' | 'external_action' | 'code_write';
 
 export interface WorkflowScriptValidationPolicy {
   maxScriptBytes?: number;
@@ -119,6 +151,20 @@ const DEFAULT_SCRIPT_POLICY: NormalizedWorkflowScriptValidationPolicy = {
 };
 
 const RESERVED_META_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const ALLOWED_WORKFLOW_PATTERNS = new Set([
+  'deliver_review_reduce',
+  'classify_and_act',
+  'fanout_synthesize',
+  'adversarial_verify',
+  'generate_filter',
+  'tournament',
+  'bounded_loop_until_done',
+  'root_cause_hypothesis_race',
+  'quarantine_triage',
+  'rule_mining',
+]);
+const ALLOWED_OUTPUT_KINDS = new Set(['diagnosis', 'task_deliverable', 'project_deliverable', 'ranking', 'verification', 'rule_candidates', 'triage_actions']);
+const ALLOWED_RISK_CLASSES = new Set(['read_only', 'artifact_write', 'external_action', 'code_write']);
 
 const FORBIDDEN_API_PATTERNS: Array<[string, RegExp]> = [
   ['require', /\brequire\s*\(/],
@@ -232,6 +278,12 @@ export function validateWorkflowScript(
   }
 
   const analysis = analyzeWorkflowScriptBody(parsed.body, parsed.meta);
+  if (analysis.loopUntilCallCount > 1) {
+    return {
+      ok: false,
+      error: 'workflow_script_nested_loop_until_forbidden',
+    };
+  }
   if (analysis.resumable && analysis.hasLoop) {
     return {
       ok: false,
@@ -361,6 +413,9 @@ function validateWorkflowMeta(meta: unknown): { ok: true; meta: WorkflowScriptMe
   if (typeof value.description !== 'string' || !value.description.trim()) return { ok: false, error: 'workflow_script_meta_description_required' };
   if (value.whenToUse !== undefined && typeof value.whenToUse !== 'string') return { ok: false, error: 'workflow_script_meta_when_to_use_invalid' };
   if (value.resumable !== undefined && typeof value.resumable !== 'boolean') return { ok: false, error: 'workflow_script_meta_resumable_invalid' };
+  if (value.pattern !== undefined && (typeof value.pattern !== 'string' || !ALLOWED_WORKFLOW_PATTERNS.has(value.pattern))) return { ok: false, error: 'workflow_script_meta_pattern_invalid' };
+  if (value.outputKind !== undefined && (typeof value.outputKind !== 'string' || !ALLOWED_OUTPUT_KINDS.has(value.outputKind))) return { ok: false, error: 'workflow_script_meta_output_kind_invalid' };
+  if (value.riskClass !== undefined && (typeof value.riskClass !== 'string' || !ALLOWED_RISK_CLASSES.has(value.riskClass))) return { ok: false, error: 'workflow_script_meta_risk_class_invalid' };
   if (value.phases !== undefined) {
     if (!Array.isArray(value.phases)) return { ok: false, error: 'workflow_script_meta_phases_invalid' };
     for (const phase of value.phases) {
@@ -375,16 +430,56 @@ function validateWorkflowMeta(meta: unknown): { ok: true; meta: WorkflowScriptMe
 
 function analyzeWorkflowScriptBody(body: string, meta: WorkflowScriptMeta): WorkflowScriptAnalysis {
   const stripped = stripStringsAndComments(body);
+  const agentOptionSummary = analyzeAgentOptions(body);
   return {
     agentCallCount: countNamedCalls(stripped, 'agent'),
     phaseCallCount: countNamedCalls(stripped, 'phase'),
     parallelCallCount: countNamedCalls(stripped, 'parallel'),
     pipelineCallCount: countNamedCalls(stripped, 'pipeline'),
     requestUserInputCallCount: countDottedCalls(stripped, 'workflow', 'requestUserInput'),
+    loopUntilCallCount: countDottedCalls(stripped, 'workflow', 'loopUntil'),
+    agentOptionRoles: agentOptionSummary.roles,
+    agentOptionTrustLevels: agentOptionSummary.trustLevels,
+    stableKeyCount: agentOptionSummary.stableKeyCount,
+    agentInputRefCount: agentOptionSummary.inputRefCount,
+    agentSourceRefCount: agentOptionSummary.sourceRefCount,
     runtimePhaseTitles: collectRuntimePhaseTitles(body),
     resumable: meta.resumable === true,
     hasLoop: hasLoopSyntax(stripped),
   };
+}
+
+function analyzeAgentOptions(body: string): {
+  roles: string[];
+  trustLevels: string[];
+  stableKeyCount: number;
+  inputRefCount: number;
+  sourceRefCount: number;
+} {
+  const roles = collectLiteralPropertyValues(body, 'role');
+  const trustLevels = collectLiteralPropertyValues(body, 'trustLevel');
+  return {
+    roles,
+    trustLevels,
+    stableKeyCount: countPropertyOccurrences(body, 'stableKey'),
+    inputRefCount: countPropertyOccurrences(body, 'inputRefs'),
+    sourceRefCount: countPropertyOccurrences(body, 'sourceRefs'),
+  };
+}
+
+function collectLiteralPropertyValues(source: string, property: string): string[] {
+  const values: string[] = [];
+  const pattern = new RegExp(`\\b${escapeRegExp(property)}\\s*:\\s*(['"\`])((?:\\\\.|(?!\\1).)*?)\\1`, 'g');
+  for (const match of source.matchAll(pattern)) {
+    const value = decodeSimpleString(match[2]).trim();
+    if (value) values.push(value);
+  }
+  return values;
+}
+
+function countPropertyOccurrences(source: string, property: string): number {
+  const pattern = new RegExp(`\\b${escapeRegExp(property)}\\s*:`, 'g');
+  return [...source.matchAll(pattern)].length;
 }
 
 function hasLoopSyntax(strippedBody: string): boolean {

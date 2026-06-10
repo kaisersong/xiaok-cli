@@ -45,6 +45,25 @@ phase('归纳建议')
 return await agent(\`基于 \${snapshot.summary} 输出下一步建议。\`, { label: '建议归纳' })
 `;
 
+const tournamentWorkflowScript = `export const meta = {
+  name: 'candidate_tournament',
+  description: '对候选方案做排序',
+  pattern: 'tournament',
+  outputKind: 'ranking',
+  riskClass: 'read_only',
+  phases: [{ title: '候选评分' }, { title: '排序归约' }],
+}
+
+phase('候选评分')
+const scores = await parallel([
+  () => agent('评估候选 A。', { label: '候选 A', role: 'judge', trustLevel: 'trusted', stableKey: 'candidate-a' }),
+  () => agent('评估候选 B。', { label: '候选 B', role: 'judge', trustLevel: 'trusted', stableKey: 'candidate-b' }),
+], { label: '候选评分', limit: 2 })
+
+phase('排序归约')
+return await agent(\`根据 \${scores.map((item) => item.summary).join('；')} 输出排序。\`, { label: '排序归约', role: 'reducer', trustLevel: 'trusted' })
+`;
+
 function completedProjectCheckNode(id = 'node-project_snapshot_review-1') {
   return {
     id,
@@ -469,6 +488,39 @@ await agent('x')`,
     const body = requests[0].body as Record<string, unknown>;
     expect(typeof body.scriptSource).toBe('string');
     expect((body.scriptSource as string)).toContain('export const meta');
+  });
+
+  it('sends workflow pattern preview hints to KSwarm proposal while leaving KSwarm as contract authority', async () => {
+    const { service, requests } = createMockService([
+      jsonResponse({ ok: true, workflowProposal: { id: 'proposal-1', compiledContract: { pattern: 'tournament' } } }, 201),
+      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'running', workflowPattern: 'tournament' } }, 201),
+    ]);
+    const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
+
+    const output = JSON.parse(await tool.execute({
+      projectId: 'proj-1',
+      script: tournamentWorkflowScript,
+      requestedBy: 'assistant',
+    })) as Record<string, unknown>;
+
+    const body = requests[0].body as Record<string, any>;
+    expect(requests[0].path).toBe('/projects/proj-1/workflows/script-generated/proposal');
+    expect(body.preview.meta).toMatchObject({
+      pattern: 'tournament',
+      outputKind: 'ranking',
+      riskClass: 'read_only',
+    });
+    expect(body.preview.analysis).toMatchObject({
+      parallelCallCount: 1,
+      agentCallCount: 3,
+    });
+    expect(body).not.toHaveProperty('compiledContract');
+    expect(output).toMatchObject({
+      ok: true,
+      workflowRun: {
+        workflowPattern: 'tournament',
+      },
+    });
   });
 
   it('recovers the persisted script source when resuming without a script', async () => {

@@ -1,0 +1,15 @@
+{
+  "type": "workspace_claim",
+  "action": "claim",
+  "participantId": "codex2",
+  "project": "xiaok-cli",
+  "files": [
+    "reviews/cli-codex.md"
+  ],
+  "directories": [],
+  "mayAffect": [],
+  "taskId": "kualityforge-cli-codex-review",
+  "claimedAt": "2026-06-03T12:49:07Z",
+  "expiresAt": "2026-06-03T13:19:07Z",
+  "gitHead": "6ded091e5ce7a9c4b71301bac02c016ce0ab027e"
+}

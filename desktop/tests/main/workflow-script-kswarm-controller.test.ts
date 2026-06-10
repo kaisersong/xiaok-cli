@@ -112,6 +112,12 @@ describe('workflow script KSwarm controller', () => {
       sequence: 1,
       scriptHash: 'a'.repeat(64),
       workflowId: 'report_review',
+      role: 'collector',
+      trustLevel: 'untrusted',
+      inputRefs: ['project.snapshot'],
+      sourceRefs: ['ticket:1'],
+      permissions: { toolCategories: ['read_project_state'] },
+      stableKey: 'ticket-1',
     });
 
     expect(result).toEqual({ summary: '检查完成' });
@@ -126,6 +132,12 @@ describe('workflow script KSwarm controller', () => {
       prompt: '检查报告产物。',
       assignedAgent: 'xiaok-worker',
       options: { model: 'default' },
+      role: 'collector',
+      trustLevel: 'untrusted',
+      inputRefs: ['project.snapshot'],
+      sourceRefs: ['ticket:1'],
+      permissions: { toolCategories: ['read_project_state'] },
+      stableKey: 'ticket-1',
     });
   });
 

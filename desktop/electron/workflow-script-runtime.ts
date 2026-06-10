@@ -31,6 +31,12 @@ export interface WorkflowScriptAgentInput {
   workflowRunId?: string;
   workspaceRoot?: string;
   modelCapability?: string;
+  role?: string;
+  trustLevel?: string;
+  inputRefs?: string[];
+  sourceRefs?: string[];
+  permissions?: Record<string, unknown> | null;
+  stableKey?: string;
 }
 
 export interface WorkflowScriptPhaseInput {
@@ -197,6 +203,12 @@ export async function runWorkflowScript(
       required: normalizedOptions?.required !== false,
       outputSchema: normalizeSchema(normalizedOptions?.schema),
       evidenceRequired: normalizedOptions?.evidenceRequired === true,
+      role: normalizeOptionalString(normalizedOptions?.role) || undefined,
+      trustLevel: normalizeOptionalString(normalizedOptions?.trustLevel) || undefined,
+      inputRefs: normalizeStringArray(normalizedOptions?.inputRefs),
+      sourceRefs: normalizeStringArray(normalizedOptions?.sourceRefs),
+      permissions: normalizePermissionPolicy(normalizedOptions?.permissions),
+      stableKey: normalizeOptionalString(normalizedOptions?.stableKey) || undefined,
     };
     return limit(() => runAgentAttempt(input, normalizedOptions));
   }
@@ -409,6 +421,41 @@ export async function runWorkflowScript(
     });
   }
 
+  async function loopUntil(config: unknown): Promise<{ status: 'stopped'; reason: string; iterations: number; progressDelta: number }> {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      throw workflowScriptError('workflow_script_loop_until_config_required', 'workflow.loopUntil() requires an object');
+    }
+    const options = config as Record<string, unknown>;
+    if (typeof options.iteration !== 'function') {
+      throw workflowScriptError('workflow_script_loop_until_iteration_required', 'workflow.loopUntil() requires an iteration function');
+    }
+    const maxIterations = Math.max(1, Math.floor(Number(options.maxIterations || 0)));
+    if (!Number.isFinite(maxIterations) || maxIterations <= 0) {
+      throw workflowScriptError('workflow_script_loop_until_max_iterations_required', 'workflow.loopUntil() requires maxIterations');
+    }
+    const dryRunStreakToStop = Math.max(1, Math.floor(Number(options.dryRunStreakToStop || 1)));
+    let dryRunStreak = 0;
+    let progressDelta = 0;
+    let previous: unknown = null;
+    for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+      const result = await (options.iteration as (input: { iteration: number; previous: unknown }) => unknown | Promise<unknown>)({ iteration, previous });
+      previous = result;
+      const record = result && typeof result === 'object' ? result as Record<string, unknown> : {};
+      const status = normalizeOptionalString(record.status) || (record.dry === true ? 'dry' : 'produced');
+      const delta = Number(record.progressDelta || 0);
+      if (Number.isFinite(delta) && delta > 0) progressDelta += delta;
+      if (status === 'dry') {
+        dryRunStreak += 1;
+      } else {
+        dryRunStreak = 0;
+      }
+      if (dryRunStreak >= dryRunStreakToStop) {
+        return { status: 'stopped', reason: 'dry_run_streak', iterations: iteration, progressDelta };
+      }
+    }
+    return { status: 'stopped', reason: 'max_iterations', iterations: maxIterations, progressDelta };
+  }
+
   const workflow = Object.freeze({
     requestUserInput: async (question: unknown, options: unknown = null): Promise<unknown> => {
       if (typeof controller.requestUserInput !== 'function') {
@@ -436,6 +483,7 @@ export async function runWorkflowScript(
     needsRubricClarification: (reason: unknown): never => {
       throw new WorkflowScriptTerminalSignal(normalizeTerminalResult('needs_rubric_clarification', reason));
     },
+    loopUntil,
   });
 
   const context = vm.createContext(
@@ -575,6 +623,15 @@ function normalizeSchema(value: unknown): Record<string, unknown> | null {
     throw workflowScriptError('workflow_script_schema_object_required', 'workflow script schema must be an object');
   }
   assertJsonSerializable(value, 'workflow_script_schema_not_serializable');
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function normalizePermissionPolicy(value: unknown): Record<string, unknown> | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw workflowScriptError('workflow_script_permissions_object_required', 'workflow script permissions must be an object');
+  }
+  assertJsonSerializable(value, 'workflow_script_permissions_not_serializable');
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
 }
 

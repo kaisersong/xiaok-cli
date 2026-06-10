@@ -19,6 +19,14 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.4.3:**
+
+- **Kanban × Workflow Fusion**: Workflow pipeline progress is now an integral part of each project task card on the kanban. Cards show a slim multi-segment progress bar (completed / running / failed) plus a `工作流执行` chip and the latest workflow primary message, so users can see how a task is doing without leaving the board.
+- **Task Detail Drawer**: Clicking any task card opens a right-side drawer (`TaskDetailDrawer`) that consolidates task description, assigned agent, execution strategy, the workflow pipeline progress bar, full workflow node details grouped by phase (with parallel groups, fan-out labels, failure policy, and per-node agent / status / error), review feedback, and artifacts. The drawer reuses the same workflow data shape exposed by KSwarm and refreshes alongside project polling.
+- **Compact Workflow Status Strip**: The top-of-page `WorkflowStatusStrip` is demoted to a small text-only badge (`工作流 · Review gate passed`) next to the dedicated `运行工作流` button. The full workflow detail dialog still opens on click and now anchors to the right edge so it stays inside the viewport.
+- **Shared `workflowUtils`**: Status icon, tone class, status label, progress formatter, public-view normalizer, and generic workflow view builder are extracted into `workflowUtils.ts`. New helpers `findWorkflowRunForTask` (matches a task to its workflow run via `task.execution.workflowRunId` / `scope.taskId` / `sourceTask.id`) and `computeTaskPipelineProgress` reduce a `KSwarmWorkflowRun` to a `TaskPipelineProgress` summary used by both card and drawer.
+- **No Backend or Data Model Changes**: This release only restructures the desktop renderer surface. KSwarm data model, project APIs, and task semantics are unchanged.
+
 **What's New in v1.4.1:**
 
 - **Artifact Preview Fix**: Project deliverable artifacts (Markdown, HTML, plain text) now load correctly in the preview panel. The previous release used a JSON-parsing proxy for all kswarm GET requests, causing artifact content to throw a parse error and display "加载失败: fetch failed". A dedicated raw-text IPC proxy (`kswarmProxyGetText`) is now used for artifact content fetches.

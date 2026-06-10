@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="zh" data-template="kai-report-creator" data-version="2.0.0" data-theme="corporate-blue">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="kai-report-creator corporate-blue v2.0.0">
+    <meta name="ir-hash" content="0014e2850dc17a51">
+    <title>KualityForge 质量评审报告 — xiaok-cli</title>
+    <style>
+/* Theme: corporate-blue — Professional · Business (warm premium palette) */
+:root {
+  --primary: #1F6F50; --primary-light: #E7EFE9; --accent: #C79A2B;
+  --bg: #F8F5EF; --surface: #FFFDF9; --text: #2B2623; --text-muted: #766B63;
+  --border: #E7DDD2; --success: #2F6B50; --warning: #A8741A; --danger: #A34A3F;
+  --font-sans: 'Inter', 'PingFang SC', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace; --radius: 8px;
+  --report-bg: #F8F5EF; --report-surface: #FFFDF9; --report-text: #2B2623;
+  --report-text-muted: #766B63; --report-border: #E7DDD2; --report-structure: #1F6F50;
+  --report-chip-bg: #F4EAD5; --report-chip-text: #7A6858; --report-chip-border: #E0D4C6;
+  --report-delta-up-bg: #E7F1EA; --report-delta-up-text: #2F6B50;
+  --report-delta-down-bg: #F6E8E6; --report-delta-down-text: #A34A3F;
+  --report-delta-flat-bg: #EEE7DE; --report-delta-flat-text: #766B63;
+}
+body { font-family: var(--font-sans); color: var(--text); background: var(--bg); margin: 0; line-height: 1.58; }
+h1 { font-size: 2.25rem; font-weight: 700; color: var(--text); border-bottom: 2px solid var(--report-structure); padding-bottom: .5rem; margin-bottom: 1.5rem; }
+h2 { font-size: 1.5rem; font-weight: 600; color: var(--text); border-left: 3px solid var(--report-structure); padding-left: .75rem; margin-top: 1.75rem; }
+h3 { font-size: 1.15rem; font-weight: 600; color: var(--text); margin-top: 1.1rem; }
+p { margin: .5rem 0; } a { color: var(--report-structure); }
+strong { font-weight: 700; } blockquote { border-left: 3px solid var(--border); margin: .75rem 0; padding: .5rem 1rem; color: var(--text-muted); }
+
+/* Shared Component CSS — append after theme CSS for all themes */
+
+/* Layout */
+*, *::before, *::after { box-sizing: border-box; }
+.report-wrapper { max-width: 920px; margin: 0 auto; padding: 2rem 1.5rem; }
+@media (min-width: 1100px) { .report-wrapper { padding: 2.5rem 3rem; } }
+.report-meta { color: var(--text-muted); font-size: .9rem; margin-top: -.5rem; margin-bottom: 1.5rem; text-align: right; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-variant-numeric: lining-nums tabular-nums; }
+.prose-constrained { max-inline-size: 65ch; }
+
+/* Title row */
+.title-row { display: flex; align-items: flex-end; gap: 1rem; }
+.title-row h1 { flex: 1; }
+.card-mode-btn { flex-shrink: 0; margin-bottom: .6rem; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: .28rem .65rem; font-size: .76rem; font-weight: 600; color: var(--text-muted); cursor: pointer; transition: all .15s; font-family: var(--font-sans, system-ui); white-space: nowrap; }
+.card-mode-btn:hover { background: var(--primary-light); color: var(--primary); border-color: var(--primary); }
+
+/* Report footer */
+.report-footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--report-border, var(--border)); text-align: center; color: var(--text-muted); font-size: .7rem; opacity: .5; letter-spacing: .03em; }
+@media print { .report-footer { display: none; } }
+@media (max-width: 768px) { .report-footer { margin-top: 1.5rem; } }
+
+/* Floating TOC */
+.toc-sidebar { position: fixed; top: 0; left: 0; width: 240px; height: 100vh; overflow-y: auto; padding: 3rem 1rem 1.5rem; background: var(--surface); border-right: 1px solid var(--border); font-size: .83rem; z-index: 100; transform: translateX(-100%); transition: transform .28s ease; }
+.toc-sidebar.open { transform: translateX(0); box-shadow: 4px 0 24px rgba(0,0,0,.18); }
+.toc-sidebar h4 { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); margin: 0 0 .75rem; font-weight: 600; }
+.toc-sidebar a { display: block; color: var(--text-muted); text-decoration: none; padding: .28rem .5rem; border-radius: 4px; margin-bottom: 1px; transition: all .18s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toc-sidebar a:hover, .toc-sidebar a.active { color: var(--primary); background: var(--primary-light); }
+.toc-sidebar a.toc-h3 { padding-left: 1.1rem; font-size: .78rem; opacity: .85; }
+.main-with-toc { margin-left: 0; }
+.toc-toggle { position: fixed; top: .75rem; left: .75rem; z-index: 200; background: var(--primary); color: #fff; border: none; border-radius: 6px; padding: .45rem .7rem; cursor: pointer; font-size: 1rem; line-height: 1; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+.toc-toggle.locked { box-shadow: 0 0 0 2px #fff, 0 2px 8px rgba(0,0,0,.2); }
+body.no-toc .toc-sidebar, body.no-toc .toc-toggle { display: none; }
+body.no-toc .main-with-toc { margin-left: 0; }
+
+/* KPI */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; margin: 1.1rem 0; }
+.kpi-card { background: var(--report-surface, var(--surface)); border: 1px solid var(--report-border, var(--border)); border-radius: var(--radius); padding: .9rem; text-align: center; border-top: 2px solid var(--report-structure, var(--primary)); display: flex; flex-direction: column; align-items: center; }
+.kpi-label { font-size: .78rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: .4rem; }
+.kpi-value { font-size: 2rem; font-weight: 800; color: var(--report-text, var(--text)); line-height: 1.2; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-variant-numeric: lining-nums tabular-nums; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; word-break: break-word; overflow-wrap: break-word; }
+.kpi-value .kpi-suffix { font-size: .75em; font-weight: 600; line-height: 1.3; }
+.kpi-trend { font-size: .85rem; margin-top: .3rem; }
+.kpi-trend--up { color: var(--success); } .kpi-trend--down { color: var(--danger); } .kpi-trend--neutral { color: var(--text-muted); }
+.kpi-card[data-accent] { border-top-color: var(--report-structure, var(--primary)); }
+.kpi-card[data-accent] .kpi-value { color: var(--report-text, var(--text)); }
+.kpi-delta { display: inline-block; padding: .15rem .48rem; border-radius: 999px; font-size: .74rem; font-weight: 700; margin-top: .28rem; }
+.kpi-delta--up { background: var(--report-delta-up-bg, #E7F1EA); color: var(--report-delta-up-text, var(--success)); }
+.kpi-delta--down { background: var(--report-delta-down-bg, #F6E8E6); color: var(--report-delta-down-text, var(--danger)); }
+.kpi-delta--info { background: var(--report-delta-flat-bg, #EEE7DE); color: var(--report-delta-flat-text, var(--text-muted)); }
+
+/* Badge */
+.badge, .badge--blue, .badge--green, .badge--purple, .badge--orange, .badge--red, .badge--gray, .badge--teal, .badge--done, .badge--wip, .badge--todo, .badge--ok {
+  display: inline-flex; align-items: center; padding: .18rem .55rem; border-radius: 999px; font-size: .75rem; font-weight: 600; letter-spacing: .01em; white-space: nowrap;
+  background: var(--report-chip-bg, var(--surface)); color: var(--report-chip-text, var(--text-muted)); border: 1px solid var(--report-chip-border, var(--report-border, var(--border)));
+}
+.badge--warn { display: inline-flex; align-items: center; padding: .18rem .55rem; border-radius: 999px; font-size: .75rem; font-weight: 600; letter-spacing: .01em; white-space: nowrap; background: var(--report-delta-up-bg, #E7F1EA); color: var(--report-delta-up-text, var(--success)); border: 1px solid transparent; }
+.badge--err { display: inline-flex; align-items: center; padding: .18rem .55rem; border-radius: 999px; font-size: .75rem; font-weight: 600; letter-spacing: .01em; white-space: nowrap; background: var(--report-delta-down-bg, #F6E8E6); color: var(--report-delta-down-text, var(--danger)); border: 1px solid transparent; }
+[data-report-mode="comparison"] .badge--entity-a { background: rgba(47, 107, 80, .12); color: var(--entity-a, #2F6B50); border-color: rgba(47, 107, 80, .18); }
+[data-report-mode="comparison"] .badge--entity-b { background: rgba(111, 106, 124, .12); color: var(--entity-b, #6F6A7C); border-color: rgba(111, 106, 124, .18); }
+[data-report-mode="comparison"] .badge--entity-c { background: rgba(92, 118, 138, .12); color: var(--entity-c, #5C768A); border-color: rgba(92, 118, 138, .18); }
+
+/* Tables */
+.table-wrapper { overflow-x: auto; margin: 1.1rem 0; }
+.report-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.report-table th { background: var(--report-surface, var(--surface)); border-bottom: 2px solid var(--report-structure, var(--primary)); padding: .7rem 1rem; text-align: left; font-weight: 600; }
+.report-table td { padding: .6rem 1rem; border-bottom: 1px solid var(--border); }
+.report-table tr:hover td { background: var(--report-surface, var(--surface)); }
+
+/* Callout */
+.callout { display: flex; gap: .75rem; padding: .9rem 1.1rem; border-radius: var(--radius); margin: .75rem 0; border-left: 4px solid; align-items: flex-start; }
+.callout--note { background: #EFF6FF; border-color: #3B82F6; }
+.callout--tip { background: #F0FDF4; border-color: #22C55E; }
+.callout--warning { background: #FFFBEB; border-color: #F59E0B; }
+.callout--danger { background: #FEF2F2; border-color: #EF4444; }
+.callout-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: .05rem; }
+.callout-body { flex: 1; min-width: 0; line-height: 1.6; font-size: .93rem; color: #1F2937; }
+
+/* Timeline */
+.timeline { position: relative; padding-left: 2rem; margin: 1.1rem 0; }
+.timeline::before { content: ''; position: absolute; left: .45rem; top: 0; bottom: 0; width: 2px; background: var(--border); }
+.timeline-item { position: relative; margin-bottom: 1rem; }
+.timeline-dot { position: absolute; left: -1.65rem; top: .3rem; width: 12px; height: 12px; border-radius: 50%; background: var(--report-structure, var(--primary)); border: 2px solid var(--report-bg, var(--bg)); }
+.timeline-date { font-size: .78rem; color: var(--text-muted); margin-bottom: .15rem; font-weight: 600; }
+.timeline-content { color: var(--text); line-height: 1.6; }
+
+/* Image */
+.report-image { margin: 1.1rem 0; } .report-image img { max-width: 100%; border-radius: var(--radius); }
+.report-image figcaption { font-size: .82rem; color: var(--text-muted); text-align: center; margin-top: .4rem; }
+.report-image--left { float: left; max-width: 40%; margin-right: 1.5rem; margin-bottom: .5rem; }
+.report-image--right { float: right; max-width: 40%; margin-left: 1.5rem; margin-bottom: .5rem; }
+.report-image--full { width: 100%; display: block; }
+.clearfix::after { content: ''; display: table; clear: both; }
+
+/* Code */
+.code-wrapper { margin: 1.1rem 0; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
+.code-title { background: var(--surface); padding: .35rem 1rem; font-size: .78rem; color: var(--text-muted); font-family: var(--font-mono); border-bottom: 1px solid var(--border); }
+.code-wrapper pre { margin: 0; overflow-x: auto; }
+
+/* List */
+.report-list { margin: .75rem 0; }
+.styled-list { padding-left: 1.5rem; line-height: 1.8; }
+.styled-list li { margin-bottom: .25rem; }
+
+/* Diagram */
+.diagram-wrapper { margin: 1.1rem 0; text-align: center; }
+.diagram-wrapper svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+
+/* Chart */
+[data-component="chart"] { margin: 1.1rem 0; }
+
+/* Prose cadence blocks */
+.highlight-sentence { font-size: 1.15rem; font-weight: 700; color: var(--primary); border-left: 3px solid var(--primary); padding-left: 1rem; margin: 1.5rem 0; line-height: 1.5; }
+.lead-block { margin: 1.1rem 0 1rem; padding: 1rem 1.15rem; border-left: 4px solid var(--primary); border-radius: 16px; background: var(--surface); font-size: 1.02rem; line-height: 1.72; max-width: 60rem; }
+.section-quote { margin: 1rem 0; padding: 1rem 1.15rem; border-radius: 18px; background: var(--surface); border: 1px solid var(--border); font-size: 1.18rem; line-height: 1.58; }
+.action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; margin: 1rem 0; }
+.action-card { padding: 1rem; border-radius: 18px; border: 1px solid var(--border); background: var(--surface); }
+.action-card strong { display: block; margin-bottom: .45rem; color: var(--primary); }
+.action-card p { margin: 0; font-size: .92rem; line-height: 1.62; color: var(--text-muted); }
+
+/* Summary card overlay */
+.sc-overlay { display: none; position: fixed; inset: 0; z-index: 500; background: rgba(0,0,0,.52); backdrop-filter: blur(6px); align-items: center; justify-content: center; padding: 2rem; }
+body.card-mode .sc-overlay { display: flex; }
+body.card-mode { overflow: hidden; height: 100vh; }
+html:has(body.card-mode) { overflow: hidden; height: 100vh; }
+body.card-mode .main-with-toc, body.card-mode .toc-toggle, body.card-mode .toc-sidebar { visibility: hidden; }
+body.card-mode .sc-overlay { visibility: visible; }
+.sc-card { position: relative; display: flex; width: min(900px, 92vw); background: #fff; border: 1px solid rgba(0,0,0,.12); border-radius: 8px; overflow: hidden; box-shadow: 0 24px 72px rgba(0,0,0,.3); }
+.sc-left { flex: 0 0 46%; display: flex; flex-direction: column; padding: 1.8rem 2rem 1.6rem; background: var(--primary); color: #fff; }
+.sc-label { font-size: .55rem; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; opacity: .5; margin-bottom: .55rem; display: flex; align-items: center; gap: .45rem; }
+.sc-label::before { content: ''; display: inline-block; width: 20px; height: 1px; background: currentColor; }
+.sc-title-main { font-size: clamp(3.45rem, 6.9vw, 5.25rem); font-weight: 900; line-height: .92; letter-spacing: -.05em; margin-bottom: .35rem; word-break: break-word; }
+.sc-title-sub { font-size: 1.08rem; line-height: 1.5; color: rgba(255,255,255,.88); margin-bottom: .9rem; max-width: 82%; }
+.sc-note { margin-top: auto; padding-top: 1.4rem; width: 72%; font-size: .84rem; line-height: 1.68; opacity: .9; }
+.sc-right { flex: 1; display: flex; flex-direction: column; padding: 1.8rem; border-left: 1px solid var(--border); }
+.sc-kpi-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 0 .6rem; margin-bottom: .5rem; }
+.sc-kpi-row { padding: .32rem 0; border-bottom: 1px solid var(--border); }
+.sc-kpi-row-l { font-size: .56rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; }
+.sc-kpi-row-v { font-size: 1.15rem; font-weight: 800; color: var(--primary); line-height: 1.15; }
+.sc-kpi-row-t { font-size: .6rem; color: var(--success, #057A55); font-weight: 600; }
+.sc-summaries { flex: 1; display: flex; flex-direction: column; }
+.sc-sum-item { padding: .35rem 0; border-bottom: 1px solid var(--border); }
+.sc-sum-item:last-child { border-bottom: none; }
+.sc-sum-name { font-size: .56rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: .08em; }
+.sc-sum-text { font-size: .74rem; color: var(--text); line-height: 1.45; margin-top: .06rem; opacity: .72; }
+.sc-close { position: absolute; top: .8rem; right: .8rem; z-index: 1; background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.25); border-radius: 3px; width: 24px; height: 24px; cursor: pointer; color: #fff; display: flex; align-items: center; justify-content: center; font-size: .75rem; transition: background .15s; }
+.sc-close:hover { background: rgba(255,255,255,.28); }
+
+/* Animations */
+.fade-in-up { opacity: 0; transform: translateY(18px); transition: opacity .5s cubic-bezier(0.22,1,0.36,1), transform .5s cubic-bezier(0.22,1,0.36,1); }
+.fade-in-up.visible { opacity: 1; transform: translateY(0); }
+body.no-animations .fade-in-up { opacity: 1; transform: none; transition: none; }
+.kpi-grid.stagger-ready .kpi-card { opacity: 0; transform: translateY(20px) scale(0.95); transition: opacity .45s cubic-bezier(0.34,1.56,0.64,1), transform .45s cubic-bezier(0.34,1.56,0.64,1); }
+.kpi-grid.stagger-ready .kpi-card.visible { opacity: 1; transform: none; }
+.timeline.stagger-ready .timeline-item { opacity: 0; transform: translateX(-12px); transition: opacity .4s cubic-bezier(0.22,1,0.36,1), transform .4s cubic-bezier(0.22,1,0.36,1); }
+.timeline.stagger-ready .timeline-item.visible { opacity: 1; transform: none; }
+body.no-animations .kpi-grid .kpi-card,
+body.no-animations .timeline .timeline-item { opacity: 1 !important; transform: none !important; transition: none !important; }
+.print-exporting .fade-in-up { opacity: 1 !important; transform: none !important; transition: none !important; }
+.print-exporting .kpi-grid .kpi-card { opacity: 1 !important; transform: none !important; transition: none !important; }
+.print-exporting .timeline .timeline-item { opacity: 1 !important; transform: none !important; transition: none !important; }
+
+/* Edit mode */
+.edit-hotzone { position: fixed; bottom: 0; left: 0; width: 80px; height: 80px; z-index: 10000; cursor: pointer; }
+.edit-toggle { position: fixed; bottom: 16px; left: 16px; background: var(--primary); color: #fff; border: none; border-radius: 6px; padding: .45rem .9rem; font-size: .82rem; cursor: pointer; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .25s ease, background .2s ease; z-index: 10001; box-shadow: 0 2px 8px rgba(0,0,0,.25); letter-spacing: .02em; }
+.edit-toggle.show { opacity: 1; pointer-events: auto; }
+.edit-toggle.active { opacity: 1; pointer-events: auto; background: var(--success); }
+body.edit-mode [contenteditable] { outline: 1px dashed var(--border); border-radius: 2px; cursor: text; }
+body.edit-mode [contenteditable]:hover { outline-color: var(--primary); }
+body.edit-mode [contenteditable]:focus { outline: 2px solid var(--primary); }
+
+/* Export */
+.export-btn { position: fixed; bottom: 16px; right: 16px; z-index: 10001; background: var(--primary); color: #fff; border: none; border-radius: 6px; padding: .45rem .9rem; font-size: .82rem; cursor: pointer; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,.2); font-family: var(--font-sans, system-ui); letter-spacing: .02em; }
+.export-menu { position: fixed; bottom: 52px; right: 16px; z-index: 10001; background: var(--surface, #fff); border: 1px solid var(--border, #e5e7eb); border-radius: 6px; overflow: hidden; display: none; box-shadow: 0 4px 16px rgba(0,0,0,.15); min-width: 148px; }
+.export-menu.open { display: block; }
+.export-item { display: block; width: 100%; padding: .55rem 1rem; font-size: .84rem; background: none; border: none; cursor: pointer; text-align: left; color: var(--text, #111); font-family: var(--font-sans, system-ui); white-space: nowrap; border-bottom: 1px solid var(--border, #e5e7eb); }
+.export-item:last-child { border-bottom: none; }
+.export-item:hover { background: var(--primary-light, #e3edff); }
+
+/* Responsive */
+@media (max-width: 900px) {
+  .action-grid { grid-template-columns: 1fr; }
+  .sc-card { flex-direction: column; width: min(92vw, 640px); }
+  .sc-right { border-left: none; border-top: 1px solid var(--border); }
+}
+@media (max-width: 768px) {
+  .report-wrapper { padding: 1.5rem 1rem; }
+}
+
+/* Print */
+@page { size: A4; margin: 1.5cm; }
+@media print {
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  .toc-toggle, .toc-sidebar, .edit-hotzone, .edit-toggle, .export-btn, .export-menu { display: none !important; }
+  .sc-overlay, .card-mode-btn { display: none !important; }
+  h2 { break-after: avoid; }
+  .kpi-grid, .kpi-card, .callout, .timeline, .timeline-item,
+  .table-wrapper, [data-component="chart"], .diagram-wrapper { break-inside: avoid; }
+  .chart-container { height: 200px !important; }
+  canvas { max-height: 200px !important; width: 100% !important; }
+  img { max-height: 260px !important; width: auto !important; object-fit: contain; }
+  .fade-in-up { opacity: 1 !important; transform: translateY(0) !important; }
+  .kpi-grid .kpi-card, .timeline .timeline-item { opacity: 1 !important; transform: none !important; }
+}
+
+    </style>
+</head>
+<body>
+    <script type="application/json" id="report-summary">{"title":"KualityForge 质量评审报告 — xiaok-cli","theme":"corporate-blue","lang":"zh","date":"2026-06-09","abstract":"","poster_title":"","poster_subtitle":"","poster_note":"","kpis":[],"sections":[{"title":"执行摘要","slug":"执行摘要"},{"title":"关键数据","slug":"关键数据"},{"title":"核心发现","slug":"核心发现"},{"title":"正面亮点","slug":"正面亮点"},{"title":"评审概览","slug":"评审概览"},{"title":"各 Reviewer 统计","slug":"各-reviewer-统计"},{"title":"严重性分布","slug":"严重性分布"},{"title":"按维度统计","slug":"按维度统计"},{"title":"关键发现","slug":"关键发现"},{"title":"🔴 Blocker 级","slug":"blocker-级"},{"title":"🟠 High 级（共识发现）","slug":"high-级共识发现"},{"title":"🟠 High 级（独立发现）","slug":"high-级独立发现"},{"title":"🟡 Warning 级","slug":"warning-级"},{"title":"ℹ️ Info 级","slug":"info-级"},{"title":"门禁详情","slug":"门禁详情"},{"title":"🔴 门禁结果：FAIL","slug":"门禁结果fail"},{"title":"MUST-FIX（阻断项）","slug":"must-fix阻断项"},{"title":"SHOULD-FIX（建议修复项）","slug":"should-fix建议修复项"},{"title":"修复优先级路线图","slug":"修复优先级路线图"},{"title":"评审维度分析","slug":"评审维度分析"},{"title":"安全性 — 评分 40/100","slug":"安全性-评分-40100"},{"title":"架构/可维护性 — 评分 50/100","slug":"架构可维护性-评分-50100"},{"title":"代码质量/类型安全 — 评分 48/100","slug":"代码质量类型安全-评分-48100"},{"title":"依赖管理 — 评分 45/100","slug":"依赖管理-评分-45100"},{"title":"可靠性/运维 — 评分 55/100","slug":"可靠性运维-评分-55100"},{"title":"测试质量 — 评分 58/100","slug":"测试质量-评分-58100"},{"title":"文档质量 — 评分 60/100","slug":"文档质量-评分-60100"},{"title":"Reviewer 贡献","slug":"reviewer-贡献"},{"title":"🥇 claude — 总分 8.3","slug":"claude-总分-83"},{"title":"🥈 xiaok — 总分 7.7","slug":"xiaok-总分-77"},{"title":"🥉 qoder — 总分 7.3","slug":"qoder-总分-73"},{"title":"质量原则","slug":"质量原则"},{"title":"原则 1: 纵深防御 — 安全不可依赖单一机制","slug":"原则-1-纵深防御-安全不可依赖单一机制"},{"title":"原则 2: 模块边界 — 单体文件是技术债务的温床","slug":"原则-2-模块边界-单体文件是技术债务的温床"},{"title":"原则 3: 错误透明 — 绝不静默吞没异常","slug":"原则-3-错误透明-绝不静默吞没异常"},{"title":"原则 4: 依赖卫生 — 定期审计是安全基线","slug":"原则-4-依赖卫生-定期审计是安全基线"},{"title":"原则 5: 防御性接口 — 信任但要验证","slug":"原则-5-防御性接口-信任但要验证"},{"title":"附录","slug":"附录"},{"title":"A. Reviewer 原始评审产物","slug":"a-reviewer-原始评审产物"},{"title":"B. 合成与决策产物","slug":"b-合成与决策产物"},{"title":"C. 评审元信息","slug":"c-评审元信息"},{"title":"D. 完整发现索引","slug":"d-完整发现索引"}]}</script>
+
+    <div class="edit-hotzone" id="edit-hotzone"></div>
+    <button class="edit-toggle" id="edit-toggle" title="Edit mode (E)">✏ Edit</button>
+
+    <div class="export-menu" id="export-menu">
+      <button class="export-item" id="export-print">🖨 打印 / PDF</button>
+      <button class="export-item" id="export-png-desktop">🖥 保存图片（桌面）</button>
+      <button class="export-item" id="export-png-mobile">📱 保存图片（手机）</button>
+      <button class="export-item" id="export-im-share">💬 IM 长图</button>
+    </div>
+    <button class="export-btn" id="export-btn" title="Export">↓ 导出</button>
+
+    <button class="toc-toggle" id="toc-toggle-btn" aria-label="目录" aria-expanded="false">☰</button>
+    <nav class="toc-sidebar" id="toc-sidebar" aria-label="报告目录">
+      <h4>目录</h4>
+      <a href="#section-执行摘要" data-section="执行摘要">执行摘要</a>
+      <a href="#section-关键数据" data-section="关键数据" class="toc-h3">关键数据</a>
+      <a href="#section-核心发现" data-section="核心发现" class="toc-h3">核心发现</a>
+      <a href="#section-正面亮点" data-section="正面亮点" class="toc-h3">正面亮点</a>
+      <a href="#section-评审概览" data-section="评审概览">评审概览</a>
+      <a href="#section-各-reviewer-统计" data-section="各 Reviewer 统计" class="toc-h3">各 Reviewer 统计</a>
+      <a href="#section-严重性分布" data-section="严重性分布" class="toc-h3">严重性分布</a>
+      <a href="#section-按维度统计" data-section="按维度统计" class="toc-h3">按维度统计</a>
+      <a href="#section-关键发现" data-section="关键发现">关键发现</a>
+      <a href="#section-blocker-级" data-section="🔴 Blocker 级" class="toc-h3">🔴 Blocker 级</a>
+      <a href="#section-high-级共识发现" data-section="🟠 High 级（共识发现）" class="toc-h3">🟠 High 级（共识发现）</a>
+      <a href="#section-high-级独立发现" data-section="🟠 High 级（独立发现）" class="toc-h3">🟠 High 级（独立发现）</a>
+      <a href="#section-warning-级" data-section="🟡 Warning 级" class="toc-h3">🟡 Warning 级</a>
+      <a href="#section-info-级" data-section="ℹ️ Info 级" class="toc-h3">ℹ️ Info 级</a>
+      <a href="#section-门禁详情" data-section="门禁详情">门禁详情</a>
+      <a href="#section-门禁结果fail" data-section="🔴 门禁结果：FAIL" class="toc-h3">🔴 门禁结果：FAIL</a>
+      <a href="#section-must-fix阻断项" data-section="MUST-FIX（阻断项）" class="toc-h3">MUST-FIX（阻断项）</a>
+      <a href="#section-should-fix建议修复项" data-section="SHOULD-FIX（建议修复项）" class="toc-h3">SHOULD-FIX（建议修复项）</a>
+      <a href="#section-修复优先级路线图" data-section="修复优先级路线图" class="toc-h3">修复优先级路线图</a>
+      <a href="#section-评审维度分析" data-section="评审维度分析">评审维度分析</a>
+      <a href="#section-安全性-评分-40100" data-section="安全性 — 评分 40/100" class="toc-h3">安全性 — 评分 40/100</a>
+      <a href="#section-架构可维护性-评分-50100" data-section="架构/可维护性 — 评分 50/100" class="toc-h3">架构/可维护性 — 评分 50/100</a>
+      <a href="#section-代码质量类型安全-评分-48100" data-section="代码质量/类型安全 — 评分 48/100" class="toc-h3">代码质量/类型安全 — 评分 48/100</a>
+      <a href="#section-依赖管理-评分-45100" data-section="依赖管理 — 评分 45/100" class="toc-h3">依赖管理 — 评分 45/100</a>
+      <a href="#section-可靠性运维-评分-55100" data-section="可靠性/运维 — 评分 55/100" class="toc-h3">可靠性/运维 — 评分 55/100</a>
+      <a href="#section-测试质量-评分-58100" data-section="测试质量 — 评分 58/100" class="toc-h3">测试质量 — 评分 58/100</a>
+      <a href="#section-文档质量-评分-60100" data-section="文档质量 — 评分 60/100" class="toc-h3">文档质量 — 评分 60/100</a>
+      <a href="#section-reviewer-贡献" data-section="Reviewer 贡献">Reviewer 贡献</a>
+      <a href="#section-claude-总分-83" data-section="🥇 claude — 总分 8.3" class="toc-h3">🥇 claude — 总分 8.3</a>
+      <a href="#section-xiaok-总分-77" data-section="🥈 xiaok — 总分 7.7" class="toc-h3">🥈 xiaok — 总分 7.7</a>
+      <a href="#section-qoder-总分-73" data-section="🥉 qoder — 总分 7.3" class="toc-h3">🥉 qoder — 总分 7.3</a>
+      <a href="#section-质量原则" data-section="质量原则">质量原则</a>
+      <a href="#section-原则-1-纵深防御-安全不可依赖单一机制" data-section="原则 1: 纵深防御 — 安全不可依赖单一机制" class="toc-h3">原则 1: 纵深防御 — 安全不可依赖单一机制</a>
+      <a href="#section-原则-2-模块边界-单体文件是技术债务的温床" data-section="原则 2: 模块边界 — 单体文件是技术债务的温床" class="toc-h3">原则 2: 模块边界 — 单体文件是技术债务的温床</a>
+      <a href="#section-原则-3-错误透明-绝不静默吞没异常" data-section="原则 3: 错误透明 — 绝不静默吞没异常" class="toc-h3">原则 3: 错误透明 — 绝不静默吞没异常</a>
+      <a href="#section-原则-4-依赖卫生-定期审计是安全基线" data-section="原则 4: 依赖卫生 — 定期审计是安全基线" class="toc-h3">原则 4: 依赖卫生 — 定期审计是安全基线</a>
+      <a href="#section-原则-5-防御性接口-信任但要验证" data-section="原则 5: 防御性接口 — 信任但要验证" class="toc-h3">原则 5: 防御性接口 — 信任但要验证</a>
+      <a href="#section-附录" data-section="附录">附录</a>
+      <a href="#section-a-reviewer-原始评审产物" data-section="A. Reviewer 原始评审产物" class="toc-h3">A. Reviewer 原始评审产物</a>
+      <a href="#section-b-合成与决策产物" data-section="B. 合成与决策产物" class="toc-h3">B. 合成与决策产物</a>
+      <a href="#section-c-评审元信息" data-section="C. 评审元信息" class="toc-h3">C. 评审元信息</a>
+      <a href="#section-d-完整发现索引" data-section="D. 完整发现索引" class="toc-h3">D. 完整发现索引</a>
+    </nav>
+
+    <div class="main-with-toc">
+      <div class="report-wrapper">
+        <div class="title-row">
+          <h1>KualityForge 质量评审报告 — xiaok-cli</h1>
+          <button id="card-mode-btn" class="card-mode-btn" title="摘要卡片">⊞ 摘要卡</button>
+        </div>
+        <p class="report-meta">2026-06-09</p>
+
+        <div class="sc-overlay" id="sc-overlay">
+          <div class="sc-card" id="sc-card">
+            <button class="sc-close" id="sc-close" aria-label="Close">✕</button>
+          </div>
+        </div>
+
+        <section data-section="执行摘要" data-summary="**门禁结果：FAIL 🔴**" id="section-执行摘要">
+          <h2 id="section-执行摘要">执行摘要</h2>
+          <p class="fade-in-up">::: callout danger <strong>门禁结果：FAIL 🔴</strong></p>
+          <p class="fade-in-up">本次 KualityForge 多 agent 交叉评审对 xiaok-cli 项目进行了全面质量审计。3 位 reviewer（claude、qoder、xiaok）并行独立评审代码质量、架构、安全、可维护性等维度，共产生 31 条原始发现，去重后得 29 条独立发现。</p>
+          <p class="fade-in-up">综合评分 <strong>52/100</strong>，门禁判定为 <strong>FAIL</strong>——直接原因是 vitest 依赖存在 critical 级安全漏洞（GHSA-5xrq-8626-4rwp）。此外尚有 7 个 high 级问题涵盖 Electron 安全纵深防御缺失、架构单体化、输入校验绕过、依赖不匹配等关键风险维度。</p>
+        </section>
+        <section data-section="关键数据" data-summary="| 指标 | 数值 |" id="section-关键数据">
+          <h3 id="section-关键数据">关键数据</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>指标</th><th>数值</th></tr></thead>
+        <tbody>
+      <tr><td>参与评审 reviewer</td><td>4（codex 未产出）</td></tr>
+      <tr><td>原始发现总数</td><td>31</td></tr>
+      <tr><td>去重后独立发现</td><td>29</td></tr>
+      <tr><td>多 reviewer 共识发现</td><td>4</td></tr>
+      <tr><td>正面发现</td><td>5</td></tr>
+      <tr><td>blocker</td><td>1</td></tr>
+      <tr><td>high</td><td>7</td></tr>
+      <tr><td>warning</td><td>11</td></tr>
+      <tr><td>info</td><td>10</td></tr>
+        </tbody>
+      </table>
+    </div>
+        </section>
+        <section data-section="核心发现" data-summary="1. **🔴 P0**：vitest 存在 critical 安全漏洞（GHSA-5xrq-8626-4rwp），当前版本 3.2.4 需升级至 ≥3.2.6" id="section-核心发现">
+          <h3 id="section-核心发现">核心发现</h3>
+    <ol class="report-list styled-list fade-in-up">
+      <li><strong>🔴 P0</strong>：vitest 存在 critical 安全漏洞（GHSA-5xrq-8626-4rwp），当前版本 3.2.4 需升级至 ≥3.2.6</li>
+      <li><strong>🔴 P0</strong>：Electron sandbox 未启用 + preload 使用 <code>require()</code>，渲染进程隔离被削弱（2 reviewer 共识）</li>
+      <li><strong>🔴 P0</strong>：desktop-services.ts 单体文件超 5400 行（2 reviewer 共识）+ chat.ts 3511 行</li>
+      <li><strong>🟠 P1</strong>：bash 命令安全分类正则存在 4 种绕过向量</li>
+      <li><strong>🟠 P1</strong>：workspace 路径校验可能被符号链接绕过</li>
+      <li><strong>🟠 P1</strong>：大量空 catch 块吞没异常（约 30 处）</li>
+    </ol>
+        </section>
+        <section data-section="正面亮点" data-summary="- ✅ Bash 三层安全分类系统设计优秀（3 reviewer 一致认可）" id="section-正面亮点">
+          <h3 id="section-正面亮点">正面亮点</h3>
+    <ul class="report-list styled-list fade-in-up">
+      <li>✅ Bash 三层安全分类系统设计优秀（3 reviewer 一致认可）</li>
+      <li>✅ Reminder scheduler 幂等交付 + 退避重试设计精良</li>
+      <li>✅ AgentRuntime 空响应自动重试与无损中断</li>
+      <li>✅ 原子文件写入（tmp+rename）保障崩溃安全</li>
+      <li>✅ TypeScript strict mode 全项目启用</li>
+    </ul>
+        </section>
+        <section data-section="评审概览" data-summary="" id="section-评审概览">
+          <h2 id="section-评审概览">评审概览</h2>
+        </section>
+        <section data-section="各 Reviewer 统计" data-summary="| 排名 | Reviewer | 总分 | 深度 | 覆盖 | 建议质量 | Blockers | High | Warning | Info | 突出贡献 |" id="section-各-reviewer-统计">
+          <h3 id="section-各-reviewer-统计">各 Reviewer 统计</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>排名</th><th>Reviewer</th><th>总分</th><th>深度</th><th>覆盖</th><th>建议质量</th><th>Blockers</th><th>High</th><th>Warning</th><th>Info</th><th>突出贡献</th></tr></thead>
+        <tbody>
+      <tr><td>🥇</td><td><strong>claude</strong></td><td><strong>8.3</strong></td><td>9</td><td>8</td><td>8</td><td>0</td><td>3</td><td>3</td><td>4</td><td>符号链接绕过、bash 正则绕过等底层安全漏洞发现</td></tr>
+      <tr><td>🥈</td><td><strong>xiaok</strong></td><td><strong>7.7</strong></td><td>8</td><td>8</td><td>7</td><td>0</td><td>3</td><td>5</td><td>2</td><td>Electron 安全纵深防御完整评估；桌面 UX 独特视角</td></tr>
+      <tr><td>🥉</td><td><strong>qoder</strong></td><td><strong>7.3</strong></td><td>7</td><td>8</td><td>7</td><td>1</td><td>2</td><td>5</td><td>3</td><td>唯一发现 blocker 级漏洞；依赖管理全面审计</td></tr>
+      <tr><td>—</td><td>codex</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>未产出评审报告</td></tr>
+        </tbody>
+      </table>
+    </div>
+        </section>
+        <section data-section="严重性分布" data-summary="```mermaid" id="section-严重性分布">
+          <h3 id="section-严重性分布">严重性分布</h3>
+          <p class="fade-in-up">``<code>mermaid xychart-beta title "去重后 Finding 严重性分布" x-axis ["blocker", "high", "warning", "info"] y-axis "数量" 0 --&gt; 12 bar [1, 7, 11, 10] </code>``</p>
+        </section>
+        <section data-section="按维度统计" data-summary="| 维度 | 相关 Findings | 覆盖 Reviewers |" id="section-按维度统计">
+          <h3 id="section-按维度统计">按维度统计</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>维度</th><th>相关 Findings</th><th>覆盖 Reviewers</th></tr></thead>
+        <tbody>
+      <tr><td><strong>安全性</strong></td><td>7</td><td>claude, qoder, xiaok</td></tr>
+      <tr><td><strong>架构/可维护性</strong></td><td>4</td><td>claude, qoder, xiaok</td></tr>
+      <tr><td><strong>代码质量/类型安全</strong></td><td>4</td><td>claude, qoder</td></tr>
+      <tr><td><strong>依赖管理</strong></td><td>3</td><td>qoder</td></tr>
+      <tr><td><strong>可靠性/运维</strong></td><td>5</td><td>claude, xiaok</td></tr>
+      <tr><td><strong>测试质量</strong></td><td>3</td><td>claude, qoder</td></tr>
+      <tr><td><strong>文档质量</strong></td><td>2</td><td>qoder</td></tr>
+      <tr><td><strong>正面亮点</strong></td><td>5</td><td>claude, xiaok</td></tr>
+        </tbody>
+      </table>
+    </div>
+        </section>
+        <section data-section="关键发现" data-summary="" id="section-关键发现">
+          <h2 id="section-关键发现">关键发现</h2>
+        </section>
+        <section data-section="🔴 Blocker 级" data-summary="#### QF-Q03 | vitest 存在关键安全漏洞 (GHSA-5xrq-8626-4rwp)" id="section-blocker-级">
+          <h3 id="section-blocker-级">🔴 Blocker 级</h3>
+          <p class="fade-in-up">::: callout danger</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>属性</th><th>值</th></tr></thead>
+        <tbody>
+      <tr><td><strong>发现者</strong></td><td>qoder</td></tr>
+      <tr><td><strong>位置</strong></td><td><code>package.json</code> → <code>devDependencies.vitest: "^3.0.0"</code></td></tr>
+      <tr><td><strong>当前版本</strong></td><td>3.2.4（修复版本 ≥ 3.2.6）</td></tr>
+      <tr><td><strong>共识</strong></td><td>单一 reviewer，但为 critical CVE</td></tr>
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><strong>描述</strong>：<code>npm audit</code> 报告 1 个 critical 级漏洞——当 Vitest UI server 监听时，攻击者可读取和执行任意文件。当前安装版本 3.2.4 在修复版本之下。</p>
+          <p class="fade-in-up"><strong>修复指引</strong>：</p>
+    <ul class="report-list styled-list fade-in-up">
+      <li>立即执行 <code>npm audit fix</code> 将 vitest 升级到 ≥ 3.2.6</li>
+      <li>或在 <code>package.json</code> 中将版本约束收紧为 <code>"^3.2.6"</code></li>
+      <li>在 CI 中添加 <code>npm audit --audit-level=critical</code> 阻断步骤</li>
+    </ul>
+        </section>
+        <section data-section="🟠 High 级（共识发现）" data-summary="#### QF-CL02 / QF-X03 | Electron sandbox 未启用 + preload 使用 require()" id="section-high-级共识发现">
+          <h3 id="section-high-级共识发现">🟠 High 级（共识发现）</h3>
+          <p class="fade-in-up">::: callout warning</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>属性</th><th>值</th></tr></thead>
+        <tbody>
+      <tr><td><strong>发现者</strong></td><td>claude, xiaok（2 reviewer 共识 ✅）</td></tr>
+      <tr><td><strong>位置</strong></td><td><code>desktop/electron/security.ts:35</code></td></tr>
+      <tr><td><strong>维度</strong></td><td>安全性</td></tr>
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><strong>描述</strong>：<code>buildBrowserWindowOptions()</code> 中 <code>sandbox</code> 被显式设置为 <code>false</code>，因为 preload.cjs 使用了 <code>require()</code>。虽然 <code>contextIsolation: true</code> 和 <code>nodeIntegration: false</code> 已启用，但禁用 sandbox 削弱了渲染进程隔离——一旦渲染进程存在 XSS，攻击面极大。</p>
+          <p class="fade-in-up"><strong>修复指引</strong>：</p>
+    <ul class="report-list styled-list fade-in-up">
+      <li>迁移 preload.cjs 为 ESM 格式，使用 <code>import</code> 替代 <code>require()</code></li>
+      <li>启用 <code>sandbox: true</code></li>
+      <li>对 <code>contextBridge</code> 暴露的 API 增加权限校验</li>
+    </ul>
+          <p class="fade-in-up">::: callout warning</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>属性</th><th>值</th></tr></thead>
+        <tbody>
+      <tr><td><strong>发现者</strong></td><td>claude, xiaok（2 reviewer 共识 ✅）</td></tr>
+      <tr><td><strong>位置</strong></td><td><code>desktop/electron/desktop-services.ts</code>（5462 行）</td></tr>
+      <tr><td><strong>维度</strong></td><td>架构设计</td></tr>
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><strong>描述</strong>：<code>desktop-services.ts</code> 承载 20+ 领域职责，导入 50+ 模块，通过闭包共享状态。单一文件包含模型管理、任务执行、MCP 集成、技能运行时、内存存储、Computer Use 等全部核心逻辑。</p>
+          <p class="fade-in-up"><strong>修复指引</strong>：</p>
+    <ul class="report-list styled-list fade-in-up">
+      <li>按领域拆分为独立服务模块：<code>SkillRuntimeService</code>、<code>MemoryService</code>、<code>KSwarmBridgeService</code> 等</li>
+      <li>引入显式服务接口 + 依赖注入</li>
+      <li>每个拆分模块控制在 300-500 行</li>
+    </ul>
+        </section>
+        <section data-section="🟠 High 级（独立发现）" data-summary="#### QF-CL01 | bash 命令安全分类正则存在绕过风险" id="section-high-级独立发现">
+          <h3 id="section-high-级独立发现">🟠 High 级（独立发现）</h3>
+          <p class="fade-in-up">::: callout warning</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>属性</th><th>值</th></tr></thead>
+        <tbody>
+      <tr><td><strong>发现者</strong></td><td>claude</td></tr>
+      <tr><td><strong>位置</strong></td><td><code>src/ai/tools/bash-safety.ts</code></td></tr>
+      <tr><td><strong>维度</strong></td><td>安全性</td></tr>
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><strong>描述</strong>：<code>classifyBashCommand()</code> 使用纯正则匹配判定命令风险，存在 4 种绕过向量：</p>
+    <ol class="report-list styled-list fade-in-up">
+      <li>Base64 编码绕过：<code>echo "cm0gLXJmIC8=" | base64 -d | sh</code></li>
+      <li>Unicode/混淆绕过：全角字符、零宽空格、<code>${IFS}</code> 变量展开</li>
+      <li>间接执行绕过：<code>python3 -c "import os; os.system('rm -rf /')"</code></li>
+      <li>变量拼接绕过：<code>X=su; Y=do; $X$Y rm -rf /</code></li>
+    </ol>
+          <p class="fade-in-up"><strong>修复指引</strong>：</p>
+    <ul class="report-list styled-list fade-in-up">
+      <li>增加 base64/hex 编码检测</li>
+      <li>增加解释器间接执行检测（python/ruby/perl）</li>
+      <li>考虑引入 AST 级命令解析替代纯正则</li>
+    </ul>
+          <p class="fade-in-up">::: callout warning</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>属性</th><th>值</th></tr></thead>
+        <tbody>
+      <tr><td><strong>发现者</strong></td><td>claude</td></tr>
+      <tr><td><strong>位置</strong></td><td><code>src/ai/permissions/workspace.ts</code></td></tr>
+      <tr><td><strong>维度</strong></td><td>安全性</td></tr>
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><strong>描述</strong>：<code>assertWorkspacePath()</code> 使用字符串前缀匹配验证路径，未调用 <code>realpathSync</code>。攻击者可在工作区内创建符号链接指向外部敏感文件（如 <code>/etc/passwd</code>），通过 <code>write</code>/<code>edit</code> 工具操作符号链接即可读写工作区外任意文件。</p>
+          <p class="fade-in-up"><strong>修复指引</strong>：</p>
+    <ul class="report-list styled-list fade-in-up">
+      <li>在路径校验前调用 <code>realpathSync</code> 解析符号链接</li>
+      <li>对符号链接本身是否指向工作区外做额外检查</li>
+    </ul>
+          <p class="fade-in-up">::: callout warning</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>属性</th><th>值</th></tr></thead>
+        <tbody>
+      <tr><td><strong>发现者</strong></td><td>qoder</td></tr>
+      <tr><td><strong>位置</strong></td><td><code>package.json</code> → <code>dependencies.ws: "^8.21.0"</code></td></tr>
+      <tr><td><strong>维度</strong></td><td>依赖管理</td></tr>
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><strong>描述</strong>：<code>package.json</code> 声明 <code>ws: "^8.21.0"</code>，但实际安装 8.20.0（npm 标记 invalid）。CI/CD 或新开发者 <code>npm install</code> 可能安装 8.21.0，导致难以复现的 WebSocket 行为差异。</p>
+          <p class="fade-in-up"><strong>修复指引</strong>：删除 <code>node_modules/ws</code> 和 lockfile，重新 <code>npm install</code>。</p>
+          <p class="fade-in-up">::: callout warning</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>属性</th><th>值</th></tr></thead>
+        <tbody>
+      <tr><td><strong>发现者</strong></td><td>qoder</td></tr>
+      <tr><td><strong>位置</strong></td><td>全项目分布：<code>src/ui/</code>（12 处）、<code>src/platform/</code>（5 处）等</td></tr>
+      <tr><td><strong>维度</strong></td><td>错误处理</td></tr>
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><strong>描述</strong>：项目中约 30 处空 <code>catch {}</code> 或 <code>.catch(() =&gt; {})</code>，完全吞没异常。embedding 失败静默丢失、级联故障无排查线索。</p>
+          <p class="fade-in-up"><strong>修复指引</strong>：</p>
+    <ul class="report-list styled-list fade-in-up">
+      <li>至少添加 <code>console.error</code> 或结构化日志</li>
+      <li>对关键路径使用带 fallback 的 catch</li>
+      <li>启用 ESLint <code>no-empty</code> 规则禁止空 catch 块</li>
+    </ul>
+          <p class="fade-in-up">::: callout warning</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>属性</th><th>值</th></tr></thead>
+        <tbody>
+      <tr><td><strong>发现者</strong></td><td>xiaok</td></tr>
+      <tr><td><strong>位置</strong></td><td><code>desktop/renderer/index.html</code></td></tr>
+      <tr><td><strong>维度</strong></td><td>安全性</td></tr>
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><strong>描述</strong>：主渲染器 HTML 未设置 CSP meta 标签，主进程也未通过 <code>session</code> 注入 CSP 头。虽然项目已实现导航限制，但 CSP 作为纵深防御的一层是缺失的。</p>
+          <p class="fade-in-up"><strong>修复指引</strong>：</p>
+    <ul class="report-list styled-list fade-in-up">
+      <li>添加 CSP meta 标签：<code>default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'</code></li>
+      <li>开发模式放宽，生产模式严格</li>
+    </ul>
+        </section>
+        <section data-section="🟡 Warning 级" data-summary="#### QF-Q01 | chat.ts 单体文件过大（3511 行）" id="section-warning-级">
+          <h3 id="section-warning-级">🟡 Warning 级</h3>
+          <p class="fade-in-up">::: callout info</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>发现者</th><th>qoder</th><th>位置</th><th><code>src/commands/chat.ts</code></th></tr></thead>
+        <tbody>
+
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up">包含模型适配、权限管理、skill 编排、UI 渲染、会话管理等十余种职责。仅 4 个 export、14 个 function，大量逻辑以闭包形式存在。建议按职责拆分为 4-5 个模块。</p>
+          <p class="fade-in-up">::: callout info</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>发现者</th><th>qoder</th><th>位置</th><th><code>layered-store.ts</code>（13 处）、<code>compaction.ts</code>（4 处）</th></tr></thead>
+        <tbody>
+
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><code>.all()</code> 返回 <code>unknown</code> 类型，统一使用 <code>as any[]</code> 绕过类型检查。修改数据库 schema 时编译器无法检测下游影响。建议为每个查询结果定义显式类型接口。</p>
+          <p class="fade-in-up">::: callout info</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>发现者</th><th>claude</th><th>位置</th><th><code>bash.ts</code>, <code>write.ts</code>, <code>read.ts</code>, <code>edit.ts</code></th></tr></thead>
+        <tbody>
+
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up">所有工具仅依赖 TypeScript 类型断言，无运行时 JSON Schema 验证。AI 模型可能产生类型错误的参数，MCP 外部工具可能传入意外类型。建议引入 zod/ajv 运行时校验层。</p>
+          <p class="fade-in-up">::: callout info</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>发现者</th><th>qoder</th><th>位置</th><th><code>transcript.ts:79</code>, <code>client.ts:36</code></th></tr></thead>
+        <tbody>
+
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up">来自文件系统和外部进程的 JSON 直接 <code>parse</code>，格式错误时会导致未捕获异常。建议对所有 <code>JSON.parse</code> 调用添加 try-catch，特别是输入来自网络或文件系统的场景。</p>
+          <p class="fade-in-up">::: callout info</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>发现者</th><th>qoder</th><th>位置</th><th><code>src/platform/mcp/transport.ts:162-203</code></th></tr></thead>
+        <tbody>
+
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up">连接断开后不会自动重连，无 keep-alive 机制，连接超时无保护。建议添加心跳 ping-pong、指数退避重连和连接超时。</p>
+          <p class="fade-in-up">::: callout info</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>发现者</th><th>qoder</th><th>位置</th><th><code>package.json</code></th></tr></thead>
+        <tbody>
+
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><code>@anthropic-ai/sdk</code> 从 0.39.0 到最新 0.102.0（63 个 minor 版本差距）、<code>openai</code> 从 4.77.0 到 6.42.0（2 个大版本）、<code>commander</code> 从 12.0.0 到 15.0.0。建议制定依赖升级计划，按风险分批进行。</p>
+          <p class="fade-in-up">::: callout info</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>发现者</th><th>claude</th><th>位置</th><th><code>src/runtime/daemon/launcher.ts</code></th></tr></thead>
+        <tbody>
+
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><code>spawnXiaokDaemonDetached()</code> 启动后立即 <code>unref()</code>，不监控进程状态。daemon 崩溃后定时任务停止执行而无通知。建议注册 exit 监听器、实现 watchdog 模式。</p>
+          <p class="fade-in-up">::: callout info</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>发现者</th><th>xiaok</th><th>位置</th><th><code>desktop/electron/preload.cjs</code></th></tr></thead>
+        <tbody>
+
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up">通过 <code>contextBridge</code> 暴露约 120+ 方法到渲染进程，包括模型管理、任务控制、文件系统操作、KSwarm 控制等。建议审计并移除渲染进程不需要的 API，添加操作权限校验。</p>
+          <p class="fade-in-up">::: callout info</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>发现者</th><th>xiaok</th><th>位置</th><th><code>package.json</code> vs <code>desktop/package.json</code></th></tr></thead>
+        <tbody>
+
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up">CLI 和 Desktop 使用不同版本号，用户难以追踪版本对应关系。建议使用单一版本源或在 Desktop 版本号中加入 CLI 版本信息。</p>
+          <p class="fade-in-up">::: callout info</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>发现者</th><th>xiaok</th><th>位置</th><th><code>desktop/renderer/src/components/ChatShell.tsx</code></th></tr></thead>
+        <tbody>
+
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up">无骨架屏、进度指示器或超时处理，长时间运行操作（可达 30 分钟）不展示中间进度。建议添加骨架屏、流式响应动画指示器、超时提示和重试按钮。</p>
+          <p class="fade-in-up">::: callout info</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>发现者</th><th>xiaok</th><th>位置</th><th><code>desktop/electron/desktop-services.ts:86-189</code></th></tr></thead>
+        <tbody>
+
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up">降级到 JSON 文件存储只打了一条 console.warn，用户无感知。建议通过 IPC 通知渲染进程存储引擎状态，添加原生模块健康检查。</p>
+          <p class="fade-in-up">::: callout info</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>发现者</th><th>xiaok</th><th>位置</th><th><code>desktop/electron/desktop-services.ts</code></th></tr></thead>
+        <tbody>
+
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up">所有服务通过闭包共享状态，单元测试极难编写。建议为每个服务定义 TypeScript 接口，使用工厂函数接受接口。</p>
+        </section>
+        <section data-section="ℹ️ Info 级" data-summary="| ID | 标题 | 发现者 | 备注 |" id="section-info-级">
+          <h3 id="section-info-级">ℹ️ Info 级</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>ID</th><th>标题</th><th>发现者</th><th>备注</th></tr></thead>
+        <tbody>
+      <tr><td>QF-CL05</td><td>reminder scheduler 设计优秀</td><td>claude</td><td>幂等交付 + 退避重试 + 递归提醒</td></tr>
+      <tr><td>QF-CL06</td><td>AgentRuntime 空响应重试与上下文压缩</td><td>claude</td><td>连续空响应自动重试，压缩失败降级</td></tr>
+      <tr><td>QF-CL07</td><td>原子写入 tmp+rename 模式</td><td>claude</td><td>保障崩溃安全，POSIX 原子操作</td></tr>
+      <tr><td>QF-CL10</td><td>质量门禁测试覆盖维度有限</td><td>claude</td><td>仅 3 个测试文件，未覆盖性能和并发场景</td></tr>
+      <tr><td>QF-Q07</td><td>测试中包含硬编码本地路径</td><td>qoder</td><td><code>/Users/song/Downloads/...</code> 不可移植</td></tr>
+      <tr><td>QF-Q08</td><td>测试目录缺少 README 文档</td><td>qoder</td><td>277 个测试文件无文档说明</td></tr>
+      <tr><td>QF-Q09</td><td>JSDoc 覆盖率低（15.7%）</td><td>qoder</td><td>仅 51/324 文件有文档注释</td></tr>
+      <tr><td>QF-X09</td><td>主进程日志缺少轮转和级别控制</td><td>xiaok</td><td>日志文件无限增长</td></tr>
+      <tr><td>QF-X10</td><td>Bash 三层安全分类系统设计优秀</td><td>xiaok</td><td>safe/warn/block 三级别 + CUA 防护</td></tr>
+      <tr><td>QF-CL</td><td>符号链接绕过攻击链完整描述</td><td>claude</td><td>正面：攻击链分析详实</td></tr>
+        </tbody>
+      </table>
+    </div>
+        </section>
+        <section data-section="门禁详情" data-summary="" id="section-门禁详情">
+          <h2 id="section-门禁详情">门禁详情</h2>
+          <p class="fade-in-up">::: callout danger</p>
+        </section>
+        <section data-section="🔴 门禁结果：FAIL" data-summary="**理由**：存在 1 个 blocker 级问题——vitest 关键安全漏洞（GHSA-5xrq-8626-4rwp）。根据门禁规则&quot;存在任何 blocker 即判定 FAIL&quot;，本门禁必须阻断。此外，去重后存在 7 个 high 级问题，远超 CONDITIONAL 阈值（≥3）。即使 blocker 修复后，当前 high 数量也足以触发 CONDITIONAL。" id="section-门禁结果fail">
+          <h3 id="section-门禁结果fail">🔴 门禁结果：FAIL</h3>
+          <p class="fade-in-up"><strong>理由</strong>：存在 1 个 blocker 级问题——vitest 关键安全漏洞（GHSA-5xrq-8626-4rwp）。根据门禁规则"存在任何 blocker 即判定 FAIL"，本门禁必须阻断。此外，去重后存在 7 个 high 级问题，远超 CONDITIONAL 阈值（≥3）。即使 blocker 修复后，当前 high 数量也足以触发 CONDITIONAL。</p>
+        </section>
+        <section data-section="MUST-FIX（阻断项）" data-summary="| ID | 标题 | Severity | Reviewer | 修复指引 |" id="section-must-fix阻断项">
+          <h3 id="section-must-fix阻断项">MUST-FIX（阻断项）</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>ID</th><th>标题</th><th>Severity</th><th>Reviewer</th><th>修复指引</th></tr></thead>
+        <tbody>
+      <tr><td>QF-Q03</td><td>vitest 关键安全漏洞 (GHSA-5xrq-8626-4rwp)</td><td><strong>blocker</strong></td><td>qoder</td><td><code>npm audit fix</code>，CI 阻断 critical</td></tr>
+        </tbody>
+      </table>
+    </div>
+        </section>
+        <section data-section="SHOULD-FIX（建议修复项）" data-summary="| # | ID | 标题 | Severity | Reviewer | 共识 |" id="section-should-fix建议修复项">
+          <h3 id="section-should-fix建议修复项">SHOULD-FIX（建议修复项）</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>#</th><th>ID</th><th>标题</th><th>Severity</th><th>Reviewer</th><th>共识</th></tr></thead>
+        <tbody>
+      <tr><td>1</td><td>QF-CL02/X03</td><td>Electron sandbox 未启用 + preload require()</td><td>high</td><td>claude, xiaok</td><td>✅ 2</td></tr>
+      <tr><td>2</td><td>QF-CL04/X02</td><td>desktop-services.ts 单体文件过大</td><td>high</td><td>claude, xiaok</td><td>✅ 2</td></tr>
+      <tr><td>3</td><td>QF-CL01</td><td>bash 正则绕过风险（4 种向量）</td><td>high</td><td>claude</td><td>1</td></tr>
+      <tr><td>4</td><td>QF-CL08</td><td>workspace 路径符号链接绕过</td><td>high</td><td>claude</td><td>1</td></tr>
+      <tr><td>5</td><td>QF-Q04</td><td>ws 版本不匹配</td><td>high</td><td>qoder</td><td>1</td></tr>
+      <tr><td>6</td><td>QF-Q05</td><td>空 catch 块吞没异常（约30处）</td><td>high</td><td>qoder</td><td>1</td></tr>
+      <tr><td>7</td><td>QF-X01</td><td>渲染进程缺少 CSP 头</td><td>high</td><td>xiaok</td><td>1</td></tr>
+        </tbody>
+      </table>
+    </div>
+        </section>
+        <section data-section="修复优先级路线图" data-summary="| 优先级 | 时间线 | 包含项 | 说明 |" id="section-修复优先级路线图">
+          <h3 id="section-修复优先级路线图">修复优先级路线图</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>优先级</th><th>时间线</th><th>包含项</th><th>说明</th></tr></thead>
+        <tbody>
+      <tr><td>🔴 P0</td><td>立即</td><td>QF-Q03, QF-Q04</td><td>修复 CVE + 对齐 lockfile</td></tr>
+      <tr><td>🟠 P1</td><td>1-2 周</td><td>QF-CL01, QF-CL02/X03, QF-X01, QF-CL08, QF-Q05</td><td>安全纵深防御 + 代码卫生</td></tr>
+      <tr><td>🟡 P2</td><td>1 月</td><td>QF-CL04/X02, QF-Q01, QF-CL03</td><td>架构拆分 + 运行时校验</td></tr>
+      <tr><td>🟢 P3</td><td>长期</td><td>QF-Q02, QF-Q06-Q11, QF-X04-X09</td><td>类型安全、文档、依赖升级</td></tr>
+        </tbody>
+      </table>
+    </div>
+        </section>
+        <section data-section="评审维度分析" data-summary="" id="section-评审维度分析">
+          <h2 id="section-评审维度分析">评审维度分析</h2>
+        </section>
+        <section data-section="安全性 — 评分 40/100" data-summary="这是最严重的维度。1 个 critical CVE + Electron sandbox 未启用 + CSP 缺失 + bash 正则可绕过 + 符号链接可绕过——安全设计存在多处单一防线，缺乏纵深防御。" id="section-安全性-评分-40100">
+          <h3 id="section-安全性-评分-40100">安全性 — 评分 40/100</h3>
+          <p class="fade-in-up">::: callout danger</p>
+          <p class="fade-in-up">这是最严重的维度。1 个 critical CVE + Electron sandbox 未启用 + CSP 缺失 + bash 正则可绕过 + 符号链接可绕过——安全设计存在多处单一防线，缺乏纵深防御。</p>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>Finding</th><th>严重性</th><th>具体问题</th></tr></thead>
+        <tbody>
+      <tr><td>QF-Q03</td><td>blocker</td><td>vitest critical CVE</td></tr>
+      <tr><td>QF-CL02/X03</td><td>high</td><td>Electron sandbox 未启用</td></tr>
+      <tr><td>QF-CL01</td><td>high</td><td>bash 正则存在 4 种绕过向量</td></tr>
+      <tr><td>QF-CL08</td><td>high</td><td>符号链接可绕过 workspace 校验</td></tr>
+      <tr><td>QF-X01</td><td>high</td><td>渲染进程缺少 CSP</td></tr>
+      <tr><td>QF-X04</td><td>warning</td><td>preload API 表面过大（120+ 方法）</td></tr>
+      <tr><td>QF-X10</td><td>info (+)</td><td>Bash 三层安全分类思想正确</td></tr>
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><strong>正面</strong>：contextIsolation 已启用，nodeIntegration 已禁用，bash 安全分类设计思想正确。capability token 机制用于文件操作授权。</p>
+          <p class="fade-in-up"><strong>改进方向</strong>：补齐纵深防御缺口（sandbox + CSP + realpath），修补 bash 正则绕过，缩小 preload API 表面。</p>
+        </section>
+        <section data-section="架构/可维护性 — 评分 50/100" data-summary="| Finding | 严重性 | 具体问题 |" id="section-架构可维护性-评分-50100">
+          <h3 id="section-架构可维护性-评分-50100">架构/可维护性 — 评分 50/100</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>Finding</th><th>严重性</th><th>具体问题</th></tr></thead>
+        <tbody>
+      <tr><td>QF-CL04/X02</td><td>high</td><td>desktop-services.ts 5462 行单体</td></tr>
+      <tr><td>QF-Q01</td><td>warning</td><td>chat.ts 3511 行单体</td></tr>
+      <tr><td>QF-X08</td><td>warning</td><td>缺乏 DI 容器，闭包共享状态</td></tr>
+      <tr><td>QF-CL03</td><td>warning</td><td>工具输入无运行时 schema 验证</td></tr>
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><strong>正面</strong>：reminder scheduler 幂等交付和退避重试设计清晰，AgentRuntime 上下文压缩可复用。TypeScript strict mode 全项目。</p>
+          <p class="fade-in-up"><strong>改进方向</strong>：按领域拆分巨型文件，引入 DI 模式，添加运行时输入校验层。</p>
+        </section>
+        <section data-section="代码质量/类型安全 — 评分 48/100" data-summary="| Finding | 严重性 | 具体问题 |" id="section-代码质量类型安全-评分-48100">
+          <h3 id="section-代码质量类型安全-评分-48100">代码质量/类型安全 — 评分 48/100</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>Finding</th><th>严重性</th><th>具体问题</th></tr></thead>
+        <tbody>
+      <tr><td>QF-Q05</td><td>high</td><td>约 30 处空 catch 吞没异常</td></tr>
+      <tr><td>QF-Q02</td><td>warning</td><td>SQLite 层大量 <code>as any</code></td></tr>
+      <tr><td>QF-Q06</td><td>warning</td><td>JSON.parse 缺少 try-catch</td></tr>
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><strong>正面</strong>：原子写入模式（tmp+rename）保障崩溃安全，TypeScript strict mode。核心 AI 模块零 <code>as any</code>。</p>
+        </section>
+        <section data-section="依赖管理 — 评分 45/100" data-summary="| Finding | 严重性 | 具体问题 |" id="section-依赖管理-评分-45100">
+          <h3 id="section-依赖管理-评分-45100">依赖管理 — 评分 45/100</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>Finding</th><th>严重性</th><th>具体问题</th></tr></thead>
+        <tbody>
+      <tr><td>QF-Q03</td><td>blocker</td><td>vitest critical CVE</td></tr>
+      <tr><td>QF-Q04</td><td>high</td><td>ws 版本不匹配</td></tr>
+      <tr><td>QF-Q11</td><td>warning</td><td>4 项核心依赖大幅落后</td></tr>
+        </tbody>
+      </table>
+    </div>
+        </section>
+        <section data-section="可靠性/运维 — 评分 55/100" data-summary="| Finding | 严重性 | 具体问题 |" id="section-可靠性运维-评分-55100">
+          <h3 id="section-可靠性运维-评分-55100">可靠性/运维 — 评分 55/100</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>Finding</th><th>严重性</th><th>具体问题</th></tr></thead>
+        <tbody>
+      <tr><td>QF-CL09</td><td>warning</td><td>daemon 无健康检查</td></tr>
+      <tr><td>QF-X05</td><td>warning</td><td>CLI/Desktop 版本不一致</td></tr>
+      <tr><td>QF-X06</td><td>warning</td><td>加载状态管理不足</td></tr>
+      <tr><td>QF-X07</td><td>warning</td><td>better-sqlite3 静默降级</td></tr>
+      <tr><td>QF-X09</td><td>info</td><td>日志无轮转</td></tr>
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><strong>正面</strong>：reminder scheduler（QF-CL05）、AgentRuntime 重试（QF-CL06）、原子写入（QF-CL07）。</p>
+        </section>
+        <section data-section="测试质量 — 评分 58/100" data-summary="| Finding | 严重性 | 具体问题 |" id="section-测试质量-评分-58100">
+          <h3 id="section-测试质量-评分-58100">测试质量 — 评分 58/100</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>Finding</th><th>严重性</th><th>具体问题</th></tr></thead>
+        <tbody>
+      <tr><td>QF-CL10</td><td>info</td><td>质量门禁测试覆盖维度有限</td></tr>
+      <tr><td>QF-Q07</td><td>info</td><td>硬编码本地路径不可移植</td></tr>
+      <tr><td>QF-Q08</td><td>info</td><td>测试目录无文档</td></tr>
+        </tbody>
+      </table>
+    </div>
+        </section>
+        <section data-section="文档质量 — 评分 60/100" data-summary="| Finding | 严重性 | 具体问题 |" id="section-文档质量-评分-60100">
+          <h3 id="section-文档质量-评分-60100">文档质量 — 评分 60/100</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>Finding</th><th>严重性</th><th>具体问题</th></tr></thead>
+        <tbody>
+      <tr><td>QF-Q09</td><td>info</td><td>JSDoc 覆盖率 15.7%</td></tr>
+      <tr><td>QF-Q08</td><td>info</td><td>测试 README 缺失</td></tr>
+        </tbody>
+      </table>
+    </div>
+          <p class="fade-in-up"><strong>正面</strong>：AGENTS.md/CLAUDE.md 优秀，设计文档通过 docs symlink 管理。</p>
+        </section>
+        <section data-section="Reviewer 贡献" data-summary="" id="section-reviewer-贡献">
+          <h2 id="section-reviewer-贡献">Reviewer 贡献</h2>
+        </section>
+        <section data-section="🥇 claude — 总分 8.3" data-summary="**贡献亮点**：最深的技术审查" id="section-claude-总分-83">
+          <h3 id="section-claude-总分-83">🥇 claude — 总分 8.3</h3>
+          <p class="fade-in-up">::: callout success</p>
+          <p class="fade-in-up"><strong>贡献亮点</strong>：最深的技术审查</p>
+    <ul class="report-list styled-list fade-in-up">
+      <li><strong>安全深度</strong>：对 bash-safety.ts 的正则绕过分析具体到 base64 编码、Unicode 混淆、IFS 变量展开和解释器间接执行 4 种绕过向量</li>
+      <li><strong>攻击链建模</strong>：workspace 符号链接绕过给出了从符号链接创建到文件读写的完整攻击链</li>
+      <li><strong>正面识别</strong>：reminder scheduler（幂等交付 + 退避重试）、AgentRuntime（空响应重试 + 上下文压缩）、原子写入（tmp+rename）的工程细节分析精到</li>
+      <li><strong>唯一不足</strong>：缺少依赖安全审计（无 npm audit 检查）</li>
+    </ul>
+          <p class="fade-in-up">代表作：QF-CL01（bash 绕过 4 种向量）、QF-CL08（symlink 攻击链）</p>
+        </section>
+        <section data-section="🥈 xiaok — 总分 7.7" data-summary="**贡献亮点**：桌面应用安全与 UX 独特视角" id="section-xiaok-总分-77">
+          <h3 id="section-xiaok-总分-77">🥈 xiaok — 总分 7.7</h3>
+          <p class="fade-in-up">::: callout success</p>
+          <p class="fade-in-up"><strong>贡献亮点</strong>：桌面应用安全与 UX 独特视角</p>
+    <ul class="report-list styled-list fade-in-up">
+      <li><strong>桌面纵深防御</strong>：CSP 缺失是其他 reviewer 未覆盖的防御层</li>
+      <li><strong>量化分析</strong>：preload API 表面过大（120+ 方法）的数据驱动分析有说服力</li>
+      <li><strong>UX 维度</strong>：加载状态、降级感知是其他 reviewer 忽略的用户视角</li>
+      <li><strong>运维价值</strong>：版本不一致发现 + 日志管理建议</li>
+    </ul>
+          <p class="fade-in-up">代表作：QF-X01（CSP 缺失）、QF-X03（sandbox 未启用）、QF-X06（加载状态）</p>
+        </section>
+        <section data-section="🥉 qoder — 总分 7.3" data-summary="**贡献亮点**：依赖管理绝对强项 + 量化指标丰富" id="section-qoder-总分-73">
+          <h3 id="section-qoder-总分-73">🥉 qoder — 总分 7.3</h3>
+          <p class="fade-in-up">::: callout success</p>
+          <p class="fade-in-up"><strong>贡献亮点</strong>：依赖管理绝对强项 + 量化指标丰富</p>
+    <ul class="report-list styled-list fade-in-up">
+      <li><strong>唯一 blocker</strong>：vitest critical CVE（GHSA-5xrq-8626-4rwp）</li>
+      <li><strong>依赖审计</strong>：ws 版本不匹配 + 4 项依赖落后，系统性覆盖</li>
+      <li><strong>量化说服力</strong>：30 处空 catch、15.7% JSDoc 覆盖率、依赖版本对比表</li>
+      <li><strong>CI 视角</strong>：关注 CI/CD 稳定性和可复现构建</li>
+    </ul>
+          <p class="fade-in-up">代表作：QF-Q03（vitest CVE）、QF-Q04（ws 不匹配）、QF-Q05（30 处空 catch）</p>
+        </section>
+        <section data-section="质量原则" data-summary="从本次交叉评审中归纳的 5 条可复用质量原则：" id="section-质量原则">
+          <h2 id="section-质量原则">质量原则</h2>
+          <p class="fade-in-up">从本次交叉评审中归纳的 5 条可复用质量原则：</p>
+        </section>
+        <section data-section="原则 1: 纵深防御 — 安全不可依赖单一机制" data-summary="**来源**：QF-CL02/X03（sandbox）、QF-X01（CSP）、QF-CL01（bash regex）、QF-CL08（symlink）" id="section-原则-1-纵深防御-安全不可依赖单一机制">
+          <h3 id="section-原则-1-纵深防御-安全不可依赖单一机制">原则 1: 纵深防御 — 安全不可依赖单一机制</h3>
+          <p class="fade-in-up"><strong>来源</strong>：QF-CL02/X03（sandbox）、QF-X01（CSP）、QF-CL01（bash regex）、QF-CL08（symlink）</p>
+          <p class="fade-in-up">即使 <code>contextIsolation: true</code> + <code>nodeIntegration: false</code> 已配置，仍需要 sandbox、CSP、realpath 校验等多层防护。任何单一安全机制的假设都可能被绕过。bash 安全分类不能仅依赖正则——需要 AST 解析或沙箱执行作为第二层。</p>
+        </section>
+        <section data-section="原则 2: 模块边界 — 单体文件是技术债务的温床" data-summary="**来源**：QF-CL04/X02（desktop-services 5400+ 行）、QF-Q01（chat.ts 3511 行）" id="section-原则-2-模块边界-单体文件是技术债务的温床">
+          <h3 id="section-原则-2-模块边界-单体文件是技术债务的温床">原则 2: 模块边界 — 单体文件是技术债务的温床</h3>
+          <p class="fade-in-up"><strong>来源</strong>：QF-CL04/X02（desktop-services 5400+ 行）、QF-Q01（chat.ts 3511 行）</p>
+          <p class="fade-in-up">超过 1000 行的单体文件应触发架构审视。职责混杂导致测试困难、修改风险高、新人上手慢。在模块达到 500 行时即应考虑职责边界和拆分策略。</p>
+        </section>
+        <section data-section="原则 3: 错误透明 — 绝不静默吞没异常" data-summary="**来源**：QF-Q05（30 处空 catch）、QF-X07（sqlite 静默降级）、QF-Q06（JSON.parse 无保护）" id="section-原则-3-错误透明-绝不静默吞没异常">
+          <h3 id="section-原则-3-错误透明-绝不静默吞没异常">原则 3: 错误透明 — 绝不静默吞没异常</h3>
+          <p class="fade-in-up"><strong>来源</strong>：QF-Q05（30 处空 catch）、QF-X07（sqlite 静默降级）、QF-Q06（JSON.parse 无保护）</p>
+          <p class="fade-in-up">空 catch 块和静默降级在生产环境中是调试黑洞。所有异常至少应记录结构化日志；关键路径降级（如存储引擎）应通知用户并提供恢复指引。ESLint <code>no-empty</code> 规则应禁止空 catch 块。</p>
+        </section>
+        <section data-section="原则 4: 依赖卫生 — 定期审计是安全基线" data-summary="**来源**：QF-Q03（vitest critical CVE）、QF-Q04（ws 版本不匹配）、QF-Q11（多依赖落后）" id="section-原则-4-依赖卫生-定期审计是安全基线">
+          <h3 id="section-原则-4-依赖卫生-定期审计是安全基线">原则 4: 依赖卫生 — 定期审计是安全基线</h3>
+          <p class="fade-in-up"><strong>来源</strong>：QF-Q03（vitest critical CVE）、QF-Q04（ws 版本不匹配）、QF-Q11（多依赖落后）</p>
+          <p class="fade-in-up">依赖管理不是一次性工作。应建立：① CI 中的 <code>npm audit</code> 阻断 critical/high；② lockfile 版本一致性校验；③ 季度依赖升级计划。vitest 3.2.4 → 3.2.6 仅差 2 个 patch 版本却存在关键漏洞，说明 patch 版本更新不可忽视。</p>
+        </section>
+        <section data-section="原则 5: 防御性接口 — 信任但要验证" data-summary="**来源**：QF-CL03（工具输入无运行时验证）、QF-X04（preload API 表面过大）、QF-CL08（workspace 路径校验）" id="section-原则-5-防御性接口-信任但要验证">
+          <h3 id="section-原则-5-防御性接口-信任但要验证">原则 5: 防御性接口 — 信任但要验证</h3>
+          <p class="fade-in-up"><strong>来源</strong>：QF-CL03（工具输入无运行时验证）、QF-X04（preload API 表面过大）、QF-CL08（workspace 路径校验）</p>
+          <p class="fade-in-up">外部输入（AI 模型、MCP 外部工具、用户文件路径）不能假设其合法性。工具输入应进行 JSON Schema 运行时验证；preload 暴露的 API 应做权限校验和频率限制；文件路径操作前应解析符号链接。TypeScript 类型系统是编译时保障，不是运行时安全。</p>
+        </section>
+        <section data-section="附录" data-summary="" id="section-附录">
+          <h2 id="section-附录">附录</h2>
+        </section>
+        <section data-section="A. Reviewer 原始评审产物" data-summary="| Reviewer | 产物文件 | 发现数 | 状态 |" id="section-a-reviewer-原始评审产物">
+          <h3 id="section-a-reviewer-原始评审产物">A. Reviewer 原始评审产物</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>Reviewer</th><th>产物文件</th><th>发现数</th><th>状态</th></tr></thead>
+        <tbody>
+      <tr><td>claude</td><td><code>artifacts/reviews/claude.md</code></td><td>10（0B/3H/3W/4I）</td><td>✅ 完成</td></tr>
+      <tr><td>qoder</td><td><code>artifacts/reviews/qoder.md</code></td><td>11（1B/2H/5W/3I）</td><td>✅ 完成</td></tr>
+      <tr><td>xiaok</td><td><code>artifacts/reviews/xiaok.md</code></td><td>10（0B/3H/5W/2I）</td><td>✅ 完成</td></tr>
+      <tr><td>codex</td><td>—</td><td>—</td><td>❌ 未产出</td></tr>
+        </tbody>
+      </table>
+    </div>
+        </section>
+        <section data-section="B. 合成与决策产物" data-summary="| 产物 | 文件 |" id="section-b-合成与决策产物">
+          <h3 id="section-b-合成与决策产物">B. 合成与决策产物</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>产物</th><th>文件</th></tr></thead>
+        <tbody>
+      <tr><td>项目上下文</td><td><code>artifacts/project-context.md</code></td></tr>
+      <tr><td>合成报告</td><td><code>artifacts/synthesis.md</code></td></tr>
+      <tr><td>门禁决策</td><td><code>artifacts/gate-decision.md</code></td></tr>
+      <tr><td>HTML 质量报告</td><td><code>artifacts/kualityforge-report.html</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+        </section>
+        <section data-section="C. 评审元信息" data-summary="| 属性 | 值 |" id="section-c-评审元信息">
+          <h3 id="section-c-评审元信息">C. 评审元信息</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>属性</th><th>值</th></tr></thead>
+        <tbody>
+      <tr><td>项目</td><td>xiaok-cli v1.4.0</td></tr>
+      <tr><td>工作流</td><td>kualityforge_quality_gate</td></tr>
+      <tr><td>Workflow Run ID</td><td>wf-proj-36cfdf73-f8c3-4d90-b1a3-0809881a6924-kualityforge_quality_gate-1780981142195</td></tr>
+      <tr><td>评审日期</td><td>2026-06-09</td></tr>
+      <tr><td>评审模式</td><td>多 agent 并行交叉评审</td></tr>
+      <tr><td>参与 reviewer</td><td>claude, qoder, xiaok（codex 未产出）</td></tr>
+      <tr><td>综合评分</td><td>52/100</td></tr>
+      <tr><td>门禁结果</td><td><strong>FAIL</strong> 🔴</td></tr>
+        </tbody>
+      </table>
+    </div>
+        </section>
+        <section data-section="D. 完整发现索引" data-summary="| # | ID | 标题 | Severity | Reviewer | 共识 |" id="section-d-完整发现索引">
+          <h3 id="section-d-完整发现索引">D. 完整发现索引</h3>
+    <div class="table-wrapper fade-in-up">
+      <table class="report-table">
+        <thead><tr><th>#</th><th>ID</th><th>标题</th><th>Severity</th><th>Reviewer</th><th>共识</th></tr></thead>
+        <tbody>
+      <tr><td>1</td><td>QF-Q03</td><td>vitest 关键安全漏洞</td><td>blocker</td><td>qoder</td><td>1</td></tr>
+      <tr><td>2</td><td>QF-CL02/X03</td><td>Electron sandbox 未启用</td><td>high</td><td>claude, xiaok</td><td>✅</td></tr>
+      <tr><td>3</td><td>QF-CL04/X02</td><td>desktop-services.ts 单体</td><td>high</td><td>claude, xiaok</td><td>✅</td></tr>
+      <tr><td>4</td><td>QF-CL01</td><td>bash 正则绕过</td><td>high</td><td>claude</td><td>1</td></tr>
+      <tr><td>5</td><td>QF-CL08</td><td>symlink 路径绕过</td><td>high</td><td>claude</td><td>1</td></tr>
+      <tr><td>6</td><td>QF-Q04</td><td>ws 版本不匹配</td><td>high</td><td>qoder</td><td>1</td></tr>
+      <tr><td>7</td><td>QF-Q05</td><td>空 catch 块（30处）</td><td>high</td><td>qoder</td><td>1</td></tr>
+      <tr><td>8</td><td>QF-X01</td><td>缺少 CSP</td><td>high</td><td>xiaok</td><td>1</td></tr>
+      <tr><td>9</td><td>QF-Q01</td><td>chat.ts 单体</td><td>warning</td><td>qoder</td><td>1</td></tr>
+      <tr><td>10</td><td>QF-Q02</td><td>SQLite as any</td><td>warning</td><td>qoder</td><td>1</td></tr>
+      <tr><td>11</td><td>QF-Q06</td><td>JSON.parse 无保护</td><td>warning</td><td>qoder</td><td>1</td></tr>
+      <tr><td>12</td><td>QF-Q10</td><td>WS 无重连心跳</td><td>warning</td><td>qoder</td><td>1</td></tr>
+      <tr><td>13</td><td>QF-Q11</td><td>依赖版本落后</td><td>warning</td><td>qoder</td><td>1</td></tr>
+      <tr><td>14</td><td>QF-CL03</td><td>工具输入无验证</td><td>warning</td><td>claude</td><td>1</td></tr>
+      <tr><td>15</td><td>QF-CL09</td><td>daemon 无健康检查</td><td>warning</td><td>claude</td><td>1</td></tr>
+      <tr><td>16</td><td>QF-X04</td><td>preload API 表面大</td><td>warning</td><td>xiaok</td><td>1</td></tr>
+      <tr><td>17</td><td>QF-X05</td><td>CLI/Desktop 版本不一致</td><td>warning</td><td>xiaok</td><td>1</td></tr>
+      <tr><td>18</td><td>QF-X06</td><td>加载状态不足</td><td>warning</td><td>xiaok</td><td>1</td></tr>
+      <tr><td>19</td><td>QF-X07</td><td>sqlite 静默降级</td><td>warning</td><td>xiaok</td><td>1</td></tr>
+      <tr><td>20</td><td>QF-X08</td><td>无 DI 容器</td><td>warning</td><td>xiaok</td><td>1</td></tr>
+      <tr><td>21</td><td>QF-CL05</td><td>reminder 设计优秀</td><td>info (+)</td><td>claude</td><td>1</td></tr>
+      <tr><td>22</td><td>QF-CL06</td><td>AgentRuntime 重试</td><td>info (+)</td><td>claude</td><td>1</td></tr>
+      <tr><td>23</td><td>QF-CL07</td><td>原子写入</td><td>info (+)</td><td>claude</td><td>1</td></tr>
+      <tr><td>24</td><td>QF-X10</td><td>Bash 三层安全</td><td>info (+)</td><td>xiaok</td><td>1</td></tr>
+      <tr><td>25</td><td>QF-CL10</td><td>测试覆盖有限</td><td>info</td><td>claude</td><td>1</td></tr>
+      <tr><td>26</td><td>QF-Q07</td><td>硬编码路径</td><td>info</td><td>qoder</td><td>1</td></tr>
+      <tr><td>27</td><td>QF-Q08</td><td>测试无 README</td><td>info</td><td>qoder</td><td>1</td></tr>
+      <tr><td>28</td><td>QF-Q09</td><td>JSDoc 覆盖率低</td><td>info</td><td>qoder</td><td>1</td></tr>
+      <tr><td>29</td><td>QF-X09</td><td>日志无轮转</td><td>info</td><td>xiaok</td><td>1</td></tr>
+        </tbody>
+      </table>
+    </div>
+        </section>
+
+        <footer class="report-footer">kai-report-creator v2.0.0 corporate-blue</footer>
+      </div>
+    </div>
+    <div style="display:none;visibility:hidden;opacity:0;font-size:0;line-height:0;height:0;overflow:hidden;" aria-hidden="true" data-watermark="kai-report-creator v2.0.0 corporate-blue">kai-report-creator v2.0.0 corporate-blue</div>
+
+    <script>
+    (function(){
+      if (document.body.classList.contains('no-animations')) return;
+      var fadeObserver = new IntersectionObserver(function(entries){
+        entries.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('visible'); fadeObserver.unobserve(e.target); }});
+      }, {threshold:0.08});
+      document.querySelectorAll('.fade-in-up').forEach(function(el){ fadeObserver.observe(el); });
+
+      function staggerGroup(parentSel, childSel, delay){
+        document.querySelectorAll(parentSel).forEach(function(parent){
+          new IntersectionObserver(function(entries, obs){
+            if(!entries[0].isIntersecting) return;
+            obs.disconnect();
+            parent.classList.add('stagger-ready');
+            parent.querySelectorAll(childSel).forEach(function(el,i){
+              setTimeout(function(){ el.classList.add('visible'); }, i*delay);
+            });
+          }, {threshold:0.1}).observe(parent);
+        });
+      }
+      staggerGroup('.kpi-grid','.kpi-card',100);
+      staggerGroup('.timeline','.timeline-item',130);
+
+      var kpiObserver = new IntersectionObserver(function(entries){
+        entries.forEach(function(e){
+          if(!e.isIntersecting) return;
+          var el = e.target;
+          var target = parseFloat(el.dataset.targetValue);
+          if(isNaN(target)) return;
+          var prefix = el.dataset.prefix||'';
+          var suffix = el.dataset.suffix||'';
+          var isFloat = String(target).indexOf('.')!==-1;
+          var decimals = isFloat ? String(target).split('.')[1].length : 0;
+          var startTime = null;
+          var duration = 1200;
+          function animate(ts){
+            if(!startTime) startTime=ts;
+            var progress = Math.min((ts-startTime)/duration,1);
+            var ease = 1-Math.pow(1-progress,3);
+            var current = isFloat ? (ease*target).toFixed(decimals) : Math.floor(ease*target).toLocaleString();
+            el.textContent = prefix+current+suffix;
+            if(progress<1) requestAnimationFrame(animate);
+            else el.textContent = prefix+(isFloat?target.toFixed(decimals):target.toLocaleString())+suffix;
+          }
+          requestAnimationFrame(animate);
+          kpiObserver.unobserve(el);
+        });
+      }, {threshold:0.3});
+      document.querySelectorAll('.kpi-value[data-target-value]').forEach(function(el){ kpiObserver.observe(el); });
+    })();
+    </script>
+    <script>
+    (function(){
+      var tocBtn = document.getElementById('toc-toggle-btn');
+      var tocSidebar = document.getElementById('toc-sidebar');
+      if(!tocBtn||!tocSidebar) return;
+      var locked=false, closeTimer;
+      function openToc(){ clearTimeout(closeTimer); tocSidebar.classList.add('open'); tocBtn.setAttribute('aria-expanded','true'); }
+      function scheduleClose(){ closeTimer=setTimeout(function(){ if(!locked){ tocSidebar.classList.remove('open'); tocBtn.setAttribute('aria-expanded','false'); }},150); }
+      tocBtn.addEventListener('mouseenter', openToc);
+      tocSidebar.addEventListener('mouseenter', openToc);
+      tocBtn.addEventListener('mouseleave', scheduleClose);
+      tocSidebar.addEventListener('mouseleave', scheduleClose);
+      tocBtn.addEventListener('click', function(){ locked=!locked; tocBtn.classList.toggle('locked',locked); if(locked) openToc(); else scheduleClose(); });
+      document.querySelectorAll('.toc-sidebar a').forEach(function(a){ a.addEventListener('click',function(){ if(!locked) scheduleClose(); }); });
+      var tocLinks = document.querySelectorAll('.toc-sidebar a[data-section]');
+      if(tocLinks.length){
+        var sectionObserver = new IntersectionObserver(function(entries){
+          entries.forEach(function(e){
+            var id = e.target.dataset.section;
+            var link = document.querySelector('.toc-sidebar a[data-section="'+CSS.escape(id)+'"]');
+            if(link) link.classList.toggle('active', e.isIntersecting);
+          });
+        }, {rootMargin:'-10% 0px -60% 0px'});
+        document.querySelectorAll('section[data-section]').forEach(function(s){ sectionObserver.observe(s); });
+      }
+    })();
+    </script>
+    <script>
+    (function(){
+      var hotzone = document.getElementById('edit-hotzone');
+      var toggle = document.getElementById('edit-toggle');
+      if(!hotzone||!toggle) return;
+      var active=false, hideTimer;
+      function showBtn(){ clearTimeout(hideTimer); toggle.classList.add('show'); }
+      function schedHide(){ hideTimer=setTimeout(function(){ if(!active) toggle.classList.remove('show'); },400); }
+      hotzone.addEventListener('mouseenter', showBtn);
+      hotzone.addEventListener('mouseleave', schedHide);
+      toggle.addEventListener('mouseenter', showBtn);
+      toggle.addEventListener('mouseleave', schedHide);
+      function enterEdit(){
+        active=true; toggle.classList.add('active','show'); toggle.textContent='✓ Done';
+        document.body.classList.add('edit-mode');
+        document.querySelectorAll('h1,h2,h3,p,li,td,th,figcaption').forEach(function(el){ el.setAttribute('contenteditable','true'); });
+      }
+      function exitEdit(){
+        active=false; toggle.classList.remove('active'); toggle.textContent='✏ Edit';
+        document.body.classList.remove('edit-mode');
+        document.querySelectorAll('[contenteditable]').forEach(function(el){ el.removeAttribute('contenteditable'); });
+        schedHide();
+      }
+      hotzone.addEventListener('click', function(){ active?exitEdit():enterEdit(); });
+      toggle.addEventListener('click', function(){ active?exitEdit():enterEdit(); });
+      document.addEventListener('keydown', function(e){
+        if((e.key==='e'||e.key==='E')&&!document.activeElement.getAttribute('contenteditable')){ active?exitEdit():enterEdit(); }
+        if((e.ctrlKey||e.metaKey)&&e.key==='s'){
+          e.preventDefault();
+          var html='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
+          var a=Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([html],{type:'text/html'})),download:location.pathname.split('/').pop()||'report.html'});
+          a.click(); URL.revokeObjectURL(a.href);
+        }
+      });
+    })();
+    </script>
+    <script>
+    (function(){
+      var exportBtn=document.getElementById('export-btn');
+      var exportMenu=document.getElementById('export-menu');
+      var printBtn=document.getElementById('export-print');
+      var pngDesktop=document.getElementById('export-png-desktop');
+      var pngMobile=document.getElementById('export-png-mobile');
+      var pngIM=document.getElementById('export-im-share');
+      if(!exportBtn||!exportMenu) return;
+      var LABEL=exportBtn.textContent;
+      var PRINT_MODE_CLASS='print-exporting';
+
+      exportBtn.addEventListener('click',function(e){ e.stopPropagation(); exportMenu.classList.toggle('open'); });
+      document.addEventListener('click',function(e){ if(!exportBtn.contains(e.target)&&!exportMenu.contains(e.target)) exportMenu.classList.remove('open'); });
+
+      var libPromise=null;
+      function loadLib(){
+        if(libPromise) return libPromise;
+        libPromise=new Promise(function(resolve){
+          if(window.html2canvas){resolve();return;}
+          var s=document.createElement('script');
+          s.src='https://cdn.jsdelivr.net/npm/html2canvas@1/dist/html2canvas.min.js';
+          s.onload=resolve; document.head.appendChild(s);
+        });
+        return libPromise;
+      }
+      loadLib();
+
+      function restore(){ exportBtn.style.visibility=''; exportBtn.textContent=LABEL; }
+      function exportBgColor(){
+        var rs=getComputedStyle(document.documentElement);
+        var v=(rs.getPropertyValue('--bg')||'').trim();
+        if(v) return v;
+        var bc=getComputedStyle(document.body).backgroundColor;
+        if(bc&&bc!=='rgba(0, 0, 0, 0)'&&bc!=='transparent') return bc;
+        return '#ffffff';
+      }
+      function filename(suffix,ext){
+        var d=new Date(),pad=function(n){return String(n).padStart(2,'0');};
+        var date=d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate());
+        return (document.title||'report').replace(/[\/\\:*?"<>|]/g,'_')+'_'+date+suffix+'.'+ext;
+      }
+      function saveBlob(canvas,fname,jpeg){
+        canvas.toBlob(function(blob){
+          var a=Object.assign(document.createElement('a'),{href:URL.createObjectURL(blob),download:fname});
+          a.click(); URL.revokeObjectURL(a.href); restore();
+        }, jpeg?'image/jpeg':'image/png', jpeg?0.92:1);
+      }
+      function capture(el,cfg,fname,jpeg){
+        exportMenu.classList.remove('open');
+        exportBtn.style.visibility='hidden'; exportBtn.textContent='…';
+        var cardBtn=document.getElementById('card-mode-btn');
+        if(cardBtn) cardBtn.style.visibility='hidden';
+        if(document.body.classList.contains('card-mode')){
+          var card=document.getElementById('sc-card');
+          var cardFname=filename('-摘要卡',jpeg?'jpg':'png');
+          loadLib().then(function(){return html2canvas(card,{scale:2,useCORS:true,allowTaint:true,backgroundColor:'#ffffff'});}).then(function(c){
+            if(cardBtn) cardBtn.style.visibility=''; restore(); saveBlob(c,cardFname,jpeg);
+          });
+          return;
+        }
+        var tocSidebar=document.getElementById('toc-sidebar');
+        var tocToggle=document.getElementById('toc-toggle-btn');
+        var tocIsOpen=tocSidebar&&tocSidebar.classList.contains('open');
+        if(tocToggle&&!tocIsOpen) tocToggle.style.visibility='hidden';
+        document.querySelectorAll('.fade-in-up').forEach(function(e){e.classList.add('visible');});
+        loadLib().then(function(){return html2canvas(el,cfg);}).then(function(c){
+          if(tocToggle&&!tocIsOpen) tocToggle.style.visibility='';
+          if(cardBtn) cardBtn.style.visibility='';
+          saveBlob(c,fname,jpeg);
+        });
+      }
+
+      function preparePrintExport(){
+        exportMenu.classList.remove('open');
+        exportBtn.style.visibility='hidden';
+        document.documentElement.classList.add(PRINT_MODE_CLASS);
+        document.documentElement.style.setProperty('--print-bg-color',exportBgColor());
+      }
+      function cleanupPrintExport(){
+        document.documentElement.classList.remove(PRINT_MODE_CLASS);
+        document.documentElement.style.removeProperty('--print-bg-color');
+        restore();
+      }
+      window.addEventListener('afterprint',cleanupPrintExport);
+
+      printBtn&&printBtn.addEventListener('click',function(){
+        preparePrintExport();
+        requestAnimationFrame(function(){requestAnimationFrame(function(){window.print();});});
+      });
+      pngDesktop&&pngDesktop.addEventListener('click',function(){
+        var H=document.documentElement.scrollHeight;
+        capture(document.documentElement,{scale:H>4000?2.5:3,useCORS:true,allowTaint:true,scrollX:0,scrollY:0,width:document.documentElement.scrollWidth,height:H,windowWidth:document.documentElement.scrollWidth,windowHeight:H},filename('','png'),false);
+      });
+      pngMobile&&pngMobile.addEventListener('click',function(){
+        var el=document.querySelector('.report-wrapper')||document.documentElement;
+        capture(el,{scale:(750/el.offsetWidth)*2,useCORS:true,allowTaint:true,backgroundColor:exportBgColor(),scrollX:0,scrollY:0,width:el.scrollWidth,height:el.scrollHeight},filename('-mobile','jpg'),true);
+      });
+      pngIM&&pngIM.addEventListener('click',function(){
+        var el=document.querySelector('.report-wrapper')||document.documentElement;
+        capture(el,{scale:(800/el.offsetWidth)*2,useCORS:true,allowTaint:true,backgroundColor:exportBgColor(),scrollX:0,scrollY:0,width:el.scrollWidth,height:el.scrollHeight},filename('-im','jpg'),true);
+      });
+    })();
+    </script>
+    <script>
+    (function(){
+      var btn=document.getElementById('card-mode-btn');
+      var overlay=document.getElementById('sc-overlay');
+      var closeBtn=document.getElementById('sc-close');
+      if(!btn||!overlay) return;
+
+      function splitPosterTitle(d){
+        var t=(d.poster_title||'').trim();
+        var s=(d.poster_subtitle||'').trim();
+        var raw=(d.title||'').trim();
+        return {main:t||raw, sub:t?s:''};
+      }
+      function summaryCardLabel(){
+        var lang=(document.documentElement.lang||'').toLowerCase();
+        return lang.startsWith('zh')?'报告摘要':'Report Summary';
+      }
+      function posterNoteText(d){
+        var explicit=(d.poster_note||'').trim();
+        if(explicit) return explicit;
+        var raw=(d.abstract||'').trim();
+        if(!raw) return '';
+        var m=raw.match(/^(.{0,72}?[。！？!?]|.{0,120})/);
+        var sentence=(m&&m[1])?m[1].trim():raw;
+        return sentence.length>72?sentence.slice(0,72).trim()+'…':sentence;
+      }
+      function buildCard(){
+        try{
+          var d=JSON.parse(document.getElementById('report-summary').textContent);
+          var poster=splitPosterTitle(d);
+          var note=posterNoteText(d);
+          var leftHtml='<div class="sc-left"><div class="sc-label">'+summaryCardLabel()+'</div><div class="sc-title-main">'+
+            (poster.main||'')+'</div>'+(poster.sub?'<div class="sc-title-sub">'+poster.sub+'</div>':'')+
+            (note?'<div class="sc-note">'+note+'</div>':'')+'</div>';
+          var kpiRowsHtml=(d.kpis||[]).slice(0,6).map(function(k){
+            return '<div class="sc-kpi-row"><div class="sc-kpi-row-l">'+(k.label||'')+
+              '</div><div class="sc-kpi-row-v">'+(k.value||'')+(k.trend?' <span class="sc-kpi-row-t">'+k.trend+'</span>':'')+
+              '</div></div>';
+          }).join('');
+          var sectionSummaries=Array.from(document.querySelectorAll('section[data-section]')).map(function(s){
+            return {name:s.dataset.section||'',text:s.dataset.summary||''};
+          }).filter(function(s){return s.name;}).slice(0,3);
+          var summariesHtml=sectionSummaries.map(function(s){
+            return '<div class="sc-sum-item"><div class="sc-sum-name">'+s.name+'</div>'+
+              (s.text?'<div class="sc-sum-text">'+s.text+'</div>':'')+'</div>';
+          }).join('');
+          var rightHtml='<div class="sc-right">'+(kpiRowsHtml?'<div class="sc-kpi-rows">'+kpiRowsHtml+'</div>':'')+
+            (summariesHtml?'<div class="sc-summaries" style="margin-top:.5rem">'+summariesHtml+'</div>':'')+'</div>';
+          var card=document.getElementById('sc-card');
+          card.insertAdjacentHTML('beforeend',leftHtml+rightHtml);
+        }catch(e){
+          var card2=document.getElementById('sc-card');
+          card2.insertAdjacentHTML('beforeend','<div style="padding:2rem;color:#666">Summary unavailable.</div>');
+        }
+      }
+      var built=false;
+      function openCard(){ if(!built){buildCard();built=true;} document.body.classList.add('card-mode'); overlay.setAttribute('aria-hidden','false'); }
+      function closeCard(){ document.body.classList.remove('card-mode'); overlay.setAttribute('aria-hidden','true'); }
+      btn.addEventListener('click',openCard);
+      closeBtn&&closeBtn.addEventListener('click',closeCard);
+      overlay.addEventListener('click',function(e){if(e.target===overlay) closeCard();});
+      document.addEventListener('keydown',function(e){if(e.key==='Escape'&&document.body.classList.contains('card-mode')) closeCard();});
+    })();
+    </script>
+</body>
+</html>

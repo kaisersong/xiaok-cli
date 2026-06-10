@@ -446,6 +446,50 @@ function blockedScriptParallelWorkflowRun() {
   };
 }
 
+function patternPublicViewWorkflowRun() {
+  return {
+    ...blockedScriptParallelWorkflowRun(),
+    workflowPattern: 'tournament',
+    patternSelection: {
+      strategy: 'workflow',
+      reasonCode: 'manual_high_quality',
+      pattern: 'tournament',
+      patternReasonCode: 'explicit_ui_control',
+      confidence: 'high',
+      requiresUserConfirmation: false,
+      selectedAt: 1770000000000,
+      selectorVersion: 'kswarm-workflow-patterns-v1',
+      inputDigest: 'sha256:pattern-input',
+    },
+    compiledContract: {
+      schemaVersion: 'kswarm_workflow_compiled_contract_v1',
+      source: 'script',
+      pattern: 'tournament',
+      riskClass: 'medium',
+      permissions: { allowShell: true, allowNetwork: true, allowWrite: false },
+      budget: { maxNodes: 24, maxParallelism: 4, maxTokens: 64000 },
+      debugMarker: 'compiled_contract_debug_marker',
+    },
+    scriptSource: 'workflow.meta({ pattern: "tournament", outputKind: "ranked_candidates" })',
+    publicView: {
+      id: 'wf-proj-workflow-script-parallel-1770000000000',
+      projectId: 'proj-workflow',
+      taskId: undefined,
+      status: 'blocked',
+      title: '并行报告复核',
+      patternLabel: '候选排序',
+      reasonLabel: '显式选择候选排序',
+      progress: 67,
+      currentPhase: '候选评分',
+      keyFindings: [],
+      risks: [],
+      pendingQuestion: null,
+      deliverables: [],
+      recoveryAction: { kind: 'resume', label: '工作流可继续，需要恢复执行。' },
+    },
+  } as any;
+}
+
 function agentWorkflowProposal(): KSwarmWorkflowProposal {
   return {
     id: 'wfp-proj-workflow-agent-review-smoke-1770000000000',
@@ -720,6 +764,36 @@ describe('WorkflowStatusStrip', () => {
     expect(dialog).toHaveTextContent('并行分支：事实检查');
   });
 
+  it('uses KSwarm public workflow view for pattern, progress, and recovery without exposing internal contract fields', () => {
+    renderWithProviders(
+      <WorkflowStatusStrip
+        workflowRun={patternPublicViewWorkflowRun()}
+        busy={false}
+        onStartDiagnose={vi.fn()}
+        onStartAgentWorkflow={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('候选排序')).toBeInTheDocument();
+    expect(screen.getByText(/显式选择候选排序/)).toBeInTheDocument();
+    expect(screen.getByText(/67%/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /候选排序/ }));
+
+    const dialog = screen.getByRole('dialog', { name: '工作流详情' });
+    expect(dialog).toHaveTextContent('策略：候选排序');
+    expect(dialog).toHaveTextContent('选择依据：显式选择候选排序');
+    expect(dialog).toHaveTextContent('公开进度：67%');
+    expect(dialog).toHaveTextContent('当前阶段：候选评分');
+    expect(dialog).toHaveTextContent('恢复建议：工作流可继续，需要恢复执行。');
+    expect(dialog).not.toHaveTextContent('compiled_contract_debug_marker');
+    expect(dialog).not.toHaveTextContent('allowShell');
+    expect(dialog).not.toHaveTextContent('maxTokens');
+    expect(dialog).not.toHaveTextContent('64000');
+    expect(dialog).not.toHaveTextContent('scriptSource');
+    expect(dialog).not.toHaveTextContent('workflow.meta');
+  });
+
   it('does not present completed script workflow without project delivery as finished project work', () => {
     const workflowRun = {
       ...scriptParallelWorkflowRun(),
@@ -948,8 +1022,8 @@ describe('ProjectDetailPage workflow action', () => {
     const dialog = await screen.findByRole('dialog', { name: '工作流执行确认' });
     expect(dialog.className).toContain('bg-[var(--c-bg-card)]');
     expect(dialog.className).not.toContain('/10');
-    expect(dialog.className).toContain('left-0');
-    expect(dialog.className).not.toContain('right-0');
+    expect(dialog.className).toContain('right-0');
+    expect(dialog.className).not.toContain('left-0');
     expect(dialog).toHaveTextContent('Agent 复核诊断');
     expect(dialog).toHaveTextContent('目标');
     expect(dialog).toHaveTextContent('Agent 复核诊断验收标准');

@@ -1085,6 +1085,7 @@ export function ProjectDetailPage() {
             onDismissWorkflowProposal={() => setWorkflowProposal(null)}
             onCancelWorkflowRun={handleCancelWorkflowRun}
             disabledReason={workflowUnavailableMessage}
+            compact
           />
         </div>
       </div>
@@ -1099,6 +1100,7 @@ export function ProjectDetailPage() {
             project={{ ...project, tasks } as KSwarmProject}
             onStartTaskWorkflow={workflowUnavailableMessage ? undefined : handleStartTaskWorkflow}
             workflowRunningOwnsProgress={workflowRunningOwnsProgress}
+            workflowRuns={detail.workflowRuns || []}
           />
         )}
         {activeTab === 'agents' && (

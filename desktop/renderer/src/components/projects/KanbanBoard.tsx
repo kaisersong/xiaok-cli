@@ -7,8 +7,11 @@ import { useState, useMemo } from 'react';
 import { Circle, Loader2, Eye, CheckCircle2, Plus, X as XIcon, Check, AlertCircle, Clock3, Workflow, PauseCircle, RotateCcw } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
-import type { KSwarmProject, KSwarmTask, KSwarmArtifact } from '../../hooks/useKSwarmClient';
+import type { KSwarmProject, KSwarmTask, KSwarmArtifact, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
 import { ArtifactPreviewModal } from './ArtifactPreviewModal';
+import { findWorkflowRunForTask, computeTaskPipelineProgress } from './workflowUtils';
+import { TaskWorkflowProgressBar } from './TaskWorkflowProgressBar';
+import { TaskDetailDrawer } from './TaskDetailDrawer';
 
 interface KanbanBoardProps {
   project: KSwarmProject;
@@ -17,6 +20,7 @@ interface KanbanBoardProps {
   // are never transitioned by the workflow and stay 'pending'. Display them as
   // 进行中 so the board reflects that the project is actively executing.
   workflowRunningOwnsProgress?: boolean;
+  workflowRuns?: KSwarmWorkflowRun[];
 }
 
 interface Column {
@@ -156,12 +160,16 @@ function TaskCard({
   projectExecutionMode,
   onPreviewArtifact,
   onStartTaskWorkflow,
+  workflowRun,
+  onCardClick,
 }: {
   task: KSwarmTask;
   projectId: string;
   projectExecutionMode?: KSwarmProject['executionMode'];
   onPreviewArtifact: (art: KSwarmArtifact) => void;
   onStartTaskWorkflow?: (taskId: string) => void;
+  workflowRun?: KSwarmWorkflowRun | null;
+  onCardClick?: (task: KSwarmTask) => void;
 }) {
   const { cancelTask, markTaskDone, agents } = useKSwarm();
   const { t } = useLocale();
@@ -187,6 +195,11 @@ function TaskCard({
     }
     return null;
   })();
+
+  const pipelineProgress = useMemo(
+    () => workflowRun ? computeTaskPipelineProgress(workflowRun) : null,
+    [workflowRun],
+  );
 
   const agentName = (id?: string) => {
     if (!id) return '';
@@ -217,7 +230,9 @@ function TaskCard({
 
   return (
     <>
-      <div className={`group rounded-lg border-[0.5px] border-[var(--c-border-subtle)] p-3 transition-colors duration-150 hover:bg-[var(--c-bg-deep)] ${
+      <div
+        onClick={() => onCardClick?.(task)}
+        className={`group cursor-pointer rounded-lg border-[0.5px] border-[var(--c-border-subtle)] p-3 transition-colors duration-150 hover:bg-[var(--c-bg-deep)] ${
         isFailed || isBlocked
           ? 'border-l-2 border-l-[var(--c-status-error-text)] bg-[var(--c-status-error-text)]/5'
           : isCancelled
@@ -276,6 +291,12 @@ function TaskCard({
             <Workflow size={10} className="shrink-0" />
             <span>{executionView.label}</span>
             {executionView.reason && <span className="text-[var(--c-text-muted)]">{executionView.reason}</span>}
+          </div>
+        )}
+
+        {pipelineProgress && pipelineProgress.total > 0 && (
+          <div className="mt-1.5">
+            <TaskWorkflowProgressBar progress={pipelineProgress} />
           </div>
         )}
 
@@ -409,11 +430,20 @@ function AddTaskForm({ projectId, onDone }: { projectId: string; onDone(): void 
   );
 }
 
-export function KanbanBoard({ project, onStartTaskWorkflow, workflowRunningOwnsProgress = false }: KanbanBoardProps) {
+export function KanbanBoard({ project, onStartTaskWorkflow, workflowRunningOwnsProgress = false, workflowRuns = [] }: KanbanBoardProps) {
   const { t } = useLocale();
   const tasks = useMemo(() => (project.tasks || []).filter(isRenderableTask), [project.tasks]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [previewArtifact, setPreviewArtifact] = useState<KSwarmArtifact | null>(null);
+  const [selectedTask, setSelectedTask] = useState<KSwarmTask | null>(null);
+
+  const taskWorkflowMap = useMemo(() => {
+    const map = new Map<string, KSwarmWorkflowRun | null>();
+    for (const task of tasks) {
+      map.set(task.id, findWorkflowRunForTask(task, workflowRuns));
+    }
+    return map;
+  }, [tasks, workflowRuns]);
 
   const COLUMNS: Column[] = useMemo(() => [
     { id: 'pending', label: t.projectsKanbanPending, color: 'border-t-[var(--c-text-muted)]', icon: Circle, statuses: ['pending'] },
@@ -486,6 +516,8 @@ export function KanbanBoard({ project, onStartTaskWorkflow, workflowRunningOwnsP
                     projectExecutionMode={project.executionMode || 'direct'}
                     onPreviewArtifact={setPreviewArtifact}
                     onStartTaskWorkflow={onStartTaskWorkflow}
+                    workflowRun={taskWorkflowMap.get(task.id) ?? null}
+                    onCardClick={setSelectedTask}
                   />
                 ))}
               </div>
@@ -494,6 +526,17 @@ export function KanbanBoard({ project, onStartTaskWorkflow, workflowRunningOwnsP
         })}
       </div>
       {previewArtifact && <ArtifactPreviewModal artifact={previewArtifact} onClose={() => setPreviewArtifact(null)} />}
+      {selectedTask && (
+        <TaskDetailDrawer
+          task={selectedTask}
+          workflowRun={taskWorkflowMap.get(selectedTask.id) ?? null}
+          projectId={project.id}
+          projectExecutionMode={project.executionMode}
+          onClose={() => setSelectedTask(null)}
+          onStartTaskWorkflow={onStartTaskWorkflow}
+          onPreviewArtifact={setPreviewArtifact}
+        />
+      )}
     </div>
   );
 }

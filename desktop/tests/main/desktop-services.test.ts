@@ -3514,6 +3514,14 @@ describe('desktop services', () => {
       return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
     }
 
+    it('uses the v1 global replay cap of 3 resumable script workflow jobs', async () => {
+      const { readFileSync } = await import('node:fs');
+      const { join: pathJoin } = await import('node:path');
+      const sourceFile = readFileSync(pathJoin(__dirname, '../../electron/desktop-services.ts'), 'utf-8');
+
+      expect(sourceFile).toContain('const maxRestarts = 3');
+    });
+
     it('restores a resumable script run that has a persisted script source', async () => {
       const runId = `run-${Date.now()}`;
       const scriptSource = "export const meta = { name: 'demo', description: 'd' }\nawait agent('x')";

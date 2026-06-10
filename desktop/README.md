@@ -4,17 +4,19 @@ Native desktop surface for xiaok task delivery, scheduled automation, and KSwarm
 
 ## Current Release Focus
 
-v1.3.13 focuses on making KSwarm dynamic workflow script orchestration parallel, resumable within the same run, and visible from project detail:
+v1.4.3 fuses the dynamic workflow surface into the project kanban, so workflow progress lives where users already manage tasks:
 
-- Trusted model-authored dynamic workflow scripts can create phases, call `agent(...)`, and use thunk-based `parallel([() => agent(...), ...])` for branch fan-out.
-- `parallel()` creates a durable KSwarm `parallelGroup` before dispatching branch nodes. Branches carry fan-out labels, required/schema/evidence metadata, and script checkpoints for snapshot-based observability.
-- The conversation tool supports `previewOnly` so an assistant can show a workflow preview before starting the run. Confirmed runs start in a background job and return `workflowRunId` immediately.
-- The conversation tool also supports `resumeWorkflowRunId` for same-run primitive reuse, and `get_dynamic_workflow_status` for read-only KSwarm snapshot status checks.
-- The bundled `report_final_review` template demonstrates a professional parallel workflow: fact review, evidence review, format/contract review, then a final gate reducer.
-- The professional E2E now creates HTML/PDF artifacts and verifies workflow run, gate decision, project deliverable, artifact provenance, and task-board state stay consistent.
+- Each task card on the project kanban now shows a slim multi-segment workflow progress bar (completed / running / failed) plus a `工作流执行` chip and the latest workflow primary message. Users can read task health directly from the board instead of switching to a separate workflow panel.
+- Clicking any task card opens a right-side `TaskDetailDrawer` that consolidates task description, assigned agent, execution strategy, pipeline progress, the full workflow node list grouped by phase (with parallel groups, fan-out labels, failure policy, and per-node agent / status / error), review feedback, and artifacts. The drawer reuses the same KSwarm workflow snapshot used by the strip and refreshes alongside project polling.
+- The top-of-page `WorkflowStatusStrip` is demoted to a small text-only badge (e.g. `工作流 · Review gate passed`) next to the dedicated `运行工作流` button. Clicking the badge still opens the full workflow detail dialog, which now anchors to the right edge so it stays inside the viewport in the compact layout.
+- Shared workflow rendering helpers — status icon, tone class, status label, progress formatter, public-view normalizer, and generic workflow view builder — are extracted into `desktop/renderer/src/components/projects/workflowUtils.ts`. New helpers `findWorkflowRunForTask` (matches a task to its workflow run via `task.execution.workflowRunId` / `scope.taskId` / `sourceTask.id`) and `computeTaskPipelineProgress` reduce a `KSwarmWorkflowRun` to a `TaskPipelineProgress` summary used by both card and drawer.
+- This release does not change the KSwarm data model, project APIs, or task semantics. It restructures the desktop renderer surface only, building on the v1.3.13 dynamic workflow script foundation (parallel groups, fan-out labels, failure policy, script checkpoints) that KSwarm already exposes through `getProjectFullDetail`.
+
+Earlier dynamic workflow foundation (v1.3.13):
+
+- Trusted model-authored dynamic workflow scripts can create phases, call `agent(...)`, and use thunk-based `parallel([() => agent(...), ...])` for branch fan-out, with `parallelGroup` and `scriptCheckpoints` persisted in KSwarm.
+- The `run_dynamic_workflow_script` tool supports `previewOnly` for confirm-before-run, and `resumeWorkflowRunId` for same-run primitive reuse. `get_dynamic_workflow_status` reports run/node/parallel/checkpoint/gate/delivery state from KSwarm snapshots.
 - Parallel runtime has foundation semantics for `required_all`, `collect_errors`, and `quorum`; KSwarm persists quorum group completion when enough branches pass.
-- Project workflow details show parallel groups, branch completion counts, failure policy, branch labels, script checkpoints, blocking failures, and gate status from KSwarm snapshots.
-- This is not yet a full user-authored workflow platform. Automatic cross-process script job recovery, durable user-input pause/resume, and comparative professional quality evals remain staged follow-up work.
 - Desktop release packaging must include the matching `kswarm`, `intent-broker`, and `kai-xiaok-plugins` sibling repositories.
 
 Troubleshooting:

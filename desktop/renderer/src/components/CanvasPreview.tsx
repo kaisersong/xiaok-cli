@@ -1,9 +1,10 @@
 import { useMemo, useRef, useEffect, useState, useCallback } from 'react';
-import { Code, Eye } from 'lucide-react';
+import { Code, Eye, Download } from 'lucide-react';
 import { ArtifactIframe } from './ArtifactIframe';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ArtifactEditableViewer, type AnnotationPayload } from './ArtifactEditableViewer';
 import { formatAnnotationForChat } from '../hooks/useArtifactAnnotation';
+import { getDesktopApi } from '../shared/desktop';
 
 interface CanvasPreviewProps {
   filePath: string;
@@ -109,39 +110,71 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
     }
   }, [filePath]);
 
+  const handleDownload = useCallback(async () => {
+    const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || 'download';
+    const api = getDesktopApi() as any;
+    if (api?.showSaveDialog && api?.saveFile) {
+      const { canceled, filePath: savePath } = await api.showSaveDialog({
+        defaultPath: fileName,
+      });
+      if (canceled || !savePath) return;
+      await api.saveFile({ filePath: savePath, content });
+    } else {
+      const blob = new Blob([content], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  }, [filePath, content]);
+
   const hasCodeView = isText;
   const hasPreview = isHtml || isMarkdown || isImage;
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Toolbar */}
-      {(hasCodeView && hasPreview) && (
+      {(hasCodeView || hasPreview) && (
         <div className="flex shrink-0 items-center gap-1 border-b border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1">
-          <div className="flex rounded-lg bg-[var(--c-bg-page)] p-0.5">
-            <button
-              type="button"
-              onClick={() => setViewMode('preview')}
-              className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs transition-colors ${
-                viewMode === 'preview'
-                  ? 'bg-[var(--c-bg-card)] text-[var(--c-text-heading)] shadow-sm'
-                  : 'text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)]'
-              }`}
-            >
-              <Eye size={12} /> Preview
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('code')}
-              className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs transition-colors ${
-                viewMode === 'code'
-                  ? 'bg-[var(--c-bg-card)] text-[var(--c-text-heading)] shadow-sm'
-                  : 'text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)]'
-              }`}
-            >
-              <Code size={12} /> Code
-            </button>
-          </div>
-          <span className="ml-auto truncate text-xs text-[var(--c-text-tertiary)]">{filePath}</span>
+          {(hasCodeView && hasPreview) && (
+            <div className="flex rounded-lg bg-[var(--c-bg-page)] p-0.5">
+              <button
+                type="button"
+                onClick={() => setViewMode('preview')}
+                className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs transition-colors ${
+                  viewMode === 'preview'
+                    ? 'bg-[var(--c-bg-card)] text-[var(--c-text-heading)] shadow-sm'
+                    : 'text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)]'
+                }`}
+              >
+                <Eye size={12} /> Preview
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('code')}
+                className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs transition-colors ${
+                  viewMode === 'code'
+                    ? 'bg-[var(--c-bg-card)] text-[var(--c-text-heading)] shadow-sm'
+                    : 'text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)]'
+                }`}
+              >
+                <Code size={12} /> Code
+              </button>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="ml-auto flex items-center gap-1 rounded p-1 text-xs text-[var(--c-text-tertiary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]"
+            title="下载到本地"
+          >
+            <Download size={12} />
+          </button>
+          <span className="truncate text-xs text-[var(--c-text-tertiary)]">{filePath}</span>
         </div>
       )}
 

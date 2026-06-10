@@ -229,7 +229,9 @@ export class OpenAIAdapter {
                 const reasoningContent = collectReasoningText(m.content);
                 const msg = {
                     role: 'assistant',
-                    content: textBlocks.length > 0 ? textBlocks.map((block) => block.text).join('') : null,
+                    content: textBlocks.length > 0
+                        ? textBlocks.map((block) => block.text).join('')
+                        : (toolUseBlocks.length > 0 ? null : ''),
                 };
                 if (toolUseBlocks.length > 0) {
                     msg.tool_calls = toolUseBlocks.map((block) => ({

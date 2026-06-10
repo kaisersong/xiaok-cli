@@ -246,6 +246,70 @@ workflow.block({ reason: '缺少 HTML 交付物', evidenceRefs: ['artifacts/repo
     });
   });
 
+  it('runs workflow.loopUntil serially until dry streak stop', async () => {
+    const calls: string[] = [];
+    const result = await runWorkflowScript(
+      `export const meta = { name: 'loop_until_runtime', description: 'loop runtime', resumable: true, pattern: 'bounded_loop_until_done' }
+return await workflow.loopUntil({
+  label: '处理队列',
+  maxIterations: 5,
+  dryRunStreakToStop: 2,
+  iteration: async ({ iteration }) => {
+    if (iteration <= 2) {
+      await agent('处理第 ' + iteration + ' 批', { label: '批次 ' + iteration, stableKey: 'batch-' + iteration })
+      return { status: 'produced', progressDelta: 1 }
+    }
+    return { status: 'dry', progressDelta: 0 }
+  },
+})`,
+      {
+        controller: {
+          async createAgentNode(input) {
+            calls.push(input.label);
+            return { summary: input.label };
+          },
+        },
+      },
+    );
+
+    expect(calls).toEqual(['批次 1', '批次 2']);
+    expect(result.result).toEqual({
+      status: 'stopped',
+      reason: 'dry_run_streak',
+      iterations: 4,
+      progressDelta: 2,
+    });
+  });
+
+  it('stops workflow.loopUntil at maxIterations when work keeps producing', async () => {
+    const result = await runWorkflowScript(
+      `export const meta = { name: 'loop_until_max_runtime', description: 'loop max runtime', resumable: true, pattern: 'bounded_loop_until_done' }
+return await workflow.loopUntil({
+  label: '持续处理',
+  maxIterations: 3,
+  dryRunStreakToStop: 2,
+  iteration: async ({ iteration }) => {
+    await agent('处理第 ' + iteration + ' 批', { label: '批次 ' + iteration, stableKey: 'batch-' + iteration })
+    return { status: 'produced', progressDelta: 1 }
+  },
+})`,
+      {
+        controller: {
+          async createAgentNode(input) {
+            return { summary: input.label };
+          },
+        },
+      },
+    );
+
+    expect(result.result).toEqual({
+      status: 'stopped',
+      reason: 'max_iterations',
+      iterations: 3,
+      progressDelta: 3,
+    });
+  });
+
   it('reserves and consumes budget with stable run/node/attempt ids', async () => {
     const calls: string[] = [];
     const controller = {
@@ -367,6 +431,41 @@ await agent('分析', { model: 'gpt-5.4', modelCapability: 'deep-reviewer' })`,
       },
     )).rejects.toMatchObject({ code: 'model_and_capability_mutually_exclusive' });
     expect(dispatched).toBe(false);
+  });
+
+  it('forwards workflow role trust refs permissions and stable keys to agent controller input', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+
+    await runWorkflowScript(
+      `export const meta = { name: 'agent_options_demo', description: 'agent options demo', pattern: 'quarantine_triage' }
+await agent('读取外部工单', {
+  label: '读取工单',
+  role: 'collector',
+  trustLevel: 'untrusted',
+  inputRefs: ['project.snapshot'],
+  sourceRefs: ['ticket:1'],
+  permissions: { toolCategories: ['read_project_state'] },
+  stableKey: 'ticket-1',
+})`,
+      {
+        controller: {
+          async createAgentNode(input) {
+            calls.push(input as unknown as Record<string, unknown>);
+            return { summary: input.label };
+          },
+        },
+      },
+    );
+
+    expect(calls[0]).toMatchObject({
+      label: '读取工单',
+      role: 'collector',
+      trustLevel: 'untrusted',
+      inputRefs: ['project.snapshot'],
+      sourceRefs: ['ticket:1'],
+      permissions: { toolCategories: ['read_project_state'] },
+      stableKey: 'ticket-1',
+    });
   });
 
   it('marks parallel branches as budget_skipped when best-effort remaining budget is exhausted', async () => {

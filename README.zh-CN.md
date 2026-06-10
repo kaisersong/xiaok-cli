@@ -19,6 +19,14 @@
 | **重命名任务延迟** | 27.6s | 180.8s | **-85%** |
 | **Token 效率** | 100% | 250% | **-60%** |
 
+**v1.4.3 新特性：**
+
+- **看板与工作流融合**：项目任务卡现在直接显示工作流流水线进度——一条细分段进度条（完成 / 运行中 / 失败），加上"工作流执行" chip 和最近的工作流进展消息。用户在看板上就能一眼看出任务的工作流执行情况，不需要切到顶部入口。
+- **任务详情抽屉**：点击任意任务卡片，会从右侧滑出 `TaskDetailDrawer`，集中展示任务描述、负责 Agent、执行策略、流水线进度条、按阶段分组的完整工作流节点详情（含并行分组、扇出标签、失败策略、单节点 Agent / 状态 / 错误）、复核反馈和产物。抽屉复用 KSwarm 暴露的工作流数据，5s 轮询后会同步刷新。
+- **顶部工作流条紧凑化**：顶部的 `WorkflowStatusStrip` 弱化为纯文本徽章（如"工作流 · Review gate passed"），与"运行工作流"按钮并排。点击徽章仍可展开完整工作流详情弹窗，并改为右锚点，避免被视口右侧截断。
+- **共享 `workflowUtils`**：状态图标、tone class、状态文案、进度格式化、公开视图归一化、通用工作流视图构建器被抽取到 `workflowUtils.ts`。新增 `findWorkflowRunForTask`（按 `task.execution.workflowRunId` / `scope.taskId` / `sourceTask.id` 匹配任务对应的 workflow run）和 `computeTaskPipelineProgress`（把 `KSwarmWorkflowRun` 归约为 `TaskPipelineProgress`）两个工具，看板卡片与抽屉共用同一份逻辑。
+- **不动后端和数据模型**：本次只改 desktop 渲染层 UI。KSwarm 数据模型、项目 API、任务语义保持不变。
+
 **v1.4.1 新特性：**
 
 - **产物预览修复**：项目交付物（Markdown、HTML、纯文本）现在可以在预览面板中正确加载。此前版本对所有 kswarm GET 请求统一使用 JSON 解析代理，导致文本类产物内容解析抛出异常，显示"加载失败: fetch failed"。现在引入专用的原始文本 IPC 代理（`kswarmProxyGetText`）用于产物内容请求。

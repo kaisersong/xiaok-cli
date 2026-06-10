@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import remarkGfm from 'remark-gfm';
 import { ChatInput } from './ChatInput';
 import { ToolStepsMessage } from './ToolStepsMessage';
@@ -9,6 +9,34 @@ import { api } from '../api';
 import type { ThreadRecord } from '../api/types';
 import type { ArtifactSummary, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
 import { A2UI_MIME_TYPE, isA2UIMimeType } from '../../../../src/a2ui/index.js';
+
+function CopyButton({ text, className }: { text: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(async () => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [text]);
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      title="复制"
+      className={`flex items-center justify-center rounded p-1 text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)] ${className ?? ''}`}
+    >
+      {copied ? (
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="2 8 6 12 14 4" />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="5" y="5" width="9" height="9" rx="1.5" />
+          <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" />
+        </svg>
+      )}
+    </button>
+  );
+}
 
 export interface ToolStep {
   toolUseId: string;
@@ -135,11 +163,16 @@ export function ChatView({
         <div className="mx-auto max-w-[800px] px-14 py-6">
           <div className="space-y-6">
             {messages.map((msg) => (
-              <div key={msg.id} className={msg.role === 'user' ? 'flex justify-end' : ''}>
+              <div key={msg.id} className={msg.role === 'user' ? 'group/usermsg flex flex-col items-end' : msg.role === 'assistant' ? 'group/assistantmsg' : ''}>
                 {msg.role === 'user' ? (
-                  <div data-role="user" className="max-w-[85%] rounded-2xl rounded-br-sm px-4 py-3 text-sm text-[var(--c-text-primary)] whitespace-pre-wrap break-words select-text" style={{ background: 'rgb(235,235,235)' }}>
-                    {msg.content}
-                  </div>
+                  <>
+                    <div data-role="user" className="max-w-[85%] rounded-2xl rounded-br-sm px-4 py-3 text-sm text-[var(--c-text-primary)] whitespace-pre-wrap break-words select-text" style={{ background: 'rgb(235,235,235)' }}>
+                      {msg.content}
+                    </div>
+                    <div className="mt-0.5 flex justify-end opacity-0 transition-opacity group-hover/usermsg:opacity-100">
+                      <CopyButton text={msg.content} />
+                    </div>
+                  </>
                 ) : msg.role === 'progress' ? (
                   <div className="flex items-center gap-2 py-1 text-sm text-[var(--c-text-secondary)] select-text">
                     <div className="relative size-3 shrink-0" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -204,16 +237,28 @@ export function ChatView({
                     </div>
                   </div>
                 ) : msg.role === 'result_card' ? (
-                  <ResultCard
-                    result={msg.result ?? null}
-                    generatedFiles={msg.generatedFiles ?? []}
-                    onArtifactClick={onArtifactClick}
-                    onArtifactOpenExternal={onArtifactOpenExternal}
-                  />
-                ) : (
-                  <div className="max-w-[663px] text-sm text-[var(--c-text-primary)] leading-relaxed select-text">
-                    <MarkdownRenderer content={msg.content} />
+                  <div className="group/resultmsg">
+                    <ResultCard
+                      result={msg.result ?? null}
+                      generatedFiles={msg.generatedFiles ?? []}
+                      onArtifactClick={onArtifactClick}
+                      onArtifactOpenExternal={onArtifactOpenExternal}
+                    />
+                    {msg.result?.summary?.trim() && (
+                      <div className="mt-0.5 opacity-0 transition-opacity group-hover/resultmsg:opacity-100">
+                        <CopyButton text={msg.result.summary} />
+                      </div>
+                    )}
                   </div>
+                ) : (
+                  <>
+                    <div className="max-w-[663px] text-sm text-[var(--c-text-primary)] leading-relaxed select-text">
+                      <MarkdownRenderer content={msg.content} />
+                    </div>
+                    <div className="mt-0.5 opacity-0 transition-opacity group-hover/assistantmsg:opacity-100">
+                      <CopyButton text={msg.content} />
+                    </div>
+                  </>
                 )}
               </div>
             ))}

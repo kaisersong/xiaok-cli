@@ -256,6 +256,12 @@ export function createKSwarmWorkflowScriptController({
           outputSchema: input.outputSchema,
           evidenceRequired: input.evidenceRequired,
           modelCapability: input.modelCapability,
+          role: input.role,
+          trustLevel: input.trustLevel,
+          inputRefs: input.inputRefs,
+          sourceRefs: input.sourceRefs,
+          permissions: input.permissions,
+          stableKey: input.stableKey,
         }),
       });
       const nodeId = readString(readRecord(created).nodeId) || inferLatestScriptNodeId(readRecord(readRecord(created).workflowRun));

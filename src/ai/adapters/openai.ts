@@ -288,7 +288,9 @@ export class OpenAIAdapter implements ModelAdapter {
 
         const msg: OpenAI.ChatCompletionAssistantMessageParam & { reasoning_content?: string } = {
           role: 'assistant',
-          content: textBlocks.length > 0 ? textBlocks.map((block) => block.text).join('') : null,
+          content: textBlocks.length > 0
+            ? textBlocks.map((block) => block.text).join('')
+            : (toolUseBlocks.length > 0 ? null : ''),
         };
 
         if (toolUseBlocks.length > 0) {

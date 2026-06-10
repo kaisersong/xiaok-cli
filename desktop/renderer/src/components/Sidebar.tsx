@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Plus, Search, X, Bolt, Pencil, RefreshCw, Clock, FolderKanban, ExternalLink, AlertTriangle } from 'lucide-react';
@@ -69,6 +70,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const [editTitle, setEditTitle] = useState('');
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [showUpdatePopover, setShowUpdatePopover] = useState(false);
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
+  const updateButtonRef = useRef<HTMLButtonElement>(null);
   const [activeNav, setActiveNav] = useState<NavSection>('new');
   const [sidebarTasks, setSidebarTasks] = useState<SidebarScheduledTask[]>([]);
   const [scheduledThreadIds, setScheduledThreadIds] = useState<Set<string>>(new Set());
@@ -248,7 +251,21 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     : 'flex flex-col gap-0';
 
   const handleUpdateReminderClick = () => {
-    setShowUpdatePopover(prev => !prev);
+    setShowUpdatePopover(prev => {
+      const next = !prev;
+      if (next && updateButtonRef.current) {
+        const rect = updateButtonRef.current.getBoundingClientRect();
+        const popoverWidth = 288;
+        const popoverHeight = 220;
+        let left = rect.right - popoverWidth;
+        let top = rect.top - popoverHeight - 8;
+        if (left < 8) left = 8;
+        if (left + popoverWidth > window.innerWidth - 8) left = window.innerWidth - popoverWidth - 8;
+        if (top < 8) top = rect.bottom + 8;
+        setPopoverPos({ top, left });
+      }
+      return next;
+    });
   };
 
   const handleOpenGithubReleases = () => {
@@ -412,6 +429,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
             {showUpdateReminder && (
               <div className="relative">
                 <button
+                  ref={updateButtonRef}
                   type="button"
                   onClick={handleUpdateReminderClick}
                   aria-label={updateReminderLabel}
@@ -423,7 +441,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                   <span>{updateReminderLabel}</span>
                 </button>
 
-                {showUpdatePopover && (
+                {showUpdatePopover && popoverPos && createPortal(
                   <>
                     <div
                       className="fixed inset-0 z-40"
@@ -433,7 +451,10 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                       tabIndex={-1}
                       aria-label="关闭弹窗"
                     />
-                    <div className="absolute bottom-10 right-0 z-50 w-72 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 shadow-lg">
+                    <div
+                      className="fixed z-50 w-72 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 shadow-lg"
+                      style={{ top: popoverPos.top, left: popoverPos.left }}
+                    >
                       <div className="mb-2 flex items-center justify-between">
                         <span className="text-sm font-semibold text-[var(--c-text-heading)]">{updatePopoverTitle}</span>
                         <button
@@ -479,7 +500,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                         <span>前往 GitHub 下载</span>
                       </button>
                     </div>
-                  </>
+                  </>,
+                  document.body,
                 )}
               </div>
             )}

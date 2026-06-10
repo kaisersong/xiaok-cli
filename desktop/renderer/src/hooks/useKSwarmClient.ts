@@ -84,6 +84,11 @@ export interface KSwarmTaskExecution {
   modeSource?: 'project_default' | 'auto_selector' | 'manual_override' | string;
   reasonCode?: string;
   workflowRunId?: string | null;
+  workflowPatternSummary?: {
+    pattern?: KSwarmWorkflowPattern | string;
+    label?: string;
+    patternReasonCode?: string;
+  } | null;
   selectedAt?: number;
 }
 
@@ -370,6 +375,35 @@ export type KSwarmWorkflowNodeStatus =
   | 'blocked'
   | 'cancelled';
 
+export type KSwarmWorkflowPattern =
+  | 'deliver_review_reduce'
+  | 'classify_and_act'
+  | 'fanout_synthesize'
+  | 'adversarial_verify'
+  | 'generate_filter'
+  | 'tournament'
+  | 'bounded_loop_until_done'
+  | 'root_cause_hypothesis_race'
+  | 'quarantine_triage'
+  | 'rule_mining';
+
+export interface KSwarmWorkflowRunPublicView {
+  id: string;
+  projectId: string;
+  taskId?: string;
+  status: string;
+  title: string;
+  patternLabel: string;
+  reasonLabel?: string;
+  progress: number;
+  currentPhase?: string;
+  keyFindings?: string[];
+  risks?: string[];
+  pendingQuestion?: string | null;
+  deliverables?: KSwarmArtifact[];
+  recoveryAction?: { kind?: string; label?: string } | null;
+}
+
 export interface KSwarmWorkflowRun {
   id: string;
   projectId: string;
@@ -386,6 +420,20 @@ export interface KSwarmWorkflowRun {
   requestedBy?: string | null;
   scope?: { projectId?: string; taskId?: string } | null;
   sourceTask?: { id: string; title?: string; status?: string; assignedAgent?: string | null } | null;
+  workflowPattern?: KSwarmWorkflowPattern | string | null;
+  patternSelection?: {
+    pattern?: KSwarmWorkflowPattern | string;
+    patternReasonCode?: string;
+    confidence?: 'low' | 'medium' | 'high' | string;
+    requiresUserConfirmation?: boolean;
+    selectedAt?: number;
+    selectorVersion?: string;
+    inputDigest?: string;
+    [key: string]: unknown;
+  } | null;
+  compiledContract?: unknown;
+  patternState?: unknown;
+  publicView?: KSwarmWorkflowRunPublicView | null;
   approval?: {
     required: boolean;
     status: 'not_required' | 'pending' | 'approved' | 'rejected' | string;

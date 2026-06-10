@@ -34,6 +34,9 @@ export function sanitizeUserFacingErrorMessage(error: unknown, fallbackMessage =
   const text = errorText(error).trim()
   if (!text) return fallbackMessage
   if (isProviderAuthError(text)) return MODEL_AUTH_ERROR_MESSAGE
-  if (isProviderResponseDump(text)) return MODEL_SERVICE_ERROR_MESSAGE
+  if (isProviderResponseDump(text)) {
+    console.error('[error-display] provider response dump (raw):', text)
+    return MODEL_SERVICE_ERROR_MESSAGE
+  }
   return text.replace(/^Error:\s*/i, '').trim() || fallbackMessage
 }

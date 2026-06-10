@@ -1,0 +1,15 @@
+{
+  "type": "workspace_claim",
+  "action": "claim",
+  "participantId": "codex4",
+  "project": "xiaok-cli",
+  "files": [
+    "reviews/cli-codex.md"
+  ],
+  "directories": [],
+  "mayAffect": [],
+  "taskId": "task-1780492914",
+  "claimedAt": "2026-06-03T13:21:54Z",
+  "expiresAt": "2026-06-03T13:51:54Z",
+  "gitHead": "6ded091e5ce7a9c4b71301bac02c016ce0ab027e"
+}

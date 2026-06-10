@@ -1,6 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronDown, Loader, Workflow, X } from 'lucide-react';
+import { ChevronDown, Workflow, X } from 'lucide-react';
 import type { KSwarmWorkflowProposal, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
+import {
+  getStatusIcon,
+  getToneClass,
+  labelNodeStatus,
+  labelFailurePolicy,
+  formatWorkflowProgress,
+  readString,
+  readNumber,
+  normalizePublicProgress,
+  getPatternPublicView,
+  buildGenericWorkflowView,
+  getNodeOutput,
+} from './workflowUtils';
 
 interface WorkflowStatusStripProps {
   workflowRun?: KSwarmWorkflowRun | null;
@@ -12,6 +25,7 @@ interface WorkflowStatusStripProps {
   onDismissWorkflowProposal?: () => void;
   onCancelWorkflowRun?: () => void;
   disabledReason?: string | null;
+  compact?: boolean;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -42,6 +56,7 @@ export function WorkflowStatusStrip({
   onDismissWorkflowProposal,
   onCancelWorkflowRun,
   disabledReason,
+  compact: compactMode = false,
 }: WorkflowStatusStripProps) {
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -50,9 +65,12 @@ export function WorkflowStatusStrip({
   const isBuiltinDiagnose = workflowRun?.workflowId === 'project-diagnose' && workflowRun.source === 'builtin';
   const isCompletedScriptWorkflowAwaitingDelivery = Boolean(workflowRun && isScriptWorkflowAwaitingDelivery(workflowRun));
   const displayStatus = isCompletedScriptWorkflowAwaitingDelivery ? 'blocked' : status;
+  const patternPublicView = getPatternPublicView(workflowRun);
   const workflowDisplayName = workflowRun ? getWorkflowDisplayName(workflowRun) : '';
   const label = workflowRun
-    ? isBuiltinDiagnose
+    ? patternPublicView
+      ? patternPublicView.patternLabel
+      : isBuiltinDiagnose
       ? (BUILTIN_DIAGNOSE_STATUS_LABELS[status] || status)
       : workflowDisplayName
     : '最近工作流：尚未运行';
@@ -61,7 +79,9 @@ export function WorkflowStatusStrip({
   const completed = summary?.completed ?? 0;
   const total = summary?.total ?? 0;
   const progressText = workflowRun
-    ? isBuiltinDiagnose
+    ? patternPublicView
+      ? formatPublicWorkflowProgress(patternPublicView)
+      : isBuiltinDiagnose
       ? `已完成 ${completed}/${total}`
       : isCompletedScriptWorkflowAwaitingDelivery
         ? '执行完成，待确认交付物'
@@ -69,7 +89,9 @@ export function WorkflowStatusStrip({
     : '选择快速诊断或 Agent 复核';
   const effectiveProgressText = disabledReason || progressText;
   const sourceText = workflowRun
-    ? isBuiltinDiagnose
+    ? patternPublicView
+      ? 'KSwarm 策略视图'
+      : isBuiltinDiagnose
       ? '系统内置，未调用智能体'
       : '工作流执行'
     : '读取项目状态，不调用智能体';
@@ -112,13 +134,22 @@ export function WorkflowStatusStrip({
         }}
         aria-expanded={open}
         disabled={!workflowRun}
-        className={`inline-flex min-w-0 max-w-[420px] items-center gap-1.5 rounded-md border px-2 py-1 text-left disabled:cursor-default ${toneClass}`}
+        className={compactMode
+          ? 'inline-flex min-w-0 max-w-[260px] items-center gap-1 rounded px-1.5 py-0.5 text-left text-[10px] text-[var(--c-text-muted)] hover:text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:cursor-default'
+          : `inline-flex min-w-0 max-w-[420px] items-center gap-1.5 rounded-md border px-2 py-1 text-left disabled:cursor-default ${toneClass}`}
       >
-        <span className="inline-flex min-w-0 items-center gap-1.5 font-semibold">
-          <StatusIcon size={13} className={status === 'running' ? 'animate-spin' : ''} />
+        <span className={`inline-flex min-w-0 items-center gap-1 ${compactMode ? 'font-normal' : 'font-semibold'}`}>
+          <StatusIcon size={compactMode ? 11 : 13} className={status === 'running' ? 'animate-spin' : ''} />
           <span className="truncate">{label}</span>
         </span>
-        {compact ? (
+        {compactMode ? (
+          (disabledReason || progressText) ? (
+            <>
+              <span className="text-[var(--c-text-muted)]">·</span>
+              <span className="truncate text-[var(--c-text-muted)]">{disabledReason || progressText}</span>
+            </>
+          ) : null
+        ) : (compact ? (
           <>
             <span className="text-[var(--c-text-muted)]">·</span>
             <span className="truncate text-[var(--c-text-secondary)]">{compact.health}</span>
@@ -129,7 +160,7 @@ export function WorkflowStatusStrip({
           </>
         ) : (
           <span className="truncate text-[var(--c-text-muted)]">{effectiveProgressText}</span>
-        )}
+        ))}
       </button>
 
       <button
@@ -175,7 +206,7 @@ export function WorkflowStatusStrip({
         <div
           role="dialog"
           aria-label={dialogLabel}
-          className="absolute left-0 top-full z-50 mt-2 max-h-[min(72vh,640px)] w-[min(560px,calc(100vw-48px))] overflow-y-auto rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-secondary)] shadow-xl"
+          className={`absolute ${compactMode ? 'right-0' : 'left-0'} top-full z-50 mt-2 max-h-[min(72vh,640px)] w-[min(560px,calc(100vw-48px))] overflow-y-auto rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-secondary)] shadow-xl`}
         >
           <div className="flex flex-wrap items-start gap-2">
             <span className="flex min-w-0 items-center gap-1.5 text-[12px] font-semibold">
@@ -233,7 +264,7 @@ export function WorkflowStatusStrip({
         <div
           role="dialog"
           aria-label="工作流执行确认"
-          className="absolute left-0 top-full z-50 mt-2 w-[min(620px,calc(100vw-48px))] rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-secondary)] shadow-xl"
+          className={`absolute ${compactMode ? 'right-0' : 'left-0'} top-full z-50 mt-2 w-[min(620px,calc(100vw-48px))] rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-secondary)] shadow-xl`}
         >
           <div className="flex items-start gap-2">
             <div className="min-w-0">
@@ -377,6 +408,31 @@ function SystemDiagnosisDetails({ diagnosis }: { diagnosis: ReturnType<typeof bu
 function GenericWorkflowDetails({ workflow }: { workflow: ReturnType<typeof buildGenericWorkflowView> }) {
   return (
     <div className="mt-2 border-t border-current/10 pt-2 text-[10px] text-[var(--c-text-secondary)]">
+      {workflow.publicView && (
+        <div className="mb-2 space-y-1 rounded-md border border-[var(--c-border-subtle)] bg-[var(--c-bg-page)] px-2 py-1.5">
+          <p className="leading-relaxed">
+            <span className="font-medium text-[var(--c-text-primary)]">策略：</span>{workflow.publicView.patternLabel}
+          </p>
+          {workflow.publicView.reasonLabel && (
+            <p className="leading-relaxed">
+              <span className="font-medium text-[var(--c-text-primary)]">选择依据：</span>{workflow.publicView.reasonLabel}
+            </p>
+          )}
+          <p className="leading-relaxed">
+            <span className="font-medium text-[var(--c-text-primary)]">公开进度：</span>{workflow.publicView.progress}%
+          </p>
+          {workflow.publicView.currentPhase && (
+            <p className="leading-relaxed">
+              <span className="font-medium text-[var(--c-text-primary)]">当前阶段：</span>{workflow.publicView.currentPhase}
+            </p>
+          )}
+          {workflow.publicView.recoveryLabel && (
+            <p className="leading-relaxed">
+              <span className="font-medium text-[var(--c-text-primary)]">恢复建议：</span>{workflow.publicView.recoveryLabel}
+            </p>
+          )}
+        </div>
+      )}
       {workflow.scopeText && (
         <p className="leading-relaxed">
           <span className="font-medium text-[var(--c-text-primary)]">{workflow.scopeText}</span>
@@ -481,14 +537,7 @@ function DiagnosisMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function formatWorkflowProgress(status: string, completed: number, total: number) {
-  const progress = `${completed}/${total}`;
-  if (status === 'running') return `执行中 ${progress}`;
-  if (status === 'blocked') return `已阻塞 ${progress}`;
-  if (status === 'failed') return `失败 ${progress}`;
-  if (status === 'cancelled') return `已取消 ${progress}`;
-  return `已完成 ${progress}`;
-}
+
 
 function buildCompactDiagnosisSummary(diagnosis: ReturnType<typeof buildSystemDiagnosisView>) {
   return {
@@ -522,81 +571,22 @@ function buildSystemDiagnosisView(workflowRun: KSwarmWorkflowRun) {
   };
 }
 
-function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
-  const gateDecision = workflowRun.gateDecision ?? readDecisionFromOutput(getNodeOutput(workflowRun, 'reduce-review-gate'));
-  const gateText = gateDecision?.status
-    ? `Gate：${gateDecision.status}${gateDecision.reason ? ` · ${gateDecision.reason}` : ''}`
-    : '';
-  const agents = Array.from(new Set(
-    workflowRun.nodes
-      .flatMap((node) => {
-        const agent = node.assignedAgent || node.producerAgent || '';
-        return agent ? [agent] : [];
-      })
-  ));
-  const nodesByParallelGroup = new Map<string, KSwarmWorkflowRun['nodes']>();
-  for (const node of workflowRun.nodes) {
-    if (!node.parallelGroupId) continue;
-    const nodes = nodesByParallelGroup.get(node.parallelGroupId) || [];
-    nodes.push(node);
-    nodesByParallelGroup.set(node.parallelGroupId, nodes);
-  }
-  const checkpoints = workflowRun.summary?.checkpoints;
-  return {
-    scopeText: workflowRun.sourceTask ? `任务：${workflowRun.sourceTask.title || workflowRun.sourceTask.id}` : '',
-    cacheText: formatCacheSummary(workflowRun),
-    recoveryText: formatRecoverySummary(workflowRun.recovery),
-    progressText: readString(workflowRun.progressState?.lastMaterialProgress?.message),
-    checkpointText: checkpoints?.total
-      ? `${checkpoints.completed || 0}/${checkpoints.total}${checkpoints.waiting ? `，等待 ${checkpoints.waiting}` : ''}${checkpoints.failed ? `，失败 ${checkpoints.failed}` : ''}`
-      : '',
-    parallelGroups: (workflowRun.parallelGroups || []).map((group) => {
-      const branchNodes = nodesByParallelGroup.get(group.id) || [];
-      const branchLabels = branchNodes
-        .flatMap((node) => {
-          const label = node.fanoutItemLabel || node.title;
-          return label ? [label] : [];
-        });
-      return {
-        id: group.id,
-        label: group.label || group.primitiveId || group.id,
-        status: labelNodeStatus(group.status),
-        progress: `完成 ${group.completedCount || 0}/${group.totalCount || branchNodes.length}`,
-        failurePolicy: labelFailurePolicy(group.failurePolicy),
-        branchText: branchLabels.join(' / '),
-      };
-    }),
-    blockingFailures: workflowRun.summary?.blockingFailures || [],
-    gateText,
-    agentText: agents.join(' / '),
-    nodes: workflowRun.nodes.map((node) => {
-      const output = node.output && typeof node.output === 'object' ? node.output : {};
-      const summary = readString(output.summary || output.result || output.message);
-      const reviewDecision = node.reviewDecision;
-      const reviewText = reviewDecision?.status
-        ? `Review：${reviewDecision.status}`
-        : '';
-      return {
-        id: node.id,
-        title: node.title,
-        status: labelNodeStatus(node.status),
-        agent: node.assignedAgent || node.producerAgent || '',
-        summary,
-        reviewText,
-        branchText: node.parallelGroupId
-          ? `并行分支：${node.fanoutItemLabel || node.fanoutItemKey || node.parallelGroupId}`
-          : '',
-        error: node.error || '',
-      };
-    }),
-  };
-}
+
+
 
 function getWorkflowDisplayName(workflowRun: KSwarmWorkflowRun) {
   if (workflowRun.workflowId === 'agent-review-smoke') return 'Agent 复核诊断';
   if (workflowRun.workflowId === 'po-generated-task-workflow') return 'PO 生成任务工作流';
   return workflowRun.title || STATUS_LABELS[workflowRun.status] || workflowRun.status;
 }
+
+
+function formatPublicWorkflowProgress(publicView: NonNullable<ReturnType<typeof getPatternPublicView>>) {
+  const progress = `${publicView.progress}%`;
+  const reasonLabel = readString(publicView.reasonLabel);
+  return reasonLabel ? `${reasonLabel} · ${progress}` : progress;
+}
+
 
 function isScriptWorkflowAwaitingDelivery(workflowRun: KSwarmWorkflowRun) {
   if (workflowRun.source !== 'script_generated') return false;
@@ -610,49 +600,6 @@ function getWorkflowDialogLabel(workflowRun?: KSwarmWorkflowRun | null) {
   if (!workflowRun) return '工作流详情';
   if (workflowRun.workflowId === 'agent-review-smoke') return 'Agent 复核诊断详情';
   return '工作流详情';
-}
-
-function formatCacheSummary(workflowRun: KSwarmWorkflowRun) {
-  const stored = workflowRun.summary?.cache?.storedNodeCount || 0;
-  if (stored <= 0) return '';
-  return `已保存节点结果 ${stored}`;
-}
-
-function formatRecoverySummary(recovery?: KSwarmWorkflowRun['recovery'] | null) {
-  if (!recovery || recovery.mode === 'not_needed') return '';
-  if (recovery.mode === 'resume_completed_nodes') return '复用已完成节点';
-  if (recovery.mode === 'blocked_waiting_runtime') return '等待运行时恢复';
-  if (recovery.mode === 'rerun_from_start') return '需要从头重跑';
-  return recovery.mode || '';
-}
-
-function readDecisionFromOutput(output: Record<string, unknown>) {
-  const raw = output.decision;
-  if (!raw || typeof raw !== 'object') return null;
-  const decision = raw as { status?: unknown; reason?: unknown; evidenceRefs?: unknown };
-  const status = readString(decision.status);
-  if (!status) return null;
-  const evidenceRefs = Array.isArray(decision.evidenceRefs)
-    ? decision.evidenceRefs.filter((ref): ref is string => typeof ref === 'string')
-    : undefined;
-  return {
-    status,
-    reason: readString(decision.reason),
-    evidenceRefs,
-  };
-}
-
-function getNodeOutput(workflowRun: KSwarmWorkflowRun, nodeId: string): Record<string, unknown> {
-  const output = workflowRun.nodes.find((node) => node.id === nodeId)?.output;
-  return output && typeof output === 'object' ? output : {};
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : '';
-}
-
-function readNumber(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
 function labelProjectStatus(status: string): string {
@@ -683,40 +630,4 @@ function labelHealthState(state: string): string {
     unknown: '未知',
   };
   return labels[state] || state || '未知';
-}
-
-function labelNodeStatus(status: string): string {
-  const labels: Record<string, string> = {
-    pending: '待运行',
-    ready: '就绪',
-    running: '运行中',
-    completed: '完成',
-    failed: '失败',
-    blocked: '阻塞',
-    cancelled: '已取消',
-  };
-  return labels[status] || status;
-}
-
-function labelFailurePolicy(policy?: string) {
-  const labels: Record<string, string> = {
-    required_all: '全部必需',
-    collect_errors: '收集错误',
-    fail_fast: '快速失败',
-    quorum: '达到法定数量',
-  };
-  return labels[policy || ''] || policy || '默认';
-}
-
-function getStatusIcon(status: string) {
-  if (status === 'completed') return CheckCircle2;
-  if (status === 'failed' || status === 'blocked') return AlertTriangle;
-  if (status === 'running') return Loader;
-  return Workflow;
-}
-
-function getToneClass(status: string) {
-  if (status === 'completed') return 'border-[var(--c-status-success-text)]/25 bg-[var(--c-status-success-text)]/10 text-[var(--c-status-success-text)]';
-  if (status === 'failed' || status === 'blocked') return 'border-[var(--c-status-error-text)]/30 bg-[var(--c-error-bg)] text-[var(--c-status-error-text)]';
-  return 'border-[var(--c-border-subtle)] bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]';
 }

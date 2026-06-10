@@ -4,6 +4,8 @@ import {
   buildBackgroundNodeSpawnOptions,
   buildIntentBrokerServiceEnv,
   doesKSwarmHealthMatchExpectedService,
+  hasDynamicWorkflowSupport,
+  hasWorkflowPatternCapabilities,
   KSwarmUnavailableError,
   nextHealthFailureCount,
   requestWithFallbackBaseUrls,
@@ -192,6 +194,29 @@ describe('kswarm service external adoption', () => {
       healthOk: true,
       brokerReady: true,
       dynamicWorkflowReady: false,
+    })).toBe(false);
+  });
+
+  it('requires workflow pattern schema capabilities before treating KSwarm as dynamic-workflow ready', () => {
+    expect(hasDynamicWorkflowSupport({
+      features: ['dynamic_workflows'],
+      workflowCapabilities: {
+        schemaVersion: 'kswarm_workflow_patterns_v1',
+        compiledContract: true,
+        patternPublicView: true,
+      },
+    })).toBe(true);
+
+    expect(hasDynamicWorkflowSupport({
+      features: ['dynamic_workflows'],
+    })).toBe(false);
+
+    expect(hasWorkflowPatternCapabilities({
+      workflowCapabilities: {
+        schemaVersion: 'kswarm_workflow_patterns_v0',
+        compiledContract: true,
+        patternPublicView: true,
+      },
     })).toBe(false);
   });
 
