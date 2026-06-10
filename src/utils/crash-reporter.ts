@@ -14,6 +14,7 @@ export type StreamErrorHandler = (error: unknown, stream: NodeJS.WriteStream) =>
 let crashContext: CrashContext = {};
 let handlersInstalled = false;
 let streamErrorHandler: StreamErrorHandler | null = null;
+let pipeBrokenFromStream = false;
 
 const CRASH_REPORT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -106,6 +107,7 @@ function installBrokenPipeExit(stream: NodeJS.WriteStream): void {
     }
 
     if (isBrokenPipeError(error)) {
+      pipeBrokenFromStream = true;
       if (shouldSilentlyExitOnBrokenPipe(stream)) {
         process.exit(0);
         return;
@@ -140,7 +142,11 @@ export function installGlobalCrashHandlers(): void {
       return;
     }
 
-    if (isBrokenPipeError(error) && shouldSilentlyExitOnBrokenPipe()) {
+    if (
+      isBrokenPipeError(error)
+      && pipeBrokenFromStream
+      && shouldSilentlyExitOnBrokenPipe()
+    ) {
       process.exit(0);
       return;
     }

@@ -57,3 +57,8 @@ __pycache__/
 /generate_*.py
 docs/skill-observability-design.md
 .qoder/
+
+# 孤儿编译产物（真正的 desktop main 在 desktop/dist/main/...）
+/main.js
+/preload.cjs
+/desktop-services.js
