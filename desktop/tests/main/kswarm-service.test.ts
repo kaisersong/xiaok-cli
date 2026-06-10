@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
+  appendKSwarmServiceLogLine,
   buildBackgroundNodeSpawnOptions,
   buildIntentBrokerServiceEnv,
+  checkKSwarmHealthServiceIdentity,
   doesKSwarmHealthMatchExpectedService,
   hasDynamicWorkflowSupport,
   hasWorkflowPatternCapabilities,
@@ -160,7 +165,7 @@ describe('kswarm service spawn options', () => {
 });
 
 describe('kswarm service external adoption', () => {
-  it('requires service source identity to match when an expected source hash is available', () => {
+  it('allows same-entry services even when source hash drifts or is missing', () => {
     const entryPath = '/tmp/xiaok.app/Contents/Resources/services/kswarm/src/server/index.js';
 
     expect(doesKSwarmHealthMatchExpectedService({
@@ -169,11 +174,64 @@ describe('kswarm service external adoption', () => {
 
     expect(doesKSwarmHealthMatchExpectedService({
       service: { entryPath, sourceHash: 'hash-old' },
-    }, entryPath, 'hash-new')).toBe(false);
+    }, entryPath, 'hash-new')).toBe(true);
 
     expect(doesKSwarmHealthMatchExpectedService({
       service: { entryPath },
-    }, entryPath, 'hash-new')).toBe(false);
+    }, entryPath, 'hash-new')).toBe(true);
+  });
+
+  it('reports source hash mismatches as warnings when the service entry path matches', () => {
+    const entryPath = '/tmp/xiaok.app/Contents/Resources/services/kswarm/src/server/index.js';
+    const result = checkKSwarmHealthServiceIdentity({
+      service: { entryPath, sourceHash: 'hash-old' },
+    }, entryPath, 'hash-new');
+
+    expect(result).toMatchObject({
+      compatible: true,
+      reason: null,
+      warning: 'source_hash_mismatch',
+      actualEntryPath: entryPath,
+      expectedEntryPath: entryPath,
+      actualSourceHash: 'hash-old',
+      expectedSourceHash: 'hash-new',
+    });
+  });
+
+  it('reports missing source hashes as warnings when the service entry path matches', () => {
+    const entryPath = '/tmp/xiaok.app/Contents/Resources/services/kswarm/src/server/index.js';
+    const result = checkKSwarmHealthServiceIdentity({
+      service: { entryPath },
+    }, entryPath, 'hash-new');
+
+    expect(result).toMatchObject({
+      compatible: true,
+      reason: null,
+      warning: 'source_hash_missing',
+      actualEntryPath: entryPath,
+      expectedEntryPath: entryPath,
+      actualSourceHash: null,
+      expectedSourceHash: 'hash-new',
+    });
+  });
+
+  it('keeps a different service entry path as an adoption blocker', () => {
+    const expectedEntryPath = '/Applications/xiaok.app/Contents/Resources/services/kswarm/src/server/index.js';
+    const actualEntryPath = '/Users/song/projects/kswarm/src/server/index.js';
+    const result = checkKSwarmHealthServiceIdentity({
+      service: { entryPath: actualEntryPath, sourceHash: 'hash-new' },
+    }, expectedEntryPath, 'hash-new');
+
+    expect(result).toMatchObject({
+      compatible: false,
+      reason: 'entry_path_mismatch',
+      warning: null,
+      actualEntryPath,
+      expectedEntryPath,
+    });
+    expect(doesKSwarmHealthMatchExpectedService({
+      service: { entryPath: actualEntryPath, sourceHash: 'hash-new' },
+    }, expectedEntryPath, 'hash-new')).toBe(false);
   });
 
   it('adopts an already healthy service when desktop does not own a child process', () => {
@@ -233,6 +291,43 @@ describe('kswarm service external adoption', () => {
   it('does not treat a desktop-owned child as an external service', () => {
     expect(shouldAdoptExistingKSwarmService({ hasOwnedChild: true, healthOk: true })).toBe(false);
     expect(shouldAdoptExistingKSwarmService({ hasOwnedChild: false, healthOk: false })).toBe(false);
+  });
+});
+
+describe('kswarm service diagnostics logs', () => {
+  it('writes service log lines under the provided log root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-logs-'));
+    try {
+      appendKSwarmServiceLogLine({
+        logRoot: root,
+        serviceName: 'server',
+        stream: 'stderr',
+        message: 'startup failed',
+        now: () => new Date('2026-06-10T12:00:00.000Z'),
+      });
+
+      const log = readFileSync(join(root, 'server.log'), 'utf8');
+      expect(log).toContain('2026-06-10T12:00:00.000Z');
+      expect(log).toContain('[stderr] startup failed');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not create a log file for empty messages', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-logs-empty-'));
+    try {
+      appendKSwarmServiceLogLine({
+        logRoot: root,
+        serviceName: 'server',
+        stream: 'stdout',
+        message: '   ',
+      });
+
+      expect(() => readFileSync(join(root, 'server.log'), 'utf8')).toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
