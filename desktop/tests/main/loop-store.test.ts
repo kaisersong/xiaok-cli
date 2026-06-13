@@ -137,6 +137,7 @@ describe('LoopStore', () => {
   it('recovers stale running runs and releases matching activeRunId', () => {
     store.ensureBuiltInLoops(1_000);
     const stale = expectStarted(store.beginLoopRun(ARTIFACT_LOOP_ID, { kind: 'startup' }, 2_000, 60_000));
+    const stage = store.startLoopStage(stale.id, ARTIFACT_LOOP_ID, 'scan', 2_010);
 
     expect(store.recoverStaleRuns(62_000, 60_000)).toBe(1);
 
@@ -146,6 +147,15 @@ describe('LoopStore', () => {
       failureKind: 'executor_crash',
       finishedAt: 62_000,
     });
+    expect(store.listLoopStages(stale.id)).toEqual([
+      expect.objectContaining({
+        id: stage.id,
+        status: 'failed',
+        failureKind: 'executor_crash',
+        message: 'Loop executor crashed or was interrupted.',
+        finishedAt: 62_000,
+      }),
+    ]);
 
     const next = expectStarted(store.beginLoopRun(ARTIFACT_LOOP_ID, { kind: 'startup_recovery' }, 63_000, 60_000));
     expect(store.getLoopDefinition(ARTIFACT_LOOP_ID)?.activeRunId).toBe(next.id);
@@ -248,6 +258,94 @@ describe('LoopStore', () => {
     const row = db.prepare('select evidence_ids_json from loop_runs where id = ?').get(success.id) as { evidence_ids_json: string };
     db.close();
     expect(row.evidence_ids_json).toBe(JSON.stringify(['evidence-success']));
+  });
+
+  it('records loop stages and lists them in creation order', () => {
+    store.ensureBuiltInLoops(1_000);
+    const run = expectStarted(store.beginLoopRun(ARTIFACT_LOOP_ID, { kind: 'manual' }, 2_000, 60_000));
+
+    const scan = store.startLoopStage(run.id, ARTIFACT_LOOP_ID, 'scan', 2_010, { source: 'test' });
+    store.finishLoopStageSuccess(scan.id, ['evidence-scan'], 2_020, 'scan complete', { ownerCount: 3 });
+
+    expect(store.listLoopStages(run.id)).toEqual([
+      expect.objectContaining({
+        id: scan.id,
+        runId: run.id,
+        loopId: ARTIFACT_LOOP_ID,
+        stageKind: 'scan',
+        status: 'success',
+        evidenceIds: ['evidence-scan'],
+        startedAt: 2_010,
+        finishedAt: 2_020,
+        summary: 'scan complete',
+        metadata: { ownerCount: 3 },
+        createdAt: 2_010,
+        updatedAt: 2_020,
+      }),
+    ]);
+  });
+
+  it('rejects stages for missing, mismatched, or terminal loop runs', () => {
+    store.ensureBuiltInLoops(1_000);
+    const run = expectStarted(store.beginLoopRun(ARTIFACT_LOOP_ID, { kind: 'manual' }, 2_000, 60_000));
+
+    expect(() => store.startLoopStage('missing-run', ARTIFACT_LOOP_ID, 'scan', 2_010))
+      .toThrow('Loop run does not exist.');
+    expect(() => store.startLoopStage(run.id, ARTIFACT_LOOP_ID, 'bogus' as any, 2_010))
+      .toThrow('Unsupported loop stage kind.');
+    expect(() => store.startLoopStage(run.id, 'other-loop', 'scan', 2_010))
+      .toThrow('Loop stage loopId does not match the run loopId.');
+
+    store.finishLoopRunSuccess(run.id, [], 2_020, 'done');
+    expect(() => store.startLoopStage(run.id, ARTIFACT_LOOP_ID, 'scan', 2_030))
+      .toThrow('Loop stage can only start for a running loop run.');
+  });
+
+  it('does not let a late stage finish overwrite an existing terminal stage', () => {
+    store.ensureBuiltInLoops(1_000);
+    const run = expectStarted(store.beginLoopRun(ARTIFACT_LOOP_ID, { kind: 'manual' }, 2_000, 60_000));
+    const scan = store.startLoopStage(run.id, ARTIFACT_LOOP_ID, 'scan', 2_010);
+    store.finishLoopStageSuccess(scan.id, ['evidence-scan'], 2_020, 'scan complete');
+
+    const late = store.finishLoopStageFailure(scan.id, 'executor_failed', 'late failure', ['late-evidence'], 2_030);
+
+    expect(late).toMatchObject({
+      id: scan.id,
+      status: 'success',
+      evidenceIds: ['evidence-scan'],
+      summary: 'scan complete',
+      message: undefined,
+      finishedAt: 2_020,
+      updatedAt: 2_020,
+    });
+    expect(store.listLoopStages(run.id)[0]).toMatchObject({
+      status: 'success',
+      evidenceIds: ['evidence-scan'],
+      summary: 'scan complete',
+      message: undefined,
+      finishedAt: 2_020,
+      updatedAt: 2_020,
+    });
+  });
+
+  it('does not let a late stage finish contradict a recovered terminal parent run', () => {
+    store.ensureBuiltInLoops(1_000);
+    const run = expectStarted(store.beginLoopRun(ARTIFACT_LOOP_ID, { kind: 'manual' }, 2_000, 60_000));
+    const scan = store.startLoopStage(run.id, ARTIFACT_LOOP_ID, 'scan', 2_010);
+    expect(store.recoverStaleRuns(62_000, 60_000)).toBe(1);
+
+    const late = store.finishLoopStageSuccess(scan.id, ['late-evidence'], 63_000, 'late success');
+
+    expect(late).toMatchObject({
+      id: scan.id,
+      status: 'failed',
+      failureKind: 'executor_crash',
+      evidenceIds: [],
+      summary: undefined,
+      message: 'Loop executor crashed or was interrupted.',
+      finishedAt: 62_000,
+      updatedAt: 62_000,
+    });
   });
 });
 

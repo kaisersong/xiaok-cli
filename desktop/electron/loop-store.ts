@@ -10,6 +10,9 @@ import {
   type LoopRun,
   type LoopRunFailureKind,
   type LoopRunStatus,
+  type LoopStage,
+  type LoopStageKind,
+  type LoopStageStatus,
   type LoopRunTrigger,
 } from './loop-types.js';
 
@@ -39,6 +42,23 @@ interface LoopRunRow {
   next_action_summary: string | null;
 }
 
+interface LoopStageRow {
+  id: string;
+  run_id: string;
+  loop_id: string;
+  stage_kind: LoopStageKind;
+  status: LoopStageStatus;
+  started_at: number | null;
+  finished_at: number | null;
+  evidence_ids_json: string;
+  summary: string | null;
+  failure_kind: LoopRunFailureKind | null;
+  message: string | null;
+  metadata_json: string;
+  created_at: number;
+  updated_at: number;
+}
+
 const BUILT_IN_LOOPS: Array<Pick<LoopDefinition, 'id' | 'title' | 'description'>> = [
   {
     id: BUILT_IN_LOOP_IDS.ARTIFACT_EVIDENCE_REGRESSION,
@@ -49,6 +69,8 @@ const BUILT_IN_LOOPS: Array<Pick<LoopDefinition, 'id' | 'title' | 'description'>
 
 const EXECUTOR_CRASH_MESSAGE = 'Loop executor crashed or was interrupted.';
 const TERMINAL_STATUSES = new Set<LoopRunStatus>(['success', 'failed', 'blocked']);
+const TERMINAL_STAGE_STATUSES = new Set<LoopStageStatus>(['success', 'failed', 'blocked', 'skipped']);
+const LOOP_STAGE_KINDS = new Set<LoopStageKind>(['scan']);
 
 export class LoopStore {
   private readonly db: DatabaseSync;
@@ -57,6 +79,7 @@ export class LoopStore {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     this.db.exec('pragma journal_mode = WAL');
+    this.db.exec('pragma foreign_keys = ON');
     this.applySchema();
   }
 
@@ -240,6 +263,115 @@ export class LoopStore {
     return rows.map(row => this.runRowToRecord(row));
   }
 
+  getLoopRun(runId: string): LoopRun | undefined {
+    const row = this.getLoopRunRow(runId);
+    return row ? this.runRowToRecord(row) : undefined;
+  }
+
+  startLoopStage(
+    runId: string,
+    loopId: string,
+    stageKind: LoopStageKind,
+    now: number,
+    metadata: Record<string, unknown> = {}
+  ): LoopStage {
+    return this.transaction(() => {
+      if (!LOOP_STAGE_KINDS.has(stageKind)) throw new Error('Unsupported loop stage kind.');
+      const run = this.getLoopRunRow(runId);
+      if (!run) throw new Error('Loop run does not exist.');
+      if (run.loop_id !== loopId) throw new Error('Loop stage loopId does not match the run loopId.');
+      if (run.status !== 'running') throw new Error('Loop stage can only start for a running loop run.');
+
+      const stageId = randomUUID();
+      this.db.prepare(`
+        insert into loop_stages (
+          id, run_id, loop_id, stage_kind, status, started_at, finished_at,
+          evidence_ids_json, summary, failure_kind, message, metadata_json,
+          created_at, updated_at
+        ) values (
+          @id, @runId, @loopId, @stageKind, 'running', @startedAt, null,
+          @evidenceIdsJson, null, null, null, @metadataJson,
+          @createdAt, @updatedAt
+        )
+      `).run({
+        id: stageId,
+        runId,
+        loopId,
+        stageKind,
+        startedAt: now,
+        evidenceIdsJson: JSON.stringify([]),
+        metadataJson: JSON.stringify(metadata),
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const stage = this.getLoopStage(stageId);
+      if (!stage) {
+        throw new Error('Loop stage insert did not persist a record.');
+      }
+      return stage;
+    });
+  }
+
+  finishLoopStageSuccess(
+    stageId: string,
+    evidenceIds: string[],
+    now: number,
+    summary?: string,
+    metadata?: Record<string, unknown>
+  ): LoopStage | undefined {
+    return this.finishLoopStage(stageId, {
+      status: 'success',
+      evidenceIds,
+      now,
+      summary,
+      metadata,
+    });
+  }
+
+  finishLoopStageFailure(
+    stageId: string,
+    failureKind: LoopRunFailureKind,
+    message: string,
+    evidenceIds: string[],
+    now: number,
+    metadata?: Record<string, unknown>
+  ): LoopStage | undefined {
+    return this.finishLoopStage(stageId, {
+      status: 'failed',
+      evidenceIds,
+      now,
+      failureKind,
+      message,
+      metadata,
+    });
+  }
+
+  finishLoopStageBlocked(
+    stageId: string,
+    evidenceIds: string[],
+    nextAction: string | undefined,
+    now: number,
+    metadata?: Record<string, unknown>
+  ): LoopStage | undefined {
+    return this.finishLoopStage(stageId, {
+      status: 'blocked',
+      evidenceIds,
+      now,
+      message: nextAction,
+      metadata,
+    });
+  }
+
+  listLoopStages(runId: string): LoopStage[] {
+    const rows = typedRows<LoopStageRow>(this.db.prepare(`
+      select * from loop_stages
+      where run_id = ?
+      order by created_at asc, id asc
+    `).all(runId));
+    return rows.map(row => this.stageRowToRecord(row));
+  }
+
   private applySchema(): void {
     this.db.exec(`
       create table if not exists loop_definitions (
@@ -340,6 +472,7 @@ export class LoopStore {
       );
 
       if (result.changes === 1) {
+        this.finishOpenStagesForTerminalRun(current.loop_id, runId, input, current.status, input.now);
         this.clearActiveRun(current.loop_id, runId, input.now);
       }
       return this.getLoopRun(runId);
@@ -350,13 +483,57 @@ export class LoopStore {
     return this.db.prepare('select * from loop_definitions where id = ?').get(loopId) as LoopDefinitionRow | undefined;
   }
 
-  private getLoopRun(runId: string): LoopRun | undefined {
-    const row = this.getLoopRunRow(runId);
-    return row ? this.runRowToRecord(row) : undefined;
-  }
-
   private getLoopRunRow(runId: string): LoopRunRow | undefined {
     return this.db.prepare('select * from loop_runs where id = ?').get(runId) as LoopRunRow | undefined;
+  }
+
+  private getLoopStage(stageId: string): LoopStage | undefined {
+    const row = this.db.prepare('select * from loop_stages where id = ?').get(stageId) as LoopStageRow | undefined;
+    return row ? this.stageRowToRecord(row) : undefined;
+  }
+
+  private finishLoopStage(
+    stageId: string,
+    input: {
+      status: Exclude<LoopStageStatus, 'pending' | 'running'>;
+      evidenceIds: string[];
+      now: number;
+      summary?: string;
+      failureKind?: LoopRunFailureKind;
+      message?: string;
+      metadata?: Record<string, unknown>;
+    }
+  ): LoopStage | undefined {
+    return this.transaction(() => {
+      const current = this.db.prepare('select * from loop_stages where id = ?').get(stageId) as LoopStageRow | undefined;
+      if (!current) return undefined;
+      if (TERMINAL_STAGE_STATUSES.has(current.status)) {
+        return this.stageRowToRecord(current);
+      }
+      const parentRun = this.getLoopRunRow(current.run_id);
+      if (!parentRun || parentRun.status !== 'running') {
+        return this.stageRowToRecord(current);
+      }
+
+      this.db.prepare(`
+        update loop_stages
+        set status = ?, evidence_ids_json = ?, finished_at = ?, updated_at = ?,
+            summary = ?, failure_kind = ?, message = ?,
+            metadata_json = coalesce(?, metadata_json)
+        where id = ? and status not in ('success', 'failed', 'blocked', 'skipped')
+      `).run(
+        input.status,
+        JSON.stringify(input.evidenceIds),
+        input.now,
+        input.now,
+        input.summary ?? null,
+        input.failureKind ?? null,
+        input.message ?? null,
+        input.metadata ? JSON.stringify(input.metadata) : null,
+        stageId
+      );
+      return this.getLoopStage(stageId);
+    });
   }
 
   private isStaleRun(row: LoopRunRow, now: number, staleAfterMs: number): boolean {
@@ -371,6 +548,56 @@ export class LoopStore {
           failure_kind = 'executor_crash', message = ?
       where id = ? and status = 'running'
     `).run(now, now, EXECUTOR_CRASH_MESSAGE, row.id);
+    this.failOpenStages(row.loop_id, row.id, 'executor_crash', EXECUTOR_CRASH_MESSAGE, now);
+  }
+
+  private finishOpenStagesForTerminalRun(
+    loopId: string,
+    runId: string,
+    input: {
+      status: Exclude<LoopRunStatus, 'running'>;
+      failureKind?: LoopRunFailureKind;
+      message?: string;
+      nextActionSummary?: string;
+    },
+    previousRunStatus: LoopRunStatus,
+    now: number
+  ): void {
+    if (previousRunStatus !== 'running') return;
+    if (input.status === 'success') {
+      this.db.prepare(`
+        update loop_stages
+        set status = 'skipped', finished_at = ?, updated_at = ?,
+            message = coalesce(message, ?)
+        where loop_id = ? and run_id = ? and status in ('pending', 'running')
+      `).run(now, now, 'Loop run finished before stage completed.', loopId, runId);
+      return;
+    }
+    if (input.status === 'blocked') {
+      this.db.prepare(`
+        update loop_stages
+        set status = 'blocked', finished_at = ?, updated_at = ?,
+            message = coalesce(message, ?)
+        where loop_id = ? and run_id = ? and status in ('pending', 'running')
+      `).run(now, now, input.nextActionSummary ?? 'Loop run blocked before stage completed.', loopId, runId);
+      return;
+    }
+    this.failOpenStages(
+      loopId,
+      runId,
+      input.failureKind ?? 'unknown',
+      input.message ?? 'Loop run failed before stage completed.',
+      now
+    );
+  }
+
+  private failOpenStages(loopId: string, runId: string, failureKind: LoopRunFailureKind, message: string, now: number): void {
+    this.db.prepare(`
+      update loop_stages
+      set status = 'failed', finished_at = ?, updated_at = ?,
+          failure_kind = ?, message = ?
+      where loop_id = ? and run_id = ? and status in ('pending', 'running')
+    `).run(now, now, failureKind, message, loopId, runId);
   }
 
   private clearActiveRun(loopId: string, runId: string, now: number): void {
@@ -422,6 +649,25 @@ export class LoopStore {
       summary: row.summary ?? undefined,
       nextActionKind: row.next_action_kind ?? undefined,
       nextActionSummary: row.next_action_summary ?? undefined,
+    };
+  }
+
+  private stageRowToRecord(row: LoopStageRow): LoopStage {
+    return {
+      id: row.id,
+      runId: row.run_id,
+      loopId: row.loop_id,
+      stageKind: row.stage_kind,
+      status: row.status,
+      evidenceIds: parseJson<string[]>(row.evidence_ids_json),
+      startedAt: row.started_at ?? undefined,
+      finishedAt: row.finished_at ?? undefined,
+      summary: row.summary ?? undefined,
+      failureKind: row.failure_kind ?? undefined,
+      message: row.message ?? undefined,
+      metadata: parseJson<Record<string, unknown>>(row.metadata_json),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
     };
   }
 }

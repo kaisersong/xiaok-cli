@@ -9,6 +9,7 @@ export type LoopDefinitionStatus = 'active' | 'paused';
 export type LoopRunStatus = 'running' | 'success' | 'failed' | 'blocked';
 
 export type LoopStageStatus = 'pending' | 'running' | 'success' | 'failed' | 'blocked' | 'skipped';
+export type LoopStageKind = 'scan';
 
 export type LoopRunFailureKind =
   | 'executor_crash'
@@ -53,7 +54,7 @@ export interface LoopStage {
   id: string;
   runId: string;
   loopId: string;
-  stageKind: string;
+  stageKind: LoopStageKind;
   status: LoopStageStatus;
   evidenceIds: string[];
   startedAt?: number;

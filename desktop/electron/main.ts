@@ -29,7 +29,8 @@ import { TimedActionStore } from './timed-action-store.js';
 import { ThreadMetaStore } from './thread-meta-store.js';
 import { TimedActionService } from './timed-action-service.js';
 import { TimedActionScheduler } from './timed-action-scheduler.js';
-import { createAgentTaskExecutor, createNotifyExecutor } from './timed-action-executors.js';
+import { createDesktopTimedActionExecutors } from './timed-action-executors.js';
+import { createDesktopLoopRuntime } from './loop-executor.js';
 import { attachDesktopContextMenu } from './context-menu.js';
 import {
   createKSwarmRuntimeBridge,
@@ -182,6 +183,7 @@ async function createWindow(): Promise<BrowserWindow> {
   const timedActionStore = new TimedActionStore(join(dataRoot, 'timed-actions.sqlite'));
   const timedActionService = new TimedActionService(timedActionStore);
   services.registerTimedActionService(timedActionService);
+  const loopRuntime = createDesktopLoopRuntime({ dataRoot });
 
   // Register channel tools with AI runner (for sending messages to yunzhijia, discord, etc.)
   services.registerChannelTools();
@@ -319,12 +321,11 @@ async function createWindow(): Promise<BrowserWindow> {
   debugMain('createWindow:mcp-registration-started');
 
   const timedActionScheduler = new TimedActionScheduler(timedActionStore, {
-    executors: {
-      notify: createNotifyExecutor({ getMainWindow: () => window }),
-      agent_task: createAgentTaskExecutor({
-        createTask: (input) => services.createTask(input),
-      }),
-    },
+    executors: createDesktopTimedActionExecutors({
+      getMainWindow: () => window,
+      loopRuntime,
+      createTask: (input) => services.createTask(input),
+    }),
     onRunComplete: (event) => {
       if (event.action.executor.kind !== 'agent_task') return;
       if (window.isDestroyed()) return;
@@ -419,6 +420,7 @@ async function createWindow(): Promise<BrowserWindow> {
     }
     for (const client of runtimeBridgeClients) client.stop();
     timedActionScheduler.stop();
+    loopRuntime.close();
     timedActionStore.close();
     mcpDispose?.();
   });
