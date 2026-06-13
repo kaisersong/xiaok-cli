@@ -1882,6 +1882,15 @@ function GeneralPane() {
       setLoopDefinitions(definitions);
       setLoopRuns(Object.fromEntries(details.map(item => [item.loop.id, item.runs])));
       setLoopAnomalies(Object.fromEntries(details.map(item => [item.loop.id, item.anomalies])));
+      setLoopRunResults(prev => {
+        const next = { ...prev };
+        for (const loop of definitions) {
+          if (!loop.activeRunId && next[loop.id]?.status === 'already_running') {
+            delete next[loop.id];
+          }
+        }
+        return next;
+      });
     } catch (error) {
       setLoopDiagnosticsError(error instanceof Error ? error.message : t.desktopSettings.loopDiagnosticsLoadError);
     } finally {
@@ -1954,7 +1963,9 @@ function GeneralPane() {
     try {
       const result = await api.runLoopNow(loopId);
       setLoopRunResults(prev => ({ ...prev, [loopId]: result }));
-      await loadLoopDiagnostics(true);
+      if (result.status !== 'already_running') {
+        await loadLoopDiagnostics(true);
+      }
     } catch (error) {
       setLoopDiagnosticsError(error instanceof Error ? error.message : t.desktopSettings.loopDiagnosticsRunFailed);
     } finally {

@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DesktopSettings } from '../../renderer/src/components/DesktopSettings';
-import { DeveloperSettings } from '../../renderer/src/components/settings/DeveloperSettings';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 
 const mocks = vi.hoisted(() => ({
@@ -31,20 +30,6 @@ vi.mock('../../renderer/src/api/bridge', () => ({
     getAccountSettings: mocks.getAccountSettings,
     updateAccountSettings: mocks.updateAccountSettings,
   },
-}));
-
-vi.mock('../../renderer/src/components/settings/RunsSettings', () => ({
-  RunsSettings: () => <div>Runs Settings</div>,
-}));
-
-vi.mock('../../renderer/src/shared/desktop', () => ({
-  getDesktopApi: () => ({
-    app: { getVersion: vi.fn().mockResolvedValue('test-version') },
-    config: {
-      get: vi.fn().mockResolvedValue({ onboarding_completed: true }),
-      set: vi.fn().mockResolvedValue(undefined),
-    },
-  }),
 }));
 
 describe('DesktopSettings service status', () => {
@@ -185,10 +170,10 @@ describe('DesktopSettings service status', () => {
     });
   });
 
-  it('shows loop diagnostics and can trigger the built-in loop from developer settings', async () => {
+  it('can trigger the built-in loop from the visible settings page', async () => {
     render(
       <LocaleProvider>
-        <DeveloperSettings />
+        <DesktopSettings onClose={() => {}} />
       </LocaleProvider>,
     );
 
@@ -205,7 +190,7 @@ describe('DesktopSettings service status', () => {
     });
   });
 
-  it('shows already-running state when a manual loop trigger collides with an active run', async () => {
+  it('shows already-running state and clears it after a fresh diagnostics read', async () => {
     mocks.runLoopNow.mockResolvedValueOnce({
       status: 'already_running',
       activeRunId: 'run-active',
@@ -213,7 +198,7 @@ describe('DesktopSettings service status', () => {
 
     render(
       <LocaleProvider>
-        <DeveloperSettings />
+        <DesktopSettings onClose={() => {}} />
       </LocaleProvider>,
     );
 
@@ -222,5 +207,12 @@ describe('DesktopSettings service status', () => {
 
     await screen.findByText('已有运行中');
     expect(screen.getByLabelText('run-loop-artifact-evidence-regression')).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('run-loop-artifact-evidence-regression')).not.toBeDisabled();
+    });
+    expect(screen.getByLabelText('run-loop-artifact-evidence-regression')).toHaveTextContent('立即运行');
   });
 });
