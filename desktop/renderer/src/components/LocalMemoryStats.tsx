@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Brain, RefreshCw } from 'lucide-react';
 import { api } from '../api';
+import { getDesktopApi } from '../shared/desktop';
 
 interface MemoryEntryView {
   id: string;
@@ -50,9 +51,9 @@ export function LocalMemoryStats() {
       setLoading(false);
     }
     try {
-      const w = window as any;
-      if (w?.xiaokDesktop?.memoryStats) {
-        const stats = await w.xiaokDesktop.memoryStats();
+      const w = getDesktopApi() as any;
+      if (w?.memoryStats) {
+        const stats = await w.memoryStats();
         if (stats) setLayerStats(stats);
       }
     } catch {}

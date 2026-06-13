@@ -3,9 +3,11 @@ import { createPortal } from 'react-dom';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Plus, Search, X, Bolt, Pencil, RefreshCw, Clock, FolderKanban, ExternalLink, AlertTriangle } from 'lucide-react';
-import { api, type ThreadRecord } from '../api';
+import { api, type ThreadResponse } from '../api';
+import { useThreadList } from '../contexts/thread-list';
 import { useKSwarm } from '../contexts/KSwarmContext';
 import { useLocale } from '../contexts/LocaleContext';
+import { getDesktopApi } from '../shared/desktop';
 import {
   collectScheduledRuntimeTaskIds,
   ensureAggregatedScheduledThread,
@@ -64,7 +66,7 @@ interface SidebarDetailsRow {
 export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const navigate = useNavigate();
   const routerLocation = useLocation();
-  const [threads, setThreads] = useState<ThreadRecord[]>([]);
+  const { threads, removeThread, updateTitle } = useThreadList();
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -81,14 +83,6 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const { t } = useLocale();
   const activeProjects = projects.filter(p => p.status !== 'closed');
 
-  // Load threads
-  useEffect(() => {
-    const load = () => api.listThreads({ limit: 50 }).then(setThreads);
-    load();
-    const interval = setInterval(load, 10_000);
-    return () => clearInterval(interval);
-  }, []);
-
   // Load scheduled tasks for sidebar and keep scheduled runs out of recent history.
   useEffect(() => {
     let disposed = false;
@@ -98,7 +92,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
         const raw = localStorage.getItem('xiaok:scheduled-tasks');
         const localItems: SidebarScheduledTask[] = raw ? JSON.parse(raw) : [];
         let items = localItems.map(item => normalizeScheduledTaskRuntimeLink(item));
-        const desktop = (window as any).xiaokDesktop;
+        const desktop = getDesktopApi();
         if (desktop?.getScheduledTasks) {
           try {
             const mainItems = await desktop.getScheduledTasks();
@@ -188,11 +182,11 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     e.stopPropagation();
     log.info('deleteThread', id);
     await api.deleteThread(id);
-    setThreads(prev => prev.filter(t => t.id !== id));
+    removeThread(id);
     log.info('deleteThread ok');
   };
 
-  const handleDoubleClick = (thread: ThreadRecord) => {
+  const handleDoubleClick = (thread: ThreadResponse) => {
     setEditingId(thread.id);
     setEditTitle(thread.title || '');
   };
@@ -202,9 +196,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       log.info('renameThread', JSON.stringify({ id: editingId, newTitle: editTitle.trim() }));
       await api.updateThreadTitle(editingId, editTitle.trim());
       log.info('renameThread ok');
-      setThreads(prev =>
-        prev.map(t => t.id === editingId ? { ...t, title: editTitle.trim() } : t)
-      );
+      updateTitle(editingId, editTitle.trim());
     }
     setEditingId(null);
   };
@@ -621,7 +613,7 @@ function SidebarThreadListItem({
   onRenameSubmit,
   onRenameKeyDown,
 }: {
-  thread: ThreadRecord;
+  thread: ThreadResponse;
   title: string;
   isSelected: boolean;
   isEditing: boolean;

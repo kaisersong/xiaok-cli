@@ -1,5 +1,6 @@
 // Thread types (local storage)
 export type ThreadMode = 'work';
+export type CollaborationMode = ThreadMode;
 export type ThreadGtdBucket = 'inbox' | 'todo' | 'waiting' | 'someday' | 'archived';
 
 export interface ThreadRecord {
@@ -14,6 +15,15 @@ export interface ThreadRecord {
   pinnedAt: number | null;
   currentTaskId: string | null;
   taskIds: string[];  // All task IDs for this thread (in order)
+}
+
+/** Alias used by thread-list context (web-client naming convention). */
+export type ThreadResponse = ThreadRecord;
+
+export interface UpdateThreadSidebarRequest {
+  starred?: boolean;
+  gtdBucket?: ThreadGtdBucket | null;
+  mode?: ThreadMode;
 }
 
 // LLM Provider types (mapped from config)
@@ -155,6 +165,7 @@ export interface MeModelUsageItem { model: string; requests: number; tokens: num
 // Channel / Persona types (for settings shared)
 export interface ChannelResponse { id: string; type: string; name: string; enabled: boolean }
 export interface ChannelBindingResponse { id: string; channelType: string; bindingType: string }
+export interface ChannelIdentityResponse { id: string; channelType: string; channelName?: string; boundAt?: string }
 
 // Memory types
 export type MemoryErrorEvent = { id: string; message: string; timestamp: number; errorType: string }

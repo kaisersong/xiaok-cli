@@ -32,7 +32,6 @@ import { createEmptySessionIntentLedger, cloneSessionIntentLedger, createIntentL
 import { DELEGATION_TEMPLATES } from '../../src/ai/intent-delegation/templates.js';
 import { buildSkillInvocation, createSkillBundleRefsTool, checkBudget, appendTrace } from './skill-runtime.js';
 import type { SkillInvocation } from './skill-runtime.js';
-import type { ReminderScheduler } from './reminder-scheduler.js';
 import type { Tool } from '../../src/types.js';
 import type { TimedActionService } from './timed-action-service.js';
 import type { TimedActionTrigger } from './timed-action-types.js';
@@ -249,7 +248,7 @@ async function appendExecRecord(dataRoot: string, record: SkillExecRecord): Prom
     if (records.length > MAX_EXEC_RECORDS) records.splice(0, records.length - MAX_EXEC_RECORDS);
     mkdirSync(dirname(filePath), { recursive: true });
     await writeFileAsync(filePath, JSON.stringify(records));
-  } catch { /* silent */ }
+  } catch (e) { console.warn('[exec-record] append failed:', (e as Error).message) }
 }
 
 async function loadExecRecords(dataRoot: string): Promise<SkillExecRecord[]> {
@@ -1364,86 +1363,6 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     async testConnectorProvider(kind: 'search' | 'fetch') {
       return connectorsService.testProvider(kind);
-    },
-    registerReminderScheduler(scheduler: ReminderScheduler) {
-      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const reminderTools: Tool[] = [
-        {
-          permission: 'safe',
-          definition: {
-            name: 'reminder_create',
-            description: '创建一个定时提醒。当用户说"定时任务"、"提醒我"、"过X分钟提醒"等时使用此工具。',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                content: { type: 'string', description: '提醒内容' },
-                schedule_at: { type: 'number', description: '提醒时间戳（毫秒）' },
-                timezone: { type: 'string', description: '时区，默认使用系统时区' },
-              },
-              required: ['content', 'schedule_at'],
-            },
-          },
-          async execute(input) {
-            const content = String(input.content ?? '').trim();
-            const scheduleAt = Number(input.schedule_at ?? 0);
-            if (!content || scheduleAt <= 0) {
-              return 'Error: content 和 schedule_at 不能为空';
-            }
-            const tz = String(input.timezone ?? timezone);
-            const record = scheduler.createReminder(content, scheduleAt, tz);
-            return JSON.stringify({
-              reminderId: record.reminderId,
-              status: record.status,
-              content: record.content,
-              scheduleAt: record.scheduleAt,
-              timezone: record.timezone,
-              createdAt: record.createdAt,
-            }, null, 2);
-          },
-        },
-        {
-          permission: 'safe',
-          definition: {
-            name: 'reminder_list',
-            description: '列出所有活跃的提醒',
-            inputSchema: { type: 'object', properties: {} },
-          },
-          async execute() {
-            const reminders = scheduler.listReminders();
-            return JSON.stringify(reminders.map(r => ({
-              reminderId: r.reminderId,
-              status: r.status,
-              content: r.content,
-              scheduleAt: r.scheduleAt,
-              timezone: r.timezone,
-              createdAt: r.createdAt,
-            })), null, 2);
-          },
-        },
-        {
-          permission: 'safe',
-          definition: {
-            name: 'reminder_cancel',
-            description: '取消一个提醒',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                reminder_id: { type: 'string', description: '提醒 ID' },
-              },
-              required: ['reminder_id'],
-            },
-          },
-          async execute(input) {
-            const id = String(input.reminder_id ?? '').trim();
-            if (!id) return 'Error: reminder_id 不能为空';
-            const ok = scheduler.cancelReminder(id);
-            return ok ? `已取消提醒 ${id}` : `未找到提醒 ${id}`;
-          },
-        },
-      ];
-      for (const tool of reminderTools) {
-        registry.registerTool(tool);
-      }
     },
     registerChannelTools() {
       const channelTools: Tool[] = [
@@ -4129,7 +4048,7 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           totalInputTokens += inputTkns;
           totalOutputTokens += chunk.usage?.outputTokens ?? 0;
           ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0);
-        } catch { /* usage capture failure is non-critical */ }
+        } catch (e) { console.warn('[usage] token capture failed:', (e as Error).message) }
       }
     }
     ctx.messages.push({ role: 'assistant', content: assistantBlocks });
@@ -4307,7 +4226,7 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           totalInputTokens += inputTkns;
           totalOutputTokens += chunk.usage?.outputTokens ?? 0;
           ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0);
-        } catch { /* usage capture failure is non-critical */ }
+        } catch (e) { console.warn('[usage] token capture failed:', (e as Error).message) }
       },
     });
     reply += finalized.reply;

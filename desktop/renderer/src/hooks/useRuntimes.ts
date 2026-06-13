@@ -1,12 +1,16 @@
 /**
  * useRuntimes — React Query hook for fetching runtime list.
  * All REST calls routed through main process IPC proxy.
+ *
+ * ⚠️ 不要在这些 query hooks 上添加 refetchInterval。
+ * useKSwarmClient 已通过 WS 事件驱动刷新，双源会产生冲突。
  */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { getDesktopApi } from '@xiaok/shared/desktop';
 
-function getApi(): any {
-  return typeof window !== 'undefined' ? (window as any).xiaokDesktop : null;
+function getApi() {
+  return getDesktopApi();
 }
 
 export const runtimeKeys = {
@@ -25,7 +29,6 @@ export function useRuntimes() {
       return data.runtimes || [];
     },
     staleTime: 60_000,
-    refetchInterval: 30_000,
     retry: 2,
   });
 }
@@ -40,7 +43,6 @@ export function useAgentLiveness() {
       return data.liveness || {};
     },
     staleTime: 15_000,
-    refetchInterval: 10_000,
     retry: 1,
   });
 }

@@ -3,6 +3,7 @@ import { Plus, X, Clock, Edit3, Trash2, Play, ChevronLeft, XCircle } from 'lucid
 import { api } from '../api';
 import { useNavigate } from 'react-router-dom';
 import { useLocale } from '../contexts/LocaleContext';
+import { getDesktopApi } from '../shared/desktop';
 import {
   collectScheduledRuntimeTaskIds,
   ensureAggregatedScheduledThread,
@@ -201,7 +202,7 @@ export function formatScheduledFrequency(
 
 async function ensureThreadForRuntimeTask(task: ScheduledTask): Promise<ScheduledTask> {
   const normalized = normalizeScheduledTaskRuntimeLink(task);
-  const desktop = (window as any).xiaokDesktop;
+  const desktop = getDesktopApi();
   let runs: unknown[] = [];
   if (normalized.id && desktop?.getTimedActionRuns) {
     runs = await desktop.getTimedActionRuns(normalized.id).catch(() => []);
@@ -270,7 +271,7 @@ export function ScheduledPage() {
 
   // Sync tasks to main on mount + refresh when global bootstrap executes a task
   useEffect(() => {
-    const desktop = (window as any).xiaokDesktop;
+    const desktop = getDesktopApi();
 
     // Refresh task list when global bootstrap auto-executes a task
     const handleUpdated = () => loadTasks();
@@ -282,7 +283,7 @@ export function ScheduledPage() {
     try {
       const raw = localStorage.getItem('xiaok:scheduled-tasks');
       const localItems = raw ? JSON.parse(raw) : [];
-      const desktop = (window as any).xiaokDesktop;
+      const desktop = getDesktopApi();
       let scheduledItems: ScheduledTask[] = localItems.map((item: ScheduledTask) => normalizeScheduledTaskRuntimeLink(item));
       if (desktop?.getScheduledTasks) {
         try {
@@ -379,7 +380,7 @@ export function ScheduledPage() {
     const nextRunAt = computeNextRunAt(formFrequency, formScheduleConfig, now);
 
     if (modalMode === 'create') {
-      const desktop = (window as any).xiaokDesktop;
+      const desktop = getDesktopApi();
       if (desktop?.createScheduledTask && formFrequency !== 'manual') {
         try {
           await desktop.createScheduledTask({
@@ -414,7 +415,7 @@ export function ScheduledPage() {
       saveTasks([newTask, ...tasks]);
       showToast(t.scheduledAutoExecCreatedNotice, 'info');
     } else if (editingTask) {
-      const desktop = (window as any).xiaokDesktop;
+      const desktop = getDesktopApi();
       if (desktop?.updateScheduledTask && formFrequency !== 'manual') {
         try {
           const saved = await desktop.updateScheduledTask({
@@ -455,7 +456,7 @@ export function ScheduledPage() {
   const confirmDelete = async () => {
     if (!confirmDeleteId) return;
     // Cancel in main process (IPC reminder) so it won't be re-merged on reload
-    try { await (window as any).xiaokDesktop?.cancelScheduledTask?.(confirmDeleteId); } catch { /* may not exist in IPC */ }
+    try { await getDesktopApi()?.cancelScheduledTask?.(confirmDeleteId); } catch { /* may not exist in IPC */ }
     try { await api.cancelReminder(confirmDeleteId); } catch { /* may not exist in IPC */ }
     saveTasks(tasks.filter(task => task.id !== confirmDeleteId));
     setConfirmDeleteId(null);
@@ -489,7 +490,7 @@ export function ScheduledPage() {
   };
 
   const handleApproveAuto = async (task: ScheduledTask) => {
-    const desktop = (window as any).xiaokDesktop;
+    const desktop = getDesktopApi();
     if (!desktop?.approveTimedActionAuto) return;
     try {
       const updated = await desktop.approveTimedActionAuto(task.id);
@@ -504,7 +505,7 @@ export function ScheduledPage() {
   };
 
   const handleRevokeAuto = async (task: ScheduledTask) => {
-    const desktop = (window as any).xiaokDesktop;
+    const desktop = getDesktopApi();
     if (!desktop?.revokeTimedActionAuto) return;
     try {
       const updated = await desktop.revokeTimedActionAuto(task.id);

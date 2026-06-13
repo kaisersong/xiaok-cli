@@ -1,3 +1,5 @@
+import type { FullDesktopApi } from '../../../electron/preload-api.js';
+
 export type ConnectionMode = 'local' | 'saas' | 'self-hosted';
 export type DesktopPlatform = 'win32' | 'darwin' | 'linux';
 export function isDesktop(): boolean { return true; }
@@ -49,17 +51,55 @@ function mapUpdateStatus(s: PreloadUpdateStatus): AppUpdaterState {
   return { ...base, phase: 'not-available' }
 }
 
-function getWindowApi(): Record<string, any> | null {
-  if (typeof window !== 'undefined' && (window as any).xiaokDesktop) {
-    return (window as any).xiaokDesktop
+function getWindowApi(): FullDesktopApi | null {
+  if (typeof window !== 'undefined' && window.xiaokDesktop) {
+    return window.xiaokDesktop
   }
   return null
 }
 
-let _cachedApi: Record<string, unknown> | null = null;
+export interface AppUpdaterApi {
+  check(): Promise<AppUpdaterState>;
+  download(): Promise<AppUpdaterState>;
+  install(): Promise<void>;
+  getState(): Promise<AppUpdaterState>;
+  onState(handler: (state: AppUpdaterState) => void): () => void;
+}
 
-export function getDesktopApi(): Record<string, unknown> | null {
-  if (_cachedApi) return _cachedApi
+export interface DesktopMemoryApi {
+  getConfig(): Promise<Record<string, unknown>>;
+  setConfig(config: Record<string, unknown>): Promise<void>;
+  getStatus(): Promise<{ configured: boolean; healthy: boolean }>;
+  getSnapshot(): Promise<{ memory_block: string; hits: unknown[] }>;
+  getImpression(): Promise<{ impression: string; updated_at: unknown }>;
+  rebuildSnapshot(): Promise<{ memory_block: string; hits: unknown[] }>;
+  rebuildImpression(): Promise<{ updated_at: unknown }>;
+  getContent(uri: string, layer: string): Promise<{ content: string }>;
+  list(): Promise<{ entries: MemoryEntry[] }>;
+  add(content: string, category?: string): Promise<unknown>;
+  delete(id: string): Promise<unknown>;
+  stats(): Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>;
+  compact(): Promise<boolean>;
+  personaTraits(): Promise<{ trait: string; confidence: number }[]>;
+  listLayer(layer: number, limit?: number, offset?: number): Promise<{ id: string; content: string; tags?: string[]; createdAt: string; meta?: Record<string, unknown> }[]>;
+  deleteEntry(id: string, layer: number): Promise<boolean>;
+  clearAll(): Promise<boolean>;
+  getModelId(): Promise<string | null>;
+  setModelId(modelId: string | null): Promise<boolean>;
+}
+
+export type ExtendedDesktopApi = FullDesktopApi & {
+  appUpdater: AppUpdaterApi;
+  memory: DesktopMemoryApi;
+};
+
+let _cachedApi: ExtendedDesktopApi | null | undefined;
+
+/** @internal Reset cached API reference — for tests only */
+export function _resetDesktopApiCache(): void { _cachedApi = undefined; }
+
+export function getDesktopApi(): ExtendedDesktopApi | null {
+  if (_cachedApi !== undefined) return _cachedApi
 
   const raw = getWindowApi()
   if (!raw) return null
@@ -163,11 +203,7 @@ export function getDesktopApi(): Record<string, unknown> | null {
     },
   }
 
-  _cachedApi = {
-    ...raw,
-    appUpdater,
-    memory,
-  }
+  _cachedApi = { ...raw, appUpdater, memory }
   return _cachedApi
 }
 

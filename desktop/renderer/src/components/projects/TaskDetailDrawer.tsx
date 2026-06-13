@@ -65,7 +65,7 @@ export function TaskDetailDrawer({
 
   const parallelGroups = workflowRun?.parallelGroups || [];
   const review = task.reviewResult;
-  const result = (task as any).result || {};
+  const result = typeof task.result === 'object' && task.result !== null ? task.result : {};
   const hasArtifacts = result.artifacts && result.artifacts.length > 0;
   const canStartWorkflow = !workflowRun && onStartTaskWorkflow && task.status !== 'done' && task.status !== 'cancelled';
 

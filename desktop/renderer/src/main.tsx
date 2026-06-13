@@ -6,6 +6,7 @@ import { App } from './App';
 import { AuthProvider } from './contexts/auth';
 import { LocaleProvider } from './contexts/LocaleContext';
 import { KSwarmProvider } from './contexts/KSwarmContext';
+import { ThreadListProvider } from './contexts/thread-list';
 import './styles/index.css';
 
 const queryClient = new QueryClient({
@@ -23,9 +24,11 @@ createRoot(document.getElementById('root')!).render(
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <LocaleProvider>
-            <KSwarmProvider>
-              <App />
-            </KSwarmProvider>
+            <ThreadListProvider>
+              <KSwarmProvider>
+                <App />
+              </KSwarmProvider>
+            </ThreadListProvider>
           </LocaleProvider>
         </AuthProvider>
       </QueryClientProvider>

@@ -2,6 +2,8 @@
 export type AppError = { message: string; traceId?: string; code?: string };
 export type AuthApi = unknown;
 
+export { silentRefresh } from './api/client';
+
 // Error types
 export function formatErrorForDisplay(error: unknown): string {
   if (error instanceof Error) return error.message;

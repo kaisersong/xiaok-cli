@@ -32,11 +32,11 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
   const { t } = useLocale();
 
   const [name, setName] = useState(agent.name);
-  const [provider, setProvider] = useState((agent as any).provider || '');
-  const [model, setModel] = useState((agent as any).model || '');
-  const [baseUrl, setBaseUrl] = useState((agent as any).baseUrl || '');
+  const [provider, setProvider] = useState(agent.provider || '');
+  const [model, setModel] = useState(agent.model || '');
+  const [baseUrl, setBaseUrl] = useState(agent.baseUrl || '');
   const [apiKey, setApiKey] = useState('');
-  const [instructions, setInstructions] = useState((agent as any).instructions || '');
+  const [instructions, setInstructions] = useState(agent.instructions || '');
   const [loading, setLoading] = useState(false);
 
   const [desktopProviders, setDesktopProviders] = useState<DesktopProvider[]>([]);
