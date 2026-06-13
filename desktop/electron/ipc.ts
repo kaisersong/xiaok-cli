@@ -1,5 +1,6 @@
 import { clipboard, dialog, shell, type BrowserWindow, type IpcMain } from 'electron';
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import { join } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
 import type { DesktopLoopRuntime } from './loop-executor.js';
@@ -81,6 +82,18 @@ export async function registerDesktopIpc(
       }
     } catch { /* not available on this platform */ }
     return [];
+  });
+  ipcMain.handle('desktop:readClipboardImage', async () => {
+    try {
+      const img = clipboard.readImage();
+      if (img.isEmpty()) return null;
+      const png = img.toPNG();
+      const tmpDir = join(os.tmpdir(), 'xiaok-clipboard-images');
+      await mkdir(tmpDir, { recursive: true });
+      const filePath = join(tmpDir, `clipboard-${Date.now()}.png`);
+      await writeFile(filePath, png);
+      return filePath;
+    } catch { return null; }
   });
   ipcMain.handle('desktop:selectDirectory', async () => {
     log('info', 'selectDirectory');
@@ -251,7 +264,8 @@ export async function registerDesktopIpc(
   ipcMain.handle('desktop:diagnosePluginDependency', (_event, input) => services.diagnosePluginDependency(input));
   ipcMain.handle('desktop:createTaskWithFiles', async (_event, input) => {
     log('info', 'createTaskWithFiles', { prompt: input?.prompt?.slice(0, 50), files: input?.filePaths?.length });
-    const r = await services.createTaskWithFiles(input);
+    const expanded = await expandSelectedMaterialPaths(input?.filePaths ?? []);
+    const r = await services.createTaskWithFiles({ ...input, filePaths: expanded });
     log('info', 'createTaskWithFiles ok', { taskId: r?.taskId });
     return r;
   });

@@ -50,6 +50,10 @@ import type {
   ConnectorsFetchProvider,
   ConnectorsSearchProvider,
   ConnectorsProviderRuntime,
+  EvidenceAnomalyView,
+  LoopDefinitionView,
+  LoopRunView,
+  RunLoopNowResultView,
 } from '../api/types';
 import { useLocale } from '../contexts/LocaleContext';
 
@@ -1811,6 +1815,22 @@ function pluginDependencyBadgeClass(state: PluginDependencyStatus['state']): str
   return 'bg-red-100 text-red-700';
 }
 
+function getOpenLoopAnomalyCount(anomalies: EvidenceAnomalyView[]): number {
+  return anomalies.filter(anomaly => anomaly.status === 'open').length;
+}
+
+function getLoopRunStatusLabel(status: LoopRunView['status']): string {
+  if (status === 'success') return 'success';
+  if (status === 'failed') return 'failed';
+  if (status === 'blocked') return 'blocked';
+  return 'running';
+}
+
+function formatLoopRunTime(run: LoopRunView): string {
+  const ts = run.finishedAt ?? run.updatedAt ?? run.startedAt;
+  return new Date(ts).toLocaleString();
+}
+
 // ---- General ----
 
 function GeneralPane() {
@@ -1823,6 +1843,13 @@ function GeneralPane() {
   const [serviceStatusLoading, setServiceStatusLoading] = useState(true);
   const [serviceStatusError, setServiceStatusError] = useState('');
   const [restartingService, setRestartingService] = useState<DesktopRelatedServiceId | null>(null);
+  const [loopDefinitions, setLoopDefinitions] = useState<LoopDefinitionView[]>([]);
+  const [loopRuns, setLoopRuns] = useState<Record<string, LoopRunView[]>>({});
+  const [loopAnomalies, setLoopAnomalies] = useState<Record<string, EvidenceAnomalyView[]>>({});
+  const [loopRunResults, setLoopRunResults] = useState<Record<string, RunLoopNowResultView | undefined>>({});
+  const [loopDiagnosticsLoading, setLoopDiagnosticsLoading] = useState(true);
+  const [loopDiagnosticsError, setLoopDiagnosticsError] = useState('');
+  const [runningLoopId, setRunningLoopId] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState(() => localStorage.getItem('xiaok_display_name') || '');
   const [avatarUrl, setAvatarUrl] = useState(() => localStorage.getItem('xiaok_avatar_url') || '');
   const [editingName, setEditingName] = useState(false);
@@ -1840,6 +1867,28 @@ function GeneralPane() {
     }
   }, []);
 
+  const loadLoopDiagnostics = useCallback(async (silent = false) => {
+    if (!silent) setLoopDiagnosticsLoading(true);
+    setLoopDiagnosticsError('');
+    try {
+      const definitions = await api.getLoopDefinitions();
+      const details = await Promise.all(definitions.map(async (loop) => {
+        const [runs, anomalies] = await Promise.all([
+          api.getLoopRuns(loop.id),
+          api.getEvidenceAnomalies(loop.id).catch(() => [] as EvidenceAnomalyView[]),
+        ]);
+        return { loop, runs, anomalies };
+      }));
+      setLoopDefinitions(definitions);
+      setLoopRuns(Object.fromEntries(details.map(item => [item.loop.id, item.runs])));
+      setLoopAnomalies(Object.fromEntries(details.map(item => [item.loop.id, item.anomalies])));
+    } catch (error) {
+      setLoopDiagnosticsError(error instanceof Error ? error.message : t.desktopSettings.loopDiagnosticsLoadError);
+    } finally {
+      if (!silent) setLoopDiagnosticsLoading(false);
+    }
+  }, [t.desktopSettings.loopDiagnosticsLoadError]);
+
   useEffect(() => {
     api.getSkillDebugConfig().then(c => {
       setSkillDebug(c.enabled);
@@ -1853,6 +1902,10 @@ function GeneralPane() {
     }, 10_000);
     return () => window.clearInterval(timer);
   }, [loadServiceStatus]);
+
+  useEffect(() => {
+    void loadLoopDiagnostics();
+  }, [loadLoopDiagnostics]);
 
   const handleSkillDebugToggle = async (enabled: boolean) => {
     setSkillDebug(enabled);
@@ -1891,6 +1944,21 @@ function GeneralPane() {
       setServiceStatusError(error instanceof Error ? error.message : '服务重启失败');
     } finally {
       setRestartingService(null);
+    }
+  };
+
+  const handleRunLoopNow = async (loopId: string) => {
+    if (runningLoopId) return;
+    setRunningLoopId(loopId);
+    setLoopDiagnosticsError('');
+    try {
+      const result = await api.runLoopNow(loopId);
+      setLoopRunResults(prev => ({ ...prev, [loopId]: result }));
+      await loadLoopDiagnostics(true);
+    } catch (error) {
+      setLoopDiagnosticsError(error instanceof Error ? error.message : t.desktopSettings.loopDiagnosticsRunFailed);
+    } finally {
+      setRunningLoopId(null);
     }
   };
 
@@ -2051,6 +2119,111 @@ function GeneralPane() {
               </div>
             ) : null}
           </div>
+        </Card>
+      </Section>
+
+      <Section>
+        <SectionHeader icon={RefreshCw}>{t.desktopSettings.loopDiagnostics}</SectionHeader>
+        <Card>
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <p className="text-xs text-[var(--c-text-secondary)]">
+              {t.desktopSettings.loopDiagnosticsDesc}
+            </p>
+            <button
+              type="button"
+              onClick={() => void loadLoopDiagnostics()}
+              disabled={loopDiagnosticsLoading}
+              className={`${btnSecondary} inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5`}
+            >
+              <RefreshCw size={14} className={loopDiagnosticsLoading ? 'animate-spin' : ''} />
+              {t.desktopSettings.loopDiagnosticsRefresh}
+            </button>
+          </div>
+
+          {loopDiagnosticsError ? (
+            <div className="mb-3 rounded-md border border-[var(--c-status-error-text)]/20 bg-[var(--c-status-error-bg,#fef2f2)] px-3 py-2 text-xs text-[var(--c-status-error-text)]">
+              {loopDiagnosticsError}
+            </div>
+          ) : null}
+
+          {loopDiagnosticsLoading && loopDefinitions.length === 0 ? (
+            <div className="text-xs text-[var(--c-text-secondary)]">
+              {t.desktopSettings.loopDiagnosticsLoading}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {loopDefinitions.map(loop => {
+                const runs = loopRuns[loop.id] ?? [];
+                const latestRun = runs[0];
+                const openAnomalyCount = getOpenLoopAnomalyCount(loopAnomalies[loop.id] ?? []);
+                const runResult = loopRunResults[loop.id];
+                const isRunning = runningLoopId === loop.id;
+                const isAlreadyRunning = !!loop.activeRunId || runResult?.status === 'already_running';
+                const buttonLabel = isRunning
+                  ? t.desktopSettings.loopDiagnosticsRunning
+                  : isAlreadyRunning
+                    ? t.desktopSettings.loopDiagnosticsAlreadyRunning
+                    : t.desktopSettings.loopDiagnosticsRunNow;
+
+                return (
+                  <div
+                    key={loop.id}
+                    className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-[var(--c-text-heading)]">
+                          {loop.title}
+                        </div>
+                        <div className="mt-0.5 text-xs text-[var(--c-text-secondary)]">
+                          {loop.description}
+                        </div>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-[var(--c-bg-deep)] px-2 py-0.5 text-[11px] text-[var(--c-text-secondary)]">
+                        {loop.status}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-md bg-[var(--c-bg-card)] px-2 py-2">
+                        <div className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsLastRun}</div>
+                        <div className="mt-1 text-[var(--c-text-primary)]">
+                          {latestRun
+                            ? `${getLoopRunStatusLabel(latestRun.status)} · ${formatLoopRunTime(latestRun)}`
+                            : t.desktopSettings.loopDiagnosticsNoRuns}
+                        </div>
+                      </div>
+                      <div className="rounded-md bg-[var(--c-bg-card)] px-2 py-2">
+                        <div className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsOpenAnomalies}</div>
+                        <div className="mt-1 font-medium text-[var(--c-text-primary)]">
+                          {openAnomalyCount}
+                        </div>
+                      </div>
+                    </div>
+
+                    {latestRun?.message ? (
+                      <div className="mt-2 rounded-md bg-[var(--c-bg-card)] px-2 py-2 text-xs text-[var(--c-text-secondary)]">
+                        {latestRun.message}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        aria-label={`run-loop-${loop.id}`}
+                        onClick={() => void handleRunLoopNow(loop.id)}
+                        disabled={isRunning || isAlreadyRunning || loop.status !== 'active'}
+                        className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
+                      >
+                        <RefreshCw size={14} className={isRunning ? 'animate-spin' : ''} />
+                        {buttonLabel}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
       </Section>
 

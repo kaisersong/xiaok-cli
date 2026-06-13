@@ -12,6 +12,7 @@ describe('preload API contract', () => {
       'deleteProvider',
       'deleteModel',
       'readClipboardFilePaths',
+      'readClipboardImage',
       'selectDirectory',
       'selectMaterials',
       'importMaterial',

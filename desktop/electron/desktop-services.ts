@@ -332,9 +332,9 @@ const CUA_DRIVER_DEPENDENCY: ExternalPluginDependency = {
     requiresUserConfirmation: true,
   },
   update: {
-    kind: 'command',
-    command: '~/.local/bin/cua-driver',
-    args: ['update'],
+    kind: 'official_installer',
+    sourceUrl: 'https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh',
+    sourceAllowlist: ['https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh'],
     requiresUserConfirmation: true,
   },
   health: {
@@ -1648,6 +1648,25 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if (!dependency.update) return { success: false, error: 'plugin_dependency_update_not_available' };
       if (dependency.update.requiresUserConfirmation && !input.confirmed) {
         return { success: false, error: 'confirmation_required' };
+      }
+      if (dependency.update.kind === 'official_installer') {
+        const updateConfig = dependency.update;
+        if (updateConfig.sourceAllowlist && !updateConfig.sourceAllowlist.includes(updateConfig.sourceUrl)) {
+          return { success: false, error: 'installer_source_not_allowed' };
+        }
+        try {
+          const installerDir = join(options.dataRoot, 'runtime', 'plugin-installers');
+          mkdirSync(installerDir, { recursive: true });
+          const res = await fetch(updateConfig.sourceUrl);
+          if (!res.ok) return { success: false, error: `installer_download_failed_${res.status}` };
+          const installerPath = join(installerDir, `${dependency.id}-update-${Date.now()}.sh`);
+          await writeFileAsync(installerPath, Buffer.from(await res.arrayBuffer()));
+          const result = await runDependencyCommand('/bin/bash', [installerPath]);
+          if (!result.success) return { success: false, error: result.error };
+          return { success: true, status: await getDependencyStatusView(entry) };
+        } catch (error) {
+          return { success: false, error: error instanceof Error ? error.message : String(error) };
+        }
       }
       const status = await getDependencyStatusView(entry);
       if (!status.resolvedBinary) return { success: false, error: 'plugin_dependency_binary_missing' };
@@ -3683,6 +3702,8 @@ export const READ_MATERIAL_TOOL_DEFINITION: ToolDefinition = {
   },
 };
 
+const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
 export function buildMaterialManifestForPrompt(materials: MaterialRecord[]): string {
   if (materials.length === 0) return '';
   const lines = [
@@ -3697,9 +3718,32 @@ export function buildMaterialManifestForPrompt(materials: MaterialRecord[]): str
     const ext = extname(material.originalName || material.workspacePath).toLowerCase() || 'unknown';
     const status = material.parseStatus || 'pending';
     const summary = material.parseSummary ? `, ${material.parseSummary}` : '';
-    lines.push(`- materialId: ${material.materialId}; 文件: ${material.originalName}; 格式: ${ext}; MIME: ${material.mimeType}; 大小: ${material.sizeBytes} bytes (${formatMaterialSize(material.sizeBytes)}); 状态: ${status}${summary}`);
+    const isImage = IMAGE_MIME_TYPES.has(material.mimeType);
+    const imageNote = isImage ? '；已作为多模态图像输入直接传递给模型，无需调用 read_material' : '';
+    lines.push(`- materialId: ${material.materialId}; 文件: ${material.originalName}; 格式: ${ext}; MIME: ${material.mimeType}; 大小: ${material.sizeBytes} bytes (${formatMaterialSize(material.sizeBytes)}); 状态: ${status}${summary}${imageNote}`);
   }
   return lines.join('\n');
+}
+
+export function buildImageBlocksForMaterials(materials: MaterialRecord[]): Extract<MessageBlock, { type: 'image' }>[] {
+  const blocks: Extract<MessageBlock, { type: 'image' }>[] = [];
+  for (const material of materials) {
+    if (!IMAGE_MIME_TYPES.has(material.mimeType)) continue;
+    try {
+      const data = readFileSync(material.workspacePath).toString('base64');
+      blocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: material.mimeType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
+          data,
+        },
+      });
+    } catch {
+      // If the file can't be read, skip it silently — it will still appear in the text manifest
+    }
+  }
+  return blocks;
 }
 
 export async function executeReadMaterialForDesktop(
@@ -4350,8 +4394,10 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
     const allToolDefs = materials && materials.length > 0 && materialRegistry
       ? [...registry.getToolDefinitions(), READ_MATERIAL_TOOL_DEFINITION]
       : registry.getToolDefinitions();
+    const imageBlocks = materials && materials.length > 0 ? buildImageBlocksForMaterials(materials) : [];
     const userContent: MessageBlock[] = [
       { type: 'text', text: userText },
+      ...imageBlocks,
     ];
     const messages: Message[] = [
       ...hostHistory.map((h): Message => ({ role: h.role, content: [{ type: 'text', text: h.content }] })),
@@ -5298,8 +5344,10 @@ function createDesktopModelRunnerWithRegistry(
     const allToolDefs = materials && materials.length > 0
       ? [...registry.getToolDefinitions(), READ_MATERIAL_TOOL_DEFINITION]
       : registry.getToolDefinitions();
+    const imageBlocks = materials && materials.length > 0 ? buildImageBlocksForMaterials(materials) : [];
     const userContent: MessageBlock[] = [
       { type: 'text', text: userText },
+      ...imageBlocks,
     ];
     const messages: Message[] = [
       ...hostHistory.map((h): Message => ({ role: h.role, content: [{ type: 'text', text: h.content }] })),

@@ -762,6 +762,63 @@ describe('desktop services', () => {
     });
   });
 
+  it('updates CUA driver dependency via official_installer by re-running install script', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const pluginDir = join(pluginRootDir, 'cua-computer-use');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({ name: 'cua-computer-use' }));
+    const dependency: ExternalPluginDependency = {
+      id: 'cua-driver',
+      kind: 'macos_app_cli',
+      displayName: 'CUA Driver',
+      binaryCandidates: ['~/.local/bin/cua-driver', 'cua-driver'],
+      minVersion: '0.1.0',
+      install: {
+        kind: 'official_installer',
+        sourceUrl: 'https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh',
+        requiresUserConfirmation: true,
+      },
+      update: {
+        kind: 'official_installer',
+        sourceUrl: 'https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh',
+        sourceAllowlist: ['https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh'],
+        requiresUserConfirmation: true,
+      },
+      health: {
+        version: ['~/.local/bin/cua-driver', '--version'],
+      },
+    };
+    const dataRoot = join(rootDir, 'data');
+    const services = createDesktopServices({
+      dataRoot,
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      pluginRootDir,
+      pluginDependencies: [{ pluginName: 'cua-computer-use', dependency }],
+      pluginDependencyStatusOptions: {
+        platform: 'darwin',
+        homeDir: '/Users/alice',
+        exists: (path) => path === '/Users/alice/.local/bin/cua-driver',
+        runCommand: async (_command, args) => {
+          if (args[0] === '--version') return { exitCode: 0, stdout: 'cua-driver 0.2.0\n', stderr: '' };
+          return { exitCode: 0, stdout: '', stderr: '' };
+        },
+      },
+    });
+
+    const statuses = await services.listPluginDependencyStatuses();
+    expect(statuses[0].canUpdate).toBe(true);
+
+    await expect(services.updatePluginDependency({
+      pluginName: 'cua-computer-use',
+      dependencyId: 'cua-driver',
+      confirmed: false,
+    })).resolves.toMatchObject({
+      success: false,
+      error: 'confirmation_required',
+    });
+  });
+
   it('rejects unsafe plugin install names before invoking the xiaok installer', async () => {
     const binDir = join(rootDir, 'bin');
     mkdirSync(binDir, { recursive: true });

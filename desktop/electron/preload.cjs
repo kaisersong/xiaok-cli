@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   deleteProvider: (providerId) => ipcRenderer.invoke('desktop:deleteProvider', providerId),
   deleteModel: (modelId) => ipcRenderer.invoke('desktop:deleteModel', modelId),
   readClipboardFilePaths: () => ipcRenderer.invoke('desktop:readClipboardFilePaths'),
+  readClipboardImage: () => ipcRenderer.invoke('desktop:readClipboardImage'),
   selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory'),
   selectMaterials: () => ipcRenderer.invoke('desktop:selectMaterials'),
   importMaterial: (input) => ipcRenderer.invoke('desktop:importMaterial', input),
