@@ -606,6 +606,9 @@ export interface KSwarmTaskReviewResult {
 export interface KSwarmProjectDeliverable {
   summary?: string;
   artifacts?: KSwarmArtifact[];
+  synthesis?: boolean;
+  files?: unknown[];
+  description?: string;
 }
 
 /**

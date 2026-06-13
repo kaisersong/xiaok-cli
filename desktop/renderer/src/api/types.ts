@@ -1,5 +1,5 @@
-// Thread types (local storage)
-export type ThreadMode = 'work';
+// Thread types (local storage + desktop web-client compatibility)
+export type ThreadMode = 'chat' | 'work';
 export type CollaborationMode = ThreadMode;
 export type ThreadGtdBucket = 'inbox' | 'todo' | 'waiting' | 'someday' | 'archived';
 
@@ -15,6 +15,19 @@ export interface ThreadRecord {
   pinnedAt: number | null;
   currentTaskId: string | null;
   taskIds: string[];  // All task IDs for this thread (in order)
+
+  // Compatibility fields mirrored from the web-client API shape. Desktop's
+  // IndexedDB store uses camelCase, while shared sidebar code still consumes
+  // snake_case metadata from the server-backed client.
+  created_at?: string | number;
+  updated_at?: string | number;
+  active_run_id?: string | null;
+  sidebar_work_folder?: string | null;
+  sidebar_pinned_at?: string | number | null;
+  sidebar_gtd_bucket?: ThreadGtdBucket | null;
+  is_private?: boolean;
+  collaboration_mode?: CollaborationMode;
+  collaboration_mode_revision?: number | null;
 }
 
 /** Alias used by thread-list context (web-client naming convention). */
@@ -24,6 +37,9 @@ export interface UpdateThreadSidebarRequest {
   starred?: boolean;
   gtdBucket?: ThreadGtdBucket | null;
   mode?: ThreadMode;
+  sidebar_work_folder?: string | null;
+  sidebar_pinned?: boolean;
+  sidebar_gtd_bucket?: ThreadGtdBucket | null;
 }
 
 // LLM Provider types (mapped from config)

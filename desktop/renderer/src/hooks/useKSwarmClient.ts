@@ -170,6 +170,9 @@ export interface KSwarmDeliverable {
 export interface KSwarmProjectDeliverable {
   summary?: string;
   artifacts?: KSwarmArtifact[];
+  synthesis?: boolean;
+  files?: unknown[];
+  description?: string;
 }
 
 export interface KSwarmAgent {
@@ -752,6 +755,34 @@ interface PrincipleEntry {
   createdAt: number;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readConnectionStatus(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  return typeof value.status === 'string' ? value.status : undefined;
+}
+
+function readKSwarmEvent(value: unknown): KSwarmEvent | null {
+  if (!isRecord(value) || typeof value.type !== 'string') return null;
+  return value as unknown as KSwarmEvent;
+}
+
+function readPrincipleEntries(value: unknown): PrincipleEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is Record<string, unknown> => isRecord(item))
+    .filter((item) => typeof item.id === 'string' && typeof item.content === 'string')
+    .map((item) => ({
+      id: item.id as string,
+      content: item.content as string,
+      scenarios: Array.isArray(item.scenarios) ? item.scenarios.map((scenario) => String(scenario)) : [],
+      enabled: item.enabled !== false,
+      createdAt: typeof item.createdAt === 'number' ? item.createdAt : 0,
+    }));
+}
+
 export function buildCreateProjectPlanningGuidance(input: {
   goal: string;
   requirements?: string;
@@ -1014,20 +1045,21 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
       }
     };
 
-    const unsubStatus = api.onKSwarmConnectionStatus?.((payload: { status: string }) => {
-      applyConnectionStatus(payload.status);
+    const unsubStatus = api.onKSwarmConnectionStatus?.((payload: unknown) => {
+      applyConnectionStatus(readConnectionStatus(payload));
     });
     wsRef.current = unsubStatus || null;
 
-    const unsubEvent = api.onKSwarmWsEvent?.((payload: KSwarmEvent) => {
-      handleWsMessage(payload);
+    const unsubEvent = api.onKSwarmWsEvent?.((payload: unknown) => {
+      const event = readKSwarmEvent(payload);
+      if (event) handleWsMessage(event);
     });
     wsEventRef.current = unsubEvent || null;
 
     api.kswarmStreamSubscribe?.();
     Promise.resolve(api.kswarmStreamGetStatus?.())
-      .then((payload: { status?: string } | undefined) => {
-        applyConnectionStatus(payload?.status);
+      .then((payload: unknown) => {
+        applyConnectionStatus(readConnectionStatus(payload));
       })
       .catch(() => {});
 
@@ -1079,7 +1111,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
       const api = getDesktopApi();
       if (api?.listPrinciples) {
         const loaded = await api.listPrinciples();
-        if (Array.isArray(loaded)) principles = loaded;
+        principles = readPrincipleEntries(loaded);
       }
     } catch (e) {
       console.warn('[principles] Failed to load principles for planning guidance, using original requirements', e);

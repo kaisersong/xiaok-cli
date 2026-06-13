@@ -20,7 +20,9 @@ import type {
   LoopDefinitionView,
   LoopRunView,
   RunLoopNowResultView,
+  ThreadMode,
   ThreadRecord,
+  UpdateThreadSidebarRequest,
 } from './types';
 import type { ChannelBindingResponse, ChannelIdentityResponse, Persona } from './types';
 import { getDesktopApi } from '../shared/desktop';
@@ -36,6 +38,43 @@ declare global {
 const DB_NAME = 'xiaok-desktop';
 const DB_VERSION = 1;
 const THREADS_STORE = 'threads';
+
+function timestampToIso(value: number): string {
+  return Number.isFinite(value) ? new Date(value).toISOString() : new Date(0).toISOString();
+}
+
+export function withThreadCompatibility(thread: ThreadRecord): ThreadRecord {
+  return {
+    ...thread,
+    created_at: thread.created_at ?? timestampToIso(thread.createdAt),
+    updated_at: thread.updated_at ?? timestampToIso(thread.updatedAt),
+    sidebar_gtd_bucket: thread.sidebar_gtd_bucket ?? thread.gtdBucket,
+    sidebar_pinned_at: thread.sidebar_pinned_at ?? thread.pinnedAt,
+  };
+}
+
+export function withoutThreadCompatibility(thread: ThreadRecord): ThreadRecord {
+  const {
+    created_at,
+    updated_at,
+    active_run_id,
+    sidebar_pinned_at,
+    sidebar_gtd_bucket,
+    is_private,
+    collaboration_mode,
+    collaboration_mode_revision,
+    ...stored
+  } = thread;
+  void created_at;
+  void updated_at;
+  void active_run_id;
+  void sidebar_pinned_at;
+  void sidebar_gtd_bucket;
+  void is_private;
+  void collaboration_mode;
+  void collaboration_mode_revision;
+  return stored;
+}
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -142,34 +181,40 @@ export const api = {
       taskIds: [],
     };
     await withStore('readwrite', (store) => store.add(thread));
-    return thread;
+    return withThreadCompatibility(thread);
   },
 
   async getThread(id: string): Promise<ThreadRecord | null> {
     const result = await withStore('readonly', (store) => store.get(id));
     if (!result) return null;
-    return {
+    return withThreadCompatibility({
       ...result,
       currentTaskId: result.currentTaskId ?? null,
       taskIds: result.taskIds ?? [],
-    };
+    });
   },
 
   async listThreads(options?: {
     limit?: number;
     before?: string;
+    mode?: ThreadMode;
   }): Promise<ThreadRecord[]> {
     const all = await withStore('readonly', (store) => store.getAll());
     // Sort by createdAt descending
     all.sort((a, b) => b.createdAt - a.createdAt);
-    const normalized = all.map(t => ({ ...t, currentTaskId: t.currentTaskId ?? null }));
+    const normalized = all.map(t => withThreadCompatibility({
+      ...t,
+      currentTaskId: t.currentTaskId ?? null,
+      taskIds: t.taskIds ?? [],
+    }));
+    const filtered = options?.mode ? normalized.filter((thread) => thread.mode === options.mode) : normalized;
     if (options?.before) {
-      const idx = normalized.findIndex((t) => t.id === options.before);
+      const idx = filtered.findIndex((t) => t.id === options.before);
       if (idx >= 0) {
-        return normalized.slice(idx + 1, idx + 1 + (options.limit ?? 20));
+        return filtered.slice(idx + 1, idx + 1 + (options.limit ?? 20));
       }
     }
-    return normalized.slice(0, options?.limit ?? 20);
+    return filtered.slice(0, options?.limit ?? 20);
   },
 
   async updateThreadTitle(id: string, title: string): Promise<void> {
@@ -177,19 +222,24 @@ export const api = {
     if (!thread) throw new Error(`Thread ${id} not found`);
     thread.title = title;
     thread.updatedAt = Date.now();
-    await withStore('readwrite', (store) => store.put(thread));
+    await withStore('readwrite', (store) => store.put(withoutThreadCompatibility(thread)));
   },
 
   async updateThreadSidebarState(
     id: string,
-    state: { starred?: boolean; gtdBucket?: ThreadRecord['gtdBucket'] }
+    state: { starred?: boolean; gtdBucket?: ThreadRecord['gtdBucket']; mode?: ThreadMode; sidebar_work_folder?: string | null }
   ): Promise<void> {
     const thread = await api.getThread(id);
     if (!thread) throw new Error(`Thread ${id} not found`);
-    if (state.starred !== undefined) thread.starred = state.starred;
+    if (state.starred !== undefined) {
+      thread.starred = state.starred;
+      thread.pinnedAt = state.starred ? Date.now() : null;
+    }
     if (state.gtdBucket !== undefined) thread.gtdBucket = state.gtdBucket;
+    if (state.mode !== undefined) thread.mode = state.mode;
+    if (state.sidebar_work_folder !== undefined) thread.sidebar_work_folder = state.sidebar_work_folder;
     thread.updatedAt = Date.now();
-    await withStore('readwrite', (store) => store.put(thread));
+    await withStore('readwrite', (store) => store.put(withoutThreadCompatibility(thread)));
   },
 
   async updateThreadTaskId(id: string, taskId: string): Promise<void> {
@@ -200,7 +250,7 @@ export const api = {
       thread.taskIds.push(taskId);
     }
     thread.updatedAt = Date.now();
-    await withStore('readwrite', (store) => store.put(thread));
+    await withStore('readwrite', (store) => store.put(withoutThreadCompatibility(thread)));
   },
 
   async deleteThread(id: string): Promise<void> {
@@ -212,7 +262,7 @@ export const api = {
     const lower = query.toLowerCase();
     return all.filter(
       (t) => t.title?.toLowerCase().includes(lower)
-    );
+    ).map((t) => withThreadCompatibility({ ...t, currentTaskId: t.currentTaskId ?? null, taskIds: t.taskIds ?? [] }));
   },
 
   // ---------------------
@@ -1075,7 +1125,11 @@ export function setExternalDirs(_accessToken: string, _dirs: string[]): Promise<
   return Promise.resolve(_dirs);
 }
 
-export function isApiError(error: unknown): boolean {
+export interface ApiErrorLike extends Error {
+  status?: number;
+}
+
+export function isApiError(error: unknown): error is ApiErrorLike {
   if (error instanceof Error) {
     const msg = error.message.toLowerCase();
     return msg.includes('api') || msg.includes('provider') || msg.includes('model') || msg.includes('connection');
@@ -1086,24 +1140,42 @@ export function isApiError(error: unknown): boolean {
 // Standalone function exports for thread-list.tsx compatibility (web-client naming convention).
 // These delegate to the `api` object methods.
 
-export async function listThreads(accessToken: string, options?: { limit?: number; before?: string; mode?: string }): Promise<ThreadRecord[]> {
+export async function listThreads(accessToken: string, options?: { limit?: number; before?: string; mode?: ThreadMode }): Promise<ThreadRecord[]> {
   void accessToken;
   return api.listThreads(options);
 }
 
-export async function updateThreadSidebarState(accessToken: string, id: string, state: Record<string, unknown>): Promise<ThreadRecord | null> {
+export async function updateThreadSidebarState(accessToken: string, id: string, state: UpdateThreadSidebarRequest): Promise<ThreadRecord> {
   void accessToken;
-  await api.updateThreadSidebarState(id, state as Parameters<typeof api.updateThreadSidebarState>[1]);
-  return api.getThread(id);
+  const patch: Parameters<typeof api.updateThreadSidebarState>[1] = {};
+  if (state.starred !== undefined) patch.starred = state.starred;
+  if (state.sidebar_pinned !== undefined) patch.starred = state.sidebar_pinned;
+  if (state.gtdBucket !== undefined) patch.gtdBucket = state.gtdBucket;
+  if (state.sidebar_gtd_bucket !== undefined) patch.gtdBucket = state.sidebar_gtd_bucket;
+  if (state.mode !== undefined) patch.mode = state.mode;
+  if (state.sidebar_work_folder !== undefined) patch.sidebar_work_folder = state.sidebar_work_folder;
+  await api.updateThreadSidebarState(id, patch);
+  const thread = await api.getThread(id);
+  if (!thread) throw new Error(`Thread ${id} not found`);
+  return thread;
 }
 
-export async function updateThreadMode(_accessToken: string, _threadId: string, _mode: string): Promise<void> {
-  // No-op: desktop uses ThreadMetaStore for GTD labels, not server-side mode
+export async function updateThreadMode(_accessToken: string, _threadId: string, _mode: ThreadMode): Promise<ThreadRecord> {
+  await api.updateThreadSidebarState(_threadId, { mode: _mode });
+  const thread = await api.getThread(_threadId);
+  if (!thread) throw new Error(`Thread ${_threadId} not found`);
+  return thread;
+}
+
+export interface ThreadRunStateEvent {
+  thread_id: string;
+  active_run_id: string | null;
+  title?: string | null;
 }
 
 export async function streamThreadRunStateEvents(
   _accessToken: string,
-  _options: { signal?: AbortSignal; onEvent?: (event: unknown) => void; onError?: (error: unknown) => void },
+  _options: { signal?: AbortSignal; onEvent?: (event: ThreadRunStateEvent) => void; onError?: (error: unknown) => void },
 ): Promise<void> {
   // No-op: desktop uses IPC-based SSE events, not direct HTTP streaming.
   // The thread-list context falls back to polling when this returns immediately.

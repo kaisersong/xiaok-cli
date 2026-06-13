@@ -2196,7 +2196,7 @@ function GeneralPane() {
                     </div>
 
                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-md bg-[var(--c-bg-card)] px-2 py-2">
+                      <div className="rounded-md bg-[var(--c-bg-card)] p-2">
                         <div className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsLastRun}</div>
                         <div className="mt-1 text-[var(--c-text-primary)]">
                           {latestRun
@@ -2204,7 +2204,7 @@ function GeneralPane() {
                             : t.desktopSettings.loopDiagnosticsNoRuns}
                         </div>
                       </div>
-                      <div className="rounded-md bg-[var(--c-bg-card)] px-2 py-2">
+                      <div className="rounded-md bg-[var(--c-bg-card)] p-2">
                         <div className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsOpenAnomalies}</div>
                         <div className="mt-1 font-medium text-[var(--c-text-primary)]">
                           {openAnomalyCount}
@@ -2213,7 +2213,7 @@ function GeneralPane() {
                     </div>
 
                     {latestRun?.message ? (
-                      <div className="mt-2 rounded-md bg-[var(--c-bg-card)] px-2 py-2 text-xs text-[var(--c-text-secondary)]">
+                      <div className="mt-2 rounded-md bg-[var(--c-bg-card)] p-2 text-xs text-[var(--c-text-secondary)]">
                         {latestRun.message}
                       </div>
                     ) : null}

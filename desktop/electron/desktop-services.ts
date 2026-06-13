@@ -987,15 +987,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   });
 
   const createKSwarmTaskHost = (workspaceRoot: string) => {
-    if (options.runner) return host;
     const scopedTools = buildToolList(undefined, { cwd: workspaceRoot });
     const scopedRegistry = new ToolRegistry({ autoMode: true }, scopedTools);
     return new InProcessTaskRuntimeHost({
       materialRegistry,
       snapshotStore,
-      runner: createDesktopModelRunnerWithRegistry(scopedRegistry, scopedTools, options.dataRoot, options.kswarmService, materialRegistry, kswarmCreateProjectToolOptions),
+      runner: options.runner ?? createDesktopModelRunnerWithRegistry(scopedRegistry, scopedTools, options.dataRoot, options.kswarmService, materialRegistry, kswarmCreateProjectToolOptions),
       now: options.now,
-      aheGuards: { artifactEvidence: true, recoveryContinuity: true },
+      aheGuards: { artifactEvidence: false, recoveryContinuity: true },
       createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
       createSessionId: () => `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     });
@@ -1034,7 +1033,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       handoff.task.evidenceContract ? `外部来源证据要求：${JSON.stringify(handoff.task.evidenceContract)}` : '',
       handoff.task.repairInstruction ? `修复反馈：${handoff.task.repairInstruction}` : '',
       requiresArtifactEvidence ? '本任务必须写入至少一个完整产物文件到产物目录；不要只在摘要里描述文件，最终交接必须能看到文件路径。' : '',
-      '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，把产物文件写入上面的产物目录，使用文件路径作为交接依据，并返回 result manifest。',
+      requiresArtifactEvidence
+        ? '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，把产物文件写入上面的产物目录，使用文件路径作为交接依据，并返回 result manifest。'
+        : '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，并返回 result manifest。如果任务没有要求生成文件，artifacts 可以为空数组，但 summary 必须说明完成了哪些要求。',
     ].filter(Boolean).join('\n');
     const created = await taskHost.createTask({ prompt, materials: [] });
     const cancelCreatedTask = () => {
@@ -1138,13 +1139,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const taskHost = createKSwarmTaskHost(workspaceRoot);
     const runStartedAt = Date.now();
     const prompt = buildKSwarmWorkflowNodePrompt(handoff, targetParticipantId || 'xiaok-worker', { artifactsDir });
-    const { summary, artifacts } = await runKSwarmRuntimeTextTask(taskHost, prompt, {
+    const runtimeResult = await runKSwarmRuntimeTextTask(taskHost, prompt, {
       artifactsDir,
       runStartedAt,
     });
+    const { summary, artifacts } = runtimeResult;
     let parsed: Record<string, unknown>;
     try {
-      parsed = extractKSwarmJsonObject(summary);
+      parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
     } catch {
       console.warn('[kswarm-workflow-node] structured JSON extraction failed, fallback applied', {
         nodeKind: handoff.nodeKind,
@@ -1210,8 +1212,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const members = readStringArray(payload.members);
       const fallbackWorkerId = members[0] || 'xiaok-worker';
       const prompt = buildKSwarmAssignPoPrompt(payload, fallbackWorkerId);
-      const { summary } = await runKSwarmRuntimeTextTask(host, prompt);
-      const parsed = extractKSwarmJsonObject(summary);
+      const runtimeResult = await runKSwarmRuntimeTextTask(host, prompt);
+      const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
       const plan = normalizeKSwarmPlan(isRecord(parsed.plan) ? parsed.plan : parsed, fallbackWorkerId, {
         userGoal: readString(payload.goal),
         userRequirements: readString(payload.requirements),
@@ -1302,8 +1304,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if (!projectId || !taskId) return { ok: false as const, error: 'project_or_task_id_missing' };
       const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
       const reviewPrompt = buildKSwarmReviewPrompt(payload);
-      const { summary } = await runKSwarmRuntimeTextTask(host, reviewPrompt);
-      const parsed = extractKSwarmJsonObject(summary);
+      const runtimeResult = await runKSwarmRuntimeTextTask(host, reviewPrompt);
+      const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
       const review = normalizeKSwarmReview(isRecord(parsed.review) ? parsed.review : parsed);
 
       await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}/review`, {
@@ -2272,7 +2274,7 @@ async function runKSwarmRuntimeTextTask(
   host: InProcessTaskRuntimeHost,
   prompt: string,
   options: { artifactsDir?: string; runStartedAt?: number } = {},
-): Promise<{ taskId: string; summary: string; artifacts: Array<{ path: string; kind: string; label?: string }> }> {
+): Promise<{ taskId: string; summary: string; structuredOutput?: Record<string, unknown>; artifacts: Array<{ path: string; kind: string; label?: string }> }> {
   const runStartedAt = options.runStartedAt || Date.now();
   const maxAttempts = 2;
   let lastFailure: string | null = null;
@@ -2296,6 +2298,7 @@ async function runKSwarmRuntimeTextTask(
         return {
           taskId: created.taskId,
           summary: recovered.snapshot.result?.summary || '',
+          structuredOutput: isRecord(recovered.snapshot.result?.structuredOutput) ? recovered.snapshot.result.structuredOutput : undefined,
           artifacts: [...eventArtifacts, ...discoveredArtifacts],
         };
       }
@@ -2315,6 +2318,10 @@ async function runKSwarmRuntimeTextTask(
     }
   }
   throw new Error(lastFailure ? `desktop_task_failed: ${lastFailure}` : 'desktop_task_timeout');
+}
+
+function parseKSwarmRuntimeStructuredJson(result: { summary: string; structuredOutput?: Record<string, unknown> }): Record<string, unknown> {
+  return result.structuredOutput ?? extractKSwarmJsonObject(result.summary);
 }
 
 function getKSwarmRuntimeTaskFailureReason(snapshot: { salvage?: { reason?: unknown }; events?: Array<unknown> }): string {

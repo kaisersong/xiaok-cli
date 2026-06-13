@@ -31,6 +31,10 @@ interface ChatInputProps {
 
 const TEXTAREA_MAX_HEIGHT = 220;
 
+function basename(filePath: string): string {
+  return filePath.split(/[\\/]/).pop() || filePath;
+}
+
 export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder = '回复...', disabled, isRunning, onStop }: ChatInputProps) {
   const [internalValue, setInternalValue] = useState(value ?? '');
   const [files, setFiles] = useState<AttachedFile[]>([]);
@@ -70,37 +74,53 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
         return;
       }
 
-      // Image paste (screenshot / raw image data, no file path)
+      // Finder NSFilenamesPboardType / file-item paste without a keydown preflight.
+      // Cmd+V sets finderFilesPendingRef first, so this branch only handles paste
+      // paths that would otherwise be lost, such as context-menu paste events.
+      const hasFileItems = clipItems.some(item => item.kind === 'file');
       const hasImage = clipItems.some(item => item.type.startsWith('image/'));
-      if (hasImage && window.xiaokDesktop?.readClipboardImage) {
+      if (hasFileItems && !finderFilesPendingRef.current && window.xiaokDesktop?.readClipboardFilePaths) {
+        e.preventDefault();
+        window.xiaokDesktop.readClipboardFilePaths().then(fp => {
+          if (fp.length > 0) {
+            const newFiles = fp.map(p => {
+              const name = basename(p);
+              const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
+              return { filePath: p, name, isImage };
+            });
+            setFiles(prev => [...prev, ...newFiles]);
+            return;
+          }
+          if (hasImage && window.xiaokDesktop?.readClipboardImage) {
+            void window.xiaokDesktop.readClipboardImage().then(imagePath => {
+              if (imagePath) {
+                const name = basename(imagePath) || 'clipboard-image.png';
+                setFiles(prev => [...prev, { filePath: imagePath, name, isImage: true }]);
+              }
+            }).catch(() => {});
+          }
+        }).catch(() => {});
+        return;
+      }
+
+      // Image paste (screenshot / raw image data, no file path).
+      // Skip if keydown Cmd+V is handling a Finder file copy — copied image
+      // files put an image/tiff preview on the clipboard alongside the path.
+      if (hasImage && finderFilesPendingRef.current) {
+        e.preventDefault();
+        return;
+      }
+      if (hasImage && !finderFilesPendingRef.current && window.xiaokDesktop?.readClipboardImage) {
         e.preventDefault();
         window.xiaokDesktop.readClipboardImage().then(imagePath => {
           if (imagePath) {
-            const name = imagePath.split('/').pop() || 'clipboard-image.png';
+            const name = basename(imagePath) || 'clipboard-image.png';
             setFiles(prev => [...prev, { filePath: imagePath, name, isImage: true }]);
           }
         }).catch(() => {});
         return;
       }
 
-      // Finder NSFilenamesPboardType — clipboard has file items but no text path.
-      // DataTransferItem.kind === 'file' is detectable synchronously, so we can
-      // call preventDefault() before going async to fetch the real paths via IPC.
-      // Skip if keydown Cmd+V already started a readClipboardFilePaths fetch.
-      const hasFileItems = clipItems.some(item => item.kind === 'file');
-      if (hasFileItems && !finderFilesPendingRef.current && window.xiaokDesktop?.readClipboardFilePaths) {
-        e.preventDefault();
-        window.xiaokDesktop.readClipboardFilePaths().then(fp => {
-          if (fp.length > 0) {
-            const newFiles = fp.map(p => {
-              const name = p.split('/').pop() || p;
-              const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
-              return { filePath: p, name, isImage };
-            });
-            setFiles(prev => [...prev, ...newFiles]);
-          }
-        }).catch(() => {});
-      }
     };
     pasteHandlerRef.current = handler;
     el.addEventListener('paste', handler);
@@ -149,7 +169,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       for (const p of paths) stripped = stripped.replace(p, '');
       stripped = stripped.replace(/\n+/g, '\n').trimEnd();
       const newFiles = paths.map(p => {
-        const name = p.split('/').pop() || p;
+        const name = basename(p);
         const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
         return { filePath: p, name, isImage };
       });
@@ -163,7 +183,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
             setFiles(prev => {
               const base = prev.slice(0, prev.length - paths.length);
               return [...base, ...fp.map(p => {
-                const name = p.split('/').pop() || p;
+                const name = basename(p);
                 const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
                 return { filePath: p, name, isImage };
               })];
@@ -180,27 +200,33 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Intercept Cmd+V to catch Finder file copies where clipboard has no text/plain path.
     // readClipboardFilePaths reads NSFilenamesPboardType which Finder always populates.
-    // We must call preventDefault() synchronously here before the paste runs.
     if (e.key === 'v' && e.metaKey && !e.shiftKey && !e.altKey && window.xiaokDesktop?.readClipboardFilePaths) {
-      // Snapshot value before paste lands so we can restore it if files are found.
       const valueBeforePaste = internalValue;
       finderFilesPendingRef.current = true;
       window.xiaokDesktop.readClipboardFilePaths().then(fp => {
         finderFilesPendingRef.current = false;
         if (fp.length > 0) {
+          // Finder file copy: add chips and restore textarea value
           const newFiles = fp.map(p => {
-            const name = p.split('/').pop() || p;
+            const name = basename(p);
             const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
             return { filePath: p, name, isImage };
           });
           setFiles(prev => [...prev, ...newFiles]);
-          // Restore pre-paste value — Finder pastes file name as text which we don't want
           setInternalValue(valueBeforePaste);
           onChange?.(valueBeforePaste);
+        } else if (window.xiaokDesktop?.readClipboardImage) {
+          // No file paths — could be a screenshot. The paste handler has
+          // already prevented the browser's default image paste while the
+          // Finder-file preflight was pending, so attach the image here.
+          window.xiaokDesktop.readClipboardImage().then(imagePath => {
+            if (imagePath) {
+              const name = basename(imagePath) || 'clipboard-image.png';
+              setFiles(prev => [...prev, { filePath: imagePath, name, isImage: true }]);
+            }
+          }).catch(() => {});
         }
       }).catch(() => { finderFilesPendingRef.current = false; });
-      // Don't preventDefault here — if there are no file paths, normal text paste should proceed.
-      // The paste event handler will fire afterward and handle text/image cases.
     }
     if (showSlashMenu && matchedSkills.length > 0) {
       if (e.key === 'ArrowDown') {
@@ -267,7 +293,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       const result = await api.selectMaterials();
       if (result.filePaths.length > 0) {
         const newFiles = result.filePaths.map(path => {
-          const name = path.split('/').pop() || path;
+          const name = basename(path);
           const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
           return { filePath: path, name, isImage };
         });

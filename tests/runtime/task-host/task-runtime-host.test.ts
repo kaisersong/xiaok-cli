@@ -779,6 +779,111 @@ describe('InProcessTaskRuntimeHost', () => {
       ]));
     });
 
+    it('allows KSwarm PO planning JSON completions even when the user goal mentions reports', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            analysis: '项目目标明确，先输出一份报告。',
+            successCriteria: ['完成报告'],
+            phases: [{
+              id: 'phase-1',
+              name: '交付',
+              items: [{
+                id: 'item-1',
+                title: '撰写报告',
+                brief: '写一份 markdown 报告。',
+                assignedAgent: 'xiaok-worker',
+                dependencies: [],
+                acceptanceCriteria: '报告结构完整。',
+              }],
+            }],
+          }),
+        });
+      });
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        aheGuards: { artifactEvidence: true },
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: [
+          'KSwarm PO 规划任务。',
+          '项目 ID：proj-1',
+          '用户目标：Write report',
+          '请只输出一个 JSON object，不要 Markdown，不要解释。',
+        ].join('\n'),
+        materials: [],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed', 3000);
+      const recovered = await host.recoverTask('task_1');
+      expect(recovered.snapshot.status).toBe('completed');
+      expect(recovered.snapshot.events).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'error', message: 'Task is being completed without artifact evidence.' }),
+      ]));
+    });
+
+    it('blocks KSwarm worker execution receipt-only completions when an artifact file is required', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '报告已完成。',
+        });
+      });
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        aheGuards: { artifactEvidence: true },
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: [
+          'KSwarm 项目任务执行。',
+          '执行者：xiaok-worker',
+          '项目：Loop Evidence',
+          '目标：生成可交付报告',
+          '产物目录：/tmp/xiaok-artifacts',
+          '任务：撰写报告',
+          '本任务必须写入至少一个完整产物文件到产物目录；不要只在摘要里描述文件，最终交接必须能看到文件路径。',
+          '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，把产物文件写入上面的产物目录，使用文件路径作为交接依据，并返回 result manifest。',
+        ].join('\n'),
+        materials: [],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'failed', 3000);
+      const recovered = await host.recoverTask('task_1');
+      expect(recovered.snapshot.status).toBe('failed');
+      expect(recovered.snapshot.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'progress',
+          stage: 'blocked',
+          message: expect.stringContaining('artifact evidence'),
+        }),
+      ]));
+    });
+
     it('does not allow clarification receipts to complete answer expectations', async () => {
       const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
         emitRuntimeEvent({

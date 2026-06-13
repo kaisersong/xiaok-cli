@@ -75,6 +75,10 @@ interface ExtractionState {
   error?: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigger?: number; importTrigger?: number }) {
   const { t } = useLocale();
   const [principles, setPrinciples] = useState<ProjectPrinciple[]>([]);
@@ -102,15 +106,16 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
   const loadQualityKnowledge = useCallback(async () => {
     try {
       const api = getDesktopApi();
-      const data = api?.kswarmProxyGet ? await api.kswarmProxyGet('/quality/knowledge') : null;
+      const raw = api?.kswarmProxyGet ? await api.kswarmProxyGet('/quality/knowledge') : null;
+      const data = isRecord(raw) ? raw : null;
       if (!data) return;
-      const builtinPacks = Array.isArray(data?.builtinPacks) ? data.builtinPacks : [];
+      const builtinPacks = Array.isArray(data.builtinPacks) ? data.builtinPacks as QualityPackView[] : [];
       setQualityKnowledge({
-        knowledgeDocuments: normalizeKnowledgeDocuments(data?.knowledgeDocuments, builtinPacks),
+        knowledgeDocuments: normalizeKnowledgeDocuments(data.knowledgeDocuments, builtinPacks),
         builtinPacks,
-        userOverlays: Array.isArray(data?.userOverlays) ? data.userOverlays : [],
-        workspaceOverlays: Array.isArray(data?.workspaceOverlays) ? data.workspaceOverlays : [],
-        conflicts: Array.isArray(data?.conflicts) ? data.conflicts : [],
+        userOverlays: Array.isArray(data.userOverlays) ? data.userOverlays as QualityRuleView[] : [],
+        workspaceOverlays: Array.isArray(data.workspaceOverlays) ? data.workspaceOverlays as QualityRuleView[] : [],
+        conflicts: Array.isArray(data.conflicts) ? data.conflicts as QualityConflictView[] : [],
       });
     } catch {
       setQualityKnowledge(null);
@@ -794,8 +799,11 @@ async function postQuality(path: string, body: unknown): Promise<any> {
   const api = getDesktopApi();
   if (!api?.kswarmProxyPost) throw new Error('IPC unavailable');
   const data = await api.kswarmProxyPost(path, body);
-  if (data === null || data === undefined || data?.ok === false) {
-    throw new Error(data?.error || data?.errors?.join(', ') || 'quality request failed');
+  const response = isRecord(data) ? data : null;
+  if (data === null || data === undefined || response?.ok === false) {
+    const errors = Array.isArray(response?.errors) ? response.errors.map((item) => String(item)).join(', ') : '';
+    const error = typeof response?.error === 'string' ? response.error : '';
+    throw new Error(error || errors || 'quality request failed');
   }
   return data;
 }

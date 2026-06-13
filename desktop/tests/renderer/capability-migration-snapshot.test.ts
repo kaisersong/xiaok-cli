@@ -33,7 +33,7 @@ describe('preload API surface snapshot (Stage 5.5)', () => {
   });
 
   it('tracks the current legacy flat key count for regression', () => {
-    expect(keys.length).toMatchInlineSnapshot(`143`);
+    expect(keys.length).toMatchInlineSnapshot(`144`);
   });
 
   it('showSaveDialog currently passes input directly (pre-capabilityToken)', () => {

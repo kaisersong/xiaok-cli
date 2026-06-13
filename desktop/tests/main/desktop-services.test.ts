@@ -1511,6 +1511,41 @@ describe('desktop services', () => {
     });
   });
 
+  it('rejects required kswarm handoff artifacts when neither events nor directory files provide evidence', async () => {
+    const artifactsDir = join(rootDir, 'artifacts');
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner: async ({ sessionId, emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '报告已完成。',
+        });
+      },
+    });
+
+    await expect(services.runKSwarmHandoffTask({
+      handoff: {
+        kind: 'kswarm_task_handoff_v1',
+        runId: 'run-1',
+        project: { id: 'proj-1', name: 'Project', goal: 'Write report', requirements: '', artifactsDir },
+        task: {
+          id: 'proj-1__item-1',
+          title: '撰写报告',
+          brief: '输出一份最终报告。',
+          acceptanceCriteria: '必须交付 Markdown 文件。',
+          requiredOutputs: ['markdown'],
+        },
+      },
+      targetParticipantId: 'xiaok-worker',
+    })).rejects.toThrow('artifact_evidence_missing');
+  });
+
   it('handles kswarm assign_po by producing a plan and creating board tasks', async () => {
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
     let receivedPrompt = '';

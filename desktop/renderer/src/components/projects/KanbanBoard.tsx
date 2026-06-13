@@ -184,7 +184,8 @@ function TaskCard({
   const canMarkDone = task.status === 'review' || task.status === 'in_progress';
   const result = typeof task.result === 'object' && task.result !== null ? task.result : {};
   const review = task.reviewResult;
-  const hasArtifacts = result.artifacts && result.artifacts.length > 0;
+  const resultArtifacts = Array.isArray(result.artifacts) ? result.artifacts : [];
+  const hasArtifacts = resultArtifacts.length > 0;
   const failureReason = task.blockedReason || task.failureReason || task.lastFailureClass || task.failureClass || review?.feedback || '';
   const executionView = getTaskExecutionView(task, projectExecutionMode);
 
@@ -328,7 +329,7 @@ function TaskCard({
         {/* Artifacts */}
         {hasArtifacts && (
           <div className="mt-2 flex flex-wrap gap-1">
-            {result.artifacts.map((art: KSwarmArtifact, i: number) => (
+            {resultArtifacts.map((art: KSwarmArtifact, i: number) => (
               <button key={i} type="button" onClick={(e) => { e.stopPropagation(); onPreviewArtifact(art); }}
                 className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] border-[0.5px] border-[var(--c-border-subtle)] hover:bg-[var(--c-bg-page)] truncate max-w-full">
                 {art.name}

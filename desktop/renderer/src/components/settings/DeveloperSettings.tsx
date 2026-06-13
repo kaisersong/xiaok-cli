@@ -45,10 +45,12 @@ function PanelButton({ onClick, disabled, ariaLabel, children }: PanelBtnProps) 
 function PillToggle({
   checked,
   disabled,
+  ariaLabel,
   onChange,
 }: {
   checked: boolean
   disabled?: boolean
+  ariaLabel: string
   onChange: (next: boolean) => void
 }) {
   return (
@@ -56,6 +58,7 @@ function PillToggle({
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={ariaLabel}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={[
@@ -304,6 +307,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
           <PillToggle
             checked={pipelineTraceEnabled}
             disabled={!accessToken || pipelineTraceLoading || pipelineTraceSaving}
+            ariaLabel={ds.pipelineTrace}
             onChange={(next) => {
               void handlePipelineTraceChange(next)
             }}
@@ -325,6 +329,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
           <PillToggle
             checked={promptCacheDebugEnabled}
             disabled={!accessToken || promptCacheDebugLoading || promptCacheDebugSaving}
+            ariaLabel={ds.promptCacheDebug}
             onChange={(next) => {
               void handlePromptCacheDebugChange(next)
             }}
@@ -346,6 +351,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
           </div>
           <PillToggle
             checked={showRunEvents}
+            ariaLabel={ds.showRunEvents}
             onChange={(next) => {
               setShowRunEvents(next)
               writeDeveloperShowRunEvents(next)
@@ -368,6 +374,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
           </div>
           <PillToggle
             checked={showDebugPanel}
+            ariaLabel={ds.showDebugPanel}
             onChange={(next) => {
               setShowDebugPanel(next)
               writeDeveloperShowDebugPanel(next)
@@ -447,7 +454,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
                 return (
                   <div
                     key={loop.id}
-                    className="rounded-lg bg-[var(--c-bg-card)] px-3 py-3"
+                    className="rounded-lg bg-[var(--c-bg-card)] p-3"
                     style={{ border: '0.5px solid var(--c-border-subtle)' }}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -465,7 +472,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
                     </div>
 
                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-md bg-[var(--c-bg-menu)] px-2 py-2">
+                      <div className="rounded-md bg-[var(--c-bg-menu)] p-2">
                         <div className="text-[var(--c-text-muted)]">{ds.loopDiagnosticsLastRun}</div>
                         <div className="mt-1 text-[var(--c-text-primary)]">
                           {latestRun
@@ -473,7 +480,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
                             : ds.loopDiagnosticsNoRuns}
                         </div>
                       </div>
-                      <div className="rounded-md bg-[var(--c-bg-menu)] px-2 py-2">
+                      <div className="rounded-md bg-[var(--c-bg-menu)] p-2">
                         <div className="text-[var(--c-text-muted)]">{ds.loopDiagnosticsOpenAnomalies}</div>
                         <div className="mt-1 font-medium text-[var(--c-text-primary)]">
                           {openAnomalyCount}
@@ -482,7 +489,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
                     </div>
 
                     {latestRun?.message && (
-                      <div className="mt-2 rounded-md bg-[var(--c-bg-menu)] px-2 py-2 text-xs text-[var(--c-text-secondary)]">
+                      <div className="mt-2 rounded-md bg-[var(--c-bg-menu)] p-2 text-xs text-[var(--c-text-secondary)]">
                         {latestRun.message}
                       </div>
                     )}

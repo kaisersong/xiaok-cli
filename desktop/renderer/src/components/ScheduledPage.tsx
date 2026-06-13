@@ -90,6 +90,15 @@ const SCHEDULED_TASK_TIME_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
   hour12: false,
 });
 
+function readTimedActionUpdate(value: unknown): { reviewedAt?: number; updatedAt?: number } | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  return {
+    reviewedAt: typeof record.reviewedAt === 'number' ? record.reviewedAt : undefined,
+    updatedAt: typeof record.updatedAt === 'number' ? record.updatedAt : undefined,
+  };
+}
+
 const DAY_OPTIONS = [
   { value: 0 },
   { value: 1 },
@@ -493,7 +502,7 @@ export function ScheduledPage() {
     const desktop = getDesktopApi();
     if (!desktop?.approveTimedActionAuto) return;
     try {
-      const updated = await desktop.approveTimedActionAuto(task.id);
+      const updated = readTimedActionUpdate(await desktop.approveTimedActionAuto(task.id));
       if (updated) {
         saveTasks(tasks.map(t => t.id === task.id
           ? { ...t, reviewedAt: updated.reviewedAt ?? Date.now(), userApprovedAuto: true, updatedAt: updated.updatedAt ?? Date.now() }
@@ -508,7 +517,7 @@ export function ScheduledPage() {
     const desktop = getDesktopApi();
     if (!desktop?.revokeTimedActionAuto) return;
     try {
-      const updated = await desktop.revokeTimedActionAuto(task.id);
+      const updated = readTimedActionUpdate(await desktop.revokeTimedActionAuto(task.id));
       if (updated) {
         saveTasks(tasks.map(t => t.id === task.id
           ? { ...t, userApprovedAuto: false, updatedAt: updated.updatedAt ?? Date.now() }
