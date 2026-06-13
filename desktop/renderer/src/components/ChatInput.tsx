@@ -43,6 +43,9 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
   const slashMenuRef = useRef<HTMLDivElement>(null);
   const pastePathsRef = useRef<string[] | null>(null);
   const pasteHandlerRef = useRef<((e: ClipboardEvent) => void) | null>(null);
+  // Set to true when keydown Cmd+V starts a readClipboardFilePaths fetch,
+  // so the paste event handler skips its own hasFileItems branch.
+  const finderFilesPendingRef = useRef(false);
 
   const textareaCallbackRef = useCallback((el: HTMLTextAreaElement | null) => {
     // Remove old listener if element changes
@@ -83,8 +86,9 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       // Finder NSFilenamesPboardType — clipboard has file items but no text path.
       // DataTransferItem.kind === 'file' is detectable synchronously, so we can
       // call preventDefault() before going async to fetch the real paths via IPC.
+      // Skip if keydown Cmd+V already started a readClipboardFilePaths fetch.
       const hasFileItems = clipItems.some(item => item.kind === 'file');
-      if (hasFileItems && window.xiaokDesktop?.readClipboardFilePaths) {
+      if (hasFileItems && !finderFilesPendingRef.current && window.xiaokDesktop?.readClipboardFilePaths) {
         e.preventDefault();
         window.xiaokDesktop.readClipboardFilePaths().then(fp => {
           if (fp.length > 0) {
@@ -180,7 +184,9 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
     if (e.key === 'v' && e.metaKey && !e.shiftKey && !e.altKey && window.xiaokDesktop?.readClipboardFilePaths) {
       // Snapshot value before paste lands so we can restore it if files are found.
       const valueBeforePaste = internalValue;
+      finderFilesPendingRef.current = true;
       window.xiaokDesktop.readClipboardFilePaths().then(fp => {
+        finderFilesPendingRef.current = false;
         if (fp.length > 0) {
           const newFiles = fp.map(p => {
             const name = p.split('/').pop() || p;
@@ -192,7 +198,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
           setInternalValue(valueBeforePaste);
           onChange?.(valueBeforePaste);
         }
-      }).catch(() => {});
+      }).catch(() => { finderFilesPendingRef.current = false; });
       // Don't preventDefault here — if there are no file paths, normal text paste should proceed.
       // The paste event handler will fire afterward and handle text/image cases.
     }
