@@ -26,6 +26,7 @@ import { setupAutoUpdater, checkForUpdates, quitAndInstall, getUpdateStatus } fr
 import { createKSwarmService } from './kswarm-service.js';
 import { deployBundledPlugins } from './deploy-bundled-plugins.js';
 import { TimedActionStore } from './timed-action-store.js';
+import { ThreadMetaStore } from './thread-meta-store.js';
 import { TimedActionService } from './timed-action-service.js';
 import { TimedActionScheduler } from './timed-action-scheduler.js';
 import { createAgentTaskExecutor, createNotifyExecutor } from './timed-action-executors.js';
@@ -367,6 +368,44 @@ async function createWindow(): Promise<BrowserWindow> {
   });
   ipcMain.handle('desktop:timedAction:revokeAuto', (_event, actionId: string) => {
     return timedActionService.revokeAuto(actionId) ?? null;
+  });
+
+  // Thread meta (GTD / pinned) — persistent via SQLite in main process
+  const threadMetaStore = new ThreadMetaStore(join(dataRoot, 'thread-meta.sqlite'));
+  const broadcastThreadMeta = () => {
+    if (window.isDestroyed()) return;
+    window.webContents.send('desktop:threadMetaChanged', threadMetaStore.getAll());
+  };
+  ipcMain.handle('desktop:getThreadLabels', () => {
+    return threadMetaStore.getAll();
+  });
+  ipcMain.handle('desktop:setThreadLabel', (_event, threadId: string, label: string) => {
+    const result = threadMetaStore.addThreadToLabel(threadId, label as any);
+    if (result.ok) broadcastThreadMeta();
+    return result;
+  });
+  ipcMain.handle('desktop:unsetThreadLabel', (_event, threadId: string, label: string) => {
+    const result = threadMetaStore.removeThreadFromLabel(threadId, label as any);
+    if (result.ok) broadcastThreadMeta();
+    return result;
+  });
+  ipcMain.handle('desktop:moveThreadLabel', (_event, threadId: string, from: string, to: string) => {
+    const result = threadMetaStore.moveThread(threadId, from as any, to as any);
+    if (result.ok) broadcastThreadMeta();
+    return result;
+  });
+  ipcMain.handle('desktop:getAppFlag', (_event, key: string) => {
+    return threadMetaStore.getFlag(key as any);
+  });
+  ipcMain.handle('desktop:setAppFlag', (_event, key: string, value: string) => {
+    const result = threadMetaStore.setFlag(key as any, value);
+    if (result.ok) broadcastThreadMeta();
+    return result;
+  });
+  ipcMain.handle('desktop:migrateLegacyThreadMeta', (_event, data: any) => {
+    const result = threadMetaStore.bulkImport(data);
+    if (result.ok) broadcastThreadMeta();
+    return result;
   });
 
   app.on('before-quit', () => {

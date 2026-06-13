@@ -647,7 +647,37 @@ function shouldRequireArtifactEvidence(snapshot) {
     if (OPERATIONAL_PROMPT_PATTERN.test(prompt)) {
         return false;
     }
+    if (isExistingArtifactLookupPrompt(prompt)) {
+        return false;
+    }
+    if (hasClarificationResult(snapshot)) {
+        return false;
+    }
     return ARTIFACT_PROMPT_PATTERN.test(prompt);
 }
 const OPERATIONAL_PROMPT_PATTERN = /(?:定时任务|提醒我|提醒|闹钟|reminder|schedule|scheduled|继续推进|推进项目|诊断.*项目|项目.*诊断|恢复项目|修复项目|KSwarm|continue_project|让小K帮忙|问小K|卡住|阻塞|stuck project|(?:验证|测试|诊断|检查).*(?:CUA|xiaok_computer_use|cua-driver|Computer Use|computer-use)|(?:CUA|xiaok_computer_use|cua-driver|Computer Use|computer-use).*(?:验证|测试|诊断|检查))/iu;
 const ARTIFACT_PROMPT_PATTERN = /(?:ppt|pptx|幻灯片|演示文稿|slides?|deck|报告|文档|文章|故事|小故事|初稿|草稿|稿件|markdown|\.md\b|pdf|word|docx|excel|xlsx|表格|图表|图片|image|html|网页|文件|导出|保存为|生成.*(?:报告|文档|ppt|幻灯片|故事|文章|文件)|写.*(?:报告|文档|故事|文章|稿))/iu;
+const EXISTING_ARTIFACT_LOOKUP_PATTERN = /(?:在哪|哪里|目录|路径|位置|地址|怎么(?:复制|copy|打开|下载|拿到)|如何(?:复制|copy|打开|下载|拿到)|copy|复制|拷贝|打开|下载|拿到|给我.*(?:路径|目录|位置)|where|path|location|open|download|copy)/iu;
+const ARTIFACT_REFERENCE_PATTERN = /(?:ppt|pptx|幻灯片|演示文稿|slides?|deck|报告|文档|markdown|\.md\b|pdf|word|docx|excel|xlsx|图片|image|html|网页|文件|产物|artifact)/iu;
+const NEW_ARTIFACT_ACTION_PATTERN = /(?:生成|创建|新建|制作|做一份|做一个|写一份|写一个|撰写|编写|导出|保存为|渲染|generate|create|write|draft|make|build|produce|export|render)/iu;
+const CLARIFICATION_RESULT_PATTERN = /(?:\?|？|请(?:告诉我|补充|提供|确认|选择)|还(?:差|需要)|需要(?:你|用户)?(?:提供|补充|确认|告诉)|主题是什么|(?:什么|哪个|哪种).*(?:主题|风格|内容|材料|文件|路径)|告诉我.*(?:主题|风格|内容|材料|文件|路径))/iu;
+const COMPLETION_CLAIM_PATTERN = /(?:已(?:经)?(?:生成|完成|保存|创建|写好|导出|渲染)|生成完成|完成了|文件(?:已|已经)|pdf\s*已生成|ppt\s*已生成|报告(?:已经|已)?(?:写好|完成)|项目已创建成功)/iu;
+function isExistingArtifactLookupPrompt(prompt) {
+    if (!EXISTING_ARTIFACT_LOOKUP_PATTERN.test(prompt)) {
+        return false;
+    }
+    if (!ARTIFACT_REFERENCE_PATTERN.test(prompt)) {
+        return false;
+    }
+    return !NEW_ARTIFACT_ACTION_PATTERN.test(prompt);
+}
+function hasClarificationResult(snapshot) {
+    const summary = snapshot.result?.summary?.trim() ?? '';
+    if (!summary) {
+        return false;
+    }
+    if (!CLARIFICATION_RESULT_PATTERN.test(summary)) {
+        return false;
+    }
+    return !COMPLETION_CLAIM_PATTERN.test(summary);
+}

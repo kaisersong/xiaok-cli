@@ -988,7 +988,7 @@ export function MemorySettings({ accessToken }: Props) {
                     let baseUrl = memConfig.nowledge?.baseUrl ?? ''
                     if (!baseUrl) {
                       try {
-                        const api = (window as any).xiaokDesktop
+                        const api = getDesktopApi()
                         if (api?.connectionHealth) {
                           const result = await Promise.race([
                             api.connectionHealth('http://127.0.0.1:14242'),

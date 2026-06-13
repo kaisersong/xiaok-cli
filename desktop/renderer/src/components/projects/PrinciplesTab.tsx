@@ -75,10 +75,6 @@ interface ExtractionState {
   error?: string;
 }
 
-function getApi(): any {
-  return typeof window !== 'undefined' ? (window as any).xiaokDesktop : null;
-}
-
 export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigger?: number; importTrigger?: number }) {
   const { t } = useLocale();
   const [principles, setPrinciples] = useState<ProjectPrinciple[]>([]);
@@ -105,7 +101,7 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
 
   const loadQualityKnowledge = useCallback(async () => {
     try {
-      const api = getApi();
+      const api = getDesktopApi();
       const data = api?.kswarmProxyGet ? await api.kswarmProxyGet('/quality/knowledge') : null;
       if (!data) return;
       const builtinPacks = Array.isArray(data?.builtinPacks) ? data.builtinPacks : [];
@@ -795,7 +791,7 @@ function deriveKnowledgeTitle(content: string): string {
 }
 
 async function postQuality(path: string, body: unknown): Promise<any> {
-  const api = getApi();
+  const api = getDesktopApi();
   if (!api?.kswarmProxyPost) throw new Error('IPC unavailable');
   const data = await api.kswarmProxyPost(path, body);
   if (data === null || data === undefined || data?.ok === false) {

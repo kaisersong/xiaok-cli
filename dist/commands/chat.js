@@ -417,7 +417,9 @@ async function runChat(initialInput, opts) {
             }
             activateTrackedSkillPlan(parsed, event.agentId);
         }
-        catch { }
+        catch (e) {
+            log.warn('skill result JSON parse failed', e.message);
+        }
     };
     const observeSkillEvidence = (event) => {
         const invocation = getTrackedInvocation(event.agentId);
@@ -846,7 +848,9 @@ async function runChat(initialInput, opts) {
         try {
             scrollRegion.end();
         }
-        catch { }
+        catch (e) {
+            log.warn('scrollRegion.end failed in suspendInteractiveUi', e.message);
+        }
     };
     const runtimeState = new TuiRuntimeState({
         statusBar,
@@ -2974,7 +2978,9 @@ async function runChat(initialInput, opts) {
         try {
             scrollRegion.end();
         }
-        catch { }
+        catch (e) {
+            log.warn('scrollRegion.end failed in post-loop cleanup', e.message);
+        }
         setStreamErrorHandler(null);
         process.stdout.write = originalStdoutWrite;
         process.stderr.write = originalStderrWrite;

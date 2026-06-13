@@ -813,6 +813,147 @@ describe('InProcessTaskRuntimeHost', () => {
       ]));
     });
 
+    it('allows existing artifact location answers without requiring a new artifact', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'post_tool_use',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          toolName: 'bash',
+          toolInput: {},
+          toolResponse: '-rw-r--r-- 1 song staff 20916 /tmp/kf-multi-agent.html',
+          toolUseId: 'call_ls',
+        });
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '文件都在 `/tmp/` 下，可以 copy 出去。',
+        });
+      });
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        aheGuards: { artifactEvidence: true },
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: '文档目录在哪，我要copy出去',
+        materials: [],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed', 3000);
+      const recovered = await host.recoverTask('task_1');
+      expect(recovered.snapshot.events).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'error', message: 'Task is being completed without artifact evidence.' }),
+      ]));
+    });
+
+    it('allows clarification responses for artifact-like prompts without marking them failed', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '这个演示文稿的主题是什么？请告诉我主题和风格，我再继续生成。',
+        });
+      });
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        aheGuards: { artifactEvidence: true },
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: '演示文稿',
+        materials: [],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed', 3000);
+      const recovered = await host.recoverTask('task_1');
+      expect(recovered.snapshot.events).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'error', message: 'Task is being completed without artifact evidence.' }),
+      ]));
+    });
+
+    it('allows CUA product-tool validation completions with structured JSON reports', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'post_tool_use',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          toolName: 'xiaok_computer_use',
+          toolInput: { action: 'list_windows', on_screen_only: true },
+          toolResponse: JSON.stringify({ ok: true, action: 'list_windows', result: { windowCount: 6 } }),
+          toolUseId: 'call_windows',
+        });
+        emitRuntimeEvent({
+          type: 'post_tool_use',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          toolName: 'xiaok_computer_use',
+          toolInput: { action: 'capture', pid: 123, window_id: 456 },
+          toolResponse: JSON.stringify({ ok: true, action: 'capture', result: { text: 'xiaok window' } }),
+          toolUseId: 'call_capture',
+        });
+        emitRuntimeEvent({
+          type: 'post_tool_use',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          toolName: 'xiaok_computer_use',
+          toolInput: { action: 'screenshot', pid: 123, window_id: 456 },
+          toolResponse: JSON.stringify({ ok: true, action: 'screenshot', result: { image: 'png' } }),
+          toolUseId: 'call_screenshot',
+        });
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '{"usedTool":"xiaok_computer_use","windowCount":6,"captureHasTextOrStructuredContent":true,"screenshotHasImage":true,"errors":[]}',
+        });
+      });
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        aheGuards: { artifactEvidence: true },
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: '请只使用产品工具 xiaok_computer_use 验证 CUA，最后用 JSON 汇报 usedTool、windowCount、screenshotHasImage、errors。',
+        materials: [],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed', 3000);
+      const recovered = await host.recoverTask('task_1');
+      expect(recovered.snapshot.events).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'error', message: 'Task is being completed without artifact evidence.' }),
+      ]));
+    });
+
     it('allows create_project orchestration completions when project_card evidence exists', async () => {
       const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
         emitRuntimeEvent({

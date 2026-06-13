@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { MessageCircle, Zap } from 'lucide-react'
 import {
-  type ChannelBindingResponse,
   type ChannelResponse,
   type LlmProvider,
   type NapCatStatus,
@@ -10,10 +9,10 @@ import {
   createChannelBindCode,
   deleteChannelBinding,
   isApiError,
-  listChannelBindings,
   updateChannel,
   updateChannelBinding,
 } from '../../api'
+import { useChannelBindings, type ChannelBindingResponse } from '../../hooks/useChannelBindings'
 import { useLocale } from '../../contexts/LocaleContext'
 import { PillToggle } from '../shared'
 import {
@@ -63,23 +62,12 @@ export function DesktopQQSettingsPanel({
   const [defaultModel, setDefaultModel] = useState((channel?.config_json?.default_model as string | undefined) ?? '')
   const [bindCode, setBindCode] = useState<string | null>(null)
   const [generatingCode, setGeneratingCode] = useState(false)
-  const [bindings, setBindings] = useState<ChannelBindingResponse[]>([])
+  const { bindings, refresh: refreshBindings } = useChannelBindings({ accessToken, channelId: channel?.id })
   const [napCatStatus, setNapCatStatus] = useState<NapCatStatus | null>(null)
   const [onebotWSUrl, setOnebotWSUrl] = useState((channel?.config_json?.onebot_ws_url as string | undefined) ?? '')
   const [onebotHTTPUrl, setOnebotHTTPUrl] = useState((channel?.config_json?.onebot_http_url as string | undefined) ?? '')
   const [onebotToken, setOnebotToken] = useState((channel?.config_json?.onebot_token as string | undefined) ?? '')
   const [autoLoginUin, setAutoLoginUin] = useState((channel?.config_json?.auto_login_uin as string | undefined) ?? '')
-  const refreshBindings = useCallback(async () => {
-    if (!channel?.id) {
-      setBindings([])
-      return
-    }
-    try {
-      setBindings(await listChannelBindings(accessToken, channel.id))
-    } catch {
-      setBindings([])
-    }
-  }, [accessToken, channel?.id])
 
   useEffect(() => {
     setEnabled(channel?.is_active ?? false)
@@ -94,15 +82,6 @@ export function DesktopQQSettingsPanel({
     setOnebotToken((channel?.config_json?.onebot_token as string | undefined) ?? '')
     setAutoLoginUin((channel?.config_json?.auto_login_uin as string | undefined) ?? '')
   }, [channel, personas])
-
-  useEffect(() => {
-    void refreshBindings()
-    if (!channel?.id) return
-    const timer = window.setInterval(() => {
-      void refreshBindings()
-    }, 5000)
-    return () => window.clearInterval(timer)
-  }, [channel?.id, refreshBindings])
 
   const modelOptions = useMemo(() => buildModelOptions(providers), [providers])
   const personaOptions = useMemo(

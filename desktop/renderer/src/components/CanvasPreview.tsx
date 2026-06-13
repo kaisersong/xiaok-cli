@@ -98,15 +98,15 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
 
   const handleRevert = useCallback(() => {
     // Trigger revert via IPC
-    if (typeof window !== 'undefined' && (window as any).xiaokDesktop?.artifactRevert) {
-      (window as any).xiaokDesktop.artifactRevert(filePath);
+    if (typeof window !== 'undefined' && (getDesktopApi() as any)?.artifactRevert) {
+      (getDesktopApi() as any).artifactRevert(filePath);
     }
   }, [filePath]);
 
   const handleFinish = useCallback(() => {
     // Cleanup backups via IPC
-    if (typeof window !== 'undefined' && (window as any).xiaokDesktop?.artifactCleanup) {
-      (window as any).xiaokDesktop.artifactCleanup(filePath);
+    if (typeof window !== 'undefined' && (getDesktopApi() as any)?.artifactCleanup) {
+      (getDesktopApi() as any).artifactCleanup(filePath);
     }
   }, [filePath]);
 

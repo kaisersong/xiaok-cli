@@ -188,4 +188,11 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
       ipcRenderer.off(channel, listener);
     };
   },
+  getThreadLabels: () => ipcRenderer.invoke('desktop:getThreadLabels'),
+  setThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:setThreadLabel', threadId, label),
+  unsetThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:unsetThreadLabel', threadId, label),
+  moveThreadLabel: (threadId, from, to) => ipcRenderer.invoke('desktop:moveThreadLabel', threadId, from, to),
+  getAppFlag: (key) => ipcRenderer.invoke('desktop:getAppFlag', key),
+  setAppFlag: (key, value) => ipcRenderer.invoke('desktop:setAppFlag', key, value),
+  migrateLegacyThreadMeta: (data) => ipcRenderer.invoke('desktop:migrateLegacyThreadMeta', data),
 });

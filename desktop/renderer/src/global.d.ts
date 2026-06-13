@@ -1,8 +1,8 @@
-import type { DesktopApi } from '../../electron/preload-api.js';
+import type { FullDesktopApi } from '../../electron/preload-api.js';
 
 declare global {
   interface Window {
-    xiaokDesktop: DesktopApi;
+    xiaokDesktop: FullDesktopApi;
   }
   const __APP_VERSION__: string;
   const __APP_BUILD__: string;

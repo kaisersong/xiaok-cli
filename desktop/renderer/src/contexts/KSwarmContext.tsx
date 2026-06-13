@@ -7,6 +7,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useKSwarmClient, type KSwarmClientState, type KSwarmClientActions } from '../hooks/useKSwarmClient';
 import type { KSwarmServiceStatus } from '../../../electron/preload-api';
+import { getDesktopApi } from '../shared/desktop';
 
 interface KSwarmContextValue extends KSwarmClientState, KSwarmClientActions {
   serviceStatus: KSwarmServiceStatus | null;
@@ -19,7 +20,7 @@ export function KSwarmProvider({ children }: { children: ReactNode }) {
   const [serviceStatus, setServiceStatus] = useState<KSwarmServiceStatus | null>(null);
 
   useEffect(() => {
-    const api = (window as unknown as { xiaokDesktop: { kswarmGetStatus(): Promise<KSwarmServiceStatus>; onKSwarmStatus(cb: (s: KSwarmServiceStatus) => void): () => void } }).xiaokDesktop;
+    const api = getDesktopApi() as { kswarmGetStatus(): Promise<KSwarmServiceStatus>; onKSwarmStatus(cb: (s: KSwarmServiceStatus) => void): () => void } | null;
     if (!api) return;
 
     // Get initial status

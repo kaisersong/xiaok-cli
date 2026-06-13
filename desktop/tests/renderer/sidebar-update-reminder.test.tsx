@@ -46,6 +46,17 @@ vi.mock('../../renderer/src/contexts/LocaleContext', () => ({
   }),
 }));
 
+const mockThreadList = vi.hoisted(() => ({
+  threads: [] as unknown[],
+  removeThread: vi.fn(),
+  updateTitle: vi.fn(),
+  loading: false,
+}));
+
+vi.mock('../../renderer/src/contexts/thread-list', () => ({
+  useThreadList: () => mockThreadList,
+}));
+
 function renderSidebar(status: {
   checking: boolean;
   available: boolean;
@@ -57,6 +68,7 @@ function renderSidebar(status: {
   currentVersion?: string;
   error?: string;
 }, initialEntry = '/', threads: unknown[] = []) {
+  mockThreadList.threads = threads;
   mockApi.listThreads.mockResolvedValue(threads);
   mockApi.getThread.mockResolvedValue(null);
   mockApi.createThread.mockResolvedValue({

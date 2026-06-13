@@ -80,7 +80,7 @@ export class KSwarmStreamBridge {
         try {
           const data = JSON.parse(String(event.data)) as KSwarmStreamEvent;
           this.dispatchEvent(data);
-        } catch {}
+        } catch (e) { console.warn('[kswarm-bridge] malformed WS message:', (e as Error).message) }
       };
 
       ws.onclose = () => {

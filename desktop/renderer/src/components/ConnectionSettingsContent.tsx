@@ -123,12 +123,15 @@ export function ConnectionSettingsContent({ initialConfig = null }: Props) {
   }, [api, initialConfig])
 
   useEffect(() => {
-    if (!api || mode !== 'local' || sidecarRuntime.status !== 'running') return
-    const id = window.setInterval(() => {
-      void api.sidecar.getRuntime().then(setSidecarRuntime)
-    }, 10000)
-    return () => window.clearInterval(id)
-  }, [api, mode, sidecarRuntime.status])
+    if (!api) return
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void api.sidecar.getRuntime().then(setSidecarRuntime)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [api])
 
   const handleSave = useCallback(async () => {
     if (!api) return
@@ -192,7 +195,7 @@ export function ConnectionSettingsContent({ initialConfig = null }: Props) {
     }
 
     try {
-      const desktopApi = (window as any).xiaokDesktop
+      const desktopApi = getDesktopApi()
       if (desktopApi?.connectionHealthz) {
         const result = await desktopApi.connectionHealthz(url)
         setTestResult(result?.ok ? 'connected' : 'failed')

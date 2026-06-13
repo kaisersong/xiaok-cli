@@ -1,6 +1,6 @@
 import { createLogger } from '../lib/logger';
 import type {
-  DesktopApi,
+  FullDesktopApi,
   DesktopRelatedServiceId,
   DesktopServiceStatusSnapshot,
   DesktopModelConfigSnapshot,
@@ -16,11 +16,13 @@ import type {
   ConnectorTestResult,
 } from '../../../electron/preload-api';
 import type { ThreadRecord } from './types';
+import type { ChannelBindingResponse, ChannelIdentityResponse, Persona } from './types';
+import { getDesktopApi } from '../shared/desktop';
 
 // Declare window.xiaokDesktop with exact types from preload-api.ts
 declare global {
   interface Window {
-    xiaokDesktop: DesktopApi;
+    xiaokDesktop: FullDesktopApi;
   }
 }
 
@@ -401,6 +403,66 @@ export const api = {
       return { success: false, error: 'testChannel API not available' };
     }
     return await window.xiaokDesktop.testChannel(channelId);
+  },
+  async listChannelBindings(_accessToken: string, channelId: string): Promise<ChannelBindingResponse[]> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyGet) return [];
+    try {
+      const data = await api.kswarmProxyGet(`/channels/${channelId}/bindings`) as { bindings?: ChannelBindingResponse[] } | null;
+      return data?.bindings ?? [];
+    } catch {
+      return [];
+    }
+  },
+  async deleteChannelBinding(_accessToken: string, channelId: string, bindingId: string): Promise<void> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyDelete) return;
+    await api.kswarmProxyDelete(`/channels/${channelId}/bindings/${bindingId}`);
+  },
+  async updateChannelBinding(_accessToken: string, channelId: string, bindingId: string, patch: Record<string, unknown>): Promise<ChannelBindingResponse | null> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyPatch) return null;
+    return await api.kswarmProxyPatch(`/channels/${channelId}/bindings/${bindingId}`, patch) as ChannelBindingResponse | null;
+  },
+  async createChannelBindCode(_accessToken: string, channelType: string): Promise<{ token: string } | null> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyPost) return null;
+    return await api.kswarmProxyPost('/channel-bind-codes', { channelType }) as { token: string } | null;
+  },
+  async listChannelPersonas(_accessToken: string): Promise<Persona[]> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyGet) return [];
+    try {
+      const data = await api.kswarmProxyGet('/channel-personas') as { personas?: Persona[] } | null;
+      return data?.personas ?? [];
+    } catch {
+      return [];
+    }
+  },
+  async listMyChannelIdentities(_accessToken: string): Promise<ChannelIdentityResponse[]> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyGet) return [];
+    try {
+      const data = await api.kswarmProxyGet('/channel-identities/mine') as { identities?: ChannelIdentityResponse[] } | null;
+      return data?.identities ?? [];
+    } catch {
+      return [];
+    }
+  },
+  async unbindChannelIdentity(_accessToken: string, identityId: string): Promise<void> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyDelete) return;
+    await api.kswarmProxyDelete(`/channel-identities/${identityId}`);
+  },
+  async verifyChannel(_accessToken: string, channelId: string): Promise<{ verified: boolean }> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyPost) return { verified: false };
+    try {
+      const data = await api.kswarmProxyPost(`/channels/${channelId}/verify`, {}) as { verified?: boolean } | null;
+      return { verified: data?.verified ?? false };
+    } catch {
+      return { verified: false };
+    }
   },
 
   // ---------------------
@@ -997,6 +1059,32 @@ export function isApiError(error: unknown): boolean {
     return msg.includes('api') || msg.includes('provider') || msg.includes('model') || msg.includes('connection');
   }
   return false;
+}
+
+// Standalone function exports for thread-list.tsx compatibility (web-client naming convention).
+// These delegate to the `api` object methods.
+
+export async function listThreads(accessToken: string, options?: { limit?: number; before?: string; mode?: string }): Promise<ThreadRecord[]> {
+  void accessToken;
+  return api.listThreads(options);
+}
+
+export async function updateThreadSidebarState(accessToken: string, id: string, state: Record<string, unknown>): Promise<ThreadRecord | null> {
+  void accessToken;
+  await api.updateThreadSidebarState(id, state as Parameters<typeof api.updateThreadSidebarState>[1]);
+  return api.getThread(id);
+}
+
+export async function updateThreadMode(_accessToken: string, _threadId: string, _mode: string): Promise<void> {
+  // No-op: desktop uses ThreadMetaStore for GTD labels, not server-side mode
+}
+
+export async function streamThreadRunStateEvents(
+  _accessToken: string,
+  _options: { signal?: AbortSignal; onEvent?: (event: unknown) => void; onError?: (error: unknown) => void },
+): Promise<void> {
+  // No-op: desktop uses IPC-based SSE events, not direct HTTP streaming.
+  // The thread-list context falls back to polling when this returns immediately.
 }
 
 export type Api = typeof api;
