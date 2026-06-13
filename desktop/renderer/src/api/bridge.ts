@@ -15,7 +15,13 @@ import type {
   ProtocolId,
   ConnectorTestResult,
 } from '../../../electron/preload-api';
-import type { ThreadRecord } from './types';
+import type {
+  EvidenceAnomalyView,
+  LoopDefinitionView,
+  LoopRunView,
+  RunLoopNowResultView,
+  ThreadRecord,
+} from './types';
 import type { ChannelBindingResponse, ChannelIdentityResponse, Persona } from './types';
 import { getDesktopApi } from '../shared/desktop';
 
@@ -290,6 +296,22 @@ export const api = {
     const r = await window.xiaokDesktop.recoverTask(taskId);
     log.info('recoverTask ok', JSON.stringify({ status: r?.snapshot?.status }));
     return r;
+  },
+
+  async getLoopDefinitions(): Promise<LoopDefinitionView[]> {
+    return await window.xiaokDesktop.getLoopDefinitions() as LoopDefinitionView[];
+  },
+
+  async getLoopRuns(loopId: string): Promise<LoopRunView[]> {
+    return await window.xiaokDesktop.getLoopRuns(loopId) as LoopRunView[];
+  },
+
+  async getEvidenceAnomalies(loopId: string): Promise<EvidenceAnomalyView[]> {
+    return await window.xiaokDesktop.getEvidenceAnomalies(loopId) as EvidenceAnomalyView[];
+  },
+
+  async runLoopNow(loopId: string): Promise<RunLoopNowResultView> {
+    return await window.xiaokDesktop.runLoopNow(loopId) as RunLoopNowResultView;
   },
 
   // ---------------------

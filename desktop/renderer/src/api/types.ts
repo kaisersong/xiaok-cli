@@ -173,4 +173,58 @@ export type MemoryErrorEvent = { id: string; message: string; timestamp: number;
 // Run type
 export interface Run { id: string; threadId: string; status: string; createdAt: number; completedAt?: number }
 
+export type LoopDefinitionStatus = 'active' | 'paused';
+export type LoopRunStatus = 'running' | 'success' | 'failed' | 'blocked';
+export type EvidenceAnomalyStatus = 'open' | 'resolved' | 'ignored';
+
+export interface LoopDefinitionView {
+  id: string;
+  title: string;
+  description: string;
+  status: LoopDefinitionStatus;
+  activeRunId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface LoopRunView {
+  id: string;
+  loopId: string;
+  status: LoopRunStatus;
+  trigger: { kind: string; [key: string]: unknown };
+  evidenceIds: string[];
+  startedAt: number;
+  finishedAt?: number;
+  updatedAt: number;
+  failureKind?: string;
+  message?: string;
+  summary?: string;
+  nextActionKind?: string;
+  nextActionSummary?: string;
+}
+
+export interface EvidenceAnomalyView {
+  id: string;
+  loopId: string;
+  ownerKind: string;
+  ownerId: string;
+  kind: string;
+  status: EvidenceAnomalyStatus;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  lastResolvedAt?: number;
+  seenCount: number;
+  ignoredUntil?: number;
+  message: string;
+  evidenceIds: string[];
+  metadata: Record<string, unknown>;
+}
+
+export type RunLoopNowResultView =
+  | { status: 'success'; run: LoopRunView }
+  | { status: 'blocked'; run: LoopRunView }
+  | { status: 'failed'; run: LoopRunView }
+  | { status: 'already_running'; activeRunId: string }
+  | { status: 'skipped'; reason: 'paused' | 'missing_loop' };
+
 export interface UploadedThreadAttachment { id: string; fileName: string; fileSize: number }

@@ -65,6 +65,19 @@ describe('LoopStore', () => {
     ]));
   });
 
+  it('lists loop definitions without rewriting paused loop state', () => {
+    store.ensureBuiltInLoops(1_000);
+    store.setLoopStatus(ARTIFACT_LOOP_ID, 'paused', 1_500);
+
+    expect(store.listLoopDefinitions()).toEqual([
+      expect.objectContaining({
+        id: ARTIFACT_LOOP_ID,
+        status: 'paused',
+        updatedAt: 1_500,
+      }),
+    ]);
+  });
+
   it('claims activeRunId for the first run and rejects a second run on the same loop', () => {
     store.ensureBuiltInLoops(1_000);
 

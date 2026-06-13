@@ -139,8 +139,9 @@ async function createWindow(): Promise<BrowserWindow> {
     dataRoot,
     kswarmService,
   });
+  const loopRuntime = createDesktopLoopRuntime({ dataRoot });
 
-  await registerDesktopIpc(ipcMain, window, services);
+  await registerDesktopIpc(ipcMain, window, services, { loopRuntime });
   debugMain('createWindow:ipc-registered');
 
   try {
@@ -183,7 +184,6 @@ async function createWindow(): Promise<BrowserWindow> {
   const timedActionStore = new TimedActionStore(join(dataRoot, 'timed-actions.sqlite'));
   const timedActionService = new TimedActionService(timedActionStore);
   services.registerTimedActionService(timedActionService);
-  const loopRuntime = createDesktopLoopRuntime({ dataRoot });
 
   // Register channel tools with AI runner (for sending messages to yunzhijia, discord, etc.)
   services.registerChannelTools();

@@ -76,6 +76,10 @@ describe('preload API contract', () => {
       'onKSwarmStatus',
       'exportTraceBundle',
       'diagnose',
+      'getLoopDefinitions',
+      'getLoopRuns',
+      'getEvidenceAnomalies',
+      'runLoopNow',
       'syncScheduledTasks',
       'getScheduledTasks',
       'createScheduledTask',
@@ -123,6 +127,32 @@ describe('preload API contract', () => {
     expect(api).not.toHaveProperty('shell');
     expect(api).not.toHaveProperty('runPluginCommand');
     expect(api).not.toHaveProperty('rawRuntimeEvents');
+    expect(api).not.toHaveProperty('insertEvidence');
+    expect(api).not.toHaveProperty('completeLoopRun');
+    expect(api).not.toHaveProperty('completeTask');
+    expect(api).not.toHaveProperty('sql');
+    expect(api).not.toHaveProperty('query');
+    expect(api).not.toHaveProperty('execute');
+    expect(api).not.toHaveProperty('fs');
+  });
+
+  it('routes loop diagnostics through semantic IPC channels', async () => {
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue([]),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer);
+
+    await api.getLoopDefinitions();
+    await api.getLoopRuns('artifact-evidence-regression');
+    await api.getEvidenceAnomalies('artifact-evidence-regression');
+    await api.runLoopNow('artifact-evidence-regression');
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listDefinitions');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listRuns', 'artifact-evidence-regression');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listAnomalies', 'artifact-evidence-regression');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:runNow', 'artifact-evidence-regression');
   });
 
   it('routes plugin dependency operations through semantic IPC channels', async () => {

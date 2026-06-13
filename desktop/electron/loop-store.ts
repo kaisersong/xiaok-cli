@@ -123,6 +123,14 @@ export class LoopStore {
     return row ? this.definitionRowToRecord(row) : undefined;
   }
 
+  listLoopDefinitions(): LoopDefinition[] {
+    const rows = typedRows<LoopDefinitionRow>(this.db.prepare(`
+      select * from loop_definitions
+      order by id asc
+    `).all());
+    return rows.map(row => this.definitionRowToRecord(row));
+  }
+
   setLoopStatus(loopId: string, status: LoopDefinitionStatus, now: number): LoopDefinition | undefined {
     const result = this.db.prepare(`
       update loop_definitions

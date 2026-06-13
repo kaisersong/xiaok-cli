@@ -105,6 +105,10 @@ export const PRELOAD_API_KEYS = [
   'onKSwarmStatus',
   'exportTraceBundle',
   'diagnose',
+  'getLoopDefinitions',
+  'getLoopRuns',
+  'getEvidenceAnomalies',
+  'runLoopNow',
   'syncScheduledTasks',
   'getScheduledTasks',
   'createScheduledTask',
@@ -499,6 +503,10 @@ export interface DesktopApi {
   onKSwarmStatus(handler: (status: KSwarmServiceStatus) => void): () => void;
   exportTraceBundle(input: DesktopTraceTarget): Promise<{ ok: boolean; path?: string; error?: string }>;
   diagnose(input: DesktopTraceTarget): Promise<unknown>;
+  getLoopDefinitions(): Promise<unknown[]>;
+  getLoopRuns(loopId: string): Promise<unknown[]>;
+  getEvidenceAnomalies(loopId: string): Promise<unknown[]>;
+  runLoopNow(loopId: string): Promise<unknown>;
   syncScheduledTasks(tasks: Array<{ id: string; cronExpr: string; enabled: boolean }>): Promise<void>;
   getScheduledTasks(): Promise<unknown[]>;
   createScheduledTask(input: unknown): Promise<unknown>;
@@ -754,6 +762,10 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     },
     exportTraceBundle: (input) => ipcRenderer.invoke('desktop:trace:export', input) as Promise<{ ok: boolean; path?: string; error?: string }>,
     diagnose: (input) => ipcRenderer.invoke('desktop:diagnose', input) as Promise<unknown>,
+    getLoopDefinitions: () => ipcRenderer.invoke('desktop:loops:listDefinitions') as Promise<unknown[]>,
+    getLoopRuns: (loopId) => ipcRenderer.invoke('desktop:loops:listRuns', loopId) as Promise<unknown[]>,
+    getEvidenceAnomalies: (loopId) => ipcRenderer.invoke('desktop:loops:listAnomalies', loopId) as Promise<unknown[]>,
+    runLoopNow: (loopId) => ipcRenderer.invoke('desktop:loops:runNow', loopId) as Promise<unknown>,
     syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks) as Promise<void>,
     getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks') as Promise<unknown[]>,
     createScheduledTask: (input) => ipcRenderer.invoke('desktop:createScheduledTask', input) as Promise<unknown>,
