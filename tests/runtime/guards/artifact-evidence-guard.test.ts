@@ -1,5 +1,48 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateArtifactEvidenceGuard } from '../../../src/runtime/guards/artifact-evidence-guard.js';
+import {
+  mergeCompletionExpectations,
+  validateCompletionEvidence,
+  type CompletionEvidenceRecord,
+  type CompletionExpectation,
+} from '../../../src/runtime/guards/completion-evidence.js';
+
+function taskExpectation(input: {
+  ownerId?: string;
+  expectedKinds: CompletionExpectation['expectedKinds'];
+  source?: CompletionExpectation['source'];
+  confidence?: CompletionExpectation['confidence'];
+}): CompletionExpectation {
+  return {
+    ownerKind: 'task',
+    ownerId: input.ownerId ?? 'item-1',
+    expectedKinds: input.expectedKinds,
+    source: input.source ?? 'task_spec',
+    confidence: input.confidence ?? 'explicit',
+  };
+}
+
+function taskEvidence(input: Pick<CompletionEvidenceRecord, 'kind'> & Partial<CompletionEvidenceRecord>): CompletionEvidenceRecord {
+  return {
+    ownerKind: 'task',
+    ownerId: 'item-1',
+    summary: 'Evidence summary',
+    ...input,
+  };
+}
+
+function validateCompletedEvidence(input: {
+  expectedKinds: CompletionExpectation['expectedKinds'];
+  evidence: CompletionEvidenceRecord[];
+}) {
+  return validateCompletionEvidence({
+    ownerKind: 'task',
+    ownerId: 'item-1',
+    targetStatus: 'completed',
+    expectation: taskExpectation({ expectedKinds: input.expectedKinds }),
+    evidence: input.evidence,
+  });
+}
 
 describe('ArtifactEvidenceGuard', () => {
   it('blocks completed task submission when no artifact evidence exists', () => {
@@ -26,5 +69,416 @@ describe('ArtifactEvidenceGuard', () => {
   it('passes non-terminal or artifact-backed tasks', () => {
     expect(evaluateArtifactEvidenceGuard({ taskId: 'item-1', status: 'in_progress', artifacts: [] }).ok).toBe(true);
     expect(evaluateArtifactEvidenceGuard({ taskId: 'item-2', status: 'done', artifacts: ['artifact-1'] }).ok).toBe(true);
+  });
+
+  it('passes answer completions when valid answer evidence exists', () => {
+    const decision = evaluateArtifactEvidenceGuard({
+      taskId: 'item-1',
+      status: 'completed',
+      artifacts: [],
+      expectation: taskExpectation({ expectedKinds: ['answer'] }),
+      evidence: [{
+        ownerKind: 'task',
+        ownerId: 'item-1',
+        kind: 'answer',
+        summary: '问题已直接回答。',
+        metadata: { responseId: 'resp-1' },
+      }],
+    });
+
+    expect(decision.ok).toBe(true);
+  });
+
+  it('blocks completion when expectation and evidence belong to a different task', () => {
+    const decision = evaluateArtifactEvidenceGuard({
+      taskId: 'item-1',
+      status: 'completed',
+      artifacts: [],
+      expectation: taskExpectation({ ownerId: 'item-2', expectedKinds: ['answer'] }),
+      evidence: [{
+        ownerKind: 'task',
+        ownerId: 'item-2',
+        kind: 'answer',
+        summary: '问题已直接回答。',
+        metadata: { responseId: 'resp-1' },
+      }],
+    });
+
+    expect(decision).toMatchObject({
+      ok: false,
+      mode: 'block',
+    });
+  });
+
+  it('blocks file artifact completions when only answer evidence exists', () => {
+    const decision = evaluateArtifactEvidenceGuard({
+      taskId: 'item-1',
+      status: 'completed',
+      artifacts: [],
+      expectation: taskExpectation({ expectedKinds: ['file_artifact'] }),
+      evidence: [{
+        ownerKind: 'task',
+        ownerId: 'item-1',
+        kind: 'answer',
+        summary: '问题已直接回答。',
+        metadata: { responseId: 'resp-1' },
+      }],
+    });
+
+    expect(decision).toMatchObject({
+      ok: false,
+      mode: 'block',
+    });
+  });
+
+  it('fails answer evidence validation without response id or snapshot hash', () => {
+    const result = validateCompletionEvidence({
+      ownerKind: 'task',
+      ownerId: 'item-1',
+      targetStatus: 'completed',
+      expectation: taskExpectation({ expectedKinds: ['answer'] }),
+      evidence: [{
+        ownerKind: 'task',
+        ownerId: 'item-1',
+        kind: 'answer',
+        summary: '问题已直接回答。',
+        metadata: { responseId: '', responseSnapshotHash: '' },
+      }],
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      failureKind: 'validation_failed',
+    });
+  });
+
+  it('rejects legacy expectations for completed owners', () => {
+    const result = validateCompletionEvidence({
+      ownerKind: 'task',
+      ownerId: 'item-1',
+      targetStatus: 'completed',
+      expectation: taskExpectation({
+        expectedKinds: ['answer'],
+        source: 'legacy_classifier',
+        confidence: 'legacy',
+      }),
+      evidence: [{
+        ownerKind: 'task',
+        ownerId: 'item-1',
+        kind: 'answer',
+        summary: '问题已直接回答。',
+        metadata: { responseId: 'resp-1' },
+      }],
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      failureKind: 'validation_failed',
+    });
+  });
+
+  it('rejects blocked evidence for completed owners', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['blocked'],
+      evidence: [taskEvidence({
+        kind: 'blocked',
+        summary: '等待用户补充信息。',
+      })],
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('runs completion validation for success status in the guard', () => {
+    const decision = evaluateArtifactEvidenceGuard({
+      taskId: 'item-1',
+      status: 'success',
+      artifacts: [],
+      expectation: taskExpectation({
+        expectedKinds: ['answer'],
+        source: 'legacy_classifier',
+        confidence: 'legacy',
+      }),
+      evidence: [{
+        ownerKind: 'task',
+        ownerId: 'item-1',
+        kind: 'answer',
+        summary: '问题已直接回答。',
+        metadata: { responseId: 'resp-1' },
+      }],
+    });
+
+    expect(decision).toMatchObject({
+      ok: false,
+      mode: 'block',
+    });
+  });
+
+  it('passes blocked targets when blocked evidence exists without an expectation', () => {
+    const result = validateCompletionEvidence({
+      ownerKind: 'task',
+      ownerId: 'item-1',
+      targetStatus: 'blocked',
+      evidence: [{
+        ownerKind: 'task',
+        ownerId: 'item-1',
+        kind: 'blocked',
+        summary: '等待用户补充信息。',
+      }],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('ignores historical blocked evidence when valid answer evidence completes the owner', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['answer'],
+      evidence: [
+        taskEvidence({
+          kind: 'blocked',
+          summary: '',
+        }),
+        taskEvidence({
+          kind: 'answer',
+          summary: '问题已直接回答。',
+          metadata: { responseId: 'resp-1' },
+        }),
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects completed owners when same-owner non-blocked evidence has a blank summary', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['answer'],
+      evidence: [
+        taskEvidence({
+          kind: 'answer',
+          summary: '问题已直接回答。',
+          metadata: { responseId: 'resp-1' },
+        }),
+        taskEvidence({
+          kind: 'file_artifact',
+          summary: '  ',
+          uri: 'file:///tmp/report.md',
+        }),
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects file artifact evidence with a blank summary', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['file_artifact'],
+      evidence: [taskEvidence({
+        kind: 'file_artifact',
+        summary: '  ',
+        uri: 'file:///tmp/report.md',
+      })],
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      failureKind: 'validation_failed',
+    });
+  });
+
+  it('rejects file artifact evidence with blank paths', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['file_artifact'],
+      evidence: [taskEvidence({
+        kind: 'file_artifact',
+        metadata: { paths: [''] },
+      })],
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects file artifact evidence when any path is invalid', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['file_artifact'],
+      evidence: [taskEvidence({
+        kind: 'file_artifact',
+        metadata: { paths: ['/tmp/report.md', ''] },
+      })],
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('passes valid file artifact evidence', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['file_artifact'],
+      evidence: [taskEvidence({
+        kind: 'file_artifact',
+        metadata: { paths: ['/tmp/report.md'] },
+      })],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects command action evidence with malformed commands', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['command_action'],
+      evidence: [taskEvidence({
+        kind: 'command_action',
+        metadata: { commands: [{}] },
+      })],
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects command action evidence when any command is invalid', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['command_action'],
+      evidence: [taskEvidence({
+        kind: 'command_action',
+        metadata: {
+          commands: [
+            { command: 'npm test', exitCode: 0, summary: 'Tests passed.' },
+            {},
+          ],
+        },
+      })],
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('passes valid command action evidence', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['command_action'],
+      evidence: [taskEvidence({
+        kind: 'command_action',
+        metadata: {
+          commands: [{ command: 'npm test', exitCode: 0, summary: 'Tests passed.' }],
+        },
+      })],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects project update evidence with blank changed tasks', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['project_update'],
+      evidence: [taskEvidence({
+        kind: 'project_update',
+        metadata: { projectId: 'project-1', changedTasks: [''] },
+      })],
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects project update evidence when any changed task is invalid', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['project_update'],
+      evidence: [taskEvidence({
+        kind: 'project_update',
+        metadata: { projectId: 'project-1', changedTasks: ['task-1', null] },
+      })],
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('passes valid project update evidence', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['project_update'],
+      evidence: [taskEvidence({
+        kind: 'project_update',
+        metadata: { projectId: 'project-1', changedTasks: ['task-1'] },
+      })],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects log diagnostic evidence with summary only', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['log_diagnostic'],
+      evidence: [taskEvidence({
+        kind: 'log_diagnostic',
+        summary: 'No errors found.',
+      })],
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects log diagnostic evidence when any finding is invalid', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['log_diagnostic'],
+      evidence: [taskEvidence({
+        kind: 'log_diagnostic',
+        metadata: { findings: ['ok', {}] },
+      })],
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('passes valid log diagnostic evidence with findings', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['log_diagnostic'],
+      evidence: [taskEvidence({
+        kind: 'log_diagnostic',
+        metadata: { findings: ['No errors found.'] },
+      })],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('merges expectations by priority and same-level intersection', () => {
+    expect(mergeCompletionExpectations([
+      taskExpectation({ expectedKinds: ['file_artifact'], confidence: 'inferred', source: 'tool_schema' }),
+      taskExpectation({ expectedKinds: ['answer'], confidence: 'explicit', source: 'task_spec' }),
+    ])).toMatchObject({
+      confidence: 'explicit',
+      expectedKinds: ['answer'],
+    });
+
+    expect(mergeCompletionExpectations([
+      taskExpectation({ expectedKinds: ['answer', 'file_artifact'] }),
+      taskExpectation({ expectedKinds: ['file_artifact', 'command_action'] }),
+    ])).toMatchObject({
+      expectedKinds: ['file_artifact'],
+    });
+
+    const conflict = mergeCompletionExpectations([
+      taskExpectation({ expectedKinds: ['answer'] }),
+      taskExpectation({ expectedKinds: ['file_artifact'] }),
+    ]);
+    expect(conflict).toBeDefined();
+    expect(conflict?.expectedKinds).toEqual([]);
+    if (!conflict) {
+      throw new Error('expected conflicting expectations to preserve an empty expectedKinds contract');
+    }
+
+    const decision = evaluateArtifactEvidenceGuard({
+      taskId: 'item-1',
+      status: 'completed',
+      artifacts: ['artifact-1'],
+      expectation: conflict,
+      evidence: [{
+        ownerKind: 'task',
+        ownerId: 'item-1',
+        kind: 'answer',
+        summary: '问题已直接回答。',
+        metadata: { responseId: 'resp-1' },
+      }],
+    });
+
+    expect(decision).toMatchObject({
+      ok: false,
+      mode: 'block',
+    });
   });
 });
