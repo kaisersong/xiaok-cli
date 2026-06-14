@@ -19,6 +19,33 @@
 | **重命名任务延迟** | 27.6s | 180.8s | **-85%** |
 | **Token 效率** | 100% | 250% | **-60%** |
 
+## Xiaok 中的 Loop Engineering
+
+Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent 做一次事，而是设计一套系统，让它持续发现工作、运行工作、检查工作、记住进度，并决定下一步该做什么。
+
+在 Xiaok 里，prompt 是一次请求，harness 是让一次请求更可靠的执行环境，loop 则是围绕重复 AI 工作建立的持久化运行系统。
+
+| Loop 构建块 | Xiaok 中的落地 |
+|-------------|----------------|
+| **Automation** | Desktop scheduler、内置 loops、提醒、项目/workflow 触发器，给重复工作一个节奏，而不是每次靠人手动 prompt。 |
+| **Work isolation** | KSwarm project、workflow run、task runtime host，以及代码任务里的 git/worktree 感知流程，避免并行工作互相覆盖。 |
+| **Skills** | Skill 文件把项目约定、执行步骤、输入输出合同、复核标准写成可复用行为，不再靠每次临场写 prompt。 |
+| **Connectors** | MCP 插件、内置 report/slide renderer、Intent Broker、KSwarm、文件系统和可选 channel，把 loop 连接到真实数据和真实产物。 |
+| **Sub-agents** | KSwarm 的 PO/worker/reviewer 角色和动态 workflow 分支，把 maker 和 checker 分开；无人值守 loop 不能只依赖自检。 |
+| **Memory** | SQLite store、broker event replay、project state、workflow checkpoint、loop run record 和 artifact manifest，让 loop 可以跨会话延续。 |
+| **Evidence** | Completion guard、deliverable contract、artifact provenance，以及 v1.4.4 的 loop evidence store，让“完成”不是模型说完成，而是有可检查的产物证据。 |
+| **Diagnostics** | 只读 loop diagnostics 和 evidence regression scan 把 silent failure 提前暴露出来，避免后台悄悄坏一周。 |
+
+第一条内置生产 loop 是 **Artifact Evidence Regression Loop**。它会定期扫描最近完成的任务，查找缺失 artifact、陈旧 run state 和异常交付结果，并写入结构化 diagnostics。这代表 Xiaok 正在走向的模式：人设计 loop，Xiaok 运行 loop，独立 evidence 判断工作是否真的完成。
+
+最小可用的 Xiaok loop 可以很简单：
+
+1. 写一个或复用一个 skill，定义工作内容和输出合同。
+2. 加一个触发器，例如 scheduled task、project workflow 或手动运行按钮。
+3. 把 memory 持久化到 project state、文件或 SQLite。
+4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
+5. 让失败可见，例如 diagnostics、changelog 或通知。
+
 **v1.4.4 新特性：**
 
 - **Loop Evidence System**：Desktop 任务完成现在会把 artifact evidence 持久化到 SQLite，并在 completion guard 运行前先判断任务是否要求硬产物。这补上了反复出现的“task completed without artifact evidence”路径，避免 UI 报告完成但没有可验证交付物。

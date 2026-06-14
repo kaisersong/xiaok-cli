@@ -19,6 +19,33 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+## Loop Engineering in Xiaok
+
+Xiaok is designed around **Loop Engineering**: the shift from prompting one agent once to designing a system that keeps finding work, running it, checking it, remembering what happened, and deciding what should happen next.
+
+In Xiaok terms, a prompt is a single request, a harness is the execution environment that helps one request succeed, and a loop is the durable operating system around repeated AI work.
+
+| Loop building block | Xiaok implementation |
+|---------------------|----------------------|
+| **Automation** | Desktop scheduler, built-in loops, reminders, and project/workflow triggers give repeated work a rhythm instead of relying on manual prompting. |
+| **Work isolation** | KSwarm projects, workflow runs, task runtime hosts, and git/worktree-aware coding flows keep parallel work from overwriting itself. |
+| **Skills** | Skill files turn project conventions, execution steps, input/output contracts, and review criteria into reusable behavior instead of one-off prompts. |
+| **Connectors** | MCP plugins, bundled report/slide renderers, Intent Broker, KSwarm, filesystem access, and optional channels connect loops to real data and real outputs. |
+| **Sub-agents** | KSwarm PO/worker/reviewer roles and dynamic workflow branches separate maker work from checker work, because self-review is not enough for unattended loops. |
+| **Memory** | SQLite stores, broker event replay, project state, workflow checkpoints, loop run records, and artifact manifests let loops survive across sessions. |
+| **Evidence** | Completion guards, deliverable contracts, artifact provenance, and the v1.4.4 loop evidence store make "done" mean "there is inspectable output", not just "the model said done". |
+| **Diagnostics** | Read-only loop diagnostics and evidence regression scans surface silent failures before they become invisible product debt. |
+
+The first built-in production loop is the **Artifact Evidence Regression Loop**. It periodically scans recent completions for missing artifacts, stale run state, and anomalous delivery outcomes, then records structured diagnostics. This is the pattern Xiaok is moving toward: the human designs the loop, Xiaok runs it, and independent evidence decides whether the work is actually complete.
+
+The smallest useful Xiaok loop is intentionally simple:
+
+1. Write or reuse a skill that defines the work and output contract.
+2. Add a trigger such as a scheduled task, project workflow, or manual run button.
+3. Persist memory in project state, a file, or SQLite.
+4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
+5. Make failure visible through diagnostics, changelogs, or notifications.
+
 **What's New in v1.4.4:**
 
 - **Loop Evidence System**: Desktop task completion now records durable artifact evidence in SQLite and classifies required artifact contracts before the completion guard runs. This closes the repeated "task completed without artifact evidence" regression path where the UI could report completion without a verifiable deliverable.
