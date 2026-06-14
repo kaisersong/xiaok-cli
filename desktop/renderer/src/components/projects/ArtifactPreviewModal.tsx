@@ -7,6 +7,7 @@ import { X, Download } from 'lucide-react';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmArtifact } from '../../hooks/useKSwarmClient';
 import { artifactDisplayName, downloadArtifact, resolveArtifactUrl } from './artifactActions';
+import { getDesktopApi } from '../../shared/desktop';
 
 interface ArtifactPreviewModalProps {
   artifact: KSwarmArtifact;
@@ -41,11 +42,11 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
           setLoading(false);
           return;
         }
-        const api = (window as any).xiaokDesktop;
+        const api = getDesktopApi();
         let text: string;
-        const kswarmBase = 'http://127.0.0.1:4400';
-        if (url.startsWith(kswarmBase) && api?.kswarmProxyGetText) {
-          const path = url.slice(kswarmBase.length);
+        const kswarmPrefix = '/api/kswarm';
+        if (url.includes(':4400') && api?.kswarmProxyGetText) {
+          const path = new URL(url).pathname;
           const data = await api.kswarmProxyGetText(path);
           if (data === null || data === undefined) throw new Error('fetch failed');
           text = data;

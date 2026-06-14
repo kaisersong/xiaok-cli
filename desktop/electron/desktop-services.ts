@@ -32,7 +32,6 @@ import { createEmptySessionIntentLedger, cloneSessionIntentLedger, createIntentL
 import { DELEGATION_TEMPLATES } from '../../src/ai/intent-delegation/templates.js';
 import { buildSkillInvocation, createSkillBundleRefsTool, checkBudget, appendTrace } from './skill-runtime.js';
 import type { SkillInvocation } from './skill-runtime.js';
-import type { ReminderScheduler } from './reminder-scheduler.js';
 import type { Tool } from '../../src/types.js';
 import type { TimedActionService } from './timed-action-service.js';
 import type { TimedActionTrigger } from './timed-action-types.js';
@@ -249,7 +248,7 @@ async function appendExecRecord(dataRoot: string, record: SkillExecRecord): Prom
     if (records.length > MAX_EXEC_RECORDS) records.splice(0, records.length - MAX_EXEC_RECORDS);
     mkdirSync(dirname(filePath), { recursive: true });
     await writeFileAsync(filePath, JSON.stringify(records));
-  } catch { /* silent */ }
+  } catch (e) { console.warn('[exec-record] append failed:', (e as Error).message) }
 }
 
 async function loadExecRecords(dataRoot: string): Promise<SkillExecRecord[]> {
@@ -333,9 +332,9 @@ const CUA_DRIVER_DEPENDENCY: ExternalPluginDependency = {
     requiresUserConfirmation: true,
   },
   update: {
-    kind: 'command',
-    command: '~/.local/bin/cua-driver',
-    args: ['update'],
+    kind: 'official_installer',
+    sourceUrl: 'https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh',
+    sourceAllowlist: ['https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh'],
     requiresUserConfirmation: true,
   },
   health: {
@@ -988,15 +987,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   });
 
   const createKSwarmTaskHost = (workspaceRoot: string) => {
-    if (options.runner) return host;
     const scopedTools = buildToolList(undefined, { cwd: workspaceRoot });
     const scopedRegistry = new ToolRegistry({ autoMode: true }, scopedTools);
     return new InProcessTaskRuntimeHost({
       materialRegistry,
       snapshotStore,
-      runner: createDesktopModelRunnerWithRegistry(scopedRegistry, scopedTools, options.dataRoot, options.kswarmService, materialRegistry, kswarmCreateProjectToolOptions),
+      runner: options.runner ?? createDesktopModelRunnerWithRegistry(scopedRegistry, scopedTools, options.dataRoot, options.kswarmService, materialRegistry, kswarmCreateProjectToolOptions),
       now: options.now,
-      aheGuards: { artifactEvidence: true, recoveryContinuity: true },
+      aheGuards: { artifactEvidence: false, recoveryContinuity: true },
       createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
       createSessionId: () => `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     });
@@ -1035,7 +1033,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       handoff.task.evidenceContract ? `外部来源证据要求：${JSON.stringify(handoff.task.evidenceContract)}` : '',
       handoff.task.repairInstruction ? `修复反馈：${handoff.task.repairInstruction}` : '',
       requiresArtifactEvidence ? '本任务必须写入至少一个完整产物文件到产物目录；不要只在摘要里描述文件，最终交接必须能看到文件路径。' : '',
-      '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，把产物文件写入上面的产物目录，使用文件路径作为交接依据，并返回 result manifest。',
+      requiresArtifactEvidence
+        ? '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，把产物文件写入上面的产物目录，使用文件路径作为交接依据，并返回 result manifest。'
+        : '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，并返回 result manifest。如果任务没有要求生成文件，artifacts 可以为空数组，但 summary 必须说明完成了哪些要求。',
     ].filter(Boolean).join('\n');
     const created = await taskHost.createTask({ prompt, materials: [] });
     const cancelCreatedTask = () => {
@@ -1139,13 +1139,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const taskHost = createKSwarmTaskHost(workspaceRoot);
     const runStartedAt = Date.now();
     const prompt = buildKSwarmWorkflowNodePrompt(handoff, targetParticipantId || 'xiaok-worker', { artifactsDir });
-    const { summary, artifacts } = await runKSwarmRuntimeTextTask(taskHost, prompt, {
+    const runtimeResult = await runKSwarmRuntimeTextTask(taskHost, prompt, {
       artifactsDir,
       runStartedAt,
     });
+    const { summary, artifacts } = runtimeResult;
     let parsed: Record<string, unknown>;
     try {
-      parsed = extractKSwarmJsonObject(summary);
+      parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
     } catch {
       console.warn('[kswarm-workflow-node] structured JSON extraction failed, fallback applied', {
         nodeKind: handoff.nodeKind,
@@ -1211,8 +1212,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const members = readStringArray(payload.members);
       const fallbackWorkerId = members[0] || 'xiaok-worker';
       const prompt = buildKSwarmAssignPoPrompt(payload, fallbackWorkerId);
-      const { summary } = await runKSwarmRuntimeTextTask(host, prompt);
-      const parsed = extractKSwarmJsonObject(summary);
+      const runtimeResult = await runKSwarmRuntimeTextTask(host, prompt);
+      const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
       const plan = normalizeKSwarmPlan(isRecord(parsed.plan) ? parsed.plan : parsed, fallbackWorkerId, {
         userGoal: readString(payload.goal),
         userRequirements: readString(payload.requirements),
@@ -1303,8 +1304,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if (!projectId || !taskId) return { ok: false as const, error: 'project_or_task_id_missing' };
       const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
       const reviewPrompt = buildKSwarmReviewPrompt(payload);
-      const { summary } = await runKSwarmRuntimeTextTask(host, reviewPrompt);
-      const parsed = extractKSwarmJsonObject(summary);
+      const runtimeResult = await runKSwarmRuntimeTextTask(host, reviewPrompt);
+      const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
       const review = normalizeKSwarmReview(isRecord(parsed.review) ? parsed.review : parsed);
 
       await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}/review`, {
@@ -1364,86 +1365,6 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     async testConnectorProvider(kind: 'search' | 'fetch') {
       return connectorsService.testProvider(kind);
-    },
-    registerReminderScheduler(scheduler: ReminderScheduler) {
-      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const reminderTools: Tool[] = [
-        {
-          permission: 'safe',
-          definition: {
-            name: 'reminder_create',
-            description: '创建一个定时提醒。当用户说"定时任务"、"提醒我"、"过X分钟提醒"等时使用此工具。',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                content: { type: 'string', description: '提醒内容' },
-                schedule_at: { type: 'number', description: '提醒时间戳（毫秒）' },
-                timezone: { type: 'string', description: '时区，默认使用系统时区' },
-              },
-              required: ['content', 'schedule_at'],
-            },
-          },
-          async execute(input) {
-            const content = String(input.content ?? '').trim();
-            const scheduleAt = Number(input.schedule_at ?? 0);
-            if (!content || scheduleAt <= 0) {
-              return 'Error: content 和 schedule_at 不能为空';
-            }
-            const tz = String(input.timezone ?? timezone);
-            const record = scheduler.createReminder(content, scheduleAt, tz);
-            return JSON.stringify({
-              reminderId: record.reminderId,
-              status: record.status,
-              content: record.content,
-              scheduleAt: record.scheduleAt,
-              timezone: record.timezone,
-              createdAt: record.createdAt,
-            }, null, 2);
-          },
-        },
-        {
-          permission: 'safe',
-          definition: {
-            name: 'reminder_list',
-            description: '列出所有活跃的提醒',
-            inputSchema: { type: 'object', properties: {} },
-          },
-          async execute() {
-            const reminders = scheduler.listReminders();
-            return JSON.stringify(reminders.map(r => ({
-              reminderId: r.reminderId,
-              status: r.status,
-              content: r.content,
-              scheduleAt: r.scheduleAt,
-              timezone: r.timezone,
-              createdAt: r.createdAt,
-            })), null, 2);
-          },
-        },
-        {
-          permission: 'safe',
-          definition: {
-            name: 'reminder_cancel',
-            description: '取消一个提醒',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                reminder_id: { type: 'string', description: '提醒 ID' },
-              },
-              required: ['reminder_id'],
-            },
-          },
-          async execute(input) {
-            const id = String(input.reminder_id ?? '').trim();
-            if (!id) return 'Error: reminder_id 不能为空';
-            const ok = scheduler.cancelReminder(id);
-            return ok ? `已取消提醒 ${id}` : `未找到提醒 ${id}`;
-          },
-        },
-      ];
-      for (const tool of reminderTools) {
-        registry.registerTool(tool);
-      }
     },
     registerChannelTools() {
       const channelTools: Tool[] = [
@@ -1729,6 +1650,25 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if (!dependency.update) return { success: false, error: 'plugin_dependency_update_not_available' };
       if (dependency.update.requiresUserConfirmation && !input.confirmed) {
         return { success: false, error: 'confirmation_required' };
+      }
+      if (dependency.update.kind === 'official_installer') {
+        const updateConfig = dependency.update;
+        if (updateConfig.sourceAllowlist && !updateConfig.sourceAllowlist.includes(updateConfig.sourceUrl)) {
+          return { success: false, error: 'installer_source_not_allowed' };
+        }
+        try {
+          const installerDir = join(options.dataRoot, 'runtime', 'plugin-installers');
+          mkdirSync(installerDir, { recursive: true });
+          const res = await fetch(updateConfig.sourceUrl);
+          if (!res.ok) return { success: false, error: `installer_download_failed_${res.status}` };
+          const installerPath = join(installerDir, `${dependency.id}-update-${Date.now()}.sh`);
+          await writeFileAsync(installerPath, Buffer.from(await res.arrayBuffer()));
+          const result = await runDependencyCommand('/bin/bash', [installerPath]);
+          if (!result.success) return { success: false, error: result.error };
+          return { success: true, status: await getDependencyStatusView(entry) };
+        } catch (error) {
+          return { success: false, error: error instanceof Error ? error.message : String(error) };
+        }
       }
       const status = await getDependencyStatusView(entry);
       if (!status.resolvedBinary) return { success: false, error: 'plugin_dependency_binary_missing' };
@@ -2334,7 +2274,7 @@ async function runKSwarmRuntimeTextTask(
   host: InProcessTaskRuntimeHost,
   prompt: string,
   options: { artifactsDir?: string; runStartedAt?: number } = {},
-): Promise<{ taskId: string; summary: string; artifacts: Array<{ path: string; kind: string; label?: string }> }> {
+): Promise<{ taskId: string; summary: string; structuredOutput?: Record<string, unknown>; artifacts: Array<{ path: string; kind: string; label?: string }> }> {
   const runStartedAt = options.runStartedAt || Date.now();
   const maxAttempts = 2;
   let lastFailure: string | null = null;
@@ -2358,6 +2298,7 @@ async function runKSwarmRuntimeTextTask(
         return {
           taskId: created.taskId,
           summary: recovered.snapshot.result?.summary || '',
+          structuredOutput: isRecord(recovered.snapshot.result?.structuredOutput) ? recovered.snapshot.result.structuredOutput : undefined,
           artifacts: [...eventArtifacts, ...discoveredArtifacts],
         };
       }
@@ -2377,6 +2318,10 @@ async function runKSwarmRuntimeTextTask(
     }
   }
   throw new Error(lastFailure ? `desktop_task_failed: ${lastFailure}` : 'desktop_task_timeout');
+}
+
+function parseKSwarmRuntimeStructuredJson(result: { summary: string; structuredOutput?: Record<string, unknown> }): Record<string, unknown> {
+  return result.structuredOutput ?? extractKSwarmJsonObject(result.summary);
 }
 
 function getKSwarmRuntimeTaskFailureReason(snapshot: { salvage?: { reason?: unknown }; events?: Array<unknown> }): string {
@@ -3764,6 +3709,8 @@ export const READ_MATERIAL_TOOL_DEFINITION: ToolDefinition = {
   },
 };
 
+const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
 export function buildMaterialManifestForPrompt(materials: MaterialRecord[]): string {
   if (materials.length === 0) return '';
   const lines = [
@@ -3778,9 +3725,32 @@ export function buildMaterialManifestForPrompt(materials: MaterialRecord[]): str
     const ext = extname(material.originalName || material.workspacePath).toLowerCase() || 'unknown';
     const status = material.parseStatus || 'pending';
     const summary = material.parseSummary ? `, ${material.parseSummary}` : '';
-    lines.push(`- materialId: ${material.materialId}; 文件: ${material.originalName}; 格式: ${ext}; MIME: ${material.mimeType}; 大小: ${material.sizeBytes} bytes (${formatMaterialSize(material.sizeBytes)}); 状态: ${status}${summary}`);
+    const isImage = IMAGE_MIME_TYPES.has(material.mimeType);
+    const imageNote = isImage ? '；已作为多模态图像输入直接传递给模型，无需调用 read_material' : '';
+    lines.push(`- materialId: ${material.materialId}; 文件: ${material.originalName}; 格式: ${ext}; MIME: ${material.mimeType}; 大小: ${material.sizeBytes} bytes (${formatMaterialSize(material.sizeBytes)}); 状态: ${status}${summary}${imageNote}`);
   }
   return lines.join('\n');
+}
+
+export function buildImageBlocksForMaterials(materials: MaterialRecord[]): Extract<MessageBlock, { type: 'image' }>[] {
+  const blocks: Extract<MessageBlock, { type: 'image' }>[] = [];
+  for (const material of materials) {
+    if (!IMAGE_MIME_TYPES.has(material.mimeType)) continue;
+    try {
+      const data = readFileSync(material.workspacePath).toString('base64');
+      blocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: material.mimeType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
+          data,
+        },
+      });
+    } catch {
+      // If the file can't be read, skip it silently — it will still appear in the text manifest
+    }
+  }
+  return blocks;
 }
 
 export async function executeReadMaterialForDesktop(
@@ -4129,7 +4099,7 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           totalInputTokens += inputTkns;
           totalOutputTokens += chunk.usage?.outputTokens ?? 0;
           ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0);
-        } catch { /* usage capture failure is non-critical */ }
+        } catch (e) { console.warn('[usage] token capture failed:', (e as Error).message) }
       }
     }
     ctx.messages.push({ role: 'assistant', content: assistantBlocks });
@@ -4307,7 +4277,7 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           totalInputTokens += inputTkns;
           totalOutputTokens += chunk.usage?.outputTokens ?? 0;
           ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0);
-        } catch { /* usage capture failure is non-critical */ }
+        } catch (e) { console.warn('[usage] token capture failed:', (e as Error).message) }
       },
     });
     reply += finalized.reply;
@@ -4431,8 +4401,10 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
     const allToolDefs = materials && materials.length > 0 && materialRegistry
       ? [...registry.getToolDefinitions(), READ_MATERIAL_TOOL_DEFINITION]
       : registry.getToolDefinitions();
+    const imageBlocks = materials && materials.length > 0 ? buildImageBlocksForMaterials(materials) : [];
     const userContent: MessageBlock[] = [
       { type: 'text', text: userText },
+      ...imageBlocks,
     ];
     const messages: Message[] = [
       ...hostHistory.map((h): Message => ({ role: h.role, content: [{ type: 'text', text: h.content }] })),
@@ -5379,8 +5351,10 @@ function createDesktopModelRunnerWithRegistry(
     const allToolDefs = materials && materials.length > 0
       ? [...registry.getToolDefinitions(), READ_MATERIAL_TOOL_DEFINITION]
       : registry.getToolDefinitions();
+    const imageBlocks = materials && materials.length > 0 ? buildImageBlocksForMaterials(materials) : [];
     const userContent: MessageBlock[] = [
       { type: 'text', text: userText },
+      ...imageBlocks,
     ];
     const messages: Message[] = [
       ...hostHistory.map((h): Message => ({ role: h.role, content: [{ type: 'text', text: h.content }] })),

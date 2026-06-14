@@ -56,8 +56,8 @@ export function exportProjectMarkdown(
   lines.push(`- **状态**: ${statusLabel}`);
   if (project.createdAt) lines.push(`- **创建时间**: ${formatTime(project.createdAt)}`);
   if (project.updatedAt) lines.push(`- **更新时间**: ${formatTime(project.updatedAt)}`);
-  if ((project as any).deliveredAt) lines.push(`- **交付时间**: ${formatTime((project as any).deliveredAt)}`);
-  if ((project as any).closedAt) lines.push(`- **关闭时间**: ${formatTime((project as any).closedAt)}`);
+  if (project.deliveredAt) lines.push(`- **交付时间**: ${formatTime(project.deliveredAt)}`);
+  if (project.closedAt) lines.push(`- **关闭时间**: ${formatTime(project.closedAt)}`);
   lines.push('');
 
   // Goal
@@ -69,10 +69,10 @@ export function exportProjectMarkdown(
   }
 
   // Requirements
-  if ((project as any).requirements) {
+  if (project.requirements) {
     lines.push('## 需求');
     lines.push('');
-    lines.push((project as any).requirements);
+    lines.push(project.requirements);
     lines.push('');
   }
 
@@ -162,7 +162,7 @@ export function exportProjectMarkdown(
   if (project.poAgent) {
     lines.push(`- **PO**: ${agentName(project.poAgent, agents)}`);
   }
-  const memberIds = new Set((project as any).members || []);
+  const memberIds = new Set(project.members || []);
   const workers = agents.filter(a => memberIds.has(a.id));
   if (workers.length) {
     for (const w of workers) {
@@ -197,7 +197,7 @@ export function exportProjectMarkdown(
   }
 
   // Project deliverable summary
-  const deliverable = (project as any).deliverable;
+  const deliverable = project.deliverable;
   if (deliverable && typeof deliverable === 'string') {
     lines.push('## 交付说明');
     lines.push('');
@@ -206,11 +206,11 @@ export function exportProjectMarkdown(
   }
 
   // Project summary (PO-generated)
-  const summary = (project as any).summary;
+  const summary = project.summary;
   if (summary && typeof summary === 'string') {
     lines.push('## 项目小结');
     lines.push('');
-    const score = (project as any).summaryScore;
+    const score = project.summaryScore;
     if (score != null) {
       lines.push(`**评分**: ${score}/10`);
       lines.push('');

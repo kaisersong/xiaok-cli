@@ -65,14 +65,25 @@ export interface ThreadListContextValue {
 }
 
 const ThreadListContext = createContext<ThreadListContextValue | null>(null)
-const THREAD_RUN_STATE_RECONNECT_DELAY_MS = 1000
+const INITIAL_RECONNECT_MS = 1000
+const MAX_RECONNECT_MS = 30_000
+const MAX_CONSECUTIVE_FAILURES = 20
 const GTD_BUCKETS: readonly ThreadGtdBucket[] = ['inbox', 'todo', 'waiting', 'someday', 'archived']
 const GTD_BUCKET_SET = new Set<ThreadGtdBucket>(GTD_BUCKETS)
 
+function threadTimestamp(value: string | number | null | undefined): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return 0
+}
+
 function sortThreadsByActivity(threads: ThreadResponse[]): ThreadResponse[] {
   return [...threads].sort((a, b) => {
-    const left = Date.parse(a.updated_at ?? a.created_at)
-    const right = Date.parse(b.updated_at ?? b.created_at)
+    const left = threadTimestamp(a.updated_at ?? a.updatedAt ?? a.created_at ?? a.createdAt)
+    const right = threadTimestamp(b.updated_at ?? b.updatedAt ?? b.created_at ?? b.createdAt)
     return right - left
   })
 }
@@ -250,7 +261,8 @@ export function ThreadListProvider({ children }: { children: ReactNode }) {
           migrated.push(result.value)
           return
         }
-        if (isApiError(result.reason) && [403, 404, 422].includes(result.reason.status)) return
+        const status = isApiError(result.reason) ? result.reason.status : undefined
+        if (status !== undefined && [403, 404, 422].includes(status)) return
         remaining[threadId] = 'work'
       })
       writeLegacyThreadModesForMigration(remaining)
@@ -285,7 +297,8 @@ export function ThreadListProvider({ children }: { children: ReactNode }) {
         migratedItems.push(result.value)
         return
       }
-      if (isApiError(result.reason) && [403, 404, 422].includes(result.reason.status)) return
+      const status = isApiError(result.reason) ? result.reason.status : undefined
+      if (status !== undefined && [403, 404, 422].includes(status)) return
       failedThreadIds.add(threadId)
     })
     return { migratedItems, failedThreadIds }
@@ -328,6 +341,7 @@ export function ThreadListProvider({ children }: { children: ReactNode }) {
     let streamController: AbortController | null = null
     let retryTimer: ReturnType<typeof setTimeout> | null = null
     let streamAccessToken = accessToken
+    let consecutiveFailures = 0
 
     const clearRetryTimer = () => {
       if (retryTimer === null) return
@@ -336,8 +350,20 @@ export function ThreadListProvider({ children }: { children: ReactNode }) {
     }
 
     const scheduleReconnect = (connect: () => void) => {
+      consecutiveFailures++
+      if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
+        // 降级为低频全量轮询
+        retryTimer = setTimeout(() => {
+          void syncThreadList(streamAccessToken).finally(() => {
+            consecutiveFailures = 0  // 成功后重置
+            scheduleReconnect(connect)
+          })
+        }, 30_000)
+        return
+      }
+      const delay = Math.min(INITIAL_RECONNECT_MS * Math.pow(2, consecutiveFailures - 1), MAX_RECONNECT_MS)
       clearRetryTimer()
-      retryTimer = setTimeout(connect, THREAD_RUN_STATE_RECONNECT_DELAY_MS)
+      retryTimer = setTimeout(connect, delay)
     }
 
     const connect = () => {
@@ -349,6 +375,7 @@ export function ThreadListProvider({ children }: { children: ReactNode }) {
       void (async () => {
         await syncThreadList(streamAccessToken)
         if (stopped || controller.signal.aborted) return
+        consecutiveFailures = 0
         await streamThreadRunStateEvents(streamAccessToken, {
           signal: controller.signal,
           onEvent: (event) => {

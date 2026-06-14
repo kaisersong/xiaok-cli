@@ -4,6 +4,7 @@ import { getConfigDir } from './config.js';
 let crashContext = {};
 let handlersInstalled = false;
 let streamErrorHandler = null;
+let pipeBrokenFromStream = false;
 const CRASH_REPORT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export function setCrashContext(ctx) {
     crashContext = { ...crashContext, ...ctx };
@@ -84,6 +85,7 @@ function installBrokenPipeExit(stream) {
             return;
         }
         if (isBrokenPipeError(error)) {
+            pipeBrokenFromStream = true;
             if (shouldSilentlyExitOnBrokenPipe(stream)) {
                 process.exit(0);
                 return;
@@ -110,7 +112,9 @@ export function installGlobalCrashHandlers() {
             && streamErrorHandler?.(error, process.stdout)) {
             return;
         }
-        if (isBrokenPipeError(error) && shouldSilentlyExitOnBrokenPipe()) {
+        if (isBrokenPipeError(error)
+            && pipeBrokenFromStream
+            && shouldSilentlyExitOnBrokenPipe()) {
             process.exit(0);
             return;
         }

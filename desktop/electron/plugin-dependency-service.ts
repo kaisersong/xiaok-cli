@@ -29,12 +29,19 @@ export interface ExternalPluginDependency {
     sourceAllowlist?: string[];
     requiresUserConfirmation: boolean;
   };
-  update?: {
-    kind: 'command';
-    command: string;
-    args?: string[];
-    requiresUserConfirmation: boolean;
-  };
+  update?:
+    | {
+        kind: 'command';
+        command: string;
+        args?: string[];
+        requiresUserConfirmation: boolean;
+      }
+    | {
+        kind: 'official_installer';
+        sourceUrl: string;
+        sourceAllowlist?: string[];
+        requiresUserConfirmation: boolean;
+      };
   health?: {
     version?: string[];
     status?: string[];

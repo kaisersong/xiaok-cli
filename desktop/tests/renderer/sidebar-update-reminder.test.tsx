@@ -46,6 +46,17 @@ vi.mock('../../renderer/src/contexts/LocaleContext', () => ({
   }),
 }));
 
+const mockThreadList = vi.hoisted(() => ({
+  threads: [] as unknown[],
+  removeThread: vi.fn(),
+  updateTitle: vi.fn(),
+  loading: false,
+}));
+
+vi.mock('../../renderer/src/contexts/thread-list', () => ({
+  useThreadList: () => mockThreadList,
+}));
+
 function renderSidebar(status: {
   checking: boolean;
   available: boolean;
@@ -57,6 +68,7 @@ function renderSidebar(status: {
   currentVersion?: string;
   error?: string;
 }, initialEntry = '/', threads: unknown[] = []) {
+  mockThreadList.threads = threads;
   mockApi.listThreads.mockResolvedValue(threads);
   mockApi.getThread.mockResolvedValue(null);
   mockApi.createThread.mockResolvedValue({
@@ -163,7 +175,7 @@ describe('Sidebar update reminder', () => {
     expect(mockApi.quitAndInstall).not.toHaveBeenCalled();
   });
 
-  it('shows a manual download recovery when update checks fail', async () => {
+  it('shows a quiet manual download hint when update checks do not complete', async () => {
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
 
     renderSidebar({
@@ -176,10 +188,15 @@ describe('Sidebar update reminder', () => {
       error: 'Cannot find latest-mac.yml',
     });
 
-    const button = await screen.findByRole('button', { name: '更新检查失败' });
+    const button = await screen.findByRole('button', { name: '检查更新未完成' });
+    expect(button.className).not.toContain('border-amber');
+    expect(button.className).not.toContain('bg-amber');
+    expect(button.querySelector('svg')).toBeNull();
+
     fireEvent.click(button);
 
-    expect(await screen.findAllByText('更新检查失败')).toHaveLength(2);
+    expect(await screen.findAllByText('检查更新未完成')).toHaveLength(2);
+    expect(screen.queryByText('更新检查失败')).not.toBeInTheDocument();
     expect(screen.getByText('v1.4.0')).toBeInTheDocument();
     expect(screen.getByText(/Cannot find latest-mac.yml/)).toBeInTheDocument();
 

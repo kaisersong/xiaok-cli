@@ -2,10 +2,13 @@ import Database from 'better-sqlite3';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
+import { getConfigDir } from '../../utils/config.js';
 import { runMigrations } from './migrations.js';
 import { EmbeddingClient } from './embedding.js';
 import { hybridSearch } from './retrieval.js';
 import { compactL0toL1, compactL1toL2, compactL2toL3 } from './compaction.js';
+import { createLogger } from '../../utils/logger.js';
+const logger = createLogger('memory:layered-store');
 import { segmentChinese } from './segment.js';
 import { MODEL_REGISTRY } from './model-registry.js';
 export function resolveLayeredConfig(config) {
@@ -15,7 +18,7 @@ export function resolveLayeredConfig(config) {
     const registryEntry = MODEL_REGISTRY.find(m => m.id === modelId);
     const defaultDims = provider === 'api' ? 768 : (registryEntry?.dims ?? 384);
     return {
-        dbPath: c.dbPath ?? path.join(process.env.HOME || '/tmp', '.xiaok', 'memory.db'),
+        dbPath: c.dbPath ?? path.join(getConfigDir(), 'memory.db'),
         embedding: {
             provider,
             apiUrl: c.embedding?.apiUrl ?? 'http://localhost:11434/v1',
@@ -92,7 +95,9 @@ export class LayeredMemoryStore {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, cwd || 'manual', 'user', record.summary, segmented, scope, memType, cwd);
         this.db.prepare(`INSERT OR REPLACE INTO memory_l1_extracted (id, source_ids, summary, tags, scope, mem_type, cwd)
        VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, JSON.stringify([id]), record.title, JSON.stringify(record.tags || []), scope, memType, cwd);
-        this.embeddingClient.embedAndStore(id, 1, `${record.title} ${record.summary}`).catch(() => { });
+        this.embeddingClient.embedAndStore(id, 1, `${record.title} ${record.summary}`).catch((err) => {
+            logger.warn('embedAndStore failed', { id, error: err instanceof Error ? err.message : String(err) });
+        });
     }
     async listRelevant(input) {
         const results = await hybridSearch(this.db, this.embeddingClient, input.query, { limit: 20 });
@@ -287,7 +292,9 @@ export class LayeredMemoryStore {
         if (this.compactTimer) {
             clearInterval(this.compactTimer);
         }
-        this.embeddingClient.close().catch(() => { });
+        this.embeddingClient.close().catch((err) => {
+            logger.debug('embeddingClient.close failed', { error: err instanceof Error ? err.message : String(err) });
+        });
         this.db.close();
     }
     searchResultToRecord(r) {

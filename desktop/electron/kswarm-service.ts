@@ -10,9 +10,10 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { app } from 'electron';
 import {
   buildSeedAgentReconciliationPlan,
@@ -50,6 +51,7 @@ const MAX_RESTART_ATTEMPTS = 10;
 const REQUEST_TIMEOUT_MS = 30_000;
 const DYNAMIC_WORKFLOW_FEATURE = 'dynamic_workflows';
 const WORKFLOW_PATTERN_SCHEMA_VERSION = 'kswarm_workflow_patterns_v1';
+const KSWARM_LOG_ROOT = join(homedir(), '.kswarm', 'logs');
 
 /**
  * Resolve service paths:
@@ -280,6 +282,19 @@ export function getKSwarmHealthServiceSourceHash(body: Record<string, unknown> |
   return typeof sourceHash === 'string' && sourceHash.length > 0 ? sourceHash : null;
 }
 
+export type KSwarmServiceIdentityWarning = 'source_hash_mismatch' | 'source_hash_missing';
+export type KSwarmServiceIdentityReason = 'service_identity_missing' | 'entry_path_mismatch';
+
+export interface KSwarmServiceIdentityCheck {
+  compatible: boolean;
+  reason: KSwarmServiceIdentityReason | null;
+  warning: KSwarmServiceIdentityWarning | null;
+  actualEntryPath: string | null;
+  expectedEntryPath: string | null;
+  actualSourceHash: string | null;
+  expectedSourceHash: string | null;
+}
+
 export function computeKSwarmServiceSourceHash(entryPath: string | null): string | null {
   if (!entryPath) return null;
   const sourceRoot = dirname(dirname(resolve(entryPath)));
@@ -313,11 +328,90 @@ export function doesKSwarmHealthMatchExpectedService(
   expectedEntryPath: string | null,
   expectedSourceHash: string | null = null,
 ): boolean {
-  if (!expectedEntryPath) return true;
+  return checkKSwarmHealthServiceIdentity(body, expectedEntryPath, expectedSourceHash).compatible;
+}
+
+export function checkKSwarmHealthServiceIdentity(
+  body: Record<string, unknown> | null,
+  expectedEntryPath: string | null,
+  expectedSourceHash: string | null = null,
+): KSwarmServiceIdentityCheck {
   const actualEntryPath = getKSwarmHealthServiceEntryPath(body);
-  if (!actualEntryPath || resolve(actualEntryPath) !== resolve(expectedEntryPath)) return false;
-  if (!expectedSourceHash) return true;
-  return getKSwarmHealthServiceSourceHash(body) === expectedSourceHash;
+  const actualSourceHash = getKSwarmHealthServiceSourceHash(body);
+  const base = {
+    actualEntryPath,
+    expectedEntryPath,
+    actualSourceHash,
+    expectedSourceHash,
+  };
+  if (!expectedEntryPath) {
+    return { ...base, compatible: true, reason: null, warning: null };
+  }
+  if (!actualEntryPath) {
+    return { ...base, compatible: false, reason: 'service_identity_missing', warning: null };
+  }
+  if (resolve(actualEntryPath) !== resolve(expectedEntryPath)) {
+    return { ...base, compatible: false, reason: 'entry_path_mismatch', warning: null };
+  }
+  if (expectedSourceHash && !actualSourceHash) {
+    return { ...base, compatible: true, reason: null, warning: 'source_hash_missing' };
+  }
+  if (expectedSourceHash && actualSourceHash !== expectedSourceHash) {
+    return { ...base, compatible: true, reason: null, warning: 'source_hash_mismatch' };
+  }
+  return { ...base, compatible: true, reason: null, warning: null };
+}
+
+export function appendKSwarmServiceLogLine(options: {
+  logRoot?: string;
+  serviceName: 'server' | 'broker';
+  stream: 'stdout' | 'stderr' | 'lifecycle';
+  message: string;
+  now?: () => Date;
+}): void {
+  const lines = options.message
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return;
+  const logRoot = options.logRoot ?? KSWARM_LOG_ROOT;
+  try {
+    mkdirSync(logRoot, { recursive: true });
+    const ts = (options.now?.() ?? new Date()).toISOString();
+    const payload = lines.map(line => `${ts} [${options.stream}] ${line}`).join('\n');
+    appendFileSync(join(logRoot, `${options.serviceName}.log`), `${payload}\n`);
+  } catch {
+    // Logging must never prevent service startup.
+  }
+}
+
+function logKSwarmServiceLine(
+  serviceName: 'server' | 'broker',
+  stream: 'stdout' | 'stderr' | 'lifecycle',
+  message: string,
+): void {
+  appendKSwarmServiceLogLine({ serviceName, stream, message });
+}
+
+function formatServiceIdentityWarning(check: KSwarmServiceIdentityCheck): string {
+  return [
+    `source identity warning: ${check.warning}`,
+    `expectedEntryPath=${check.expectedEntryPath ?? 'unknown'}`,
+    `actualEntryPath=${check.actualEntryPath ?? 'unknown'}`,
+    `expectedSourceHash=${check.expectedSourceHash ?? 'unknown'}`,
+    `actualSourceHash=${check.actualSourceHash ?? 'unknown'}`,
+  ].join(' ');
+}
+
+function formatServiceIdentityBlock(check: KSwarmServiceIdentityCheck): string {
+  return [
+    `existing kswarm service on port ${KSWARM_PORT} is not the bundled service`,
+    `reason=${check.reason ?? 'unknown'}`,
+    `expectedEntryPath=${check.expectedEntryPath ?? 'unknown'}`,
+    `actualEntryPath=${check.actualEntryPath ?? 'unknown'}`,
+    `expectedSourceHash=${check.expectedSourceHash ?? 'unknown'}`,
+    `actualSourceHash=${check.actualSourceHash ?? 'unknown'}`,
+  ].join('; ');
 }
 
 export function shouldAdoptExistingKSwarmService(input: {
@@ -591,6 +685,11 @@ export function createKSwarmService(): KSwarmService {
     });
     const nodeRuntime = resolveBackgroundNodeRuntime({ env: brokerEnv });
     console.log(`[kswarm-service] Spawning broker: ${brokerLaunch.entryPath}`);
+    logKSwarmServiceLine(
+      'broker',
+      'lifecycle',
+      `spawn command=${nodeRuntime.command} entryPath=${brokerLaunch.entryPath} cwd=${brokerLaunch.cwd}`,
+    );
     mkdirSync(brokerLaunch.cwd, { recursive: true });
     brokerChild = spawn(nodeRuntime.command, brokerLaunch.nodeArgs, buildBackgroundNodeSpawnOptions({
       cwd: brokerLaunch.cwd,
@@ -598,14 +697,22 @@ export function createKSwarmService(): KSwarmService {
     }));
     brokerChild.stdout?.on('data', (d: Buffer) => {
       const msg = d.toString().trim();
-      if (msg) console.log(`[broker] ${msg}`);
+      if (msg) {
+        console.log(`[broker] ${msg}`);
+        logKSwarmServiceLine('broker', 'stdout', msg);
+      }
     });
     brokerChild.stderr?.on('data', (d: Buffer) => {
       const msg = d.toString().trim();
-      if (msg) console.error(`[broker:err] ${msg}`);
+      if (msg) {
+        console.error(`[broker:err] ${msg}`);
+        logKSwarmServiceLine('broker', 'stderr', msg);
+      }
     });
     brokerChild.on('exit', (code) => {
-      console.log(`[kswarm-service] Broker exited: code=${code}`);
+      const message = `Broker exited: code=${code}`;
+      console.log(`[kswarm-service] ${message}`);
+      logKSwarmServiceLine('broker', 'lifecycle', message);
       brokerChild = null;
     });
 
@@ -623,11 +730,18 @@ export function createKSwarmService(): KSwarmService {
     const dynamicWorkflowReady = hasDynamicWorkflowSupport(existingHealth.body);
     const serverPath = resolveServicePath('kswarm', 'src/server/index.js');
     const expectedSourceHash = computeKSwarmServiceSourceHash(serverPath);
-    const serviceIdentityMatches = doesKSwarmHealthMatchExpectedService(existingHealth.body, serverPath, expectedSourceHash);
+    const serviceIdentity = checkKSwarmHealthServiceIdentity(existingHealth.body, serverPath, expectedSourceHash);
+    const serviceIdentityMatches = serviceIdentity.compatible;
     let brokerReady = await brokerHealthCheck();
+    if (existingHealthy && serviceIdentity.warning) {
+      const warning = formatServiceIdentityWarning(serviceIdentity);
+      console.warn(`[kswarm-service] ${warning}`);
+      logKSwarmServiceLine('server', 'lifecycle', warning);
+    }
     if (existingHealthy && serverPath && !serviceIdentityMatches && !child) {
-      lastError = `existing kswarm service on port ${KSWARM_PORT} does not match bundled service`;
+      lastError = formatServiceIdentityBlock(serviceIdentity);
       console.warn(`[kswarm-service] ${lastError}`);
+      logKSwarmServiceLine('server', 'lifecycle', lastError);
       running = false;
       notifyListeners();
       return;
@@ -702,22 +816,35 @@ export function createKSwarmService(): KSwarmService {
       },
     });
     console.log(`[kswarm-service] Spawning kswarm server: ${serverPath}`);
+    logKSwarmServiceLine(
+      'server',
+      'lifecycle',
+      `spawn command=${nodeRuntime.command} entryPath=${serverPath}`,
+    );
     child = spawn(nodeRuntime.command, [serverPath], buildBackgroundNodeSpawnOptions({
       env: nodeRuntime.env,
     }));
 
     child.stdout?.on('data', (data: Buffer) => {
       const msg = data.toString().trim();
-      if (msg) console.log(`[kswarm] ${msg}`);
+      if (msg) {
+        console.log(`[kswarm] ${msg}`);
+        logKSwarmServiceLine('server', 'stdout', msg);
+      }
     });
 
     child.stderr?.on('data', (data: Buffer) => {
       const msg = data.toString().trim();
-      if (msg) console.error(`[kswarm:err] ${msg}`);
+      if (msg) {
+        console.error(`[kswarm:err] ${msg}`);
+        logKSwarmServiceLine('server', 'stderr', msg);
+      }
     });
 
     child.on('exit', (code, signal) => {
-      console.log(`[kswarm-service] Process exited: code=${code} signal=${signal}`);
+      const message = `Process exited: code=${code} signal=${signal}`;
+      console.log(`[kswarm-service] ${message}`);
+      logKSwarmServiceLine('server', 'lifecycle', message);
       child = null;
       running = false;
       if (!stopping) {
@@ -729,6 +856,7 @@ export function createKSwarmService(): KSwarmService {
 
     child.on('error', (err) => {
       console.error('[kswarm-service] Spawn error:', err.message);
+      logKSwarmServiceLine('server', 'lifecycle', `Spawn error: ${err.message}`);
       lastError = err.message;
       child = null;
       running = false;
@@ -745,10 +873,12 @@ export function createKSwarmService(): KSwarmService {
       restartCount = 0; // Reset on successful start
       healthFailureCount = 0;
       console.log(`[kswarm-service] Server ready on port ${KSWARM_PORT}`);
+      logKSwarmServiceLine('server', 'lifecycle', `Server ready on port ${KSWARM_PORT}`);
       startHealthCheck();
       notifyListeners();
     } else if (!stopping) {
       console.log('[kswarm-service] Server did not become ready in time');
+      logKSwarmServiceLine('server', 'lifecycle', 'Server did not become ready in time');
       lastError = 'Server startup timeout';
       notifyListeners();
     }

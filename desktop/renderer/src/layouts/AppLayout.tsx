@@ -1,6 +1,6 @@
 import React, { useState, createContext, useContext } from 'react';
 import { Outlet } from 'react-router-dom';
-import { Sidebar, PanelLeftClose } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Sidebar, PanelLeftClose } from 'lucide-react';
 import { SidebarComponent } from '../components/Sidebar';
 import { DesktopSettings } from '../components/DesktopSettings';
 
@@ -10,6 +10,40 @@ interface SidebarContextValue {
 }
 
 const SidebarContext = createContext<SidebarContextValue>({ collapsed: false, setCollapsed: () => {} });
+const TITLEBAR_BUTTON_SIZE = 28;
+const TITLEBAR_BUTTON_TOP = 12;
+
+type TitlebarControl = {
+  key: string;
+  label: string;
+  left: number;
+  icon: React.ReactNode;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+};
+
+function TitlebarControlButton({ control }: { control: TitlebarControl }) {
+  return (
+    <button
+      type="button"
+      aria-label={control.label}
+      title={control.label}
+      data-app-region="no-drag"
+      onClick={control.onClick}
+      style={{
+        WebkitAppRegion: 'no-drag',
+        position: 'absolute',
+        top: TITLEBAR_BUTTON_TOP,
+        left: control.left,
+        width: TITLEBAR_BUTTON_SIZE,
+        height: TITLEBAR_BUTTON_SIZE,
+        zIndex: 50,
+      } as React.CSSProperties}
+      className="grid place-items-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
+    >
+      {control.icon}
+    </button>
+  );
+}
 
 export function useSidebarCollapse() {
   return useContext(SidebarContext);
@@ -18,6 +52,68 @@ export function useSidebarCollapse() {
 export function AppLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const navigateHistory = (delta: -1 | 1, event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (delta < 0 && window.history.length <= 1) return;
+    if (delta < 0) {
+      window.history.back();
+    } else {
+      window.history.forward();
+    }
+  };
+  const titlebarControls: TitlebarControl[] = sidebarCollapsed
+    ? [
+        {
+          key: 'back',
+          label: '后退',
+          left: 78,
+          icon: <ChevronLeft size={16} />,
+          onClick: (event) => navigateHistory(-1, event),
+        },
+        {
+          key: 'forward',
+          label: '前进',
+          left: 110,
+          icon: <ChevronRight size={16} />,
+          onClick: (event) => navigateHistory(1, event),
+        },
+        {
+          key: 'expand',
+          label: '展开侧边栏',
+          left: 142,
+          icon: <Sidebar size={16} />,
+          onClick: (event) => {
+            event.stopPropagation();
+            setSidebarCollapsed(false);
+          },
+        },
+      ]
+    : [
+        {
+          key: 'back',
+          label: '后退',
+          left: 148,
+          icon: <ChevronLeft size={16} />,
+          onClick: (event) => navigateHistory(-1, event),
+        },
+        {
+          key: 'forward',
+          label: '前进',
+          left: 180,
+          icon: <ChevronRight size={16} />,
+          onClick: (event) => navigateHistory(1, event),
+        },
+        {
+          key: 'collapse',
+          label: '收起侧边栏',
+          left: 212,
+          icon: <PanelLeftClose size={16} />,
+          onClick: (event) => {
+            event.stopPropagation();
+            setSidebarCollapsed(true);
+          },
+        },
+      ];
 
   if (settingsOpen) {
     return (
@@ -58,30 +154,9 @@ export function AppLayout() {
               className="absolute inset-y-0 left-0 w-60 border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)]"
             />
           )}
-          {/* Collapse button (when sidebar visible) */}
-          {!sidebarCollapsed && (
-            <button
-              type="button"
-              onClick={() => setSidebarCollapsed(true)}
-              style={{ WebkitAppRegion: 'no-drag', position: 'absolute', top: 12, left: 212 } as React.CSSProperties}
-              className="flex items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors z-50"
-              title="收起侧边栏"
-            >
-              <PanelLeftClose size={16} />
-            </button>
-          )}
-          {/* Expand button (when sidebar hidden) — place after traffic light buttons */}
-          {sidebarCollapsed && (
-            <button
-              type="button"
-              onClick={() => setSidebarCollapsed(false)}
-              style={{ WebkitAppRegion: 'no-drag', position: 'absolute', top: 12, left: 78 } as React.CSSProperties}
-              className="flex items-center justify-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors z-50"
-              title="展开侧边栏"
-            >
-              <Sidebar size={16} />
-            </button>
-          )}
+          {titlebarControls.map((control) => (
+            <TitlebarControlButton key={control.key} control={control} />
+          ))}
         </div>
         <div className="flex min-h-0 flex-1">
           {!sidebarCollapsed && (
@@ -101,4 +176,3 @@ export function AppLayout() {
     </SidebarContext.Provider>
   );
 }
-

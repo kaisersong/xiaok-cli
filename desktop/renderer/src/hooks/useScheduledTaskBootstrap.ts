@@ -10,6 +10,7 @@
  */
 
 import { useEffect } from 'react';
+import { getDesktopApi } from '@xiaok/shared/desktop';
 import {
   collectScheduledRuntimeTaskIds,
   ensureAggregatedScheduledThread,
@@ -20,7 +21,7 @@ const STORAGE_KEY = 'xiaok:scheduled-tasks';
 
 export function useScheduledTaskBootstrap(): void {
   useEffect(() => {
-    const desktop = (window as any).xiaokDesktop;
+    const desktop = getDesktopApi();
     if (!desktop?.onScheduledTaskDue) return;
 
     // Listen for task execution notifications from main — trust main's state

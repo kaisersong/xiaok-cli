@@ -41,6 +41,7 @@ export const PRELOAD_API_KEYS = [
   'deleteProvider',
   'deleteModel',
   'readClipboardFilePaths',
+  'readClipboardImage',
   'selectDirectory',
   'selectMaterials',
   'importMaterial',
@@ -105,6 +106,10 @@ export const PRELOAD_API_KEYS = [
   'onKSwarmStatus',
   'exportTraceBundle',
   'diagnose',
+  'getLoopDefinitions',
+  'getLoopRuns',
+  'getEvidenceAnomalies',
+  'runLoopNow',
   'syncScheduledTasks',
   'getScheduledTasks',
   'createScheduledTask',
@@ -136,6 +141,49 @@ export const PRELOAD_API_KEYS = [
   'listConnectorRuntimes',
   'testConnectorProvider',
 ] as const;
+
+export const KSWARM_PROXY_KEYS = [
+  'kswarmProxyGet',
+  'kswarmProxyGetText',
+  'kswarmProxyPost',
+  'kswarmProxyPostJson',
+  'kswarmProxyPut',
+  'kswarmProxyPatch',
+  'kswarmProxyDelete',
+  'kswarmStreamSubscribe',
+  'kswarmStreamUnsubscribe',
+  'kswarmStreamGetStatus',
+  'onKSwarmWsEvent',
+  'onKSwarmConnectionStatus',
+  'connectionHealthz',
+  'connectionHealth',
+] as const;
+
+export const EXTRA_KEYS = [
+  'showSaveDialog',
+  'saveFile',
+  'listPrinciples',
+  'savePrinciple',
+  'deletePrinciple',
+  'systemUsername',
+] as const;
+
+export const THREAD_META_KEYS = [
+  'getThreadLabels',
+  'setThreadLabel',
+  'unsetThreadLabel',
+  'moveThreadLabel',
+  'getAppFlag',
+  'setAppFlag',
+  'migrateLegacyThreadMeta',
+] as const;
+
+export const FULL_PRELOAD_KEYS: readonly string[] = [
+  ...PRELOAD_API_KEYS,
+  ...KSWARM_PROXY_KEYS,
+  ...EXTRA_KEYS,
+  ...THREAD_META_KEYS,
+];
 
 export interface DesktopModelProviderView {
   id: string;
@@ -369,6 +417,7 @@ export interface DesktopApi {
   deleteProvider(providerId: string): Promise<void>;
   deleteModel(modelId: string): Promise<void>;
   readClipboardFilePaths(): Promise<string[]>;
+  readClipboardImage(): Promise<string | null>;
   selectDirectory(): Promise<{ filePath: string }>;
   selectMaterials(): Promise<{ filePaths: string[] }>;
   importMaterial(input: { taskId: string; filePath: string; role: MaterialRole }): Promise<MaterialView>;
@@ -456,6 +505,10 @@ export interface DesktopApi {
   onKSwarmStatus(handler: (status: KSwarmServiceStatus) => void): () => void;
   exportTraceBundle(input: DesktopTraceTarget): Promise<{ ok: boolean; path?: string; error?: string }>;
   diagnose(input: DesktopTraceTarget): Promise<unknown>;
+  getLoopDefinitions(): Promise<unknown[]>;
+  getLoopRuns(loopId: string): Promise<unknown[]>;
+  getEvidenceAnomalies(loopId: string): Promise<unknown[]>;
+  runLoopNow(loopId: string): Promise<unknown>;
   syncScheduledTasks(tasks: Array<{ id: string; cronExpr: string; enabled: boolean }>): Promise<void>;
   getScheduledTasks(): Promise<unknown[]>;
   createScheduledTask(input: unknown): Promise<unknown>;
@@ -486,6 +539,32 @@ export interface DesktopApi {
   saveConnectorsConfig(input: ConnectorsConfig): Promise<ConnectorsConfigSnapshot>;
   listConnectorRuntimes(): Promise<ProviderRuntime[]>;
   testConnectorProvider(kind: 'search' | 'fetch'): Promise<ConnectorTestResult>;
+
+  // Thread meta (GTD / pinned)
+  getThreadLabels(): Promise<ThreadMetaSnapshot>;
+  setThreadLabel(threadId: string, label: string): Promise<ThreadMetaWriteResult>;
+  unsetThreadLabel(threadId: string, label: string): Promise<ThreadMetaWriteResult>;
+  moveThreadLabel(threadId: string, from: string, to: string): Promise<ThreadMetaWriteResult>;
+  getAppFlag(key: AppFlagKey): Promise<string | null>;
+  setAppFlag(key: AppFlagKey, value: string): Promise<ThreadMetaWriteResult>;
+  migrateLegacyThreadMeta(data: ThreadMetaSnapshot): Promise<{ migrated: boolean; reason?: string }>;
+}
+
+export type AppFlagKey = 'gtd-enabled';
+
+export interface ThreadMetaSnapshot {
+  gtdEnabled?: boolean;
+  inbox?: string[];
+  todo?: string[];
+  waiting?: string[];
+  someday?: string[];
+  archived?: string[];
+  pinned?: string[];
+}
+
+export interface ThreadMetaWriteResult {
+  ok: boolean;
+  degraded?: boolean;
 }
 
 export interface ConnectorTestResult {
@@ -496,13 +575,88 @@ export interface ConnectorTestResult {
   error?: string;
 }
 
+export interface KSwarmArtifact {
+  name?: string;
+  filename?: string;
+  mimeType?: string;
+  type?: string;
+  projectId?: string;
+  path?: string;
+  relativePath?: string;
+  url?: string;
+  size?: number;
+  previewable?: boolean;
+  createdAt?: number | string;
+  updatedAt?: number | string;
+  generatedAt?: number | string;
+}
+
+export interface KSwarmTaskResult {
+  summary?: string;
+  artifacts?: KSwarmArtifact[];
+}
+
+export interface KSwarmTaskReviewResult {
+  passed?: boolean;
+  feedback?: string;
+  failureClass?: string;
+  reviewedAt?: number;
+}
+
+export interface KSwarmProjectDeliverable {
+  summary?: string;
+  artifacts?: KSwarmArtifact[];
+  synthesis?: boolean;
+  files?: unknown[];
+  description?: string;
+}
+
+/**
+ * KSwarm HTTP proxy interface.
+ * ⚠️ All methods return Promise<unknown> — these are IPC pass-throughs to the
+ * kswarm REST API. Consumers must perform runtime type validation or type
+ * assertions. High-frequency endpoints (/projects, /tasks, /agents) should be
+ * wrapped in type-safe accessor functions in useKSwarmClient with zod/runtime
+ * validation on return values.
+ */
+export interface KSwarmProxyApi {
+  kswarmProxyGet(path: string): Promise<unknown>;
+  kswarmProxyGetText(path: string): Promise<string>;
+  kswarmProxyPost(path: string, body: unknown): Promise<unknown>;
+  kswarmProxyPostJson(path: string, body: unknown): Promise<unknown>;
+  kswarmProxyPut(path: string, body: unknown): Promise<unknown>;
+  kswarmProxyPatch(path: string, body: unknown): Promise<unknown>;
+  kswarmProxyDelete(path: string): Promise<unknown>;
+  kswarmStreamSubscribe(): Promise<void>;
+  kswarmStreamUnsubscribe(): Promise<void>;
+  kswarmStreamGetStatus(): Promise<unknown>;
+  onKSwarmWsEvent(handler: (event: unknown) => void): () => void;
+  onKSwarmConnectionStatus(handler: (status: unknown) => void): () => void;
+  connectionHealthz(url: string): Promise<boolean>;
+  connectionHealth(url: string): Promise<unknown>;
+}
+
+/**
+ * systemUsername is a snapshot from preload execution time and does not reflect
+ * runtime user switching. Use only for UI display; path construction or
+ * permission checks should use IPC real-time queries.
+ */
+export type FullDesktopApi = DesktopApi & KSwarmProxyApi & {
+  showSaveDialog(input: { defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }): Promise<{ filePath: string; canceled: boolean }>;
+  saveFile(input: { filePath: string; content: string }): Promise<{ ok: boolean; error?: string }>;
+  listPrinciples(): Promise<unknown[]>;
+  savePrinciple(principle: unknown): Promise<unknown>;
+  deletePrinciple(id: string): Promise<void>;
+  systemUsername: string;
+};
+
 interface IpcRendererLike {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   on(channel: string, listener: (event: unknown, payload: unknown) => void): void;
   off(channel: string, listener: (event: unknown, payload: unknown) => void): void;
 }
 
-export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
+export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = ''): FullDesktopApi {
   return {
     getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig') as ReturnType<DesktopApi['getModelConfig']>,
     saveModelConfig: (input) => ipcRenderer.invoke('desktop:saveModelConfig', input) as ReturnType<DesktopApi['saveModelConfig']>,
@@ -512,6 +666,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     deleteProvider: (providerId) => ipcRenderer.invoke('desktop:deleteProvider', providerId) as Promise<void>,
     deleteModel: (modelId) => ipcRenderer.invoke('desktop:deleteModel', modelId) as Promise<void>,
     readClipboardFilePaths: () => ipcRenderer.invoke('desktop:readClipboardFilePaths') as Promise<string[]>,
+    readClipboardImage: () => ipcRenderer.invoke('desktop:readClipboardImage') as Promise<string | null>,
     selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory') as Promise<{ filePath: string }>,
     selectMaterials: () => ipcRenderer.invoke('desktop:selectMaterials') as ReturnType<DesktopApi['selectMaterials']>,
     importMaterial: (input) => ipcRenderer.invoke('desktop:importMaterial', input) as ReturnType<DesktopApi['importMaterial']>,
@@ -613,6 +768,10 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     },
     exportTraceBundle: (input) => ipcRenderer.invoke('desktop:trace:export', input) as Promise<{ ok: boolean; path?: string; error?: string }>,
     diagnose: (input) => ipcRenderer.invoke('desktop:diagnose', input) as Promise<unknown>,
+    getLoopDefinitions: () => ipcRenderer.invoke('desktop:loops:listDefinitions') as Promise<unknown[]>,
+    getLoopRuns: (loopId) => ipcRenderer.invoke('desktop:loops:listRuns', loopId) as Promise<unknown[]>,
+    getEvidenceAnomalies: (loopId) => ipcRenderer.invoke('desktop:loops:listAnomalies', loopId) as Promise<unknown[]>,
+    runLoopNow: (loopId) => ipcRenderer.invoke('desktop:loops:runNow', loopId) as Promise<unknown>,
     syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks) as Promise<void>,
     getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks') as Promise<unknown[]>,
     createScheduledTask: (input) => ipcRenderer.invoke('desktop:createScheduledTask', input) as Promise<unknown>,
@@ -652,6 +811,51 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike): DesktopApi {
     saveConnectorsConfig: (input) => ipcRenderer.invoke('desktop:saveConnectorsConfig', input) as Promise<ConnectorsConfigSnapshot>,
     listConnectorRuntimes: () => ipcRenderer.invoke('desktop:listConnectorRuntimes') as Promise<ProviderRuntime[]>,
     testConnectorProvider: (kind) => ipcRenderer.invoke('desktop:testConnectorProvider', kind) as Promise<ConnectorTestResult>,
+    getThreadLabels: () => ipcRenderer.invoke('desktop:getThreadLabels') as Promise<ThreadMetaSnapshot>,
+    setThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:setThreadLabel', threadId, label) as Promise<ThreadMetaWriteResult>,
+    unsetThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:unsetThreadLabel', threadId, label) as Promise<ThreadMetaWriteResult>,
+    moveThreadLabel: (threadId, from, to) => ipcRenderer.invoke('desktop:moveThreadLabel', threadId, from, to) as Promise<ThreadMetaWriteResult>,
+    getAppFlag: (key) => ipcRenderer.invoke('desktop:getAppFlag', key) as Promise<string | null>,
+    setAppFlag: (key, value) => ipcRenderer.invoke('desktop:setAppFlag', key, value) as Promise<ThreadMetaWriteResult>,
+    migrateLegacyThreadMeta: (data) => ipcRenderer.invoke('desktop:migrateLegacyThreadMeta', data) as Promise<{ migrated: boolean; reason?: string }>,
+    showSaveDialog: (input) => ipcRenderer.invoke('desktop:showSaveDialog', input) as Promise<{ filePath: string; canceled: boolean }>,
+    saveFile: (input) => ipcRenderer.invoke('desktop:saveFile', input) as Promise<{ ok: boolean; error?: string }>,
+    listPrinciples: () => ipcRenderer.invoke('desktop:listPrinciples') as Promise<unknown[]>,
+    savePrinciple: (principle) => ipcRenderer.invoke('desktop:savePrinciple', principle) as Promise<unknown>,
+    deletePrinciple: (id) => ipcRenderer.invoke('desktop:deletePrinciple', id) as Promise<void>,
+    kswarmProxyGet: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:get', path) as Promise<unknown>,
+    kswarmProxyGetText: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:getText', path) as Promise<string>,
+    kswarmProxyPost: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:post', path, body) as Promise<unknown>,
+    kswarmProxyPostJson: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:postJson', path, body) as Promise<unknown>,
+    kswarmProxyPut: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:put', path, body) as Promise<unknown>,
+    kswarmProxyPatch: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:patch', path, body) as Promise<unknown>,
+    kswarmProxyDelete: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:delete', path) as Promise<unknown>,
+    kswarmStreamSubscribe: () => ipcRenderer.invoke('desktop:kswarm:stream:subscribe') as Promise<void>,
+    kswarmStreamUnsubscribe: () => ipcRenderer.invoke('desktop:kswarm:stream:unsubscribe') as Promise<void>,
+    kswarmStreamGetStatus: () => ipcRenderer.invoke('desktop:kswarm:stream:status') as Promise<unknown>,
+    onKSwarmWsEvent(handler) {
+      const channel = 'desktop:kswarm:wsEvent';
+      const listener = (_event: unknown, payload: unknown) => {
+        handler(payload);
+      };
+      ipcRenderer.on(channel, listener);
+      return () => {
+        ipcRenderer.off(channel, listener);
+      };
+    },
+    onKSwarmConnectionStatus(handler) {
+      const channel = 'desktop:kswarm:connectionStatus';
+      const listener = (_event: unknown, payload: unknown) => {
+        handler(payload);
+      };
+      ipcRenderer.on(channel, listener);
+      return () => {
+        ipcRenderer.off(channel, listener);
+      };
+    },
+    connectionHealthz: (url) => ipcRenderer.invoke('desktop:connection:healthz', url) as Promise<boolean>,
+    connectionHealth: (url) => ipcRenderer.invoke('desktop:connection:health', url) as Promise<unknown>,
+    systemUsername,
   };
 }
 

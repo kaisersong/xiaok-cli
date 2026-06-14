@@ -341,6 +341,7 @@ export function ChatShell() {
           }
           setResult(resultWithArtifacts);
           setStatus('completed');
+          setPlanSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'completed' } : s));
           // Only set title if thread has no title yet (preserve user's prompt as title)
           if (taskId && !thread?.title) {
             api.updateThreadTitle(taskId, r.summary.slice(0, 40)).catch(() => {});
@@ -639,6 +640,7 @@ export function ChatShell() {
     setStreamingText('');
     setResult(null);
     setMessages([]);
+    setPlanSteps([]);
     setCurrentQuestion(null);
     setThread(null);
     setStatus('idle');

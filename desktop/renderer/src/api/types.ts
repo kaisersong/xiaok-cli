@@ -1,5 +1,6 @@
-// Thread types (local storage)
-export type ThreadMode = 'work';
+// Thread types (local storage + desktop web-client compatibility)
+export type ThreadMode = 'chat' | 'work';
+export type CollaborationMode = ThreadMode;
 export type ThreadGtdBucket = 'inbox' | 'todo' | 'waiting' | 'someday' | 'archived';
 
 export interface ThreadRecord {
@@ -14,6 +15,31 @@ export interface ThreadRecord {
   pinnedAt: number | null;
   currentTaskId: string | null;
   taskIds: string[];  // All task IDs for this thread (in order)
+
+  // Compatibility fields mirrored from the web-client API shape. Desktop's
+  // IndexedDB store uses camelCase, while shared sidebar code still consumes
+  // snake_case metadata from the server-backed client.
+  created_at?: string | number;
+  updated_at?: string | number;
+  active_run_id?: string | null;
+  sidebar_work_folder?: string | null;
+  sidebar_pinned_at?: string | number | null;
+  sidebar_gtd_bucket?: ThreadGtdBucket | null;
+  is_private?: boolean;
+  collaboration_mode?: CollaborationMode;
+  collaboration_mode_revision?: number | null;
+}
+
+/** Alias used by thread-list context (web-client naming convention). */
+export type ThreadResponse = ThreadRecord;
+
+export interface UpdateThreadSidebarRequest {
+  starred?: boolean;
+  gtdBucket?: ThreadGtdBucket | null;
+  mode?: ThreadMode;
+  sidebar_work_folder?: string | null;
+  sidebar_pinned?: boolean;
+  sidebar_gtd_bucket?: ThreadGtdBucket | null;
 }
 
 // LLM Provider types (mapped from config)
@@ -155,11 +181,66 @@ export interface MeModelUsageItem { model: string; requests: number; tokens: num
 // Channel / Persona types (for settings shared)
 export interface ChannelResponse { id: string; type: string; name: string; enabled: boolean }
 export interface ChannelBindingResponse { id: string; channelType: string; bindingType: string }
+export interface ChannelIdentityResponse { id: string; channelType: string; channelName?: string; boundAt?: string }
 
 // Memory types
 export type MemoryErrorEvent = { id: string; message: string; timestamp: number; errorType: string }
 
 // Run type
 export interface Run { id: string; threadId: string; status: string; createdAt: number; completedAt?: number }
+
+export type LoopDefinitionStatus = 'active' | 'paused';
+export type LoopRunStatus = 'running' | 'success' | 'failed' | 'blocked';
+export type EvidenceAnomalyStatus = 'open' | 'resolved' | 'ignored';
+
+export interface LoopDefinitionView {
+  id: string;
+  title: string;
+  description: string;
+  status: LoopDefinitionStatus;
+  activeRunId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface LoopRunView {
+  id: string;
+  loopId: string;
+  status: LoopRunStatus;
+  trigger: { kind: string; [key: string]: unknown };
+  evidenceIds: string[];
+  startedAt: number;
+  finishedAt?: number;
+  updatedAt: number;
+  failureKind?: string;
+  message?: string;
+  summary?: string;
+  nextActionKind?: string;
+  nextActionSummary?: string;
+}
+
+export interface EvidenceAnomalyView {
+  id: string;
+  loopId: string;
+  ownerKind: string;
+  ownerId: string;
+  kind: string;
+  status: EvidenceAnomalyStatus;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  lastResolvedAt?: number;
+  seenCount: number;
+  ignoredUntil?: number;
+  message: string;
+  evidenceIds: string[];
+  metadata: Record<string, unknown>;
+}
+
+export type RunLoopNowResultView =
+  | { status: 'success'; run: LoopRunView }
+  | { status: 'blocked'; run: LoopRunView }
+  | { status: 'failed'; run: LoopRunView }
+  | { status: 'already_running'; activeRunId: string }
+  | { status: 'skipped'; reason: 'paused' | 'missing_loop' };
 
 export interface UploadedThreadAttachment { id: string; fileName: string; fileSize: number }

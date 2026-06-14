@@ -1,6 +1,4 @@
-import type { ReminderDeliveryEvent } from './reminder-scheduler.js';
 import type { ReminderRecord } from './reminder-store.js';
-import type { ScheduledTaskRecord } from './scheduled-task-scheduler.js';
 import type { TimedActionStore } from './timed-action-store.js';
 import type {
   CreateTimedActionInput,
@@ -9,6 +7,33 @@ import type {
   TimedActionSource,
   TimedActionTrigger,
 } from './timed-action-types.js';
+
+export interface ReminderDeliveryEvent {
+  reminderId: string;
+  content: string;
+  sessionId?: string;
+  createdAt: number;
+}
+
+export interface ScheduledTaskRecord {
+  id: string;
+  name: string;
+  description?: string;
+  prompt: string;
+  frequency: 'manual' | 'hourly' | 'interval' | 'daily' | 'weekdays' | 'weekly';
+  status: 'active' | 'paused';
+  nextRunAt?: number;
+  lastRunAt?: number;
+  runtimeTaskId?: string;
+  reviewedAt?: number;
+  userApprovedAuto?: boolean;
+  scheduleConfig?: {
+    intervalMinutes?: number;
+    hour?: number;
+    minute?: number;
+    dayOfWeek?: number;
+  };
+}
 
 export interface CreateScheduledTaskInput {
   id?: string;

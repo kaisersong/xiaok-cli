@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { TimedActionScheduler } from '../../electron/timed-action-scheduler.js';
 import { TimedActionStore } from '../../electron/timed-action-store.js';
 import type { TimedActionExecutorHandler } from '../../electron/timed-action-types.js';
+import { createLoopExecutor } from '../../electron/loop-executor.js';
 
 describe('TimedActionScheduler', () => {
   let rootDir: string;
@@ -158,6 +159,200 @@ describe('TimedActionScheduler', () => {
           lastDueAt: 2_000,
         }),
       }));
+    });
+  });
+
+  it('claims notify, then loop, then agent task without applying agent concurrency to loop', async () => {
+    store.createAction({
+      id: 'notify_now',
+      title: '提醒',
+      trigger: { kind: 'once', at: 1_000 },
+      executor: { kind: 'notify', message: '提醒' },
+      source: 'user',
+      now: 0,
+    });
+    store.createAction({
+      id: 'loop_now',
+      title: '证据回归',
+      trigger: { kind: 'once', at: 1_000 },
+      executor: { kind: 'loop', loopId: 'artifact-evidence-regression' },
+      source: 'agent',
+      now: 0,
+    });
+    store.createAction({
+      id: 'agent_now',
+      title: '自动任务',
+      trigger: { kind: 'once', at: 1_000 },
+      executor: { kind: 'agent_task', prompt: '执行' },
+      source: 'agent',
+      now: 0,
+    });
+
+    const calls: string[] = [];
+    const notifyExecutor: TimedActionExecutorHandler = {
+      kind: 'notify',
+      execute: vi.fn(() => {
+        calls.push('notify');
+        return {};
+      }),
+    };
+    const loopExecutor: TimedActionExecutorHandler = {
+      kind: 'loop',
+      execute: vi.fn(() => {
+        calls.push('loop');
+        return {};
+      }),
+    };
+    const agentExecutor: TimedActionExecutorHandler = {
+      kind: 'agent_task',
+      execute: vi.fn(() => {
+        calls.push('agent_task');
+        return {};
+      }),
+    };
+    const scheduler = new TimedActionScheduler(store, {
+      executors: { notify: notifyExecutor, loop: loopExecutor, agent_task: agentExecutor },
+      now: () => 2_000,
+      maxAgentConcurrent: 0,
+    });
+
+    await scheduler.runOnce('normal_tick');
+    await vi.waitFor(() => {
+      expect(calls).toEqual(['notify', 'loop']);
+    });
+
+    await vi.waitFor(() => {
+      expect(store.listRuns('notify_now')[0]).toMatchObject({ status: 'success' });
+      expect(store.listRuns('loop_now')[0]).toMatchObject({ status: 'success' });
+    });
+    expect(agentExecutor.execute).not.toHaveBeenCalled();
+    expect(store.listRuns('agent_now')).toEqual([]);
+  });
+
+  it('records a cron loop timed action run as skipped when the loop is already running', async () => {
+    store.createAction({
+      id: 'loop_cron',
+      title: '证据回归',
+      trigger: { kind: 'daily', hour: 1, minute: 0 },
+      executor: { kind: 'loop', loopId: 'artifact-evidence-regression' },
+      source: 'agent',
+      nextDueAt: 1_000,
+      now: 0,
+    });
+
+    const onRunComplete = vi.fn();
+    const scheduler = new TimedActionScheduler(store, {
+      executors: {
+        loop: createLoopExecutor({
+          runLoop: vi.fn().mockResolvedValue({ status: 'already_running', activeRunId: 'run_active' }),
+        }),
+      },
+      now: () => 2_000,
+      onRunComplete,
+    });
+
+    await scheduler.runOnce('normal_tick');
+
+    await vi.waitFor(() => {
+      expect(store.listRuns('loop_cron')[0]).toMatchObject({
+        status: 'skip',
+        error: 'loop already running: run_active',
+      });
+      expect(onRunComplete).toHaveBeenCalledWith(expect.objectContaining({
+        status: 'skipped',
+        error: 'loop already running: run_active',
+      }));
+    });
+  });
+
+  it('records a cron loop timed action run as failed when the loop run fails', async () => {
+    store.createAction({
+      id: 'loop_cron_failure',
+      title: '证据回归',
+      trigger: { kind: 'daily', hour: 1, minute: 0 },
+      executor: { kind: 'loop', loopId: 'artifact-evidence-regression' },
+      source: 'agent',
+      nextDueAt: 1_000,
+      now: 0,
+    });
+
+    const scheduler = new TimedActionScheduler(store, {
+      executors: {
+        loop: createLoopExecutor({
+          runLoop: vi.fn().mockResolvedValue({
+            status: 'failed',
+            run: {
+              id: 'run_failed',
+              loopId: 'artifact-evidence-regression',
+              status: 'failed',
+              trigger: { kind: 'scheduled' },
+              evidenceIds: [],
+              startedAt: 1_000,
+              finishedAt: 2_000,
+              updatedAt: 2_000,
+              failureKind: 'executor_failed',
+              message: 'scanner failed',
+            },
+          }),
+        }),
+      },
+      now: () => 2_000,
+    });
+
+    await scheduler.runOnce('normal_tick');
+
+    await vi.waitFor(() => {
+      expect(store.listRuns('loop_cron_failure')[0]).toMatchObject({
+        status: 'failed',
+        error: 'loop failed: scanner failed',
+      });
+      expect(store.getAction('loop_cron_failure')).toMatchObject({
+        consecutiveFailures: 1,
+        lastError: 'loop failed: scanner failed',
+      });
+    });
+  });
+
+  it('does not let many due loops starve an agent task with available agent capacity', async () => {
+    for (let index = 0; index < 3; index += 1) {
+      store.createAction({
+        id: `loop_${index}`,
+        title: `证据回归 ${index}`,
+        trigger: { kind: 'once', at: 1_000 },
+        executor: { kind: 'loop', loopId: `loop-${index}` },
+        source: 'agent',
+        now: 0,
+      });
+    }
+    store.createAction({
+      id: 'agent_due',
+      title: '自动任务',
+      trigger: { kind: 'once', at: 1_000 },
+      executor: { kind: 'agent_task', prompt: '执行' },
+      source: 'agent',
+      now: 0,
+    });
+
+    const loopExecutor: TimedActionExecutorHandler = {
+      kind: 'loop',
+      execute: vi.fn(() => ({})),
+    };
+    const agentExecutor: TimedActionExecutorHandler = {
+      kind: 'agent_task',
+      execute: vi.fn(() => ({})),
+    };
+    const scheduler = new TimedActionScheduler(store, {
+      executors: { loop: loopExecutor, agent_task: agentExecutor },
+      now: () => 2_000,
+      maxClaimPerTick: 3,
+      maxAgentConcurrent: 1,
+    });
+
+    await scheduler.runOnce('normal_tick');
+
+    await vi.waitFor(() => {
+      expect(agentExecutor.execute).toHaveBeenCalledTimes(1);
+      expect(loopExecutor.execute).toHaveBeenCalledTimes(1);
     });
   });
 });

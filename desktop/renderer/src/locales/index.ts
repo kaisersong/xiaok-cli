@@ -1028,6 +1028,18 @@ export interface LocaleStrings {
     runsHistoryOpen: string;
     runsHistoryPrev: string;
     runsHistoryNext: string;
+    loopDiagnostics: string;
+    loopDiagnosticsDesc: string;
+    loopDiagnosticsRefresh: string;
+    loopDiagnosticsRunNow: string;
+    loopDiagnosticsRunning: string;
+    loopDiagnosticsAlreadyRunning: string;
+    loopDiagnosticsLastRun: string;
+    loopDiagnosticsOpenAnomalies: string;
+    loopDiagnosticsNoRuns: string;
+    loopDiagnosticsLoading: string;
+    loopDiagnosticsLoadError: string;
+    loopDiagnosticsRunFailed: string;
     chatSectionTitle: string;
     chatCompactCardTitle: string;
     chatCompactEnableLabel: string;
