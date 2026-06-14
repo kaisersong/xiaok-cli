@@ -1,15 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { ChevronLeft } from 'lucide-react'
-import { getDesktopApi } from '../shared/desktop'
-import { useToast } from '../shared'
+import { ChevronLeft, Copy, RefreshCw } from 'lucide-react'
+import { getDesktopApi, type DesktopSettingsKey } from '../../shared/desktop'
+import { useToast } from '../../shared'
 import { useLocale } from '../../contexts/LocaleContext'
-import { getAccountSettings, updateAccountSettings } from '../../api'
+import {
+  api,
+  type EvidenceAnomalyView,
+  type LoopDefinitionView,
+  type LoopRunView,
+  type RunLoopNowResultView,
+} from '../../api'
 import { readDeveloperShowRunEvents, writeDeveloperShowRunEvents, readDeveloperShowDebugPanel, writeDeveloperShowDebugPanel, readDeveloperPipelineTraceEnabled, writeDeveloperPipelineTraceEnabled, readDeveloperPromptCacheDebugEnabled, writeDeveloperPromptCacheDebugEnabled } from '../../storage'
 import { RunsSettings } from './RunsSettings'
-import { PillToggle } from '../shared'
-import type { DesktopSettingsKey } from '../DesktopSettings'
 import { secondaryButtonBorderStyle, secondaryButtonSmCls } from '../buttonStyles'
+import {
+  buildLoopDiagnosticsSummary,
+  getLoopAnomalyLogPaths,
+  getLoopAnomalySuggestedAction,
+  getOpenLoopAnomalies,
+} from './loopDiagnostics'
 
 type Props = {
   accessToken?: string
@@ -19,15 +29,17 @@ type Props = {
 type PanelBtnProps = {
   onClick: () => void
   disabled?: boolean
+  ariaLabel?: string
   children: ReactNode
 }
 
-function PanelButton({ onClick, disabled, children }: PanelBtnProps) {
+function PanelButton({ onClick, disabled, ariaLabel, children }: PanelBtnProps) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      aria-label={ariaLabel}
       className={secondaryButtonSmCls}
       style={secondaryButtonBorderStyle}
     >
@@ -36,10 +48,72 @@ function PanelButton({ onClick, disabled, children }: PanelBtnProps) {
   )
 }
 
+function PillToggle({
+  checked,
+  disabled,
+  ariaLabel,
+  onChange,
+}: {
+  checked: boolean
+  disabled?: boolean
+  ariaLabel: string
+  onChange: (next: boolean) => void
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={[
+        'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+        checked ? 'bg-[var(--c-accent)]' : 'bg-[var(--c-border-subtle)]',
+      ].join(' ')}
+    >
+      <span
+        className={[
+          'inline-block size-5 rounded-full bg-white shadow transition-transform',
+          checked ? 'translate-x-5' : 'translate-x-0.5',
+        ].join(' ')}
+      />
+    </button>
+  )
+}
+
+type AccountSettingsSnapshot = {
+  pipeline_trace_enabled?: boolean
+  prompt_cache_debug_enabled?: boolean
+}
+
+function getOpenAnomalyCount(anomalies: EvidenceAnomalyView[]): number {
+  return getOpenLoopAnomalies(anomalies).length
+}
+
+function getRunStatusLabel(status: LoopRunView['status']): string {
+  if (status === 'success') return 'success'
+  if (status === 'failed') return 'failed'
+  if (status === 'blocked') return 'blocked'
+  return 'running'
+}
+
+function formatLoopRunTime(run: LoopRunView): string {
+  const ts = run.finishedAt ?? run.updatedAt ?? run.startedAt
+  return new Date(ts).toLocaleString()
+}
+
 export function DeveloperSettings({ accessToken, onNavigate }: Props) {
   const { t } = useLocale()
-  const { addToast } = useToast()
+  const toast = useToast() as {
+    addToast?: (message: string, type?: 'success' | 'error') => void
+    show?: (message: string, type?: 'success' | 'error') => void
+  }
   const ds = t.desktopSettings
+  const showToast = useCallback((message: string, type: 'success' | 'error' = 'error') => {
+    if (toast.addToast) toast.addToast(message, type)
+    else toast.show?.(message, type)
+  }, [toast])
   const [appVersion, setAppVersion] = useState('')
   const [resetDone, setResetDone] = useState(false)
   const [showRunEvents, setShowRunEvents] = useState(() => readDeveloperShowRunEvents())
@@ -51,6 +125,13 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
   const [promptCacheDebugLoading, setPromptCacheDebugLoading] = useState(() => !!accessToken)
   const [promptCacheDebugSaving, setPromptCacheDebugSaving] = useState(false)
   const [runsOpen, setRunsOpen] = useState(false)
+  const [loopDefinitions, setLoopDefinitions] = useState<LoopDefinitionView[]>([])
+  const [loopRuns, setLoopRuns] = useState<Record<string, LoopRunView[]>>({})
+  const [loopAnomalies, setLoopAnomalies] = useState<Record<string, EvidenceAnomalyView[]>>({})
+  const [loopRunResults, setLoopRunResults] = useState<Record<string, RunLoopNowResultView | undefined>>({})
+  const [loopDiagnosticsLoading, setLoopDiagnosticsLoading] = useState(false)
+  const [loopDiagnosticsError, setLoopDiagnosticsError] = useState('')
+  const [runningLoopId, setRunningLoopId] = useState<string | null>(null)
 
   useEffect(() => {
     const api = getDesktopApi()
@@ -71,17 +152,18 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
     let cancelled = false
     setPipelineTraceLoading(true)
     setPromptCacheDebugLoading(true)
-    void getAccountSettings(accessToken)
+    void api.getAccountSettings()
       .then((settings) => {
         if (cancelled) return
-        setPipelineTraceEnabled(settings.pipeline_trace_enabled)
-        writeDeveloperPipelineTraceEnabled(settings.pipeline_trace_enabled)
-        setPromptCacheDebugEnabled(settings.prompt_cache_debug_enabled)
-        writeDeveloperPromptCacheDebugEnabled(settings.prompt_cache_debug_enabled)
+        const snapshot = settings as AccountSettingsSnapshot
+        setPipelineTraceEnabled(!!snapshot.pipeline_trace_enabled)
+        writeDeveloperPipelineTraceEnabled(!!snapshot.pipeline_trace_enabled)
+        setPromptCacheDebugEnabled(!!snapshot.prompt_cache_debug_enabled)
+        writeDeveloperPromptCacheDebugEnabled(!!snapshot.prompt_cache_debug_enabled)
       })
       .catch((error) => {
         if (cancelled) return
-        addToast(error instanceof Error ? error.message : t.requestFailed, 'error')
+        showToast(error instanceof Error ? error.message : t.requestFailed, 'error')
       })
       .finally(() => {
         if (!cancelled) {
@@ -93,7 +175,33 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
     return () => {
       cancelled = true
     }
-  }, [accessToken, addToast, t.requestFailed])
+  }, [accessToken, t.requestFailed])
+
+  const loadLoopDiagnostics = useCallback(async (silent = false) => {
+    if (!silent) setLoopDiagnosticsLoading(true)
+    setLoopDiagnosticsError('')
+    try {
+      const definitions = await api.getLoopDefinitions()
+      const details = await Promise.all(definitions.map(async (loop) => {
+        const [runs, anomalies] = await Promise.all([
+          api.getLoopRuns(loop.id),
+          api.getEvidenceAnomalies(loop.id).catch(() => [] as EvidenceAnomalyView[]),
+        ])
+        return { loop, runs, anomalies }
+      }))
+      setLoopDefinitions(definitions)
+      setLoopRuns(Object.fromEntries(details.map(item => [item.loop.id, item.runs])))
+      setLoopAnomalies(Object.fromEntries(details.map(item => [item.loop.id, item.anomalies])))
+    } catch (error) {
+      setLoopDiagnosticsError(error instanceof Error ? error.message : ds.loopDiagnosticsLoadError)
+    } finally {
+      if (!silent) setLoopDiagnosticsLoading(false)
+    }
+  }, [ds.loopDiagnosticsLoadError])
+
+  useEffect(() => {
+    void loadLoopDiagnostics()
+  }, [loadLoopDiagnostics])
 
   const handleResetOnboarding = async () => {
     const api = getDesktopApi()
@@ -115,14 +223,14 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
     setPipelineTraceEnabled(next)
     setPipelineTraceSaving(true)
     try {
-      const settings = await updateAccountSettings(accessToken, {
+      const settings = await api.updateAccountSettings({
         pipeline_trace_enabled: next,
-      })
-      setPipelineTraceEnabled(settings.pipeline_trace_enabled)
-      writeDeveloperPipelineTraceEnabled(settings.pipeline_trace_enabled)
+      }) as AccountSettingsSnapshot
+      setPipelineTraceEnabled(!!settings.pipeline_trace_enabled)
+      writeDeveloperPipelineTraceEnabled(!!settings.pipeline_trace_enabled)
     } catch (error) {
       setPipelineTraceEnabled(previous)
-      addToast(error instanceof Error ? error.message : t.requestFailed, 'error')
+      showToast(error instanceof Error ? error.message : t.requestFailed, 'error')
     } finally {
       setPipelineTraceSaving(false)
     }
@@ -135,16 +243,45 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
     setPromptCacheDebugEnabled(next)
     setPromptCacheDebugSaving(true)
     try {
-      const settings = await updateAccountSettings(accessToken, {
+      const settings = await api.updateAccountSettings({
         prompt_cache_debug_enabled: next,
-      })
-      setPromptCacheDebugEnabled(settings.prompt_cache_debug_enabled)
-      writeDeveloperPromptCacheDebugEnabled(settings.prompt_cache_debug_enabled)
+      }) as AccountSettingsSnapshot
+      setPromptCacheDebugEnabled(!!settings.prompt_cache_debug_enabled)
+      writeDeveloperPromptCacheDebugEnabled(!!settings.prompt_cache_debug_enabled)
     } catch (error) {
       setPromptCacheDebugEnabled(previous)
-      addToast(error instanceof Error ? error.message : t.requestFailed, 'error')
+      showToast(error instanceof Error ? error.message : t.requestFailed, 'error')
     } finally {
       setPromptCacheDebugSaving(false)
+    }
+  }
+
+  const handleRunLoopNow = async (loopId: string) => {
+    if (runningLoopId) return
+    setRunningLoopId(loopId)
+    setLoopDiagnosticsError('')
+    try {
+      const result = await api.runLoopNow(loopId)
+      setLoopRunResults(prev => ({ ...prev, [loopId]: result }))
+      await loadLoopDiagnostics(true)
+    } catch (error) {
+      setLoopDiagnosticsError(error instanceof Error ? error.message : ds.loopDiagnosticsRunFailed)
+    } finally {
+      setRunningLoopId(null)
+    }
+  }
+
+  const handleCopyLoopDiagnostics = async (
+    loop: LoopDefinitionView,
+    runs: LoopRunView[],
+    anomalies: EvidenceAnomalyView[],
+  ) => {
+    try {
+      const summary = buildLoopDiagnosticsSummary({ loop, runs, anomalies })
+      await navigator.clipboard.writeText(summary)
+      showToast(ds.loopDiagnosticsCopied, 'success')
+    } catch {
+      showToast(ds.loopDiagnosticsCopyFailed, 'error')
     }
   }
 
@@ -190,6 +327,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
           <PillToggle
             checked={pipelineTraceEnabled}
             disabled={!accessToken || pipelineTraceLoading || pipelineTraceSaving}
+            ariaLabel={ds.pipelineTrace}
             onChange={(next) => {
               void handlePipelineTraceChange(next)
             }}
@@ -211,6 +349,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
           <PillToggle
             checked={promptCacheDebugEnabled}
             disabled={!accessToken || promptCacheDebugLoading || promptCacheDebugSaving}
+            ariaLabel={ds.promptCacheDebug}
             onChange={(next) => {
               void handlePromptCacheDebugChange(next)
             }}
@@ -232,6 +371,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
           </div>
           <PillToggle
             checked={showRunEvents}
+            ariaLabel={ds.showRunEvents}
             onChange={(next) => {
               setShowRunEvents(next)
               writeDeveloperShowRunEvents(next)
@@ -254,6 +394,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
           </div>
           <PillToggle
             checked={showDebugPanel}
+            ariaLabel={ds.showDebugPanel}
             onChange={(next) => {
               setShowDebugPanel(next)
               writeDeveloperShowDebugPanel(next)
@@ -280,6 +421,165 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
           >
             {ds.runsHistoryOpen}
           </PanelButton>
+        </div>
+
+        {/* Loop diagnostics */}
+        <div
+          className="rounded-xl bg-[var(--c-bg-menu)] px-4 py-3"
+          style={{ border: '0.5px solid var(--c-border-subtle)' }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-[var(--c-text-primary)]">
+                {ds.loopDiagnostics}
+              </div>
+              <div className="text-xs text-[var(--c-text-muted)]">
+                {ds.loopDiagnosticsDesc}
+              </div>
+            </div>
+            <PanelButton
+              onClick={() => void loadLoopDiagnostics()}
+              disabled={loopDiagnosticsLoading}
+            >
+              <RefreshCw size={14} className={loopDiagnosticsLoading ? 'animate-spin' : ''} />
+              {ds.loopDiagnosticsRefresh}
+            </PanelButton>
+          </div>
+
+          {loopDiagnosticsError && (
+            <div className="mt-3 rounded-lg bg-[var(--c-status-error-bg,#fef2f2)] px-3 py-2 text-xs text-[var(--c-status-error-text,#b91c1c)]">
+              {loopDiagnosticsError}
+            </div>
+          )}
+
+          {loopDiagnosticsLoading && loopDefinitions.length === 0 ? (
+            <div className="mt-3 text-xs text-[var(--c-text-muted)]">
+              {ds.loopDiagnosticsLoading}
+            </div>
+          ) : (
+	            <div className="mt-3 flex flex-col gap-2">
+	              {loopDefinitions.map((loop) => {
+	                const runs = loopRuns[loop.id] ?? []
+	                const latestRun = runs[0]
+	                const anomalies = loopAnomalies[loop.id] ?? []
+	                const openAnomalies = getOpenLoopAnomalies(anomalies)
+	                const visibleAnomalies = openAnomalies.slice(0, 3)
+	                const openAnomalyCount = getOpenAnomalyCount(anomalies)
+	                const runResult = loopRunResults[loop.id]
+	                const isRunning = runningLoopId === loop.id
+	                const isAlreadyRunning = !!loop.activeRunId || runResult?.status === 'already_running'
+	                const buttonLabel = isRunning
+	                  ? ds.loopDiagnosticsRunning
+	                  : isAlreadyRunning
+	                    ? ds.loopDiagnosticsAlreadyRunning
+	                    : ds.loopDiagnosticsRunNow
+
+	                return (
+	                  <div
+	                    key={loop.id}
+	                    className="rounded-lg bg-[var(--c-bg-card)] p-3"
+	                    style={{ border: '0.5px solid var(--c-border-subtle)' }}
+	                  >
+	                    <div className="flex items-start justify-between gap-3">
+	                      <div className="min-w-0">
+	                        <div className="truncate text-sm font-medium text-[var(--c-text-primary)]">
+	                          {loop.title}
+	                        </div>
+	                        <div className="mt-0.5 text-xs text-[var(--c-text-muted)]">
+	                          {loop.description}
+	                        </div>
+	                      </div>
+	                      <span className="shrink-0 rounded-full bg-[var(--c-bg-menu)] px-2 py-0.5 text-[11px] text-[var(--c-text-secondary)]">
+	                        {loop.status}
+	                      </span>
+	                    </div>
+
+	                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+	                      <div className="rounded-md bg-[var(--c-bg-menu)] p-2">
+	                        <div className="text-[var(--c-text-muted)]">{ds.loopDiagnosticsLastRun}</div>
+	                        <div className="mt-1 text-[var(--c-text-primary)]">
+	                          {latestRun
+	                            ? `${getRunStatusLabel(latestRun.status)} · ${formatLoopRunTime(latestRun)}`
+	                            : ds.loopDiagnosticsNoRuns}
+	                        </div>
+	                      </div>
+	                      <div className="rounded-md bg-[var(--c-bg-menu)] p-2">
+	                        <div className="text-[var(--c-text-muted)]">{ds.loopDiagnosticsOpenAnomalies}</div>
+	                        <div className="mt-1 font-medium text-[var(--c-text-primary)]">
+	                          {openAnomalyCount}
+	                        </div>
+	                      </div>
+	                    </div>
+
+	                    {latestRun?.message && (
+	                      <div className="mt-2 rounded-md bg-[var(--c-bg-menu)] p-2 text-xs text-[var(--c-text-secondary)]">
+	                        {latestRun.message}
+	                      </div>
+	                    )}
+
+	                    {visibleAnomalies.length > 0 && (
+	                      <div className="mt-2 flex flex-col gap-2">
+	                        {visibleAnomalies.map((anomaly) => {
+	                          const suggestedAction = getLoopAnomalySuggestedAction(anomaly)
+	                          const logPaths = getLoopAnomalyLogPaths(anomaly)
+	                          return (
+	                            <div
+	                              key={anomaly.id}
+	                              className="rounded-md bg-[var(--c-bg-menu)] p-2 text-xs text-[var(--c-text-secondary)]"
+	                            >
+	                              <div className="flex items-start justify-between gap-2">
+	                                <div className="min-w-0">
+	                                  <div className="font-medium text-[var(--c-text-primary)]">
+	                                    {anomaly.message}
+	                                  </div>
+	                                  <div className="mt-0.5 break-all text-[var(--c-text-muted)]">
+	                                    {anomaly.kind} · {anomaly.ownerKind}/{anomaly.ownerId}
+	                                  </div>
+	                                </div>
+	                                <span className="shrink-0 text-[11px] text-[var(--c-text-muted)]">
+	                                  {anomaly.seenCount}x
+	                                </span>
+	                              </div>
+	                              {suggestedAction && (
+	                                <div className="mt-1">
+	                                  <span className="text-[var(--c-text-muted)]">{ds.loopDiagnosticsSuggestedAction}: </span>
+	                                  {suggestedAction}
+	                                </div>
+	                              )}
+	                              {logPaths.map((logPath) => (
+	                                <div key={logPath} className="mt-1 break-all">
+	                                  <span className="text-[var(--c-text-muted)]">{ds.loopDiagnosticsLogPath}: </span>
+	                                  {logPath}
+	                                </div>
+	                              ))}
+	                            </div>
+	                          )
+	                        })}
+	                      </div>
+	                    )}
+
+	                    <div className="mt-3 flex flex-wrap justify-end gap-2">
+	                      <PanelButton
+	                        onClick={() => void handleCopyLoopDiagnostics(loop, runs, anomalies)}
+	                        ariaLabel={`copy-loop-diagnostics-${loop.id}`}
+	                      >
+	                        <Copy size={14} />
+	                        <span>{ds.loopDiagnosticsCopy}</span>
+	                      </PanelButton>
+	                      <PanelButton
+	                        onClick={() => void handleRunLoopNow(loop.id)}
+	                        disabled={isRunning || isAlreadyRunning || loop.status !== 'active'}
+	                        ariaLabel={`run-loop-${loop.id}`}
+	                      >
+	                        <RefreshCw size={14} className={isRunning ? 'animate-spin' : ''} />
+	                        <span>{buttonLabel}</span>
+	                      </PanelButton>
+	                    </div>
+	                  </div>
+	                )
+	              })}
+	            </div>
+          )}
         </div>
 
         {/* Design Tokens */}

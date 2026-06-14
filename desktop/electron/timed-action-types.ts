@@ -7,7 +7,8 @@ export type TimedActionTrigger =
 
 export type TimedActionExecutor =
   | { kind: 'notify'; message: string }
-  | { kind: 'agent_task'; prompt: string; materials?: unknown[] };
+  | { kind: 'agent_task'; prompt: string; materials?: unknown[] }
+  | { kind: 'loop'; loopId: string };
 
 export interface TimedActionPolicy {
   maxRuns?: number;
@@ -87,6 +88,7 @@ export interface ClaimedTimedAction {
 export interface TimedActionExecutorResult {
   runtimeTaskId?: string;
   decision?: Record<string, unknown>;
+  skip?: Exclude<ExecutorRecoveryDecision, { action: 'execute' }>;
 }
 
 export interface TimedActionExecutorHandler {

@@ -224,6 +224,88 @@ describe('DesktopTaskEvent projection', () => {
     ]);
   });
 
+  it('projects structured receipt output artifacts into result artifacts', () => {
+    const desktopEvent = projectRuntimeEventToDesktopEvent({
+      taskId: 'task_1',
+      event: {
+        type: 'receipt_emitted',
+        sessionId: 'sess_1',
+        turnId: 'turn_1',
+        intentId: 'intent_1',
+        stepId: 'step_1',
+        note: JSON.stringify({
+          output: {
+            summary: 'Final report generated.',
+            artifacts: [{ path: '/tmp/final-report.md', kind: 'markdown', label: 'final-report.md' }],
+            evidenceRefs: ['artifact:/tmp/final-report.md'],
+          },
+        }),
+      },
+    });
+
+    expect(desktopEvent).toEqual({
+      type: 'result',
+      result: {
+        summary: 'Final report generated.',
+        structuredOutput: {
+          summary: 'Final report generated.',
+          artifacts: [{ path: '/tmp/final-report.md', kind: 'markdown', label: 'final-report.md' }],
+          evidenceRefs: ['artifact:/tmp/final-report.md'],
+        },
+        artifacts: [{
+          artifactId: 'receipt_turn_1_0',
+          kind: 'text',
+          title: 'final-report.md',
+          createdAt: 'turn_1',
+          previewAvailable: true,
+          filePath: '/tmp/final-report.md',
+          creator: 'agent',
+        }],
+      },
+    });
+  });
+
+  it('uses receipt analysis as summary when structured output has no summary field', () => {
+    const desktopEvent = projectRuntimeEventToDesktopEvent({
+      taskId: 'task_1',
+      event: {
+        type: 'receipt_emitted',
+        sessionId: 'sess_1',
+        turnId: 'turn_1',
+        intentId: 'intent_1',
+        stepId: 'step_1',
+        note: JSON.stringify({
+          output: {
+            analysis: 'PO planning complete.',
+            phases: [{ id: 'phase_1', title: 'Build' }],
+            artifacts: [{ filePath: '/tmp/plan.md', kind: 'markdown', title: 'plan.md' }],
+          },
+        }),
+      },
+    });
+
+    expect(desktopEvent).toEqual({
+      type: 'result',
+      result: {
+        summary: 'PO planning complete.',
+        structuredOutput: {
+          analysis: 'PO planning complete.',
+          phases: [{ id: 'phase_1', title: 'Build' }],
+          artifacts: [{ filePath: '/tmp/plan.md', kind: 'markdown', title: 'plan.md' }],
+        },
+        artifacts: [{
+          artifactId: 'receipt_turn_1_0',
+          kind: 'text',
+          title: 'plan.md',
+          createdAt: 'turn_1',
+          previewAvailable: true,
+          filePath: '/tmp/plan.md',
+          creator: 'agent',
+        }],
+      },
+    });
+  });
+
   it('projects file_changed events correctly', () => {
     const runtimeEvent: RuntimeEvent = {
       type: 'file_changed',

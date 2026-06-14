@@ -1,5 +1,4 @@
 node_modules/
-dist/
 *.log
 .DS_Store
 .claude/
@@ -62,3 +61,25 @@ docs/skill-observability-design.md
 /main.js
 /preload.cjs
 /desktop-services.js
+
+# 会话治理日志（运行期产物，不进版本控制）
+.governance-claims/
+.governance-log/
+
+# 根目录临时报告/幻灯片
+/claude-*.html
+/plan-output.json
+/verify-*.sh
+/index.html
+
+# desktop 包根散落的临时 e2e / test 文件和截图
+/desktop/e2e-*.ts
+/desktop/e2e-*.spec.ts
+/desktop/e2e-*.js
+/desktop/test-*.ts
+/desktop/test-*.js
+/desktop/test-*.png
+/desktop/e2e-results/
+/desktop/test-results/
+/desktop/claude-*.html
+/desktop/OpenAI*.md

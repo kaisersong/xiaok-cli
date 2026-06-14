@@ -553,7 +553,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         return;
       }
       activateTrackedSkillPlan(parsed as ReturnType<typeof buildSkillExecutionPlan>, event.agentId);
-    } catch {}
+    } catch (e) { log.warn('skill result JSON parse failed', (e as Error).message) }
   };
 
   const observeSkillEvidence = (event: ToolObservation): void => {
@@ -992,7 +992,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     } catch {}
     try {
       scrollRegion.end();
-    } catch {}
+    } catch (e) { log.warn('scrollRegion.end failed in suspendInteractiveUi', (e as Error).message) }
   };
 
   const runtimeState = new TuiRuntimeState({
@@ -3396,7 +3396,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     } catch {}
     try {
       scrollRegion.end();
-    } catch {}
+    } catch (e) { log.warn('scrollRegion.end failed in post-loop cleanup', (e as Error).message) }
     setStreamErrorHandler(null);
     process.stdout.write = originalStdoutWrite;
     process.stderr.write = originalStderrWrite;

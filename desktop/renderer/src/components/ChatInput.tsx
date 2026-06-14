@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
 import { Send, Square, X, Plus } from 'lucide-react';
 import { api } from '../api';
 
 interface AttachedFile {
   filePath: string;
   name: string;
+  isImage?: boolean;
 }
 
 interface SkillItem {
@@ -30,6 +31,10 @@ interface ChatInputProps {
 
 const TEXTAREA_MAX_HEIGHT = 220;
 
+function basename(filePath: string): string {
+  return filePath.split(/[\\/]/).pop() || filePath;
+}
+
 export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder = '回复...', disabled, isRunning, onStop }: ChatInputProps) {
   const [internalValue, setInternalValue] = useState(value ?? '');
   const [files, setFiles] = useState<AttachedFile[]>([]);
@@ -40,6 +45,86 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
   const [selectedIndex, setSelectedIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const slashMenuRef = useRef<HTMLDivElement>(null);
+  const pastePathsRef = useRef<string[] | null>(null);
+  const pasteHandlerRef = useRef<((e: ClipboardEvent) => void) | null>(null);
+  // Set to true when keydown Cmd+V starts a readClipboardFilePaths fetch,
+  // so the paste event handler skips its own hasFileItems branch.
+  const finderFilesPendingRef = useRef(false);
+
+  const textareaCallbackRef = useCallback((el: HTMLTextAreaElement | null) => {
+    // Remove old listener if element changes
+    if (pasteHandlerRef.current && (textareaRef.current || el === null)) {
+      (textareaRef.current ?? el)?.removeEventListener('paste', pasteHandlerRef.current);
+    }
+    (textareaRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
+    if (!el) return;
+
+    const handler = (e: ClipboardEvent) => {
+      const clipItems = Array.from(e.clipboardData?.items ?? []);
+
+      // File path paste takes priority over image paste.
+      // Copying a file in Finder puts both the file path (text/plain) and an
+      // image preview (image/tiff) on the clipboard; we must check paths first
+      // so we don't mistake a copied image file for a screenshot paste.
+      const plainText = e.clipboardData?.getData('text/plain') ?? '';
+      const lines = plainText.split(/\r?\n/).flatMap(l => { const t = l.trim(); return t ? [t] : []; });
+      const pathLines = lines.filter(l => l.startsWith('/'));
+      if (pathLines.length > 0) {
+        pastePathsRef.current = pathLines;
+        return;
+      }
+
+      // Finder NSFilenamesPboardType / file-item paste without a keydown preflight.
+      // Cmd+V sets finderFilesPendingRef first, so this branch only handles paste
+      // paths that would otherwise be lost, such as context-menu paste events.
+      const hasFileItems = clipItems.some(item => item.kind === 'file');
+      const hasImage = clipItems.some(item => item.type.startsWith('image/'));
+      if (hasFileItems && !finderFilesPendingRef.current && window.xiaokDesktop?.readClipboardFilePaths) {
+        e.preventDefault();
+        window.xiaokDesktop.readClipboardFilePaths().then(fp => {
+          if (fp.length > 0) {
+            const newFiles = fp.map(p => {
+              const name = basename(p);
+              const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
+              return { filePath: p, name, isImage };
+            });
+            setFiles(prev => [...prev, ...newFiles]);
+            return;
+          }
+          if (hasImage && window.xiaokDesktop?.readClipboardImage) {
+            void window.xiaokDesktop.readClipboardImage().then(imagePath => {
+              if (imagePath) {
+                const name = basename(imagePath) || 'clipboard-image.png';
+                setFiles(prev => [...prev, { filePath: imagePath, name, isImage: true }]);
+              }
+            }).catch(() => {});
+          }
+        }).catch(() => {});
+        return;
+      }
+
+      // Image paste (screenshot / raw image data, no file path).
+      // Skip if keydown Cmd+V is handling a Finder file copy — copied image
+      // files put an image/tiff preview on the clipboard alongside the path.
+      if (hasImage && finderFilesPendingRef.current) {
+        e.preventDefault();
+        return;
+      }
+      if (hasImage && !finderFilesPendingRef.current && window.xiaokDesktop?.readClipboardImage) {
+        e.preventDefault();
+        window.xiaokDesktop.readClipboardImage().then(imagePath => {
+          if (imagePath) {
+            const name = basename(imagePath) || 'clipboard-image.png';
+            setFiles(prev => [...prev, { filePath: imagePath, name, isImage: true }]);
+          }
+        }).catch(() => {});
+        return;
+      }
+
+    };
+    pasteHandlerRef.current = handler;
+    el.addEventListener('paste', handler);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     api.listSkills().then(list => setSkills(list)).catch(() => {});
@@ -75,11 +160,74 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value;
+    // If paste detected file paths, strip them from the textarea and add as chips
+    if (pastePathsRef.current) {
+      const paths = pastePathsRef.current;
+      pastePathsRef.current = null;
+      // Strip the pasted path text from the new value
+      let stripped = v;
+      for (const p of paths) stripped = stripped.replace(p, '');
+      stripped = stripped.replace(/\n+/g, '\n').trimEnd();
+      const newFiles = paths.map(p => {
+        const name = basename(p);
+        const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
+        return { filePath: p, name, isImage };
+      });
+      setFiles(prev => [...prev, ...newFiles]);
+      setInternalValue(stripped);
+      onChange?.(stripped);
+      // Try NSFilenamesPboardType to get canonical paths
+      if (window.xiaokDesktop?.readClipboardFilePaths) {
+        window.xiaokDesktop.readClipboardFilePaths().then(fp => {
+          if (fp.length > 0) {
+            setFiles(prev => {
+              const base = prev.slice(0, prev.length - paths.length);
+              return [...base, ...fp.map(p => {
+                const name = basename(p);
+                const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
+                return { filePath: p, name, isImage };
+              })];
+            });
+          }
+        }).catch(() => {});
+      }
+      return;
+    }
     setInternalValue(v);
     onChange?.(v);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Intercept Cmd+V to catch Finder file copies where clipboard has no text/plain path.
+    // readClipboardFilePaths reads NSFilenamesPboardType which Finder always populates.
+    if (e.key === 'v' && e.metaKey && !e.shiftKey && !e.altKey && window.xiaokDesktop?.readClipboardFilePaths) {
+      const valueBeforePaste = internalValue;
+      finderFilesPendingRef.current = true;
+      window.xiaokDesktop.readClipboardFilePaths().then(fp => {
+        finderFilesPendingRef.current = false;
+        if (fp.length > 0) {
+          // Finder file copy: add chips and restore textarea value
+          const newFiles = fp.map(p => {
+            const name = basename(p);
+            const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
+            return { filePath: p, name, isImage };
+          });
+          setFiles(prev => [...prev, ...newFiles]);
+          setInternalValue(valueBeforePaste);
+          onChange?.(valueBeforePaste);
+        } else if (window.xiaokDesktop?.readClipboardImage) {
+          // No file paths — could be a screenshot. The paste handler has
+          // already prevented the browser's default image paste while the
+          // Finder-file preflight was pending, so attach the image here.
+          window.xiaokDesktop.readClipboardImage().then(imagePath => {
+            if (imagePath) {
+              const name = basename(imagePath) || 'clipboard-image.png';
+              setFiles(prev => [...prev, { filePath: imagePath, name, isImage: true }]);
+            }
+          }).catch(() => {});
+        }
+      }).catch(() => { finderFilesPendingRef.current = false; });
+    }
     if (showSlashMenu && matchedSkills.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -144,10 +292,11 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
     try {
       const result = await api.selectMaterials();
       if (result.filePaths.length > 0) {
-        const newFiles = result.filePaths.map(path => ({
-          filePath: path,
-          name: path.split('/').pop() || path,
-        }));
+        const newFiles = result.filePaths.map(path => {
+          const name = basename(path);
+          const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
+          return { filePath: path, name, isImage };
+        });
         setFiles(prev => [...prev, ...newFiles]);
       }
     } catch (e) {
@@ -191,29 +340,72 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
           style={{
             display: 'flex',
             flexWrap: 'wrap',
-            gap: '12px',
-            padding: '14px 16px 8px',
+            gap: '8px',
+            padding: '12px 16px 8px',
           }}
         >
           {files.map((f, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-2 rounded-lg px-3 py-2"
-              style={{
-                background: 'var(--c-bg-deep)',
-                border: '0.5px solid var(--c-border-subtle)',
-              }}
-            >
-              <span className="text-sm text-[var(--c-text-primary)] max-w-[360px] truncate" title={f.filePath}>{f.filePath}</span>
-              <button
-                type="button"
-                onClick={() => removeFile(i)}
-                className="flex items-center justify-center rounded-md hover:bg-[rgba(0,0,0,0.05)]"
-                style={{ width: '20px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}
+            f.isImage ? (
+              <div
+                key={i}
+                style={{ position: 'relative', display: 'inline-block' }}
               >
-                <X size={14} style={{ color: 'var(--c-text-secondary)' }} />
-              </button>
-            </div>
+                <img
+                  src={`file://${f.filePath}`}
+                  alt={f.name}
+                  title={f.filePath}
+                  style={{
+                    width: '64px',
+                    height: '64px',
+                    objectFit: 'cover',
+                    borderRadius: '8px',
+                    display: 'block',
+                    border: '0.5px solid var(--c-border-subtle)',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeFile(i)}
+                  style={{
+                    position: 'absolute',
+                    top: '-6px',
+                    right: '-6px',
+                    width: '18px',
+                    height: '18px',
+                    borderRadius: '50%',
+                    background: 'var(--c-text-secondary)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 0,
+                  }}
+                >
+                  <X size={10} style={{ color: '#fff' }} />
+                </button>
+              </div>
+            ) : (
+              <div
+                key={i}
+                className="flex items-center gap-2 rounded-lg px-3 py-1.5"
+                style={{
+                  background: 'var(--c-bg-deep)',
+                  border: '0.5px solid var(--c-border-subtle)',
+                  maxWidth: '280px',
+                }}
+              >
+                <span className="text-sm text-[var(--c-text-primary)] truncate" title={f.filePath}>{f.name}</span>
+                <button
+                  type="button"
+                  onClick={() => removeFile(i)}
+                  className="flex items-center justify-center rounded-md hover:bg-[rgba(0,0,0,0.05)] flex-shrink-0"
+                  style={{ width: '18px', height: '18px', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}
+                >
+                  <X size={12} style={{ color: 'var(--c-text-secondary)' }} />
+                </button>
+              </div>
+            )
           ))}
         </div>
       )}
@@ -273,45 +465,12 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
           {/* Textarea */}
           <div style={{ position: 'relative', marginBottom: '8px' }}>
             <textarea aria-label={placeholder}
-              ref={textareaRef}
+              ref={textareaCallbackRef}
               rows={1}
               className="w-full resize-none bg-transparent outline-none"
               value={internalValue}
               onChange={handleChange}
               onKeyDown={handleKeyDown}
-              onPaste={async (e) => {
-                // Try macOS Finder file copy first (NSFilenamesPboardType)
-                if (window.xiaokDesktop?.readClipboardFilePaths) {
-                  try {
-                    const finderPaths = await window.xiaokDesktop.readClipboardFilePaths();
-                    if (finderPaths.length > 0) {
-                      e.preventDefault();
-                      const newFiles = finderPaths.map(p => ({ filePath: p, name: p.split('/').pop() || p }));
-                      setFiles(prev => [...prev, ...newFiles]);
-                      return;
-                    }
-                  } catch { /* fall through to text-based detection */ }
-                }
-                // Fallback: detect paths from plain text
-                const items = e.clipboardData?.items;
-                if (!items) return;
-                for (const item of items) {
-                  if (item.type === 'text/plain') {
-                    const text = await new Promise<string>(r => item.getAsString(r));
-                    const lines = text.split(/\r?\n/).flatMap(l => {
-                      const trimmed = l.trim();
-                      return trimmed ? [trimmed] : [];
-                    });
-                    const paths = lines.filter(l => l.startsWith('/'));
-                    if (paths.length > 0) {
-                      e.preventDefault();
-                      const newFiles = paths.map(p => ({ filePath: p, name: p.split('/').pop() || p }));
-                      setFiles(prev => [...prev, ...newFiles]);
-                      return;
-                    }
-                  }
-                }
-              }}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
               placeholder={placeholder}

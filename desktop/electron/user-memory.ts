@@ -43,7 +43,7 @@ export class UserMemoryStore {
     try {
       mkdirSync(dirname(this.filePath), { recursive: true });
       writeFileSync(this.filePath, JSON.stringify(this.memories, null, 2));
-    } catch { /* silent */ }
+    } catch (e) { console.warn('[memory] save to disk failed:', (e as Error).message) }
   }
 
   create(input: { content: string; tags: string[]; source?: string }): UserMemory {

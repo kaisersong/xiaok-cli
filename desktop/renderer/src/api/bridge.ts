@@ -1,6 +1,6 @@
 import { createLogger } from '../lib/logger';
 import type {
-  DesktopApi,
+  FullDesktopApi,
   DesktopRelatedServiceId,
   DesktopServiceStatusSnapshot,
   DesktopModelConfigSnapshot,
@@ -15,12 +15,22 @@ import type {
   ProtocolId,
   ConnectorTestResult,
 } from '../../../electron/preload-api';
-import type { ThreadRecord } from './types';
+import type {
+  EvidenceAnomalyView,
+  LoopDefinitionView,
+  LoopRunView,
+  RunLoopNowResultView,
+  ThreadMode,
+  ThreadRecord,
+  UpdateThreadSidebarRequest,
+} from './types';
+import type { ChannelBindingResponse, ChannelIdentityResponse, Persona } from './types';
+import { getDesktopApi } from '../shared/desktop';
 
 // Declare window.xiaokDesktop with exact types from preload-api.ts
 declare global {
   interface Window {
-    xiaokDesktop: DesktopApi;
+    xiaokDesktop: FullDesktopApi;
   }
 }
 
@@ -28,6 +38,43 @@ declare global {
 const DB_NAME = 'xiaok-desktop';
 const DB_VERSION = 1;
 const THREADS_STORE = 'threads';
+
+function timestampToIso(value: number): string {
+  return Number.isFinite(value) ? new Date(value).toISOString() : new Date(0).toISOString();
+}
+
+export function withThreadCompatibility(thread: ThreadRecord): ThreadRecord {
+  return {
+    ...thread,
+    created_at: thread.created_at ?? timestampToIso(thread.createdAt),
+    updated_at: thread.updated_at ?? timestampToIso(thread.updatedAt),
+    sidebar_gtd_bucket: thread.sidebar_gtd_bucket ?? thread.gtdBucket,
+    sidebar_pinned_at: thread.sidebar_pinned_at ?? thread.pinnedAt,
+  };
+}
+
+export function withoutThreadCompatibility(thread: ThreadRecord): ThreadRecord {
+  const {
+    created_at,
+    updated_at,
+    active_run_id,
+    sidebar_pinned_at,
+    sidebar_gtd_bucket,
+    is_private,
+    collaboration_mode,
+    collaboration_mode_revision,
+    ...stored
+  } = thread;
+  void created_at;
+  void updated_at;
+  void active_run_id;
+  void sidebar_pinned_at;
+  void sidebar_gtd_bucket;
+  void is_private;
+  void collaboration_mode;
+  void collaboration_mode_revision;
+  return stored;
+}
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -134,34 +181,40 @@ export const api = {
       taskIds: [],
     };
     await withStore('readwrite', (store) => store.add(thread));
-    return thread;
+    return withThreadCompatibility(thread);
   },
 
   async getThread(id: string): Promise<ThreadRecord | null> {
     const result = await withStore('readonly', (store) => store.get(id));
     if (!result) return null;
-    return {
+    return withThreadCompatibility({
       ...result,
       currentTaskId: result.currentTaskId ?? null,
       taskIds: result.taskIds ?? [],
-    };
+    });
   },
 
   async listThreads(options?: {
     limit?: number;
     before?: string;
+    mode?: ThreadMode;
   }): Promise<ThreadRecord[]> {
     const all = await withStore('readonly', (store) => store.getAll());
     // Sort by createdAt descending
     all.sort((a, b) => b.createdAt - a.createdAt);
-    const normalized = all.map(t => ({ ...t, currentTaskId: t.currentTaskId ?? null }));
+    const normalized = all.map(t => withThreadCompatibility({
+      ...t,
+      currentTaskId: t.currentTaskId ?? null,
+      taskIds: t.taskIds ?? [],
+    }));
+    const filtered = options?.mode ? normalized.filter((thread) => thread.mode === options.mode) : normalized;
     if (options?.before) {
-      const idx = normalized.findIndex((t) => t.id === options.before);
+      const idx = filtered.findIndex((t) => t.id === options.before);
       if (idx >= 0) {
-        return normalized.slice(idx + 1, idx + 1 + (options.limit ?? 20));
+        return filtered.slice(idx + 1, idx + 1 + (options.limit ?? 20));
       }
     }
-    return normalized.slice(0, options?.limit ?? 20);
+    return filtered.slice(0, options?.limit ?? 20);
   },
 
   async updateThreadTitle(id: string, title: string): Promise<void> {
@@ -169,19 +222,24 @@ export const api = {
     if (!thread) throw new Error(`Thread ${id} not found`);
     thread.title = title;
     thread.updatedAt = Date.now();
-    await withStore('readwrite', (store) => store.put(thread));
+    await withStore('readwrite', (store) => store.put(withoutThreadCompatibility(thread)));
   },
 
   async updateThreadSidebarState(
     id: string,
-    state: { starred?: boolean; gtdBucket?: ThreadRecord['gtdBucket'] }
+    state: { starred?: boolean; gtdBucket?: ThreadRecord['gtdBucket']; mode?: ThreadMode; sidebar_work_folder?: string | null }
   ): Promise<void> {
     const thread = await api.getThread(id);
     if (!thread) throw new Error(`Thread ${id} not found`);
-    if (state.starred !== undefined) thread.starred = state.starred;
+    if (state.starred !== undefined) {
+      thread.starred = state.starred;
+      thread.pinnedAt = state.starred ? Date.now() : null;
+    }
     if (state.gtdBucket !== undefined) thread.gtdBucket = state.gtdBucket;
+    if (state.mode !== undefined) thread.mode = state.mode;
+    if (state.sidebar_work_folder !== undefined) thread.sidebar_work_folder = state.sidebar_work_folder;
     thread.updatedAt = Date.now();
-    await withStore('readwrite', (store) => store.put(thread));
+    await withStore('readwrite', (store) => store.put(withoutThreadCompatibility(thread)));
   },
 
   async updateThreadTaskId(id: string, taskId: string): Promise<void> {
@@ -192,7 +250,7 @@ export const api = {
       thread.taskIds.push(taskId);
     }
     thread.updatedAt = Date.now();
-    await withStore('readwrite', (store) => store.put(thread));
+    await withStore('readwrite', (store) => store.put(withoutThreadCompatibility(thread)));
   },
 
   async deleteThread(id: string): Promise<void> {
@@ -204,7 +262,7 @@ export const api = {
     const lower = query.toLowerCase();
     return all.filter(
       (t) => t.title?.toLowerCase().includes(lower)
-    );
+    ).map((t) => withThreadCompatibility({ ...t, currentTaskId: t.currentTaskId ?? null, taskIds: t.taskIds ?? [] }));
   },
 
   // ---------------------
@@ -288,6 +346,22 @@ export const api = {
     const r = await window.xiaokDesktop.recoverTask(taskId);
     log.info('recoverTask ok', JSON.stringify({ status: r?.snapshot?.status }));
     return r;
+  },
+
+  async getLoopDefinitions(): Promise<LoopDefinitionView[]> {
+    return await window.xiaokDesktop.getLoopDefinitions() as LoopDefinitionView[];
+  },
+
+  async getLoopRuns(loopId: string): Promise<LoopRunView[]> {
+    return await window.xiaokDesktop.getLoopRuns(loopId) as LoopRunView[];
+  },
+
+  async getEvidenceAnomalies(loopId: string): Promise<EvidenceAnomalyView[]> {
+    return await window.xiaokDesktop.getEvidenceAnomalies(loopId) as EvidenceAnomalyView[];
+  },
+
+  async runLoopNow(loopId: string): Promise<RunLoopNowResultView> {
+    return await window.xiaokDesktop.runLoopNow(loopId) as RunLoopNowResultView;
   },
 
   // ---------------------
@@ -401,6 +475,66 @@ export const api = {
       return { success: false, error: 'testChannel API not available' };
     }
     return await window.xiaokDesktop.testChannel(channelId);
+  },
+  async listChannelBindings(_accessToken: string, channelId: string): Promise<ChannelBindingResponse[]> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyGet) return [];
+    try {
+      const data = await api.kswarmProxyGet(`/channels/${channelId}/bindings`) as { bindings?: ChannelBindingResponse[] } | null;
+      return data?.bindings ?? [];
+    } catch {
+      return [];
+    }
+  },
+  async deleteChannelBinding(_accessToken: string, channelId: string, bindingId: string): Promise<void> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyDelete) return;
+    await api.kswarmProxyDelete(`/channels/${channelId}/bindings/${bindingId}`);
+  },
+  async updateChannelBinding(_accessToken: string, channelId: string, bindingId: string, patch: Record<string, unknown>): Promise<ChannelBindingResponse | null> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyPatch) return null;
+    return await api.kswarmProxyPatch(`/channels/${channelId}/bindings/${bindingId}`, patch) as ChannelBindingResponse | null;
+  },
+  async createChannelBindCode(_accessToken: string, channelType: string): Promise<{ token: string } | null> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyPost) return null;
+    return await api.kswarmProxyPost('/channel-bind-codes', { channelType }) as { token: string } | null;
+  },
+  async listChannelPersonas(_accessToken: string): Promise<Persona[]> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyGet) return [];
+    try {
+      const data = await api.kswarmProxyGet('/channel-personas') as { personas?: Persona[] } | null;
+      return data?.personas ?? [];
+    } catch {
+      return [];
+    }
+  },
+  async listMyChannelIdentities(_accessToken: string): Promise<ChannelIdentityResponse[]> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyGet) return [];
+    try {
+      const data = await api.kswarmProxyGet('/channel-identities/mine') as { identities?: ChannelIdentityResponse[] } | null;
+      return data?.identities ?? [];
+    } catch {
+      return [];
+    }
+  },
+  async unbindChannelIdentity(_accessToken: string, identityId: string): Promise<void> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyDelete) return;
+    await api.kswarmProxyDelete(`/channel-identities/${identityId}`);
+  },
+  async verifyChannel(_accessToken: string, channelId: string): Promise<{ verified: boolean }> {
+    const api = getDesktopApi();
+    if (!api?.kswarmProxyPost) return { verified: false };
+    try {
+      const data = await api.kswarmProxyPost(`/channels/${channelId}/verify`, {}) as { verified?: boolean } | null;
+      return { verified: data?.verified ?? false };
+    } catch {
+      return { verified: false };
+    }
   },
 
   // ---------------------
@@ -991,12 +1125,60 @@ export function setExternalDirs(_accessToken: string, _dirs: string[]): Promise<
   return Promise.resolve(_dirs);
 }
 
-export function isApiError(error: unknown): boolean {
+export interface ApiErrorLike extends Error {
+  status?: number;
+}
+
+export function isApiError(error: unknown): error is ApiErrorLike {
   if (error instanceof Error) {
     const msg = error.message.toLowerCase();
     return msg.includes('api') || msg.includes('provider') || msg.includes('model') || msg.includes('connection');
   }
   return false;
+}
+
+// Standalone function exports for thread-list.tsx compatibility (web-client naming convention).
+// These delegate to the `api` object methods.
+
+export async function listThreads(accessToken: string, options?: { limit?: number; before?: string; mode?: ThreadMode }): Promise<ThreadRecord[]> {
+  void accessToken;
+  return api.listThreads(options);
+}
+
+export async function updateThreadSidebarState(accessToken: string, id: string, state: UpdateThreadSidebarRequest): Promise<ThreadRecord> {
+  void accessToken;
+  const patch: Parameters<typeof api.updateThreadSidebarState>[1] = {};
+  if (state.starred !== undefined) patch.starred = state.starred;
+  if (state.sidebar_pinned !== undefined) patch.starred = state.sidebar_pinned;
+  if (state.gtdBucket !== undefined) patch.gtdBucket = state.gtdBucket;
+  if (state.sidebar_gtd_bucket !== undefined) patch.gtdBucket = state.sidebar_gtd_bucket;
+  if (state.mode !== undefined) patch.mode = state.mode;
+  if (state.sidebar_work_folder !== undefined) patch.sidebar_work_folder = state.sidebar_work_folder;
+  await api.updateThreadSidebarState(id, patch);
+  const thread = await api.getThread(id);
+  if (!thread) throw new Error(`Thread ${id} not found`);
+  return thread;
+}
+
+export async function updateThreadMode(_accessToken: string, _threadId: string, _mode: ThreadMode): Promise<ThreadRecord> {
+  await api.updateThreadSidebarState(_threadId, { mode: _mode });
+  const thread = await api.getThread(_threadId);
+  if (!thread) throw new Error(`Thread ${_threadId} not found`);
+  return thread;
+}
+
+export interface ThreadRunStateEvent {
+  thread_id: string;
+  active_run_id: string | null;
+  title?: string | null;
+}
+
+export async function streamThreadRunStateEvents(
+  _accessToken: string,
+  _options: { signal?: AbortSignal; onEvent?: (event: ThreadRunStateEvent) => void; onError?: (error: unknown) => void },
+): Promise<void> {
+  // No-op: desktop uses IPC-based SSE events, not direct HTTP streaming.
+  // The thread-list context falls back to polling when this returns immediately.
 }
 
 export type Api = typeof api;

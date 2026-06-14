@@ -125,7 +125,7 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
   // Collect all artifacts from tasks with their summaries
   const taskOutputs: Array<{ task: KSwarmTask; artifacts: KSwarmArtifact[] }> = [];
   for (const task of tasks) {
-    const rawArtifacts = (task as any).result?.artifacts || [];
+    const rawArtifacts = typeof task.result === 'object' && task.result !== null ? task.result.artifacts || [] : [];
     const artifacts = Array.isArray(rawArtifacts)
       ? rawArtifacts
           .map((item: unknown) => normalizeDeliverableFile(item, project.id))
@@ -135,7 +135,7 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
   }
 
   const deliverables = project.deliverables || [];
-  const rawDeliverable = (project as any).deliverable;
+  const rawDeliverable = project.deliverable;
   // Filter out bare { synthesis: true } placeholder — it has no displayable content
   const deliverable = rawDeliverable && !(
     typeof rawDeliverable === 'object' && rawDeliverable.synthesis && !rawDeliverable.files && !rawDeliverable.artifacts && !rawDeliverable.description
@@ -164,9 +164,9 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
         <div className="rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-4">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)] mb-3">{t.projectsDeliverableTitle}</h3>
           <DeliverableContent deliverable={deliverable} projectId={project.id} onPreview={setPreviewArtifact} />
-          {(project as any).deliveredAt && (
+          {project.deliveredAt && (
             <p className="text-[10px] text-[var(--c-text-muted)] mt-2">
-              {t.projectsDeliverableDeliveredAt}: {new Date((project as any).deliveredAt).toLocaleString()}
+              {t.projectsDeliverableDeliveredAt}: {new Date(project.deliveredAt).toLocaleString()}
             </p>
           )}
         </div>
@@ -223,8 +223,8 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
                     <span className="text-[12px] font-medium text-[var(--c-text-primary)]">{task.title}</span>
                     {task.assignedAgent && <span className="text-[10px] text-[var(--c-text-muted)]">@{task.assignedAgent}</span>}
                   </div>
-                  {(task as any).result?.summary && (
-                    <p className="mt-1.5 text-[11px] text-[var(--c-text-tertiary)] pl-4">{(task as any).result.summary}</p>
+                  {typeof task.result === 'object' && task.result !== null && task.result.summary && (
+                    <p className="mt-1.5 text-[11px] text-[var(--c-text-tertiary)] pl-4">{task.result.summary}</p>
                   )}
                 </div>
                 {/* Artifacts */}

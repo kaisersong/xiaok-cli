@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react'
 import {
-  type ChannelBindingResponse,
   type ChannelResponse,
   type LlmProvider,
   type Persona,
@@ -10,10 +9,10 @@ import {
   getWeixinQRCode,
   getWeixinQRCodeStatus,
   isApiError,
-  listChannelBindings,
   updateChannel,
   updateChannelBinding,
 } from '../../api'
+import { useChannelBindings, type ChannelBindingResponse } from '../../hooks/useChannelBindings'
 import { useLocale } from '../../contexts/LocaleContext'
 import { PillToggle } from '../shared'
 import { secondaryButtonSmCls, secondaryButtonBorderStyle } from '../buttonStyles'
@@ -76,7 +75,7 @@ export function DesktopWeixinSettingsPanel({
   const [defaultModel, setDefaultModel] = useState((channel?.config_json?.default_model as string | undefined) ?? '')
   const [bindCode, setBindCode] = useState<string | null>(null)
   const [generatingCode, setGeneratingCode] = useState(false)
-  const [bindings, setBindings] = useState<ChannelBindingResponse[]>([])
+  const { bindings, refresh: refreshBindings } = useChannelBindings({ accessToken, channelId: channel?.id })
 
   // QR code login state
   const [qrCodeImg, setQrCodeImg] = useState<string | null>(null)
@@ -85,18 +84,6 @@ export function DesktopWeixinSettingsPanel({
   const [botToken, setBotToken] = useState('')
   const [baseURL, setBaseURL] = useState((channel?.config_json?.base_url as string | undefined) ?? '')
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const refreshBindings = useCallback(async () => {
-    if (!channel?.id) {
-      setBindings([])
-      return
-    }
-    try {
-      setBindings(await listChannelBindings(accessToken, channel.id))
-    } catch {
-      setBindings([])
-    }
-  }, [accessToken, channel?.id])
 
   useEffect(() => {
     setEnabled(channel?.is_active ?? false)
@@ -124,15 +111,6 @@ export function DesktopWeixinSettingsPanel({
     setQrStatus('idle')
     clearPolling()
   }, [channel, personas])
-
-  useEffect(() => {
-    void refreshBindings()
-    if (!channel?.id) return
-    const timer = window.setInterval(() => {
-      void refreshBindings()
-    }, 5000)
-    return () => window.clearInterval(timer)
-  }, [channel?.id, refreshBindings])
 
   useEffect(() => {
     return () => clearPolling()

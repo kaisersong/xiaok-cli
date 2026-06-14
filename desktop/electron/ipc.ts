@@ -1,9 +1,15 @@
 import { clipboard, dialog, shell, type BrowserWindow, type IpcMain } from 'electron';
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import { join } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
+import type { DesktopLoopRuntime } from './loop-executor.js';
 
 type DesktopServices = ReturnType<typeof createDesktopServices>;
+
+interface RegisterDesktopIpcOptions {
+  loopRuntime?: Pick<DesktopLoopRuntime, 'loopStore' | 'scanner' | 'runner' | 'listAnomalies'>;
+}
 
 function log(level: string, msg: string, ...args: unknown[]) {
   const ts = new Date().toISOString();
@@ -11,7 +17,12 @@ function log(level: string, msg: string, ...args: unknown[]) {
   console.log(`[${ts}] [${level}] [ipc] ${msg}${payload}`);
 }
 
-export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow, services: DesktopServices): Promise<void> {
+export async function registerDesktopIpc(
+  ipcMain: IpcMain,
+  window: BrowserWindow,
+  services: DesktopServices,
+  options: RegisterDesktopIpcOptions = {}
+): Promise<void> {
   ipcMain.handle('desktop:getModelConfig', async () => {
     log('info', 'getModelConfig');
     const r = await services.getModelConfig();
@@ -70,6 +81,18 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
       }
     } catch { /* not available on this platform */ }
     return [];
+  });
+  ipcMain.handle('desktop:readClipboardImage', async () => {
+    try {
+      const img = clipboard.readImage();
+      if (img.isEmpty()) return null;
+      const png = img.toPNG();
+      const tmpDir = join(os.tmpdir(), 'xiaok-clipboard-images');
+      await mkdir(tmpDir, { recursive: true });
+      const filePath = join(tmpDir, `clipboard-${Date.now()}.png`);
+      await writeFile(filePath, png);
+      return filePath;
+    } catch { return null; }
   });
   ipcMain.handle('desktop:selectDirectory', async () => {
     log('info', 'selectDirectory');
@@ -240,7 +263,8 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
   ipcMain.handle('desktop:diagnosePluginDependency', (_event, input) => services.diagnosePluginDependency(input));
   ipcMain.handle('desktop:createTaskWithFiles', async (_event, input) => {
     log('info', 'createTaskWithFiles', { prompt: input?.prompt?.slice(0, 50), files: input?.filePaths?.length });
-    const r = await services.createTaskWithFiles(input);
+    const expanded = await expandSelectedMaterialPaths(input?.filePaths ?? []);
+    const r = await services.createTaskWithFiles({ ...input, filePaths: expanded });
     log('info', 'createTaskWithFiles ok', { taskId: r?.taskId });
     return r;
   });
@@ -260,6 +284,23 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
     const result = await services.diagnose(input);
     log('info', 'diagnose result', { health: result?.health, primaryFinding: result?.primaryFinding?.category ?? null });
     return result;
+  });
+
+  ipcMain.handle('desktop:loops:listDefinitions', () => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.loopStore.listLoopDefinitions();
+  });
+  ipcMain.handle('desktop:loops:listRuns', (_event, loopId) => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.loopStore.listLoopRuns(readLoopId(loopId), 20);
+  });
+  ipcMain.handle('desktop:loops:listAnomalies', (_event, loopId) => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.listAnomalies(readLoopId(loopId));
+  });
+  ipcMain.handle('desktop:loops:runNow', (_event, loopId) => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.runner.runLoopNow(readLoopId(loopId));
   });
 
   // ---- Memory ----
@@ -491,6 +532,20 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
     log('info', 'deletePrinciple result', result);
     return result;
   });
+}
+
+function getLoopRuntime(options: RegisterDesktopIpcOptions): NonNullable<RegisterDesktopIpcOptions['loopRuntime']> {
+  if (!options.loopRuntime) {
+    throw new Error('loop diagnostics runtime is not registered');
+  }
+  return options.loopRuntime;
+}
+
+function readLoopId(input: unknown): string {
+  if (typeof input !== 'string' || input.trim().length === 0) {
+    throw new Error('loopId must be a non-empty string');
+  }
+  return input;
 }
 
 async function expandSelectedMaterialPaths(paths: string[]): Promise<string[]> {

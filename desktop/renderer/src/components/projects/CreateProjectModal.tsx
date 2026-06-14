@@ -7,6 +7,7 @@ import { X, Check, FolderOpen } from 'lucide-react';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmAgent } from '../../hooks/useKSwarmClient';
 import { getPreferredPoAgentId, getPreferredWorkerSeedId } from '../../../../shared/kswarm-seed-contract.js';
+import { getDesktopApi } from '../../shared/desktop';
 
 type AgentSelectionSource = 'default_seed' | 'explicit_user';
 
@@ -41,7 +42,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
     if (!open) return;
     (async () => {
       try {
-        const api = (window as any).xiaokDesktop;
+        const api = getDesktopApi();
         if (!api?.listPrinciples) return;
         const list = await api.listPrinciples();
         if (!Array.isArray(list)) return;
@@ -99,7 +100,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
 
   const handlePickWorkFolder = async () => {
     try {
-      const result = await (window as any).xiaokDesktop?.selectDirectory?.();
+      const result = await getDesktopApi()?.selectDirectory?.();
       if (result?.filePath) setWorkFolder(result.filePath);
     } catch { /* user cancelled or desktop API unavailable */ }
   };

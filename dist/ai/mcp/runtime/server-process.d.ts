@@ -19,11 +19,12 @@ export declare function buildMcpServerSpawnOptions(command: string, opts?: McpSe
 export declare function startMcpServerProcess(command: string, args?: string[], opts?: McpServerProcessOptions): McpServerProcess;
 export declare function encodeMcpMessage(message: McpRuntimeRequest | McpRuntimeResponse): string;
 export declare function decodeMcpFrames(input: string): McpRuntimeResponse[];
-export declare function createStdioMcpTransport(child: Pick<ChildProcessWithoutNullStreams, 'stdin' | 'stdout' | 'on' | 'off'>): McpRuntimeTransport & {
+export declare function createStdioMcpTransport(child: Pick<ChildProcessWithoutNullStreams, 'stdin' | 'stdout' | 'stderr' | 'on' | 'off'>): McpRuntimeTransport & {
     notify(message: {
         jsonrpc: '2.0';
         method: string;
         params?: Record<string, unknown>;
     }): void;
+    getStderrTail(): string;
     dispose(): void;
 };

@@ -762,6 +762,63 @@ describe('desktop services', () => {
     });
   });
 
+  it('updates CUA driver dependency via official_installer by re-running install script', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const pluginDir = join(pluginRootDir, 'cua-computer-use');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({ name: 'cua-computer-use' }));
+    const dependency: ExternalPluginDependency = {
+      id: 'cua-driver',
+      kind: 'macos_app_cli',
+      displayName: 'CUA Driver',
+      binaryCandidates: ['~/.local/bin/cua-driver', 'cua-driver'],
+      minVersion: '0.1.0',
+      install: {
+        kind: 'official_installer',
+        sourceUrl: 'https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh',
+        requiresUserConfirmation: true,
+      },
+      update: {
+        kind: 'official_installer',
+        sourceUrl: 'https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh',
+        sourceAllowlist: ['https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh'],
+        requiresUserConfirmation: true,
+      },
+      health: {
+        version: ['~/.local/bin/cua-driver', '--version'],
+      },
+    };
+    const dataRoot = join(rootDir, 'data');
+    const services = createDesktopServices({
+      dataRoot,
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      pluginRootDir,
+      pluginDependencies: [{ pluginName: 'cua-computer-use', dependency }],
+      pluginDependencyStatusOptions: {
+        platform: 'darwin',
+        homeDir: '/Users/alice',
+        exists: (path) => path === '/Users/alice/.local/bin/cua-driver',
+        runCommand: async (_command, args) => {
+          if (args[0] === '--version') return { exitCode: 0, stdout: 'cua-driver 0.2.0\n', stderr: '' };
+          return { exitCode: 0, stdout: '', stderr: '' };
+        },
+      },
+    });
+
+    const statuses = await services.listPluginDependencyStatuses();
+    expect(statuses[0].canUpdate).toBe(true);
+
+    await expect(services.updatePluginDependency({
+      pluginName: 'cua-computer-use',
+      dependencyId: 'cua-driver',
+      confirmed: false,
+    })).resolves.toMatchObject({
+      success: false,
+      error: 'confirmation_required',
+    });
+  });
+
   it('rejects unsafe plugin install names before invoking the xiaok installer', async () => {
     const binDir = join(rootDir, 'bin');
     mkdirSync(binDir, { recursive: true });
@@ -1452,6 +1509,41 @@ describe('desktop services', () => {
       summary: '已写入 artifacts/research-notes.md。',
       artifacts: [{ path: artifactPath, kind: 'markdown', label: 'research-notes.md' }],
     });
+  });
+
+  it('rejects required kswarm handoff artifacts when neither events nor directory files provide evidence', async () => {
+    const artifactsDir = join(rootDir, 'artifacts');
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner: async ({ sessionId, emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '报告已完成。',
+        });
+      },
+    });
+
+    await expect(services.runKSwarmHandoffTask({
+      handoff: {
+        kind: 'kswarm_task_handoff_v1',
+        runId: 'run-1',
+        project: { id: 'proj-1', name: 'Project', goal: 'Write report', requirements: '', artifactsDir },
+        task: {
+          id: 'proj-1__item-1',
+          title: '撰写报告',
+          brief: '输出一份最终报告。',
+          acceptanceCriteria: '必须交付 Markdown 文件。',
+          requiredOutputs: ['markdown'],
+        },
+      },
+      targetParticipantId: 'xiaok-worker',
+    })).rejects.toThrow('artifact_evidence_missing');
   });
 
   it('handles kswarm assign_po by producing a plan and creating board tasks', async () => {

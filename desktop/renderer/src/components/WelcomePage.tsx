@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ChatInput } from './ChatInput';
 import { api } from '../api';
+import { getDesktopApi } from '../shared/desktop';
 
 const QUICK_PROMPTS = [
   '帮我写一篇产品调研报告',
@@ -16,14 +17,14 @@ const QUICK_PROMPTS = [
 function useProfileName() {
   const [name, setName] = useState(() =>
     localStorage.getItem('xiaok_display_name')
-    || (window as any).xiaokDesktop?.systemUsername
+    || getDesktopApi()?.systemUsername
     || ''
   );
   useEffect(() => {
     const handler = () => {
       setName(
         localStorage.getItem('xiaok_display_name')
-        || (window as any).xiaokDesktop?.systemUsername
+        || getDesktopApi()?.systemUsername
         || ''
       );
     };
