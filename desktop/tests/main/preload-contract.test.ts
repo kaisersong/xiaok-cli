@@ -1,5 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createPreloadApi, PRELOAD_API_KEYS, FULL_PRELOAD_KEYS, KSWARM_PROXY_KEYS, EXTRA_KEYS, THREAD_META_KEYS } from '../../electron/preload-api.js';
+
+const preloadCjsSource = readFileSync(join(__dirname, '..', '..', 'electron', 'preload.cjs'), 'utf8');
+
+function extractPreloadCjsApiKeys(source: string): string[] {
+  const bodyMatch = source.match(/contextBridge\.exposeInMainWorld\('xiaokDesktop',\s*\{([\s\S]*)\}\s*\)/);
+  if (!bodyMatch) return [];
+  return [...bodyMatch[1].matchAll(/^\s+(\w+)\s*[:(]/gm)]
+    .map(match => match[1])
+    .sort();
+}
 
 describe('preload API contract', () => {
   it('exposes only task-semantic APIs', () => {
@@ -391,6 +403,13 @@ describe('preload API contract', () => {
     const api = createPreloadApi(ipcRenderer, 'test-user');
     const actualKeys = Object.keys(api).sort();
     expect(actualKeys).toEqual([...FULL_PRELOAD_KEYS].sort());
+  });
+
+  it('manual CommonJS preload exposes every typed desktop API key', () => {
+    const cjsKeys = new Set(extractPreloadCjsApiKeys(preloadCjsSource));
+    for (const key of FULL_PRELOAD_KEYS) {
+      expect(cjsKeys, `preload.cjs is missing ${key}`).toContain(key);
+    }
   });
 
   it('routes kswarm proxy methods through semantic IPC channels', async () => {
