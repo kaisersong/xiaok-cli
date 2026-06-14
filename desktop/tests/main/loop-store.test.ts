@@ -7,6 +7,7 @@ import { LoopStore } from '../../electron/loop-store.js';
 import { BUILT_IN_LOOP_IDS } from '../../electron/loop-types.js';
 
 const ARTIFACT_LOOP_ID = 'artifact-evidence-regression';
+const KSWARM_HEALTH_LOOP_ID = 'kswarm-service-health';
 
 describe('LoopStore', () => {
   let rootDir: string;
@@ -27,8 +28,9 @@ describe('LoopStore', () => {
     rmSync(rootDir, { recursive: true, force: true });
   });
 
-  it('creates loop schema and the active built-in artifact evidence regression loop', () => {
+  it('creates loop schema and active built-in diagnostic loops', () => {
     expect(BUILT_IN_LOOP_IDS.ARTIFACT_EVIDENCE_REGRESSION).toBe(ARTIFACT_LOOP_ID);
+    expect(BUILT_IN_LOOP_IDS.KSWARM_SERVICE_HEALTH).toBe(KSWARM_HEALTH_LOOP_ID);
 
     store.ensureBuiltInLoops(1_000);
 
@@ -41,6 +43,15 @@ describe('LoopStore', () => {
       updatedAt: 1_000,
     });
     expect(ARTIFACT_LOOP_ID).not.toContain('_');
+    expect(store.getLoopDefinition(KSWARM_HEALTH_LOOP_ID)).toMatchObject({
+      id: KSWARM_HEALTH_LOOP_ID,
+      title: 'KSwarm Service Health',
+      status: 'active',
+      activeRunId: undefined,
+      createdAt: 1_000,
+      updatedAt: 1_000,
+    });
+    expect(KSWARM_HEALTH_LOOP_ID).not.toContain('_');
 
     store.close();
     const db = new DatabaseSync(dbPath);
@@ -74,6 +85,11 @@ describe('LoopStore', () => {
         id: ARTIFACT_LOOP_ID,
         status: 'paused',
         updatedAt: 1_500,
+      }),
+      expect.objectContaining({
+        id: KSWARM_HEALTH_LOOP_ID,
+        status: 'active',
+        updatedAt: 1_000,
       }),
     ]);
   });

@@ -4,12 +4,11 @@ import os from 'node:os';
 import { join } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
 import type { DesktopLoopRuntime } from './loop-executor.js';
-import { BUILT_IN_LOOP_IDS } from './loop-types.js';
 
 type DesktopServices = ReturnType<typeof createDesktopServices>;
 
 interface RegisterDesktopIpcOptions {
-  loopRuntime?: Pick<DesktopLoopRuntime, 'loopStore' | 'scanner' | 'runner'>;
+  loopRuntime?: Pick<DesktopLoopRuntime, 'loopStore' | 'scanner' | 'runner' | 'listAnomalies'>;
 }
 
 function log(level: string, msg: string, ...args: unknown[]) {
@@ -297,7 +296,7 @@ export async function registerDesktopIpc(
   });
   ipcMain.handle('desktop:loops:listAnomalies', (_event, loopId) => {
     const loopRuntime = getLoopRuntime(options);
-    return loopRuntime.scanner.listAnomalies({ loopId: readArtifactEvidenceLoopId(loopId) });
+    return loopRuntime.listAnomalies(readLoopId(loopId));
   });
   ipcMain.handle('desktop:loops:runNow', (_event, loopId) => {
     const loopRuntime = getLoopRuntime(options);
@@ -547,14 +546,6 @@ function readLoopId(input: unknown): string {
     throw new Error('loopId must be a non-empty string');
   }
   return input;
-}
-
-function readArtifactEvidenceLoopId(input: unknown): typeof BUILT_IN_LOOP_IDS.ARTIFACT_EVIDENCE_REGRESSION {
-  const loopId = readLoopId(input);
-  if (loopId !== BUILT_IN_LOOP_IDS.ARTIFACT_EVIDENCE_REGRESSION) {
-    throw new Error(`evidence anomalies are not available for loop: ${loopId}`);
-  }
-  return loopId;
 }
 
 async function expandSelectedMaterialPaths(paths: string[]): Promise<string[]> {

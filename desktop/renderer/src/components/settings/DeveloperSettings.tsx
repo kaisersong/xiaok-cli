@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { ChevronLeft, RefreshCw } from 'lucide-react'
+import { ChevronLeft, Copy, RefreshCw } from 'lucide-react'
 import { getDesktopApi, type DesktopSettingsKey } from '../../shared/desktop'
 import { useToast } from '../../shared'
 import { useLocale } from '../../contexts/LocaleContext'
@@ -14,6 +14,12 @@ import {
 import { readDeveloperShowRunEvents, writeDeveloperShowRunEvents, readDeveloperShowDebugPanel, writeDeveloperShowDebugPanel, readDeveloperPipelineTraceEnabled, writeDeveloperPipelineTraceEnabled, readDeveloperPromptCacheDebugEnabled, writeDeveloperPromptCacheDebugEnabled } from '../../storage'
 import { RunsSettings } from './RunsSettings'
 import { secondaryButtonBorderStyle, secondaryButtonSmCls } from '../buttonStyles'
+import {
+  buildLoopDiagnosticsSummary,
+  getLoopAnomalyLogPaths,
+  getLoopAnomalySuggestedAction,
+  getOpenLoopAnomalies,
+} from './loopDiagnostics'
 
 type Props = {
   accessToken?: string
@@ -82,7 +88,7 @@ type AccountSettingsSnapshot = {
 }
 
 function getOpenAnomalyCount(anomalies: EvidenceAnomalyView[]): number {
-  return anomalies.filter(anomaly => anomaly.status === 'open').length
+  return getOpenLoopAnomalies(anomalies).length
 }
 
 function getRunStatusLabel(status: LoopRunView['status']): string {
@@ -265,6 +271,20 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
     }
   }
 
+  const handleCopyLoopDiagnostics = async (
+    loop: LoopDefinitionView,
+    runs: LoopRunView[],
+    anomalies: EvidenceAnomalyView[],
+  ) => {
+    try {
+      const summary = buildLoopDiagnosticsSummary({ loop, runs, anomalies })
+      await navigator.clipboard.writeText(summary)
+      showToast(ds.loopDiagnosticsCopied, 'success')
+    } catch {
+      showToast(ds.loopDiagnosticsCopyFailed, 'error')
+    }
+  }
+
   if (runsOpen && accessToken) {
     return (
       <div className="flex flex-col gap-5">
@@ -437,77 +457,128 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
               {ds.loopDiagnosticsLoading}
             </div>
           ) : (
-            <div className="mt-3 flex flex-col gap-2">
-              {loopDefinitions.map((loop) => {
-                const runs = loopRuns[loop.id] ?? []
-                const latestRun = runs[0]
-                const openAnomalyCount = getOpenAnomalyCount(loopAnomalies[loop.id] ?? [])
-                const runResult = loopRunResults[loop.id]
-                const isRunning = runningLoopId === loop.id
-                const isAlreadyRunning = !!loop.activeRunId || runResult?.status === 'already_running'
-                const buttonLabel = isRunning
-                  ? ds.loopDiagnosticsRunning
-                  : isAlreadyRunning
-                    ? ds.loopDiagnosticsAlreadyRunning
-                    : ds.loopDiagnosticsRunNow
+	            <div className="mt-3 flex flex-col gap-2">
+	              {loopDefinitions.map((loop) => {
+	                const runs = loopRuns[loop.id] ?? []
+	                const latestRun = runs[0]
+	                const anomalies = loopAnomalies[loop.id] ?? []
+	                const openAnomalies = getOpenLoopAnomalies(anomalies)
+	                const visibleAnomalies = openAnomalies.slice(0, 3)
+	                const openAnomalyCount = getOpenAnomalyCount(anomalies)
+	                const runResult = loopRunResults[loop.id]
+	                const isRunning = runningLoopId === loop.id
+	                const isAlreadyRunning = !!loop.activeRunId || runResult?.status === 'already_running'
+	                const buttonLabel = isRunning
+	                  ? ds.loopDiagnosticsRunning
+	                  : isAlreadyRunning
+	                    ? ds.loopDiagnosticsAlreadyRunning
+	                    : ds.loopDiagnosticsRunNow
 
-                return (
-                  <div
-                    key={loop.id}
-                    className="rounded-lg bg-[var(--c-bg-card)] p-3"
-                    style={{ border: '0.5px solid var(--c-border-subtle)' }}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-[var(--c-text-primary)]">
-                          {loop.title}
-                        </div>
-                        <div className="mt-0.5 text-xs text-[var(--c-text-muted)]">
-                          {loop.description}
-                        </div>
-                      </div>
-                      <span className="shrink-0 rounded-full bg-[var(--c-bg-menu)] px-2 py-0.5 text-[11px] text-[var(--c-text-secondary)]">
-                        {loop.status}
-                      </span>
-                    </div>
+	                return (
+	                  <div
+	                    key={loop.id}
+	                    className="rounded-lg bg-[var(--c-bg-card)] p-3"
+	                    style={{ border: '0.5px solid var(--c-border-subtle)' }}
+	                  >
+	                    <div className="flex items-start justify-between gap-3">
+	                      <div className="min-w-0">
+	                        <div className="truncate text-sm font-medium text-[var(--c-text-primary)]">
+	                          {loop.title}
+	                        </div>
+	                        <div className="mt-0.5 text-xs text-[var(--c-text-muted)]">
+	                          {loop.description}
+	                        </div>
+	                      </div>
+	                      <span className="shrink-0 rounded-full bg-[var(--c-bg-menu)] px-2 py-0.5 text-[11px] text-[var(--c-text-secondary)]">
+	                        {loop.status}
+	                      </span>
+	                    </div>
 
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-md bg-[var(--c-bg-menu)] p-2">
-                        <div className="text-[var(--c-text-muted)]">{ds.loopDiagnosticsLastRun}</div>
-                        <div className="mt-1 text-[var(--c-text-primary)]">
-                          {latestRun
-                            ? `${getRunStatusLabel(latestRun.status)} · ${formatLoopRunTime(latestRun)}`
-                            : ds.loopDiagnosticsNoRuns}
-                        </div>
-                      </div>
-                      <div className="rounded-md bg-[var(--c-bg-menu)] p-2">
-                        <div className="text-[var(--c-text-muted)]">{ds.loopDiagnosticsOpenAnomalies}</div>
-                        <div className="mt-1 font-medium text-[var(--c-text-primary)]">
-                          {openAnomalyCount}
-                        </div>
-                      </div>
-                    </div>
+	                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+	                      <div className="rounded-md bg-[var(--c-bg-menu)] p-2">
+	                        <div className="text-[var(--c-text-muted)]">{ds.loopDiagnosticsLastRun}</div>
+	                        <div className="mt-1 text-[var(--c-text-primary)]">
+	                          {latestRun
+	                            ? `${getRunStatusLabel(latestRun.status)} · ${formatLoopRunTime(latestRun)}`
+	                            : ds.loopDiagnosticsNoRuns}
+	                        </div>
+	                      </div>
+	                      <div className="rounded-md bg-[var(--c-bg-menu)] p-2">
+	                        <div className="text-[var(--c-text-muted)]">{ds.loopDiagnosticsOpenAnomalies}</div>
+	                        <div className="mt-1 font-medium text-[var(--c-text-primary)]">
+	                          {openAnomalyCount}
+	                        </div>
+	                      </div>
+	                    </div>
 
-                    {latestRun?.message && (
-                      <div className="mt-2 rounded-md bg-[var(--c-bg-menu)] p-2 text-xs text-[var(--c-text-secondary)]">
-                        {latestRun.message}
-                      </div>
-                    )}
+	                    {latestRun?.message && (
+	                      <div className="mt-2 rounded-md bg-[var(--c-bg-menu)] p-2 text-xs text-[var(--c-text-secondary)]">
+	                        {latestRun.message}
+	                      </div>
+	                    )}
 
-                    <div className="mt-3 flex justify-end">
-                      <PanelButton
-                        onClick={() => void handleRunLoopNow(loop.id)}
-                        disabled={isRunning || isAlreadyRunning || loop.status !== 'active'}
-                        ariaLabel={`run-loop-${loop.id}`}
-                      >
-                        <RefreshCw size={14} className={isRunning ? 'animate-spin' : ''} />
-                        <span>{buttonLabel}</span>
-                      </PanelButton>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+	                    {visibleAnomalies.length > 0 && (
+	                      <div className="mt-2 flex flex-col gap-2">
+	                        {visibleAnomalies.map((anomaly) => {
+	                          const suggestedAction = getLoopAnomalySuggestedAction(anomaly)
+	                          const logPaths = getLoopAnomalyLogPaths(anomaly)
+	                          return (
+	                            <div
+	                              key={anomaly.id}
+	                              className="rounded-md bg-[var(--c-bg-menu)] p-2 text-xs text-[var(--c-text-secondary)]"
+	                            >
+	                              <div className="flex items-start justify-between gap-2">
+	                                <div className="min-w-0">
+	                                  <div className="font-medium text-[var(--c-text-primary)]">
+	                                    {anomaly.message}
+	                                  </div>
+	                                  <div className="mt-0.5 break-all text-[var(--c-text-muted)]">
+	                                    {anomaly.kind} · {anomaly.ownerKind}/{anomaly.ownerId}
+	                                  </div>
+	                                </div>
+	                                <span className="shrink-0 text-[11px] text-[var(--c-text-muted)]">
+	                                  {anomaly.seenCount}x
+	                                </span>
+	                              </div>
+	                              {suggestedAction && (
+	                                <div className="mt-1">
+	                                  <span className="text-[var(--c-text-muted)]">{ds.loopDiagnosticsSuggestedAction}: </span>
+	                                  {suggestedAction}
+	                                </div>
+	                              )}
+	                              {logPaths.map((logPath) => (
+	                                <div key={logPath} className="mt-1 break-all">
+	                                  <span className="text-[var(--c-text-muted)]">{ds.loopDiagnosticsLogPath}: </span>
+	                                  {logPath}
+	                                </div>
+	                              ))}
+	                            </div>
+	                          )
+	                        })}
+	                      </div>
+	                    )}
+
+	                    <div className="mt-3 flex flex-wrap justify-end gap-2">
+	                      <PanelButton
+	                        onClick={() => void handleCopyLoopDiagnostics(loop, runs, anomalies)}
+	                        ariaLabel={`copy-loop-diagnostics-${loop.id}`}
+	                      >
+	                        <Copy size={14} />
+	                        <span>{ds.loopDiagnosticsCopy}</span>
+	                      </PanelButton>
+	                      <PanelButton
+	                        onClick={() => void handleRunLoopNow(loop.id)}
+	                        disabled={isRunning || isAlreadyRunning || loop.status !== 'active'}
+	                        ariaLabel={`run-loop-${loop.id}`}
+	                      >
+	                        <RefreshCw size={14} className={isRunning ? 'animate-spin' : ''} />
+	                        <span>{buttonLabel}</span>
+	                      </PanelButton>
+	                    </div>
+	                  </div>
+	                )
+	              })}
+	            </div>
           )}
         </div>
 

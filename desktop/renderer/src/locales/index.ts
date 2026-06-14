@@ -1040,6 +1040,11 @@ export interface LocaleStrings {
     loopDiagnosticsLoading: string;
     loopDiagnosticsLoadError: string;
     loopDiagnosticsRunFailed: string;
+    loopDiagnosticsSuggestedAction: string;
+    loopDiagnosticsLogPath: string;
+    loopDiagnosticsCopy: string;
+    loopDiagnosticsCopied: string;
+    loopDiagnosticsCopyFailed: string;
     chatSectionTitle: string;
     chatCompactCardTitle: string;
     chatCompactEnableLabel: string;

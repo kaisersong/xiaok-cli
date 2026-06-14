@@ -23,7 +23,7 @@ import {
 } from './window-lifecycle.js';
 import { setupMenuBar, destroyMenuBar } from './menubar.js';
 import { setupAutoUpdater, checkForUpdates, quitAndInstall, getUpdateStatus } from './updater.js';
-import { createKSwarmService } from './kswarm-service.js';
+import { createKSwarmService, resolveKSwarmServiceLogRoot } from './kswarm-service.js';
 import { deployBundledPlugins } from './deploy-bundled-plugins.js';
 import { TimedActionStore } from './timed-action-store.js';
 import { ThreadMetaStore } from './thread-meta-store.js';
@@ -139,7 +139,14 @@ async function createWindow(): Promise<BrowserWindow> {
     dataRoot,
     kswarmService,
   });
-  const loopRuntime = createDesktopLoopRuntime({ dataRoot });
+  const loopRuntime = createDesktopLoopRuntime({
+    dataRoot,
+    kswarmHealthProbe: () => kswarmService.getHealthDiagnosticInput(),
+    kswarmHealthLogPaths: [
+      join(resolveKSwarmServiceLogRoot(app.getPath('userData')), 'server.log'),
+      join(resolveKSwarmServiceLogRoot(app.getPath('userData')), 'broker.log'),
+    ],
+  });
 
   await registerDesktopIpc(ipcMain, window, services, { loopRuntime });
   debugMain('createWindow:ipc-registered');

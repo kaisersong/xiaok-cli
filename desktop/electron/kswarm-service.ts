@@ -27,6 +27,7 @@ import {
 } from './kswarm-service-paths.js';
 import { loadConfig } from '../../src/utils/config.js';
 import { buildManagedXiaokAgentPayload, diffManagedXiaokAgentPatch } from './managed-xiaok-agent.js';
+import type { KSwarmHealthDiagnosticInput } from './kswarm-service-diagnostics.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -51,7 +52,7 @@ const MAX_RESTART_ATTEMPTS = 10;
 const REQUEST_TIMEOUT_MS = 30_000;
 const DYNAMIC_WORKFLOW_FEATURE = 'dynamic_workflows';
 const WORKFLOW_PATTERN_SCHEMA_VERSION = 'kswarm_workflow_patterns_v1';
-const KSWARM_LOG_ROOT = join(homedir(), '.kswarm', 'logs');
+const LEGACY_KSWARM_LOG_ROOT = join(homedir(), '.kswarm', 'logs');
 
 /**
  * Resolve service paths:
@@ -136,6 +137,15 @@ export function resolveIntentBrokerRuntimeRoot(userDataPath: string): string {
   return join(userDataPath, 'services', 'intent-broker');
 }
 
+export function resolveKSwarmServiceLogRoot(userDataPath?: string): string {
+  if (userDataPath) return join(userDataPath, 'logs');
+  try {
+    return join(app.getPath('userData'), 'logs');
+  } catch {
+    return LEGACY_KSWARM_LOG_ROOT;
+  }
+}
+
 export function buildIntentBrokerServiceEnv(options: {
   baseEnv?: NodeJS.ProcessEnv;
   cwd: string;
@@ -188,6 +198,46 @@ export interface KSwarmServiceStatus {
   pid: number | null;
   restartCount: number;
   lastError: string | null;
+}
+
+interface HealthJsonResult {
+  ok: boolean;
+  body: Record<string, unknown> | null;
+  error: string | null;
+  status?: number;
+}
+
+export function buildKSwarmHealthDiagnosticInput(options: {
+  expectedEntryPath: string | null;
+  expectedSourceHash?: string | null;
+  health: HealthJsonResult;
+  broker: HealthJsonResult;
+  status: KSwarmServiceStatus;
+  lastExit?: { code?: number | null; signal?: string | null; stderr?: string | null } | null;
+}): KSwarmHealthDiagnosticInput {
+  const listening = options.health.ok || typeof options.health.status === 'number';
+  return {
+    expectedEntryPath: options.expectedEntryPath,
+    expectedSourceHash: options.expectedSourceHash ?? null,
+    spawnEntryExists: Boolean(options.expectedEntryPath),
+    managerRunning: options.status.running,
+    port: {
+      listening,
+      pid: options.status.pid,
+      command: options.status.pid ? 'desktop-owned kswarm service' : null,
+    },
+    health: {
+      ok: options.health.ok,
+      status: options.health.status,
+      body: options.health.body,
+      error: options.health.error,
+    },
+    broker: {
+      ok: options.broker.ok,
+      error: options.broker.error,
+    },
+    lastExit: options.lastExit ?? null,
+  };
 }
 
 export type DesktopRelatedServiceId = 'kswarm' | 'intent-broker' | 'runtime-bridge';
@@ -374,7 +424,7 @@ export function appendKSwarmServiceLogLine(options: {
     .map(line => line.trim())
     .filter(Boolean);
   if (lines.length === 0) return;
-  const logRoot = options.logRoot ?? KSWARM_LOG_ROOT;
+  const logRoot = options.logRoot ?? resolveKSwarmServiceLogRoot();
   try {
     mkdirSync(logRoot, { recursive: true });
     const ts = (options.now?.() ?? new Date()).toISOString();
@@ -434,6 +484,7 @@ export interface KSwarmService {
   restart(): Promise<void>;
   getStatus(): KSwarmServiceStatus;
   getServiceStatus(): Promise<DesktopServiceStatusSnapshot>;
+  getHealthDiagnosticInput(): Promise<KSwarmHealthDiagnosticInput>;
   restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void>;
   onStatusChange(cb: (status: KSwarmServiceStatus) => void): () => void;
   /** Make an HTTP request to the KSwarm service. Auto-starts if not running. */
@@ -480,21 +531,35 @@ export function createKSwarmService(): KSwarmService {
     return result.ok;
   }
 
-  async function fetchHealthJson(url: string): Promise<{ ok: boolean; body: Record<string, unknown> | null; error: string | null }> {
+  async function fetchHealthJson(url: string): Promise<HealthJsonResult> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
 
     try {
       const res = await fetch(url, { signal: controller.signal });
       let body: Record<string, unknown> | null = null;
+      let parseError: string | null = null;
       try {
         const parsed = await res.json();
-        body = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
-      } catch {
-        body = null;
+        if (parsed && typeof parsed === 'object') {
+          body = parsed as Record<string, unknown>;
+        } else {
+          parseError = 'health response JSON is not an object';
+        }
+      } catch (error) {
+        parseError = error instanceof Error ? error.message : 'health response is not valid JSON';
+      }
+      if (res.ok && parseError) {
+        return {
+          ok: false,
+          status: res.status,
+          body: null,
+          error: `invalid health JSON: ${parseError}`,
+        };
       }
       return {
         ok: res.ok,
+        status: res.status,
         body,
         error: res.ok ? null : `HTTP ${res.status}`,
       };
@@ -520,8 +585,8 @@ export function createKSwarmService(): KSwarmService {
     });
   }
 
-  async function fetchHealthJsonFromUrls(urls: string[]): Promise<{ ok: boolean; body: Record<string, unknown> | null; error: string | null }> {
-    let lastResult: { ok: boolean; body: Record<string, unknown> | null; error: string | null } | null = null;
+  async function fetchHealthJsonFromUrls(urls: string[]): Promise<HealthJsonResult> {
+    let lastResult: HealthJsonResult | null = null;
     for (const url of uniqueServiceUrls(urls)) {
       const result = await fetchHealthJson(url);
       if (result.ok) {
@@ -1015,6 +1080,22 @@ export function createKSwarmService(): KSwarmService {
     };
   }
 
+  async function getHealthDiagnosticInput(): Promise<KSwarmHealthDiagnosticInput> {
+    const serverPath = resolveServicePath('kswarm', 'src/server/index.js');
+    const expectedSourceHash = computeKSwarmServiceSourceHash(serverPath);
+    const [kswarmHealth, brokerHealth] = await Promise.all([
+      fetchHealthJsonFromUrls(KSWARM_HEALTH_URLS),
+      fetchHealthJsonFromUrls(BROKER_HEALTH_URLS),
+    ]);
+    return buildKSwarmHealthDiagnosticInput({
+      expectedEntryPath: serverPath,
+      expectedSourceHash,
+      health: kswarmHealth,
+      broker: brokerHealth,
+      status: getStatus(),
+    });
+  }
+
   async function restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void> {
     if (serviceId === 'kswarm') {
       await restart();
@@ -1028,5 +1109,5 @@ export function createKSwarmService(): KSwarmService {
     notifyListeners();
   }
 
-  return { start, stop, restart, getStatus, getServiceStatus, restartRelatedService, onStatusChange, request };
+  return { start, stop, restart, getStatus, getServiceStatus, getHealthDiagnosticInput, restartRelatedService, onStatusChange, request };
 }

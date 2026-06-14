@@ -65,6 +65,11 @@ const BUILT_IN_LOOPS: Array<Pick<LoopDefinition, 'id' | 'title' | 'description'>
     title: 'Artifact Evidence Regression',
     description: 'Checks artifact completion evidence flows for regressions.',
   },
+  {
+    id: BUILT_IN_LOOP_IDS.KSWARM_SERVICE_HEALTH,
+    title: 'KSwarm Service Health',
+    description: 'Checks KSwarm service startup, health, identity, and broker connectivity.',
+  },
 ];
 
 const EXECUTOR_CRASH_MESSAGE = 'Loop executor crashed or was interrupted.';

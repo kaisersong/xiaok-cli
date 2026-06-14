@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import {
   appendKSwarmServiceLogLine,
+  buildKSwarmHealthDiagnosticInput,
   buildBackgroundNodeSpawnOptions,
   buildIntentBrokerServiceEnv,
   checkKSwarmHealthServiceIdentity,
@@ -15,6 +16,7 @@ import {
   nextHealthFailureCount,
   requestWithFallbackBaseUrls,
   resolveBackgroundNodeRuntime,
+  resolveKSwarmServiceLogRoot,
   resolveIntentBrokerRuntimeRoot,
   shouldAdoptExistingKSwarmService,
   shouldRestartAfterHealthFailures,
@@ -295,6 +297,11 @@ describe('kswarm service external adoption', () => {
 });
 
 describe('kswarm service diagnostics logs', () => {
+  it('resolves service logs under desktop userData logs', () => {
+    expect(resolveKSwarmServiceLogRoot('/Users/song/Library/Application Support/xiaok'))
+      .toBe('/Users/song/Library/Application Support/xiaok/logs');
+  });
+
   it('writes service log lines under the provided log root', () => {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-logs-'));
     try {
@@ -328,6 +335,129 @@ describe('kswarm service diagnostics logs', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('kswarm service health diagnostic input', () => {
+  it('marks a missing service entry as spawn_path_missing classifier input', () => {
+    const input = buildKSwarmHealthDiagnosticInput({
+      expectedEntryPath: null,
+      expectedSourceHash: null,
+      health: { ok: false, body: null, error: 'connect ECONNREFUSED' },
+      broker: { ok: true, body: { ok: true }, error: null },
+      status: {
+        running: false,
+        port: 4400,
+        pid: null,
+        restartCount: 0,
+        lastError: 'kswarm server entry not found',
+      },
+    });
+
+    expect(input).toMatchObject({
+      expectedEntryPath: null,
+      spawnEntryExists: false,
+      port: { listening: false, pid: null },
+      health: { ok: false, error: 'connect ECONNREFUSED' },
+      broker: { ok: true },
+    });
+  });
+
+  it('keeps parsed health and broker state for classifier decisions', () => {
+    const input = buildKSwarmHealthDiagnosticInput({
+      expectedEntryPath: '/app/services/kswarm/src/server/index.js',
+      expectedSourceHash: 'expected',
+      health: {
+        ok: true,
+        body: {
+          service: { entryPath: '/tmp/kswarm/src/server/index.js', sourceHash: 'actual' },
+          brokerConnected: false,
+        },
+        error: null,
+      },
+      broker: { ok: false, body: null, error: 'broker refused connection' },
+      status: {
+        running: true,
+        port: 4400,
+        pid: 42,
+        restartCount: 2,
+        lastError: null,
+      },
+    });
+
+    expect(input).toMatchObject({
+      expectedEntryPath: '/app/services/kswarm/src/server/index.js',
+      expectedSourceHash: 'expected',
+      spawnEntryExists: true,
+      port: { listening: true, pid: 42, command: 'desktop-owned kswarm service' },
+      health: {
+        ok: true,
+        body: {
+          service: { entryPath: '/tmp/kswarm/src/server/index.js', sourceHash: 'actual' },
+          brokerConnected: false,
+        },
+      },
+      broker: { ok: false, error: 'broker refused connection' },
+    });
+  });
+
+  it('does not infer port listening from the desktop service manager running flag', () => {
+    const input = buildKSwarmHealthDiagnosticInput({
+      expectedEntryPath: '/app/services/kswarm/src/server/index.js',
+      expectedSourceHash: 'expected',
+      health: {
+        ok: false,
+        body: null,
+        error: 'health check timed out (1000ms): http://127.0.0.1:4400/health',
+      },
+      broker: { ok: true, body: { ok: true }, error: null },
+      status: {
+        running: true,
+        port: 4400,
+        pid: 42,
+        restartCount: 0,
+        lastError: null,
+      },
+    });
+
+    expect(input).toMatchObject({
+      spawnEntryExists: true,
+      port: {
+        listening: false,
+        pid: 42,
+        command: 'desktop-owned kswarm service',
+      },
+      health: {
+        ok: false,
+        error: 'health check timed out (1000ms): http://127.0.0.1:4400/health',
+      },
+    });
+  });
+
+  it('marks HTTP health responses as port listeners without relying on manager state', () => {
+    const input = buildKSwarmHealthDiagnosticInput({
+      expectedEntryPath: '/app/services/kswarm/src/server/index.js',
+      expectedSourceHash: 'expected',
+      health: {
+        ok: false,
+        status: 404,
+        body: null,
+        error: 'HTTP 404',
+      },
+      broker: { ok: true, body: { ok: true }, error: null },
+      status: {
+        running: false,
+        port: 4400,
+        pid: null,
+        restartCount: 0,
+        lastError: null,
+      },
+    });
+
+    expect(input).toMatchObject({
+      port: { listening: true },
+      health: { ok: false, status: 404, error: 'HTTP 404' },
+    });
   });
 });
 

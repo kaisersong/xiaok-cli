@@ -1,3 +1,6 @@
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
+import { isAbsolute, relative, resolve } from 'node:path';
+
 export type CompletionKind =
   | 'answer'
   | 'file_artifact'
@@ -146,6 +149,15 @@ function validateEvidenceRecord(record: CompletionEvidenceRecord): EvidenceValid
       if (hasText(record.uri) || isNonEmptyStringArray(record.metadata?.paths)) {
         return { ok: true };
       }
+      {
+        const localResult = validateLocalFileArtifactEvidence(record);
+        if (!localResult.ok) {
+          return localResult;
+        }
+      }
+      if (isNonEmptyStringArray(record.metadata?.localPaths)) {
+        return { ok: true };
+      }
       return fail('validation_failed', 'File artifact evidence requires a URI or paths metadata.');
     case 'command_action':
       if (isNonEmptyCommandArray(record.metadata?.commands)) {
@@ -209,7 +221,7 @@ function hasText(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function isNonEmptyStringArray(value: unknown): boolean {
+function isNonEmptyStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.length > 0 && value.every(item => hasText(item));
 }
 
@@ -236,6 +248,55 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNoOpSummary(summary: string): boolean {
   return /\bno-?op\b|无变化/iu.test(summary);
+}
+
+function validateLocalFileArtifactEvidence(record: CompletionEvidenceRecord): EvidenceValidationResult {
+  const localPaths = record.metadata?.localPaths;
+  if (localPaths === undefined) {
+    return { ok: true };
+  }
+  if (!isNonEmptyStringArray(localPaths)) {
+    return fail('validation_failed', 'File artifact evidence local paths must be non-empty strings.');
+  }
+  const workspaceRoot = record.metadata?.workspaceRoot;
+  if (!hasText(workspaceRoot)) {
+    return fail('validation_failed', 'File artifact evidence local paths require a workspace root.');
+  }
+  const resolvedRoot = resolve(workspaceRoot);
+  let realRoot: string;
+  try {
+    realRoot = realpathSync.native(resolvedRoot);
+  } catch {
+    return fail('validation_failed', 'File artifact evidence workspace root is missing.');
+  }
+  for (const localPath of localPaths) {
+    if (localPath.includes('\0')) {
+      return fail('validation_failed', `File artifact evidence local path is invalid: ${localPath}`);
+    }
+    const resolvedPath = isAbsolute(localPath) ? resolve(localPath) : resolve(realRoot, localPath);
+    if (!isAbsolute(localPath)) {
+      const rel = relative(realRoot, resolvedPath);
+      if (rel.startsWith('..') || isAbsolute(rel)) {
+        return fail('validation_failed', `File artifact evidence local path escapes workspace: ${localPath}`);
+      }
+    }
+    try {
+      if (lstatSync(resolvedPath).isSymbolicLink()) {
+        return fail('validation_failed', `File artifact evidence local path is a symlink: ${localPath}`);
+      }
+      const realPath = realpathSync.native(resolvedPath);
+      const realRel = relative(realRoot, realPath);
+      if (realRel.startsWith('..') || isAbsolute(realRel)) {
+        return fail('validation_failed', `File artifact evidence local path escapes workspace: ${localPath}`);
+      }
+    } catch {
+      return fail('validation_failed', `File artifact evidence local path is missing: ${localPath}`);
+    }
+    if (!existsSync(resolvedPath)) {
+      return fail('validation_failed', `File artifact evidence local path is missing: ${localPath}`);
+    }
+  }
+  return { ok: true };
 }
 
 function fail(failureKind: EvidenceValidationFailure, message: string): EvidenceValidationResult {

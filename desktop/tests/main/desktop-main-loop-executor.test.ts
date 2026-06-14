@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { createDesktopLoopRuntime } from '../../electron/loop-executor.js';
 import { createDesktopTimedActionExecutors } from '../../electron/timed-action-executors.js';
@@ -107,6 +108,31 @@ describe('desktop main loop executor wiring', () => {
       });
     } finally {
       timedActionStore.close();
+      loopRuntime.close();
+    }
+  });
+
+  it('does not expose anomaly rows for unknown loop ids', () => {
+    const loopRuntime = createDesktopLoopRuntime({
+      dataRoot: rootDir,
+      now: () => 1_000,
+      staleAfterMs: 60_000,
+    });
+    const db = new DatabaseSync(join(rootDir, 'loop-evidence.sqlite'));
+    try {
+      db.prepare(`
+        insert into evidence_anomalies (
+          id, loop_id, owner_kind, owner_id, kind, status, first_seen_at,
+          last_seen_at, last_resolved_at, seen_count, ignored_until,
+          message, evidence_ids_json, metadata_json
+        ) values (
+          'unknown-anomaly', 'unknown-loop', 'task', 'task-1', 'private',
+          'open', 1, 1, null, 1, null, 'private diagnostic', '[]', '{}'
+        )
+      `).run();
+      expect(loopRuntime.listAnomalies('unknown-loop')).toEqual([]);
+    } finally {
+      db.close();
       loopRuntime.close();
     }
   });

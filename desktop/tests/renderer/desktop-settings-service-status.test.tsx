@@ -36,6 +36,10 @@ describe('DesktopSettings service status', () => {
   beforeEach(() => {
     (globalThis as Record<string, unknown>).__APP_VERSION__ = 'test-version';
     (globalThis as Record<string, unknown>).__APP_BUILD__ = 'test-build';
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
     mocks.getServiceStatus.mockReset();
     mocks.restartRelatedService.mockReset();
     mocks.getServiceStatus.mockResolvedValue({
@@ -113,7 +117,10 @@ describe('DesktopSettings service status', () => {
         seenCount: 1,
         message: 'missing artifact',
         evidenceIds: [],
-        metadata: {},
+        metadata: {
+          suggestedActionSummary: '检查 artifact evidence',
+          logPaths: ['/tmp/xiaok/logs/kswarm-service.log'],
+        },
       },
     ]);
     mocks.runLoopNow.mockResolvedValue({
@@ -188,6 +195,43 @@ describe('DesktopSettings service status', () => {
     await waitFor(() => {
       expect(mocks.runLoopNow).toHaveBeenCalledWith('artifact-evidence-regression');
     });
+  });
+
+  it('shows actionable loop anomaly details and can copy diagnostics summary', async () => {
+    render(
+      <LocaleProvider>
+        <DesktopSettings onClose={() => {}} />
+      </LocaleProvider>,
+    );
+
+    await screen.findByText('Artifact Evidence Regression');
+    expect(screen.getByText('missing artifact')).toBeInTheDocument();
+    expect(screen.getByText('检查 artifact evidence')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/xiaok/logs/kswarm-service.log')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('copy-loop-diagnostics-artifact-evidence-regression'));
+
+    await waitFor(() => {
+      expect(globalThis.navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('missing artifact'));
+    });
+  });
+
+  it('keeps loop diagnostics visible when clipboard copy fails', async () => {
+    vi.mocked(globalThis.navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard denied'));
+    render(
+      <LocaleProvider>
+        <DesktopSettings onClose={() => {}} />
+      </LocaleProvider>,
+    );
+
+    await screen.findByText('Artifact Evidence Regression');
+    fireEvent.click(screen.getByLabelText('copy-loop-diagnostics-artifact-evidence-regression'));
+
+    await waitFor(() => {
+      expect(globalThis.navigator.clipboard.writeText).toHaveBeenCalled();
+    });
+    expect(screen.getByText('missing artifact')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/xiaok/logs/kswarm-service.log')).toBeInTheDocument();
   });
 
   it('shows already-running state and clears it after a fresh diagnostics read', async () => {

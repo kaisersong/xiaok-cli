@@ -33,10 +33,10 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 | **Connectors** | MCP 插件、内置 report/slide renderer、Intent Broker、KSwarm、文件系统和可选 channel，把 loop 连接到真实数据和真实产物。 |
 | **Sub-agents** | KSwarm 的 PO/worker/reviewer 角色和动态 workflow 分支，把 maker 和 checker 分开；无人值守 loop 不能只依赖自检。 |
 | **Memory** | SQLite store、broker event replay、project state、workflow checkpoint、loop run record 和 artifact manifest，让 loop 可以跨会话延续。 |
-| **Evidence** | Completion guard、deliverable contract、artifact provenance，以及 v1.4.4 的 loop evidence store，让“完成”不是模型说完成，而是有可检查的产物证据。 |
-| **Diagnostics** | 只读 loop diagnostics 和 evidence regression scan 把 silent failure 提前暴露出来，避免后台悄悄坏一周。 |
+| **Evidence** | Completion guard、deliverable contract、artifact provenance 和 loop evidence store，让“完成”不是模型说完成，而是有可检查的产物证据。 |
+| **Diagnostics** | 只读 loop diagnostics、evidence regression scan 和 KSwarm service health check 把 silent failure 提前暴露出来，避免后台悄悄坏一周。 |
 
-第一条内置生产 loop 是 **Artifact Evidence Regression Loop**。它会定期扫描最近完成的任务，查找缺失 artifact、陈旧 run state 和异常交付结果，并写入结构化 diagnostics。这代表 Xiaok 正在走向的模式：人设计 loop，Xiaok 运行 loop，独立 evidence 判断工作是否真的完成。
+第一批内置生产 loop 是 **Artifact Evidence Regression Loop** 和 **KSwarm Service Health Loop**。它们会定期扫描最近完成的任务与服务可用性，查找缺失 artifact、陈旧 run state、异常交付结果、服务未启动、health 握手失败、broker 不可用和版本/能力不匹配等问题，并写入结构化 diagnostics。这代表 Xiaok 正在走向的模式：人设计 loop，Xiaok 运行 loop，独立 evidence 判断工作是否真的完成。
 
 最小可用的 Xiaok loop 可以很简单：
 
@@ -45,6 +45,13 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 3. 把 memory 持久化到 project state、文件或 SQLite。
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
+
+**v1.4.5 新特性：**
+
+- **KSwarm Service Health Loop**：Desktop 新增内置 `kswarm-service-health` loop，会把无监听端口、未知端口占用、health 不可达、HTTP 错误、health JSON 无效、身份/能力不匹配、broker 不可用、spawn 路径缺失、spawn 退出和源码 hash 漂移写成结构化服务诊断。
+- **可行动的 Loop Diagnostics**：设置页现在展示 anomaly kind、owner、seen count、建议处理动作和相关日志路径，并支持复制诊断摘要，方便支持和排查。通知策略也更轻：新的高危异常提醒一次，重复未解决异常默认去重，source unavailable 连续出现第二次才提醒。
+- **更强的 Artifact Evidence 校验**：本地 file artifact evidence 现在会校验文件真实存在且 realpath 留在 workspace 内，覆盖父目录 symlink escape；同时合法 `uri` 或 `metadata.paths` 不会因为陈旧的 `localPaths` 元数据被误拒。
+- **发布验证**：v1.4.5 已通过 desktop 全量测试、CLI sandbox 全量测试、loop/evidence 聚焦测试、desktop build/typecheck，以及 intent/skill structured eval。
 
 **v1.4.4 新特性：**
 
@@ -688,6 +695,8 @@ npm run dev -- --help  # 从源码运行
 ---
 
 ## 版本日志
+
+**v1.4.5** — Loop 可靠性版本：新增内置 KSwarm Service Health Loop，把服务启动和 health-check 失败分类成结构化 diagnostics；设置页展示建议处理动作和日志路径；重复异常通知保持克制；本地 artifact evidence 增加 workspace containment 与 symlink escape 防护。发版门禁覆盖 desktop 全量测试、CLI sandbox 全量测试、desktop build/typecheck，以及 intent/skill structured eval。
 
 **v1.4.2** — A2UI 看板与中断版本：Desktop 可以在对话中直接回放安全的只读 A2UI 看板产物，支持指标、列表、表格和结论 section，并用 `/Applications/xiaok.app` 已安装应用 E2E 覆盖自然语言看板需求，不在用户路径中暴露内部工具名。用户可见 tool step 现在显示为 `dashboard [A2UI]`，原始看板 payload 保持 redacted，section validator 支持常见 alias，并避免有效看板请求触发"未知 section"。终端 streaming turn 也可用 `ESC` 中断，同时保留 draft 和 queued input，并把本轮记录为 user-aborted 而不是 failed。Model adapters、runtime core、compact runner、subagents 和 tool execution 共享 abort signal，不会 retry 真实 `AbortError`；Desktop KSwarm handoff 会透传取消 signal，并把用户中断暴露为 `task_cancelled`。
 

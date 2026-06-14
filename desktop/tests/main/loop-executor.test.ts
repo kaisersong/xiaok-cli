@@ -12,6 +12,7 @@ import {
 } from '../../electron/loop-executor.js';
 
 const ARTIFACT_LOOP_ID = BUILT_IN_LOOP_IDS.ARTIFACT_EVIDENCE_REGRESSION;
+const KSWARM_HEALTH_LOOP_ID = BUILT_IN_LOOP_IDS.KSWARM_SERVICE_HEALTH;
 
 describe('loop executor', () => {
   let rootDir: string;
@@ -84,6 +85,41 @@ describe('loop executor', () => {
         summary: '0 anomalies found',
       }),
     ]);
+  });
+
+  it('routes a manual KSwarm health run to its registered scanner', async () => {
+    const artifactScanner: LoopScanner = {
+      scan: vi.fn().mockReturnValue({
+        summaryEvidence: { summary: 'artifact scanner should not run', metadata: {} },
+        nextActionKind: 'none',
+      }),
+    };
+    const kswarmScanner: LoopScanner = {
+      scan: vi.fn().mockReturnValue({
+        summaryEvidence: { summary: 'KSwarm service is healthy', metadata: { diagnosticKinds: [] } },
+        nextActionKind: 'none',
+      }),
+    };
+    const runner = createLoopRunner({
+      loopStore: store,
+      evidenceStore,
+      scanner: artifactScanner,
+      scanners: {
+        [KSWARM_HEALTH_LOOP_ID]: kswarmScanner,
+      },
+      now: () => now,
+      staleAfterMs: 60_000,
+    });
+
+    const result = await runner.runLoopNow(KSWARM_HEALTH_LOOP_ID);
+
+    expect(result).toMatchObject({ status: 'success' });
+    expect(artifactScanner.scan).not.toHaveBeenCalled();
+    expect(kswarmScanner.scan).toHaveBeenCalledWith({ loopRunId: expect.any(String), now: 2_000 });
+    expect(store.listLoopRuns(KSWARM_HEALTH_LOOP_ID, 10)[0]).toMatchObject({
+      status: 'success',
+      summary: 'KSwarm service is healthy',
+    });
   });
 
   it('blocked runs persist blocked evidence before terminal loop state', async () => {

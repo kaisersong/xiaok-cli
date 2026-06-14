@@ -1,6 +1,13 @@
 import { join } from 'node:path';
-import { ArtifactEvidenceRegressionScanner } from './artifact-evidence-regression-loop.js';
+import {
+  ARTIFACT_EVIDENCE_REGRESSION_LOOP_ID,
+  ArtifactEvidenceRegressionScanner,
+} from './artifact-evidence-regression-loop.js';
 import { CompletionEvidenceStore } from './completion-evidence-store.js';
+import {
+  KSWARM_SERVICE_HEALTH_LOOP_ID,
+  KSwarmServiceHealthScanner,
+} from './kswarm-health-loop.js';
 import { LoopStore } from './loop-store.js';
 import type {
   LoopRun,
@@ -9,6 +16,7 @@ import type {
 import type {
   CompletionOwnerKind,
 } from './completion-evidence-types.js';
+import type { KSwarmHealthDiagnosticInput } from './kswarm-service-diagnostics.js';
 import type {
   OverdueRecoveryContext,
   TimedActionExecutorHandler,
@@ -50,6 +58,7 @@ export interface CreateLoopRunnerOptions {
   loopStore: LoopStore;
   evidenceStore: CompletionEvidenceStore;
   scanner: LoopScanner;
+  scanners?: Record<string, LoopScanner>;
   now?: () => number;
   staleAfterMs?: number;
 }
@@ -75,7 +84,8 @@ export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
 
       try {
         const scanNow = now();
-        const scan = await options.scanner.scan({ loopRunId: run.id, now: scanNow });
+        const scanner = options.scanners?.[loopId] ?? options.scanner;
+        const scan = await scanner.scan({ loopRunId: run.id, now: scanNow });
         const summary = scan.summaryEvidence?.summary ?? summarizeScan(scan);
         const metadata = diagnosticMetadata(scan);
         const finishedAt = now();
@@ -208,8 +218,10 @@ export interface DesktopLoopRuntime {
   loopStore: LoopStore;
   evidenceStore: CompletionEvidenceStore;
   scanner: ArtifactEvidenceRegressionScanner;
+  kswarmHealthScanner: KSwarmServiceHealthScanner;
   runner: LoopRunner;
   executor: TimedActionExecutorHandler;
+  listAnomalies(loopId: string): unknown[];
   close(): void;
 }
 
@@ -219,6 +231,8 @@ export interface CreateDesktopLoopRuntimeOptions {
   staleAfterMs?: number;
   loopDbPath?: string;
   completionEvidenceDbPath?: string;
+  kswarmHealthProbe?: () => KSwarmHealthDiagnosticInput | Promise<KSwarmHealthDiagnosticInput>;
+  kswarmHealthLogPaths?: string[];
 }
 
 export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOptions): DesktopLoopRuntime {
@@ -231,10 +245,17 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
   loopStore.ensureBuiltInLoops(now());
   loopStore.recoverStaleRuns(now(), staleAfterMs);
   const scanner = new ArtifactEvidenceRegressionScanner(completionEvidenceDbPath);
+  const kswarmHealthScanner = new KSwarmServiceHealthScanner(completionEvidenceDbPath, {
+    probe: options.kswarmHealthProbe ?? defaultHealthyKSwarmHealthProbe,
+    logPaths: options.kswarmHealthLogPaths,
+  });
   const runner = createLoopRunner({
     loopStore,
     evidenceStore,
     scanner,
+    scanners: {
+      [KSWARM_SERVICE_HEALTH_LOOP_ID]: kswarmHealthScanner,
+    },
     now,
     staleAfterMs,
   });
@@ -242,15 +263,47 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
     loopStore,
     evidenceStore,
     scanner,
+    kswarmHealthScanner,
     runner,
     executor: createLoopExecutor({
       runLoop: (loopId, trigger) => runner.runLoopNow(loopId, trigger),
     }),
+    listAnomalies(loopId) {
+      if (loopId === KSWARM_SERVICE_HEALTH_LOOP_ID) {
+        return kswarmHealthScanner.listAnomalies({ loopId: KSWARM_SERVICE_HEALTH_LOOP_ID });
+      }
+      if (loopId === ARTIFACT_EVIDENCE_REGRESSION_LOOP_ID) {
+        return scanner.listAnomalies({ loopId: ARTIFACT_EVIDENCE_REGRESSION_LOOP_ID });
+      }
+      return [];
+    },
     close() {
+      kswarmHealthScanner.close();
       scanner.close();
       evidenceStore.close();
       loopStore.close();
     },
+  };
+}
+
+function defaultHealthyKSwarmHealthProbe(): KSwarmHealthDiagnosticInput {
+  return {
+    expectedEntryPath: null,
+    spawnEntryExists: true,
+    port: { listening: true },
+    health: {
+      ok: true,
+      body: {
+        features: ['dynamic_workflows'],
+        workflowCapabilities: {
+          schemaVersion: 'kswarm_workflow_patterns_v1',
+          compiledContract: true,
+          patternPublicView: true,
+        },
+        brokerConnected: true,
+      },
+    },
+    broker: { ok: true },
   };
 }
 

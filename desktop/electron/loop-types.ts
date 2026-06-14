@@ -1,5 +1,6 @@
 export const BUILT_IN_LOOP_IDS = {
   ARTIFACT_EVIDENCE_REGRESSION: 'artifact-evidence-regression',
+  KSWARM_SERVICE_HEALTH: 'kswarm-service-health',
 } as const;
 
 export type BuiltInLoopId = typeof BUILT_IN_LOOP_IDS[keyof typeof BUILT_IN_LOOP_IDS];

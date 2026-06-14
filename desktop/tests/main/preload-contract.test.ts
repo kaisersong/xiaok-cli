@@ -1,3 +1,5 @@
+import Module, { createRequire } from 'node:module';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createPreloadApi, PRELOAD_API_KEYS, FULL_PRELOAD_KEYS, KSWARM_PROXY_KEYS, EXTRA_KEYS, THREAD_META_KEYS } from '../../electron/preload-api.js';
 
@@ -393,6 +395,11 @@ describe('preload API contract', () => {
     expect(actualKeys).toEqual([...FULL_PRELOAD_KEYS].sort());
   });
 
+  it('runtime preload.cjs exposes keys matching FULL_PRELOAD_KEYS', () => {
+    const api = loadRuntimePreloadApi();
+    expect(Object.keys(api).sort()).toEqual([...FULL_PRELOAD_KEYS].sort());
+  });
+
   it('routes kswarm proxy methods through semantic IPC channels', async () => {
     const ipcRenderer = {
       invoke: vi.fn().mockResolvedValue({ data: 'test' }),
@@ -431,3 +438,45 @@ describe('preload API contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:deletePrinciple', 'p1');
   });
 });
+
+function loadRuntimePreloadApi(): Record<string, unknown> {
+  const require = createRequire(import.meta.url);
+  const preloadPath = resolve(process.cwd(), 'electron', 'preload.cjs');
+  const originalLoad = (Module as unknown as { _load: NodeJS.Require })._load;
+  let exposedApi: Record<string, unknown> | null = null;
+  const ipcRenderer = {
+    invoke: vi.fn(),
+    on: vi.fn(),
+    off: vi.fn(),
+  };
+
+  delete require.cache[preloadPath];
+  (Module as unknown as { _load: NodeJS.Require })._load = ((request: string, parent: unknown, isMain: boolean) => {
+    if (request === 'electron') {
+      return {
+        contextBridge: {
+          exposeInMainWorld(name: string, api: Record<string, unknown>) {
+            if (name === 'xiaokDesktop') exposedApi = api;
+          },
+        },
+        ipcRenderer,
+      };
+    }
+    if (request === 'os') {
+      return { userInfo: () => ({ username: 'test-user' }) };
+    }
+    return originalLoad(request, parent, isMain);
+  }) as NodeJS.Require;
+
+  try {
+    require(preloadPath);
+  } finally {
+    (Module as unknown as { _load: NodeJS.Require })._load = originalLoad;
+    delete require.cache[preloadPath];
+  }
+
+  if (!exposedApi) {
+    throw new Error('preload.cjs did not expose xiaokDesktop');
+  }
+  return exposedApi;
+}

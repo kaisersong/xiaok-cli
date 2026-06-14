@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { evaluateArtifactEvidenceGuard } from '../../../src/runtime/guards/artifact-evidence-guard.js';
 import {
   mergeCompletionExpectations,
@@ -315,6 +318,156 @@ describe('ArtifactEvidenceGuard', () => {
       evidence: [taskEvidence({
         kind: 'file_artifact',
         metadata: { paths: ['/tmp/report.md'] },
+      })],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects local file artifact evidence when declared local paths are missing', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-local-artifact-missing-'));
+    try {
+      const result = validateCompletedEvidence({
+        expectedKinds: ['file_artifact'],
+        evidence: [taskEvidence({
+          kind: 'file_artifact',
+          metadata: {
+            workspaceRoot: root,
+            localPaths: ['missing-report.md'],
+          },
+        })],
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        failureKind: 'validation_failed',
+        message: 'File artifact evidence local path is missing: missing-report.md',
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('passes local file artifact evidence when declared local paths exist', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-local-artifact-present-'));
+    try {
+      writeFileSync(join(root, 'report.md'), '# Report\n');
+      const result = validateCompletedEvidence({
+        expectedKinds: ['file_artifact'],
+        evidence: [taskEvidence({
+          kind: 'file_artifact',
+          metadata: {
+            workspaceRoot: root,
+            localPaths: ['report.md'],
+          },
+        })],
+      });
+
+      expect(result.ok).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not let invalid localPaths override a valid artifact URI', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['file_artifact'],
+      evidence: [taskEvidence({
+        kind: 'file_artifact',
+        uri: 'https://example.com/report.md',
+        metadata: {
+          localPaths: ['missing-report.md'],
+        },
+      })],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('passes local file artifact evidence for absolute paths inside the workspace', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-local-artifact-absolute-inside-'));
+    try {
+      const reportPath = join(root, 'report.md');
+      writeFileSync(reportPath, '# Report\n');
+      const result = validateCompletedEvidence({
+        expectedKinds: ['file_artifact'],
+        evidence: [taskEvidence({
+          kind: 'file_artifact',
+          metadata: {
+            workspaceRoot: root,
+            localPaths: [reportPath],
+          },
+        })],
+      });
+
+      expect(result.ok).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects local file artifact evidence for absolute paths outside the workspace', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-local-artifact-absolute-root-'));
+    const outside = mkdtempSync(join(tmpdir(), 'xiaok-local-artifact-absolute-outside-'));
+    try {
+      const outsideReport = join(outside, 'report.md');
+      writeFileSync(outsideReport, '# Outside Report\n');
+      const result = validateCompletedEvidence({
+        expectedKinds: ['file_artifact'],
+        evidence: [taskEvidence({
+          kind: 'file_artifact',
+          metadata: {
+            workspaceRoot: root,
+            localPaths: [outsideReport],
+          },
+        })],
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        failureKind: 'validation_failed',
+        message: `File artifact evidence local path escapes workspace: ${outsideReport}`,
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects local file artifact evidence that escapes through a symlinked directory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-local-artifact-symlink-root-'));
+    const outside = mkdtempSync(join(tmpdir(), 'xiaok-local-artifact-symlink-outside-'));
+    try {
+      writeFileSync(join(outside, 'report.md'), '# Outside Report\n');
+      symlinkSync(outside, join(root, 'linked'), 'dir');
+      const result = validateCompletedEvidence({
+        expectedKinds: ['file_artifact'],
+        evidence: [taskEvidence({
+          kind: 'file_artifact',
+          metadata: {
+            workspaceRoot: root,
+            localPaths: ['linked/report.md'],
+          },
+        })],
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        failureKind: 'validation_failed',
+        message: 'File artifact evidence local path escapes workspace: linked/report.md',
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('does not force remote artifact URIs through local file existence checks', () => {
+    const result = validateCompletedEvidence({
+      expectedKinds: ['file_artifact'],
+      evidence: [taskEvidence({
+        kind: 'file_artifact',
+        uri: 'https://example.com/report.md',
       })],
     });
 

@@ -30,6 +30,7 @@ import {
   Search,
   Link as LinkIcon,
   Server,
+  Copy,
   RefreshCw,
 } from 'lucide-react';
 import { api } from '../api';
@@ -56,6 +57,13 @@ import type {
   RunLoopNowResultView,
 } from '../api/types';
 import { useLocale } from '../contexts/LocaleContext';
+import { useToast } from '../shared';
+import {
+  buildLoopDiagnosticsSummary,
+  getLoopAnomalyLogPaths,
+  getLoopAnomalySuggestedAction,
+  getOpenLoopAnomalies,
+} from './settings/loopDiagnostics';
 
 type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'tools' | 'general' | 'appearance' | 'data' | 'memory' | 'about';
 
@@ -1816,7 +1824,7 @@ function pluginDependencyBadgeClass(state: PluginDependencyStatus['state']): str
 }
 
 function getOpenLoopAnomalyCount(anomalies: EvidenceAnomalyView[]): number {
-  return anomalies.filter(anomaly => anomaly.status === 'open').length;
+  return getOpenLoopAnomalies(anomalies).length;
 }
 
 function getLoopRunStatusLabel(status: LoopRunView['status']): string {
@@ -1835,6 +1843,14 @@ function formatLoopRunTime(run: LoopRunView): string {
 
 function GeneralPane() {
   const { locale, setLocale, t } = useLocale();
+  const toast = useToast() as {
+    addToast?: (message: string, type?: 'success' | 'error') => void;
+    show?: (message: string, type?: 'success' | 'error') => void;
+  };
+  const showToast = useCallback((message: string, type: 'success' | 'error' = 'error') => {
+    if (toast.addToast) toast.addToast(message, type);
+    else toast.show?.(message, type);
+  }, [toast]);
   const [skillDebug, setSkillDebug] = useState(false);
   const [savingSkillDebug, setSavingSkillDebug] = useState(false);
   const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(3);
@@ -1970,6 +1986,20 @@ function GeneralPane() {
       setLoopDiagnosticsError(error instanceof Error ? error.message : t.desktopSettings.loopDiagnosticsRunFailed);
     } finally {
       setRunningLoopId(null);
+    }
+  };
+
+  const handleCopyLoopDiagnostics = async (
+    loop: LoopDefinitionView,
+    runs: LoopRunView[],
+    anomalies: EvidenceAnomalyView[],
+  ) => {
+    try {
+      const summary = buildLoopDiagnosticsSummary({ loop, runs, anomalies });
+      await navigator.clipboard.writeText(summary);
+      showToast(t.desktopSettings.loopDiagnosticsCopied, 'success');
+    } catch {
+      showToast(t.desktopSettings.loopDiagnosticsCopyFailed, 'error');
     }
   };
 
@@ -2163,11 +2193,14 @@ function GeneralPane() {
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              {loopDefinitions.map(loop => {
-                const runs = loopRuns[loop.id] ?? [];
-                const latestRun = runs[0];
-                const openAnomalyCount = getOpenLoopAnomalyCount(loopAnomalies[loop.id] ?? []);
-                const runResult = loopRunResults[loop.id];
+	              {loopDefinitions.map(loop => {
+	                const runs = loopRuns[loop.id] ?? [];
+	                const latestRun = runs[0];
+	                const anomalies = loopAnomalies[loop.id] ?? [];
+	                const openAnomalies = getOpenLoopAnomalies(anomalies);
+	                const visibleAnomalies = openAnomalies.slice(0, 3);
+	                const openAnomalyCount = getOpenLoopAnomalyCount(anomalies);
+	                const runResult = loopRunResults[loop.id];
                 const isRunning = runningLoopId === loop.id;
                 const isAlreadyRunning = !!loop.activeRunId || runResult?.status === 'already_running';
                 const buttonLabel = isRunning
@@ -2212,15 +2245,65 @@ function GeneralPane() {
                       </div>
                     </div>
 
-                    {latestRun?.message ? (
-                      <div className="mt-2 rounded-md bg-[var(--c-bg-card)] p-2 text-xs text-[var(--c-text-secondary)]">
-                        {latestRun.message}
-                      </div>
-                    ) : null}
+	                    {latestRun?.message ? (
+	                      <div className="mt-2 rounded-md bg-[var(--c-bg-card)] p-2 text-xs text-[var(--c-text-secondary)]">
+	                        {latestRun.message}
+	                      </div>
+	                    ) : null}
 
-                    <div className="mt-3 flex justify-end">
-                      <button
-                        type="button"
+	                    {visibleAnomalies.length > 0 ? (
+	                      <div className="mt-2 flex flex-col gap-2">
+	                        {visibleAnomalies.map(anomaly => {
+	                          const suggestedAction = getLoopAnomalySuggestedAction(anomaly);
+	                          const logPaths = getLoopAnomalyLogPaths(anomaly);
+	                          return (
+	                            <div
+	                              key={anomaly.id}
+	                              className="rounded-md bg-[var(--c-bg-card)] p-2 text-xs text-[var(--c-text-secondary)]"
+	                            >
+	                              <div className="flex items-start justify-between gap-2">
+	                                <div className="min-w-0">
+	                                  <div className="font-medium text-[var(--c-text-primary)]">
+	                                    {anomaly.message}
+	                                  </div>
+	                                  <div className="mt-0.5 break-all text-[var(--c-text-tertiary)]">
+	                                    {anomaly.kind} · {anomaly.ownerKind}/{anomaly.ownerId}
+	                                  </div>
+	                                </div>
+	                                <span className="shrink-0 text-[11px] text-[var(--c-text-tertiary)]">
+	                                  {anomaly.seenCount}x
+	                                </span>
+	                              </div>
+	                              {suggestedAction ? (
+	                                <div className="mt-1">
+	                                  <span className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsSuggestedAction}: </span>
+	                                  {suggestedAction}
+	                                </div>
+	                              ) : null}
+	                              {logPaths.map(logPath => (
+	                                <div key={logPath} className="mt-1 break-all">
+	                                  <span className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsLogPath}: </span>
+	                                  {logPath}
+	                                </div>
+	                              ))}
+	                            </div>
+	                          );
+	                        })}
+	                      </div>
+	                    ) : null}
+
+	                    <div className="mt-3 flex flex-wrap justify-end gap-2">
+	                      <button
+	                        type="button"
+	                        aria-label={`copy-loop-diagnostics-${loop.id}`}
+	                        onClick={() => void handleCopyLoopDiagnostics(loop, runs, anomalies)}
+	                        className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
+	                      >
+	                        <Copy size={14} />
+	                        {t.desktopSettings.loopDiagnosticsCopy}
+	                      </button>
+	                      <button
+	                        type="button"
                         aria-label={`run-loop-${loop.id}`}
                         onClick={() => void handleRunLoopNow(loop.id)}
                         disabled={isRunning || isAlreadyRunning || loop.status !== 'active'}

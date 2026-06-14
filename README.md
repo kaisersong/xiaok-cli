@@ -33,10 +33,10 @@ In Xiaok terms, a prompt is a single request, a harness is the execution environ
 | **Connectors** | MCP plugins, bundled report/slide renderers, Intent Broker, KSwarm, filesystem access, and optional channels connect loops to real data and real outputs. |
 | **Sub-agents** | KSwarm PO/worker/reviewer roles and dynamic workflow branches separate maker work from checker work, because self-review is not enough for unattended loops. |
 | **Memory** | SQLite stores, broker event replay, project state, workflow checkpoints, loop run records, and artifact manifests let loops survive across sessions. |
-| **Evidence** | Completion guards, deliverable contracts, artifact provenance, and the v1.4.4 loop evidence store make "done" mean "there is inspectable output", not just "the model said done". |
-| **Diagnostics** | Read-only loop diagnostics and evidence regression scans surface silent failures before they become invisible product debt. |
+| **Evidence** | Completion guards, deliverable contracts, artifact provenance, and loop evidence stores make "done" mean "there is inspectable output", not just "the model said done". |
+| **Diagnostics** | Read-only loop diagnostics, evidence regression scans, and KSwarm service health checks surface silent failures before they become invisible product debt. |
 
-The first built-in production loop is the **Artifact Evidence Regression Loop**. It periodically scans recent completions for missing artifacts, stale run state, and anomalous delivery outcomes, then records structured diagnostics. This is the pattern Xiaok is moving toward: the human designs the loop, Xiaok runs it, and independent evidence decides whether the work is actually complete.
+The first built-in production loops are the **Artifact Evidence Regression Loop** and the **KSwarm Service Health Loop**. They periodically scan recent completions and service readiness for missing artifacts, stale run state, anomalous delivery outcomes, service startup failures, health handshake problems, and broker connectivity issues, then record structured diagnostics. This is the pattern Xiaok is moving toward: the human designs the loop, Xiaok runs it, and independent evidence decides whether the work is actually complete.
 
 The smallest useful Xiaok loop is intentionally simple:
 
@@ -45,6 +45,13 @@ The smallest useful Xiaok loop is intentionally simple:
 3. Persist memory in project state, a file, or SQLite.
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
+
+**What's New in v1.4.5:**
+
+- **KSwarm Service Health Loop**: Desktop now ships a built-in `kswarm-service-health` loop that records structured service diagnostics for no listener, unknown port owner, unreachable health, HTTP error, invalid health JSON, identity/capability mismatch, broker unavailability, spawn path failures, spawn exits, and source hash drift.
+- **Actionable Loop Diagnostics**: Settings surfaces now show the anomaly kind, owner, seen count, suggested action, and relevant log paths, with a copyable diagnostic summary for support/debugging. Notifications stay light: new high-severity failures surface once, repeated unresolved anomalies dedupe, and source-unavailable warnings wait for a second observation.
+- **Stronger Artifact Evidence Validation**: Local file artifact evidence now validates real files inside the workspace with symlink-safe containment checks. Valid `uri` or `metadata.paths` evidence is not rejected just because stale `localPaths` metadata is present.
+- **Release Validation**: v1.4.5 was verified with desktop full tests, CLI sandbox full tests, focused loop/evidence tests, desktop build/typecheck, and structured intent/skill evals.
 
 **What's New in v1.4.4:**
 
@@ -688,6 +695,8 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.4.5** — Loop reliability release: adds the built-in KSwarm Service Health Loop, classifies service startup and health-check failures with structured diagnostics, records suggested actions and log paths for Settings, keeps repeated notifications quiet, and hardens local artifact evidence validation with workspace containment and symlink escape protection. The release gate covers desktop full tests, CLI sandbox full tests, desktop build/typecheck, and structured intent/skill evals.
 
 **v1.4.2** — A2UI dashboard and interrupt release: Desktop can replay safe read-only A2UI dashboard artifacts inline, including metrics, lists, tables, and conclusion sections, with installed-app E2E coverage against `/Applications/xiaok.app` using natural user language instead of internal tool names. User-facing tool-step labels now show `dashboard [A2UI]`, raw dashboard payloads stay redacted, and the section validator accepts common aliases while avoiding the previous "未知 section" failure for valid dashboard requests. Terminal streaming turns can also be aborted with `ESC` while preserving drafts and queued input, emitting a user-aborted turn instead of a failed turn. Model adapters, runtime core, compact runner, subagents, and tool execution share abort signals and avoid retrying true `AbortError`s; Desktop KSwarm handoffs propagate cancellation through the runtime bridge and surface user aborts as `task_cancelled`.
 

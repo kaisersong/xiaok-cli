@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -216,6 +216,103 @@ describe('CompletionEvidenceStore', () => {
       evidenceIds: [evidence.id],
     });
     expect(store.listCompletionRecords({ status: 'blocked' })).toEqual([record]);
+  });
+
+  it('rejects completed file artifact owners when declared local paths are missing', () => {
+    const workspaceRoot = join(rootDir, 'workspace');
+    mkdirSync(workspaceRoot, { recursive: true });
+    store.upsertExpectation(taskExpectation({ expectedKinds: ['file_artifact'], now: 1_000 }));
+    store.insertEvidence(taskEvidence({
+      kind: 'file_artifact',
+      summary: 'Report generated.',
+      metadata: {
+        workspaceRoot,
+        localPaths: ['missing.md'],
+      },
+      now: 1_100,
+    }));
+
+    expect(() => store.completeOwnerWithEvidence({
+      ownerKind: 'task',
+      ownerId: 'owner-1',
+      now: 1_200,
+    })).toThrow(/File artifact evidence local path is missing: missing.md/);
+  });
+
+  it('accepts completed file artifact owners when declared local paths exist', () => {
+    const workspaceRoot = join(rootDir, 'workspace');
+    mkdirSync(workspaceRoot, { recursive: true });
+    writeFileSync(join(workspaceRoot, 'report.md'), '# Report\n');
+    store.upsertExpectation(taskExpectation({ expectedKinds: ['file_artifact'], now: 1_000 }));
+    const evidence = store.insertEvidence(taskEvidence({
+      kind: 'file_artifact',
+      summary: 'Report generated.',
+      metadata: {
+        workspaceRoot,
+        localPaths: ['report.md'],
+      },
+      now: 1_100,
+    }));
+
+    const record = store.completeOwnerWithEvidence({
+      ownerKind: 'task',
+      ownerId: 'owner-1',
+      now: 1_200,
+    });
+
+    expect(record).toMatchObject({
+      ok: true,
+      evidenceIds: [evidence.id],
+    });
+  });
+
+  it('does not let invalid local paths override a valid file artifact URI', () => {
+    store.upsertExpectation(taskExpectation({ expectedKinds: ['file_artifact'], now: 1_000 }));
+    const evidence = store.insertEvidence(taskEvidence({
+      kind: 'file_artifact',
+      summary: 'Report uploaded.',
+      uri: 'https://example.com/report.md',
+      metadata: {
+        localPaths: ['missing.md'],
+      },
+      now: 1_100,
+    }));
+
+    const record = store.completeOwnerWithEvidence({
+      ownerKind: 'task',
+      ownerId: 'owner-1',
+      now: 1_200,
+    });
+
+    expect(record).toMatchObject({
+      ok: true,
+      evidenceIds: [evidence.id],
+    });
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects file artifact local paths that escape through a symlinked directory', () => {
+    const workspaceRoot = join(rootDir, 'workspace');
+    const outsideRoot = join(rootDir, 'outside');
+    mkdirSync(workspaceRoot, { recursive: true });
+    mkdirSync(outsideRoot, { recursive: true });
+    writeFileSync(join(outsideRoot, 'report.md'), '# Outside Report\n');
+    symlinkSync(outsideRoot, join(workspaceRoot, 'linked'), 'dir');
+    store.upsertExpectation(taskExpectation({ expectedKinds: ['file_artifact'], now: 1_000 }));
+    store.insertEvidence(taskEvidence({
+      kind: 'file_artifact',
+      summary: 'Report generated.',
+      metadata: {
+        workspaceRoot,
+        localPaths: ['linked/report.md'],
+      },
+      now: 1_100,
+    }));
+
+    expect(() => store.completeOwnerWithEvidence({
+      ownerKind: 'task',
+      ownerId: 'owner-1',
+      now: 1_200,
+    })).toThrow(/File artifact evidence local path escapes workspace: linked\/report\.md/);
   });
 });
 
