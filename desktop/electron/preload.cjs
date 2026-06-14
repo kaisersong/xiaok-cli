@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   deleteProvider: (providerId) => ipcRenderer.invoke('desktop:deleteProvider', providerId),
   deleteModel: (modelId) => ipcRenderer.invoke('desktop:deleteModel', modelId),
   readClipboardFilePaths: () => ipcRenderer.invoke('desktop:readClipboardFilePaths'),
+  readClipboardImage: () => ipcRenderer.invoke('desktop:readClipboardImage'),
   selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory'),
   selectMaterials: () => ipcRenderer.invoke('desktop:selectMaterials'),
   importMaterial: (input) => ipcRenderer.invoke('desktop:importMaterial', input),
@@ -112,6 +113,10 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   },
   exportTraceBundle: (input) => ipcRenderer.invoke('desktop:trace:export', input),
   diagnose: (input) => ipcRenderer.invoke('desktop:diagnose', input),
+  getLoopDefinitions: () => ipcRenderer.invoke('desktop:loops:listDefinitions'),
+  getLoopRuns: (loopId) => ipcRenderer.invoke('desktop:loops:listRuns', loopId),
+  getEvidenceAnomalies: (loopId) => ipcRenderer.invoke('desktop:loops:listAnomalies', loopId),
+  runLoopNow: (loopId) => ipcRenderer.invoke('desktop:loops:runNow', loopId),
   listMemories: () => ipcRenderer.invoke('desktop:listMemories'),
   createMemory: (input) => ipcRenderer.invoke('desktop:createMemory', input),
   updateMemory: (input) => ipcRenderer.invoke('desktop:updateMemory', input),
@@ -188,4 +193,11 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
       ipcRenderer.off(channel, listener);
     };
   },
+  getThreadLabels: () => ipcRenderer.invoke('desktop:getThreadLabels'),
+  setThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:setThreadLabel', threadId, label),
+  unsetThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:unsetThreadLabel', threadId, label),
+  moveThreadLabel: (threadId, from, to) => ipcRenderer.invoke('desktop:moveThreadLabel', threadId, from, to),
+  getAppFlag: (key) => ipcRenderer.invoke('desktop:getAppFlag', key),
+  setAppFlag: (key, value) => ipcRenderer.invoke('desktop:setAppFlag', key, value),
+  migrateLegacyThreadMeta: (data) => ipcRenderer.invoke('desktop:migrateLegacyThreadMeta', data),
 });

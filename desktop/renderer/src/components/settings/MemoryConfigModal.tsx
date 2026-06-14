@@ -443,7 +443,7 @@ function NowledgeDetectButton({
   const detect = useCallback(async () => {
     setState('detecting')
     try {
-      const api = (window as any).xiaokDesktop
+      const api = getDesktopApi()
       if (api?.connectionHealth) {
         const result = await Promise.race([
           api.connectionHealth(NOWLEDGE_LOCAL_URL),
@@ -608,7 +608,7 @@ export function MemoryConfigModal({ open, onClose, accessToken, memConfig, onCon
       }
       // 打开 nowledge 弹窗且尚未填 baseUrl 时，自动检测本地实例
       if (provider === 'nowledge' && !nd.baseUrl) {
-        const api = (window as any).xiaokDesktop
+        const api = getDesktopApi()
         if (api?.connectionHealth) {
           let cancelled = false
           const timer = setTimeout(() => { /* race timeout */ }, 3000)

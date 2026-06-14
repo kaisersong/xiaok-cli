@@ -48,7 +48,12 @@ export function decodeMcpFrames(input) {
 }
 export function createStdioMcpTransport(child) {
     let buffer = '';
+    let stderrTail = '';
+    const STDERR_TAIL_LIMIT = 4096;
     const pending = new Map();
+    const handleStderr = (chunk) => {
+        stderrTail = (stderrTail + chunk.toString()).slice(-STDERR_TAIL_LIMIT);
+    };
     const handleStdout = (chunk) => {
         buffer += chunk.toString();
         while (buffer.length > 0) {
@@ -105,6 +110,7 @@ export function createStdioMcpTransport(child) {
         failPending(new Error('MCP server process exited before responding'));
     };
     child.stdout.on('data', handleStdout);
+    child.stderr.on('data', handleStderr);
     child.on('error', handleError);
     child.on('exit', handleExit);
     return {
@@ -117,9 +123,13 @@ export function createStdioMcpTransport(child) {
         notify(message) {
             child.stdin.write(JSON.stringify(message) + '\n');
         },
+        getStderrTail() {
+            return stderrTail;
+        },
         dispose() {
             failPending(new Error('MCP server transport disposed before responding'));
             child.stdout.off('data', handleStdout);
+            child.stderr.off('data', handleStderr);
             child.off('error', handleError);
             child.off('exit', handleExit);
         },

@@ -1,5 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createPreloadApi, PRELOAD_API_KEYS } from '../../electron/preload-api.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { createPreloadApi, PRELOAD_API_KEYS, FULL_PRELOAD_KEYS, KSWARM_PROXY_KEYS, EXTRA_KEYS, THREAD_META_KEYS } from '../../electron/preload-api.js';
+
+const preloadCjsSource = readFileSync(join(__dirname, '..', '..', 'electron', 'preload.cjs'), 'utf8');
+
+function extractPreloadCjsApiKeys(source: string): string[] {
+  const bodyMatch = source.match(/contextBridge\.exposeInMainWorld\('xiaokDesktop',\s*\{([\s\S]*)\}\s*\)/);
+  if (!bodyMatch) return [];
+  return [...bodyMatch[1].matchAll(/^\s+(\w+)\s*[:(]/gm)]
+    .map(match => match[1])
+    .sort();
+}
 
 describe('preload API contract', () => {
   it('exposes only task-semantic APIs', () => {
@@ -12,6 +24,7 @@ describe('preload API contract', () => {
       'deleteProvider',
       'deleteModel',
       'readClipboardFilePaths',
+      'readClipboardImage',
       'selectDirectory',
       'selectMaterials',
       'importMaterial',
@@ -76,6 +89,10 @@ describe('preload API contract', () => {
       'onKSwarmStatus',
       'exportTraceBundle',
       'diagnose',
+      'getLoopDefinitions',
+      'getLoopRuns',
+      'getEvidenceAnomalies',
+      'runLoopNow',
       'syncScheduledTasks',
       'getScheduledTasks',
       'createScheduledTask',
@@ -117,12 +134,38 @@ describe('preload API contract', () => {
     };
     const api = createPreloadApi(ipcRenderer);
 
-    expect(Object.keys(api).sort()).toEqual([...PRELOAD_API_KEYS].sort());
+    expect(Object.keys(api).sort()).toEqual([...FULL_PRELOAD_KEYS].sort());
     expect(api).not.toHaveProperty('readFile');
     expect(api).not.toHaveProperty('readdir');
     expect(api).not.toHaveProperty('shell');
     expect(api).not.toHaveProperty('runPluginCommand');
     expect(api).not.toHaveProperty('rawRuntimeEvents');
+    expect(api).not.toHaveProperty('insertEvidence');
+    expect(api).not.toHaveProperty('completeLoopRun');
+    expect(api).not.toHaveProperty('completeTask');
+    expect(api).not.toHaveProperty('sql');
+    expect(api).not.toHaveProperty('query');
+    expect(api).not.toHaveProperty('execute');
+    expect(api).not.toHaveProperty('fs');
+  });
+
+  it('routes loop diagnostics through semantic IPC channels', async () => {
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue([]),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer);
+
+    await api.getLoopDefinitions();
+    await api.getLoopRuns('artifact-evidence-regression');
+    await api.getEvidenceAnomalies('artifact-evidence-regression');
+    await api.runLoopNow('artifact-evidence-regression');
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listDefinitions');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listRuns', 'artifact-evidence-regression');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listAnomalies', 'artifact-evidence-regression');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:runNow', 'artifact-evidence-regression');
   });
 
   it('routes plugin dependency operations through semantic IPC channels', async () => {
@@ -344,5 +387,66 @@ describe('preload API contract', () => {
       projectId: 'proj-1',
       workflowRunId: 'run-1',
     });
+  });
+
+  it('FULL_PRELOAD_KEYS is the composition of PRELOAD_API_KEYS + KSWARM_PROXY_KEYS + EXTRA_KEYS + THREAD_META_KEYS', () => {
+    const composed = [...PRELOAD_API_KEYS, ...KSWARM_PROXY_KEYS, ...EXTRA_KEYS, ...THREAD_META_KEYS];
+    expect(FULL_PRELOAD_KEYS.sort()).toEqual([...composed].sort());
+  });
+
+  it('createPreloadApi returns keys matching FULL_PRELOAD_KEYS', () => {
+    const ipcRenderer = {
+      invoke: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer, 'test-user');
+    const actualKeys = Object.keys(api).sort();
+    expect(actualKeys).toEqual([...FULL_PRELOAD_KEYS].sort());
+  });
+
+  it('manual CommonJS preload exposes every typed desktop API key', () => {
+    const cjsKeys = new Set(extractPreloadCjsApiKeys(preloadCjsSource));
+    for (const key of FULL_PRELOAD_KEYS) {
+      expect(cjsKeys, `preload.cjs is missing ${key}`).toContain(key);
+    }
+  });
+
+  it('routes kswarm proxy methods through semantic IPC channels', async () => {
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue({ data: 'test' }),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer, 'test-user');
+
+    await api.kswarmProxyGet('/projects');
+    await api.kswarmProxyPost('/tasks', { title: 'test' });
+    await api.kswarmProxyDelete('/tasks/t1');
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:proxy:get', '/projects');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:proxy:post', '/tasks', { title: 'test' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:proxy:delete', '/tasks/t1');
+  });
+
+  it('routes extra methods through semantic IPC channels', async () => {
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue({ ok: true }),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer, 'test-user');
+
+    await api.showSaveDialog({ defaultPath: '/tmp/test.md' });
+    await api.saveFile({ filePath: '/tmp/test.md', content: 'hello' });
+    await api.listPrinciples();
+    await api.savePrinciple({ id: 'p1', content: 'test' });
+    await api.deletePrinciple('p1');
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:showSaveDialog', { defaultPath: '/tmp/test.md' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:saveFile', { filePath: '/tmp/test.md', content: 'hello' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:listPrinciples');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:savePrinciple', { id: 'p1', content: 'test' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:deletePrinciple', 'p1');
   });
 });

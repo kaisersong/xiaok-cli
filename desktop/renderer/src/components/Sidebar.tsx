@@ -2,10 +2,12 @@ import { useState, useEffect, useRef, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Search, X, Bolt, Pencil, RefreshCw, Clock, FolderKanban, ExternalLink, AlertTriangle } from 'lucide-react';
-import { api, type ThreadRecord } from '../api';
+import { Plus, Search, X, Bolt, Pencil, RefreshCw, Clock, FolderKanban, ExternalLink } from 'lucide-react';
+import { api, type ThreadResponse } from '../api';
+import { useThreadList } from '../contexts/thread-list';
 import { useKSwarm } from '../contexts/KSwarmContext';
 import { useLocale } from '../contexts/LocaleContext';
+import { getDesktopApi } from '../shared/desktop';
 import {
   collectScheduledRuntimeTaskIds,
   ensureAggregatedScheduledThread,
@@ -64,7 +66,7 @@ interface SidebarDetailsRow {
 export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const navigate = useNavigate();
   const routerLocation = useLocation();
-  const [threads, setThreads] = useState<ThreadRecord[]>([]);
+  const { threads, removeThread, updateTitle } = useThreadList();
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -81,14 +83,6 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const { t } = useLocale();
   const activeProjects = projects.filter(p => p.status !== 'closed');
 
-  // Load threads
-  useEffect(() => {
-    const load = () => api.listThreads({ limit: 50 }).then(setThreads);
-    load();
-    const interval = setInterval(load, 10_000);
-    return () => clearInterval(interval);
-  }, []);
-
   // Load scheduled tasks for sidebar and keep scheduled runs out of recent history.
   useEffect(() => {
     let disposed = false;
@@ -98,7 +92,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
         const raw = localStorage.getItem('xiaok:scheduled-tasks');
         const localItems: SidebarScheduledTask[] = raw ? JSON.parse(raw) : [];
         let items = localItems.map(item => normalizeScheduledTaskRuntimeLink(item));
-        const desktop = (window as any).xiaokDesktop;
+        const desktop = getDesktopApi();
         if (desktop?.getScheduledTasks) {
           try {
             const mainItems = await desktop.getScheduledTasks();
@@ -188,11 +182,11 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     e.stopPropagation();
     log.info('deleteThread', id);
     await api.deleteThread(id);
-    setThreads(prev => prev.filter(t => t.id !== id));
+    removeThread(id);
     log.info('deleteThread ok');
   };
 
-  const handleDoubleClick = (thread: ThreadRecord) => {
+  const handleDoubleClick = (thread: ThreadResponse) => {
     setEditingId(thread.id);
     setEditTitle(thread.title || '');
   };
@@ -202,9 +196,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       log.info('renameThread', JSON.stringify({ id: editingId, newTitle: editTitle.trim() }));
       await api.updateThreadTitle(editingId, editTitle.trim());
       log.info('renameThread ok');
-      setThreads(prev =>
-        prev.map(t => t.id === editingId ? { ...t, title: editTitle.trim() } : t)
-      );
+      updateTitle(editingId, editTitle.trim());
     }
     setEditingId(null);
   };
@@ -235,13 +227,13 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   ));
   const hasUpdateFailure = Boolean(updateError && !hasActiveUpdate);
   const showUpdateReminder = Boolean(updateStatus && (hasActiveUpdate || updateError));
-  const updateReminderLabel = hasUpdateFailure ? '更新检查失败' : `升级到 ${updateVersion}`;
-  const updatePopoverTitle = hasUpdateFailure ? '更新检查失败' : '发现新版本';
+  const updateReminderLabel = hasUpdateFailure ? '检查更新未完成' : `升级到 ${updateVersion}`;
+  const updatePopoverTitle = hasUpdateFailure ? '检查更新未完成' : '发现新版本';
   const updateReminderTitle = hasUpdateFailure
-    ? `更新检查失败: ${updateError}，点击查看下载方式`
+    ? `检查更新未完成，点击查看下载方式`
     : `发现新版本: v${updateVersion}，点击查看更新方式`;
   const updateReminderButtonClassName = hasUpdateFailure
-    ? 'inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 text-xs font-medium text-amber-800 transition-[background-color,color,transform] duration-[60ms] hover:bg-amber-100 active:scale-[0.96]'
+    ? 'inline-flex h-8 items-center rounded-md px-1.5 text-[11px] font-medium text-[var(--c-text-tertiary)] transition-[background-color,color,transform] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)] active:scale-[0.96]'
     : 'inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--c-accent)] px-2 text-xs font-medium text-white transition-[background-color,color,transform] duration-[60ms] hover:opacity-90 active:scale-[0.96]';
   const scheduledListClassName = activeNav === 'new'
     ? 'flex flex-col gap-0 max-h-[90px] overflow-y-auto'
@@ -437,7 +429,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                   className={updateReminderButtonClassName}
                   title={updateReminderTitle}
                 >
-                  {hasUpdateFailure ? <AlertTriangle size={14} /> : <RefreshCw size={14} />}
+                  {!hasUpdateFailure && <RefreshCw size={14} />}
                   <span>{updateReminderLabel}</span>
                 </button>
 
@@ -480,14 +472,14 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                       </div>
 
                       {hasUpdateFailure && updateError && (
-                        <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs leading-relaxed text-amber-800">
+                        <p className="mb-3 rounded-md bg-[var(--c-bg-deep)] px-2 py-1.5 text-xs leading-relaxed text-[var(--c-text-secondary)]">
                           {updateError}
                         </p>
                       )}
 
                       <p className="mb-3 text-xs leading-relaxed text-[var(--c-text-secondary)]">
                         {hasUpdateFailure
-                          ? '自动更新检查失败。请前往 GitHub 下载最新版，下载后将应用拖入「应用程序」覆盖安装即可。'
+                          ? '自动更新检查暂时没有完成。需要更新时，可前往 GitHub 下载最新版，下载后将应用拖入「应用程序」覆盖安装即可。'
                           : '请前往 GitHub 下载最新版本，下载后将应用拖入「应用程序」覆盖安装即可。'}
                       </p>
 
@@ -621,7 +613,7 @@ function SidebarThreadListItem({
   onRenameSubmit,
   onRenameKeyDown,
 }: {
-  thread: ThreadRecord;
+  thread: ThreadResponse;
   title: string;
   isSelected: boolean;
   isEditing: boolean;

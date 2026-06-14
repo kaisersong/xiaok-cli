@@ -182,9 +182,10 @@ function TaskCard({
   const isCancelled = task.status === 'cancelled';
   const canCancel = task.status === 'pending';
   const canMarkDone = task.status === 'review' || task.status === 'in_progress';
-  const result = (task as any).result || {};
-  const review = (task as any).reviewResult;
-  const hasArtifacts = result.artifacts && result.artifacts.length > 0;
+  const result = typeof task.result === 'object' && task.result !== null ? task.result : {};
+  const review = task.reviewResult;
+  const resultArtifacts = Array.isArray(result.artifacts) ? result.artifacts : [];
+  const hasArtifacts = resultArtifacts.length > 0;
   const failureReason = task.blockedReason || task.failureReason || task.lastFailureClass || task.failureClass || review?.feedback || '';
   const executionView = getTaskExecutionView(task, projectExecutionMode);
 
@@ -231,7 +232,10 @@ function TaskCard({
   return (
     <>
       <div
+        role="button"
+        tabIndex={0}
         onClick={() => onCardClick?.(task)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onCardClick?.(task); } }}
         className={`group cursor-pointer rounded-lg border-[0.5px] border-[var(--c-border-subtle)] p-3 transition-colors duration-150 hover:bg-[var(--c-bg-deep)] ${
         isFailed || isBlocked
           ? 'border-l-2 border-l-[var(--c-status-error-text)] bg-[var(--c-status-error-text)]/5'
@@ -325,7 +329,7 @@ function TaskCard({
         {/* Artifacts */}
         {hasArtifacts && (
           <div className="mt-2 flex flex-wrap gap-1">
-            {result.artifacts.map((art: KSwarmArtifact, i: number) => (
+            {resultArtifacts.map((art: KSwarmArtifact, i: number) => (
               <button key={i} type="button" onClick={(e) => { e.stopPropagation(); onPreviewArtifact(art); }}
                 className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] border-[0.5px] border-[var(--c-border-subtle)] hover:bg-[var(--c-bg-page)] truncate max-w-full">
                 {art.name}

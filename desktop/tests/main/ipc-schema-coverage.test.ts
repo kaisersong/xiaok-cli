@@ -35,4 +35,20 @@ describe('IPC schema coverage', () => {
     const nonConforming = allChannels.filter(c => !c.startsWith('desktop:'));
     expect(nonConforming, `Channels not using desktop: prefix: ${nonConforming.join(', ')}`).toEqual([]);
   });
+
+  it('registers loop diagnostics channels without renderer mutation channels', () => {
+    const mainChannels = extractIpcChannels(mainSource);
+    const ipcChannels = extractIpcChannels(ipcSource);
+    const allChannels = new Set([...mainChannels, ...ipcChannels]);
+
+    expect([...allChannels].sort()).toEqual(expect.arrayContaining([
+      'desktop:loops:listDefinitions',
+      'desktop:loops:listRuns',
+      'desktop:loops:listAnomalies',
+      'desktop:loops:runNow',
+    ]));
+    expect(allChannels.has('desktop:loops:insertEvidence')).toBe(false);
+    expect(allChannels.has('desktop:loops:completeLoopRun')).toBe(false);
+    expect(allChannels.has('desktop:loops:completeTask')).toBe(false);
+  });
 });

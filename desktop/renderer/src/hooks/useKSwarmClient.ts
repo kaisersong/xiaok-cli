@@ -6,15 +6,12 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { getDesktopApi } from '@xiaok/shared/desktop';
 
 const RECONNECT_DELAY = 3000;
 const MAX_RECONNECT_DELAY = 60_000;
 const PARTICIPANT_POLL_INTERVAL = 8000;
 const INITIAL_SNAPSHOT_RETRY_DELAYS_MS = [1000, 2500, 5000, 10_000];
-
-function getDesktopApi(): any {
-  return typeof window !== 'undefined' ? (window as any).xiaokDesktop : null;
-}
 
 const PROJECT_REFRESH_EVENTS = new Set([
   'project_created',
@@ -46,6 +43,18 @@ export function shouldRefreshProjectsForEvent(type?: string | null): boolean {
 
 // ─── Types ────────────────────────────────────────────────────────
 
+export interface KSwarmTaskResult {
+  summary?: string;
+  artifacts?: KSwarmArtifact[];
+}
+
+export interface KSwarmTaskReviewResult {
+  passed?: boolean;
+  feedback?: string;
+  failureClass?: string;
+  reviewedAt?: number;
+}
+
 export interface KSwarmTask {
   id: string;
   title: string;
@@ -57,7 +66,7 @@ export interface KSwarmTask {
   priority?: number;
   planItemId?: string;
   acceptanceCriteria?: string[];
-  result?: string;
+  result?: KSwarmTaskResult | string | null;
   artifacts?: KSwarmArtifact[];
   blockedReason?: string;
   failureReason?: string;
@@ -65,7 +74,7 @@ export interface KSwarmTask {
   failureClass?: string;
   failureCount?: number;
   qualityFailureCount?: number;
-  reviewResult?: { passed?: boolean; feedback?: string; failureClass?: string; reviewedAt?: number };
+  reviewResult?: KSwarmTaskReviewResult | null;
   startedAt?: number | string | null;
   completedAt?: number | string | null;
   createdAt?: number | string;
@@ -119,12 +128,16 @@ export interface KSwarmProject {
   id: string;
   name: string;
   goal?: string;
+  requirements?: string;
   status: 'draft' | 'planning' | 'created' | 'active' | 'review' | 'delivered' | 'closed';
   executionMode?: KSwarmProjectExecutionMode;
   tasks?: KSwarmTask[];
   phases?: KSwarmPhase[];
   poAgent?: string;
   members?: string[];
+  deliverable?: KSwarmProjectDeliverable | null;
+  deliveredAt?: number | string | null;
+  closedAt?: number | string | null;
   createdAt?: string;
   updatedAt?: string;
   progress?: number;
@@ -154,6 +167,14 @@ export interface KSwarmDeliverable {
   createdAt?: string;
 }
 
+export interface KSwarmProjectDeliverable {
+  summary?: string;
+  artifacts?: KSwarmArtifact[];
+  synthesis?: boolean;
+  files?: unknown[];
+  description?: string;
+}
+
 export interface KSwarmAgent {
   id: string;
   name: string;
@@ -161,6 +182,10 @@ export interface KSwarmAgent {
   roles?: string[];
   capabilities?: string[];
   status: 'idle' | 'waiting' | 'working' | 'blocked' | 'failed' | 'error' | 'completed' | 'offline';
+  provider?: string;
+  model?: string;
+  baseUrl?: string;
+  instructions?: string;
   runtimeType?: string;
   runtimeMode?: 'local' | 'cloud';
   maxConcurrentTasks?: number;
@@ -277,6 +302,10 @@ export interface KSwarmClientState {
   agents: KSwarmAgent[];
   participants: KSwarmParticipant[];
   lastEvent: KSwarmEvent | null;
+  /** Monotonically increasing counter — changes on every WS event. Use as effect dependency instead of lastEvent object reference. */
+  lastEventSeq: number;
+  /** Synchronous read of the most recent WS event (stable ref). */
+  getLastEvent: () => KSwarmEvent | null;
 }
 
 export interface KSwarmClientActions {
@@ -726,6 +755,34 @@ interface PrincipleEntry {
   createdAt: number;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readConnectionStatus(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  return typeof value.status === 'string' ? value.status : undefined;
+}
+
+function readKSwarmEvent(value: unknown): KSwarmEvent | null {
+  if (!isRecord(value) || typeof value.type !== 'string') return null;
+  return value as unknown as KSwarmEvent;
+}
+
+function readPrincipleEntries(value: unknown): PrincipleEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is Record<string, unknown> => isRecord(item))
+    .filter((item) => typeof item.id === 'string' && typeof item.content === 'string')
+    .map((item) => ({
+      id: item.id as string,
+      content: item.content as string,
+      scenarios: Array.isArray(item.scenarios) ? item.scenarios.map((scenario) => String(scenario)) : [],
+      enabled: item.enabled !== false,
+      createdAt: typeof item.createdAt === 'number' ? item.createdAt : 0,
+    }));
+}
+
 export function buildCreateProjectPlanningGuidance(input: {
   goal: string;
   requirements?: string;
@@ -891,6 +948,9 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   const [agents, setAgents] = useState<KSwarmAgent[]>([]);
   const [participants, setParticipants] = useState<KSwarmParticipant[]>([]);
   const [lastEvent, setLastEvent] = useState<KSwarmEvent | null>(null);
+  const [lastEventSeq, setLastEventSeq] = useState(0);
+  const lastEventRef = useRef<KSwarmEvent | null>(null);
+  const getLastEvent = useCallback(() => lastEventRef.current, []);
 
   const wsRef = useRef<(() => void) | null>(null);
   const wsEventRef = useRef<(() => void) | null>(null);
@@ -903,7 +963,9 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   // ─── IPC Stream Connection ─────────────────────────────────────
 
   function handleWsMessage(msg: KSwarmEvent) {
+    lastEventRef.current = msg;
     setLastEvent(msg);
+    setLastEventSeq(s => s + 1);
 
     if (shouldRefreshProjectsForEvent(msg.type)) {
       fetchProjects();
@@ -983,20 +1045,21 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
       }
     };
 
-    const unsubStatus = api.onKSwarmConnectionStatus?.((payload: { status: string }) => {
-      applyConnectionStatus(payload.status);
+    const unsubStatus = api.onKSwarmConnectionStatus?.((payload: unknown) => {
+      applyConnectionStatus(readConnectionStatus(payload));
     });
     wsRef.current = unsubStatus || null;
 
-    const unsubEvent = api.onKSwarmWsEvent?.((payload: KSwarmEvent) => {
-      handleWsMessage(payload);
+    const unsubEvent = api.onKSwarmWsEvent?.((payload: unknown) => {
+      const event = readKSwarmEvent(payload);
+      if (event) handleWsMessage(event);
     });
     wsEventRef.current = unsubEvent || null;
 
     api.kswarmStreamSubscribe?.();
     Promise.resolve(api.kswarmStreamGetStatus?.())
-      .then((payload: { status?: string } | undefined) => {
-        applyConnectionStatus(payload?.status);
+      .then((payload: unknown) => {
+        applyConnectionStatus(readConnectionStatus(payload));
       })
       .catch(() => {});
 
@@ -1045,10 +1108,10 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   const createProject = useCallback(async (input: CreateKSwarmProjectInput): Promise<KSwarmProject | null> => {
     let principles: PrincipleEntry[] = [];
     try {
-      const api = (window as any).xiaokDesktop;
+      const api = getDesktopApi();
       if (api?.listPrinciples) {
         const loaded = await api.listPrinciples();
-        if (Array.isArray(loaded)) principles = loaded;
+        principles = readPrincipleEntries(loaded);
       }
     } catch (e) {
       console.warn('[principles] Failed to load principles for planning guidance, using original requirements', e);
@@ -1078,7 +1141,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     // client MUST successfully enqueue the planning bootstrap; a failure here
     // would leave the project stuck in "created" forever, so surface it.
     try {
-      const api = (window as any).xiaokDesktop;
+      const api = getDesktopApi();
       if (api?.kswarmStartProjectPlanning) {
         const enqueueResult = await api.kswarmStartProjectPlanning({
           projectId: result.id,
@@ -1306,6 +1369,8 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     agents,
     participants,
     lastEvent,
+    lastEventSeq,
+    getLastEvent,
     // Project actions
     fetchProjects,
     getProjectDetail,

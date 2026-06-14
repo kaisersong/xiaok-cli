@@ -3,6 +3,9 @@
  * Replaces the manual fetch + WebSocket pattern with React Query caching.
  * All REST calls are routed through the main process IPC proxy.
  *
+ * ⚠️ 不要在这些 query hooks 上添加 refetchInterval。
+ * useKSwarmClient 已通过 WS 事件驱动刷新，双源会产生冲突。
+ *
  * Usage:
  *   const { data: projects } = useProjects();
  *   const { data: agents } = useAgents();
@@ -10,9 +13,10 @@
  */
 
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { getDesktopApi } from '@xiaok/shared/desktop';
 
-function getApi(): any {
-  return typeof window !== 'undefined' ? (window as any).xiaokDesktop : null;
+function getApi() {
+  return getDesktopApi();
 }
 
 async function proxyGet<T>(path: string): Promise<T> {
@@ -59,7 +63,6 @@ export function useProjects() {
       return data.projects || [];
     },
     staleTime: 5_000,
-    refetchInterval: 10_000,
     retry: 2,
   });
 }
@@ -70,7 +73,6 @@ export function useProjectDetail(projectId: string) {
     queryFn: () => proxyGet(`/projects/${projectId}`),
     enabled: !!projectId,
     staleTime: 5_000,
-    refetchInterval: 10_000,
     retry: 2,
   });
 }
@@ -81,7 +83,6 @@ export function useProjectFullDetail(projectId: string) {
     queryFn: () => proxyGet(`/projects/${projectId}`),
     enabled: !!projectId,
     staleTime: 5_000,
-    refetchInterval: 5_000,
     retry: 2,
   });
 }
@@ -103,7 +104,6 @@ export function useAgents() {
       return data.agents || [];
     },
     staleTime: 10_000,
-    refetchInterval: 15_000,
     retry: 2,
   });
 }

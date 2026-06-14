@@ -26,9 +26,11 @@ import { setupAutoUpdater, checkForUpdates, quitAndInstall, getUpdateStatus } fr
 import { createKSwarmService } from './kswarm-service.js';
 import { deployBundledPlugins } from './deploy-bundled-plugins.js';
 import { TimedActionStore } from './timed-action-store.js';
+import { ThreadMetaStore } from './thread-meta-store.js';
 import { TimedActionService } from './timed-action-service.js';
 import { TimedActionScheduler } from './timed-action-scheduler.js';
-import { createAgentTaskExecutor, createNotifyExecutor } from './timed-action-executors.js';
+import { createDesktopTimedActionExecutors } from './timed-action-executors.js';
+import { createDesktopLoopRuntime } from './loop-executor.js';
 import { attachDesktopContextMenu } from './context-menu.js';
 import {
   createKSwarmRuntimeBridge,
@@ -137,8 +139,9 @@ async function createWindow(): Promise<BrowserWindow> {
     dataRoot,
     kswarmService,
   });
+  const loopRuntime = createDesktopLoopRuntime({ dataRoot });
 
-  await registerDesktopIpc(ipcMain, window, services);
+  await registerDesktopIpc(ipcMain, window, services, { loopRuntime });
   debugMain('createWindow:ipc-registered');
 
   try {
@@ -318,12 +321,11 @@ async function createWindow(): Promise<BrowserWindow> {
   debugMain('createWindow:mcp-registration-started');
 
   const timedActionScheduler = new TimedActionScheduler(timedActionStore, {
-    executors: {
-      notify: createNotifyExecutor({ getMainWindow: () => window }),
-      agent_task: createAgentTaskExecutor({
-        createTask: (input) => services.createTask(input),
-      }),
-    },
+    executors: createDesktopTimedActionExecutors({
+      getMainWindow: () => window,
+      loopRuntime,
+      createTask: (input) => services.createTask(input),
+    }),
     onRunComplete: (event) => {
       if (event.action.executor.kind !== 'agent_task') return;
       if (window.isDestroyed()) return;
@@ -369,6 +371,44 @@ async function createWindow(): Promise<BrowserWindow> {
     return timedActionService.revokeAuto(actionId) ?? null;
   });
 
+  // Thread meta (GTD / pinned) — persistent via SQLite in main process
+  const threadMetaStore = new ThreadMetaStore(join(dataRoot, 'thread-meta.sqlite'));
+  const broadcastThreadMeta = () => {
+    if (window.isDestroyed()) return;
+    window.webContents.send('desktop:threadMetaChanged', threadMetaStore.getAll());
+  };
+  ipcMain.handle('desktop:getThreadLabels', () => {
+    return threadMetaStore.getAll();
+  });
+  ipcMain.handle('desktop:setThreadLabel', (_event, threadId: string, label: string) => {
+    const result = threadMetaStore.addThreadToLabel(threadId, label as any);
+    if (result.ok) broadcastThreadMeta();
+    return result;
+  });
+  ipcMain.handle('desktop:unsetThreadLabel', (_event, threadId: string, label: string) => {
+    const result = threadMetaStore.removeThreadFromLabel(threadId, label as any);
+    if (result.ok) broadcastThreadMeta();
+    return result;
+  });
+  ipcMain.handle('desktop:moveThreadLabel', (_event, threadId: string, from: string, to: string) => {
+    const result = threadMetaStore.moveThread(threadId, from as any, to as any);
+    if (result.ok) broadcastThreadMeta();
+    return result;
+  });
+  ipcMain.handle('desktop:getAppFlag', (_event, key: string) => {
+    return threadMetaStore.getFlag(key as any);
+  });
+  ipcMain.handle('desktop:setAppFlag', (_event, key: string, value: string) => {
+    const result = threadMetaStore.setFlag(key as any, value);
+    if (result.ok) broadcastThreadMeta();
+    return result;
+  });
+  ipcMain.handle('desktop:migrateLegacyThreadMeta', (_event, data: any) => {
+    const result = threadMetaStore.bulkImport(data);
+    if (result.ok) broadcastThreadMeta();
+    return result;
+  });
+
   app.on('before-quit', () => {
     kswarmService.stop().catch((err) => {
       debugMain('kswarmService.stop failed', err instanceof Error ? err.message : String(err));
@@ -380,6 +420,7 @@ async function createWindow(): Promise<BrowserWindow> {
     }
     for (const client of runtimeBridgeClients) client.stop();
     timedActionScheduler.stop();
+    loopRuntime.close();
     timedActionStore.close();
     mcpDispose?.();
   });

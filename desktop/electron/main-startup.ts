@@ -53,7 +53,7 @@ export async function runMainStartup(deps: MainStartupDeps): Promise<MainStartup
   try {
     const { dispose } = await deps.registerMcpTools(services);
     mcpDispose = dispose;
-  } catch {}
+  } catch (e) { console.error('[startup] registerMcpTools failed:', (e as Error).message) }
   deps.startRuntimeBridge(services, Promise.resolve());
 
   deps.setupAutoUpdater(window).catch(() => {});

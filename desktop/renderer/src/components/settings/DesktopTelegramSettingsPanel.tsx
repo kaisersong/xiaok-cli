@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Radio } from 'lucide-react' // icon only
 import { openExternal } from '../../openExternal'
 import {
-  type ChannelBindingResponse,
   type ChannelResponse,
   type LlmProvider,
   type Persona,
@@ -10,11 +9,11 @@ import {
   createChannelBindCode,
   deleteChannelBinding,
   isApiError,
-  listChannelBindings,
   updateChannel,
   updateChannelBinding,
   verifyChannel,
 } from '../../api'
+import { useChannelBindings, type ChannelBindingResponse } from '../../hooks/useChannelBindings'
 import { useLocale } from '../../contexts/LocaleContext'
 import { PillToggle } from '../shared'
 import {
@@ -79,19 +78,7 @@ export function DesktopTelegramSettingsPanel({
   const [verifyResult, setVerifyResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [bindCode, setBindCode] = useState<string | null>(null)
   const [generatingCode, setGeneratingCode] = useState(false)
-  const [bindings, setBindings] = useState<ChannelBindingResponse[]>([])
-
-  const refreshBindings = useCallback(async () => {
-    if (!channel?.id) {
-      setBindings([])
-      return
-    }
-    try {
-      setBindings(await listChannelBindings(accessToken, channel.id))
-    } catch {
-      setBindings([])
-    }
-  }, [accessToken, channel?.id])
+  const { bindings, refresh: refreshBindings } = useChannelBindings({ accessToken, channelId: channel?.id })
 
   useEffect(() => {
     setEnabled(channel?.is_active ?? false)
@@ -115,17 +102,6 @@ export function DesktopTelegramSettingsPanel({
     setDefaultModel((channel?.config_json?.default_model as string | undefined) ?? '')
     setVerifyResult(null)
   }, [channel, personas])
-
-  useEffect(() => {
-    void refreshBindings()
-    if (!channel?.id) {
-      return
-    }
-    const timer = window.setInterval(() => {
-      void refreshBindings()
-    }, 5000)
-    return () => window.clearInterval(timer)
-  }, [channel?.id, refreshBindings])
 
   const modelOptions = useMemo(() => buildModelOptions(providers), [providers])
   const personaOptions = useMemo(

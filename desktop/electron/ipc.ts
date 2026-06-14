@@ -1,9 +1,17 @@
 import { clipboard, dialog, shell, type BrowserWindow, type IpcMain } from 'electron';
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { createDesktopServices } from './desktop-services.js';
+import type { DesktopLoopRuntime } from './loop-executor.js';
+import { BUILT_IN_LOOP_IDS } from './loop-types.js';
 
 type DesktopServices = ReturnType<typeof createDesktopServices>;
+
+interface RegisterDesktopIpcOptions {
+  loopRuntime?: Pick<DesktopLoopRuntime, 'loopStore' | 'scanner' | 'runner'>;
+}
 
 function log(level: string, msg: string, ...args: unknown[]) {
   const ts = new Date().toISOString();
@@ -11,7 +19,12 @@ function log(level: string, msg: string, ...args: unknown[]) {
   console.log(`[${ts}] [${level}] [ipc] ${msg}${payload}`);
 }
 
-export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow, services: DesktopServices): Promise<void> {
+export async function registerDesktopIpc(
+  ipcMain: IpcMain,
+  window: BrowserWindow,
+  services: DesktopServices,
+  options: RegisterDesktopIpcOptions = {}
+): Promise<void> {
   ipcMain.handle('desktop:getModelConfig', async () => {
     log('info', 'getModelConfig');
     const r = await services.getModelConfig();
@@ -59,17 +72,19 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
     return r;
   });
   ipcMain.handle('desktop:readClipboardFilePaths', async () => {
-    // macOS Finder copy puts file URLs in 'public.file-url' pasteboard type
-    // Electron clipboard.read('NSFilenamesPboardType') returns newline-separated paths
+    return readClipboardFilePaths();
+  });
+  ipcMain.handle('desktop:readClipboardImage', async () => {
     try {
-      const raw = clipboard.read('NSFilenamesPboardType');
-      if (raw) {
-        // NSFilenamesPboardType returns a plist XML string; extract paths from it
-        const paths = raw.match(/<string>(.*?)<\/string>/g)?.map(m => m.replace(/<\/?string>/g, '')) ?? [];
-        return paths.filter(p => p.startsWith('/'));
-      }
-    } catch { /* not available on this platform */ }
-    return [];
+      const img = clipboard.readImage();
+      if (img.isEmpty()) return null;
+      const png = img.toPNG();
+      const tmpDir = join(os.tmpdir(), 'xiaok-clipboard-images');
+      await mkdir(tmpDir, { recursive: true });
+      const filePath = join(tmpDir, `clipboard-${Date.now()}.png`);
+      await writeFile(filePath, png);
+      return filePath;
+    } catch { return null; }
   });
   ipcMain.handle('desktop:selectDirectory', async () => {
     log('info', 'selectDirectory');
@@ -240,7 +255,8 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
   ipcMain.handle('desktop:diagnosePluginDependency', (_event, input) => services.diagnosePluginDependency(input));
   ipcMain.handle('desktop:createTaskWithFiles', async (_event, input) => {
     log('info', 'createTaskWithFiles', { prompt: input?.prompt?.slice(0, 50), files: input?.filePaths?.length });
-    const r = await services.createTaskWithFiles(input);
+    const expanded = await expandSelectedMaterialPaths(input?.filePaths ?? []);
+    const r = await services.createTaskWithFiles({ ...input, filePaths: expanded });
     log('info', 'createTaskWithFiles ok', { taskId: r?.taskId });
     return r;
   });
@@ -260,6 +276,23 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
     const result = await services.diagnose(input);
     log('info', 'diagnose result', { health: result?.health, primaryFinding: result?.primaryFinding?.category ?? null });
     return result;
+  });
+
+  ipcMain.handle('desktop:loops:listDefinitions', () => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.loopStore.listLoopDefinitions();
+  });
+  ipcMain.handle('desktop:loops:listRuns', (_event, loopId) => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.loopStore.listLoopRuns(readLoopId(loopId), 20);
+  });
+  ipcMain.handle('desktop:loops:listAnomalies', (_event, loopId) => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.scanner.listAnomalies({ loopId: readArtifactEvidenceLoopId(loopId) });
+  });
+  ipcMain.handle('desktop:loops:runNow', (_event, loopId) => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.runner.runLoopNow(readLoopId(loopId));
   });
 
   // ---- Memory ----
@@ -491,6 +524,194 @@ export async function registerDesktopIpc(ipcMain: IpcMain, window: BrowserWindow
     log('info', 'deletePrinciple result', result);
     return result;
   });
+}
+
+function getLoopRuntime(options: RegisterDesktopIpcOptions): NonNullable<RegisterDesktopIpcOptions['loopRuntime']> {
+  if (!options.loopRuntime) {
+    throw new Error('loop diagnostics runtime is not registered');
+  }
+  return options.loopRuntime;
+}
+
+function readLoopId(input: unknown): string {
+  if (typeof input !== 'string' || input.trim().length === 0) {
+    throw new Error('loopId must be a non-empty string');
+  }
+  return input;
+}
+
+function readArtifactEvidenceLoopId(input: unknown): typeof BUILT_IN_LOOP_IDS.ARTIFACT_EVIDENCE_REGRESSION {
+  const loopId = readLoopId(input);
+  if (loopId !== BUILT_IN_LOOP_IDS.ARTIFACT_EVIDENCE_REGRESSION) {
+    throw new Error(`evidence anomalies are not available for loop: ${loopId}`);
+  }
+  return loopId;
+}
+
+async function readClipboardFilePaths(): Promise<string[]> {
+  const candidates = [
+    ...readMacClipboardFilePaths(),
+    ...readWindowsClipboardFilePaths(),
+    ...readTextClipboardFilePaths(),
+  ];
+  return filterExistingMaterialPaths(candidates);
+}
+
+function readMacClipboardFilePaths(): string[] {
+  const paths: string[] = [];
+  const nsFilenames = readClipboardFormat('NSFilenamesPboardType');
+  if (nsFilenames) {
+    const xmlPaths = nsFilenames.match(/<string>(.*?)<\/string>/g)
+      ?.map(m => m.replace(/<\/?string>/g, ''))
+      .map(decodeXmlEntities) ?? [];
+    paths.push(...xmlPaths);
+    if (xmlPaths.length === 0) {
+      paths.push(...splitClipboardPathList(nsFilenames));
+    }
+  }
+
+  const fileUrl = readClipboardFormat('public.file-url') || readClipboardFormat('text/uri-list');
+  if (fileUrl) {
+    paths.push(...splitClipboardPathList(fileUrl));
+  }
+
+  return paths.map(normalizeClipboardPathCandidate).filter(isLikelyFilePath);
+}
+
+function readWindowsClipboardFilePaths(): string[] {
+  const paths: string[] = [];
+  paths.push(...parseNullDelimitedPaths(readClipboardBuffer('FileNameW'), 'utf16le'));
+  paths.push(...parseNullDelimitedPaths(readClipboardBuffer('FileName'), 'utf8'));
+  paths.push(...parseDropFilesClipboardBuffer(readClipboardBuffer('CF_HDROP')));
+
+  return paths.map(normalizeClipboardPathCandidate).filter(isLikelyFilePath);
+}
+
+function readTextClipboardFilePaths(): string[] {
+  return splitClipboardPathList(readClipboardText())
+    .map(normalizeClipboardPathCandidate)
+    .filter(isLikelyFilePath);
+}
+
+function readClipboardFormat(format: string): string {
+  try {
+    return clipboard.read(format);
+  } catch {
+    return '';
+  }
+}
+
+function readClipboardText(): string {
+  try {
+    return clipboard.readText();
+  } catch {
+    return '';
+  }
+}
+
+function readClipboardBuffer(format: string): Buffer {
+  try {
+    return clipboard.readBuffer(format);
+  } catch {
+    return Buffer.alloc(0);
+  }
+}
+
+function splitClipboardPathList(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .flatMap(line => {
+      const trimmed = line.trim();
+      return trimmed ? [trimmed] : [];
+    });
+}
+
+function parseNullDelimitedPaths(buffer: Buffer, encoding: BufferEncoding): string[] {
+  if (buffer.length === 0) return [];
+  return buffer
+    .toString(encoding)
+    .split('\0')
+    .map(value => value.trim())
+    .filter(Boolean);
+}
+
+function parseDropFilesClipboardBuffer(buffer: Buffer): string[] {
+  if (buffer.length < 20) return [];
+  const fileListOffset = buffer.readUInt32LE(0);
+  const isWide = buffer.readUInt32LE(16) !== 0;
+  if (fileListOffset <= 0 || fileListOffset >= buffer.length) return [];
+  return parseNullDelimitedPaths(buffer.subarray(fileListOffset), isWide ? 'utf16le' : 'utf8');
+}
+
+function decodeXmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
+function stripWrappingQuotes(value: string): string {
+  let next = value.trim();
+  while (
+    next.length >= 2 &&
+    ((next.startsWith('"') && next.endsWith('"')) ||
+      (next.startsWith("'") && next.endsWith("'")) ||
+      (next.startsWith('`') && next.endsWith('`')))
+  ) {
+    next = next.slice(1, -1).trim();
+  }
+  return next;
+}
+
+function normalizeClipboardPathCandidate(value: string): string {
+  const unquoted = stripWrappingQuotes(value);
+  if (/^file:\/\//i.test(unquoted)) {
+    try {
+      return fileURLToPath(unquoted);
+    } catch {
+      return unquoted;
+    }
+  }
+  return unquoted;
+}
+
+function isLikelyFilePath(value: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(value) ||
+    /^\\\\[^\\]+\\[^\\]+/.test(value) ||
+    /^\/[^\s/]/.test(value);
+}
+
+function materialPathKey(filePath: string): string {
+  const normalized = filePath.replace(/\//g, '\\');
+  return /^[a-zA-Z]:[\\/]/.test(normalized) || /^\\\\/.test(normalized)
+    ? normalized.toLowerCase()
+    : filePath;
+}
+
+async function filterExistingMaterialPaths(paths: string[]): Promise<string[]> {
+  const files: string[] = [];
+  const seen = new Set<string>();
+  for (const path of paths) {
+    const normalized = normalizeClipboardPathCandidate(path);
+    const key = materialPathKey(normalized);
+    if (!normalized || seen.has(key)) continue;
+    seen.add(key);
+    try {
+      const entry = await stat(normalized);
+      if (entry.isFile()) {
+        files.push(normalized);
+        continue;
+      }
+      if (entry.isDirectory()) {
+        files.push(...await listFilesInDirectory(normalized));
+      }
+    } catch {
+      // Clipboard text can contain arbitrary non-path content; ignore misses.
+    }
+  }
+  return files;
 }
 
 async function expandSelectedMaterialPaths(paths: string[]): Promise<string[]> {
