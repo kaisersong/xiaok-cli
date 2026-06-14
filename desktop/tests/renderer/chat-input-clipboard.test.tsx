@@ -103,6 +103,59 @@ describe('ChatInput clipboard attachments', () => {
     expect(pasteEvent.defaultPrevented).toBe(true);
   });
 
+  it('handles Windows Ctrl+V Explorer file copies even when Chromium exposes no file item', async () => {
+    const readClipboardFilePaths = vi.fn().mockResolvedValue(['C:\\Users\\song\\Desktop\\photo.png']);
+    const readClipboardImage = vi.fn().mockResolvedValue('C:\\Users\\song\\AppData\\Local\\Temp\\clipboard.png');
+    installClipboardApi({ readClipboardFilePaths, readClipboardImage });
+
+    render(<ChatInput onSubmit={() => {}} />);
+    const input = screen.getByRole('textbox');
+
+    fireEvent.keyDown(input, { key: 'v', ctrlKey: true });
+    const pasteEvent = pasteClipboard(input, { items: [] });
+
+    expect(await screen.findByAltText('photo.png')).toBeInTheDocument();
+    expect(screen.queryByAltText('clipboard.png')).not.toBeInTheDocument();
+    expect(screen.getAllByAltText('photo.png')).toHaveLength(1);
+    expect(readClipboardFilePaths).toHaveBeenCalledTimes(1);
+    expect(readClipboardImage).not.toHaveBeenCalled();
+    expect(pasteEvent.defaultPrevented).toBe(true);
+  });
+
+  it('handles Windows Ctrl+V raw image clipboard when Chromium exposes no paste item', async () => {
+    const readClipboardFilePaths = vi.fn().mockResolvedValue([]);
+    const readClipboardImage = vi.fn().mockResolvedValue('C:\\Users\\song\\AppData\\Local\\Temp\\clipboard-image.png');
+    installClipboardApi({ readClipboardFilePaths, readClipboardImage });
+
+    render(<ChatInput onSubmit={() => {}} />);
+    const input = screen.getByRole('textbox');
+
+    fireEvent.keyDown(input, { key: 'v', ctrlKey: true });
+    const pasteEvent = pasteClipboard(input, { items: [] });
+
+    expect(await screen.findByAltText('clipboard-image.png')).toBeInTheDocument();
+    expect(readClipboardFilePaths).toHaveBeenCalledTimes(1);
+    expect(readClipboardImage).toHaveBeenCalledTimes(1);
+    expect(pasteEvent.defaultPrevented).toBe(true);
+    expect(input).toHaveValue('');
+  });
+
+  it('turns pasted Windows path text into a file chip instead of draft text', async () => {
+    installClipboardApi({ readClipboardFilePaths: () => Promise.resolve([]) });
+
+    render(<ChatInput onSubmit={() => {}} />);
+    const input = screen.getByRole('textbox');
+
+    pasteClipboard(input, {
+      items: [{ kind: 'string', type: 'text/plain' }],
+      text: '"C:\\Users\\song\\Desktop\\brief.txt"',
+    });
+    fireEvent.change(input, { target: { value: '"C:\\Users\\song\\Desktop\\brief.txt"' } });
+
+    expect(await screen.findByText('brief.txt')).toBeInTheDocument();
+    expect(input).toHaveValue('');
+  });
+
   it('falls back to raw image paste when a context-menu file-item paste has no file paths', async () => {
     const readClipboardFilePaths = vi.fn().mockResolvedValue([]);
     const readClipboardImage = vi.fn().mockResolvedValue('/tmp/context-menu-image.png');

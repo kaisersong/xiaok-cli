@@ -30,9 +30,122 @@ interface ChatInputProps {
 }
 
 const TEXTAREA_MAX_HEIGHT = 220;
+const IMAGE_FILE_EXTENSION_RE = /\.(png|jpg|jpeg|gif|webp|svg)$/i;
 
 function basename(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath;
+}
+
+function isImageFilePath(filePath: string): boolean {
+  return IMAGE_FILE_EXTENSION_RE.test(basename(filePath));
+}
+
+function filePathToAttachment(filePath: string): AttachedFile {
+  return {
+    filePath,
+    name: basename(filePath),
+    isImage: isImageFilePath(filePath),
+  };
+}
+
+function isWindowsPath(filePath: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(filePath) || /^\\\\[^\\]+\\[^\\]+/.test(filePath);
+}
+
+function attachedFileKey(filePath: string): string {
+  const normalized = filePath.replace(/\//g, '\\');
+  return isWindowsPath(normalized) ? normalized.toLowerCase() : filePath;
+}
+
+function appendAttachedFiles(previous: AttachedFile[], next: AttachedFile[]): AttachedFile[] {
+  const seen = new Set(previous.map(file => attachedFileKey(file.filePath)));
+  const uniqueNext = next.filter(file => {
+    const key = attachedFileKey(file.filePath);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return [...previous, ...uniqueNext];
+}
+
+function stripWrappingQuotes(value: string): string {
+  let next = value.trim();
+  while (
+    next.length >= 2 &&
+    ((next.startsWith('"') && next.endsWith('"')) ||
+      (next.startsWith("'") && next.endsWith("'")) ||
+      (next.startsWith('`') && next.endsWith('`')))
+  ) {
+    next = next.slice(1, -1).trim();
+  }
+  return next;
+}
+
+function fileUrlToPath(value: string): string {
+  if (!/^file:\/\//i.test(value)) return value;
+  try {
+    const url = new URL(value);
+    const decodedPath = decodeURIComponent(url.pathname);
+    if (url.hostname) {
+      return `\\\\${url.hostname}${decodedPath.replace(/\//g, '\\')}`;
+    }
+    if (/^\/[a-zA-Z]:[\\/]/.test(decodedPath)) {
+      return decodedPath.slice(1).replace(/\//g, '\\');
+    }
+    return decodedPath;
+  } catch {
+    return value;
+  }
+}
+
+function normalizeClipboardPathCandidate(value: string): string {
+  const unquoted = stripWrappingQuotes(value);
+  return stripWrappingQuotes(fileUrlToPath(unquoted)).trim();
+}
+
+function isLikelyFilePath(value: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(value) ||
+    /^\\\\[^\\]+\\[^\\]+/.test(value) ||
+    /^\/[^\s/]/.test(value);
+}
+
+interface ClipboardPathCandidate {
+  raw: string;
+  path: string;
+}
+
+function extractClipboardPathCandidates(text: string): ClipboardPathCandidate[] {
+  return text
+    .split(/\r?\n/)
+    .flatMap(raw => {
+      const trimmed = raw.trim();
+      if (!trimmed) return [];
+      const path = normalizeClipboardPathCandidate(trimmed);
+      if (!isLikelyFilePath(path)) return [];
+      return [{ raw: trimmed, path }];
+    });
+}
+
+function stripPastedPathText(value: string, candidates: ClipboardPathCandidate[]): string {
+  let stripped = value;
+  for (const candidate of candidates) {
+    const variants = new Set([
+      candidate.raw,
+      candidate.path,
+      `"${candidate.raw}"`,
+      `'${candidate.raw}'`,
+      `"${candidate.path}"`,
+      `'${candidate.path}'`,
+    ]);
+    for (const variant of variants) {
+      if (variant) stripped = stripped.split(variant).join('');
+    }
+  }
+  return stripped
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
 }
 
 export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder = '回复...', disabled, isRunning, onStop }: ChatInputProps) {
@@ -45,10 +158,10 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
   const [selectedIndex, setSelectedIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const slashMenuRef = useRef<HTMLDivElement>(null);
-  const pastePathsRef = useRef<string[] | null>(null);
+  const pastePathsRef = useRef<ClipboardPathCandidate[] | null>(null);
   const pasteHandlerRef = useRef<((e: ClipboardEvent) => void) | null>(null);
-  // Set to true when keydown Cmd+V starts a readClipboardFilePaths fetch,
-  // so the paste event handler skips its own hasFileItems branch.
+  // Set to true when keydown starts a clipboard preflight, so the paste event
+  // handler skips branches that would duplicate the async attachment.
   const finderFilesPendingRef = useRef(false);
 
   const textareaCallbackRef = useCallback((el: HTMLTextAreaElement | null) => {
@@ -67,10 +180,9 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       // image preview (image/tiff) on the clipboard; we must check paths first
       // so we don't mistake a copied image file for a screenshot paste.
       const plainText = e.clipboardData?.getData('text/plain') ?? '';
-      const lines = plainText.split(/\r?\n/).flatMap(l => { const t = l.trim(); return t ? [t] : []; });
-      const pathLines = lines.filter(l => l.startsWith('/'));
-      if (pathLines.length > 0) {
-        pastePathsRef.current = pathLines;
+      const pathCandidates = extractClipboardPathCandidates(plainText);
+      if (pathCandidates.length > 0) {
+        pastePathsRef.current = pathCandidates;
         return;
       }
 
@@ -79,23 +191,22 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       // paths that would otherwise be lost, such as context-menu paste events.
       const hasFileItems = clipItems.some(item => item.kind === 'file');
       const hasImage = clipItems.some(item => item.type.startsWith('image/'));
+      if (finderFilesPendingRef.current && !plainText && (hasFileItems || hasImage || clipItems.length === 0)) {
+        e.preventDefault();
+        return;
+      }
       if (hasFileItems && !finderFilesPendingRef.current && window.xiaokDesktop?.readClipboardFilePaths) {
         e.preventDefault();
         window.xiaokDesktop.readClipboardFilePaths().then(fp => {
           if (fp.length > 0) {
-            const newFiles = fp.map(p => {
-              const name = basename(p);
-              const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
-              return { filePath: p, name, isImage };
-            });
-            setFiles(prev => [...prev, ...newFiles]);
+            const newFiles = fp.map(filePathToAttachment);
+            setFiles(prev => appendAttachedFiles(prev, newFiles));
             return;
           }
           if (hasImage && window.xiaokDesktop?.readClipboardImage) {
             void window.xiaokDesktop.readClipboardImage().then(imagePath => {
               if (imagePath) {
-                const name = basename(imagePath) || 'clipboard-image.png';
-                setFiles(prev => [...prev, { filePath: imagePath, name, isImage: true }]);
+                setFiles(prev => appendAttachedFiles(prev, [filePathToAttachment(imagePath)]));
               }
             }).catch(() => {});
           }
@@ -114,8 +225,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
         e.preventDefault();
         window.xiaokDesktop.readClipboardImage().then(imagePath => {
           if (imagePath) {
-            const name = basename(imagePath) || 'clipboard-image.png';
-            setFiles(prev => [...prev, { filePath: imagePath, name, isImage: true }]);
+            setFiles(prev => appendAttachedFiles(prev, [filePathToAttachment(imagePath)]));
           }
         }).catch(() => {});
         return;
@@ -162,18 +272,13 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
     const v = e.target.value;
     // If paste detected file paths, strip them from the textarea and add as chips
     if (pastePathsRef.current) {
-      const paths = pastePathsRef.current;
+      const candidates = pastePathsRef.current;
       pastePathsRef.current = null;
       // Strip the pasted path text from the new value
-      let stripped = v;
-      for (const p of paths) stripped = stripped.replace(p, '');
-      stripped = stripped.replace(/\n+/g, '\n').trimEnd();
-      const newFiles = paths.map(p => {
-        const name = basename(p);
-        const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
-        return { filePath: p, name, isImage };
-      });
-      setFiles(prev => [...prev, ...newFiles]);
+      const paths = candidates.map(candidate => candidate.path);
+      const stripped = stripPastedPathText(v, candidates);
+      const newFiles = paths.map(filePathToAttachment);
+      setFiles(prev => appendAttachedFiles(prev, newFiles));
       setInternalValue(stripped);
       onChange?.(stripped);
       // Try NSFilenamesPboardType to get canonical paths
@@ -181,12 +286,8 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
         window.xiaokDesktop.readClipboardFilePaths().then(fp => {
           if (fp.length > 0) {
             setFiles(prev => {
-              const base = prev.slice(0, prev.length - paths.length);
-              return [...base, ...fp.map(p => {
-                const name = basename(p);
-                const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
-                return { filePath: p, name, isImage };
-              })];
+              const base = prev.slice(0, Math.max(0, prev.length - paths.length));
+              return appendAttachedFiles(base, fp.map(filePathToAttachment));
             });
           }
         }).catch(() => {});
@@ -198,21 +299,18 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Intercept Cmd+V to catch Finder file copies where clipboard has no text/plain path.
-    // readClipboardFilePaths reads NSFilenamesPboardType which Finder always populates.
-    if (e.key === 'v' && e.metaKey && !e.shiftKey && !e.altKey && window.xiaokDesktop?.readClipboardFilePaths) {
+    // Intercept paste shortcuts to catch OS file/image clipboard formats that
+    // Chromium does not expose through the DOM paste event on every platform.
+    const isPasteShortcut = e.key.toLowerCase() === 'v' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey;
+    if (isPasteShortcut && window.xiaokDesktop?.readClipboardFilePaths) {
       const valueBeforePaste = internalValue;
       finderFilesPendingRef.current = true;
       window.xiaokDesktop.readClipboardFilePaths().then(fp => {
         finderFilesPendingRef.current = false;
         if (fp.length > 0) {
           // Finder file copy: add chips and restore textarea value
-          const newFiles = fp.map(p => {
-            const name = basename(p);
-            const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
-            return { filePath: p, name, isImage };
-          });
-          setFiles(prev => [...prev, ...newFiles]);
+          const newFiles = fp.map(filePathToAttachment);
+          setFiles(prev => appendAttachedFiles(prev, newFiles));
           setInternalValue(valueBeforePaste);
           onChange?.(valueBeforePaste);
         } else if (window.xiaokDesktop?.readClipboardImage) {
@@ -221,8 +319,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
           // Finder-file preflight was pending, so attach the image here.
           window.xiaokDesktop.readClipboardImage().then(imagePath => {
             if (imagePath) {
-              const name = basename(imagePath) || 'clipboard-image.png';
-              setFiles(prev => [...prev, { filePath: imagePath, name, isImage: true }]);
+              setFiles(prev => appendAttachedFiles(prev, [filePathToAttachment(imagePath)]));
             }
           }).catch(() => {});
         }
