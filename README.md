@@ -19,6 +19,15 @@ A local-first AI CLI for reliable skill execution across coding and document-hea
 | **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
 | **Token Efficiency** | 100% | 250% | **-60%** |
 
+**What's New in v1.4.4:**
+
+- **Loop Evidence System**: Desktop task completion now records durable artifact evidence in SQLite and classifies required artifact contracts before the completion guard runs. This closes the repeated "task completed without artifact evidence" regression path where the UI could report completion without a verifiable deliverable.
+- **Built-in Evidence Regression Loop**: Xiaok now ships a scheduled loop that scans recent completion records for missing artifacts, stale run state, and anomalous delivery outcomes. The loop uses a single-run lock, clears stale diagnostics, and writes structured findings so silent failures become visible.
+- **Read-only Loop Diagnostics**: Desktop exposes loop/evidence diagnostics through read-only IPC and settings surfaces, giving operators a way to inspect active runs, recent scans, anomaly counts, and evidence status without touching internal database files.
+- **Service and Packaging Validation**: KSwarm service startup, bundled plugin deployment, and desktop packaging contracts have focused validation coverage for the release path. Service status now has clearer UI/API visibility, which makes KSwarm and plugin startup failures easier to distinguish from model/runtime failures.
+- **Clipboard File Attachments**: Finder copy/paste can attach files directly as chat input chips. The input path deduplicates keydown and paste events, preventing the same file from appearing twice when macOS sends both signals.
+- **Release Validation**: This release is prepared with focused loop evidence tests, desktop packaging contract tests, renderer/main builds, and the desktop `desktop-v1.4.4` release tag workflow.
+
 **What's New in v1.4.3:**
 
 - **Kanban × Workflow Fusion**: Workflow pipeline progress is now an integral part of each project task card on the kanban. Cards show a slim multi-segment progress bar (completed / running / failed) plus a `工作流执行` chip and the latest workflow primary message, so users can see how a task is doing without leaving the board.

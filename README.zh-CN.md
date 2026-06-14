@@ -19,6 +19,15 @@
 | **重命名任务延迟** | 27.6s | 180.8s | **-85%** |
 | **Token 效率** | 100% | 250% | **-60%** |
 
+**v1.4.4 新特性：**
+
+- **Loop Evidence System**：Desktop 任务完成现在会把 artifact evidence 持久化到 SQLite，并在 completion guard 运行前先判断任务是否要求硬产物。这补上了反复出现的“task completed without artifact evidence”路径，避免 UI 报告完成但没有可验证交付物。
+- **内置 Evidence Regression Loop**：Xiaok 新增定时 loop，用来扫描最近的完成记录、缺失产物、陈旧 run state 和异常交付结果。该 loop 使用单运行锁、会清理 stale diagnostics，并写入结构化 findings，让 silent failure 不再躲在后台。
+- **只读 Loop Diagnostics**：Desktop 通过只读 IPC 和设置页能力暴露 loop/evidence diagnostics，操作者可以查看 active run、最近扫描、异常数量和 evidence 状态，不需要直接翻内部数据库。
+- **服务与打包验证**：KSwarm 服务启动、内置插件部署、desktop packaging contract 都进入聚焦验证范围。服务状态现在有更清楚的 UI/API 可见性，便于区分 KSwarm / 插件启动失败与模型/runtime 失败。
+- **剪贴板文件附件**：从 Finder 复制文件后可以直接粘贴成 chat input chip。输入链路会去重 keydown 与 paste 的双触发，避免 macOS 同时发送两个事件时同一文件被添加两次。
+- **发布验证**：本版本按 loop evidence 聚焦测试、desktop packaging contract 测试、renderer/main build，以及 `desktop-v1.4.4` release tag workflow 准备发布。
+
 **v1.4.3 新特性：**
 
 - **看板与工作流融合**：项目任务卡现在直接显示工作流流水线进度——一条细分段进度条（完成 / 运行中 / 失败），加上"工作流执行" chip 和最近的工作流进展消息。用户在看板上就能一眼看出任务的工作流执行情况，不需要切到顶部入口。
