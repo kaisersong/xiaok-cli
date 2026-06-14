@@ -51,7 +51,7 @@ The smallest useful Xiaok loop is intentionally simple:
 - **KSwarm Service Health Loop**: Desktop now ships a built-in `kswarm-service-health` loop that records structured service diagnostics for no listener, unknown port owner, unreachable health, HTTP error, invalid health JSON, identity/capability mismatch, broker unavailability, spawn path failures, spawn exits, and source hash drift.
 - **Actionable Loop Diagnostics**: Settings surfaces now show the anomaly kind, owner, seen count, suggested action, and relevant log paths, with a copyable diagnostic summary for support/debugging. Notifications stay light: new high-severity failures surface once, repeated unresolved anomalies dedupe, and source-unavailable warnings wait for a second observation.
 - **Stronger Artifact Evidence Validation**: Local file artifact evidence now validates real files inside the workspace with symlink-safe containment checks. Valid `uri` or `metadata.paths` evidence is not rejected just because stale `localPaths` metadata is present.
-- **Release Validation**: v1.4.5 was verified with desktop full tests, CLI sandbox full tests, focused loop/evidence tests, desktop build/typecheck, and structured intent/skill evals.
+- **Release Validation**: v1.4.5 was verified with desktop full tests, CLI sandbox full tests, focused loop/evidence tests, desktop build/typecheck, structured intent/skill evals, Computer Use live smoke, and the desktop `desktop-v1.4.5` release tag workflow.
 
 **What's New in v1.4.4:**
 
@@ -431,9 +431,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-1.3.10-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.3.10-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-setup-1.3.10.exe** — Windows installer (x64)
+- **xiaok-1.4.5-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.4.5-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-setup-1.4.5.exe** — Windows installer (x64)
 
 ### Features
 
@@ -696,7 +696,7 @@ npm run dev -- --help  # Run from source
 
 ## Version History
 
-**v1.4.5** — Loop reliability release: adds the built-in KSwarm Service Health Loop, classifies service startup and health-check failures with structured diagnostics, records suggested actions and log paths for Settings, keeps repeated notifications quiet, and hardens local artifact evidence validation with workspace containment and symlink escape protection. The release gate covers desktop full tests, CLI sandbox full tests, desktop build/typecheck, and structured intent/skill evals.
+**v1.4.5** — Loop reliability release: adds the built-in KSwarm Service Health Loop, classifies service startup and health-check failures with structured diagnostics, records suggested actions and log paths for Settings, keeps repeated notifications quiet, and hardens local artifact evidence validation with workspace containment and symlink escape protection. The release gate covers desktop full tests, CLI sandbox full tests, desktop build/typecheck, structured intent/skill evals, Computer Use live smoke, and the desktop `desktop-v1.4.5` release tag workflow.
 
 **v1.4.2** — A2UI dashboard and interrupt release: Desktop can replay safe read-only A2UI dashboard artifacts inline, including metrics, lists, tables, and conclusion sections, with installed-app E2E coverage against `/Applications/xiaok.app` using natural user language instead of internal tool names. User-facing tool-step labels now show `dashboard [A2UI]`, raw dashboard payloads stay redacted, and the section validator accepts common aliases while avoiding the previous "未知 section" failure for valid dashboard requests. Terminal streaming turns can also be aborted with `ESC` while preserving drafts and queued input, emitting a user-aborted turn instead of a failed turn. Model adapters, runtime core, compact runner, subagents, and tool execution share abort signals and avoid retrying true `AbortError`s; Desktop KSwarm handoffs propagate cancellation through the runtime bridge and surface user aborts as `task_cancelled`.
 
