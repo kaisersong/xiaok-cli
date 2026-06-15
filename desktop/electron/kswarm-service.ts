@@ -969,9 +969,7 @@ export function createKSwarmService(): KSwarmService {
 
   async function ensureReady(): Promise<void> {
     if (running) return;
-    if (startingPromise) { await startingPromise; return; }
-    startingPromise = start().finally(() => { startingPromise = null; });
-    await startingPromise;
+    await start();
   }
 
   async function request(path: string, init?: RequestInit): Promise<Response> {
@@ -991,11 +989,19 @@ export function createKSwarmService(): KSwarmService {
 
   async function start(): Promise<void> {
     if (running || child) return;
-    stopping = false;
-    restartCount = 0;
-    healthFailureCount = 0;
-    lastError = null;
-    await spawnServer();
+    if (startingPromise) {
+      await startingPromise;
+      return;
+    }
+    startingPromise = (async () => {
+      if (running || child) return;
+      stopping = false;
+      restartCount = 0;
+      healthFailureCount = 0;
+      lastError = null;
+      await spawnServer();
+    })().finally(() => { startingPromise = null; });
+    await startingPromise;
   }
 
   async function stop(): Promise<void> {

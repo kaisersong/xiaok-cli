@@ -100,12 +100,18 @@ export class KSwarmStreamBridge {
   private closeErroredSocket(ws: WebSocket): void {
     if (this.ws !== ws) return;
     if (ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) return;
+
+    this.ws = null;
+    ws.onerror = null;
+    ws.onclose = null;
+    this.setConnectionStatus('disconnected');
+    this.scheduleReconnect();
+
     try {
       ws.close();
     } catch {
-      this.ws = null;
-      this.setConnectionStatus('disconnected');
-      this.scheduleReconnect();
+      // Reconnect was already scheduled before close() so synchronous close errors
+      // cannot re-enter the error handler and grow the stack.
     }
   }
 

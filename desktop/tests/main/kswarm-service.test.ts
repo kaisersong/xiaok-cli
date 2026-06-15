@@ -44,20 +44,24 @@ function createMockKSwarmService(handlers: {
 
   async function ensureReady(): Promise<void> {
     if (running) return;
+    await start();
+  }
+
+  async function start(): Promise<void> {
+    if (running) return;
     if (startingPromise) {
       await startingPromise;
       return;
     }
-    startingPromise = start().finally(() => {
+    startingPromise = (async () => {
+      if (running) return;
+      startCalls++;
+      if (handlers.onStart) await handlers.onStart();
+      running = handlers.shouldRunAfterStart ?? true;
+    })().finally(() => {
       startingPromise = null;
     });
     await startingPromise;
-  }
-
-  async function start(): Promise<void> {
-    startCalls++;
-    if (handlers.onStart) await handlers.onStart();
-    running = handlers.shouldRunAfterStart ?? true;
   }
 
   async function request(path: string, init?: RequestInit): Promise<Response> {
@@ -537,6 +541,23 @@ describe('kswarm service request gateway', () => {
     expect(r3).toBeTruthy();
     expect(svc.startCalls).toBe(1);
     expect(startComplete).toBe(true);
+  });
+
+  it('external start and auto-start request share the same start promise', async () => {
+    const svc = createMockKSwarmService({
+      onStart: async () => {
+        await new Promise(r => setTimeout(r, 50));
+      },
+    });
+
+    const [started, requested] = await Promise.all([
+      svc.start(),
+      svc.request('/agents'),
+    ]);
+
+    expect(started).toBeUndefined();
+    expect(requested).toBeTruthy();
+    expect(svc.startCalls).toBe(1);
   });
 
   it('throws KSwarmUnavailableError when start does not make the service running', async () => {
