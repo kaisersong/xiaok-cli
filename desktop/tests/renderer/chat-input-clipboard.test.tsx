@@ -103,6 +103,33 @@ describe('ChatInput clipboard attachments', () => {
     expect(pasteEvent.defaultPrevented).toBe(true);
   });
 
+  it('produces a single attachment when Cmd+V pastes a Finder file with both text/plain path and a file item', async () => {
+    const readClipboardFilePaths = vi.fn().mockResolvedValue(['/Users/song/Desktop/report.pdf']);
+    installClipboardApi({ readClipboardFilePaths });
+
+    render(<ChatInput onSubmit={() => {}} />);
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    fireEvent.keyDown(input, { key: 'v', metaKey: true });
+    const pastedText = '/Users/song/Desktop/report.pdf';
+    const pasteEvent = pasteClipboard(input, {
+      items: [{ kind: 'file', type: 'application/pdf' }],
+      text: pastedText,
+    });
+
+    if (!pasteEvent.defaultPrevented) {
+      fireEvent.change(input, { target: { value: pastedText } });
+    }
+
+    await waitFor(() => {
+      expect(readClipboardFilePaths).toHaveBeenCalled();
+      expect(screen.queryAllByText('report.pdf').length).toBeGreaterThan(0);
+    });
+    await new Promise(r => setTimeout(r, 20));
+    expect(screen.queryAllByText('report.pdf')).toHaveLength(1);
+    expect(input).toHaveValue('');
+  });
+
   it('falls back to raw image paste when a context-menu file-item paste has no file paths', async () => {
     const readClipboardFilePaths = vi.fn().mockResolvedValue([]);
     const readClipboardImage = vi.fn().mockResolvedValue('/tmp/context-menu-image.png');
