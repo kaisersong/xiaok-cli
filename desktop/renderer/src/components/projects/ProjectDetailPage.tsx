@@ -3,13 +3,14 @@
  * Uses getProjectFullDetail to fetch activities, humanActions, plan, planProgress, workspace.
  */
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, LayoutGrid, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users, Download, FolderOpen, Circle, Loader, Clock, AlertTriangle, CircleOff } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { DispatchTasksResult, KSwarmProject, KSwarmProjectExecutionMode, ProjectIntervention, KSwarmWorkflowProposal, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
 import type { ProjectFullDetail } from '../../hooks/useKSwarmClient';
+import { shouldRefreshProjectsForEvent } from '../../hooks/useKSwarmClient';
 import { PlanView } from './PlanView';
 import { KanbanBoard } from './KanbanBoard';
 import { ActivityTimeline } from './ActivityTimeline';
@@ -383,6 +384,22 @@ function buildXiaokInterventionDraft(context: ReturnType<typeof buildSwarmContin
   return lines.join('\n');
 }
 
+/**
+ * Events that bypass the 500ms throttle and trigger an immediate detail refresh.
+ * These represent state transitions where the user needs to see updated data
+ * as quickly as possible (task completed/failed/reviewed, or project deliverable).
+ */
+const CRITICAL_DETAIL_EVENTS = new Set([
+  'task_done',
+  'task_failed',
+  'task_reviewed',
+  'project_deliverable',
+]);
+
+const EVENT_THROTTLE_MS = 500;
+const FALLBACK_POLL_INTERVAL_MS = 30_000;
+const EVENT_TIMEOUT_MS = 60_000;
+
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -402,6 +419,8 @@ export function ProjectDetailPage() {
     connected,
     serviceStatus,
     agents,
+    lastEventSeq,
+    getLastEvent,
   } = useKSwarm();
   const { t } = useLocale();
   const [detail, setDetail] = useState<ProjectFullDetail | null>(null);
@@ -412,7 +431,6 @@ export function ProjectDetailPage() {
   const [retryCooldownUntil, setRetryCooldownUntil] = useState(0);
   const [confirmClose, setConfirmClose] = useState(false);
   const [workflowProposal, setWorkflowProposal] = useState<KSwarmWorkflowProposal | null>(null);
-  const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const retryCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -429,13 +447,57 @@ export function ProjectDetailPage() {
     review: t.projectsStatusReview, delivered: t.projectsStatusDelivered, closed: t.projectsStatusClosed,
   }), [t]);
 
-  const load = async () => {
+  const load = async (signal?: AbortSignal) => {
     if (!projectId) return;
-    const data = await getProjectFullDetail(projectId);
-    if (data) setDetail(data);
-    return data;
+    try {
+      const data = await getProjectFullDetail(projectId);
+      if (signal?.aborted) return;
+      if (data) setDetail(data);
+      return data;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      throw err;
+    }
   };
 
+  // --- Event-driven refresh with fallback polling ---
+  const abortRef = useRef<AbortController | null>(null);
+  const lastRefreshRef = useRef(0);
+  const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fallbackPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const eventTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastEventSeenAtRef = useRef(0);
+
+  const scheduleRefresh = useCallback((immediate: boolean) => {
+    // Cancel any in-flight request
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    const doRefresh = () => {
+      if (ac.signal.aborted) return;
+      lastRefreshRef.current = Date.now();
+      void load(ac.signal);
+    };
+
+    if (immediate) {
+      doRefresh();
+    } else {
+      const elapsed = Date.now() - lastRefreshRef.current;
+      const remaining = Math.max(0, EVENT_THROTTLE_MS - elapsed);
+      if (remaining === 0) {
+        doRefresh();
+      } else {
+        if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current);
+        throttleTimerRef.current = setTimeout(() => {
+          throttleTimerRef.current = null;
+          doRefresh();
+        }, remaining);
+      }
+    }
+  }, [projectId, getProjectFullDetail]);
+
+  // Initial load when projectId changes
   useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
@@ -444,12 +506,74 @@ export function ProjectDetailPage() {
       if (!cancelled) setLoading(false);
     };
     doLoad();
-    refreshRef.current = setInterval(load, 5000);
-    return () => {
-      cancelled = true;
-      if (refreshRef.current) clearInterval(refreshRef.current);
-    };
+    return () => { cancelled = true; };
   }, [projectId, getProjectFullDetail]);
+
+  // Refresh when a WS event is relevant to this project
+  useEffect(() => {
+    if (!lastEventSeq || !projectId) return;
+    const lastEvent = getLastEvent();
+    if (!lastEvent) return;
+    const { type, projectId: eventProjectId } = lastEvent;
+
+    // Only react to events relevant to this project (or project-wide events)
+    if (eventProjectId && eventProjectId !== projectId) return;
+    if (!shouldRefreshProjectsForEvent(type)) return;
+
+    lastEventSeenAtRef.current = Date.now();
+    const isCritical = CRITICAL_DETAIL_EVENTS.has(type);
+    scheduleRefresh(isCritical);
+  }, [lastEventSeq, projectId, getLastEvent, scheduleRefresh]);
+
+  // Fallback: 30s polling when WS disconnected, 60s event timeout when connected
+  useEffect(() => {
+    // Clear previous timers
+    if (fallbackPollRef.current) {
+      clearInterval(fallbackPollRef.current);
+      fallbackPollRef.current = null;
+    }
+    if (eventTimeoutRef.current) {
+      clearTimeout(eventTimeoutRef.current);
+      eventTimeoutRef.current = null;
+    }
+
+    if (!projectId) return;
+
+    if (!connected) {
+      // WS disconnected: 30s fallback polling
+      fallbackPollRef.current = setInterval(() => {
+        scheduleRefresh(true);
+      }, FALLBACK_POLL_INTERVAL_MS);
+    } else {
+      // WS connected: detect 60s event timeout (no events received)
+      const checkTimeout = () => {
+        const sinceLastEvent = Date.now() - lastEventSeenAtRef.current;
+        if (sinceLastEvent >= EVENT_TIMEOUT_MS) {
+          // No event received for 60s — do a one-time refresh and reschedule
+          scheduleRefresh(true);
+        }
+        eventTimeoutRef.current = setTimeout(checkTimeout, EVENT_TIMEOUT_MS);
+      };
+      // Start checking after initial timeout period
+      eventTimeoutRef.current = setTimeout(checkTimeout, EVENT_TIMEOUT_MS);
+    }
+
+    return () => {
+      if (fallbackPollRef.current) {
+        clearInterval(fallbackPollRef.current);
+        fallbackPollRef.current = null;
+      }
+      if (eventTimeoutRef.current) {
+        clearTimeout(eventTimeoutRef.current);
+        eventTimeoutRef.current = null;
+      }
+      if (throttleTimerRef.current) {
+        clearTimeout(throttleTimerRef.current);
+        throttleTimerRef.current = null;
+      }
+      abortRef.current?.abort();
+    };
+  }, [projectId, connected, scheduleRefresh]);
 
   useEffect(() => {
     return () => {
@@ -467,8 +591,7 @@ export function ProjectDetailPage() {
   }, [detail?.plan, actionNotice]);
 
   const refreshOnce = async () => {
-    const data = await load();
-    return data;
+    scheduleRefresh(true);
   };
 
   const showNotice = (notice: ActionNotice, ttlMs?: number) => {
@@ -958,11 +1081,11 @@ export function ProjectDetailPage() {
               )}
             </div>
           )}
-          {(project as any).requirements && (
+          {project.requirements && (
             <div className="flex items-center gap-1 text-[11px] text-[var(--c-text-muted)]">
               <FileText size={11} className="shrink-0" />
               <DelayedHoverText
-                text={(project as any).requirements}
+                text={project.requirements}
                 testId="project-requirements-preview"
                 wrapperClassName="max-w-[400px] align-bottom"
                 className="inline-block max-w-full truncate"

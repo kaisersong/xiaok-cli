@@ -15,6 +15,7 @@ export interface TimedActionSchedulerOptions {
   executorTimeoutMs?: number;
   maxClaimPerTick?: number;
   maxAgentConcurrent?: number;
+  maxLoopConcurrent?: number;
   staleAfterMs?: number;
   onRunComplete?: (event: {
     action: TimedActionRecord;
@@ -33,6 +34,7 @@ export class TimedActionScheduler {
   private readonly executorTimeoutMs: number;
   private readonly maxClaimPerTick: number;
   private readonly maxAgentConcurrent: number;
+  private readonly maxLoopConcurrent: number;
   private readonly staleAfterMs: number;
   private readonly inFlight = new Map<string, TimedActionExecutorKind>();
   private lastTickAt: number | null = null;
@@ -47,6 +49,7 @@ export class TimedActionScheduler {
     this.executorTimeoutMs = options.executorTimeoutMs ?? 5 * 60_000;
     this.maxClaimPerTick = options.maxClaimPerTick ?? 20;
     this.maxAgentConcurrent = options.maxAgentConcurrent ?? 2;
+    this.maxLoopConcurrent = options.maxLoopConcurrent ?? 1;
     this.staleAfterMs = options.staleAfterMs ?? 30 * 60_000;
   }
 
@@ -81,9 +84,18 @@ export class TimedActionScheduler {
         executorKinds: ['notify'],
         recoveryReason,
       });
-      const agentCapacity = Math.max(0, this.maxAgentConcurrent - this.countInFlight('agent_task'));
       const remainingCapacity = Math.max(0, this.maxClaimPerTick - notify.length);
-      const agentLimit = Math.min(agentCapacity, remainingCapacity);
+      const loopCapacity = Math.max(0, this.maxLoopConcurrent - this.countInFlight('loop'));
+      const loopLimit = Math.min(loopCapacity, remainingCapacity);
+      const loop = loopLimit > 0
+        ? this.store.claimDueActions(now, loopLimit, {
+          executorKinds: ['loop'],
+          recoveryReason,
+        })
+        : [];
+      const agentCapacity = Math.max(0, this.maxAgentConcurrent - this.countInFlight('agent_task'));
+      const remainingAgentCapacity = Math.max(0, this.maxClaimPerTick - notify.length - loop.length);
+      const agentLimit = Math.min(agentCapacity, remainingAgentCapacity);
       const agent = agentLimit > 0
         ? this.store.claimDueActions(now, agentLimit, {
           executorKinds: ['agent_task'],
@@ -91,7 +103,7 @@ export class TimedActionScheduler {
         })
         : [];
 
-      for (const claimed of [...notify, ...agent]) {
+      for (const claimed of [...notify, ...loop, ...agent]) {
         this.dispatch(claimed);
       }
       this.lastTickError = null;
@@ -134,6 +146,11 @@ export class TimedActionScheduler {
     try {
       const result = await this.withTimeout(Promise.resolve(handler.execute(claimed.action, claimed.context)));
       const finishedAt = this.now();
+      if (result.skip) {
+        this.store.finishRunSkipped(claimed.action.id, claimed.runId, finishedAt, result.skip);
+        this.notifyRunComplete(claimed, 'skipped', finishedAt, result.runtimeTaskId, result.skip.reason);
+        return;
+      }
       this.store.finishRunSuccess(claimed.action.id, claimed.runId, finishedAt, {
         runtimeTaskId: result.runtimeTaskId,
         decision: { recoveryDecision: decision, ...(result.decision ?? {}) },

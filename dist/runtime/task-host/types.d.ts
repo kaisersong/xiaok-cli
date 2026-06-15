@@ -97,6 +97,7 @@ export interface ArtifactSummary {
 export interface TaskResult {
     summary: string;
     artifacts: ArtifactSummary[];
+    structuredOutput?: Record<string, unknown>;
     assumptions?: string[];
     nextSteps?: string[];
     degraded?: boolean;

@@ -1,4 +1,5 @@
 import type { BrowserWindow } from 'electron';
+import type { DesktopLoopRuntime } from './loop-executor.js';
 import {
   createElectronDesktopNotificationPort,
   type DesktopNotificationPort,
@@ -9,6 +10,7 @@ import { reminderEventFromAction } from './timed-action-service.js';
 import type {
   OverdueRecoveryContext,
   TimedActionExecutorHandler,
+  TimedActionExecutorKind,
   TimedActionRecord,
 } from './timed-action-types.js';
 
@@ -25,6 +27,27 @@ export interface AgentTaskExecutorOptions {
     materials: Array<{ materialId: string; role?: MaterialRole }>;
     permissionMode?: 'plan' | 'auto' | 'default';
   }) => Promise<{ taskId: string }>;
+}
+
+export interface DesktopTimedActionExecutorsOptions extends NotifyExecutorOptions, AgentTaskExecutorOptions {
+  loopRuntime: Pick<DesktopLoopRuntime, 'executor'>;
+}
+
+export function createDesktopTimedActionExecutors(
+  options: DesktopTimedActionExecutorsOptions
+): Partial<Record<TimedActionExecutorKind, TimedActionExecutorHandler>> {
+  return {
+    notify: createNotifyExecutor({
+      getMainWindow: options.getMainWindow,
+      notificationPort: options.notificationPort,
+      onDelivery: options.onDelivery,
+      onDesktopNotification: options.onDesktopNotification,
+    }),
+    loop: options.loopRuntime.executor,
+    agent_task: createAgentTaskExecutor({
+      createTask: options.createTask,
+    }),
+  };
 }
 
 export function createNotifyExecutor(options: NotifyExecutorOptions = {}): TimedActionExecutorHandler {

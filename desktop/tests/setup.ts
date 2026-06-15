@@ -1,4 +1,9 @@
 import '@testing-library/jest-dom/vitest'
+import { afterEach } from 'vitest'
+
+// Reset the desktop API cache between tests so window.xiaokDesktop mocks take effect
+import { _resetDesktopApiCache } from '../renderer/src/shared/desktop';
+afterEach(() => { _resetDesktopApiCache(); });
 
 class ResizeObserverMock {
   observe(): void {}

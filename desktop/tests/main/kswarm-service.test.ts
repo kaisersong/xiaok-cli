@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
+  appendKSwarmServiceLogLine,
+  buildKSwarmHealthDiagnosticInput,
   buildBackgroundNodeSpawnOptions,
   buildIntentBrokerServiceEnv,
+  checkKSwarmHealthServiceIdentity,
   doesKSwarmHealthMatchExpectedService,
   hasDynamicWorkflowSupport,
   hasWorkflowPatternCapabilities,
@@ -10,6 +16,7 @@ import {
   nextHealthFailureCount,
   requestWithFallbackBaseUrls,
   resolveBackgroundNodeRuntime,
+  resolveKSwarmServiceLogRoot,
   resolveIntentBrokerRuntimeRoot,
   shouldAdoptExistingKSwarmService,
   shouldRestartAfterHealthFailures,
@@ -37,20 +44,24 @@ function createMockKSwarmService(handlers: {
 
   async function ensureReady(): Promise<void> {
     if (running) return;
+    await start();
+  }
+
+  async function start(): Promise<void> {
+    if (running) return;
     if (startingPromise) {
       await startingPromise;
       return;
     }
-    startingPromise = start().finally(() => {
+    startingPromise = (async () => {
+      if (running) return;
+      startCalls++;
+      if (handlers.onStart) await handlers.onStart();
+      running = handlers.shouldRunAfterStart ?? true;
+    })().finally(() => {
       startingPromise = null;
     });
     await startingPromise;
-  }
-
-  async function start(): Promise<void> {
-    startCalls++;
-    if (handlers.onStart) await handlers.onStart();
-    running = handlers.shouldRunAfterStart ?? true;
   }
 
   async function request(path: string, init?: RequestInit): Promise<Response> {
@@ -160,7 +171,7 @@ describe('kswarm service spawn options', () => {
 });
 
 describe('kswarm service external adoption', () => {
-  it('requires service source identity to match when an expected source hash is available', () => {
+  it('allows same-entry services even when source hash drifts or is missing', () => {
     const entryPath = '/tmp/xiaok.app/Contents/Resources/services/kswarm/src/server/index.js';
 
     expect(doesKSwarmHealthMatchExpectedService({
@@ -169,11 +180,64 @@ describe('kswarm service external adoption', () => {
 
     expect(doesKSwarmHealthMatchExpectedService({
       service: { entryPath, sourceHash: 'hash-old' },
-    }, entryPath, 'hash-new')).toBe(false);
+    }, entryPath, 'hash-new')).toBe(true);
 
     expect(doesKSwarmHealthMatchExpectedService({
       service: { entryPath },
-    }, entryPath, 'hash-new')).toBe(false);
+    }, entryPath, 'hash-new')).toBe(true);
+  });
+
+  it('reports source hash mismatches as warnings when the service entry path matches', () => {
+    const entryPath = '/tmp/xiaok.app/Contents/Resources/services/kswarm/src/server/index.js';
+    const result = checkKSwarmHealthServiceIdentity({
+      service: { entryPath, sourceHash: 'hash-old' },
+    }, entryPath, 'hash-new');
+
+    expect(result).toMatchObject({
+      compatible: true,
+      reason: null,
+      warning: 'source_hash_mismatch',
+      actualEntryPath: entryPath,
+      expectedEntryPath: entryPath,
+      actualSourceHash: 'hash-old',
+      expectedSourceHash: 'hash-new',
+    });
+  });
+
+  it('reports missing source hashes as warnings when the service entry path matches', () => {
+    const entryPath = '/tmp/xiaok.app/Contents/Resources/services/kswarm/src/server/index.js';
+    const result = checkKSwarmHealthServiceIdentity({
+      service: { entryPath },
+    }, entryPath, 'hash-new');
+
+    expect(result).toMatchObject({
+      compatible: true,
+      reason: null,
+      warning: 'source_hash_missing',
+      actualEntryPath: entryPath,
+      expectedEntryPath: entryPath,
+      actualSourceHash: null,
+      expectedSourceHash: 'hash-new',
+    });
+  });
+
+  it('keeps a different service entry path as an adoption blocker', () => {
+    const expectedEntryPath = '/Applications/xiaok.app/Contents/Resources/services/kswarm/src/server/index.js';
+    const actualEntryPath = '/Users/song/projects/kswarm/src/server/index.js';
+    const result = checkKSwarmHealthServiceIdentity({
+      service: { entryPath: actualEntryPath, sourceHash: 'hash-new' },
+    }, expectedEntryPath, 'hash-new');
+
+    expect(result).toMatchObject({
+      compatible: false,
+      reason: 'entry_path_mismatch',
+      warning: null,
+      actualEntryPath,
+      expectedEntryPath,
+    });
+    expect(doesKSwarmHealthMatchExpectedService({
+      service: { entryPath: actualEntryPath, sourceHash: 'hash-new' },
+    }, expectedEntryPath, 'hash-new')).toBe(false);
   });
 
   it('adopts an already healthy service when desktop does not own a child process', () => {
@@ -233,6 +297,171 @@ describe('kswarm service external adoption', () => {
   it('does not treat a desktop-owned child as an external service', () => {
     expect(shouldAdoptExistingKSwarmService({ hasOwnedChild: true, healthOk: true })).toBe(false);
     expect(shouldAdoptExistingKSwarmService({ hasOwnedChild: false, healthOk: false })).toBe(false);
+  });
+});
+
+describe('kswarm service diagnostics logs', () => {
+  it('resolves service logs under desktop userData logs', () => {
+    expect(resolveKSwarmServiceLogRoot('/Users/song/Library/Application Support/xiaok'))
+      .toBe('/Users/song/Library/Application Support/xiaok/logs');
+  });
+
+  it('writes service log lines under the provided log root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-logs-'));
+    try {
+      appendKSwarmServiceLogLine({
+        logRoot: root,
+        serviceName: 'server',
+        stream: 'stderr',
+        message: 'startup failed',
+        now: () => new Date('2026-06-10T12:00:00.000Z'),
+      });
+
+      const log = readFileSync(join(root, 'server.log'), 'utf8');
+      expect(log).toContain('2026-06-10T12:00:00.000Z');
+      expect(log).toContain('[stderr] startup failed');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not create a log file for empty messages', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-logs-empty-'));
+    try {
+      appendKSwarmServiceLogLine({
+        logRoot: root,
+        serviceName: 'server',
+        stream: 'stdout',
+        message: '   ',
+      });
+
+      expect(() => readFileSync(join(root, 'server.log'), 'utf8')).toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('kswarm service health diagnostic input', () => {
+  it('marks a missing service entry as spawn_path_missing classifier input', () => {
+    const input = buildKSwarmHealthDiagnosticInput({
+      expectedEntryPath: null,
+      expectedSourceHash: null,
+      health: { ok: false, body: null, error: 'connect ECONNREFUSED' },
+      broker: { ok: true, body: { ok: true }, error: null },
+      status: {
+        running: false,
+        port: 4400,
+        pid: null,
+        restartCount: 0,
+        lastError: 'kswarm server entry not found',
+      },
+    });
+
+    expect(input).toMatchObject({
+      expectedEntryPath: null,
+      spawnEntryExists: false,
+      port: { listening: false, pid: null },
+      health: { ok: false, error: 'connect ECONNREFUSED' },
+      broker: { ok: true },
+    });
+  });
+
+  it('keeps parsed health and broker state for classifier decisions', () => {
+    const input = buildKSwarmHealthDiagnosticInput({
+      expectedEntryPath: '/app/services/kswarm/src/server/index.js',
+      expectedSourceHash: 'expected',
+      health: {
+        ok: true,
+        body: {
+          service: { entryPath: '/tmp/kswarm/src/server/index.js', sourceHash: 'actual' },
+          brokerConnected: false,
+        },
+        error: null,
+      },
+      broker: { ok: false, body: null, error: 'broker refused connection' },
+      status: {
+        running: true,
+        port: 4400,
+        pid: 42,
+        restartCount: 2,
+        lastError: null,
+      },
+    });
+
+    expect(input).toMatchObject({
+      expectedEntryPath: '/app/services/kswarm/src/server/index.js',
+      expectedSourceHash: 'expected',
+      spawnEntryExists: true,
+      port: { listening: true, pid: 42, command: 'desktop-owned kswarm service' },
+      health: {
+        ok: true,
+        body: {
+          service: { entryPath: '/tmp/kswarm/src/server/index.js', sourceHash: 'actual' },
+          brokerConnected: false,
+        },
+      },
+      broker: { ok: false, error: 'broker refused connection' },
+    });
+  });
+
+  it('does not infer port listening from the desktop service manager running flag', () => {
+    const input = buildKSwarmHealthDiagnosticInput({
+      expectedEntryPath: '/app/services/kswarm/src/server/index.js',
+      expectedSourceHash: 'expected',
+      health: {
+        ok: false,
+        body: null,
+        error: 'health check timed out (1000ms): http://127.0.0.1:4400/health',
+      },
+      broker: { ok: true, body: { ok: true }, error: null },
+      status: {
+        running: true,
+        port: 4400,
+        pid: 42,
+        restartCount: 0,
+        lastError: null,
+      },
+    });
+
+    expect(input).toMatchObject({
+      spawnEntryExists: true,
+      port: {
+        listening: false,
+        pid: 42,
+        command: 'desktop-owned kswarm service',
+      },
+      health: {
+        ok: false,
+        error: 'health check timed out (1000ms): http://127.0.0.1:4400/health',
+      },
+    });
+  });
+
+  it('marks HTTP health responses as port listeners without relying on manager state', () => {
+    const input = buildKSwarmHealthDiagnosticInput({
+      expectedEntryPath: '/app/services/kswarm/src/server/index.js',
+      expectedSourceHash: 'expected',
+      health: {
+        ok: false,
+        status: 404,
+        body: null,
+        error: 'HTTP 404',
+      },
+      broker: { ok: true, body: { ok: true }, error: null },
+      status: {
+        running: false,
+        port: 4400,
+        pid: null,
+        restartCount: 0,
+        lastError: null,
+      },
+    });
+
+    expect(input).toMatchObject({
+      port: { listening: true },
+      health: { ok: false, status: 404, error: 'HTTP 404' },
+    });
   });
 });
 
@@ -312,6 +541,23 @@ describe('kswarm service request gateway', () => {
     expect(r3).toBeTruthy();
     expect(svc.startCalls).toBe(1);
     expect(startComplete).toBe(true);
+  });
+
+  it('external start and auto-start request share the same start promise', async () => {
+    const svc = createMockKSwarmService({
+      onStart: async () => {
+        await new Promise(r => setTimeout(r, 50));
+      },
+    });
+
+    const [started, requested] = await Promise.all([
+      svc.start(),
+      svc.request('/agents'),
+    ]);
+
+    expect(started).toBeUndefined();
+    expect(requested).toBeTruthy();
+    expect(svc.startCalls).toBe(1);
   });
 
   it('throws KSwarmUnavailableError when start does not make the service running', async () => {

@@ -65,8 +65,9 @@ export function TaskDetailDrawer({
 
   const parallelGroups = workflowRun?.parallelGroups || [];
   const review = task.reviewResult;
-  const result = (task as any).result || {};
-  const hasArtifacts = result.artifacts && result.artifacts.length > 0;
+  const result = typeof task.result === 'object' && task.result !== null ? task.result : {};
+  const resultArtifacts = Array.isArray(result.artifacts) ? result.artifacts : [];
+  const hasArtifacts = resultArtifacts.length > 0;
   const canStartWorkflow = !workflowRun && onStartTaskWorkflow && task.status !== 'done' && task.status !== 'cancelled';
 
   const closeFromButton = (e: React.MouseEvent) => {
@@ -202,7 +203,7 @@ export function TaskDetailDrawer({
           <div className="mt-4">
             <div className="mb-1.5 text-[10px] font-medium text-[var(--c-text-muted)]">产物</div>
             <div className="flex flex-wrap gap-1.5">
-              {result.artifacts.map((art: KSwarmArtifact, i: number) => (
+              {resultArtifacts.map((art: KSwarmArtifact, i: number) => (
                 <button
                   key={i}
                   type="button"

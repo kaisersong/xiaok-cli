@@ -90,10 +90,10 @@ describe('KSwarmStreamBridge', () => {
       onopen: (() => void) | null = null;
       onmessage: ((event: { data: string }) => void) | null = null;
       close = vi.fn(() => {
-        this.readyState = MockWebSocket.CLOSING;
         if (this.close.mock.calls.length === 1) {
           this.onerror?.({ type: 'error-during-close' });
         }
+        this.readyState = MockWebSocket.CLOSING;
         this.readyState = MockWebSocket.CLOSED;
         this.onclose?.();
       });

@@ -10,6 +10,7 @@ import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import { api } from '../../api';
 import type { CreateAgentInput } from '../../hooks/useKSwarmClient';
+import { getDesktopApi } from '../../shared/desktop';
 
 interface ModelInfo {
   id: string;
@@ -67,7 +68,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
   // Fetch kswarm model catalog when a non-xiaok provider is selected
   useEffect(() => {
     if (isXiaok || !provider) { setKswarmModels([]); return; }
-    const api = (window as any).xiaokDesktop;
+    const api = getDesktopApi();
     if (api?.kswarmProxyGet) {
       api.kswarmProxyGet(`/llm/models?provider=${provider}`)
         .then((d: any) => setKswarmModels(d?.models ?? []))

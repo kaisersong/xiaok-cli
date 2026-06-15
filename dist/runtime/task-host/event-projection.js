@@ -64,25 +64,22 @@ export function projectRuntimeEventToDesktopEvent(input) {
     }
     if (event.type === 'artifact_recorded') {
         const kind = normalizeArtifactKind(event.kind);
-        const previewAvailable = kind === 'html' || kind === 'image' || kind === 'text';
         return {
             type: 'artifact_recorded',
             artifactId: event.artifactId,
             kind,
             label: event.label,
             filePath: event.path ?? '',
-            previewAvailable,
+            previewAvailable: isPreviewableArtifactKind(kind),
             turnId: event.turnId,
             creator: event.creator ?? 'agent',
         };
     }
     if (event.type === 'receipt_emitted') {
+        const result = resultFromReceipt(event.note, event.turnId);
         return {
             type: 'result',
-            result: {
-                summary: event.note,
-                artifacts: [],
-            },
+            result,
         };
     }
     if (event.type === 'salvage_emitted') {
@@ -285,6 +282,67 @@ function parseJsonObject(value) {
     catch {
         return null;
     }
+}
+function resultFromReceipt(note, turnId) {
+    const parsed = parseJsonObject(note);
+    const output = parsed && isRecord(parsed.output) ? parsed.output : parsed;
+    if (!output) {
+        return { summary: note, artifacts: [] };
+    }
+    const summary = readReceiptSummary(output, note);
+    return {
+        summary,
+        structuredOutput: output,
+        artifacts: artifactSummariesFromReceipt(output.artifacts, turnId),
+    };
+}
+function artifactSummariesFromReceipt(value, turnId) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.flatMap((artifact, index) => {
+        if (!isRecord(artifact)) {
+            return [];
+        }
+        const filePath = readString(artifact.path) || readString(artifact.filePath);
+        if (!filePath) {
+            return [];
+        }
+        const kind = normalizeArtifactKind(readString(artifact.kind) || readString(artifact.type));
+        const title = readString(artifact.label)
+            || readString(artifact.title)
+            || readString(artifact.filename)
+            || filePath.split(/[\\/]/).pop()
+            || `artifact-${index + 1}`;
+        return [{
+                artifactId: readString(artifact.artifactId) || `receipt_${turnId}_${index}`,
+                kind,
+                title,
+                createdAt: turnId,
+                previewAvailable: isPreviewableArtifactKind(kind),
+                filePath,
+                creator: readString(artifact.creator) || 'agent',
+            }];
+    });
+}
+function readReceiptSummary(output, note) {
+    return readString(output.summary)
+        || readString(output.analysis)
+        || readString(output.message)
+        || truncateReceiptNote(note);
+}
+function truncateReceiptNote(note) {
+    const trimmed = note.trim();
+    return trimmed.length <= 1000 ? trimmed : `${trimmed.slice(0, 1000)}...`;
+}
+function isPreviewableArtifactKind(kind) {
+    return kind === 'html' || kind === 'image' || kind === 'text' || kind === 'a2ui';
+}
+function readString(value) {
+    return typeof value === 'string' ? value.trim() : '';
+}
+function isRecord(value) {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 export function planStepFromStage(id, label) {
     return { id, label, status: 'running' };
