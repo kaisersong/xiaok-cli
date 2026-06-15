@@ -46,6 +46,14 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+**What's New in v1.4.6:**
+
+- **KSwarm Startup Reliability Follow-up**: Desktop now shares one guarded startup promise between explicit service start and request-triggered auto-start, preventing duplicate Intent Broker/KSwarm spawns during cold launch.
+- **Stream Reconnect Hardening**: The KSwarm WebSocket bridge clears handlers and schedules reconnect before closing errored sockets, preventing recursive `onerror -> close -> onerror` failures in real desktop startup.
+- **Completion Evidence Runtime Packaging**: The compiled `completion-evidence` runtime guard is now included in `dist/`, so packaged CLI/runtime code resolves the same evidence validation path that source tests exercise.
+- **Related Service Replay Hardening**: The paired Intent Broker update tolerates approval/task lifecycle replay events that lack `taskId`, preserving approval state without crashing broker state rebuild.
+- **Release Validation**: v1.4.6 is verified with focused desktop KSwarm startup tests, focused CLI completion-evidence/task-host tests, Intent Broker full tests, desktop build, live KSwarm/broker health checks, Computer Use live smoke, and the desktop `desktop-v1.4.6` release workflow.
+
 **What's New in v1.4.5:**
 
 - **KSwarm Service Health Loop**: Desktop now ships a built-in `kswarm-service-health` loop that records structured service diagnostics for no listener, unknown port owner, unreachable health, HTTP error, invalid health JSON, identity/capability mismatch, broker unavailability, spawn path failures, spawn exits, and source hash drift.
@@ -431,9 +439,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-1.4.5-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.4.5-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-setup-1.4.5.exe** — Windows installer (x64)
+- **xiaok-1.4.6-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.4.6-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-setup-1.4.6.exe** — Windows installer (x64)
 
 ### Features
 
@@ -695,6 +703,8 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.4.6** — Loop reliability follow-up: hardens the real desktop launch path around KSwarm/Intent Broker startup by sharing the KSwarm service start promise, preventing recursive stream-bridge close handling, packaging the compiled completion-evidence runtime guard, and pairing the desktop release with an Intent Broker replay fix for task-id-less approval/lifecycle events. The release gate covers focused KSwarm desktop tests, focused CLI completion-evidence/task-host tests, Intent Broker full tests, desktop build, live KSwarm/broker health checks, Computer Use live smoke, and the desktop `desktop-v1.4.6` release workflow.
 
 **v1.4.5** — Loop reliability release: adds the built-in KSwarm Service Health Loop, classifies service startup and health-check failures with structured diagnostics, records suggested actions and log paths for Settings, keeps repeated notifications quiet, and hardens local artifact evidence validation with workspace containment and symlink escape protection. The release gate covers desktop full tests, CLI sandbox full tests, desktop build/typecheck, structured intent/skill evals, Computer Use live smoke, and the desktop `desktop-v1.4.5` release tag workflow.
 
