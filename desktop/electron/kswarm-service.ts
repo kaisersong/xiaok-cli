@@ -11,7 +11,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { app } from 'electron';
@@ -134,16 +134,23 @@ export async function requestWithFallbackBaseUrls(options: {
 }
 
 export function resolveIntentBrokerRuntimeRoot(userDataPath: string): string {
-  return join(userDataPath, 'services', 'intent-broker');
+  return joinServicePath(userDataPath, 'services', 'intent-broker');
 }
 
 export function resolveKSwarmServiceLogRoot(userDataPath?: string): string {
-  if (userDataPath) return join(userDataPath, 'logs');
+  if (userDataPath) return joinServicePath(userDataPath, 'logs');
   try {
     return join(app.getPath('userData'), 'logs');
   } catch {
     return LEGACY_KSWARM_LOG_ROOT;
   }
+}
+
+function joinServicePath(basePath: string, ...segments: string[]): string {
+  if (basePath.startsWith('/') && !basePath.includes('\\')) {
+    return posix.join(basePath, ...segments);
+  }
+  return join(basePath, ...segments);
 }
 
 export function buildIntentBrokerServiceEnv(options: {
@@ -157,10 +164,10 @@ export function buildIntentBrokerServiceEnv(options: {
 
   if (repoRoot !== options.cwd) {
     env.INTENT_BROKER_REPO_ROOT ||= repoRoot;
-    env.INTENT_BROKER_CONFIG ||= join(repoRoot, 'intent-broker.config.json');
-    env.INTENT_BROKER_LOCAL_CONFIG ||= join(options.cwd, 'intent-broker.local.json');
-    env.INTENT_BROKER_DB ||= join(options.cwd, '.tmp', 'intent-broker.db');
-    env.INTENT_BROKER_HEARTBEAT_PATH ||= join(options.cwd, '.tmp', 'broker.heartbeat.json');
+    env.INTENT_BROKER_CONFIG ||= joinServicePath(repoRoot, 'intent-broker.config.json');
+    env.INTENT_BROKER_LOCAL_CONFIG ||= joinServicePath(options.cwd, 'intent-broker.local.json');
+    env.INTENT_BROKER_DB ||= joinServicePath(options.cwd, '.tmp', 'intent-broker.db');
+    env.INTENT_BROKER_HEARTBEAT_PATH ||= joinServicePath(options.cwd, '.tmp', 'broker.heartbeat.json');
   }
 
   return env;
