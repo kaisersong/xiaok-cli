@@ -16,6 +16,11 @@ import type {
 import type {
   CompletionOwnerKind,
 } from './completion-evidence-types.js';
+import {
+  createUserLoopTemplateRunner,
+  type UserLoopTaskPort,
+  type UserLoopTemplateRunner,
+} from './user-loop-template-runner.js';
 import type { KSwarmHealthDiagnosticInput } from './kswarm-service-diagnostics.js';
 import type {
   OverdueRecoveryContext,
@@ -59,6 +64,7 @@ export interface CreateLoopRunnerOptions {
   evidenceStore: CompletionEvidenceStore;
   scanner: LoopScanner;
   scanners?: Record<string, LoopScanner>;
+  userTemplateRunner?: UserLoopTemplateRunner;
   now?: () => number;
   staleAfterMs?: number;
 }
@@ -78,6 +84,14 @@ export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
       }
 
       const run = begin.run;
+      if (options.userTemplateRunner && options.loopStore.getUserLoopTemplate(loopId)) {
+        return options.userTemplateRunner.runTemplateLoop({
+          loopId,
+          runId: run.id,
+          trigger: effectiveTrigger,
+        });
+      }
+
       const stage = options.loopStore.startLoopStage(run.id, loopId, 'scan', startedAt, {
         trigger: effectiveTrigger,
       });
@@ -233,6 +247,9 @@ export interface CreateDesktopLoopRuntimeOptions {
   completionEvidenceDbPath?: string;
   kswarmHealthProbe?: () => KSwarmHealthDiagnosticInput | Promise<KSwarmHealthDiagnosticInput>;
   kswarmHealthLogPaths?: string[];
+  userLoopTaskPort?: UserLoopTaskPort;
+  userLoopPollIntervalMs?: number;
+  userLoopMaxRunMs?: number;
 }
 
 export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOptions): DesktopLoopRuntime {
@@ -249,6 +266,16 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
     probe: options.kswarmHealthProbe ?? defaultHealthyKSwarmHealthProbe,
     logPaths: options.kswarmHealthLogPaths,
   });
+  const userTemplateRunner = options.userLoopTaskPort
+    ? createUserLoopTemplateRunner({
+      loopStore,
+      evidenceStore,
+      taskPort: options.userLoopTaskPort,
+      now,
+      pollIntervalMs: options.userLoopPollIntervalMs,
+      maxRunMs: options.userLoopMaxRunMs,
+    })
+    : undefined;
   const runner = createLoopRunner({
     loopStore,
     evidenceStore,
@@ -256,6 +283,7 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
     scanners: {
       [KSWARM_SERVICE_HEALTH_LOOP_ID]: kswarmHealthScanner,
     },
+    userTemplateRunner,
     now,
     staleAfterMs,
   });

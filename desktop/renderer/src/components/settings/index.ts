@@ -20,6 +20,7 @@ export { ExtensionsSettings } from "./ExtensionsSettings";
 export { ModulesSettings } from "./ModulesSettings";
 export { DeveloperSettings } from "./DeveloperSettings";
 export { RunsSettings } from "./RunsSettings";
+export { LoopsSettings } from "./LoopsSettings";
 export { DesktopPromptInjectionSettings } from "./DesktopPromptInjectionSettings";
 export { VoiceSettings } from "./VoiceSettings";
 export { DesignTokensSettings } from "./DesignTokensSettings";

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -106,6 +106,102 @@ describe('desktop main loop executor wiring', () => {
         status: 'skip',
         error: expect.stringMatching(/^loop already running:/),
       });
+    } finally {
+      timedActionStore.close();
+      loopRuntime.close();
+    }
+  });
+
+  it('runs a scheduled user loop template through the desktop loop runtime', async () => {
+    let now = 1_000;
+    const taskInputs: Array<{ permissionMode?: string; prompt: string }> = [];
+    const loopRuntime = createDesktopLoopRuntime({
+      dataRoot: rootDir,
+      now: () => now,
+      staleAfterMs: 60_000,
+      userLoopTaskPort: {
+        async createTask(input) {
+          taskInputs.push({ permissionMode: input.permissionMode, prompt: input.prompt });
+          writeFileSync(join(rootDir, 'weekly-note.md'), '# Weekly\n');
+          return { taskId: 'task_user_loop' };
+        },
+        async recoverTask(taskId) {
+          return {
+            snapshot: {
+              taskId,
+              sessionId: 'session-user-loop',
+              status: 'completed',
+              prompt: 'prompt',
+              materials: [],
+              events: [],
+              result: { summary: 'done', artifacts: [] },
+              createdAt: 1_000,
+              updatedAt: 2_000,
+            },
+          };
+        },
+      },
+    });
+    const timedActionStore = new TimedActionStore(join(rootDir, 'timed-actions.sqlite'));
+    try {
+      const created = loopRuntime.loopStore.createUserLoopTemplate({
+        title: 'Weekly note',
+        description: '',
+        kind: 'markdown_file',
+        prompt: 'Summarize this week.',
+        outputDirectory: rootDir,
+        outputFileName: 'weekly-note.md',
+        now: 500,
+      });
+      loopRuntime.loopStore.setUserLoopAutoRunApproved(created.definition.id, true, 600);
+      timedActionStore.createAction({
+        id: 'user_loop_schedule',
+        title: 'Weekly note schedule',
+        trigger: { kind: 'once', at: 1_000 },
+        executor: {
+          kind: 'loop',
+          loopId: created.definition.id,
+        },
+        source: 'user',
+        nextDueAt: 1_000,
+        now: 500,
+      });
+
+      now = 1_500;
+      const scheduler = new TimedActionScheduler(timedActionStore, {
+        executors: {
+          loop: loopRuntime.executor,
+        },
+        now: () => now,
+      });
+      await scheduler.runOnce('normal_tick');
+
+      await expect.poll(() => taskInputs).toEqual([
+        expect.objectContaining({
+          permissionMode: 'default',
+          prompt: expect.stringContaining('weekly-note.md'),
+        }),
+      ]);
+      await expect.poll(() => timedActionStore.listRuns('user_loop_schedule')[0]).toMatchObject({
+        status: 'success',
+        decision: expect.objectContaining({
+          loopStatus: 'success',
+          loopRunId: expect.any(String),
+        }),
+      });
+      const [run] = loopRuntime.loopStore.listLoopRuns(created.definition.id, 10);
+      expect(run).toMatchObject({
+        status: 'success',
+        evidenceIds: [expect.any(String)],
+      });
+      expect(loopRuntime.evidenceStore.listEvidenceForOwner('loop_run', run.id)).toEqual([
+        expect.objectContaining({
+          kind: 'file_artifact',
+          metadata: expect.objectContaining({
+            localPaths: ['weekly-note.md'],
+          }),
+        }),
+      ]);
     } finally {
       timedActionStore.close();
       loopRuntime.close();

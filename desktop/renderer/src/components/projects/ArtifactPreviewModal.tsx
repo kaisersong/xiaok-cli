@@ -11,10 +11,12 @@ import { getDesktopApi } from '../../shared/desktop';
 
 interface ArtifactPreviewModalProps {
   artifact: KSwarmArtifact;
+  initialContent?: string;
+  disableDownload?: boolean;
   onClose(): void;
 }
 
-export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModalProps) {
+export function ArtifactPreviewModal({ artifact, initialContent, disableDownload = false, onClose }: ArtifactPreviewModalProps) {
   const { t } = useLocale();
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,6 +30,12 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
     setContent(null);
     setError(null);
     setLoading(true);
+
+    if (initialContent !== undefined) {
+      setContent(initialContent);
+      setLoading(false);
+      return;
+    }
 
     if (!isPreviewable) {
       setLoading(false);
@@ -63,9 +71,10 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
       }
     };
     loadContent();
-  }, [artifact, isPreviewable]);
+  }, [artifact, initialContent, isPreviewable]);
 
   const handleDownload = () => {
+    if (disableDownload) return;
     downloadArtifact(artifact);
   };
 
@@ -145,7 +154,9 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
             <p className="text-[10px] text-[var(--c-text-muted)]">{artifact.mimeType || t.projectsDeliverableUnknownType}</p>
           </div>
           <div className="flex items-center gap-1">
-            <button type="button" aria-label="Download artifact" onClick={handleDownload} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title="下载"><Download size={15} /></button>
+            {!disableDownload ? (
+              <button type="button" aria-label="Download artifact" onClick={handleDownload} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title="下载"><Download size={15} /></button>
+            ) : null}
             <button type="button" aria-label="Close artifact preview" onClick={onClose} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]"><X size={15} /></button>
           </div>
         </div>

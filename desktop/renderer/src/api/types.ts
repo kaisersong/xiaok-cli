@@ -190,6 +190,7 @@ export type MemoryErrorEvent = { id: string; message: string; timestamp: number;
 export interface Run { id: string; threadId: string; status: string; createdAt: number; completedAt?: number }
 
 export type LoopDefinitionStatus = 'active' | 'paused';
+export type LoopDefinitionOrigin = 'built_in' | 'user_template';
 export type LoopRunStatus = 'running' | 'success' | 'failed' | 'blocked';
 export type EvidenceAnomalyStatus = 'open' | 'resolved' | 'ignored';
 
@@ -198,9 +199,45 @@ export interface LoopDefinitionView {
   title: string;
   description: string;
   status: LoopDefinitionStatus;
+  origin?: LoopDefinitionOrigin;
   activeRunId?: string;
   createdAt: number;
   updatedAt: number;
+}
+
+export type UserLoopTemplateKind = 'markdown_file';
+
+export interface UserLoopTemplateView {
+  loopId: string;
+  title: string;
+  description: string;
+  status: LoopDefinitionStatus;
+  origin?: LoopDefinitionOrigin;
+  activeRunId?: string;
+  kind: UserLoopTemplateKind;
+  prompt: string;
+  outputDirectory: string;
+  outputFileName: string;
+  outputPath: string;
+  scheduleActionId?: string;
+  scheduleEnabled: boolean;
+  scheduleTrigger?: { kind: string; [key: string]: unknown };
+  autoRunApproved: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface UserLoopTemplateInput {
+  loopId?: string;
+  title: string;
+  description?: string;
+  kind: UserLoopTemplateKind;
+  prompt: string;
+  outputDirectory: string;
+  outputFileName: string;
+  scheduleEnabled?: boolean;
+  scheduleTrigger?: { kind: string; [key: string]: unknown };
+  autoRunApproved?: boolean;
 }
 
 export interface LoopRunView {

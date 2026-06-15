@@ -376,6 +376,265 @@ describe('LoopStore', () => {
       updatedAt: 62_000,
     });
   });
+
+  it('marks built-in loops with built_in origin without overwriting paused state', () => {
+    store.ensureBuiltInLoops(1_000);
+    store.setLoopStatus(ARTIFACT_LOOP_ID, 'paused', 1_500);
+
+    store.ensureBuiltInLoops(2_000);
+
+    expect(store.getLoopDefinition(ARTIFACT_LOOP_ID)).toMatchObject({
+      id: ARTIFACT_LOOP_ID,
+      origin: 'built_in',
+      status: 'paused',
+      updatedAt: 1_500,
+    });
+    expect(store.getLoopDefinition(KSWARM_HEALTH_LOOP_ID)).toMatchObject({
+      id: KSWARM_HEALTH_LOOP_ID,
+      origin: 'built_in',
+      status: 'active',
+    });
+  });
+
+  it('migrates legacy loop definition rows that do not have origin', () => {
+    store.close();
+    const legacyDbPath = join(rootDir, 'legacy-loops.sqlite');
+    const legacyDb = new DatabaseSync(legacyDbPath);
+    legacyDb.exec(`
+      create table loop_definitions (
+        id text primary key,
+        title text not null,
+        description text not null,
+        status text not null,
+        active_run_id text,
+        created_at integer not null,
+        updated_at integer not null
+      );
+      create table loop_runs (
+        id text primary key,
+        loop_id text not null,
+        status text not null,
+        trigger_json text not null,
+        evidence_ids_json text not null,
+        started_at integer not null,
+        finished_at integer,
+        updated_at integer not null,
+        failure_kind text,
+        message text,
+        summary text,
+        next_action_kind text,
+        next_action_summary text
+      );
+      create table loop_stages (
+        id text primary key,
+        run_id text not null,
+        loop_id text not null,
+        stage_kind text not null,
+        status text not null,
+        started_at integer,
+        finished_at integer,
+        evidence_ids_json text not null default '[]',
+        summary text,
+        failure_kind text,
+        message text,
+        metadata_json text not null default '{}',
+        created_at integer not null,
+        updated_at integer not null
+      );
+    `);
+    legacyDb.prepare(`
+      insert into loop_definitions (
+        id, title, description, status, active_run_id, created_at, updated_at
+      ) values (
+        'legacy-loop', 'Legacy', 'Old loop', 'active', null, 1, 1
+      )
+    `).run();
+    legacyDb.close();
+
+    store = new LoopStore(legacyDbPath);
+
+    expect(store.getLoopDefinition('legacy-loop')).toMatchObject({
+      id: 'legacy-loop',
+      origin: 'built_in',
+    });
+  });
+
+  it('creates, updates, lists, and deletes markdown user loop templates', () => {
+    store.ensureBuiltInLoops(1_000);
+
+    const created = store.createUserLoopTemplate({
+      title: 'Weekly note',
+      description: 'Write a weekly note',
+      kind: 'markdown_file',
+      prompt: 'Summarize this week.',
+      outputDirectory: rootDir,
+      outputFileName: 'weekly-note.md',
+      now: 2_000,
+    });
+
+    expect(created.definition).toMatchObject({
+      id: expect.stringMatching(/^user-loop-/),
+      title: 'Weekly note',
+      description: 'Write a weekly note',
+      status: 'active',
+      origin: 'user_template',
+      activeRunId: undefined,
+      createdAt: 2_000,
+      updatedAt: 2_000,
+    });
+    expect(created.template).toMatchObject({
+      loopId: created.definition.id,
+      kind: 'markdown_file',
+      prompt: 'Summarize this week.',
+      outputDirectory: rootDir,
+      outputFileName: 'weekly-note.md',
+      scheduleEnabled: false,
+      autoRunApproved: false,
+      createdAt: 2_000,
+      updatedAt: 2_000,
+    });
+
+    expect(store.listUserLoopTemplates()).toEqual([
+      expect.objectContaining({
+        definition: expect.objectContaining({ id: created.definition.id }),
+        template: expect.objectContaining({ loopId: created.definition.id }),
+      }),
+    ]);
+
+    const updated = store.updateUserLoopTemplate({
+      loopId: created.definition.id,
+      title: 'Daily note',
+      description: 'Write a daily note',
+      kind: 'markdown_file',
+      prompt: 'Summarize today.',
+      outputDirectory: rootDir,
+      outputFileName: 'daily-note.md',
+      now: 3_000,
+    });
+
+    expect(updated).toMatchObject({
+      definition: {
+        id: created.definition.id,
+        title: 'Daily note',
+        description: 'Write a daily note',
+        origin: 'user_template',
+        updatedAt: 3_000,
+      },
+      template: {
+        loopId: created.definition.id,
+        prompt: 'Summarize today.',
+        outputFileName: 'daily-note.md',
+        updatedAt: 3_000,
+      },
+    });
+
+    expect(store.setUserLoopAutoRunApproved(created.definition.id, true, 3_500)).toMatchObject({
+      autoRunApproved: true,
+      updatedAt: 3_500,
+    });
+
+    expect(store.deleteUserLoopTemplate(created.definition.id, 4_000)).toEqual({ ok: true });
+    expect(store.getLoopDefinition(created.definition.id)).toBeUndefined();
+    expect(store.getUserLoopTemplate(created.definition.id)).toBeUndefined();
+  });
+
+  it('preserves user loop schedule metadata across content edits and clears it when disabled', () => {
+    const created = store.createUserLoopTemplate({
+      title: 'Weekly note',
+      description: 'Write a weekly note',
+      kind: 'markdown_file',
+      prompt: 'Summarize this week.',
+      outputDirectory: rootDir,
+      outputFileName: 'weekly-note.md',
+      now: 1_000,
+    });
+
+    expect(store.setUserLoopScheduleBinding(created.definition.id, {
+      scheduleEnabled: true,
+      scheduleActionId: 'timed-action-1',
+      scheduleTrigger: { kind: 'daily', hour: 6, minute: 3 },
+      now: 1_500,
+    })).toMatchObject({
+      scheduleEnabled: true,
+      scheduleActionId: 'timed-action-1',
+      scheduleTrigger: { kind: 'daily', hour: 6, minute: 3 },
+    });
+    expect(store.setUserLoopAutoRunApproved(created.definition.id, true, 1_600)).toMatchObject({
+      autoRunApproved: true,
+    });
+
+    const updated = store.updateUserLoopTemplate({
+      loopId: created.definition.id,
+      title: 'Weekly digest',
+      description: 'Write a digest',
+      kind: 'markdown_file',
+      prompt: 'Summarize this week as a digest.',
+      outputDirectory: rootDir,
+      outputFileName: 'weekly-digest.md',
+      now: 2_000,
+    });
+
+    expect(updated?.template).toMatchObject({
+      scheduleEnabled: true,
+      scheduleActionId: 'timed-action-1',
+      scheduleTrigger: { kind: 'daily', hour: 6, minute: 3 },
+      autoRunApproved: true,
+    });
+
+    expect(store.setUserLoopScheduleBinding(created.definition.id, {
+      scheduleEnabled: false,
+      now: 2_500,
+    })).toMatchObject({
+      scheduleEnabled: false,
+      scheduleActionId: undefined,
+      scheduleTrigger: undefined,
+      autoRunApproved: true,
+    });
+  });
+
+  it('rejects invalid user loop template output paths and file names', () => {
+    for (const outputFileName of ['', '.', '..', '../x.md', 'a/b.md', 'a\\b.md']) {
+      expect(() => store.createUserLoopTemplate({
+        title: 'Bad',
+        description: '',
+        kind: 'markdown_file',
+        prompt: 'Write',
+        outputDirectory: rootDir,
+        outputFileName,
+        now: 1_000,
+      })).toThrow(/outputFileName/);
+    }
+
+    expect(() => store.createUserLoopTemplate({
+      title: 'Bad',
+      description: '',
+      kind: 'markdown_file',
+      prompt: 'Write',
+      outputDirectory: 'relative/path',
+      outputFileName: 'ok.md',
+      now: 1_000,
+    })).toThrow(/outputDirectory/);
+  });
+
+  it('refuses to delete a user loop template while a run is active', () => {
+    const created = store.createUserLoopTemplate({
+      title: 'Active',
+      description: '',
+      kind: 'markdown_file',
+      prompt: 'Write',
+      outputDirectory: rootDir,
+      outputFileName: 'active.md',
+      now: 1_000,
+    });
+    const run = store.beginLoopRun(created.definition.id, { kind: 'manual' }, 2_000, 60_000);
+    expect(run.status).toBe('started');
+
+    expect(store.deleteUserLoopTemplate(created.definition.id, 2_500)).toEqual({
+      ok: false,
+      reason: 'loop_running',
+    });
+    expect(store.getUserLoopTemplate(created.definition.id)).toBeDefined();
+  });
 });
 
 function expectStarted(result: ReturnType<LoopStore['beginLoopRun']>) {

@@ -103,6 +103,19 @@ afterEach(() => {
 });
 
 describe('Sidebar update reminder', () => {
+  it('keeps top navigation aligned with the titlebar controls', async () => {
+    renderSidebar({
+      checking: false,
+      available: false,
+      downloading: false,
+      downloaded: false,
+      progress: 0,
+    });
+
+    expect(await screen.findByRole('button', { name: '新建任务' })).toBeInTheDocument();
+    expect(document.querySelector('aside')).toHaveStyle({ paddingTop: '2px' });
+  });
+
   it('opens a popover with a version comparison when the reminder is clicked', async () => {
     renderSidebar({
       checking: false,

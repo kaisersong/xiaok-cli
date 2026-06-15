@@ -61,6 +61,22 @@ export interface UpdateScheduledTaskInput {
   nextDueAt?: number;
 }
 
+export interface CreateLoopScheduleInput {
+  id?: string;
+  loopId: string;
+  title: string;
+  description?: string;
+  trigger: TimedActionTrigger;
+  policy?: TimedActionPolicy;
+  userApprovedAuto?: boolean;
+  now?: number;
+  nextDueAt?: number;
+}
+
+export interface UpdateLoopScheduleInput extends CreateLoopScheduleInput {
+  id: string;
+}
+
 export interface TimedActionServiceOptions {
   now?: () => number;
 }
@@ -165,6 +181,49 @@ export class TimedActionService {
       return this.store.deleteAction(id);
     }
     return this.store.cancelAction(id, reason ?? 'scheduled task cancelled', this.now());
+  }
+
+  createLoopSchedule(input: CreateLoopScheduleInput): TimedActionRecord {
+    const now = input.now ?? this.now();
+    return this.store.createAction({
+      id: input.id,
+      title: input.title,
+      description: input.description ?? '',
+      trigger: input.trigger,
+      executor: { kind: 'loop', loopId: input.loopId },
+      policy: {
+        maxConsecutiveFailures: 3,
+        ...(input.policy ?? {}),
+      },
+      source: 'user',
+      now,
+      nextDueAt: input.nextDueAt,
+      userApprovedAuto: input.userApprovedAuto ?? false,
+    });
+  }
+
+  updateLoopSchedule(input: UpdateLoopScheduleInput): TimedActionRecord | undefined {
+    const current = this.store.getAction(input.id);
+    if (!current || current.executor.kind !== 'loop') return undefined;
+    const now = input.now ?? this.now();
+    return this.store.updateActionDefinition(input.id, {
+      title: input.title,
+      description: input.description ?? current.description ?? '',
+      trigger: input.trigger,
+      executor: { kind: 'loop', loopId: input.loopId },
+      policy: {
+        maxConsecutiveFailures: 3,
+        ...(input.policy ?? current.policy ?? {}),
+      },
+      nextDueAt: input.nextDueAt,
+      now,
+    });
+  }
+
+  cancelLoopSchedule(id: string, reason?: string): boolean {
+    const action = this.store.getAction(id);
+    if (!action || action.executor.kind !== 'loop') return false;
+    return this.store.cancelAction(id, reason ?? 'loop schedule cancelled', this.now());
   }
 
   getActions(): TimedActionRecord[] {

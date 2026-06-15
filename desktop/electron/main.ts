@@ -139,6 +139,10 @@ async function createWindow(): Promise<BrowserWindow> {
     dataRoot,
     kswarmService,
   });
+  // Unified timed action daemon: notification reminders, scheduled AI tasks, and scheduled loops share one scheduler.
+  const timedActionStore = new TimedActionStore(join(dataRoot, 'timed-actions.sqlite'));
+  const timedActionService = new TimedActionService(timedActionStore);
+  services.registerTimedActionService(timedActionService);
   const loopRuntime = createDesktopLoopRuntime({
     dataRoot,
     kswarmHealthProbe: () => kswarmService.getHealthDiagnosticInput(),
@@ -146,9 +150,13 @@ async function createWindow(): Promise<BrowserWindow> {
       join(resolveKSwarmServiceLogRoot(app.getPath('userData')), 'server.log'),
       join(resolveKSwarmServiceLogRoot(app.getPath('userData')), 'broker.log'),
     ],
+    userLoopTaskPort: {
+      createTask: (input) => services.createTask(input),
+      recoverTask: (taskId) => services.recoverTask(taskId),
+    },
   });
 
-  await registerDesktopIpc(ipcMain, window, services, { loopRuntime });
+  await registerDesktopIpc(ipcMain, window, services, { loopRuntime, timedActionService });
   debugMain('createWindow:ipc-registered');
 
   try {
@@ -186,11 +194,6 @@ async function createWindow(): Promise<BrowserWindow> {
       throw e;
     }
   });
-
-  // Unified timed action daemon: notification reminders and automatic AI tasks share one scheduler.
-  const timedActionStore = new TimedActionStore(join(dataRoot, 'timed-actions.sqlite'));
-  const timedActionService = new TimedActionService(timedActionStore);
-  services.registerTimedActionService(timedActionService);
 
   // Register channel tools with AI runner (for sending messages to yunzhijia, discord, etc.)
   services.registerChannelTools();

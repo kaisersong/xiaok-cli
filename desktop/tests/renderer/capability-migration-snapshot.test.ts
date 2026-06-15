@@ -32,8 +32,13 @@ describe('preload API surface snapshot (Stage 5.5)', () => {
     expect(keys).toContain('readFileContent');
   });
 
+  it('includes semantic local output artifact actions', () => {
+    expect(keys).toContain('openLocalPath');
+    expect(keys).toContain('readLocalArtifactPreview');
+  });
+
   it('tracks the current legacy flat key count for regression', () => {
-    expect(keys.length).toMatchInlineSnapshot(`144`);
+    expect(keys.length).toMatchInlineSnapshot(`155`);
   });
 
   it('showSaveDialog currently passes input directly (pre-capabilityToken)', () => {

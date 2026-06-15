@@ -1,20 +1,105 @@
 import { clipboard, dialog, shell, type BrowserWindow, type IpcMain } from 'electron';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
-import { join } from 'node:path';
+import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
 import type { DesktopLoopRuntime } from './loop-executor.js';
+import type { TimedActionService } from './timed-action-service.js';
+import type { TimedActionTrigger } from './timed-action-types.js';
 
 type DesktopServices = ReturnType<typeof createDesktopServices>;
 
 interface RegisterDesktopIpcOptions {
   loopRuntime?: Pick<DesktopLoopRuntime, 'loopStore' | 'scanner' | 'runner' | 'listAnomalies'>;
+  timedActionService?: Pick<TimedActionService,
+    'createLoopSchedule' |
+    'updateLoopSchedule' |
+    'cancelLoopSchedule' |
+    'approveAuto' |
+    'revokeAuto'
+  >;
 }
 
 function log(level: string, msg: string, ...args: unknown[]) {
   const ts = new Date().toISOString();
   const payload = args.length ? ' ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') : '';
   console.log(`[${ts}] [${level}] [ipc] ${msg}${payload}`);
+}
+
+const LOCAL_ARTIFACT_PREVIEW_MAX_BYTES = 512 * 1024;
+
+const LOCAL_ARTIFACT_MIME_TYPES: Record<string, string> = {
+  '.css': 'text/css',
+  '.csv': 'text/csv',
+  '.htm': 'text/html',
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.json': 'application/json',
+  '.jsx': 'text/javascript',
+  '.log': 'text/plain',
+  '.md': 'text/markdown',
+  '.markdown': 'text/markdown',
+  '.mjs': 'text/javascript',
+  '.svg': 'image/svg+xml',
+  '.ts': 'text/typescript',
+  '.tsx': 'text/typescript',
+  '.txt': 'text/plain',
+  '.xml': 'application/xml',
+  '.yaml': 'application/yaml',
+  '.yml': 'application/yaml',
+};
+
+function normalizeAbsoluteLocalPath(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error('invalid_path');
+  }
+  const filePath = value.trim();
+  if (!isAbsolute(filePath)) {
+    throw new Error('path_must_be_absolute');
+  }
+  return resolve(filePath);
+}
+
+function mimeTypeForLocalArtifact(filePath: string): string | null {
+  return LOCAL_ARTIFACT_MIME_TYPES[extname(filePath).toLowerCase()] ?? null;
+}
+
+async function readLocalArtifactPreview(filePathInput: unknown) {
+  const filePath = normalizeAbsoluteLocalPath(filePathInput);
+  const mimeType = mimeTypeForLocalArtifact(filePath);
+  if (!mimeType) {
+    throw new Error('unsupported_file_type');
+  }
+  const fileStat = await stat(filePath);
+  if (!fileStat.isFile()) {
+    throw new Error('not_a_file');
+  }
+
+  const bytesToRead = Math.min(fileStat.size, LOCAL_ARTIFACT_PREVIEW_MAX_BYTES);
+  let content = '';
+  if (bytesToRead > 0) {
+    const handle = await open(filePath, 'r');
+    try {
+      const buffer = Buffer.alloc(bytesToRead);
+      const { bytesRead } = await handle.read(buffer, 0, bytesToRead, 0);
+      content = buffer.subarray(0, bytesRead).toString('utf8');
+    } finally {
+      await handle.close();
+    }
+  }
+  if (content.includes('\u0000')) {
+    throw new Error('unsupported_binary_file');
+  }
+
+  return {
+    path: filePath,
+    fileName: basename(filePath),
+    mimeType,
+    sizeBytes: fileStat.size,
+    modifiedAt: fileStat.mtimeMs,
+    content,
+    truncated: fileStat.size > LOCAL_ARTIFACT_PREVIEW_MAX_BYTES,
+  };
 }
 
 export async function registerDesktopIpc(
@@ -167,6 +252,27 @@ export async function registerDesktopIpc(
       return { content: '', error: String(e) };
     }
   });
+  ipcMain.handle('desktop:openLocalPath', async (_event, input) => {
+    try {
+      const filePath = normalizeAbsoluteLocalPath(input?.filePath);
+      log('info', 'openLocalPath', { filePath });
+      const error = await shell.openPath(filePath);
+      if (error) {
+        log('warn', 'openLocalPath failed', { filePath, error });
+        return { ok: false, error };
+      }
+      return { ok: true };
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      log('warn', 'openLocalPath rejected', { error });
+      return { ok: false, error };
+    }
+  });
+  ipcMain.handle('desktop:readLocalArtifactPreview', async (_event, input) => {
+    const filePath = input?.filePath as string;
+    log('info', 'readLocalArtifactPreview', { filePath });
+    return readLocalArtifactPreview(filePath);
+  });
   const activeTaskSubs = new Map<string, AbortController>();
   ipcMain.handle('desktop:subscribeTask', async (_event, input) => {
     const taskId = input.taskId as string;
@@ -301,6 +407,75 @@ export async function registerDesktopIpc(
   ipcMain.handle('desktop:loops:runNow', (_event, loopId) => {
     const loopRuntime = getLoopRuntime(options);
     return loopRuntime.runner.runLoopNow(readLoopId(loopId));
+  });
+  ipcMain.handle('desktop:loops:listUserTemplates', () => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.loopStore.listUserLoopTemplates().map(userLoopTemplateView);
+  });
+  ipcMain.handle('desktop:loops:createUserTemplate', (_event, input) => {
+    const loopRuntime = getLoopRuntime(options);
+    const normalized = readUserLoopTemplateInput(input);
+    const created = loopRuntime.loopStore.createUserLoopTemplate(normalized);
+    const withSchedule = bindUserLoopSchedule({
+      loopRuntime,
+      timedActionService: options.timedActionService,
+      loopId: created.definition.id,
+      title: normalized.title,
+      description: normalized.description,
+      scheduleEnabled: normalized.scheduleEnabled ?? false,
+      scheduleTrigger: normalized.scheduleTrigger,
+      scheduleActionId: created.template.scheduleActionId,
+      autoRunApproved: created.template.autoRunApproved,
+    });
+    return userLoopTemplateView({
+      definition: created.definition,
+      template: withSchedule ?? created.template,
+    });
+  });
+  ipcMain.handle('desktop:loops:updateUserTemplate', (_event, input) => {
+    const loopRuntime = getLoopRuntime(options);
+    const normalized = readUserLoopTemplateInput(input, { requireLoopId: true });
+    const existing = loopRuntime.loopStore.getUserLoopTemplate(normalized.loopId);
+    const updated = loopRuntime.loopStore.updateUserLoopTemplate(normalized);
+    if (!updated) return null;
+    const withSchedule = bindUserLoopSchedule({
+      loopRuntime,
+      timedActionService: options.timedActionService,
+      loopId: updated.definition.id,
+      title: normalized.title,
+      description: normalized.description,
+      scheduleEnabled: updated.template.scheduleEnabled,
+      scheduleTrigger: normalized.scheduleTrigger ?? readStoredScheduleTrigger(updated.template.scheduleTrigger),
+      scheduleActionId: existing?.scheduleActionId,
+      autoRunApproved: updated.template.autoRunApproved,
+    });
+    return userLoopTemplateView({
+      definition: updated.definition,
+      template: withSchedule ?? updated.template,
+    });
+  });
+  ipcMain.handle('desktop:loops:deleteUserTemplate', (_event, loopId) => {
+    const loopRuntime = getLoopRuntime(options);
+    const id = readLoopId(loopId);
+    const existing = loopRuntime.loopStore.getUserLoopTemplate(id);
+    const result = loopRuntime.loopStore.deleteUserLoopTemplate(id, Date.now());
+    if (result.ok && existing?.scheduleActionId) {
+      options.timedActionService?.cancelLoopSchedule(existing.scheduleActionId, 'user loop template deleted');
+    }
+    return result;
+  });
+  ipcMain.handle('desktop:loops:setUserTemplateAutoRunApproved', (_event, input) => {
+    const loopRuntime = getLoopRuntime(options);
+    const loopId = readLoopId(input?.loopId);
+    const approved = Boolean(input?.approved);
+    const template = loopRuntime.loopStore.setUserLoopAutoRunApproved(loopId, approved, Date.now());
+    if (!template) return null;
+    if (template.scheduleActionId) {
+      if (approved) options.timedActionService?.approveAuto(template.scheduleActionId);
+      else options.timedActionService?.revokeAuto(template.scheduleActionId);
+    }
+    const definition = loopRuntime.loopStore.getLoopDefinition(loopId);
+    return definition ? userLoopTemplateView({ definition, template }) : null;
   });
 
   // ---- Memory ----
@@ -546,6 +721,182 @@ function readLoopId(input: unknown): string {
     throw new Error('loopId must be a non-empty string');
   }
   return input;
+}
+
+interface NormalizedUserLoopTemplateIpcInput {
+  loopId: string;
+  title: string;
+  description: string;
+  kind: 'markdown_file';
+  prompt: string;
+  outputDirectory: string;
+  outputFileName: string;
+  scheduleEnabled?: boolean;
+  scheduleTrigger?: TimedActionTrigger;
+  scheduleActionId?: string;
+  autoRunApproved?: boolean;
+}
+
+function readUserLoopTemplateInput(input: unknown, options: { requireLoopId?: boolean } = {}): NormalizedUserLoopTemplateIpcInput {
+  if (!isRecord(input)) throw new Error('user loop template input must be an object');
+  const loopId = options.requireLoopId ? readLoopId(input.loopId) : String(input.loopId ?? '');
+  const title = readNonEmptyString(input.title, 'title');
+  const kind = input.kind === 'markdown_file' ? input.kind : undefined;
+  if (!kind) throw new Error('kind must be markdown_file');
+  const prompt = readNonEmptyString(input.prompt, 'prompt');
+  const outputDirectory = readNonEmptyString(input.outputDirectory, 'outputDirectory');
+  const outputFileName = readNonEmptyString(input.outputFileName, 'outputFileName');
+  const scheduleTrigger = input.scheduleTrigger === undefined ? undefined : readScheduleTrigger(input.scheduleTrigger);
+  return {
+    loopId,
+    title,
+    description: typeof input.description === 'string' ? input.description : '',
+    kind,
+    prompt,
+    outputDirectory,
+    outputFileName,
+    scheduleEnabled: typeof input.scheduleEnabled === 'boolean' ? input.scheduleEnabled : undefined,
+    scheduleTrigger,
+    scheduleActionId: typeof input.scheduleActionId === 'string' ? input.scheduleActionId : undefined,
+    autoRunApproved: typeof input.autoRunApproved === 'boolean' ? input.autoRunApproved : undefined,
+  };
+}
+
+function bindUserLoopSchedule(input: {
+  loopRuntime: NonNullable<RegisterDesktopIpcOptions['loopRuntime']>;
+  timedActionService?: RegisterDesktopIpcOptions['timedActionService'];
+  loopId: string;
+  title: string;
+  description: string;
+  scheduleEnabled: boolean;
+  scheduleTrigger?: TimedActionTrigger;
+  scheduleActionId?: string;
+  autoRunApproved?: boolean;
+}) {
+  if (!input.timedActionService) return undefined;
+  if (!input.scheduleEnabled || !input.scheduleTrigger) {
+    if (input.scheduleActionId) {
+      input.timedActionService.cancelLoopSchedule(input.scheduleActionId, 'user loop schedule disabled');
+    }
+    return input.loopRuntime.loopStore.setUserLoopScheduleBinding(input.loopId, {
+      scheduleEnabled: false,
+      now: Date.now(),
+    });
+  }
+  const action = input.scheduleActionId
+    ? input.timedActionService.updateLoopSchedule({
+      id: input.scheduleActionId,
+      loopId: input.loopId,
+      title: input.title,
+      description: input.description,
+      trigger: input.scheduleTrigger,
+      userApprovedAuto: input.autoRunApproved ?? false,
+    })
+    : input.timedActionService.createLoopSchedule({
+      loopId: input.loopId,
+      title: input.title,
+      description: input.description,
+      trigger: input.scheduleTrigger,
+      userApprovedAuto: input.autoRunApproved ?? false,
+    });
+  if (!action) return undefined;
+  return input.loopRuntime.loopStore.setUserLoopScheduleBinding(input.loopId, {
+    scheduleEnabled: true,
+    scheduleActionId: action.id,
+    scheduleTrigger: input.scheduleTrigger,
+    now: Date.now(),
+  });
+}
+
+function userLoopTemplateView(item: {
+  definition: {
+    id: string;
+    title: string;
+    description: string;
+    status: string;
+    origin?: string;
+    activeRunId?: string;
+    createdAt: number;
+    updatedAt: number;
+  };
+  template: {
+    loopId: string;
+    kind: string;
+    prompt: string;
+    outputDirectory: string;
+    outputFileName: string;
+    scheduleActionId?: string;
+    scheduleEnabled: boolean;
+    scheduleTrigger?: Record<string, unknown>;
+    autoRunApproved: boolean;
+    createdAt: number;
+    updatedAt: number;
+  };
+}) {
+  return {
+    loopId: item.definition.id,
+    title: item.definition.title,
+    description: item.definition.description,
+    status: item.definition.status,
+    origin: item.definition.origin,
+    activeRunId: item.definition.activeRunId,
+    kind: item.template.kind,
+    prompt: item.template.prompt,
+    outputDirectory: item.template.outputDirectory,
+    outputFileName: item.template.outputFileName,
+    outputPath: resolve(item.template.outputDirectory, item.template.outputFileName),
+    scheduleActionId: item.template.scheduleActionId,
+    scheduleEnabled: item.template.scheduleEnabled,
+    scheduleTrigger: item.template.scheduleTrigger,
+    autoRunApproved: item.template.autoRunApproved,
+    createdAt: item.definition.createdAt,
+    updatedAt: Math.max(item.definition.updatedAt, item.template.updatedAt),
+  };
+}
+
+function readScheduleTrigger(input: unknown): TimedActionTrigger {
+  if (!isRecord(input)) throw new Error('scheduleTrigger must be an object');
+  if (input.kind === 'interval') {
+    const intervalMinutes = Number(input.intervalMinutes);
+    if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) throw new Error('intervalMinutes must be positive');
+    return { kind: 'interval', intervalMinutes };
+  }
+  if (input.kind === 'daily' || input.kind === 'weekdays') {
+    const hour = Number(input.hour);
+    const minute = Number(input.minute);
+    if (!isHour(hour) || !isMinute(minute)) throw new Error('schedule hour/minute are invalid');
+    return { kind: input.kind, hour, minute };
+  }
+  if (input.kind === 'weekly') {
+    const dayOfWeek = Number(input.dayOfWeek);
+    const hour = Number(input.hour);
+    const minute = Number(input.minute);
+    if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) throw new Error('dayOfWeek must be 0-6');
+    if (!isHour(hour) || !isMinute(minute)) throw new Error('schedule hour/minute are invalid');
+    return { kind: 'weekly', dayOfWeek, hour, minute };
+  }
+  throw new Error('scheduleTrigger kind must be interval, daily, weekdays, or weekly');
+}
+
+function readStoredScheduleTrigger(input: Record<string, unknown> | undefined): TimedActionTrigger | undefined {
+  return input ? readScheduleTrigger(input) : undefined;
+}
+
+function readNonEmptyString(input: unknown, name: string): string {
+  if (typeof input !== 'string' || input.trim().length === 0) throw new Error(`${name} must be a non-empty string`);
+  return input;
+}
+
+function isHour(value: number): boolean {
+  return Number.isInteger(value) && value >= 0 && value <= 23;
+}
+
+function isMinute(value: number): boolean {
+  return Number.isInteger(value) && value >= 0 && value <= 59;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
 }
 
 async function expandSelectedMaterialPaths(paths: string[]): Promise<string[]> {

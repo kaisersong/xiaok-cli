@@ -5,12 +5,16 @@ export const BUILT_IN_LOOP_IDS = {
 
 export type BuiltInLoopId = typeof BUILT_IN_LOOP_IDS[keyof typeof BUILT_IN_LOOP_IDS];
 
+export type LoopDefinitionOrigin = 'built_in' | 'user_template';
+
 export type LoopDefinitionStatus = 'active' | 'paused';
 
 export type LoopRunStatus = 'running' | 'success' | 'failed' | 'blocked';
 
 export type LoopStageStatus = 'pending' | 'running' | 'success' | 'failed' | 'blocked' | 'skipped';
-export type LoopStageKind = 'scan';
+export type LoopStageKind = 'scan' | 'execute' | 'verify';
+
+export type UserLoopTemplateKind = 'markdown_file';
 
 export type LoopRunFailureKind =
   | 'executor_crash'
@@ -30,9 +34,42 @@ export interface LoopDefinition {
   title: string;
   description: string;
   status: LoopDefinitionStatus;
+  origin: LoopDefinitionOrigin;
   activeRunId?: string;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface UserLoopTemplate {
+  loopId: string;
+  kind: UserLoopTemplateKind;
+  prompt: string;
+  outputDirectory: string;
+  outputFileName: string;
+  scheduleActionId?: string;
+  scheduleEnabled: boolean;
+  scheduleTrigger?: Record<string, unknown>;
+  autoRunApproved: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateUserLoopTemplateInput {
+  title: string;
+  description?: string;
+  kind: UserLoopTemplateKind;
+  prompt: string;
+  outputDirectory: string;
+  outputFileName: string;
+  scheduleActionId?: string;
+  scheduleEnabled?: boolean;
+  scheduleTrigger?: Record<string, unknown>;
+  autoRunApproved?: boolean;
+  now?: number;
+}
+
+export interface UpdateUserLoopTemplateInput extends CreateUserLoopTemplateInput {
+  loopId: string;
 }
 
 export interface LoopRun {

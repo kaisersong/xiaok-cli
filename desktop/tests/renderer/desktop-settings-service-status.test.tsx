@@ -11,6 +11,13 @@ const mocks = vi.hoisted(() => ({
   getLoopRuns: vi.fn(),
   getEvidenceAnomalies: vi.fn(),
   runLoopNow: vi.fn(),
+  listUserLoopTemplates: vi.fn(),
+  createUserLoopTemplate: vi.fn(),
+  updateUserLoopTemplate: vi.fn(),
+  deleteUserLoopTemplate: vi.fn(),
+  setUserLoopAutoRunApproved: vi.fn(),
+  openLocalPath: vi.fn(),
+  readLocalArtifactPreview: vi.fn(),
   getAccountSettings: vi.fn(),
   updateAccountSettings: vi.fn(),
 }));
@@ -27,6 +34,13 @@ vi.mock('../../renderer/src/api/bridge', () => ({
     getLoopRuns: mocks.getLoopRuns,
     getEvidenceAnomalies: mocks.getEvidenceAnomalies,
     runLoopNow: mocks.runLoopNow,
+    listUserLoopTemplates: mocks.listUserLoopTemplates,
+    createUserLoopTemplate: mocks.createUserLoopTemplate,
+    updateUserLoopTemplate: mocks.updateUserLoopTemplate,
+    deleteUserLoopTemplate: mocks.deleteUserLoopTemplate,
+    setUserLoopAutoRunApproved: mocks.setUserLoopAutoRunApproved,
+    openLocalPath: mocks.openLocalPath,
+    readLocalArtifactPreview: mocks.readLocalArtifactPreview,
     getAccountSettings: mocks.getAccountSettings,
     updateAccountSettings: mocks.updateAccountSettings,
   },
@@ -34,6 +48,8 @@ vi.mock('../../renderer/src/api/bridge', () => ({
 
 describe('DesktopSettings service status', () => {
   beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem('xiaok:locale', 'zh');
     (globalThis as Record<string, unknown>).__APP_VERSION__ = 'test-version';
     (globalThis as Record<string, unknown>).__APP_BUILD__ = 'test-build';
     Object.defineProperty(globalThis.navigator, 'clipboard', {
@@ -81,6 +97,23 @@ describe('DesktopSettings service status', () => {
       ],
     });
     mocks.restartRelatedService.mockResolvedValue(undefined);
+    mocks.listUserLoopTemplates.mockResolvedValue([]);
+    mocks.createUserLoopTemplate.mockResolvedValue({});
+    mocks.updateUserLoopTemplate.mockResolvedValue({});
+    mocks.deleteUserLoopTemplate.mockResolvedValue({ ok: true });
+    mocks.setUserLoopAutoRunApproved.mockResolvedValue({});
+    mocks.openLocalPath.mockReset();
+    mocks.openLocalPath.mockResolvedValue({ ok: true });
+    mocks.readLocalArtifactPreview.mockReset();
+    mocks.readLocalArtifactPreview.mockResolvedValue({
+      path: '/tmp/xiaok-loop/weekly-note.md',
+      fileName: 'weekly-note.md',
+      mimeType: 'text/markdown',
+      sizeBytes: 31,
+      modifiedAt: 1_000,
+      content: '# Weekly note\n\nLoop output body',
+      truncated: false,
+    });
     mocks.getLoopDefinitions.mockResolvedValue([
       {
         id: 'artifact-evidence-regression',
@@ -161,8 +194,8 @@ describe('DesktopSettings service status', () => {
     expect(screen.getByText('KSwarm')).toBeInTheDocument();
     expect(screen.getByText('Intent Broker')).toBeInTheDocument();
     expect(screen.getByText('Runtime Bridge')).toBeInTheDocument();
-    await screen.findByText('Loop 诊断');
-    expect(screen.getByText('Artifact Evidence Regression')).toBeInTheDocument();
+    expect(screen.queryByText('Loop 诊断')).not.toBeInTheDocument();
+    expect(mocks.getLoopDefinitions).not.toHaveBeenCalled();
     expect(screen.getAllByText('运行中').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('不可用')).toBeInTheDocument();
     expect(screen.getByText(/connection refused/)).toBeInTheDocument();
@@ -177,12 +210,14 @@ describe('DesktopSettings service status', () => {
     });
   });
 
-  it('can trigger the built-in loop from the visible settings page', async () => {
+  it('shows and can trigger built-in loop diagnostics from the loops settings page', async () => {
     render(
       <LocaleProvider>
         <DesktopSettings onClose={() => {}} />
       </LocaleProvider>,
     );
+
+    fireEvent.click(screen.getByRole('button', { name: '循环' }));
 
     await screen.findByText('Artifact Evidence Regression');
     expect(screen.getByText('Loop 诊断')).toBeInTheDocument();
@@ -204,6 +239,8 @@ describe('DesktopSettings service status', () => {
       </LocaleProvider>,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: '循环' }));
+
     await screen.findByText('Artifact Evidence Regression');
     expect(screen.getByText('missing artifact')).toBeInTheDocument();
     expect(screen.getByText('检查 artifact evidence')).toBeInTheDocument();
@@ -223,6 +260,8 @@ describe('DesktopSettings service status', () => {
         <DesktopSettings onClose={() => {}} />
       </LocaleProvider>,
     );
+
+    fireEvent.click(screen.getByRole('button', { name: '循环' }));
 
     await screen.findByText('Artifact Evidence Regression');
     fireEvent.click(screen.getByLabelText('copy-loop-diagnostics-artifact-evidence-regression'));
@@ -246,6 +285,8 @@ describe('DesktopSettings service status', () => {
       </LocaleProvider>,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: '循环' }));
+
     await screen.findByText('Artifact Evidence Regression');
     fireEvent.click(screen.getByLabelText('run-loop-artifact-evidence-regression'));
 
@@ -258,5 +299,221 @@ describe('DesktopSettings service status', () => {
       expect(screen.getByLabelText('run-loop-artifact-evidence-regression')).not.toBeDisabled();
     });
     expect(screen.getByLabelText('run-loop-artifact-evidence-regression')).toHaveTextContent('立即运行');
+  });
+
+  it('shows the user loops settings empty state and create entry', async () => {
+    render(
+      <LocaleProvider>
+        <DesktopSettings onClose={() => {}} />
+      </LocaleProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '循环' }));
+
+    await screen.findByText('暂无用户循环');
+    expect(screen.getByText('新建 Markdown 循环')).toBeInTheDocument();
+    expect(mocks.listUserLoopTemplates).toHaveBeenCalled();
+  });
+
+  it('shows user loop settings labels in English when English locale is selected', async () => {
+    localStorage.setItem('xiaok:locale', 'en');
+
+    render(
+      <LocaleProvider>
+        <DesktopSettings onClose={() => {}} />
+      </LocaleProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Loops' }));
+
+    await screen.findByText('No user loops yet');
+    expect(screen.getByText('New Markdown Loop')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
+  });
+
+  it('shows user loop blocked history and schedule controls', async () => {
+    mocks.listUserLoopTemplates.mockResolvedValue([
+      {
+        loopId: 'user-loop-1',
+        title: 'Weekly note',
+        description: 'Writes a weekly Markdown note.',
+        status: 'active',
+        kind: 'markdown_file',
+        prompt: 'Write weekly note.',
+        outputDirectory: '/tmp/xiaok-loop',
+        outputFileName: 'weekly-note.md',
+        outputPath: '/tmp/xiaok-loop/weekly-note.md',
+        scheduleEnabled: false,
+        autoRunApproved: false,
+        createdAt: 1_000,
+        updatedAt: 2_000,
+      },
+    ]);
+    mocks.getLoopRuns.mockImplementation(async (loopId: string) => {
+      if (loopId === 'user-loop-1') {
+        return [
+          {
+            id: 'run-blocked',
+            loopId,
+            status: 'blocked',
+            trigger: { kind: 'manual' },
+            evidenceIds: ['ev-blocked'],
+            startedAt: 3_000,
+            finishedAt: 4_000,
+            updatedAt: 4_000,
+            nextActionKind: 'missing_file_artifact',
+            nextActionSummary: 'Missing Markdown file artifact: weekly-note.md',
+          },
+        ];
+      }
+      return [
+        {
+          id: 'run-success',
+          loopId,
+          status: 'success',
+          trigger: { kind: 'manual' },
+          evidenceIds: ['ev-1'],
+          startedAt: 3_000,
+          finishedAt: 4_000,
+          updatedAt: 4_000,
+          summary: 'clean',
+        },
+      ];
+    });
+
+    render(
+      <LocaleProvider>
+        <DesktopSettings onClose={() => {}} />
+      </LocaleProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '循环' }));
+
+    await screen.findByText('Weekly note');
+    expect(screen.getByText('missing_file_artifact')).toBeInTheDocument();
+    expect(screen.getByText('Missing Markdown file artifact: weekly-note.md')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '立即运行' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '启用调度' })).toBeInTheDocument();
+  });
+
+  it('opens a user loop output directory and previews the output file from the card', async () => {
+    mocks.listUserLoopTemplates.mockResolvedValue([
+      {
+        loopId: 'user-loop-1',
+        title: 'Weekly note',
+        description: 'Writes a weekly Markdown note.',
+        status: 'active',
+        kind: 'markdown_file',
+        prompt: 'Write weekly note.',
+        outputDirectory: '/tmp/xiaok-loop',
+        outputFileName: 'weekly-note.md',
+        outputPath: '/tmp/xiaok-loop/weekly-note.md',
+        scheduleEnabled: false,
+        autoRunApproved: false,
+        createdAt: 1_000,
+        updatedAt: 2_000,
+      },
+    ]);
+
+    render(
+      <LocaleProvider>
+        <DesktopSettings onClose={() => {}} />
+      </LocaleProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '循环' }));
+
+    await screen.findByText('Weekly note');
+    fireEvent.click(screen.getByRole('button', { name: /打开输出目录.*\/tmp\/xiaok-loop/ }));
+
+    await waitFor(() => {
+      expect(mocks.openLocalPath).toHaveBeenCalledWith('/tmp/xiaok-loop');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /预览输出文件.*weekly-note\.md/ }));
+
+    await waitFor(() => {
+      expect(mocks.readLocalArtifactPreview).toHaveBeenCalledWith('/tmp/xiaok-loop/weekly-note.md');
+    });
+    expect(await screen.findByText(/Loop output body/)).toBeInTheDocument();
+  });
+
+  it('shows an inline error when a user loop output file cannot be previewed', async () => {
+    mocks.listUserLoopTemplates.mockResolvedValue([
+      {
+        loopId: 'user-loop-1',
+        title: 'Weekly note',
+        description: 'Writes a weekly Markdown note.',
+        status: 'active',
+        kind: 'markdown_file',
+        prompt: 'Write weekly note.',
+        outputDirectory: '/tmp/xiaok-loop',
+        outputFileName: 'weekly-note.md',
+        outputPath: '/tmp/xiaok-loop/weekly-note.md',
+        scheduleEnabled: false,
+        autoRunApproved: false,
+        createdAt: 1_000,
+        updatedAt: 2_000,
+      },
+    ]);
+    mocks.readLocalArtifactPreview.mockRejectedValueOnce(new Error('ENOENT'));
+
+    render(
+      <LocaleProvider>
+        <DesktopSettings onClose={() => {}} />
+      </LocaleProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '循环' }));
+
+    await screen.findByText('Weekly note');
+    fireEvent.click(screen.getByRole('button', { name: /预览输出文件.*weekly-note\.md/ }));
+
+    expect(await screen.findByText('输出文件不可预览：ENOENT')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '立即运行' })).toBeInTheDocument();
+  });
+
+  it('lets users disable an enabled user loop schedule without leaving auto-run approved', async () => {
+    mocks.listUserLoopTemplates.mockResolvedValue([
+      {
+        loopId: 'user-loop-1',
+        title: 'Weekly note',
+        description: 'Compile a weekly note.',
+        status: 'active',
+        kind: 'markdown_file',
+        prompt: 'Write weekly note.',
+        outputDirectory: '/tmp/xiaok-loop',
+        outputFileName: 'weekly-note.md',
+        outputPath: '/tmp/xiaok-loop/weekly-note.md',
+        scheduleEnabled: true,
+        scheduleTrigger: { kind: 'daily', hour: 6, minute: 3 },
+        autoRunApproved: false,
+        createdAt: 1_000,
+        updatedAt: 2_000,
+      },
+    ]);
+
+    render(
+      <LocaleProvider>
+        <DesktopSettings onClose={() => {}} />
+      </LocaleProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '循环' }));
+
+    await screen.findByText('Weekly note');
+    expect(screen.getByRole('button', { name: '关闭调度' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '批准自动运行' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭调度' }));
+
+    await waitFor(() => {
+      expect(mocks.updateUserLoopTemplate).toHaveBeenCalledWith(expect.objectContaining({
+        loopId: 'user-loop-1',
+        scheduleEnabled: false,
+        autoRunApproved: false,
+        scheduleTrigger: { kind: 'daily', hour: 6, minute: 3 },
+      }));
+    });
   });
 });

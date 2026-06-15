@@ -11,7 +11,7 @@ interface SidebarContextValue {
 
 const SidebarContext = createContext<SidebarContextValue>({ collapsed: false, setCollapsed: () => {} });
 const TITLEBAR_BUTTON_SIZE = 28;
-const TITLEBAR_BUTTON_TOP = 12;
+const TITLEBAR_BUTTON_TOP = 2;
 
 type TitlebarControl = {
   key: string;

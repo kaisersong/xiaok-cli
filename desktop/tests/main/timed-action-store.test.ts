@@ -195,6 +195,21 @@ describe('TimedActionStore', () => {
     expect(persisted?.userApprovedAuto).toBe(true);
   });
 
+  it('allows loop schedule actions to start with auto-run approval disabled', () => {
+    const action = store.createAction({
+      id: 'loop_schedule_auto_plan',
+      title: 'Loop schedule',
+      trigger: { kind: 'daily', hour: 9, minute: 0 },
+      executor: { kind: 'loop', loopId: 'user-loop-1' },
+      source: 'user',
+      userApprovedAuto: false,
+      now: 1_000,
+    });
+
+    expect(action.userApprovedAuto).toBe(false);
+    expect(store.getAction('loop_schedule_auto_plan')?.userApprovedAuto).toBe(false);
+  });
+
   it('approveAuto sets reviewedAt and userApprovedAuto, revokeAuto leaves reviewedAt intact', () => {
     const action = store.createAction({
       id: 'review_action',

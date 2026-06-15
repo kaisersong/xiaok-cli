@@ -119,4 +119,5 @@ export interface CreateTimedActionInput {
   runCount?: number;
   consecutiveFailures?: number;
   lastRuntimeTaskId?: string;
+  userApprovedAuto?: boolean;
 }

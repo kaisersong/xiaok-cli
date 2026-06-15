@@ -46,6 +46,29 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+### 用户循环
+
+Desktop 用户现在可以在 **设置 > Loops** 中创建自己的 Markdown 输出循环。推荐验证路径是：
+
+1. 打开 **设置 > Loops**。
+2. 创建一个 Markdown loop，填写清晰 prompt、输出目录和输出文件名。
+3. 先手动运行一次，再打开定时自动运行。
+4. 在 loop 卡片里检查状态、输出目录入口和产物预览。
+5. 只有当手动运行产出符合预期后，再启用 schedule。
+
+每次用户 loop 运行都会落盘一个真实 Markdown 文件，并记录 `file_artifact` evidence。loop 卡片里的输出目录可以直接打开，输出文件复用项目交付物的 artifact preview 能力，用户不用离开 Loops 页面就能检查结果。如果模型已经产出有价值内容但没有按严格合同完成 artifact handoff，Xiaok 会写入一份诊断 Markdown 报告，而不是只留下一个失败卡片；如果没有可恢复的实质内容，运行仍会以 guard 原因明确失败。
+
+Loop diagnostics 也迁移到 **设置 > Loops**。诊断内容支持中英文，会展示 anomaly kind、owner、seen count、建议动作和相关日志，方便区分用户 loop 输出问题、KSwarm 服务健康问题和 artifact evidence 回归。
+
+**v1.4.7 新特性：**
+
+- **用户 Markdown Loops**：设置 > Loops 现在支持用户创建 Markdown loop，包含手动运行、定时自动运行、输出目录选择和明确输出文件名合同。
+- **Loop 卡片产物预览**：用户 loop 卡片新增可点击输出目录，并复用 artifact preview 展示生成的 Markdown 文件，用户可以直接在 Loops 页面检查产物。
+- **严格 Evidence 恢复**：用户 loop runner 现在会自动创建缺失输出目录，请求 bounded Markdown handoff，在安全时恢复被截断的 handoff marker，写入精确输出文件，校验磁盘文件，并在成功前记录 `file_artifact` evidence。
+- **可见失败诊断**：如果 loop 产出了实质 Markdown 但没有满足 artifact handoff，Xiaok 会写入带恢复内容和 guard 细节的失败诊断报告，而不是静默丢失工作。
+- **Loop UI 本地化与位置调整**：Loop Diagnostics 从通用设置迁移到设置 > Loops，loop 相关词条已补齐中英文覆盖。
+- **发布验证**：v1.4.7 已通过用户 loop runner 聚焦测试、desktop loop 主进程回归、desktop typecheck、desktop packaging，以及 `/Applications/xiaok.app` 已安装应用中的真实用户 loop 运行验证，并成功生成 Markdown 产物。
+
 **v1.4.6 新特性：**
 
 - **KSwarm 启动可靠性追修**：Desktop 现在让显式 service start 与 request 触发的 auto-start 共用同一个受保护启动 promise，避免冷启动期间重复拉起 Intent Broker / KSwarm。
@@ -57,7 +80,7 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 **v1.4.5 新特性：**
 
 - **KSwarm Service Health Loop**：Desktop 新增内置 `kswarm-service-health` loop，会把无监听端口、未知端口占用、health 不可达、HTTP 错误、health JSON 无效、身份/能力不匹配、broker 不可用、spawn 路径缺失、spawn 退出和源码 hash 漂移写成结构化服务诊断。
-- **可行动的 Loop Diagnostics**：设置页现在展示 anomaly kind、owner、seen count、建议处理动作和相关日志路径，并支持复制诊断摘要，方便支持和排查。通知策略也更轻：新的高危异常提醒一次，重复未解决异常默认去重，source unavailable 连续出现第二次才提醒。
+- **可行动的 Loop Diagnostics**：设置 > Loops 现在展示 anomaly kind、owner、seen count、建议处理动作和相关日志路径，并支持复制诊断摘要，方便支持和排查。通知策略也更轻：新的高危异常提醒一次，重复未解决异常默认去重，source unavailable 连续出现第二次才提醒。
 - **更强的 Artifact Evidence 校验**：本地 file artifact evidence 现在会校验文件真实存在且 realpath 留在 workspace 内，覆盖父目录 symlink escape；同时合法 `uri` 或 `metadata.paths` 不会因为陈旧的 `localPaths` 元数据被误拒。
 - **发布验证**：v1.4.5 已通过 desktop 全量测试、CLI sandbox 全量测试、loop/evidence 聚焦测试、desktop build/typecheck、intent/skill structured eval、Computer Use live smoke，以及 `desktop-v1.4.5` release tag workflow。
 
@@ -65,7 +88,7 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 
 - **Loop Evidence System**：Desktop 任务完成现在会把 artifact evidence 持久化到 SQLite，并在 completion guard 运行前先判断任务是否要求硬产物。这补上了反复出现的“task completed without artifact evidence”路径，避免 UI 报告完成但没有可验证交付物。
 - **内置 Evidence Regression Loop**：Xiaok 新增定时 loop，用来扫描最近的完成记录、缺失产物、陈旧 run state 和异常交付结果。该 loop 使用单运行锁、会清理 stale diagnostics，并写入结构化 findings，让 silent failure 不再躲在后台。
-- **只读 Loop Diagnostics**：Desktop 通过只读 IPC 和设置页能力暴露 loop/evidence diagnostics，操作者可以查看 active run、最近扫描、异常数量和 evidence 状态，不需要直接翻内部数据库。
+- **只读 Loop Diagnostics**：Desktop 通过只读 IPC 和设置 > Loops 暴露 loop/evidence diagnostics，操作者可以查看 active run、最近扫描、异常数量和 evidence 状态，不需要直接翻内部数据库。
 - **服务与打包验证**：KSwarm 服务启动、内置插件部署、desktop packaging contract 都进入聚焦验证范围。服务状态现在有更清楚的 UI/API 可见性，便于区分 KSwarm / 插件启动失败与模型/runtime 失败。
 - **剪贴板文件附件**：从 Finder 复制文件后可以直接粘贴成 chat input chip。输入链路会去重 keydown 与 paste 的双触发，避免 macOS 同时发送两个事件时同一文件被添加两次。
 - **发布验证**：本版本按 loop evidence 聚焦测试、desktop packaging contract 测试、renderer/main build，以及 `desktop-v1.4.4` release tag workflow 准备发布。

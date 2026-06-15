@@ -54,6 +54,8 @@ export const PRELOAD_API_KEYS = [
   'recoverTask',
   'openArtifact',
   'readFileContent',
+  'openLocalPath',
+  'readLocalArtifactPreview',
   'listSkills',
   'installSkill',
   'uninstallSkill',
@@ -110,6 +112,11 @@ export const PRELOAD_API_KEYS = [
   'getLoopRuns',
   'getEvidenceAnomalies',
   'runLoopNow',
+  'listUserLoopTemplates',
+  'createUserLoopTemplate',
+  'updateUserLoopTemplate',
+  'deleteUserLoopTemplate',
+  'setUserLoopAutoRunApproved',
   'syncScheduledTasks',
   'getScheduledTasks',
   'createScheduledTask',
@@ -232,6 +239,16 @@ export interface DesktopSaveModelConfigInput {
   apiKey?: string;
   baseUrl?: string;
   protocol?: ProtocolId;
+}
+
+export interface DesktopLocalArtifactPreview {
+  path: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  modifiedAt: number;
+  content: string;
+  truncated: boolean;
 }
 
 export interface AvailableModelView {
@@ -438,6 +455,8 @@ export interface DesktopApi {
   recoverTask(taskId: string): Promise<{ snapshot: TaskSnapshot }>;
   openArtifact(artifactId: string): Promise<void>;
   readFileContent(filePath: string): Promise<{ content: string; error?: string }>;
+  openLocalPath(filePath: string): Promise<{ ok: boolean; error?: string }>;
+  readLocalArtifactPreview(filePath: string): Promise<DesktopLocalArtifactPreview>;
   listSkills(): Promise<Array<{ name: string; aliases: string[]; description: string; source: string; tier: string }>>;
   installSkill(skillName: string): Promise<{ success: boolean; message: string }>;
   uninstallSkill(skillName: string): Promise<{ success: boolean; message: string }>;
@@ -509,6 +528,11 @@ export interface DesktopApi {
   getLoopRuns(loopId: string): Promise<unknown[]>;
   getEvidenceAnomalies(loopId: string): Promise<unknown[]>;
   runLoopNow(loopId: string): Promise<unknown>;
+  listUserLoopTemplates(): Promise<unknown[]>;
+  createUserLoopTemplate(input: unknown): Promise<unknown>;
+  updateUserLoopTemplate(input: unknown): Promise<unknown>;
+  deleteUserLoopTemplate(loopId: string): Promise<unknown>;
+  setUserLoopAutoRunApproved(loopId: string, approved: boolean): Promise<unknown>;
   syncScheduledTasks(tasks: Array<{ id: string; cronExpr: string; enabled: boolean }>): Promise<void>;
   getScheduledTasks(): Promise<unknown[]>;
   createScheduledTask(input: unknown): Promise<unknown>;
@@ -689,6 +713,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     recoverTask: (taskId) => ipcRenderer.invoke('desktop:recoverTask', { taskId }) as ReturnType<DesktopApi['recoverTask']>,
     openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }) as Promise<void>,
     readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }) as Promise<{ content: string; error?: string }>,
+    openLocalPath: (filePath) => ipcRenderer.invoke('desktop:openLocalPath', { filePath }) as Promise<{ ok: boolean; error?: string }>,
+    readLocalArtifactPreview: (filePath) => ipcRenderer.invoke('desktop:readLocalArtifactPreview', { filePath }) as Promise<DesktopLocalArtifactPreview>,
     listSkills: () => ipcRenderer.invoke('desktop:listSkills') as ReturnType<DesktopApi['listSkills']>,
     installSkill: (skillName) => ipcRenderer.invoke('desktop:installSkill', skillName) as Promise<{ success: boolean; message: string }>,
     uninstallSkill: (skillName) => ipcRenderer.invoke('desktop:uninstallSkill', skillName) as Promise<{ success: boolean; message: string }>,
@@ -772,6 +798,11 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getLoopRuns: (loopId) => ipcRenderer.invoke('desktop:loops:listRuns', loopId) as Promise<unknown[]>,
     getEvidenceAnomalies: (loopId) => ipcRenderer.invoke('desktop:loops:listAnomalies', loopId) as Promise<unknown[]>,
     runLoopNow: (loopId) => ipcRenderer.invoke('desktop:loops:runNow', loopId) as Promise<unknown>,
+    listUserLoopTemplates: () => ipcRenderer.invoke('desktop:loops:listUserTemplates') as Promise<unknown[]>,
+    createUserLoopTemplate: (input) => ipcRenderer.invoke('desktop:loops:createUserTemplate', input) as Promise<unknown>,
+    updateUserLoopTemplate: (input) => ipcRenderer.invoke('desktop:loops:updateUserTemplate', input) as Promise<unknown>,
+    deleteUserLoopTemplate: (loopId) => ipcRenderer.invoke('desktop:loops:deleteUserTemplate', loopId) as Promise<unknown>,
+    setUserLoopAutoRunApproved: (loopId, approved) => ipcRenderer.invoke('desktop:loops:setUserTemplateAutoRunApproved', { loopId, approved }) as Promise<unknown>,
     syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks) as Promise<void>,
     getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks') as Promise<unknown[]>,
     createScheduledTask: (input) => ipcRenderer.invoke('desktop:createScheduledTask', input) as Promise<unknown>,

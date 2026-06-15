@@ -97,8 +97,8 @@ export class TimedActionStore {
       runCount: input.runCount ?? 0,
       consecutiveFailures: input.consecutiveFailures ?? 0,
       lastRuntimeTaskId: input.lastRuntimeTaskId,
-      // SQLite column default is 0 (for historical rows); new tasks default to auto-execute.
-      userApprovedAuto: true,
+      // SQLite column default is 0 (for historical rows); new tasks default to auto-execute unless explicitly disabled.
+      userApprovedAuto: input.userApprovedAuto ?? true,
       createdAt: now,
       updatedAt: now,
     };

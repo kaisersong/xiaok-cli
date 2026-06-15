@@ -122,6 +122,58 @@ describe('loop executor', () => {
     });
   });
 
+  it('routes user template loop runs to the user template runner instead of built-in scanners', async () => {
+    const created = store.createUserLoopTemplate({
+      title: 'Weekly note',
+      description: '',
+      kind: 'markdown_file',
+      prompt: 'Summarize this week.',
+      outputDirectory: rootDir,
+      outputFileName: 'weekly-note.md',
+      now: 1_000,
+    });
+    const scanner: LoopScanner = {
+      scan: vi.fn().mockReturnValue({
+        summaryEvidence: { summary: 'scanner should not run', metadata: {} },
+        nextActionKind: 'none',
+      }),
+    };
+    const userTemplateRunner = {
+      runTemplateLoop: vi.fn(({ runId }) => {
+        store.finishLoopRunSuccess(runId, ['user-template-evidence'], 2_100, 'user template complete');
+        return {
+          status: 'success' as const,
+          run: store.getLoopRun(runId)!,
+        };
+      }),
+    };
+    const runner = createLoopRunner({
+      loopStore: store,
+      evidenceStore,
+      scanner,
+      userTemplateRunner,
+      now: () => now,
+      staleAfterMs: 60_000,
+    });
+
+    const result = await runner.runLoopNow(created.definition.id, { kind: 'manual', source: 'test' });
+
+    expect(result).toMatchObject({ status: 'success' });
+    expect(scanner.scan).not.toHaveBeenCalled();
+    expect(userTemplateRunner.runTemplateLoop).toHaveBeenCalledWith({
+      loopId: created.definition.id,
+      runId: expect.any(String),
+      trigger: { kind: 'manual', source: 'test' },
+    });
+    const [run] = store.listLoopRuns(created.definition.id, 10);
+    expect(run).toMatchObject({
+      status: 'success',
+      summary: 'user template complete',
+      evidenceIds: ['user-template-evidence'],
+    });
+    expect(store.listLoopStages(run.id)).toEqual([]);
+  });
+
   it('blocked runs persist blocked evidence before terminal loop state', async () => {
     const scanner: LoopScanner = {
       scan: vi.fn().mockReturnValue({

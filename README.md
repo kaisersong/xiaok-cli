@@ -46,6 +46,29 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+### User Loops
+
+Desktop users can now create their own Markdown-producing loops from **Settings > Loops**. A practical validation flow is:
+
+1. Open **Settings > Loops**.
+2. Create a Markdown loop with a clear prompt, output directory, and output filename.
+3. Run it manually once before enabling scheduled auto-run.
+4. Inspect the loop card status, output directory link, and artifact preview.
+5. Enable the schedule only after the manual run produces the expected file.
+
+Each user loop run materializes a real Markdown file and records `file_artifact` evidence. The loop card exposes the output directory as an openable target, and the output file reuses the same artifact preview path used by project deliverables. If the model does useful work but fails the strict artifact handoff, Xiaok writes a diagnostic Markdown report instead of leaving a bare failed card; if no substantive content is recoverable, the run still fails visibly with the guard reason.
+
+Loop diagnostics also live under **Settings > Loops**. They show anomaly kind, owner, seen count, suggested action, and relevant logs in both English and Chinese, so operators can distinguish user loop output problems from KSwarm service health or artifact evidence regressions.
+
+**What's New in v1.4.7:**
+
+- **User Markdown Loops**: Settings > Loops now supports user-created Markdown loops with manual run, scheduled auto-run, output directory selection, and explicit output filename contracts.
+- **Artifact Preview on Loop Cards**: User loop cards expose clickable output directories and reuse the artifact preview flow for generated Markdown files, so users can inspect results without leaving the loop screen.
+- **Strict Evidence Recovery**: The user loop runner now creates missing output directories, requests a bounded Markdown handoff, recovers clipped handoff markers when safe, writes the exact output file, verifies the file on disk, and records `file_artifact` evidence before reporting success.
+- **Visible Failure Diagnostics**: If a loop produces substantive Markdown but misses the required artifact handoff, Xiaok writes a failure diagnostic report with the recovered content and guard details instead of silently dropping the work.
+- **Loop UI Localization and Placement**: Loop Diagnostics moved from General Settings into Settings > Loops, and loop-related labels now have English and Chinese coverage.
+- **Release Validation**: v1.4.7 is verified with focused user-loop runner tests, desktop loop main-process regressions, desktop typecheck, desktop packaging, and a live `/Applications/xiaok.app` user-loop run that produced a real Markdown artifact.
+
 **What's New in v1.4.6:**
 
 - **KSwarm Startup Reliability Follow-up**: Desktop now shares one guarded startup promise between explicit service start and request-triggered auto-start, preventing duplicate Intent Broker/KSwarm spawns during cold launch.
@@ -57,7 +80,7 @@ The smallest useful Xiaok loop is intentionally simple:
 **What's New in v1.4.5:**
 
 - **KSwarm Service Health Loop**: Desktop now ships a built-in `kswarm-service-health` loop that records structured service diagnostics for no listener, unknown port owner, unreachable health, HTTP error, invalid health JSON, identity/capability mismatch, broker unavailability, spawn path failures, spawn exits, and source hash drift.
-- **Actionable Loop Diagnostics**: Settings surfaces now show the anomaly kind, owner, seen count, suggested action, and relevant log paths, with a copyable diagnostic summary for support/debugging. Notifications stay light: new high-severity failures surface once, repeated unresolved anomalies dedupe, and source-unavailable warnings wait for a second observation.
+- **Actionable Loop Diagnostics**: Settings > Loops now shows the anomaly kind, owner, seen count, suggested action, and relevant log paths, with a copyable diagnostic summary for support/debugging. Notifications stay light: new high-severity failures surface once, repeated unresolved anomalies dedupe, and source-unavailable warnings wait for a second observation.
 - **Stronger Artifact Evidence Validation**: Local file artifact evidence now validates real files inside the workspace with symlink-safe containment checks. Valid `uri` or `metadata.paths` evidence is not rejected just because stale `localPaths` metadata is present.
 - **Release Validation**: v1.4.5 was verified with desktop full tests, CLI sandbox full tests, focused loop/evidence tests, desktop build/typecheck, structured intent/skill evals, Computer Use live smoke, and the desktop `desktop-v1.4.5` release tag workflow.
 
@@ -65,7 +88,7 @@ The smallest useful Xiaok loop is intentionally simple:
 
 - **Loop Evidence System**: Desktop task completion now records durable artifact evidence in SQLite and classifies required artifact contracts before the completion guard runs. This closes the repeated "task completed without artifact evidence" regression path where the UI could report completion without a verifiable deliverable.
 - **Built-in Evidence Regression Loop**: Xiaok now ships a scheduled loop that scans recent completion records for missing artifacts, stale run state, and anomalous delivery outcomes. The loop uses a single-run lock, clears stale diagnostics, and writes structured findings so silent failures become visible.
-- **Read-only Loop Diagnostics**: Desktop exposes loop/evidence diagnostics through read-only IPC and settings surfaces, giving operators a way to inspect active runs, recent scans, anomaly counts, and evidence status without touching internal database files.
+- **Read-only Loop Diagnostics**: Desktop exposes loop/evidence diagnostics through read-only IPC and Settings > Loops, giving operators a way to inspect active runs, recent scans, anomaly counts, and evidence status without touching internal database files.
 - **Service and Packaging Validation**: KSwarm service startup, bundled plugin deployment, and desktop packaging contracts have focused validation coverage for the release path. Service status now has clearer UI/API visibility, which makes KSwarm and plugin startup failures easier to distinguish from model/runtime failures.
 - **Clipboard File Attachments**: Finder copy/paste can attach files directly as chat input chips. The input path deduplicates keydown and paste events, preventing the same file from appearing twice when macOS sends both signals.
 - **Release Validation**: This release is prepared with focused loop evidence tests, desktop packaging contract tests, renderer/main builds, and the desktop `desktop-v1.4.4` release tag workflow.

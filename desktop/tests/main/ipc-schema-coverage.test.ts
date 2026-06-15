@@ -46,9 +46,15 @@ describe('IPC schema coverage', () => {
       'desktop:loops:listRuns',
       'desktop:loops:listAnomalies',
       'desktop:loops:runNow',
+      'desktop:loops:listUserTemplates',
+      'desktop:loops:createUserTemplate',
+      'desktop:loops:updateUserTemplate',
+      'desktop:loops:deleteUserTemplate',
+      'desktop:loops:setUserTemplateAutoRunApproved',
     ]));
     expect(allChannels.has('desktop:loops:insertEvidence')).toBe(false);
     expect(allChannels.has('desktop:loops:completeLoopRun')).toBe(false);
     expect(allChannels.has('desktop:loops:completeTask')).toBe(false);
+    expect([...allChannels].some(channel => /evidence.*(insert|update|delete|complete)/i.test(channel))).toBe(false);
   });
 });

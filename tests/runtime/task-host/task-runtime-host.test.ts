@@ -1108,6 +1108,49 @@ describe('InProcessTaskRuntimeHost', () => {
       ]));
     });
 
+    it('allows scheduled report clarification prompts instead of failing missing artifact evidence', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId: 'sess_1',
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: '需要你提供本周完成的主要工作、遇到的问题和下周计划，我才能整理成本周工作报告。',
+        });
+      });
+
+      let taskOrd = 0;
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry,
+        snapshotStore,
+        runner,
+        aheGuards: { artifactEvidence: true },
+        now: () => 200,
+        createTaskId: () => `task_${++taskOrd}`,
+        createSessionId: () => `sess_${taskOrd}`,
+      });
+
+      await host.createTask({
+        prompt: [
+          '[SYSTEM: 这是用户设置的自动定时任务，请给出友好简洁的回复。]',
+          '[SYSTEM: scheduled_task_id=weekly-report; timed_action_id=weekly-report; timed_action_title=📝 写本周工作报告]',
+          '',
+          '📝 写本周工作报告',
+        ].join('\n'),
+        materials: [],
+      });
+
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed', 3000);
+      const recovered = await host.recoverTask('task_1');
+      expect(recovered.snapshot.status).toBe('completed');
+      expect(recovered.snapshot.result?.artifacts).toEqual([]);
+      expect(recovered.snapshot.result?.summary).toContain('需要你提供本周完成的主要工作');
+      expect(recovered.snapshot.events).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'error', message: 'Task is being completed without artifact evidence.' }),
+      ]));
+    });
+
     it('allows CUA validation completions without treating screenshotHasImage as an image deliverable', async () => {
       const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
         emitRuntimeEvent({

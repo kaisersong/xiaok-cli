@@ -27,6 +27,8 @@ describe('preload API contract', () => {
       'recoverTask',
       'openArtifact',
       'readFileContent',
+      'openLocalPath',
+      'readLocalArtifactPreview',
       'listSkills',
       'installSkill',
       'uninstallSkill',
@@ -83,6 +85,11 @@ describe('preload API contract', () => {
       'getLoopRuns',
       'getEvidenceAnomalies',
       'runLoopNow',
+      'listUserLoopTemplates',
+      'createUserLoopTemplate',
+      'updateUserLoopTemplate',
+      'deleteUserLoopTemplate',
+      'setUserLoopAutoRunApproved',
       'syncScheduledTasks',
       'getScheduledTasks',
       'createScheduledTask',
@@ -133,6 +140,9 @@ describe('preload API contract', () => {
     expect(api).not.toHaveProperty('insertEvidence');
     expect(api).not.toHaveProperty('completeLoopRun');
     expect(api).not.toHaveProperty('completeTask');
+    expect(api).not.toHaveProperty('createEvidence');
+    expect(api).not.toHaveProperty('updateEvidence');
+    expect(api).not.toHaveProperty('deleteEvidence');
     expect(api).not.toHaveProperty('sql');
     expect(api).not.toHaveProperty('query');
     expect(api).not.toHaveProperty('execute');
@@ -151,11 +161,50 @@ describe('preload API contract', () => {
     await api.getLoopRuns('artifact-evidence-regression');
     await api.getEvidenceAnomalies('artifact-evidence-regression');
     await api.runLoopNow('artifact-evidence-regression');
+    await api.listUserLoopTemplates();
+    await api.createUserLoopTemplate({
+      title: 'Weekly note',
+      kind: 'markdown_file',
+      prompt: 'Write weekly note.',
+      outputDirectory: '/tmp',
+      outputFileName: 'weekly.md',
+    });
+    await api.updateUserLoopTemplate({
+      loopId: 'user-loop-1',
+      title: 'Weekly note',
+      kind: 'markdown_file',
+      prompt: 'Write weekly note.',
+      outputDirectory: '/tmp',
+      outputFileName: 'weekly.md',
+    });
+    await api.deleteUserLoopTemplate('user-loop-1');
+    await api.setUserLoopAutoRunApproved('user-loop-1', true);
 
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listDefinitions');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listRuns', 'artifact-evidence-regression');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listAnomalies', 'artifact-evidence-regression');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:runNow', 'artifact-evidence-regression');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listUserTemplates');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:createUserTemplate', {
+      title: 'Weekly note',
+      kind: 'markdown_file',
+      prompt: 'Write weekly note.',
+      outputDirectory: '/tmp',
+      outputFileName: 'weekly.md',
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:updateUserTemplate', {
+      loopId: 'user-loop-1',
+      title: 'Weekly note',
+      kind: 'markdown_file',
+      prompt: 'Write weekly note.',
+      outputDirectory: '/tmp',
+      outputFileName: 'weekly.md',
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:deleteUserTemplate', 'user-loop-1');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:setUserTemplateAutoRunApproved', {
+      loopId: 'user-loop-1',
+      approved: true,
+    });
   });
 
   it('routes plugin dependency operations through semantic IPC channels', async () => {
@@ -278,6 +327,34 @@ describe('preload API contract', () => {
 
     await expect(api.selectDirectory()).resolves.toEqual({ filePath: '/tmp/workspace' });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:selectDirectory');
+  });
+
+  it('routes local output artifact actions through semantic IPC channels', async () => {
+    const preview = {
+      path: '/tmp/xiaok-loop/weekly-note.md',
+      fileName: 'weekly-note.md',
+      mimeType: 'text/markdown',
+      sizeBytes: 24,
+      modifiedAt: 1_000,
+      content: '# Weekly note',
+      truncated: false,
+    };
+    const ipcRenderer = {
+      invoke: vi.fn()
+        .mockResolvedValueOnce({ ok: true })
+        .mockResolvedValueOnce(preview),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer);
+
+    await expect(api.openLocalPath('/tmp/xiaok-loop')).resolves.toEqual({ ok: true });
+    await expect(api.readLocalArtifactPreview('/tmp/xiaok-loop/weekly-note.md')).resolves.toEqual(preview);
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:openLocalPath', { filePath: '/tmp/xiaok-loop' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:readLocalArtifactPreview', {
+      filePath: '/tmp/xiaok-loop/weekly-note.md',
+    });
   });
 
   it('routes model config reads and saves through semantic IPC channels', async () => {

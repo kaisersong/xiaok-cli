@@ -5,6 +5,7 @@ import type {
   DesktopServiceStatusSnapshot,
   DesktopModelConfigSnapshot,
   DesktopSaveModelConfigInput,
+  DesktopLocalArtifactPreview,
   MaterialView,
   MaterialRole,
   TaskCreateContext,
@@ -20,6 +21,8 @@ import type {
   LoopDefinitionView,
   LoopRunView,
   RunLoopNowResultView,
+  UserLoopTemplateInput,
+  UserLoopTemplateView,
   ThreadMode,
   ThreadRecord,
   UpdateThreadSidebarRequest,
@@ -364,6 +367,26 @@ export const api = {
     return await window.xiaokDesktop.runLoopNow(loopId) as RunLoopNowResultView;
   },
 
+  async listUserLoopTemplates(): Promise<UserLoopTemplateView[]> {
+    return await window.xiaokDesktop.listUserLoopTemplates() as UserLoopTemplateView[];
+  },
+
+  async createUserLoopTemplate(input: UserLoopTemplateInput): Promise<UserLoopTemplateView> {
+    return await window.xiaokDesktop.createUserLoopTemplate(input) as UserLoopTemplateView;
+  },
+
+  async updateUserLoopTemplate(input: UserLoopTemplateInput & { loopId: string }): Promise<UserLoopTemplateView | null> {
+    return await window.xiaokDesktop.updateUserLoopTemplate(input) as UserLoopTemplateView | null;
+  },
+
+  async deleteUserLoopTemplate(loopId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    return await window.xiaokDesktop.deleteUserLoopTemplate(loopId) as { ok: true } | { ok: false; reason: string };
+  },
+
+  async setUserLoopAutoRunApproved(loopId: string, approved: boolean): Promise<UserLoopTemplateView | null> {
+    return await window.xiaokDesktop.setUserLoopAutoRunApproved(loopId, approved) as UserLoopTemplateView | null;
+  },
+
   // ---------------------
   // Model Config API (IPC)
   // ---------------------
@@ -453,6 +476,16 @@ export const api = {
   async readFileContent(filePath: string): Promise<{ content: string; error?: string }> {
     log.info('readFileContent', filePath);
     return await window.xiaokDesktop.readFileContent(filePath);
+  },
+
+  async openLocalPath(filePath: string): Promise<{ ok: boolean; error?: string }> {
+    log.info('openLocalPath', filePath);
+    return await window.xiaokDesktop.openLocalPath(filePath);
+  },
+
+  async readLocalArtifactPreview(filePath: string): Promise<DesktopLocalArtifactPreview> {
+    log.info('readLocalArtifactPreview', filePath);
+    return await window.xiaokDesktop.readLocalArtifactPreview(filePath);
   },
 
   // ---------------------

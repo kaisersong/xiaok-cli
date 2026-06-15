@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import {
   BUILT_IN_LOOP_IDS,
   type BeginLoopRunResult,
+  type CreateUserLoopTemplateInput,
   type LoopDefinition,
+  type LoopDefinitionOrigin,
   type LoopDefinitionStatus,
   type LoopRun,
   type LoopRunFailureKind,
@@ -14,6 +16,9 @@ import {
   type LoopStageKind,
   type LoopStageStatus,
   type LoopRunTrigger,
+  type UpdateUserLoopTemplateInput,
+  type UserLoopTemplate,
+  type UserLoopTemplateKind,
 } from './loop-types.js';
 
 interface LoopDefinitionRow {
@@ -21,6 +26,7 @@ interface LoopDefinitionRow {
   title: string;
   description: string;
   status: LoopDefinitionStatus;
+  origin: LoopDefinitionOrigin;
   active_run_id: string | null;
   created_at: number;
   updated_at: number;
@@ -59,6 +65,20 @@ interface LoopStageRow {
   updated_at: number;
 }
 
+interface UserLoopTemplateRow {
+  loop_id: string;
+  kind: UserLoopTemplateKind;
+  prompt: string;
+  output_directory: string;
+  output_file_name: string;
+  schedule_action_id: string | null;
+  schedule_enabled: number;
+  schedule_trigger_json: string | null;
+  auto_run_approved: number;
+  created_at: number;
+  updated_at: number;
+}
+
 const BUILT_IN_LOOPS: Array<Pick<LoopDefinition, 'id' | 'title' | 'description'>> = [
   {
     id: BUILT_IN_LOOP_IDS.ARTIFACT_EVIDENCE_REGRESSION,
@@ -75,7 +95,7 @@ const BUILT_IN_LOOPS: Array<Pick<LoopDefinition, 'id' | 'title' | 'description'>
 const EXECUTOR_CRASH_MESSAGE = 'Loop executor crashed or was interrupted.';
 const TERMINAL_STATUSES = new Set<LoopRunStatus>(['success', 'failed', 'blocked']);
 const TERMINAL_STAGE_STATUSES = new Set<LoopStageStatus>(['success', 'failed', 'blocked', 'skipped']);
-const LOOP_STAGE_KINDS = new Set<LoopStageKind>(['scan']);
+const LOOP_STAGE_KINDS = new Set<LoopStageKind>(['scan', 'execute', 'verify']);
 
 export class LoopStore {
   private readonly db: DatabaseSync;
@@ -96,16 +116,18 @@ export class LoopStore {
     for (const loop of BUILT_IN_LOOPS) {
       this.db.prepare(`
         insert into loop_definitions (
-          id, title, description, status, active_run_id, created_at, updated_at
+          id, title, description, status, origin, active_run_id, created_at, updated_at
         ) values (
-          @id, @title, @description, 'active', null, @createdAt, @updatedAt
+          @id, @title, @description, 'active', 'built_in', null, @createdAt, @updatedAt
         )
         on conflict(id) do update set
           title = excluded.title,
           description = excluded.description,
+          origin = 'built_in',
           updated_at = case
             when loop_definitions.title != excluded.title
               or loop_definitions.description != excluded.description
+              or loop_definitions.origin != 'built_in'
             then excluded.updated_at
             else loop_definitions.updated_at
           end
@@ -144,6 +166,131 @@ export class LoopStore {
     `).run(status, now, loopId);
     if (result.changes === 0) return undefined;
     return this.getLoopDefinition(loopId);
+  }
+
+  createUserLoopTemplate(input: CreateUserLoopTemplateInput): { definition: LoopDefinition; template: UserLoopTemplate } {
+    return this.transaction(() => {
+      const now = input.now ?? Date.now();
+      const normalized = normalizeUserLoopTemplateInput(input);
+      const loopId = `user-loop-${randomUUID()}`;
+      this.db.prepare(`
+        insert into loop_definitions (
+          id, title, description, status, origin, active_run_id, created_at, updated_at
+        ) values (
+          @id, @title, @description, 'active', 'user_template', null, @createdAt, @updatedAt
+        )
+      `).run({
+        id: loopId,
+        title: normalized.title,
+        description: normalized.description,
+        createdAt: now,
+        updatedAt: now,
+      });
+      this.insertOrUpdateUserLoopTemplate(loopId, normalized, now);
+      const definition = this.getLoopDefinition(loopId);
+      const template = this.getUserLoopTemplate(loopId);
+      if (!definition || !template) throw new Error('User loop template insert did not persist.');
+      return { definition, template };
+    });
+  }
+
+  updateUserLoopTemplate(input: UpdateUserLoopTemplateInput): { definition: LoopDefinition; template: UserLoopTemplate } | undefined {
+    return this.transaction(() => {
+      const current = this.getLoopDefinitionRow(input.loopId);
+      if (!current || current.origin !== 'user_template') return undefined;
+      const currentTemplateRow = this.getUserLoopTemplateRow(input.loopId);
+      if (!currentTemplateRow) return undefined;
+      const now = input.now ?? Date.now();
+      const normalized = normalizeUserLoopTemplateInput(input, this.userLoopTemplateRowToRecord(currentTemplateRow));
+      this.db.prepare(`
+        update loop_definitions
+        set title = ?, description = ?, updated_at = ?
+        where id = ? and origin = 'user_template'
+      `).run(normalized.title, normalized.description, now, input.loopId);
+      this.insertOrUpdateUserLoopTemplate(input.loopId, normalized, now);
+      const definition = this.getLoopDefinition(input.loopId);
+      const template = this.getUserLoopTemplate(input.loopId);
+      if (!definition || !template) return undefined;
+      return { definition, template };
+    });
+  }
+
+  getUserLoopTemplate(loopId: string): UserLoopTemplate | undefined {
+    const row = this.getUserLoopTemplateRow(loopId);
+    return row ? this.userLoopTemplateRowToRecord(row) : undefined;
+  }
+
+  listUserLoopTemplates(): Array<{ definition: LoopDefinition; template: UserLoopTemplate }> {
+    const rows = typedRows<UserLoopTemplateRow>(this.db.prepare(`
+      select user_loop_templates.* from user_loop_templates
+      join loop_definitions on loop_definitions.id = user_loop_templates.loop_id
+      where loop_definitions.origin = 'user_template'
+      order by loop_definitions.created_at desc, loop_definitions.id desc
+    `).all());
+    return rows
+      .map(row => {
+        const definition = this.getLoopDefinition(row.loop_id);
+        if (!definition) return undefined;
+        return { definition, template: this.userLoopTemplateRowToRecord(row) };
+      })
+      .filter((item): item is { definition: LoopDefinition; template: UserLoopTemplate } => item !== undefined);
+  }
+
+  deleteUserLoopTemplate(loopId: string, now: number): { ok: true } | { ok: false; reason: 'missing_loop' | 'loop_running' } {
+    return this.transaction(() => {
+      const definition = this.getLoopDefinitionRow(loopId);
+      if (!definition || definition.origin !== 'user_template') return { ok: false, reason: 'missing_loop' };
+      if (definition.active_run_id) {
+        const activeRun = this.getLoopRunRow(definition.active_run_id);
+        if (activeRun && activeRun.status === 'running') return { ok: false, reason: 'loop_running' };
+      }
+
+      this.db.prepare('delete from user_loop_templates where loop_id = ?').run(loopId);
+      const runCount = this.db.prepare('select count(*) as count from loop_runs where loop_id = ?').get(loopId) as { count: number };
+      if (runCount.count === 0) {
+        this.db.prepare('delete from loop_definitions where id = ? and origin = ?').run(loopId, 'user_template');
+      } else {
+        this.db.prepare(`
+          update loop_definitions
+          set status = 'paused', updated_at = ?
+          where id = ? and origin = 'user_template'
+        `).run(now, loopId);
+      }
+      return { ok: true };
+    });
+  }
+
+  setUserLoopScheduleBinding(
+    loopId: string,
+    input: {
+      scheduleActionId?: string;
+      scheduleEnabled: boolean;
+      scheduleTrigger?: Record<string, unknown>;
+      now: number;
+    }
+  ): UserLoopTemplate | undefined {
+    this.db.prepare(`
+      update user_loop_templates
+      set schedule_action_id = ?, schedule_enabled = ?, schedule_trigger_json = ?, updated_at = ?
+      where loop_id = ?
+    `).run(
+      input.scheduleActionId ?? null,
+      input.scheduleEnabled ? 1 : 0,
+      input.scheduleTrigger ? JSON.stringify(input.scheduleTrigger) : null,
+      input.now,
+      loopId
+    );
+    return this.getUserLoopTemplate(loopId);
+  }
+
+  setUserLoopAutoRunApproved(loopId: string, approved: boolean, now: number): UserLoopTemplate | undefined {
+    const result = this.db.prepare(`
+      update user_loop_templates
+      set auto_run_approved = ?, updated_at = ?
+      where loop_id = ?
+    `).run(approved ? 1 : 0, now, loopId);
+    if (result.changes === 0) return undefined;
+    return this.getUserLoopTemplate(loopId);
   }
 
   beginLoopRun(loopId: string, trigger: LoopRunTrigger, now: number, staleAfterMs: number): BeginLoopRunResult {
@@ -380,7 +527,7 @@ export class LoopStore {
     const rows = typedRows<LoopStageRow>(this.db.prepare(`
       select * from loop_stages
       where run_id = ?
-      order by created_at asc, id asc
+      order by created_at asc, rowid asc
     `).all(runId));
     return rows.map(row => this.stageRowToRecord(row));
   }
@@ -392,6 +539,7 @@ export class LoopStore {
         title text not null,
         description text not null,
         status text not null,
+        origin text not null default 'built_in',
         active_run_id text,
         created_at integer not null,
         updated_at integer not null
@@ -444,7 +592,63 @@ export class LoopStore {
 
       create index if not exists idx_loop_stages_run
       on loop_stages(run_id, created_at);
+
+      create table if not exists user_loop_templates (
+        loop_id text primary key,
+        kind text not null,
+        prompt text not null,
+        output_directory text not null,
+        output_file_name text not null,
+        schedule_action_id text,
+        schedule_enabled integer not null default 0,
+        schedule_trigger_json text,
+        auto_run_approved integer not null default 0,
+        created_at integer not null,
+        updated_at integer not null,
+        foreign key(loop_id) references loop_definitions(id)
+      );
     `);
+    this.ensureColumn('loop_definitions', 'origin', "alter table loop_definitions add column origin text not null default 'built_in'");
+    this.ensureColumn('user_loop_templates', 'schedule_action_id', 'alter table user_loop_templates add column schedule_action_id text');
+    this.ensureColumn('user_loop_templates', 'schedule_enabled', 'alter table user_loop_templates add column schedule_enabled integer not null default 0');
+    this.ensureColumn('user_loop_templates', 'schedule_trigger_json', 'alter table user_loop_templates add column schedule_trigger_json text');
+    this.ensureColumn('user_loop_templates', 'auto_run_approved', 'alter table user_loop_templates add column auto_run_approved integer not null default 0');
+  }
+
+  private insertOrUpdateUserLoopTemplate(loopId: string, input: NormalizedUserLoopTemplateInput, now: number): void {
+    this.db.prepare(`
+      insert into user_loop_templates (
+        loop_id, kind, prompt, output_directory, output_file_name,
+        schedule_action_id, schedule_enabled, schedule_trigger_json,
+        auto_run_approved, created_at, updated_at
+      ) values (
+        @loopId, @kind, @prompt, @outputDirectory, @outputFileName,
+        @scheduleActionId, @scheduleEnabled, @scheduleTriggerJson,
+        @autoRunApproved, @createdAt, @updatedAt
+      )
+      on conflict(loop_id) do update set
+        kind = excluded.kind,
+        prompt = excluded.prompt,
+        output_directory = excluded.output_directory,
+        output_file_name = excluded.output_file_name,
+        schedule_action_id = excluded.schedule_action_id,
+        schedule_enabled = excluded.schedule_enabled,
+        schedule_trigger_json = excluded.schedule_trigger_json,
+        auto_run_approved = excluded.auto_run_approved,
+        updated_at = excluded.updated_at
+    `).run({
+      loopId,
+      kind: input.kind,
+      prompt: input.prompt,
+      outputDirectory: input.outputDirectory,
+      outputFileName: input.outputFileName,
+      scheduleActionId: input.scheduleActionId ?? null,
+      scheduleEnabled: input.scheduleEnabled ? 1 : 0,
+      scheduleTriggerJson: input.scheduleTrigger ? JSON.stringify(input.scheduleTrigger) : null,
+      autoRunApproved: input.autoRunApproved ? 1 : 0,
+      createdAt: now,
+      updatedAt: now,
+    });
   }
 
   private finishLoopRun(
@@ -494,6 +698,10 @@ export class LoopStore {
 
   private getLoopDefinitionRow(loopId: string): LoopDefinitionRow | undefined {
     return this.db.prepare('select * from loop_definitions where id = ?').get(loopId) as LoopDefinitionRow | undefined;
+  }
+
+  private getUserLoopTemplateRow(loopId: string): UserLoopTemplateRow | undefined {
+    return this.db.prepare('select * from user_loop_templates where loop_id = ?').get(loopId) as UserLoopTemplateRow | undefined;
   }
 
   private getLoopRunRow(runId: string): LoopRunRow | undefined {
@@ -635,12 +843,19 @@ export class LoopStore {
     }
   }
 
+  private ensureColumn(tableName: string, columnName: string, statement: string): void {
+    const rows = this.db.prepare(`pragma table_info(${tableName})`).all() as Array<{ name: string }>;
+    if (rows.some(row => row.name === columnName)) return;
+    this.db.exec(statement);
+  }
+
   private definitionRowToRecord(row: LoopDefinitionRow): LoopDefinition {
     return {
       id: row.id,
       title: row.title,
       description: row.description,
       status: row.status,
+      origin: row.origin ?? 'built_in',
       activeRunId: row.active_run_id ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -682,6 +897,80 @@ export class LoopStore {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+  }
+
+  private userLoopTemplateRowToRecord(row: UserLoopTemplateRow): UserLoopTemplate {
+    return {
+      loopId: row.loop_id,
+      kind: row.kind,
+      prompt: row.prompt,
+      outputDirectory: row.output_directory,
+      outputFileName: row.output_file_name,
+      scheduleActionId: row.schedule_action_id ?? undefined,
+      scheduleEnabled: row.schedule_enabled === 1,
+      scheduleTrigger: row.schedule_trigger_json ? parseJson<Record<string, unknown>>(row.schedule_trigger_json) : undefined,
+      autoRunApproved: row.auto_run_approved === 1,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+}
+
+interface NormalizedUserLoopTemplateInput {
+  title: string;
+  description: string;
+  kind: UserLoopTemplateKind;
+  prompt: string;
+  outputDirectory: string;
+  outputFileName: string;
+  scheduleActionId?: string;
+  scheduleEnabled: boolean;
+  scheduleTrigger?: Record<string, unknown>;
+  autoRunApproved: boolean;
+}
+
+function normalizeUserLoopTemplateInput(
+  input: CreateUserLoopTemplateInput | UpdateUserLoopTemplateInput,
+  defaults: Partial<Pick<NormalizedUserLoopTemplateInput, 'scheduleActionId' | 'scheduleEnabled' | 'scheduleTrigger' | 'autoRunApproved'>> = {}
+): NormalizedUserLoopTemplateInput {
+  const title = input.title.trim();
+  if (!title) throw new Error('title must be a non-empty string');
+  if (input.kind !== 'markdown_file') throw new Error('kind must be markdown_file');
+  const prompt = input.prompt.trim();
+  if (!prompt) throw new Error('prompt must be a non-empty string');
+  if (!isAbsolute(input.outputDirectory)) throw new Error('outputDirectory must be an absolute path');
+  validateOutputFileName(input.outputFileName);
+  const outputDirectory = resolve(input.outputDirectory);
+  const outputPath = resolve(outputDirectory, input.outputFileName);
+  if (outputPath !== resolve(outputDirectory, basename(outputPath))) {
+    throw new Error('outputFileName must resolve inside outputDirectory');
+  }
+  if (!outputPath.startsWith(`${outputDirectory}${sep}`) && dirname(outputPath) !== outputDirectory) {
+    throw new Error('outputFileName must resolve inside outputDirectory');
+  }
+  return {
+    title,
+    description: input.description?.trim() ?? '',
+    kind: input.kind,
+    prompt,
+    outputDirectory,
+    outputFileName: input.outputFileName,
+    scheduleActionId: input.scheduleActionId ?? defaults.scheduleActionId,
+    scheduleEnabled: input.scheduleEnabled ?? defaults.scheduleEnabled ?? false,
+    scheduleTrigger: input.scheduleTrigger ?? defaults.scheduleTrigger,
+    autoRunApproved: input.autoRunApproved ?? defaults.autoRunApproved ?? false,
+  };
+}
+
+function validateOutputFileName(outputFileName: string): void {
+  if (typeof outputFileName !== 'string' || outputFileName.trim().length === 0) {
+    throw new Error('outputFileName must be a non-empty basename');
+  }
+  if (outputFileName !== basename(outputFileName)) {
+    throw new Error('outputFileName must be a basename');
+  }
+  if (outputFileName === '.' || outputFileName === '..' || outputFileName.includes('/') || outputFileName.includes('\\')) {
+    throw new Error('outputFileName must be a basename');
   }
 }
 
