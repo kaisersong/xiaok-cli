@@ -10,8 +10,10 @@ import {
   buildIntentBrokerServiceEnv,
   checkKSwarmHealthServiceIdentity,
   doesKSwarmHealthMatchExpectedService,
+  findPidOnPort,
   hasDynamicWorkflowSupport,
   hasWorkflowPatternCapabilities,
+  killStaleServiceOnPort,
   KSwarmUnavailableError,
   nextHealthFailureCount,
   requestWithFallbackBaseUrls,
@@ -171,7 +173,7 @@ describe('kswarm service spawn options', () => {
 });
 
 describe('kswarm service external adoption', () => {
-  it('allows same-entry services even when source hash drifts or is missing', () => {
+  it('allows same-entry services when source hash matches or is missing from remote', () => {
     const entryPath = '/tmp/xiaok.app/Contents/Resources/services/kswarm/src/server/index.js';
 
     expect(doesKSwarmHealthMatchExpectedService({
@@ -180,23 +182,23 @@ describe('kswarm service external adoption', () => {
 
     expect(doesKSwarmHealthMatchExpectedService({
       service: { entryPath, sourceHash: 'hash-old' },
-    }, entryPath, 'hash-new')).toBe(true);
+    }, entryPath, 'hash-new')).toBe(false);
 
     expect(doesKSwarmHealthMatchExpectedService({
       service: { entryPath },
     }, entryPath, 'hash-new')).toBe(true);
   });
 
-  it('reports source hash mismatches as warnings when the service entry path matches', () => {
+  it('treats source hash mismatch as incompatible when the service entry path matches', () => {
     const entryPath = '/tmp/xiaok.app/Contents/Resources/services/kswarm/src/server/index.js';
     const result = checkKSwarmHealthServiceIdentity({
       service: { entryPath, sourceHash: 'hash-old' },
     }, entryPath, 'hash-new');
 
     expect(result).toMatchObject({
-      compatible: true,
-      reason: null,
-      warning: 'source_hash_mismatch',
+      compatible: false,
+      reason: 'source_hash_mismatch',
+      warning: null,
       actualEntryPath: entryPath,
       expectedEntryPath: entryPath,
       actualSourceHash: 'hash-old',
@@ -649,5 +651,29 @@ describe('kswarm service request gateway', () => {
       fetchImpl,
       timeoutMs: 1_000,
     })).rejects.toThrow(KSwarmUnavailableError);
+  });
+});
+
+describe('killStaleServiceOnPort', () => {
+  it('returns false when no process is listening on the port', async () => {
+    const result = await killStaleServiceOnPort(19999);
+    expect(result).toBe(false);
+  });
+
+  it('returns false when the port owner is the current process', async () => {
+    const { createServer } = await import('node:net');
+    const server = createServer();
+    await new Promise<void>(resolve => server.listen(0, resolve));
+    const port = (server.address() as { port: number }).port;
+    const pid = await findPidOnPort(port);
+    server.close();
+    if (pid === process.pid) {
+      expect(await killStaleServiceOnPort(port)).toBe(false);
+    }
+  });
+
+  it('findPidOnPort returns null for an unused port', async () => {
+    const pid = await findPidOnPort(19999);
+    expect(pid).toBeNull();
   });
 });

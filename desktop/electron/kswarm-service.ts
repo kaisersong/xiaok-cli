@@ -8,7 +8,7 @@
  * - Graceful shutdown on app quit
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, posix, relative, resolve } from 'node:path';
@@ -339,8 +339,8 @@ export function getKSwarmHealthServiceSourceHash(body: Record<string, unknown> |
   return typeof sourceHash === 'string' && sourceHash.length > 0 ? sourceHash : null;
 }
 
-export type KSwarmServiceIdentityWarning = 'source_hash_mismatch' | 'source_hash_missing';
-export type KSwarmServiceIdentityReason = 'service_identity_missing' | 'entry_path_mismatch';
+export type KSwarmServiceIdentityWarning = 'source_hash_missing';
+export type KSwarmServiceIdentityReason = 'service_identity_missing' | 'entry_path_mismatch' | 'source_hash_mismatch';
 
 export interface KSwarmServiceIdentityCheck {
   compatible: boolean;
@@ -414,7 +414,7 @@ export function checkKSwarmHealthServiceIdentity(
     return { ...base, compatible: true, reason: null, warning: 'source_hash_missing' };
   }
   if (expectedSourceHash && actualSourceHash !== expectedSourceHash) {
-    return { ...base, compatible: true, reason: null, warning: 'source_hash_mismatch' };
+    return { ...base, compatible: false, reason: 'source_hash_mismatch', warning: null };
   }
   return { ...base, compatible: true, reason: null, warning: null };
 }
@@ -496,6 +496,54 @@ export interface KSwarmService {
   onStatusChange(cb: (status: KSwarmServiceStatus) => void): () => void;
   /** Make an HTTP request to the KSwarm service. Auto-starts if not running. */
   request(path: string, init?: RequestInit): Promise<Response>;
+}
+
+export async function killStaleServiceOnPort(port: number): Promise<boolean> {
+  const pid = await findPidOnPort(port);
+  if (pid == null || pid === process.pid) return false;
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    return false;
+  }
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 200));
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+  }
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch { /* already gone */ }
+  await new Promise(r => setTimeout(r, 200));
+  return true;
+}
+
+export function findPidOnPort(port: number): Promise<number | null> {
+  return new Promise(resolve => {
+    if (process.platform === 'win32') {
+      execFile('netstat', ['-ano', '-p', 'TCP'], (err, stdout) => {
+        if (err) return resolve(null);
+        for (const line of stdout.split('\n')) {
+          if (line.includes(`:${port}`) && /LISTENING/i.test(line)) {
+            const parts = line.trim().split(/\s+/);
+            const pid = parseInt(parts[parts.length - 1], 10);
+            if (pid > 0) return resolve(pid);
+          }
+        }
+        resolve(null);
+      });
+    } else {
+      execFile('lsof', ['-ti', `:${port}`], (err, stdout) => {
+        if (err) return resolve(null);
+        const pid = parseInt(stdout.trim().split('\n')[0], 10);
+        resolve(pid > 0 ? pid : null);
+      });
+    }
+  });
 }
 
 export function createKSwarmService(): KSwarmService {
@@ -810,13 +858,22 @@ export function createKSwarmService(): KSwarmService {
       console.warn(`[kswarm-service] ${warning}`);
       logKSwarmServiceLine('server', 'lifecycle', warning);
     }
+    let killedStale = false;
     if (existingHealthy && serverPath && !serviceIdentityMatches && !child) {
-      lastError = formatServiceIdentityBlock(serviceIdentity);
-      console.warn(`[kswarm-service] ${lastError}`);
-      logKSwarmServiceLine('server', 'lifecycle', lastError);
-      running = false;
-      notifyListeners();
-      return;
+      const reason = formatServiceIdentityBlock(serviceIdentity);
+      console.warn(`[kswarm-service] ${reason}`);
+      logKSwarmServiceLine('server', 'lifecycle', `replacing stale service: ${reason}`);
+      const killed = await killStaleServiceOnPort(KSWARM_PORT);
+      if (!killed) {
+        lastError = `failed to kill stale kswarm service on port ${KSWARM_PORT}: ${reason}`;
+        console.error(`[kswarm-service] ${lastError}`);
+        logKSwarmServiceLine('server', 'lifecycle', lastError);
+        running = false;
+        notifyListeners();
+        return;
+      }
+      killedStale = true;
+      logKSwarmServiceLine('server', 'lifecycle', `stale service killed, proceeding with spawn`);
     }
     if (shouldAdoptExistingKSwarmService({
       hasOwnedChild: Boolean(child),
@@ -836,15 +893,24 @@ export function createKSwarmService(): KSwarmService {
       return;
     }
 
-    if (existingHealthy && !dynamicWorkflowReady && !child) {
-      lastError = `existing kswarm service on port ${KSWARM_PORT} does not support dynamic workflows`;
-      console.warn(`[kswarm-service] ${lastError}`);
-      running = false;
-      notifyListeners();
-      return;
+    if (existingHealthy && !dynamicWorkflowReady && !killedStale && !child) {
+      const reason = `existing kswarm service on port ${KSWARM_PORT} does not support dynamic workflows`;
+      console.warn(`[kswarm-service] ${reason}`);
+      logKSwarmServiceLine('server', 'lifecycle', `replacing incompatible service: ${reason}`);
+      const killed = await killStaleServiceOnPort(KSWARM_PORT);
+      if (!killed) {
+        lastError = `failed to kill incompatible kswarm service on port ${KSWARM_PORT}`;
+        console.error(`[kswarm-service] ${lastError}`);
+        logKSwarmServiceLine('server', 'lifecycle', lastError);
+        running = false;
+        notifyListeners();
+        return;
+      }
+      killedStale = true;
+      logKSwarmServiceLine('server', 'lifecycle', `incompatible service killed, proceeding with spawn`);
     }
 
-    if (existingHealthy && !child) {
+    if (existingHealthy && !killedStale && !child) {
       brokerReady = await ensureBroker();
       console.log(`[kswarm-service] Adopting existing kswarm service on port ${KSWARM_PORT}${brokerReady ? '' : ' (broker degraded)'}`);
       await reconcileSeedAgents();
