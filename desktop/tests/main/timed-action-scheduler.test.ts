@@ -100,7 +100,7 @@ describe('TimedActionScheduler', () => {
     resolveAgent?.();
   });
 
-  it('uses a 30 minute default lease before releasing stale scheduled task claims', async () => {
+  it('keeps lease intact within the default stale-after window', async () => {
     store.createAction({
       id: 'leased_agent',
       title: '长租约任务',
@@ -112,9 +112,10 @@ describe('TimedActionScheduler', () => {
     const [claimed] = store.claimDueActions(1_000, 1);
     expect(claimed.action.id).toBe('leased_agent');
 
+    // 60 min after claim, default 75 min stale-after has not elapsed.
     const scheduler = new TimedActionScheduler(store, {
       executors: {},
-      now: () => 10 * 60_000,
+      now: () => 60 * 60_000,
     });
     await scheduler.runOnce('startup_recovery');
 
@@ -200,7 +201,7 @@ describe('TimedActionScheduler', () => {
       kind: 'loop',
       execute: vi.fn(() => {
         calls.push('loop');
-        return {};
+        return { decision: { loopRunId: 'run_loop_now', loopStatus: 'success' } };
       }),
     };
     const agentExecutor: TimedActionExecutorHandler = {
@@ -227,6 +228,79 @@ describe('TimedActionScheduler', () => {
     });
     expect(agentExecutor.execute).not.toHaveBeenCalled();
     expect(store.listRuns('agent_now')).toEqual([]);
+  });
+
+  it('skips background loop and agent actions when the global auto-run gate is disabled', async () => {
+    store.createAction({
+      id: 'notify_due',
+      title: '提醒',
+      trigger: { kind: 'once', at: 1_000 },
+      executor: { kind: 'notify', message: '提醒' },
+      source: 'user',
+      now: 0,
+    });
+    store.createAction({
+      id: 'loop_due',
+      title: '循环',
+      trigger: { kind: 'interval', intervalMinutes: 10 },
+      executor: { kind: 'loop', loopId: 'artifact-evidence-regression' },
+      source: 'user',
+      nextDueAt: 1_000,
+      now: 0,
+    });
+    store.createAction({
+      id: 'agent_due',
+      title: '自动任务',
+      trigger: { kind: 'interval', intervalMinutes: 10 },
+      executor: { kind: 'agent_task', prompt: '执行' },
+      source: 'agent',
+      nextDueAt: 1_000,
+      now: 0,
+    });
+
+    const notifyExecutor: TimedActionExecutorHandler = {
+      kind: 'notify',
+      execute: vi.fn(() => ({})),
+    };
+    const loopExecutor: TimedActionExecutorHandler = {
+      kind: 'loop',
+      execute: vi.fn(() => ({ decision: { loopRunId: 'run_loop_due', loopStatus: 'success' } })),
+    };
+    const agentExecutor: TimedActionExecutorHandler = {
+      kind: 'agent_task',
+      execute: vi.fn(() => ({})),
+    };
+
+    const scheduler = new TimedActionScheduler(store, {
+      executors: { notify: notifyExecutor, loop: loopExecutor, agent_task: agentExecutor },
+      now: () => 2_000,
+      isGlobalBackgroundAutoRunEnabled: () => false,
+    });
+
+    await scheduler.runOnce('normal_tick');
+
+    await vi.waitFor(() => {
+      expect(notifyExecutor.execute).toHaveBeenCalledTimes(1);
+      expect(store.listRuns('notify_due')[0]).toMatchObject({ status: 'success' });
+    });
+    expect(loopExecutor.execute).not.toHaveBeenCalled();
+    expect(agentExecutor.execute).not.toHaveBeenCalled();
+
+    for (const actionId of ['loop_due', 'agent_due']) {
+      expect(store.listRuns(actionId)[0]).toMatchObject({
+        status: 'skip',
+        error: 'skipped_auto_run_disabled',
+        decision: expect.objectContaining({
+          recoveryDecision: { action: 'skip', reason: 'skipped_auto_run_disabled' },
+        }),
+      });
+      expect(store.getAction(actionId)).toMatchObject({
+        status: 'active',
+        consecutiveFailures: 0,
+        lastError: 'skipped_auto_run_disabled',
+      });
+      expect(store.getAction(actionId)?.nextDueAt).toBeGreaterThan(2_000);
+    }
   });
 
   it('records a cron loop timed action run as skipped when the loop is already running', async () => {
@@ -261,6 +335,146 @@ describe('TimedActionScheduler', () => {
       expect(onRunComplete).toHaveBeenCalledWith(expect.objectContaining({
         status: 'skipped',
         error: 'loop already running: run_active',
+      }));
+    });
+  });
+
+  it('passes the claimed TimedAction run id into scheduled loop triggers', async () => {
+    store.createAction({
+      id: 'loop_with_run_context',
+      title: '证据回归',
+      trigger: { kind: 'once', at: 1_000 },
+      executor: { kind: 'loop', loopId: 'artifact-evidence-regression' },
+      source: 'agent',
+      now: 0,
+    });
+
+    const runLoop = vi.fn().mockResolvedValue({
+      status: 'success',
+      run: {
+        id: 'loop-run-context',
+        loopId: 'artifact-evidence-regression',
+        status: 'success',
+        trigger: { kind: 'scheduled' },
+        evidenceIds: ['evidence-1'],
+        startedAt: 2_000,
+        finishedAt: 2_000,
+        updatedAt: 2_000,
+        summary: 'ok',
+      },
+    });
+    const scheduler = new TimedActionScheduler(store, {
+      executors: {
+        loop: createLoopExecutor({ runLoop }),
+      },
+      now: () => 2_000,
+    });
+
+    await scheduler.runOnce('normal_tick');
+
+    await vi.waitFor(() => {
+      expect(store.listRuns('loop_with_run_context')[0]).toMatchObject({ status: 'success' });
+    });
+    const [timedRun] = store.listRuns('loop_with_run_context');
+    expect(runLoop).toHaveBeenCalledWith('artifact-evidence-regression', expect.objectContaining({
+      timedActionId: 'loop_with_run_context',
+      timedActionRunId: timedRun.runId,
+    }));
+    expect(timedRun.decision).toEqual(expect.objectContaining({
+      loopRunId: 'loop-run-context',
+      loopStatus: 'success',
+    }));
+  });
+
+  it('fails a loop timed action when the loop executor omits loopStatus', async () => {
+    store.createAction({
+      id: 'loop_missing_status',
+      title: '证据回归',
+      trigger: { kind: 'daily', hour: 1, minute: 0 },
+      executor: { kind: 'loop', loopId: 'artifact-evidence-regression' },
+      source: 'agent',
+      nextDueAt: 1_000,
+      now: 0,
+    });
+
+    const scheduler = new TimedActionScheduler(store, {
+      executors: {
+        loop: {
+          kind: 'loop',
+          execute: vi.fn().mockResolvedValue({
+            decision: { loopRunId: 'run_missing_status' },
+          }),
+        },
+      },
+      now: () => 2_000,
+    });
+
+    await scheduler.runOnce('normal_tick');
+
+    await vi.waitFor(() => {
+      expect(store.listRuns('loop_missing_status')[0]).toMatchObject({
+        status: 'failed',
+        error: 'loop executor decision missing loopStatus',
+      });
+      expect(store.getAction('loop_missing_status')).toMatchObject({
+        consecutiveFailures: 1,
+        lastError: 'loop executor decision missing loopStatus',
+      });
+    });
+  });
+
+  it('pauses a loop timed action when the loop executor reports blocked', async () => {
+    store.createAction({
+      id: 'loop_blocked',
+      title: '证据回归',
+      trigger: { kind: 'daily', hour: 1, minute: 0 },
+      executor: { kind: 'loop', loopId: 'artifact-evidence-regression' },
+      source: 'agent',
+      nextDueAt: 1_000,
+      now: 0,
+    });
+
+    const onRunComplete = vi.fn();
+    const scheduler = new TimedActionScheduler(store, {
+      executors: {
+        loop: {
+          kind: 'loop',
+          execute: vi.fn().mockResolvedValue({
+            decision: {
+              loopRunId: 'run_blocked',
+              loopStatus: 'blocked',
+              nextActionKind: 'ask_user',
+              nextActionSummary: 'need credentials',
+            },
+          }),
+        },
+      },
+      now: () => 2_000,
+      onRunComplete,
+    });
+
+    await scheduler.runOnce('normal_tick');
+
+    await vi.waitFor(() => {
+      expect(store.listRuns('loop_blocked')[0]).toMatchObject({
+        status: 'pause',
+        error: 'blocked_requires_user_action',
+        decision: expect.objectContaining({
+          recoveryDecision: { action: 'pause', reason: 'blocked_requires_user_action' },
+          loopRunId: 'run_blocked',
+          loopStatus: 'blocked',
+          nextActionKind: 'ask_user',
+          nextActionSummary: 'need credentials',
+        }),
+      });
+      expect(store.getAction('loop_blocked')).toMatchObject({
+        status: 'paused',
+        consecutiveFailures: 0,
+        lastError: 'blocked_requires_user_action',
+      });
+      expect(onRunComplete).toHaveBeenCalledWith(expect.objectContaining({
+        status: 'skipped',
+        error: 'blocked_requires_user_action',
       }));
     });
   });
@@ -335,7 +549,7 @@ describe('TimedActionScheduler', () => {
 
     const loopExecutor: TimedActionExecutorHandler = {
       kind: 'loop',
-      execute: vi.fn(() => ({})),
+      execute: vi.fn(() => ({ decision: { loopRunId: 'run_loop_due', loopStatus: 'success' } })),
     };
     const agentExecutor: TimedActionExecutorHandler = {
       kind: 'agent_task',

@@ -152,6 +152,7 @@ export interface TaskCreateInput {
   prompt: string;
   materials: Array<{ materialId: string; role?: MaterialRole }>;
   permissionMode?: TaskPermissionMode;
+  watchdogMs?: number;
   context?: TaskCreateContext;
 }
 
@@ -178,7 +179,7 @@ export interface TaskRuntimeHost {
   createTask(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
   subscribeTask(taskId: string, options?: { sinceIndex?: number }): AsyncIterable<DesktopTaskEvent>;
   answerQuestion(input: { taskId: string; answer: UserAnswer }): Promise<void>;
-  cancelTask(taskId: string): Promise<void>;
+  cancelTask(taskId: string, reason?: string): Promise<void>;
   getActiveTasks(): Promise<ActiveTaskRef[]>;
   /** @deprecated Use getActiveTasks() */
   getActiveTask(): Promise<ActiveTaskRef | null>;

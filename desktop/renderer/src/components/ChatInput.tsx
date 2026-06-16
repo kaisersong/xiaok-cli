@@ -70,6 +70,10 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       const lines = plainText.split(/\r?\n/).flatMap(l => { const t = l.trim(); return t ? [t] : []; });
       const pathLines = lines.filter(l => l.startsWith('/'));
       if (pathLines.length > 0) {
+        if (finderFilesPendingRef.current) {
+          e.preventDefault();
+          return;
+        }
         pastePathsRef.current = pathLines;
         return;
       }

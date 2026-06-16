@@ -31,6 +31,7 @@ import { TimedActionService } from './timed-action-service.js';
 import { TimedActionScheduler } from './timed-action-scheduler.js';
 import { createDesktopTimedActionExecutors } from './timed-action-executors.js';
 import { createDesktopLoopRuntime } from './loop-executor.js';
+import { buildAutomationOverviewSnapshot, buildAutomationRunHistory } from './automation-overview.js';
 import { attachDesktopContextMenu } from './context-menu.js';
 import {
   createKSwarmRuntimeBridge,
@@ -133,7 +134,7 @@ async function createWindow(): Promise<BrowserWindow> {
   kswarmStreamBridge.start();
   registerKSwarmProxy(ipcMain, kswarmStreamBridge, kswarmService);
 
-  const { getConfigDir } = await import('../../src/utils/config.js');
+  const { getConfigDir, loadConfig, saveConfig } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
   const services = createDesktopServices({
     dataRoot,
@@ -141,6 +142,11 @@ async function createWindow(): Promise<BrowserWindow> {
   });
   const loopRuntime = createDesktopLoopRuntime({
     dataRoot,
+    taskPort: {
+      createTask: (input) => services.createTask(input),
+      recoverTask: (taskId) => services.recoverTask(taskId),
+      cancelTask: (taskId, reason) => services.cancelTask(taskId, reason),
+    },
     kswarmHealthProbe: () => kswarmService.getHealthDiagnosticInput(),
     kswarmHealthLogPaths: [
       join(resolveKSwarmServiceLogRoot(app.getPath('userData')), 'server.log'),
@@ -187,10 +193,36 @@ async function createWindow(): Promise<BrowserWindow> {
     }
   });
 
+  let globalBackgroundAutoRunEnabled = (await loadConfig()).automations?.globalBackgroundAutoRunEnabled !== false;
+  const automationsConfigSnapshot = () => ({ globalBackgroundAutoRunEnabled });
+  ipcMain.handle('desktop:automations:getConfig', () => automationsConfigSnapshot());
+  ipcMain.handle('desktop:automations:setGlobalBackgroundAutoRun', async (_event, input) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.enabled !== 'boolean') {
+      throw new Error('enabled must be a boolean');
+    }
+    const config = await loadConfig();
+    globalBackgroundAutoRunEnabled = input.enabled;
+    config.automations = {
+      ...(config.automations ?? {}),
+      globalBackgroundAutoRunEnabled,
+    };
+    await saveConfig(config);
+    return automationsConfigSnapshot();
+  });
+
   // Unified timed action daemon: notification reminders and automatic AI tasks share one scheduler.
   const timedActionStore = new TimedActionStore(join(dataRoot, 'timed-actions.sqlite'));
   const timedActionService = new TimedActionService(timedActionStore);
   services.registerTimedActionService(timedActionService);
+  ipcMain.handle('desktop:automations:getOverviewSnapshot', () => buildAutomationOverviewSnapshot({
+    loopStore: loopRuntime.loopStore,
+    timedActionStore,
+    globalBackgroundAutoRunEnabled,
+  }));
+  ipcMain.handle('desktop:automations:getRunHistory', () => buildAutomationRunHistory({
+    loopStore: loopRuntime.loopStore,
+    timedActionStore,
+  }));
 
   // Register channel tools with AI runner (for sending messages to yunzhijia, discord, etc.)
   services.registerChannelTools();
@@ -333,6 +365,11 @@ async function createWindow(): Promise<BrowserWindow> {
       loopRuntime,
       createTask: (input) => services.createTask(input),
     }),
+    isGlobalBackgroundAutoRunEnabled: () => globalBackgroundAutoRunEnabled,
+    resolveLinkedLoopRun: ({ action, timedActionRunId }) => loopRuntime.resolveTimedActionLoopRun({
+      action,
+      timedActionRunId,
+    }),
     onRunComplete: (event) => {
       if (event.action.executor.kind !== 'agent_task') return;
       if (window.isDestroyed()) return;
@@ -359,8 +396,43 @@ async function createWindow(): Promise<BrowserWindow> {
   ipcMain.handle('desktop:createScheduledTask', (_event, input) => {
     return timedActionService.createScheduledTask(input);
   });
+  ipcMain.handle('desktop:loops:createSchedule', (_event, input) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw new Error('loop schedule input must be an object');
+    }
+    const record = input as Record<string, unknown>;
+    const loopId = typeof record.loopId === 'string' && record.loopId.trim().length > 0
+      ? record.loopId
+      : '';
+    if (!loopId) {
+      throw new Error('loopId must be a non-empty string');
+    }
+    const template = loopRuntime.loopStore.getUserLoopTemplate(loopId);
+    if (!template) {
+      throw new Error('user loop template does not exist');
+    }
+    if (!record.trigger || typeof record.trigger !== 'object' || Array.isArray(record.trigger)) {
+      throw new Error('trigger must be an object');
+    }
+    return timedActionService.createLoopSchedule({
+      id: typeof record.id === 'string' ? record.id : undefined,
+      loopId,
+      title: typeof record.title === 'string' && record.title.trim().length > 0
+        ? record.title
+        : loopRuntime.loopStore.getLoopDefinition(loopId)?.title ?? 'Loop schedule',
+      description: typeof record.description === 'string' ? record.description : undefined,
+      trigger: record.trigger as never,
+      source: 'user',
+    });
+  });
+  ipcMain.handle('desktop:loops:getScheduleBindings', () => {
+    return timedActionService.listLoopScheduleBindings();
+  });
   ipcMain.handle('desktop:updateScheduledTask', (_event, input) => {
     return timedActionService.updateScheduledTask(input);
+  });
+  ipcMain.handle('desktop:setScheduledTaskStatus', (_event, id: string, status: 'active' | 'paused') => {
+    return timedActionService.setScheduledTaskStatus(id, status) ?? null;
   });
   ipcMain.handle('desktop:cancelScheduledTask', (_event, id: string) => {
     return timedActionService.cancelScheduledTask(id);

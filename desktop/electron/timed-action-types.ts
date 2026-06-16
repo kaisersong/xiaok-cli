@@ -79,6 +79,25 @@ export interface TimedActionRunRecord {
   decision?: Record<string, unknown>;
 }
 
+export interface LoopTimedActionDecision {
+  loopRunId: string;
+  loopStatus: 'success' | 'failed' | 'blocked';
+  nextActionKind?: string;
+  nextActionSummary?: string;
+  [key: string]: unknown;
+}
+
+export interface TimedActionExecutorRuntimeContext {
+  timedActionRunId: string;
+  /**
+   * AbortSignal that fires when the scheduler's executor timeout elapses or
+   * when the scheduler is asked to terminate this run. Handlers should
+   * propagate this signal into any long-running work they kick off so the
+   * underlying task can be cancelled instead of left running as a zombie.
+   */
+  signal?: AbortSignal;
+}
+
 export interface ClaimedTimedAction {
   action: TimedActionRecord;
   runId: string;
@@ -99,7 +118,8 @@ export interface TimedActionExecutorHandler {
   ) => ExecutorRecoveryDecision;
   execute: (
     action: TimedActionRecord,
-    context: OverdueRecoveryContext
+    context: OverdueRecoveryContext,
+    runtimeContext?: TimedActionExecutorRuntimeContext
   ) => Promise<TimedActionExecutorResult> | TimedActionExecutorResult;
 }
 
@@ -119,4 +139,5 @@ export interface CreateTimedActionInput {
   runCount?: number;
   consecutiveFailures?: number;
   lastRuntimeTaskId?: string;
+  userApprovedAuto?: boolean;
 }

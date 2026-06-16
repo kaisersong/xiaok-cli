@@ -3911,6 +3911,25 @@ function createReadMaterialResult(ok: boolean, payload: Record<string, unknown>)
 }
 
 const DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS = 20;
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (!signal.aborted) return;
+  const reason = signal.reason instanceof Error
+    ? signal.reason.message
+    : typeof signal.reason === 'string'
+      ? signal.reason
+      : '';
+  if (reason === 'task_watchdog_timeout') {
+    throw new Error('任务执行超时，已自动终止。');
+  }
+  if (reason === 'loop_poll_timeout') {
+    throw new Error('任务运行时间过长，已自动停止。');
+  }
+  // user_cancelled and any unknown/missing reason fall back to the prior wire
+  // message so existing catch blocks (and renderer copy) keep working.
+  throw new Error('task cancelled');
+}
+
 const DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT = [
   '工具调用预算已用尽。不要再调用工具。',
   '请基于以上所有工具结果直接给出最终答复。',
@@ -3933,7 +3952,7 @@ async function streamDesktopToolLoopFinalization(input: {
   const assistantBlocks: MessageBlock[] = [];
   let reply = '';
   for await (const chunk of input.adapter.stream(input.apiMessages, [], input.systemPrompt)) {
-    if (input.signal.aborted) throw new Error('task cancelled');
+    throwIfAborted(input.signal);
     if (chunk.type === 'text') {
       const lastBlock = assistantBlocks[assistantBlocks.length - 1];
       if (lastBlock?.type === 'text') {
@@ -4041,8 +4060,8 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
   }
 
   while (iteration < DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS) {
-    if (ctx.signal.aborted) throw new Error('task cancelled');
-    if (Date.now() > ctx.taskDeadline) throw new Error('任务超时（30分钟），可能是网络不稳定或模型响应过慢。请检查网络后重试。');
+    throwIfAborted(ctx.signal);
+    if (Date.now() > ctx.taskDeadline) throw new Error('任务超时，可能是网络不稳定或模型响应过慢。请检查网络后重试。');
     iteration++;
 
     if (skillInvocation) {
@@ -4073,7 +4092,7 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
     const apiMessages = ctx.strategies.buildApiView(ctx.messages);
     lastRequestInputTokens = 0;
     for await (const chunk of ctx.adapter.stream(apiMessages, ctx.allToolDefs, ctx.systemPrompt)) {
-      if (ctx.signal.aborted) throw new Error('task cancelled');
+      throwIfAborted(ctx.signal);
       if (chunk.type === 'text') {
         const lastBlock = assistantBlocks[assistantBlocks.length - 1];
         if (lastBlock?.type === 'text') {
@@ -4112,7 +4131,7 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
     }
     const toolResults: MessageBlock[] = [];
     for (const toolCall of toolCalls) {
-      if (ctx.signal.aborted) throw new Error('task cancelled');
+      throwIfAborted(ctx.signal);
       totalToolCalls++;
       const runtimeToolInput = attachRuntimeToolRequestScope(toolCall.name, toolCall.input, ctx.sessionId);
       const isInternalTool = toolCall.name === 'report_progress' || toolCall.name === 'skill' || toolCall.name === 'skill_bundle_refs' || toolCall.name === 'skill_list';
@@ -4323,7 +4342,7 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
     registry.registerTool(tool);
   }
 
-  return async ({ taskId, sessionId, prompt, materials, signal, history: hostHistory, emitRuntimeEvent }) => {
+  return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
@@ -4414,7 +4433,7 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
     }];
     const contextLimit = getContextLimit(adapter.getModelName());
     const sessionDir = join(dataRoot, 'sessions', sessionId);
-    const TASK_TIMEOUT_MS = 30 * 60_000;
+    const TASK_TIMEOUT_MS = deadlineMs ?? 28 * 60_000;
 
     const loopResult = await runDesktopToolLoop({
       adapter,
@@ -5273,7 +5292,7 @@ function createDesktopModelRunnerWithRegistry(
     registry.registerTool(tool);
   }
 
-  return async ({ taskId, sessionId, prompt, materials, signal, history: hostHistory, emitRuntimeEvent }) => {
+  return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
@@ -5362,7 +5381,7 @@ function createDesktopModelRunnerWithRegistry(
       role: 'user',
       content: userContent,
     }];
-    const TASK_TIMEOUT_MS = 30 * 60_000;
+    const TASK_TIMEOUT_MS = deadlineMs ?? 28 * 60_000;
 
     const loopResult = await runDesktopToolLoop({
       adapter,
