@@ -12,6 +12,7 @@ import type {
   ClaimedTimedAction,
   CreateTimedActionInput,
   ExecutorRecoveryDecision,
+  LoopTimedActionDecision,
   OverdueRecoveryContext,
   TimedActionExecutor,
   TimedActionExecutorKind,
@@ -62,6 +63,18 @@ interface TimedActionRunRow {
   decision_json: string | null;
 }
 
+interface AutomationStoreMetadataRow {
+  value: number;
+}
+
+export interface ReleaseStaleLocksOptions {
+  resolveLinkedLoopRun?: (input: {
+    action: TimedActionRecord;
+    actionId: string;
+    timedActionRunId: string;
+  }) => LoopTimedActionDecision | undefined;
+}
+
 export class TimedActionStore {
   private readonly db: DatabaseSync;
 
@@ -74,6 +87,13 @@ export class TimedActionStore {
 
   close(): void {
     this.db.close();
+  }
+
+  getAutomationStoreVersion(): number {
+    const row = this.db.prepare(`
+      select value from automation_store_metadata where key = 'version'
+    `).get() as AutomationStoreMetadataRow | undefined;
+    return row?.value ?? 0;
   }
 
   createAction(input: CreateTimedActionInput): TimedActionRecord {
@@ -97,46 +117,49 @@ export class TimedActionStore {
       runCount: input.runCount ?? 0,
       consecutiveFailures: input.consecutiveFailures ?? 0,
       lastRuntimeTaskId: input.lastRuntimeTaskId,
-      // SQLite column default is 0 (for historical rows); new tasks default to auto-execute.
-      userApprovedAuto: true,
+      // SQLite column default is 0 (for historical rows); most new tasks default to auto-execute.
+      userApprovedAuto: input.userApprovedAuto ?? true,
       createdAt: now,
       updatedAt: now,
     };
 
-    this.db.prepare(`
-      insert into timed_actions (
-        id, title, description, trigger_kind, trigger_json, executor_kind, executor_json, policy_json,
-        status, source, created_by_task_id, next_due_at, last_due_at, run_count,
-        consecutive_failures, locked_run_id, locked_at, last_runtime_task_id, last_error,
-        user_approved_auto, created_at, updated_at
-      ) values (
-        @id, @title, @description, @triggerKind, @triggerJson, @executorKind, @executorJson, @policyJson,
-        @status, @source, @createdByTaskId, @nextDueAt, @lastDueAt, @runCount,
-        @consecutiveFailures, null, null, @lastRuntimeTaskId, null,
-        @userApprovedAuto, @createdAt, @updatedAt
-      )
-    `).run({
-      id: record.id,
-      title: record.title,
-      description: record.description ?? '',
-      triggerKind: record.trigger.kind,
-      triggerJson: JSON.stringify(record.trigger),
-      executorKind: record.executor.kind,
-      executorJson: JSON.stringify(record.executor),
-      policyJson: JSON.stringify(record.policy),
-      status: record.status,
-      source: record.source,
-      createdByTaskId: record.createdByTaskId ?? null,
-      nextDueAt: record.nextDueAt ?? null,
-      lastDueAt: record.lastDueAt ?? null,
-      runCount: record.runCount,
-      consecutiveFailures: record.consecutiveFailures,
-      lastRuntimeTaskId: record.lastRuntimeTaskId ?? null,
-      userApprovedAuto: record.userApprovedAuto ? 1 : 0,
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt,
+    return this.transaction(() => {
+      this.db.prepare(`
+        insert into timed_actions (
+          id, title, description, trigger_kind, trigger_json, executor_kind, executor_json, policy_json,
+          status, source, created_by_task_id, next_due_at, last_due_at, run_count,
+          consecutive_failures, locked_run_id, locked_at, last_runtime_task_id, last_error,
+          user_approved_auto, created_at, updated_at
+        ) values (
+          @id, @title, @description, @triggerKind, @triggerJson, @executorKind, @executorJson, @policyJson,
+          @status, @source, @createdByTaskId, @nextDueAt, @lastDueAt, @runCount,
+          @consecutiveFailures, null, null, @lastRuntimeTaskId, null,
+          @userApprovedAuto, @createdAt, @updatedAt
+        )
+      `).run({
+        id: record.id,
+        title: record.title,
+        description: record.description ?? '',
+        triggerKind: record.trigger.kind,
+        triggerJson: JSON.stringify(record.trigger),
+        executorKind: record.executor.kind,
+        executorJson: JSON.stringify(record.executor),
+        policyJson: JSON.stringify(record.policy),
+        status: record.status,
+        source: record.source,
+        createdByTaskId: record.createdByTaskId ?? null,
+        nextDueAt: record.nextDueAt ?? null,
+        lastDueAt: record.lastDueAt ?? null,
+        runCount: record.runCount,
+        consecutiveFailures: record.consecutiveFailures,
+        lastRuntimeTaskId: record.lastRuntimeTaskId ?? null,
+        userApprovedAuto: record.userApprovedAuto ? 1 : 0,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+      });
+      this.bumpAutomationStoreVersion();
+      return record;
     });
-    return record;
   }
 
   updateActionDefinition(
@@ -158,25 +181,29 @@ export class TimedActionStore {
     const policy = input.policy ?? current.policy;
     validateTrigger(input.trigger, policy.minIntervalMinutes);
     const nextDueAt = input.nextDueAt ?? computeInitialDueAt(input.trigger, now);
-    const result = this.db.prepare(`
-      update timed_actions
-      set title = ?, description = ?, trigger_kind = ?, trigger_json = ?,
-          executor_kind = ?, executor_json = ?, policy_json = ?, next_due_at = ?,
-          updated_at = ?
-      where id = ?
-    `).run(
-      input.title,
-      input.description ?? '',
-      input.trigger.kind,
-      JSON.stringify(input.trigger),
-      input.executor.kind,
-      JSON.stringify(input.executor),
-      JSON.stringify(policy),
-      nextDueAt ?? null,
-      now,
-      id
-    );
-    return result.changes === 1 ? this.getAction(id) : undefined;
+    return this.transaction(() => {
+      const result = this.db.prepare(`
+        update timed_actions
+        set title = ?, description = ?, trigger_kind = ?, trigger_json = ?,
+            executor_kind = ?, executor_json = ?, policy_json = ?, next_due_at = ?,
+            updated_at = ?
+        where id = ?
+      `).run(
+        input.title,
+        input.description ?? '',
+        input.trigger.kind,
+        JSON.stringify(input.trigger),
+        input.executor.kind,
+        JSON.stringify(input.executor),
+        JSON.stringify(policy),
+        nextDueAt ?? null,
+        now,
+        id
+      );
+      if (result.changes !== 1) return undefined;
+      this.bumpAutomationStoreVersion();
+      return this.getAction(id);
+    });
   }
 
   getAction(id: string): TimedActionRecord | undefined {
@@ -184,10 +211,13 @@ export class TimedActionStore {
     return row ? this.rowToRecord(row) : undefined;
   }
 
-  listActions(filter: { executorKind?: TimedActionExecutorKind; includeInactive?: boolean } = {}): TimedActionRecord[] {
+  listActions(filter: { executorKind?: TimedActionExecutorKind; executorKinds?: TimedActionExecutorKind[]; includeInactive?: boolean } = {}): TimedActionRecord[] {
     const clauses: string[] = [];
     const params: SQLInputValue[] = [];
-    if (filter.executorKind) {
+    if (filter.executorKinds && filter.executorKinds.length > 0) {
+      clauses.push(`executor_kind in (${filter.executorKinds.map(() => '?').join(', ')})`);
+      params.push(...filter.executorKinds);
+    } else if (filter.executorKind) {
       clauses.push('executor_kind = ?');
       params.push(filter.executorKind);
     }
@@ -256,23 +286,33 @@ export class TimedActionStore {
         `).run(runId, row.id, row.executor_kind, now, JSON.stringify({ context }));
         claimed.push({ action, runId, context });
       }
+      if (claimed.length > 0) {
+        this.bumpAutomationStoreVersion();
+      }
       return claimed;
     });
   }
 
   markRunRunning(actionId: string, runId: string, now: number): void {
-    this.db.prepare(`
-      update timed_action_runs
-      set status = 'running', started_at = ?
-      where action_id = ? and run_id = ?
-    `).run(now, actionId, runId);
+    this.transaction(() => {
+      const result = this.db.prepare(`
+        update timed_action_runs
+        set status = 'running', started_at = ?
+        where action_id = ? and run_id = ?
+      `).run(now, actionId, runId);
+      if (result.changes === 1) {
+        this.bumpAutomationStoreVersion();
+      }
+    });
   }
 
   finishRunSuccess(actionId: string, runId: string, now: number, result: { runtimeTaskId?: string; decision?: Record<string, unknown> }): void {
     this.transaction(() => {
       const current = this.getAction(actionId);
       if (!current || current.lockedRunId !== runId || current.status !== 'active') {
-        this.updateRun(runId, 'success', now, result.runtimeTaskId, undefined, result.decision);
+        if (this.updateRun(runId, 'success', now, result.runtimeTaskId, undefined, result.decision)) {
+          this.bumpAutomationStoreVersion();
+        }
         return;
       }
 
@@ -284,14 +324,17 @@ export class TimedActionStore {
           maxRunsReached || expired ? 'paused' :
             'active';
       const nextDueAt = status === 'active' ? computeNextDueAt(current.trigger, now) : undefined;
-      this.db.prepare(`
+      const actionUpdate = this.db.prepare(`
         update timed_actions
         set status = ?, next_due_at = ?, last_due_at = ?, run_count = ?,
             consecutive_failures = 0, locked_run_id = null, locked_at = null,
             last_runtime_task_id = ?, last_error = null, updated_at = ?
         where id = ?
       `).run(status, nextDueAt ?? null, now, runCount, result.runtimeTaskId ?? current.lastRuntimeTaskId ?? null, now, actionId);
-      this.updateRun(runId, 'success', now, result.runtimeTaskId, undefined, result.decision);
+      const runUpdated = this.updateRun(runId, 'success', now, result.runtimeTaskId, undefined, result.decision);
+      if (actionUpdate.changes > 0 || runUpdated) {
+        this.bumpAutomationStoreVersion();
+      }
     });
   }
 
@@ -299,28 +342,42 @@ export class TimedActionStore {
     this.transaction(() => {
       const current = this.getAction(actionId);
       if (!current || current.lockedRunId !== runId || current.status !== 'active') {
-        this.updateRun(runId, 'failed', now, undefined, error);
+        if (this.updateRun(runId, 'failed', now, undefined, error)) {
+          this.bumpAutomationStoreVersion();
+        }
         return;
       }
 
       const consecutiveFailures = current.consecutiveFailures + 1;
       const shouldPause = current.policy.maxConsecutiveFailures !== undefined && consecutiveFailures >= current.policy.maxConsecutiveFailures;
       const nextDueAt = shouldPause ? undefined : this.nextRetryDueAt(current.trigger, now);
-      this.db.prepare(`
+      const actionUpdate = this.db.prepare(`
         update timed_actions
         set status = ?, next_due_at = ?, consecutive_failures = ?, locked_run_id = null,
             locked_at = null, last_error = ?, updated_at = ?
         where id = ?
       `).run(shouldPause ? 'paused' : 'active', nextDueAt ?? null, consecutiveFailures, error, now, actionId);
-      this.updateRun(runId, 'failed', now, undefined, error);
+      const runUpdated = this.updateRun(runId, 'failed', now, undefined, error);
+      if (actionUpdate.changes > 0 || runUpdated) {
+        this.bumpAutomationStoreVersion();
+      }
     });
   }
 
-  finishRunSkipped(actionId: string, runId: string, now: number, decision: Exclude<ExecutorRecoveryDecision, { action: 'execute' }>): void {
+  finishRunSkipped(
+    actionId: string,
+    runId: string,
+    now: number,
+    decision: Exclude<ExecutorRecoveryDecision, { action: 'execute' }>,
+    completionDecision?: Record<string, unknown>
+  ): void {
     this.transaction(() => {
       const current = this.getAction(actionId);
+      const runDecision = { recoveryDecision: decision, ...(completionDecision ?? {}) };
       if (!current || current.lockedRunId !== runId || current.status !== 'active') {
-        this.updateRun(runId, decision.action, now, undefined, decision.reason, { recoveryDecision: decision });
+        if (this.updateRun(runId, decision.action, now, undefined, decision.reason, runDecision)) {
+          this.bumpAutomationStoreVersion();
+        }
         return;
       }
 
@@ -331,35 +388,69 @@ export class TimedActionStore {
       const nextDueAt = decision.action === 'skip'
         ? decision.nextDueAt ?? computeNextDueAt(current.trigger, now)
         : undefined;
-      this.db.prepare(`
+      const actionUpdate = this.db.prepare(`
         update timed_actions
         set status = ?, next_due_at = ?, locked_run_id = null, locked_at = null,
             last_error = ?, updated_at = ?
         where id = ?
       `).run(status, nextDueAt ?? null, decision.reason, now, actionId);
-      this.updateRun(runId, decision.action, now, undefined, decision.reason, { recoveryDecision: decision });
+      const runUpdated = this.updateRun(runId, decision.action, now, undefined, decision.reason, runDecision);
+      if (actionUpdate.changes > 0 || runUpdated) {
+        this.bumpAutomationStoreVersion();
+      }
     });
   }
 
   cancelAction(id: string, reason?: string, now = Date.now()): boolean {
-    const result = this.db.prepare(`
-      update timed_actions
-      set status = 'cancelled', next_due_at = null, locked_run_id = null, locked_at = null,
-          last_error = coalesce(?, last_error), updated_at = ?
-      where id = ? and status in ('active', 'paused')
-    `).run(reason ?? null, now, id);
-    return result.changes === 1;
-  }
-
-  deleteAction(id: string): boolean {
     return this.transaction(() => {
-      this.db.prepare('delete from timed_action_runs where action_id = ?').run(id);
-      const result = this.db.prepare('delete from timed_actions where id = ?').run(id);
+      const result = this.db.prepare(`
+        update timed_actions
+        set status = 'cancelled', next_due_at = null, locked_run_id = null, locked_at = null,
+            last_error = coalesce(?, last_error), updated_at = ?
+        where id = ? and status in ('active', 'paused')
+      `).run(reason ?? null, now, id);
+      if (result.changes === 1) {
+        this.bumpAutomationStoreVersion();
+      }
       return result.changes === 1;
     });
   }
 
-  releaseStaleLocks(now: number, staleAfterMs: number): number {
+  setActionStatus(
+    id: string,
+    status: Extract<TimedActionStatus, 'active' | 'paused'>,
+    now = Date.now(),
+    reason?: string
+  ): TimedActionRecord | undefined {
+    const current = this.getAction(id);
+    if (!current || (current.status !== 'active' && current.status !== 'paused')) return undefined;
+    const nextDueAt = status === 'active' ? computeInitialDueAt(current.trigger, now) : undefined;
+    const lastError = status === 'paused' ? reason ?? 'paused_by_user' : undefined;
+    return this.transaction(() => {
+      const result = this.db.prepare(`
+        update timed_actions
+        set status = ?, next_due_at = ?, locked_run_id = null, locked_at = null,
+            last_error = ?, updated_at = ?
+        where id = ? and status in ('active', 'paused')
+      `).run(status, nextDueAt ?? null, lastError ?? null, now, id);
+      if (result.changes !== 1) return undefined;
+      this.bumpAutomationStoreVersion();
+      return this.getAction(id);
+    });
+  }
+
+  deleteAction(id: string): boolean {
+    return this.transaction(() => {
+      const runDelete = this.db.prepare('delete from timed_action_runs where action_id = ?').run(id);
+      const result = this.db.prepare('delete from timed_actions where id = ?').run(id);
+      if (result.changes === 1 || runDelete.changes > 0) {
+        this.bumpAutomationStoreVersion();
+      }
+      return result.changes === 1;
+    });
+  }
+
+  releaseStaleLocks(now: number, staleAfterMs: number, options: ReleaseStaleLocksOptions = {}): number {
     return this.transaction(() => {
       const rows = typedRows<TimedActionRow>(this.db.prepare(`
         select * from timed_actions
@@ -368,6 +459,17 @@ export class TimedActionStore {
 
       for (const row of rows) {
         const action = this.rowToRecord(row);
+        const linkedLoopDecision = row.locked_run_id && action.executor.kind === 'loop'
+          ? options.resolveLinkedLoopRun?.({
+            action,
+            actionId: action.id,
+            timedActionRunId: row.locked_run_id,
+          })
+          : undefined;
+        if (linkedLoopDecision) {
+          this.finishStaleLockFromLoopDecision(action, row.locked_run_id!, now, linkedLoopDecision);
+          continue;
+        }
         const failures = action.consecutiveFailures + 1;
         const shouldPause = action.policy.maxConsecutiveFailures !== undefined && failures >= action.policy.maxConsecutiveFailures;
         this.updateRun(row.locked_run_id!, 'failed_stale', now, undefined, 'executor stale lock', { recoveryReason: 'stale_lock' });
@@ -377,6 +479,9 @@ export class TimedActionStore {
               next_due_at = ?, last_error = 'executor stale lock', updated_at = ?
           where id = ?
         `).run(shouldPause ? 'paused' : 'active', failures, shouldPause ? null : now, now, row.id);
+      }
+      if (rows.length > 0) {
+        this.bumpAutomationStoreVersion();
       }
       return rows.length;
     });
@@ -430,6 +535,11 @@ export class TimedActionStore {
         decision_json text,
         foreign key(action_id) references timed_actions(id)
       );
+
+      create table if not exists automation_store_metadata (
+        key text primary key,
+        value integer not null
+      );
     `);
     this.ensureTimedActionDescriptionColumn();
     this.ensureTimedActionReviewColumns();
@@ -466,9 +576,69 @@ export class TimedActionStore {
     }
   }
 
+  private bumpAutomationStoreVersion(): void {
+    this.db.prepare(`
+      insert into automation_store_metadata(key, value)
+      values ('version', 1)
+      on conflict(key) do update set value = value + 1
+    `).run();
+  }
+
   private nextRetryDueAt(trigger: TimedActionTrigger, now: number): number {
     if (trigger.kind === 'once') return now + 60_000;
     return computeNextDueAt(trigger, now);
+  }
+
+  private finishStaleLockFromLoopDecision(
+    current: TimedActionRecord,
+    runId: string,
+    now: number,
+    loopDecision: LoopTimedActionDecision
+  ): void {
+    const decision = { recoveryReason: 'stale_lock', ...loopDecision };
+    if (loopDecision.loopStatus === 'success') {
+      const runCount = current.runCount + 1;
+      const maxRunsReached = current.policy.maxRuns !== undefined && runCount >= current.policy.maxRuns;
+      const expired = current.policy.expiresAt !== undefined && current.policy.expiresAt <= now;
+      const status: TimedActionStatus =
+        current.trigger.kind === 'once' ? 'completed' :
+          maxRunsReached || expired ? 'paused' :
+            'active';
+      const nextDueAt = status === 'active' ? computeNextDueAt(current.trigger, now) : undefined;
+      this.db.prepare(`
+        update timed_actions
+        set status = ?, next_due_at = ?, last_due_at = ?, run_count = ?,
+            consecutive_failures = 0, locked_run_id = null, locked_at = null,
+            last_error = null, updated_at = ?
+        where id = ?
+      `).run(status, nextDueAt ?? null, now, runCount, now, current.id);
+      this.updateRun(runId, 'success', now, undefined, undefined, decision);
+      return;
+    }
+
+    if (loopDecision.loopStatus === 'blocked') {
+      const reason = 'blocked_requires_user_action';
+      this.db.prepare(`
+        update timed_actions
+        set status = 'paused', next_due_at = null, locked_run_id = null,
+            locked_at = null, last_error = ?, updated_at = ?
+        where id = ?
+      `).run(reason, now, current.id);
+      this.updateRun(runId, 'pause', now, undefined, reason, decision);
+      return;
+    }
+
+    const error = loopDecision.nextActionSummary ?? `loop failed: ${loopDecision.loopRunId}`;
+    const failures = current.consecutiveFailures + 1;
+    const shouldPause = current.policy.maxConsecutiveFailures !== undefined && failures >= current.policy.maxConsecutiveFailures;
+    const nextDueAt = shouldPause ? undefined : this.nextRetryDueAt(current.trigger, now);
+    this.db.prepare(`
+      update timed_actions
+      set status = ?, next_due_at = ?, consecutive_failures = ?, locked_run_id = null,
+          locked_at = null, last_error = ?, updated_at = ?
+      where id = ?
+    `).run(shouldPause ? 'paused' : 'active', nextDueAt ?? null, failures, error, now, current.id);
+    this.updateRun(runId, 'failed_stale', now, undefined, error, decision);
   }
 
   private updateRun(
@@ -478,33 +648,40 @@ export class TimedActionStore {
     runtimeTaskId?: string,
     error?: string,
     decision?: Record<string, unknown>
-  ): void {
-    this.db.prepare(`
+  ): boolean {
+    const result = this.db.prepare(`
       update timed_action_runs
       set status = ?, finished_at = ?, runtime_task_id = coalesce(?, runtime_task_id),
           error = ?, decision_json = coalesce(?, decision_json)
       where run_id = ?
     `).run(status, finishedAt, runtimeTaskId ?? null, error ?? null, decision ? JSON.stringify(decision) : null, runId);
+    return result.changes === 1;
   }
 
   approveAuto(id: string, now: number = Date.now()): TimedActionRecord | undefined {
-    const result = this.db.prepare(`
-      update timed_actions
-      set reviewed_at = ?, user_approved_auto = 1, updated_at = ?
-      where id = ?
-    `).run(now, now, id);
-    if (result.changes === 0) return undefined;
-    return this.getAction(id);
+    return this.transaction(() => {
+      const result = this.db.prepare(`
+        update timed_actions
+        set reviewed_at = ?, user_approved_auto = 1, updated_at = ?
+        where id = ?
+      `).run(now, now, id);
+      if (result.changes === 0) return undefined;
+      this.bumpAutomationStoreVersion();
+      return this.getAction(id);
+    });
   }
 
   revokeAuto(id: string, now: number = Date.now()): TimedActionRecord | undefined {
-    const result = this.db.prepare(`
-      update timed_actions
-      set user_approved_auto = 0, updated_at = ?
-      where id = ?
-    `).run(now, id);
-    if (result.changes === 0) return undefined;
-    return this.getAction(id);
+    return this.transaction(() => {
+      const result = this.db.prepare(`
+        update timed_actions
+        set user_approved_auto = 0, updated_at = ?
+        where id = ?
+      `).run(now, id);
+      if (result.changes === 0) return undefined;
+      this.bumpAutomationStoreVersion();
+      return this.getAction(id);
+    });
   }
 
   private rowToRecord(row: TimedActionRow): TimedActionRecord {

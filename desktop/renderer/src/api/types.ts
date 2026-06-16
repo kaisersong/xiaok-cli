@@ -189,7 +189,8 @@ export type MemoryErrorEvent = { id: string; message: string; timestamp: number;
 // Run type
 export interface Run { id: string; threadId: string; status: string; createdAt: number; completedAt?: number }
 
-export type LoopDefinitionStatus = 'active' | 'paused';
+export type LoopDefinitionStatus = 'active' | 'paused' | 'deleted';
+export type LoopDefinitionOrigin = 'built_in' | 'user_template';
 export type LoopRunStatus = 'running' | 'success' | 'failed' | 'blocked';
 export type EvidenceAnomalyStatus = 'open' | 'resolved' | 'ignored';
 
@@ -198,10 +199,143 @@ export interface LoopDefinitionView {
   title: string;
   description: string;
   status: LoopDefinitionStatus;
+  origin?: LoopDefinitionOrigin;
   activeRunId?: string;
+  deletedAt?: number;
+  deleteReason?: string;
   createdAt: number;
   updatedAt: number;
 }
+
+export type UserLoopTemplateKind = 'markdown_file';
+
+export interface UserLoopTemplateView {
+  loopId: string;
+  kind: UserLoopTemplateKind;
+  prompt: string;
+  outputDirectory: string;
+  outputFileName: string;
+  scheduleActionId?: string;
+  scheduleEnabled?: boolean;
+  scheduleTrigger?: Record<string, unknown>;
+  autoRunApproved?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateUserLoopTemplateInputView {
+  loopId: string;
+  title: string;
+  description?: string;
+  kind: UserLoopTemplateKind;
+  prompt: string;
+  outputDirectory: string;
+  outputFileName: string;
+}
+
+export interface CreateUserLoopTemplateResultView {
+  template: UserLoopTemplateView;
+  ignoredLegacyScheduleFields?: string[];
+}
+
+export interface CreateLoopScheduleInputView {
+  id?: string;
+  loopId: string;
+  title: string;
+  description?: string;
+  trigger: Record<string, unknown>;
+}
+
+export interface LoopScheduleBindingView {
+  loopId: string;
+  kind: 'single' | 'multiple';
+  count: number;
+  activeCount: number;
+  actionIds: string[];
+  primaryActionId?: string;
+  schedules: Array<{
+    id: string;
+    title: string;
+    status: 'active' | 'paused';
+    trigger: Record<string, unknown>;
+    nextDueAt?: number;
+    updatedAt: number;
+  }>;
+}
+
+export interface TimedActionView {
+  id: string;
+  title: string;
+  description?: string;
+  status: string;
+  trigger: Record<string, unknown>;
+  executor: Record<string, unknown>;
+  nextDueAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AutomationsConfigView {
+  globalBackgroundAutoRunEnabled: boolean;
+}
+
+export type AutomationRecentFailureSourceView = 'loop_run' | 'timed_action_run';
+
+export interface AutomationRecentFailureItemView {
+  id: string;
+  source: AutomationRecentFailureSourceView;
+  ownerId: string;
+  title: string;
+  status: string;
+  message?: string;
+  occurredAt: number;
+  loopId?: string;
+  actionId?: string;
+}
+
+export interface AutomationOverviewSnapshotView {
+  generatedAt: number;
+  sourceVersions: {
+    loopStore: number;
+    timedActionStore: number;
+  };
+  globalBackgroundAutoRunEnabled: boolean;
+  totals: {
+    loops: number;
+    userLoops: number;
+    schedules: number;
+    activeSchedules: number;
+    diagnostics: number;
+    recentFailures: number;
+  };
+  recentFailures: AutomationRecentFailureItemView[];
+}
+
+export interface AutomationRunHistoryItemView {
+  id: string;
+  automationKind: 'loop' | 'notify' | 'agent_task';
+  scheduleRunId?: string;
+  loopRunId?: string;
+  actionId?: string;
+  loopId?: string;
+  title: string;
+  startedAt: number;
+  finishedAt?: number;
+  status: 'success' | 'failed' | 'blocked' | 'skipped' | 'running';
+  schedulerStatus?: string;
+  loopStatus?: LoopRunStatus;
+  failureKind?: string;
+  message?: string;
+  outputPreviewAvailable?: boolean;
+}
+
+export type LoopOutputActionResultView =
+  | { ok: true; loopId: string; pathLabel: string }
+  | { ok: false; loopId: string; error: string; message?: string; pathLabel?: string; sizeBytes?: number; limitBytes?: number };
+
+export type LoopOutputPreviewView =
+  | { ok: true; loopId: string; pathLabel: string; content: string; sizeBytes: number; truncated: boolean }
+  | { ok: false; loopId: string; error: string; message?: string; pathLabel?: string; sizeBytes?: number; limitBytes?: number };
 
 export interface LoopRunView {
   id: string;
@@ -241,6 +375,6 @@ export type RunLoopNowResultView =
   | { status: 'blocked'; run: LoopRunView }
   | { status: 'failed'; run: LoopRunView }
   | { status: 'already_running'; activeRunId: string }
-  | { status: 'skipped'; reason: 'paused' | 'missing_loop' };
+  | { status: 'skipped'; reason: 'paused' | 'missing_loop' | 'deleted_loop' };
 
 export interface UploadedThreadAttachment { id: string; fileName: string; fileSize: number }

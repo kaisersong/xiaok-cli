@@ -57,16 +57,19 @@ describe('LoopStore', () => {
     const db = new DatabaseSync(dbPath);
     const rows = db.prepare(`
       select name from sqlite_master
-      where type = 'table' and name like 'loop_%'
+      where type = 'table'
+        and (name like 'loop_%' or name = 'user_loop_templates')
       order by name
     `).all() as Array<{ name: string }>;
     const stageColumns = db.prepare('pragma table_info(loop_stages)').all() as Array<{ name: string }>;
+    const definitionColumns = db.prepare('pragma table_info(loop_definitions)').all() as Array<{ name: string }>;
     db.close();
 
     expect(rows.map(row => row.name)).toEqual([
       'loop_definitions',
       'loop_runs',
       'loop_stages',
+      'user_loop_templates',
     ]);
 
     expect(stageColumns.map(column => column.name)).toEqual(expect.arrayContaining([
@@ -74,6 +77,156 @@ describe('LoopStore', () => {
       'failure_kind',
       'message',
     ]));
+
+    expect(definitionColumns.map(column => column.name)).toEqual(expect.arrayContaining([
+      'deleted_at',
+      'delete_reason',
+      'origin',
+    ]));
+  });
+
+  it('keeps a monotonic automation store version for loop facts', () => {
+    expect(store.getAutomationStoreVersion()).toBe(0);
+
+    store.createUserLoopTemplate({
+      loopId: 'daily-briefing',
+      title: 'Daily Briefing',
+      description: 'Write a briefing.',
+      kind: 'markdown_file',
+      prompt: 'Write briefing',
+      outputDirectory: join(rootDir, 'outputs'),
+      outputFileName: 'briefing.md',
+      now: 1_000,
+    });
+    const afterTemplate = store.getAutomationStoreVersion();
+    expect(afterTemplate).toBeGreaterThan(0);
+
+    const run = expectStarted(store.beginLoopRun('daily-briefing', { kind: 'manual' }, 2_000, 60_000));
+    const afterRunStart = store.getAutomationStoreVersion();
+    expect(afterRunStart).toBeGreaterThan(afterTemplate);
+
+    store.finishLoopRunSuccess(run.id, ['evidence-1'], 2_100, 'done');
+    expect(store.getAutomationStoreVersion()).toBeGreaterThan(afterRunStart);
+  });
+
+  it('creates a markdown user loop template without persisting legacy schedule truth', () => {
+    const outputDirectory = join(rootDir, 'outputs');
+
+    const result = store.createUserLoopTemplate({
+      loopId: 'user-loop-1',
+      title: 'Weekly Briefing',
+      description: 'Write a weekly markdown briefing.',
+      kind: 'markdown_file',
+      prompt: 'Summarize the current project state.',
+      outputDirectory,
+      outputFileName: 'briefing.md',
+      scheduleEnabled: true,
+      scheduleTrigger: { kind: 'daily', hour: 9, minute: 0 },
+      autoRunApproved: true,
+      now: 1_000,
+    });
+
+    expect(result).toEqual({
+      template: expect.objectContaining({
+        loopId: 'user-loop-1',
+        kind: 'markdown_file',
+        prompt: 'Summarize the current project state.',
+        outputDirectory,
+        outputFileName: 'briefing.md',
+        scheduleActionId: undefined,
+        scheduleEnabled: false,
+        scheduleTrigger: undefined,
+        autoRunApproved: false,
+        createdAt: 1_000,
+        updatedAt: 1_000,
+      }),
+      ignoredLegacyScheduleFields: ['scheduleEnabled', 'scheduleTrigger', 'autoRunApproved'],
+    });
+    expect(store.getLoopDefinition('user-loop-1')).toMatchObject({
+      id: 'user-loop-1',
+      title: 'Weekly Briefing',
+      description: 'Write a weekly markdown briefing.',
+      status: 'active',
+      origin: 'user_template',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+    });
+    expect(store.getUserLoopTemplate('user-loop-1')).toEqual(result.template);
+  });
+
+  it('rejects unsafe markdown user loop output paths', () => {
+    expect(() => store.createUserLoopTemplate({
+      loopId: 'relative-dir',
+      title: 'Bad Directory',
+      kind: 'markdown_file',
+      prompt: 'Write file',
+      outputDirectory: 'relative-output',
+      outputFileName: 'briefing.md',
+      now: 1_000,
+    })).toThrow('User loop outputDirectory must be an absolute path.');
+
+    expect(() => store.createUserLoopTemplate({
+      loopId: 'nested-file',
+      title: 'Nested File',
+      kind: 'markdown_file',
+      prompt: 'Write file',
+      outputDirectory: join(rootDir, 'outputs'),
+      outputFileName: 'nested/briefing.md',
+      now: 1_000,
+    })).toThrow('User loop outputFileName must be a file name, not a path.');
+
+    expect(() => store.createUserLoopTemplate({
+      loopId: 'windows-nested-file',
+      title: 'Windows Nested File',
+      kind: 'markdown_file',
+      prompt: 'Write file',
+      outputDirectory: join(rootDir, 'outputs'),
+      outputFileName: 'nested\\briefing.md',
+      now: 1_000,
+    })).toThrow('User loop outputFileName must be a file name, not a path.');
+
+    expect(() => store.createUserLoopTemplate({
+      loopId: 'parent-file',
+      title: 'Parent File',
+      kind: 'markdown_file',
+      prompt: 'Write file',
+      outputDirectory: join(rootDir, 'outputs'),
+      outputFileName: '..',
+      now: 1_000,
+    })).toThrow('User loop outputFileName must be a file name, not a path.');
+
+    for (const outputFileName of ['CON', 'CON.md', 'NUL.txt', 'LPT9.log', 'briefing.', 'briefing ', 'C:briefing.md']) {
+      expect(() => store.createUserLoopTemplate({
+        loopId: `unsafe-${outputFileName.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`,
+        title: `Unsafe ${outputFileName}`,
+        kind: 'markdown_file',
+        prompt: 'Write file',
+        outputDirectory: join(rootDir, 'outputs'),
+        outputFileName,
+        now: 1_000,
+      })).toThrow('User loop outputFileName must be a file name, not a path.');
+    }
+  });
+
+  it('supports execute and verify stages for user loop templates', () => {
+    store.createUserLoopTemplate({
+      loopId: 'user-loop-stage',
+      title: 'Stage Loop',
+      kind: 'markdown_file',
+      prompt: 'Write file',
+      outputDirectory: join(rootDir, 'outputs'),
+      outputFileName: 'stage.md',
+      now: 1_000,
+    });
+    const run = expectStarted(store.beginLoopRun('user-loop-stage', { kind: 'manual' }, 2_000, 60_000));
+
+    const execute = store.startLoopStage(run.id, 'user-loop-stage', 'execute', 2_010);
+    const verify = store.startLoopStage(run.id, 'user-loop-stage', 'verify', 2_020);
+
+    expect(store.listLoopStages(run.id)).toEqual([
+      expect.objectContaining({ id: execute.id, stageKind: 'execute' }),
+      expect.objectContaining({ id: verify.id, stageKind: 'verify' }),
+    ]);
   });
 
   it('lists loop definitions without rewriting paused loop state', () => {
@@ -127,6 +280,22 @@ describe('LoopStore', () => {
     expect(store.listLoopRuns(ARTIFACT_LOOP_ID, 10)).toEqual([]);
   });
 
+  it('skips deleted loops without creating a run', () => {
+    store.ensureBuiltInLoops(1_000);
+    const deleted = store.setLoopStatus(ARTIFACT_LOOP_ID, 'deleted', 1_500, 'user deleted loop');
+    expect(deleted).toMatchObject({
+      status: 'deleted',
+      deletedAt: 1_500,
+      deleteReason: 'user deleted loop',
+    });
+
+    const result = store.beginLoopRun(ARTIFACT_LOOP_ID, { kind: 'manual' }, 2_000, 60_000);
+
+    expect(result).toEqual({ status: 'skipped', reason: 'deleted_loop' });
+    expect(store.getLoopDefinition(ARTIFACT_LOOP_ID)?.activeRunId).toBeUndefined();
+    expect(store.listLoopRuns(ARTIFACT_LOOP_ID, 10)).toEqual([]);
+  });
+
   it('clears a terminal activeRunId before starting a replacement run', () => {
     store.ensureBuiltInLoops(1_000);
     const first = expectStarted(store.beginLoopRun(ARTIFACT_LOOP_ID, { kind: 'manual' }, 2_000, 60_000));
@@ -168,7 +337,11 @@ describe('LoopStore', () => {
     const stale = expectStarted(store.beginLoopRun(ARTIFACT_LOOP_ID, { kind: 'startup' }, 2_000, 60_000));
     const stage = store.startLoopStage(stale.id, ARTIFACT_LOOP_ID, 'scan', 2_010);
 
-    expect(store.recoverStaleRuns(62_000, 60_000)).toBe(1);
+    expect(store.recoverStaleRuns(62_000, 60_000)).toEqual({
+      ok: true,
+      recovered: 1,
+      failedRunIds: [stale.id],
+    });
 
     expect(store.getLoopDefinition(ARTIFACT_LOOP_ID)?.activeRunId).toBeUndefined();
     expect(store.listLoopRuns(ARTIFACT_LOOP_ID, 10).find(run => run.id === stale.id)).toMatchObject({
@@ -193,7 +366,11 @@ describe('LoopStore', () => {
   it('does not let a late finish overwrite a stale recovered terminal run or clear a new active run', () => {
     store.ensureBuiltInLoops(1_000);
     const stale = expectStarted(store.beginLoopRun(ARTIFACT_LOOP_ID, { kind: 'startup' }, 2_000, 60_000));
-    expect(store.recoverStaleRuns(62_000, 60_000)).toBe(1);
+    expect(store.recoverStaleRuns(62_000, 60_000)).toEqual({
+      ok: true,
+      recovered: 1,
+      failedRunIds: [stale.id],
+    });
     const replacement = expectStarted(store.beginLoopRun(ARTIFACT_LOOP_ID, { kind: 'startup_recovery' }, 63_000, 60_000));
 
     const lateFinish = store.finishLoopRunSuccess(stale.id, ['late-evidence'], 64_000, 'late success');
@@ -226,7 +403,11 @@ describe('LoopStore', () => {
       updatedAt: 61_500,
     });
 
-    expect(store.recoverStaleRuns(62_000, 60_000)).toBe(0);
+    expect(store.recoverStaleRuns(62_000, 60_000)).toEqual({
+      ok: true,
+      recovered: 0,
+      failedRunIds: [],
+    });
     expect(store.getLoopDefinition(ARTIFACT_LOOP_ID)?.activeRunId).toBe(active.id);
     expect(store.listLoopRuns(ARTIFACT_LOOP_ID, 10).find(run => run.id === active.id)).toMatchObject({
       status: 'running',
@@ -361,7 +542,11 @@ describe('LoopStore', () => {
     store.ensureBuiltInLoops(1_000);
     const run = expectStarted(store.beginLoopRun(ARTIFACT_LOOP_ID, { kind: 'manual' }, 2_000, 60_000));
     const scan = store.startLoopStage(run.id, ARTIFACT_LOOP_ID, 'scan', 2_010);
-    expect(store.recoverStaleRuns(62_000, 60_000)).toBe(1);
+    expect(store.recoverStaleRuns(62_000, 60_000)).toEqual({
+      ok: true,
+      recovered: 1,
+      failedRunIds: [run.id],
+    });
 
     const late = store.finishLoopStageSuccess(scan.id, ['late-evidence'], 63_000, 'late success');
 

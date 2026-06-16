@@ -86,6 +86,44 @@ describe('normalizeConfig', () => {
     expect(normalizeConfig(input)).toEqual({
       ...input,
       intentBoundary: DEFAULT_INTENT_BOUNDARY_CONFIG,
+      automations: {
+        globalBackgroundAutoRunEnabled: true,
+      },
+    });
+  });
+
+  it('defaults background auto-run to enabled while preserving an explicit pause', () => {
+    const input = {
+      schemaVersion: 2 as const,
+      defaultProvider: 'openai',
+      defaultModelId: 'openai-default',
+      providers: {
+        openai: {
+          type: 'first_party' as const,
+          protocol: 'openai_legacy' as const,
+          apiKey: 'sk-openai',
+          baseUrl: 'https://api.openai.com/v1',
+        },
+      },
+      models: {
+        'openai-default': {
+          provider: 'openai',
+          model: 'gpt-4o',
+          label: 'OpenAI Default',
+        },
+      },
+      defaultMode: 'interactive' as const,
+      intentBoundary: DEFAULT_INTENT_BOUNDARY_CONFIG,
+      automations: {
+        globalBackgroundAutoRunEnabled: false,
+      },
+    };
+
+    expect(normalizeConfig(input).automations).toEqual({
+      globalBackgroundAutoRunEnabled: false,
+    });
+    expect(normalizeConfig({ ...input, automations: undefined }).automations).toEqual({
+      globalBackgroundAutoRunEnabled: true,
     });
   });
 });

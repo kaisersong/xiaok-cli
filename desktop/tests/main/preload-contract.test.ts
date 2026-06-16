@@ -1,7 +1,20 @@
 import Module, { createRequire } from 'node:module';
 import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { createPreloadApi, PRELOAD_API_KEYS, FULL_PRELOAD_KEYS, KSWARM_PROXY_KEYS, EXTRA_KEYS, THREAD_META_KEYS } from '../../electron/preload-api.js';
+import {
+  createPreloadApi,
+  PRELOAD_API_KEYS,
+  FULL_PRELOAD_KEYS,
+  KSWARM_PROXY_KEYS,
+  EXTRA_KEYS,
+  THREAD_META_KEYS,
+  EVENT_SUBSCRIPTION_KEYS,
+  LOCAL_CONSTANT_KEYS,
+  INVOKE_API_KEYS,
+  INVOKE_CHANNEL_BY_KEY,
+  KNOWN_UNROUTED_HANDLERS,
+} from '../../electron/preload-api.js';
 
 describe('preload API contract', () => {
   it('exposes only task-semantic APIs', () => {
@@ -80,6 +93,16 @@ describe('preload API contract', () => {
       'exportTraceBundle',
       'diagnose',
       'getLoopDefinitions',
+      'listUserLoopTemplates',
+      'createUserLoopTemplate',
+      'createLoopSchedule',
+      'getLoopScheduleBindings',
+      'getAutomationOverviewSnapshot',
+      'getAutomationRunHistory',
+      'getAutomationsConfig',
+      'setGlobalBackgroundAutoRun',
+      'openLoopOutputDirectory',
+      'readLoopOutputPreview',
       'getLoopRuns',
       'getEvidenceAnomalies',
       'runLoopNow',
@@ -87,6 +110,7 @@ describe('preload API contract', () => {
       'getScheduledTasks',
       'createScheduledTask',
       'updateScheduledTask',
+      'setScheduledTaskStatus',
       'cancelScheduledTask',
       'getTimedActions',
       'getTimedActionRuns',
@@ -148,11 +172,53 @@ describe('preload API contract', () => {
     const api = createPreloadApi(ipcRenderer);
 
     await api.getLoopDefinitions();
+    await api.listUserLoopTemplates();
+    await api.createUserLoopTemplate({
+      loopId: 'user-loop-1',
+      title: 'User Loop',
+      kind: 'markdown_file',
+      prompt: 'Write note',
+      outputDirectory: '/tmp/xiaok-loop',
+      outputFileName: 'note.md',
+    });
+    await api.createLoopSchedule({
+      loopId: 'user-loop-1',
+      title: 'User Loop Schedule',
+      trigger: { kind: 'daily', hour: 9, minute: 0 },
+    });
+    await api.getLoopScheduleBindings();
+    await api.getAutomationOverviewSnapshot();
+    await api.getAutomationRunHistory();
+    await api.getAutomationsConfig();
+    await api.setGlobalBackgroundAutoRun({ enabled: false });
+    await api.openLoopOutputDirectory('user-loop-1');
+    await api.readLoopOutputPreview('user-loop-1');
     await api.getLoopRuns('artifact-evidence-regression');
     await api.getEvidenceAnomalies('artifact-evidence-regression');
     await api.runLoopNow('artifact-evidence-regression');
 
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listDefinitions');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listUserTemplates');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:createUserTemplate', {
+      loopId: 'user-loop-1',
+      title: 'User Loop',
+      kind: 'markdown_file',
+      prompt: 'Write note',
+      outputDirectory: '/tmp/xiaok-loop',
+      outputFileName: 'note.md',
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:createSchedule', {
+      loopId: 'user-loop-1',
+      title: 'User Loop Schedule',
+      trigger: { kind: 'daily', hour: 9, minute: 0 },
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:getScheduleBindings');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:automations:getOverviewSnapshot');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:automations:getRunHistory');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:automations:getConfig');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:automations:setGlobalBackgroundAutoRun', { enabled: false });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:openOutputDirectory', 'user-loop-1');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:readOutputPreview', 'user-loop-1');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listRuns', 'artifact-evidence-regression');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listAnomalies', 'artifact-evidence-regression');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:runNow', 'artifact-evidence-regression');
@@ -436,6 +502,85 @@ describe('preload API contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:listPrinciples');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:savePrinciple', { id: 'p1', content: 'test' });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:deletePrinciple', 'p1');
+  });
+});
+
+const HANDLER_REGISTRATION_FILES = [
+  resolve(process.cwd(), 'electron', 'main.ts'),
+  resolve(process.cwd(), 'electron', 'ipc.ts'),
+  resolve(process.cwd(), 'electron', 'kswarm-ipc-proxy.ts'),
+];
+
+function extractRegisteredHandlerChannels(): Set<string> {
+  const channels = new Set<string>();
+  for (const filePath of HANDLER_REGISTRATION_FILES) {
+    const source = readFileSync(filePath, 'utf8');
+    const re = /ipcMain\.handle\(\s*'([^']+)'/g;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(source)) !== null) {
+      channels.add(match[1]!);
+    }
+  }
+  return channels;
+}
+
+describe('IPC handler ↔ preload key parity', () => {
+  it('three preload key categories are disjoint and cover FULL_PRELOAD_KEYS', () => {
+    const eventSet = new Set<string>(EVENT_SUBSCRIPTION_KEYS);
+    const localSet = new Set<string>(LOCAL_CONSTANT_KEYS);
+    const invokeSet = new Set<string>(INVOKE_API_KEYS);
+
+    // Disjoint
+    for (const key of EVENT_SUBSCRIPTION_KEYS) {
+      expect(localSet.has(key)).toBe(false);
+      expect(invokeSet.has(key)).toBe(false);
+    }
+    for (const key of LOCAL_CONSTANT_KEYS) {
+      expect(eventSet.has(key)).toBe(false);
+      expect(invokeSet.has(key)).toBe(false);
+    }
+
+    // Cover
+    const union = new Set<string>([...eventSet, ...localSet, ...invokeSet]);
+    expect(union.size).toBe(FULL_PRELOAD_KEYS.length);
+    for (const key of FULL_PRELOAD_KEYS) {
+      expect(union.has(key)).toBe(true);
+    }
+  });
+
+  it('INVOKE_CHANNEL_BY_KEY keys exactly match INVOKE_API_KEYS', () => {
+    const mappedKeys = Object.keys(INVOKE_CHANNEL_BY_KEY).sort();
+    const expectedKeys = [...INVOKE_API_KEYS].sort();
+    expect(mappedKeys).toEqual(expectedKeys);
+  });
+
+  it('every INVOKE_CHANNEL_BY_KEY channel is registered in main process source files', () => {
+    const registeredChannels = extractRegisteredHandlerChannels();
+    const orphanInvokes: Array<{ key: string; channel: string }> = [];
+    for (const [key, channel] of Object.entries(INVOKE_CHANNEL_BY_KEY)) {
+      if (!registeredChannels.has(channel)) {
+        orphanInvokes.push({ key, channel });
+      }
+    }
+    expect(orphanInvokes).toEqual([]);
+  });
+
+  it('every registered ipcMain.handle channel either maps to a preload key or is in KNOWN_UNROUTED_HANDLERS', () => {
+    const registeredChannels = extractRegisteredHandlerChannels();
+    const reverseMap = new Set(Object.values(INVOKE_CHANNEL_BY_KEY));
+    // subscribeTask is hybrid: it triggers an invoke 'desktop:subscribeTask' but
+    // is classified as event subscription. Add the invoke side here so it does
+    // not appear orphaned.
+    reverseMap.add('desktop:subscribeTask');
+    const knownOrphans = new Set(KNOWN_UNROUTED_HANDLERS);
+
+    const undeclaredOrphans: string[] = [];
+    for (const channel of registeredChannels) {
+      if (reverseMap.has(channel)) continue;
+      if (knownOrphans.has(channel)) continue;
+      undeclaredOrphans.push(channel);
+    }
+    expect(undeclaredOrphans).toEqual([]);
   });
 });
 

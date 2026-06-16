@@ -8,6 +8,20 @@ const DEFAULT_CONTEXT_MAX_TASKS = 12;
 const DEFAULT_CONTEXT_MAX_USER_CHARS = 4000;
 const DEFAULT_CONTEXT_MAX_ASSISTANT_CHARS = 6000;
 const DEFAULT_CONTEXT_MAX_TOTAL_CHARS = 30000;
+const RUNNER_DEADLINE_RESERVE_MS = 2 * 60_000;
+function abortWithReason(controller, reason) {
+    controller.abort(new Error(reason));
+}
+function normalizeAbortReason(reason) {
+    if (reason instanceof Error)
+        return reason.message;
+    if (typeof reason === 'string')
+        return reason;
+    return 'aborted';
+}
+function computeRunnerDeadlineMs(watchdogMs) {
+    return Math.max(1, watchdogMs - RUNNER_DEADLINE_RESERVE_MS);
+}
 export function buildHistoryFromTaskSnapshots(snapshots, options = {}) {
     const maxTasks = options.maxTasks ?? DEFAULT_CONTEXT_MAX_TASKS;
     const maxUserChars = options.maxUserChars ?? DEFAULT_CONTEXT_MAX_USER_CHARS;
@@ -69,6 +83,7 @@ export class InProcessTaskRuntimeHost {
     taskHistories = new Map();
     activeExecutions = new Map();
     executionPromises = new Map();
+    taskWatchdogs = new Map();
     taskOrdinal = 0;
     sessionOrdinal = 0;
     permissionModes = new Map();
@@ -79,6 +94,9 @@ export class InProcessTaskRuntimeHost {
         const taskId = this.createTaskId();
         if (input.permissionMode) {
             this.permissionModes.set(taskId, input.permissionMode);
+        }
+        if (input.watchdogMs !== undefined && Number.isFinite(input.watchdogMs) && input.watchdogMs > 0) {
+            this.taskWatchdogs.set(taskId, input.watchdogMs);
         }
         const sessionId = this.createSessionId();
         const materials = input.materials.map((item) => {
@@ -168,7 +186,7 @@ export class InProcessTaskRuntimeHost {
             await this.executeTask(input.taskId);
         }
     }
-    async cancelTask(taskId) {
+    async cancelTask(taskId, reason = 'user_cancelled') {
         const snapshot = await this.requireSnapshot(taskId);
         if (TERMINAL_STATUSES.has(snapshot.status)) {
             return;
@@ -176,7 +194,7 @@ export class InProcessTaskRuntimeHost {
         const execution = this.activeExecutions.get(taskId);
         if (execution) {
             this.cancellingTaskIds.add(taskId);
-            execution.controller.abort();
+            abortWithReason(execution.controller, reason);
         }
         const salvage = {
             summary: ['任务已取消，可基于已识别的任务理解继续。'],
@@ -231,8 +249,9 @@ export class InProcessTaskRuntimeHost {
         const taskHistory = this.taskHistories.get(taskId) ?? [];
         this.activeExecutions.set(taskId, { taskId, controller });
         await this.updateSnapshot(taskId, { status: 'running' });
-        const watchdogMs = this.options.taskWatchdogMs ?? 30 * 60_000;
-        const watchdogTimer = setTimeout(() => controller.abort(), watchdogMs);
+        const watchdogMs = this.taskWatchdogs.get(taskId) ?? this.options.taskWatchdogMs ?? 30 * 60_000;
+        const deadlineMs = computeRunnerDeadlineMs(watchdogMs);
+        const watchdogTimer = setTimeout(() => abortWithReason(controller, 'task_watchdog_timeout'), watchdogMs);
         try {
             await this.options.runner({
                 taskId,
@@ -241,6 +260,7 @@ export class InProcessTaskRuntimeHost {
                 materials,
                 understanding: snapshot.understanding,
                 signal: controller.signal,
+                deadlineMs,
                 history: [...taskHistory],
                 permissionMode: this.permissionModes.get(taskId),
                 emitRuntimeEvent: (event) => {
@@ -261,6 +281,7 @@ export class InProcessTaskRuntimeHost {
                         materials: [],
                         understanding: snapshot.understanding,
                         signal: controller.signal,
+                        deadlineMs,
                         history: [...taskHistory],
                         permissionMode: this.permissionModes.get(taskId),
                         emitRuntimeEvent: (event) => {
@@ -294,7 +315,11 @@ export class InProcessTaskRuntimeHost {
             if (this.cancellingTaskIds.has(taskId)) {
                 return;
             }
-            const message = error instanceof Error ? error.message : String(error);
+            const message = controller.signal.aborted
+                ? normalizeAbortReason(controller.signal.reason)
+                : error instanceof Error
+                    ? error.message
+                    : String(error);
             const salvage = {
                 summary: [
                     snapshot.understanding ? '已保留任务理解' : '已保留任务输入',
@@ -312,6 +337,7 @@ export class InProcessTaskRuntimeHost {
             clearTimeout(watchdogTimer);
             this.taskHistories.delete(taskId);
             this.permissionModes.delete(taskId);
+            this.taskWatchdogs.delete(taskId);
             this.activeExecutions.delete(taskId);
             this.executionPromises.delete(taskId);
             this.cancellingTaskIds.delete(taskId);

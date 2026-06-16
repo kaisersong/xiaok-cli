@@ -49,12 +49,18 @@ describe('WelcomePage quick prompts', () => {
 
     const projectPrompt = '创建项目, 让2个智能体搞定本月国外主要AI产品动态分析';
     const oldProjectPrompt = '创建项目，让2个智能体搞定本月国外主要AI产品动态分析';
+    const scheduledPrompt = '创建定时任务：每天早上9点生成AI日报';
+    const workflowPrompt = '设计一个工作流：资料收集、撰写、评审后交付报告';
+    const loopPrompt = '创建Loop：每周自动检查项目状态并输出Markdown报告';
     const promptGrid = screen.getByTestId('quick-prompts');
     const projectButton = screen.getByRole('button', { name: projectPrompt });
 
     expect(screen.queryByRole('button', { name: oldProjectPrompt })).not.toBeInTheDocument();
     expect(promptGrid).toHaveClass('flex', 'flex-wrap', 'justify-center');
-    expect(promptGrid.querySelectorAll('button')).toHaveLength(7);
+    expect(promptGrid.querySelectorAll('button')).toHaveLength(10);
+    expect(screen.getByRole('button', { name: scheduledPrompt })).toHaveAttribute('title', scheduledPrompt);
+    expect(screen.getByRole('button', { name: workflowPrompt })).toHaveAttribute('title', workflowPrompt);
+    expect(screen.getByRole('button', { name: loopPrompt })).toHaveAttribute('title', loopPrompt);
     expect(projectButton).toHaveClass('whitespace-nowrap');
     expect(projectButton).toHaveAttribute('title', projectPrompt);
   });

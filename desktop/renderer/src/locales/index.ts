@@ -1028,6 +1028,32 @@ export interface LocaleStrings {
     runsHistoryOpen: string;
     runsHistoryPrev: string;
     runsHistoryNext: string;
+    loopsTab: string;
+    openAutomations: string;
+    userLoops: string;
+    userLoopsDesc: string;
+    userLoopsLoading: string;
+    userLoopsEmpty: string;
+    newMarkdownLoop: string;
+    createLoop: string;
+    creatingLoop: string;
+    cancel: string;
+    userLoopTitleLabel: string;
+    userLoopPromptLabel: string;
+    userLoopOutputDirectoryLabel: string;
+    userLoopOutputFileNameLabel: string;
+    userLoopOutputPath: string;
+    userLoopOpenOutputDirectory: string;
+    userLoopPreviewOutputFile: string;
+    userLoopOutputPreview: string;
+    userLoopOutputPreviewUnavailable: string;
+    userLoopScheduleSingle: string;
+    userLoopScheduleMultiple: string;
+    userLoopScheduleActive: string;
+    userLoopOpenSchedules: string;
+    userLoopCreateMissingFields: string;
+    userLoopCreateSuccess: string;
+    userLoopCreateFailed: string;
     loopDiagnostics: string;
     loopDiagnosticsDesc: string;
     loopDiagnosticsRefresh: string;
@@ -1892,6 +1918,7 @@ export interface LocaleStrings {
 
   // sidebar - desktop
   sidebarSearch: string;
+  sidebarAutomations: string;
   sidebarScheduled: string;
   sidebarProjects: string;
   sidebarNewTask: string;
@@ -1899,6 +1926,29 @@ export interface LocaleStrings {
   sidebarNoResults: string;
   sidebarNoRecent: string;
   sidebarRename: string;
+
+  // automations page
+  automationsTitle: string;
+  automationsSubtitle: string;
+  automationsOverview: string;
+  automationsSchedules: string;
+  automationsLoops: string;
+  automationsDiagnostics: string;
+  automationsOverviewTitle: string;
+  automationsOverviewDesc: string;
+  automationsSchedulesDesc: string;
+  automationsLoopsDesc: string;
+  automationsDiagnosticsDesc: string;
+  automationsGlobalAutoRunEnabled: string;
+  automationsGlobalAutoRunDisabled: string;
+  automationsGlobalAutoRunPause: string;
+  automationsGlobalAutoRunEnable: string;
+  automationsGlobalAutoRunDesc: string;
+  automationsOverviewRecentFailures: string;
+  automationsOverviewNoRecentFailures: string;
+  automationsOverviewLoopsCount: string;
+  automationsOverviewSchedulesCount: string;
+  automationsOverviewFailuresCount: string;
 
   // scheduled page
   scheduledTitle: string;
@@ -1962,6 +2012,8 @@ export interface LocaleStrings {
   scheduledRevokeAutoTitle: string;
   scheduledAutoExecCreatedNotice: string;
   scheduledHighFreqConfirmBody: string;
+  scheduledStaleConflict: string;
+  scheduledLinkedLoop: string;
 
   // common
   commonConfirm: string;

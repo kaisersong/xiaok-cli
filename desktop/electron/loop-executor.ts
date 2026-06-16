@@ -13,13 +13,16 @@ import type {
   LoopRun,
   LoopRunTrigger,
 } from './loop-types.js';
+import { createUserLoopTemplateRunner, type UserLoopTaskPort, type UserLoopTemplateRunner } from './user-loop-template-runner.js';
 import type {
   CompletionOwnerKind,
 } from './completion-evidence-types.js';
 import type { KSwarmHealthDiagnosticInput } from './kswarm-service-diagnostics.js';
 import type {
+  LoopTimedActionDecision,
   OverdueRecoveryContext,
   TimedActionExecutorHandler,
+  TimedActionExecutorRuntimeContext,
   TimedActionRecord,
 } from './timed-action-types.js';
 
@@ -48,7 +51,7 @@ export type RunLoopNowResult =
   | { status: 'blocked'; run: LoopRun }
   | { status: 'failed'; run: LoopRun }
   | { status: 'already_running'; activeRunId: string }
-  | { status: 'skipped'; reason: 'paused' | 'missing_loop' };
+  | { status: 'skipped'; reason: 'paused' | 'missing_loop' | 'deleted_loop' };
 
 export interface LoopRunner {
   runLoopNow(loopId: string, trigger?: LoopRunTrigger): Promise<RunLoopNowResult>;
@@ -59,6 +62,7 @@ export interface CreateLoopRunnerOptions {
   evidenceStore: CompletionEvidenceStore;
   scanner: LoopScanner;
   scanners?: Record<string, LoopScanner>;
+  userLoopTemplateRunner?: UserLoopTemplateRunner;
   now?: () => number;
   staleAfterMs?: number;
 }
@@ -70,7 +74,7 @@ export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
   return {
     async runLoopNow(loopId, trigger) {
       const startedAt = now();
-      options.loopStore.recoverStaleRuns(startedAt, staleAfterMs);
+      assertRecoveredStaleRuns(options.loopStore.recoverStaleRuns(startedAt, staleAfterMs));
       const effectiveTrigger = trigger ?? { kind: 'manual' };
       const begin = options.loopStore.beginLoopRun(loopId, effectiveTrigger, startedAt, staleAfterMs);
       if (begin.status !== 'started') {
@@ -78,6 +82,25 @@ export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
       }
 
       const run = begin.run;
+      const definition = options.loopStore.getLoopDefinition(loopId);
+      if (definition?.origin === 'user_template') {
+        if (!options.userLoopTemplateRunner) {
+          const failed = options.loopStore.finishLoopRunFailure(
+            run.id,
+            'executor_failed',
+            'User loop template runner is not configured.',
+            [],
+            startedAt
+          );
+          return resultFromPersistedRun(failed ?? run);
+        }
+        return options.userLoopTemplateRunner.runTemplateLoop({
+          loopId,
+          runId: run.id,
+          trigger: effectiveTrigger,
+        });
+      }
+
       const stage = options.loopStore.startLoopStage(run.id, loopId, 'scan', startedAt, {
         trigger: effectiveTrigger,
       });
@@ -160,11 +183,11 @@ export interface CreateLoopExecutorOptions {
 export function createLoopExecutor(options: CreateLoopExecutorOptions): TimedActionExecutorHandler {
   return {
     kind: 'loop',
-    async execute(action, context) {
+    async execute(action, context, runtimeContext) {
       if (action.executor.kind !== 'loop') {
         return { skip: { action: 'skip', reason: `not a loop executor: ${action.executor.kind}` } };
       }
-      const result = await options.runLoop(action.executor.loopId, scheduledLoopTrigger(action, context));
+      const result = await options.runLoop(action.executor.loopId, scheduledLoopTrigger(action, context, runtimeContext));
       if (result.status === 'already_running') {
         return { skip: { action: 'skip', reason: `loop already running: ${result.activeRunId}` } };
       }
@@ -222,6 +245,7 @@ export interface DesktopLoopRuntime {
   runner: LoopRunner;
   executor: TimedActionExecutorHandler;
   listAnomalies(loopId: string): unknown[];
+  resolveTimedActionLoopRun(input: { action: TimedActionRecord; timedActionRunId: string }): LoopTimedActionDecision | undefined;
   close(): void;
 }
 
@@ -231,6 +255,7 @@ export interface CreateDesktopLoopRuntimeOptions {
   staleAfterMs?: number;
   loopDbPath?: string;
   completionEvidenceDbPath?: string;
+  taskPort?: UserLoopTaskPort;
   kswarmHealthProbe?: () => KSwarmHealthDiagnosticInput | Promise<KSwarmHealthDiagnosticInput>;
   kswarmHealthLogPaths?: string[];
 }
@@ -243,12 +268,20 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
   const loopStore = new LoopStore(dbPath);
   const evidenceStore = new CompletionEvidenceStore(completionEvidenceDbPath);
   loopStore.ensureBuiltInLoops(now());
-  loopStore.recoverStaleRuns(now(), staleAfterMs);
+  assertRecoveredStaleRuns(loopStore.recoverStaleRuns(now(), staleAfterMs));
   const scanner = new ArtifactEvidenceRegressionScanner(completionEvidenceDbPath);
   const kswarmHealthScanner = new KSwarmServiceHealthScanner(completionEvidenceDbPath, {
     probe: options.kswarmHealthProbe ?? defaultHealthyKSwarmHealthProbe,
     logPaths: options.kswarmHealthLogPaths,
   });
+  const userLoopTemplateRunner = options.taskPort
+    ? createUserLoopTemplateRunner({
+      loopStore,
+      evidenceStore,
+      taskPort: options.taskPort,
+      now,
+    })
+    : undefined;
   const runner = createLoopRunner({
     loopStore,
     evidenceStore,
@@ -256,6 +289,7 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
     scanners: {
       [KSWARM_SERVICE_HEALTH_LOOP_ID]: kswarmHealthScanner,
     },
+    userLoopTemplateRunner,
     now,
     staleAfterMs,
   });
@@ -277,6 +311,17 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
       }
       return [];
     },
+    resolveTimedActionLoopRun(input) {
+      if (input.action.executor.kind !== 'loop') return undefined;
+      const run = loopStore.findLoopRunByTimedActionRunId(input.timedActionRunId);
+      if (!run || run.loopId !== input.action.executor.loopId || run.status === 'running') return undefined;
+      return {
+        loopRunId: run.id,
+        loopStatus: run.status,
+        nextActionKind: run.nextActionKind,
+        nextActionSummary: run.nextActionSummary ?? run.message ?? run.summary,
+      };
+    },
     close() {
       kswarmHealthScanner.close();
       scanner.close();
@@ -284,6 +329,11 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
       loopStore.close();
     },
   };
+}
+
+function assertRecoveredStaleRuns(result: ReturnType<LoopStore['recoverStaleRuns']>): void {
+  if (result.ok) return;
+  throw new Error(`Loop stale-run recovery failed: ${result.error}`);
 }
 
 function defaultHealthyKSwarmHealthProbe(): KSwarmHealthDiagnosticInput {
@@ -367,10 +417,15 @@ function expectationSourceForOwner(ownerKind: 'loop_stage' | 'loop_run'): 'loop_
   return ownerKind === 'loop_stage' ? 'loop_stage_contract' : 'scheduler_executor_contract';
 }
 
-function scheduledLoopTrigger(action: TimedActionRecord, context: OverdueRecoveryContext): LoopRunTrigger {
+function scheduledLoopTrigger(
+  action: TimedActionRecord,
+  context: OverdueRecoveryContext,
+  runtimeContext?: TimedActionExecutorRuntimeContext
+): LoopRunTrigger {
   return {
     kind: 'scheduled',
     timedActionId: action.id,
+    timedActionRunId: runtimeContext?.timedActionRunId,
     scheduledDueAt: context.scheduledDueAt,
     claimedAt: context.claimedAt,
     overdueMs: context.overdueMs,

@@ -43,6 +43,15 @@ describe('IPC schema coverage', () => {
 
     expect([...allChannels].sort()).toEqual(expect.arrayContaining([
       'desktop:loops:listDefinitions',
+      'desktop:loops:listUserTemplates',
+      'desktop:loops:createUserTemplate',
+      'desktop:loops:createSchedule',
+      'desktop:automations:getOverviewSnapshot',
+      'desktop:automations:getRunHistory',
+      'desktop:automations:getConfig',
+      'desktop:automations:setGlobalBackgroundAutoRun',
+      'desktop:loops:openOutputDirectory',
+      'desktop:loops:readOutputPreview',
       'desktop:loops:listRuns',
       'desktop:loops:listAnomalies',
       'desktop:loops:runNow',

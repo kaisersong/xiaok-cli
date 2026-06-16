@@ -20,8 +20,13 @@ export interface ScheduledTaskRecord {
   name: string;
   description?: string;
   prompt: string;
+  executorKind: 'agent_task' | 'loop';
+  loopId?: string;
   frequency: 'manual' | 'hourly' | 'interval' | 'daily' | 'weekdays' | 'weekly';
   status: 'active' | 'paused';
+  createdAt: number;
+  updatedAt: number;
+  automationStoreVersion?: number;
   nextRunAt?: number;
   lastRunAt?: number;
   runtimeTaskId?: string;
@@ -56,6 +61,52 @@ export interface UpdateScheduledTaskInput {
   description?: string;
   prompt: string;
   trigger: TimedActionTrigger;
+  policy?: TimedActionPolicy;
+  now?: number;
+  nextDueAt?: number;
+  expectedUpdatedAt?: number;
+  expectedAutomationStoreVersion?: number;
+}
+
+export interface StaleAutomationViewConflict {
+  ok: false;
+  code: 'stale_automation_view';
+  recoverable: true;
+  message: string;
+  sourceVersions: {
+    timedActionStore: number;
+  };
+  current?: ScheduledTaskRecord;
+}
+
+export type UpdateScheduledTaskResult = ScheduledTaskRecord | StaleAutomationViewConflict | undefined;
+
+export interface LoopScheduleBindingSchedule {
+  id: string;
+  title: string;
+  status: 'active' | 'paused';
+  trigger: TimedActionTrigger;
+  nextDueAt?: number;
+  updatedAt: number;
+}
+
+export interface LoopScheduleBindingRecord {
+  loopId: string;
+  kind: 'single' | 'multiple';
+  count: number;
+  activeCount: number;
+  actionIds: string[];
+  primaryActionId?: string;
+  schedules: LoopScheduleBindingSchedule[];
+}
+
+export interface CreateLoopScheduleInput {
+  id?: string;
+  loopId: string;
+  title: string;
+  description?: string;
+  trigger: TimedActionTrigger;
+  source?: TimedActionSource;
   policy?: TimedActionPolicy;
   now?: number;
   nextDueAt?: number;
@@ -128,16 +179,94 @@ export class TimedActionService {
     return this.actionToScheduledTask(action);
   }
 
+  createLoopSchedule(input: CreateLoopScheduleInput): TimedActionRecord {
+    const now = input.now ?? this.now();
+    const policy: TimedActionPolicy = {
+      maxConsecutiveFailures: 3,
+      ...(input.policy ?? {}),
+    };
+    return this.store.createAction({
+      id: input.id,
+      title: input.title,
+      description: input.description ?? '',
+      trigger: input.trigger,
+      executor: { kind: 'loop', loopId: input.loopId },
+      policy,
+      source: input.source ?? 'user',
+      now,
+      nextDueAt: input.nextDueAt,
+      userApprovedAuto: false,
+    });
+  }
+
+  listLoopSchedules(): TimedActionRecord[] {
+    return this.store
+      .listActions({ executorKind: 'loop' })
+      .filter(action => action.status === 'active' || action.status === 'paused');
+  }
+
+  listLoopScheduleBindings(): LoopScheduleBindingRecord[] {
+    const grouped = new Map<string, TimedActionRecord[]>();
+    for (const action of this.listLoopSchedules()) {
+      if (action.executor.kind !== 'loop') continue;
+      const list = grouped.get(action.executor.loopId) ?? [];
+      list.push(action);
+      grouped.set(action.executor.loopId, list);
+    }
+
+    return [...grouped.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([loopId, actions]) => {
+        const schedules: LoopScheduleBindingSchedule[] = actions.map(action => ({
+          id: action.id,
+          title: action.title,
+          status: action.status === 'active' ? 'active' : 'paused',
+          trigger: action.trigger,
+          nextDueAt: action.nextDueAt,
+          updatedAt: action.updatedAt,
+        }));
+        const actionIds = schedules.map(schedule => schedule.id);
+        const activeCount = schedules.filter(schedule => schedule.status === 'active').length;
+        const base = {
+          loopId,
+          kind: schedules.length === 1 ? 'single' as const : 'multiple' as const,
+          count: schedules.length,
+          activeCount,
+          actionIds,
+          schedules,
+        };
+        return schedules.length === 1
+          ? { ...base, primaryActionId: schedules[0]?.id }
+          : base;
+      });
+  }
+
   listScheduledTasks(): ScheduledTaskRecord[] {
     return this.store
-      .listActions({ executorKind: 'agent_task' })
-      .filter(action => action.status === 'active' || action.status === 'paused')
+      .listActions({ executorKinds: ['agent_task', 'loop'] })
+      .filter(action => (action.status === 'active' || action.status === 'paused')
+        && (action.executor.kind === 'agent_task' || action.executor.kind === 'loop'))
       .map(action => this.actionToScheduledTask(action));
   }
 
-  updateScheduledTask(input: UpdateScheduledTaskInput): ScheduledTaskRecord | undefined {
+  updateScheduledTask(input: UpdateScheduledTaskInput): UpdateScheduledTaskResult {
     const current = this.store.getAction(input.id);
-    if (!current || current.executor.kind !== 'agent_task') return undefined;
+    if (!current || (current.executor.kind !== 'agent_task' && current.executor.kind !== 'loop')) return undefined;
+
+    const currentStoreVersion = this.store.getAutomationStoreVersion();
+    const staleByUpdatedAt = input.expectedUpdatedAt !== undefined && current.updatedAt !== input.expectedUpdatedAt;
+    const staleByStoreVersion = input.expectedAutomationStoreVersion !== undefined
+      && currentStoreVersion !== input.expectedAutomationStoreVersion;
+    if (staleByUpdatedAt || staleByStoreVersion) {
+      return {
+        ok: false,
+        code: 'stale_automation_view',
+        recoverable: true,
+        message: 'This automation changed elsewhere. Review the latest values before saving again.',
+        sourceVersions: { timedActionStore: currentStoreVersion },
+        current: this.actionToScheduledTask(current),
+      };
+    }
 
     const now = input.now ?? this.now();
     const policy = this.withScheduledTaskDefaults(
@@ -150,7 +279,9 @@ export class TimedActionService {
       title: input.name,
       description: input.description ?? current.description ?? '',
       trigger: input.trigger,
-      executor: { kind: 'agent_task', prompt: input.prompt },
+      executor: current.executor.kind === 'loop'
+        ? current.executor
+        : { kind: 'agent_task', prompt: input.prompt },
       policy,
       nextDueAt: input.nextDueAt,
       now,
@@ -160,11 +291,22 @@ export class TimedActionService {
 
   cancelScheduledTask(id: string, reason?: string): boolean {
     const action = this.store.getAction(id);
-    if (!action || action.executor.kind !== 'agent_task') return false;
+    if (!action || (action.executor.kind !== 'agent_task' && action.executor.kind !== 'loop')) return false;
     if (this.isTemporaryAgentIntervalTask(action)) {
       return this.store.deleteAction(id);
     }
     return this.store.cancelAction(id, reason ?? 'scheduled task cancelled', this.now());
+  }
+
+  setScheduledTaskStatus(
+    id: string,
+    status: ScheduledTaskRecord['status'],
+    now = this.now()
+  ): ScheduledTaskRecord | undefined {
+    const action = this.store.getAction(id);
+    if (!action || (action.executor.kind !== 'agent_task' && action.executor.kind !== 'loop')) return undefined;
+    const updated = this.store.setActionStatus(id, status, now);
+    return updated ? this.actionToScheduledTask(updated) : undefined;
   }
 
   getActions(): TimedActionRecord[] {
@@ -223,11 +365,15 @@ export class TimedActionService {
   }
 
   private actionToScheduledTask(action: TimedActionRecord): ScheduledTaskRecord {
+    const executorKind = action.executor.kind === 'loop' ? 'loop' : 'agent_task';
     const prompt = action.executor.kind === 'agent_task' ? action.executor.prompt : '';
+    const loopId = action.executor.kind === 'loop' ? action.executor.loopId : undefined;
     return {
       id: action.id,
       name: action.title,
       prompt,
+      executorKind,
+      loopId,
       frequency: triggerToFrequency(action.trigger),
       status: action.status === 'active' ? 'active' : 'paused',
       nextRunAt: action.nextDueAt,
@@ -239,7 +385,8 @@ export class TimedActionService {
       runtimeTaskId: action.lastRuntimeTaskId,
       reviewedAt: action.reviewedAt,
       userApprovedAuto: action.userApprovedAuto ?? false,
-    } as ScheduledTaskRecord & { description?: string; createdAt?: number; updatedAt?: number };
+      automationStoreVersion: this.store.getAutomationStoreVersion(),
+    };
   }
 
   private isTemporaryAgentIntervalTask(action: TimedActionRecord): boolean {

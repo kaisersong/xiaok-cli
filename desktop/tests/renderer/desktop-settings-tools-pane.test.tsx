@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 
 import { DesktopSettings } from '../../renderer/src/components/DesktopSettings';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
@@ -61,14 +62,20 @@ describe('DesktopSettings tools pane', () => {
     };
   }
 
+  function renderSettings() {
+    render(
+      <MemoryRouter>
+        <LocaleProvider>
+          <DesktopSettings onClose={() => {}} />
+        </LocaleProvider>
+      </MemoryRouter>,
+    );
+  }
+
   it('renders tools tab with current providers and runtime badges', async () => {
     mocks.getConnectorsConfig.mockResolvedValue(defaultSnapshot());
 
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
+    renderSettings();
 
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
 
@@ -103,11 +110,7 @@ describe('DesktopSettings tools pane', () => {
       providers: defaultSnapshot().providers,
     }));
 
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
+    renderSettings();
 
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
     await screen.findByText('搜索 Provider');
@@ -141,11 +144,7 @@ describe('DesktopSettings tools pane', () => {
       },
     });
 
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
+    renderSettings();
 
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
     await screen.findByText('搜索 Provider');
@@ -170,11 +169,7 @@ describe('DesktopSettings tools pane', () => {
       detail: '3 result(s)',
     });
 
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
+    renderSettings();
 
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
     await screen.findByText('搜索 Provider');

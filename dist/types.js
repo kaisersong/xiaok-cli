@@ -32,6 +32,9 @@ export const DEFAULT_CONFIG = {
     skillDebug: false,
     intentBoundary: DEFAULT_INTENT_BOUNDARY_CONFIG,
     channels: {},
+    automations: {
+        globalBackgroundAutoRunEnabled: true,
+    },
 };
 /** 校验 legacy defaultModel 是否合法，防止脏数据写入 */
 export function isValidLegacyProvider(v) {

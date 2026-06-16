@@ -33,6 +33,7 @@ import {
   Copy,
   RefreshCw,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { LocalMemoryStatsCard } from './settings/LocalMemoryStatsCard';
 import { MemoryModelSettings } from './settings/MemoryModelSettings';
@@ -52,9 +53,13 @@ import type {
   ConnectorsSearchProvider,
   ConnectorsProviderRuntime,
   EvidenceAnomalyView,
+  CreateUserLoopTemplateInputView,
   LoopDefinitionView,
+  LoopOutputPreviewView,
   LoopRunView,
+  LoopScheduleBindingView,
   RunLoopNowResultView,
+  UserLoopTemplateView,
 } from '../api/types';
 import { useLocale } from '../contexts/LocaleContext';
 import { useToast } from '../shared';
@@ -92,6 +97,13 @@ interface Props {
 
 export function DesktopSettings({ onClose }: Props) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const { t } = useLocale();
+  const navigate = useNavigate();
+
+  const openAutomations = useCallback(() => {
+    onClose();
+    navigate('/automations/loops');
+  }, [navigate, onClose]);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-[var(--c-bg-page)]">
@@ -111,7 +123,9 @@ export function DesktopSettings({ onClose }: Props) {
         </div>
         <div className="px-3">
           <div className="flex flex-col gap-[2px]">
-            {NAV_ITEMS.map(({ key, icon: Icon, label }) => (
+            {NAV_ITEMS.map(({ key, icon: Icon, label }) => {
+              const navLabel = label;
+              return (
               <button type="button"
                 key={key}
                 onClick={() => setActiveTab(key)}
@@ -123,9 +137,10 @@ export function DesktopSettings({ onClose }: Props) {
                 ].join(' ')}
               >
                 <Icon size={16} />
-                <span>{label}</span>
+                <span>{navLabel}</span>
               </button>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -138,7 +153,7 @@ export function DesktopSettings({ onClose }: Props) {
           {activeTab === 'channels' && <ChannelsPane />}
           {activeTab === 'mcp' && <McpPane />}
           {activeTab === 'tools' && <ToolsPane />}
-          {activeTab === 'general' && <GeneralPane />}
+          {activeTab === 'general' && <GeneralPane onOpenAutomations={openAutomations} />}
           {activeTab === 'appearance' && <AppearancePane />}
           {activeTab === 'data' && <DataPane />}
           {activeTab === 'memory' && <MemoryPane />}
@@ -1839,10 +1854,16 @@ function formatLoopRunTime(run: LoopRunView): string {
   return new Date(ts).toLocaleString();
 }
 
-// ---- General ----
+function createUserLoopId(): string {
+  const randomId = globalThis.crypto?.randomUUID?.();
+  return `user-loop-${randomId ?? Date.now().toString(36)}`;
+}
 
-function GeneralPane() {
-  const { locale, setLocale, t } = useLocale();
+// ---- Loops ----
+
+export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'diagnostics' }) {
+  const { t } = useLocale();
+  const navigate = useNavigate();
   const toast = useToast() as {
     addToast?: (message: string, type?: 'success' | 'error') => void;
     show?: (message: string, type?: 'success' | 'error') => void;
@@ -1851,43 +1872,34 @@ function GeneralPane() {
     if (toast.addToast) toast.addToast(message, type);
     else toast.show?.(message, type);
   }, [toast]);
-  const [skillDebug, setSkillDebug] = useState(false);
-  const [savingSkillDebug, setSavingSkillDebug] = useState(false);
-  const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(3);
-  const [savingConcurrency, setSavingConcurrency] = useState(false);
-  const [serviceStatus, setServiceStatus] = useState<DesktopServiceStatusSnapshot | null>(null);
-  const [serviceStatusLoading, setServiceStatusLoading] = useState(true);
-  const [serviceStatusError, setServiceStatusError] = useState('');
-  const [restartingService, setRestartingService] = useState<DesktopRelatedServiceId | null>(null);
   const [loopDefinitions, setLoopDefinitions] = useState<LoopDefinitionView[]>([]);
+  const [userLoopTemplates, setUserLoopTemplates] = useState<UserLoopTemplateView[]>([]);
+  const [loopScheduleBindings, setLoopScheduleBindings] = useState<Record<string, LoopScheduleBindingView>>({});
   const [loopRuns, setLoopRuns] = useState<Record<string, LoopRunView[]>>({});
   const [loopAnomalies, setLoopAnomalies] = useState<Record<string, EvidenceAnomalyView[]>>({});
   const [loopRunResults, setLoopRunResults] = useState<Record<string, RunLoopNowResultView | undefined>>({});
   const [loopDiagnosticsLoading, setLoopDiagnosticsLoading] = useState(true);
   const [loopDiagnosticsError, setLoopDiagnosticsError] = useState('');
   const [runningLoopId, setRunningLoopId] = useState<string | null>(null);
-  const [displayName, setDisplayName] = useState(() => localStorage.getItem('xiaok_display_name') || '');
-  const [avatarUrl, setAvatarUrl] = useState(() => localStorage.getItem('xiaok_avatar_url') || '');
-  const [editingName, setEditingName] = useState(false);
-  const [nameInput, setNameInput] = useState('');
+  const [loopOutputPreviews, setLoopOutputPreviews] = useState<Record<string, LoopOutputPreviewView | undefined>>({});
+  const [previewingLoopId, setPreviewingLoopId] = useState<string | null>(null);
+  const [showCreateLoop, setShowCreateLoop] = useState(false);
+  const [creatingLoop, setCreatingLoop] = useState(false);
+  const [createLoopError, setCreateLoopError] = useState('');
+  const [newLoopTitle, setNewLoopTitle] = useState('');
+  const [newLoopPrompt, setNewLoopPrompt] = useState('');
+  const [newLoopOutputDirectory, setNewLoopOutputDirectory] = useState('');
+  const [newLoopOutputFileName, setNewLoopOutputFileName] = useState('');
 
-  const loadServiceStatus = useCallback(async (silent = false) => {
-    if (!silent) setServiceStatusLoading(true);
-    setServiceStatusError('');
-    try {
-      setServiceStatus(await api.getServiceStatus());
-    } catch (error) {
-      setServiceStatusError(error instanceof Error ? error.message : '服务状态读取失败');
-    } finally {
-      if (!silent) setServiceStatusLoading(false);
-    }
-  }, []);
-
-  const loadLoopDiagnostics = useCallback(async (silent = false) => {
+  const loadLoops = useCallback(async (silent = false) => {
     if (!silent) setLoopDiagnosticsLoading(true);
     setLoopDiagnosticsError('');
     try {
-      const definitions = await api.getLoopDefinitions();
+      const [definitions, templates, scheduleBindings] = await Promise.all([
+        api.getLoopDefinitions(),
+        api.listUserLoopTemplates(),
+        api.getLoopScheduleBindings().catch(() => [] as LoopScheduleBindingView[]),
+      ]);
       const details = await Promise.all(definitions.map(async (loop) => {
         const [runs, anomalies] = await Promise.all([
           api.getLoopRuns(loop.id),
@@ -1896,6 +1908,8 @@ function GeneralPane() {
         return { loop, runs, anomalies };
       }));
       setLoopDefinitions(definitions);
+      setUserLoopTemplates(templates);
+      setLoopScheduleBindings(Object.fromEntries(scheduleBindings.map(binding => [binding.loopId, binding])));
       setLoopRuns(Object.fromEntries(details.map(item => [item.loop.id, item.runs])));
       setLoopAnomalies(Object.fromEntries(details.map(item => [item.loop.id, item.anomalies])));
       setLoopRunResults(prev => {
@@ -1915,6 +1929,519 @@ function GeneralPane() {
   }, [t.desktopSettings.loopDiagnosticsLoadError]);
 
   useEffect(() => {
+    void loadLoops();
+  }, [loadLoops]);
+
+  const handleRunLoopNow = async (loopId: string) => {
+    if (runningLoopId) return;
+    setRunningLoopId(loopId);
+    setLoopDiagnosticsError('');
+    try {
+      const result = await api.runLoopNow(loopId);
+      setLoopRunResults(prev => ({ ...prev, [loopId]: result }));
+      if (result.status !== 'already_running') {
+        await loadLoops(true);
+      }
+    } catch (error) {
+      setLoopDiagnosticsError(error instanceof Error ? error.message : t.desktopSettings.loopDiagnosticsRunFailed);
+    } finally {
+      setRunningLoopId(null);
+    }
+  };
+
+  const handleOpenLoopOutputDirectory = async (loopId: string) => {
+    try {
+      const result = await api.openLoopOutputDirectory(loopId);
+      if (!result.ok) {
+        showToast(result.message || result.error);
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t.desktopSettings.userLoopOutputPreviewUnavailable);
+    }
+  };
+
+  const handlePreviewLoopOutput = async (loopId: string) => {
+    setPreviewingLoopId(loopId);
+    try {
+      const result = await api.readLoopOutputPreview(loopId);
+      setLoopOutputPreviews(prev => ({ ...prev, [loopId]: result }));
+      if (!result.ok) {
+        showToast(result.message || t.desktopSettings.userLoopOutputPreviewUnavailable);
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t.desktopSettings.userLoopOutputPreviewUnavailable);
+    } finally {
+      setPreviewingLoopId(null);
+    }
+  };
+
+  const handleCopyLoopDiagnostics = async (
+    loop: LoopDefinitionView,
+    runs: LoopRunView[],
+    anomalies: EvidenceAnomalyView[],
+  ) => {
+    try {
+      const summary = buildLoopDiagnosticsSummary({ loop, runs, anomalies });
+      await navigator.clipboard.writeText(summary);
+      showToast(t.desktopSettings.loopDiagnosticsCopied, 'success');
+    } catch {
+      showToast(t.desktopSettings.loopDiagnosticsCopyFailed, 'error');
+    }
+  };
+
+  const handleOpenLoopSchedules = (loopId: string) => {
+    navigate(`/automations/schedules?loopId=${encodeURIComponent(loopId)}`);
+  };
+
+  const resetCreateForm = () => {
+    setNewLoopTitle('');
+    setNewLoopPrompt('');
+    setNewLoopOutputDirectory('');
+    setNewLoopOutputFileName('');
+    setCreateLoopError('');
+  };
+
+  const handleCreateUserLoop = async () => {
+    const input: CreateUserLoopTemplateInputView = {
+      loopId: createUserLoopId(),
+      title: newLoopTitle.trim(),
+      kind: 'markdown_file',
+      prompt: newLoopPrompt.trim(),
+      outputDirectory: newLoopOutputDirectory.trim(),
+      outputFileName: newLoopOutputFileName.trim(),
+    };
+    if (!input.title || !input.prompt || !input.outputDirectory || !input.outputFileName) {
+      setCreateLoopError(t.desktopSettings.userLoopCreateMissingFields);
+      return;
+    }
+    setCreatingLoop(true);
+    setCreateLoopError('');
+    try {
+      await api.createUserLoopTemplate(input);
+      resetCreateForm();
+      setShowCreateLoop(false);
+      showToast(t.desktopSettings.userLoopCreateSuccess, 'success');
+      await loadLoops(true);
+    } catch (error) {
+      setCreateLoopError(error instanceof Error ? error.message : t.desktopSettings.userLoopCreateFailed);
+    } finally {
+      setCreatingLoop(false);
+    }
+  };
+
+  const definitionById = new Map(loopDefinitions.map(loop => [loop.id, loop]));
+  const builtInLoops = loopDefinitions.filter(loop => loop.origin !== 'user_template');
+  const userLoops = userLoopTemplates.map(template => ({
+    template,
+    definition: definitionById.get(template.loopId),
+  }));
+  const showUserLoops = sections === 'all' || sections === 'user';
+  const showDiagnostics = sections === 'all' || sections === 'diagnostics';
+
+  return (
+    <>
+      {showUserLoops && (
+      <Section>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <SectionHeader icon={RefreshCw}>{t.desktopSettings.userLoops}</SectionHeader>
+          <button
+            type="button"
+            onClick={() => setShowCreateLoop(true)}
+            className={`${btnPrimary} inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5`}
+          >
+            <Plus size={14} />
+            {t.desktopSettings.newMarkdownLoop}
+          </button>
+        </div>
+        <Card>
+          <p className="mb-3 text-xs text-[var(--c-text-secondary)]">
+            {t.desktopSettings.userLoopsDesc}
+          </p>
+
+          {showCreateLoop ? (
+            <div className="mb-4 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3">
+              <div className="grid gap-3">
+                <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
+                  {t.desktopSettings.userLoopTitleLabel}
+                  <input
+                    aria-label={t.desktopSettings.userLoopTitleLabel}
+                    type="text"
+                    value={newLoopTitle}
+                    onChange={(event) => setNewLoopTitle(event.target.value)}
+                    className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
+                  {t.desktopSettings.userLoopPromptLabel}
+                  <textarea
+                    aria-label={t.desktopSettings.userLoopPromptLabel}
+                    value={newLoopPrompt}
+                    onChange={(event) => setNewLoopPrompt(event.target.value)}
+                    rows={3}
+                    className="resize-none rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]"
+                  />
+                </label>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
+                    {t.desktopSettings.userLoopOutputDirectoryLabel}
+                    <input
+                      aria-label={t.desktopSettings.userLoopOutputDirectoryLabel}
+                      type="text"
+                      value={newLoopOutputDirectory}
+                      onChange={(event) => setNewLoopOutputDirectory(event.target.value)}
+                      className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
+                    {t.desktopSettings.userLoopOutputFileNameLabel}
+                    <input
+                      aria-label={t.desktopSettings.userLoopOutputFileNameLabel}
+                      type="text"
+                      value={newLoopOutputFileName}
+                      onChange={(event) => setNewLoopOutputFileName(event.target.value)}
+                      className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]"
+                    />
+                  </label>
+                </div>
+              </div>
+              {createLoopError ? (
+                <div className="mt-3 rounded-md border border-[var(--c-status-error-text)]/20 bg-[var(--c-status-error-bg,#fef2f2)] px-3 py-2 text-xs text-[var(--c-status-error-text)]">
+                  {createLoopError}
+                </div>
+              ) : null}
+              <div className="mt-3 flex justify-end gap-2">
+                <button type="button" onClick={() => { resetCreateForm(); setShowCreateLoop(false); }} className={btnSecondary}>
+                  {t.desktopSettings.cancel}
+                </button>
+                <button type="button" onClick={() => void handleCreateUserLoop()} disabled={creatingLoop} className={btnPrimary}>
+                  {creatingLoop ? t.desktopSettings.creatingLoop : t.desktopSettings.createLoop}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {loopDiagnosticsLoading && userLoops.length === 0 ? (
+            <div className="text-xs text-[var(--c-text-secondary)]">
+              {t.desktopSettings.userLoopsLoading}
+            </div>
+          ) : userLoops.length === 0 ? (
+            <div className="text-xs text-[var(--c-text-secondary)]">
+              {t.desktopSettings.userLoopsEmpty}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {userLoops.map(({ template, definition }) => {
+                const loopTitle = definition?.title ?? template.loopId;
+                const loopStatus = definition?.status ?? 'active';
+                const isRunning = runningLoopId === template.loopId;
+                const isPreviewing = previewingLoopId === template.loopId;
+                const outputPreview = loopOutputPreviews[template.loopId];
+                const scheduleBinding = loopScheduleBindings[template.loopId];
+                const runResult = loopRunResults[template.loopId];
+                const isAlreadyRunning = !!definition?.activeRunId || runResult?.status === 'already_running';
+                const buttonLabel = isRunning
+                  ? t.desktopSettings.loopDiagnosticsRunning
+                  : isAlreadyRunning
+                    ? t.desktopSettings.loopDiagnosticsAlreadyRunning
+                    : t.desktopSettings.loopDiagnosticsRunNow;
+                return (
+                  <div key={template.loopId} className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-[var(--c-text-heading)]">{loopTitle}</div>
+                        {definition?.description ? (
+                          <div className="mt-0.5 text-xs text-[var(--c-text-secondary)]">{definition.description}</div>
+                        ) : null}
+                        <div className="mt-2 grid gap-1 break-all text-xs text-[var(--c-text-secondary)]">
+                          <div>
+                            <span className="text-[var(--c-text-tertiary)]">{t.desktopSettings.userLoopOutputDirectoryLabel}: </span>
+                            {template.outputDirectory}
+                          </div>
+                          <div>
+                            <span className="text-[var(--c-text-tertiary)]">{t.desktopSettings.userLoopOutputFileNameLabel}: </span>
+                            {template.outputFileName}
+                          </div>
+                          {scheduleBinding ? (
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                              <span className="rounded-full bg-[var(--c-bg-deep)] px-2 py-0.5 text-[11px] text-[var(--c-text-secondary)]">
+                                {scheduleBinding.kind === 'multiple'
+                                  ? t.desktopSettings.userLoopScheduleMultiple
+                                  : t.desktopSettings.userLoopScheduleSingle}
+                              </span>
+                              <span>
+                                {scheduleBinding.count} {t.automationsSchedules}
+                              </span>
+                              <span>
+                                {scheduleBinding.activeCount} {t.desktopSettings.userLoopScheduleActive}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenLoopSchedules(template.loopId)}
+                                className="text-[var(--c-accent)] hover:underline"
+                              >
+                                {t.desktopSettings.userLoopOpenSchedules}
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-[var(--c-bg-deep)] px-2 py-0.5 text-[11px] text-[var(--c-text-secondary)]">
+                        {loopStatus}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        aria-label={`${t.desktopSettings.userLoopOpenOutputDirectory}: ${loopTitle}`}
+                        onClick={() => void handleOpenLoopOutputDirectory(template.loopId)}
+                        className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
+                      >
+                        <HardDrive size={14} />
+                        {t.desktopSettings.userLoopOpenOutputDirectory}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`${t.desktopSettings.userLoopPreviewOutputFile}: ${loopTitle}`}
+                        onClick={() => void handlePreviewLoopOutput(template.loopId)}
+                        disabled={isPreviewing}
+                        className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
+                      >
+                        <Eye size={14} />
+                        {isPreviewing ? t.desktopSettings.loopDiagnosticsRunning : t.desktopSettings.userLoopPreviewOutputFile}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`run-loop-${template.loopId}`}
+                        onClick={() => void handleRunLoopNow(template.loopId)}
+                        disabled={isRunning || isAlreadyRunning || loopStatus !== 'active'}
+                        className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
+                      >
+                        <RefreshCw size={14} className={isRunning ? 'animate-spin' : ''} />
+                        {buttonLabel}
+                      </button>
+                    </div>
+                    {outputPreview ? (
+                      <div className="mt-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-3">
+                        <div className="mb-2 text-xs font-medium text-[var(--c-text-secondary)]">
+                          {t.desktopSettings.userLoopOutputPreview}
+                        </div>
+                        {outputPreview.ok ? (
+                          <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--c-bg-deep)] p-3 text-xs leading-5 text-[var(--c-text-primary)]">
+                            {outputPreview.content.split(/\r?\n/).map((line, index) => (
+                              <span key={`${template.loopId}-preview-${index}`} className="block min-h-[1.25em]">
+                                {line || ' '}
+                              </span>
+                            ))}
+                          </pre>
+                        ) : (
+                          <div className="text-xs text-[var(--c-text-secondary)]">
+                            {outputPreview.message || t.desktopSettings.userLoopOutputPreviewUnavailable}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </Section>
+      )}
+
+      {showDiagnostics && (
+      <Section>
+        <SectionHeader icon={RefreshCw}>{t.desktopSettings.loopDiagnostics}</SectionHeader>
+        <Card>
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <p className="text-xs text-[var(--c-text-secondary)]">
+              {t.desktopSettings.loopDiagnosticsDesc}
+            </p>
+            <button
+              type="button"
+              onClick={() => void loadLoops()}
+              disabled={loopDiagnosticsLoading}
+              className={`${btnSecondary} inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5`}
+            >
+              <RefreshCw size={14} className={loopDiagnosticsLoading ? 'animate-spin' : ''} />
+              {t.desktopSettings.loopDiagnosticsRefresh}
+            </button>
+          </div>
+
+          {loopDiagnosticsError ? (
+            <div className="mb-3 rounded-md border border-[var(--c-status-error-text)]/20 bg-[var(--c-status-error-bg,#fef2f2)] px-3 py-2 text-xs text-[var(--c-status-error-text)]">
+              {loopDiagnosticsError}
+            </div>
+          ) : null}
+
+          {loopDiagnosticsLoading && builtInLoops.length === 0 ? (
+            <div className="text-xs text-[var(--c-text-secondary)]">
+              {t.desktopSettings.loopDiagnosticsLoading}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {builtInLoops.map(loop => {
+                const runs = loopRuns[loop.id] ?? [];
+                const latestRun = runs[0];
+                const anomalies = loopAnomalies[loop.id] ?? [];
+                const openAnomalies = getOpenLoopAnomalies(anomalies);
+                const visibleAnomalies = openAnomalies.slice(0, 3);
+                const openAnomalyCount = getOpenLoopAnomalyCount(anomalies);
+                const runResult = loopRunResults[loop.id];
+                const isRunning = runningLoopId === loop.id;
+                const isAlreadyRunning = !!loop.activeRunId || runResult?.status === 'already_running';
+                const buttonLabel = isRunning
+                  ? t.desktopSettings.loopDiagnosticsRunning
+                  : isAlreadyRunning
+                    ? t.desktopSettings.loopDiagnosticsAlreadyRunning
+                    : t.desktopSettings.loopDiagnosticsRunNow;
+
+                return (
+                  <div
+                    key={loop.id}
+                    className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-[var(--c-text-heading)]">
+                          {loop.title}
+                        </div>
+                        <div className="mt-0.5 text-xs text-[var(--c-text-secondary)]">
+                          {loop.description}
+                        </div>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-[var(--c-bg-deep)] px-2 py-0.5 text-[11px] text-[var(--c-text-secondary)]">
+                        {loop.status}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-md bg-[var(--c-bg-card)] p-2">
+                        <div className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsLastRun}</div>
+                        <div className="mt-1 text-[var(--c-text-primary)]">
+                          {latestRun
+                            ? `${getLoopRunStatusLabel(latestRun.status)} · ${formatLoopRunTime(latestRun)}`
+                            : t.desktopSettings.loopDiagnosticsNoRuns}
+                        </div>
+                      </div>
+                      <div className="rounded-md bg-[var(--c-bg-card)] p-2">
+                        <div className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsOpenAnomalies}</div>
+                        <div className="mt-1 font-medium text-[var(--c-text-primary)]">
+                          {openAnomalyCount}
+                        </div>
+                      </div>
+                    </div>
+
+                    {latestRun?.message ? (
+                      <div className="mt-2 rounded-md bg-[var(--c-bg-card)] p-2 text-xs text-[var(--c-text-secondary)]">
+                        {latestRun.message}
+                      </div>
+                    ) : null}
+
+                    {visibleAnomalies.length > 0 ? (
+                      <div className="mt-2 flex flex-col gap-2">
+                        {visibleAnomalies.map(anomaly => {
+                          const suggestedAction = getLoopAnomalySuggestedAction(anomaly);
+                          const logPaths = getLoopAnomalyLogPaths(anomaly);
+                          return (
+                            <div
+                              key={anomaly.id}
+                              className="rounded-md bg-[var(--c-bg-card)] p-2 text-xs text-[var(--c-text-secondary)]"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="font-medium text-[var(--c-text-primary)]">
+                                    {anomaly.message}
+                                  </div>
+                                  <div className="mt-0.5 break-all text-[var(--c-text-tertiary)]">
+                                    {anomaly.kind} · {anomaly.ownerKind}/{anomaly.ownerId}
+                                  </div>
+                                </div>
+                                <span className="shrink-0 text-[11px] text-[var(--c-text-tertiary)]">
+                                  {anomaly.seenCount}x
+                                </span>
+                              </div>
+                              {suggestedAction ? (
+                                <div className="mt-1">
+                                  <span className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsSuggestedAction}: </span>
+                                  {suggestedAction}
+                                </div>
+                              ) : null}
+                              {logPaths.map(logPath => (
+                                <div key={logPath} className="mt-1 break-all">
+                                  <span className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsLogPath}: </span>
+                                  {logPath}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-3 flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        aria-label={`copy-loop-diagnostics-${loop.id}`}
+                        onClick={() => void handleCopyLoopDiagnostics(loop, runs, anomalies)}
+                        className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
+                      >
+                        <Copy size={14} />
+                        {t.desktopSettings.loopDiagnosticsCopy}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`run-loop-${loop.id}`}
+                        onClick={() => void handleRunLoopNow(loop.id)}
+                        disabled={isRunning || isAlreadyRunning || loop.status !== 'active'}
+                        className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
+                      >
+                        <RefreshCw size={14} className={isRunning ? 'animate-spin' : ''} />
+                        {buttonLabel}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </Section>
+      )}
+    </>
+  );
+}
+
+// ---- General ----
+
+function GeneralPane({ onOpenAutomations }: { onOpenAutomations: () => void }) {
+  const { locale, setLocale, t } = useLocale();
+  const [skillDebug, setSkillDebug] = useState(false);
+  const [savingSkillDebug, setSavingSkillDebug] = useState(false);
+  const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(3);
+  const [savingConcurrency, setSavingConcurrency] = useState(false);
+  const [serviceStatus, setServiceStatus] = useState<DesktopServiceStatusSnapshot | null>(null);
+  const [serviceStatusLoading, setServiceStatusLoading] = useState(true);
+  const [serviceStatusError, setServiceStatusError] = useState('');
+  const [restartingService, setRestartingService] = useState<DesktopRelatedServiceId | null>(null);
+  const [displayName, setDisplayName] = useState(() => localStorage.getItem('xiaok_display_name') || '');
+  const [avatarUrl, setAvatarUrl] = useState(() => localStorage.getItem('xiaok_avatar_url') || '');
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+
+  const loadServiceStatus = useCallback(async (silent = false) => {
+    if (!silent) setServiceStatusLoading(true);
+    setServiceStatusError('');
+    try {
+      setServiceStatus(await api.getServiceStatus());
+    } catch (error) {
+      setServiceStatusError(error instanceof Error ? error.message : '服务状态读取失败');
+    } finally {
+      if (!silent) setServiceStatusLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
     api.getSkillDebugConfig().then(c => {
       setSkillDebug(c.enabled);
     });
@@ -1927,10 +2454,6 @@ function GeneralPane() {
     }, 10_000);
     return () => window.clearInterval(timer);
   }, [loadServiceStatus]);
-
-  useEffect(() => {
-    void loadLoopDiagnostics();
-  }, [loadLoopDiagnostics]);
 
   const handleSkillDebugToggle = async (enabled: boolean) => {
     setSkillDebug(enabled);
@@ -1969,37 +2492,6 @@ function GeneralPane() {
       setServiceStatusError(error instanceof Error ? error.message : '服务重启失败');
     } finally {
       setRestartingService(null);
-    }
-  };
-
-  const handleRunLoopNow = async (loopId: string) => {
-    if (runningLoopId) return;
-    setRunningLoopId(loopId);
-    setLoopDiagnosticsError('');
-    try {
-      const result = await api.runLoopNow(loopId);
-      setLoopRunResults(prev => ({ ...prev, [loopId]: result }));
-      if (result.status !== 'already_running') {
-        await loadLoopDiagnostics(true);
-      }
-    } catch (error) {
-      setLoopDiagnosticsError(error instanceof Error ? error.message : t.desktopSettings.loopDiagnosticsRunFailed);
-    } finally {
-      setRunningLoopId(null);
-    }
-  };
-
-  const handleCopyLoopDiagnostics = async (
-    loop: LoopDefinitionView,
-    runs: LoopRunView[],
-    anomalies: EvidenceAnomalyView[],
-  ) => {
-    try {
-      const summary = buildLoopDiagnosticsSummary({ loop, runs, anomalies });
-      await navigator.clipboard.writeText(summary);
-      showToast(t.desktopSettings.loopDiagnosticsCopied, 'success');
-    } catch {
-      showToast(t.desktopSettings.loopDiagnosticsCopyFailed, 'error');
     }
   };
 
@@ -2137,6 +2629,25 @@ function GeneralPane() {
       </Section>
 
       <Section>
+        <SectionHeader icon={RefreshCw}>{t.automationsTitle}</SectionHeader>
+        <Card>
+          <div className="flex items-start justify-between gap-4">
+            <p className="text-xs leading-5 text-[var(--c-text-secondary)]">
+              {t.automationsSubtitle}
+            </p>
+            <button
+              type="button"
+              onClick={onOpenAutomations}
+              className={`${btnSecondary} inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5`}
+            >
+              <RefreshCw size={14} />
+              {t.desktopSettings.openAutomations}
+            </button>
+          </div>
+        </Card>
+      </Section>
+
+      <Section>
         <SectionHeader icon={Server}>服务状态</SectionHeader>
         <Card>
           <div className="flex flex-col gap-3">
@@ -2160,164 +2671,6 @@ function GeneralPane() {
               </div>
             ) : null}
           </div>
-        </Card>
-      </Section>
-
-      <Section>
-        <SectionHeader icon={RefreshCw}>{t.desktopSettings.loopDiagnostics}</SectionHeader>
-        <Card>
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <p className="text-xs text-[var(--c-text-secondary)]">
-              {t.desktopSettings.loopDiagnosticsDesc}
-            </p>
-            <button
-              type="button"
-              onClick={() => void loadLoopDiagnostics()}
-              disabled={loopDiagnosticsLoading}
-              className={`${btnSecondary} inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5`}
-            >
-              <RefreshCw size={14} className={loopDiagnosticsLoading ? 'animate-spin' : ''} />
-              {t.desktopSettings.loopDiagnosticsRefresh}
-            </button>
-          </div>
-
-          {loopDiagnosticsError ? (
-            <div className="mb-3 rounded-md border border-[var(--c-status-error-text)]/20 bg-[var(--c-status-error-bg,#fef2f2)] px-3 py-2 text-xs text-[var(--c-status-error-text)]">
-              {loopDiagnosticsError}
-            </div>
-          ) : null}
-
-          {loopDiagnosticsLoading && loopDefinitions.length === 0 ? (
-            <div className="text-xs text-[var(--c-text-secondary)]">
-              {t.desktopSettings.loopDiagnosticsLoading}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-	              {loopDefinitions.map(loop => {
-	                const runs = loopRuns[loop.id] ?? [];
-	                const latestRun = runs[0];
-	                const anomalies = loopAnomalies[loop.id] ?? [];
-	                const openAnomalies = getOpenLoopAnomalies(anomalies);
-	                const visibleAnomalies = openAnomalies.slice(0, 3);
-	                const openAnomalyCount = getOpenLoopAnomalyCount(anomalies);
-	                const runResult = loopRunResults[loop.id];
-                const isRunning = runningLoopId === loop.id;
-                const isAlreadyRunning = !!loop.activeRunId || runResult?.status === 'already_running';
-                const buttonLabel = isRunning
-                  ? t.desktopSettings.loopDiagnosticsRunning
-                  : isAlreadyRunning
-                    ? t.desktopSettings.loopDiagnosticsAlreadyRunning
-                    : t.desktopSettings.loopDiagnosticsRunNow;
-
-                return (
-                  <div
-                    key={loop.id}
-                    className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-[var(--c-text-heading)]">
-                          {loop.title}
-                        </div>
-                        <div className="mt-0.5 text-xs text-[var(--c-text-secondary)]">
-                          {loop.description}
-                        </div>
-                      </div>
-                      <span className="shrink-0 rounded-full bg-[var(--c-bg-deep)] px-2 py-0.5 text-[11px] text-[var(--c-text-secondary)]">
-                        {loop.status}
-                      </span>
-                    </div>
-
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-md bg-[var(--c-bg-card)] p-2">
-                        <div className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsLastRun}</div>
-                        <div className="mt-1 text-[var(--c-text-primary)]">
-                          {latestRun
-                            ? `${getLoopRunStatusLabel(latestRun.status)} · ${formatLoopRunTime(latestRun)}`
-                            : t.desktopSettings.loopDiagnosticsNoRuns}
-                        </div>
-                      </div>
-                      <div className="rounded-md bg-[var(--c-bg-card)] p-2">
-                        <div className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsOpenAnomalies}</div>
-                        <div className="mt-1 font-medium text-[var(--c-text-primary)]">
-                          {openAnomalyCount}
-                        </div>
-                      </div>
-                    </div>
-
-	                    {latestRun?.message ? (
-	                      <div className="mt-2 rounded-md bg-[var(--c-bg-card)] p-2 text-xs text-[var(--c-text-secondary)]">
-	                        {latestRun.message}
-	                      </div>
-	                    ) : null}
-
-	                    {visibleAnomalies.length > 0 ? (
-	                      <div className="mt-2 flex flex-col gap-2">
-	                        {visibleAnomalies.map(anomaly => {
-	                          const suggestedAction = getLoopAnomalySuggestedAction(anomaly);
-	                          const logPaths = getLoopAnomalyLogPaths(anomaly);
-	                          return (
-	                            <div
-	                              key={anomaly.id}
-	                              className="rounded-md bg-[var(--c-bg-card)] p-2 text-xs text-[var(--c-text-secondary)]"
-	                            >
-	                              <div className="flex items-start justify-between gap-2">
-	                                <div className="min-w-0">
-	                                  <div className="font-medium text-[var(--c-text-primary)]">
-	                                    {anomaly.message}
-	                                  </div>
-	                                  <div className="mt-0.5 break-all text-[var(--c-text-tertiary)]">
-	                                    {anomaly.kind} · {anomaly.ownerKind}/{anomaly.ownerId}
-	                                  </div>
-	                                </div>
-	                                <span className="shrink-0 text-[11px] text-[var(--c-text-tertiary)]">
-	                                  {anomaly.seenCount}x
-	                                </span>
-	                              </div>
-	                              {suggestedAction ? (
-	                                <div className="mt-1">
-	                                  <span className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsSuggestedAction}: </span>
-	                                  {suggestedAction}
-	                                </div>
-	                              ) : null}
-	                              {logPaths.map(logPath => (
-	                                <div key={logPath} className="mt-1 break-all">
-	                                  <span className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsLogPath}: </span>
-	                                  {logPath}
-	                                </div>
-	                              ))}
-	                            </div>
-	                          );
-	                        })}
-	                      </div>
-	                    ) : null}
-
-	                    <div className="mt-3 flex flex-wrap justify-end gap-2">
-	                      <button
-	                        type="button"
-	                        aria-label={`copy-loop-diagnostics-${loop.id}`}
-	                        onClick={() => void handleCopyLoopDiagnostics(loop, runs, anomalies)}
-	                        className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
-	                      >
-	                        <Copy size={14} />
-	                        {t.desktopSettings.loopDiagnosticsCopy}
-	                      </button>
-	                      <button
-	                        type="button"
-                        aria-label={`run-loop-${loop.id}`}
-                        onClick={() => void handleRunLoopNow(loop.id)}
-                        disabled={isRunning || isAlreadyRunning || loop.status !== 'active'}
-                        className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
-                      >
-                        <RefreshCw size={14} className={isRunning ? 'animate-spin' : ''} />
-                        {buttonLabel}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </Card>
       </Section>
 

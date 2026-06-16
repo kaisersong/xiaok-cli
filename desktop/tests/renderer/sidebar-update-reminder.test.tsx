@@ -34,6 +34,7 @@ vi.mock('../../renderer/src/contexts/LocaleContext', () => ({
   useLocale: () => ({
     t: {
       sidebarNewTask: '新建任务',
+      sidebarAutomations: '自动化',
       sidebarScheduled: '定时任务',
       sidebarProjects: '项目',
       sidebarSearch: '搜索...',
@@ -103,6 +104,19 @@ afterEach(() => {
 });
 
 describe('Sidebar update reminder', () => {
+  it('uses Automations as the top-level navigation entry for scheduled work', async () => {
+    renderSidebar({
+      checking: false,
+      available: false,
+      downloading: false,
+      downloaded: false,
+      progress: 0,
+    }, '/automations/schedules');
+
+    expect(await screen.findByRole('button', { name: '自动化' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '定时任务' })).not.toBeInTheDocument();
+  });
+
   it('opens a popover with a version comparison when the reminder is clicked', async () => {
     renderSidebar({
       checking: false,

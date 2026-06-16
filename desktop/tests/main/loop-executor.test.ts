@@ -122,6 +122,49 @@ describe('loop executor', () => {
     });
   });
 
+  it('routes user template loops to the user loop template runner', async () => {
+    store.createUserLoopTemplate({
+      loopId: 'user-loop-1',
+      title: 'User Loop',
+      kind: 'markdown_file',
+      prompt: 'Write the note.',
+      outputDirectory: join(rootDir, 'outputs'),
+      outputFileName: 'note.md',
+      now: 1_500,
+    });
+    const artifactScanner: LoopScanner = {
+      scan: vi.fn().mockReturnValue({
+        summaryEvidence: { summary: 'scanner should not run', metadata: {} },
+        nextActionKind: 'none',
+      }),
+    };
+    const userLoopTemplateRunner = {
+      runTemplateLoop: vi.fn(({ runId }) => {
+        const success = store.finishLoopRunSuccess(runId, ['user-evidence'], 2_100, 'user loop success');
+        if (!success) throw new Error('expected user loop run to finish');
+        return { status: 'success' as const, run: success };
+      }),
+    };
+    const runner = createLoopRunner({
+      loopStore: store,
+      evidenceStore,
+      scanner: artifactScanner,
+      userLoopTemplateRunner,
+      now: () => now,
+      staleAfterMs: 60_000,
+    });
+
+    const result = await runner.runLoopNow('user-loop-1');
+
+    expect(result).toMatchObject({ status: 'success', run: expect.objectContaining({ summary: 'user loop success' }) });
+    expect(artifactScanner.scan).not.toHaveBeenCalled();
+    expect(userLoopTemplateRunner.runTemplateLoop).toHaveBeenCalledWith({
+      loopId: 'user-loop-1',
+      runId: expect.any(String),
+      trigger: { kind: 'manual' },
+    });
+  });
+
   it('blocked runs persist blocked evidence before terminal loop state', async () => {
     const scanner: LoopScanner = {
       scan: vi.fn().mockReturnValue({
@@ -243,7 +286,11 @@ describe('loop executor', () => {
     const stage = store.listLoopStages(run.id)[0];
 
     now = 63_000;
-    expect(store.recoverStaleRuns(now, 60_000)).toBe(1);
+    expect(store.recoverStaleRuns(now, 60_000)).toEqual({
+      ok: true,
+      recovered: 1,
+      failedRunIds: [run.id],
+    });
     resolveScan?.({
       summaryEvidence: { summary: 'late success', metadata: { findings: ['late'] } },
       nextActionKind: 'none',
@@ -270,8 +317,9 @@ describe('loop executor', () => {
   });
 
   it('loop timed action executor asks scheduler to skip when the loop is already running', async () => {
+    const runLoop = vi.fn().mockResolvedValue({ status: 'already_running', activeRunId: 'run_active' });
     const executor = createLoopExecutor({
-      runLoop: vi.fn().mockResolvedValue({ status: 'already_running', activeRunId: 'run_active' }),
+      runLoop,
     });
 
     const result = await executor.execute({
@@ -291,12 +339,21 @@ describe('loop executor', () => {
       claimedAt: 2_000,
       overdueMs: 1_000,
       recoveryReason: 'normal_tick',
+    }, {
+      timedActionRunId: 'timed-run-1',
     });
 
     expect(result.skip).toEqual({
       action: 'skip',
       reason: 'loop already running: run_active',
     });
+    expect(runLoop).toHaveBeenCalledWith(ARTIFACT_LOOP_ID, expect.objectContaining({
+      kind: 'scheduled',
+      timedActionId: 'loop-action',
+      timedActionRunId: 'timed-run-1',
+      scheduledDueAt: 1_000,
+      claimedAt: 2_000,
+    }));
   });
 
   it('loop timed action executor throws when the loop run fails', async () => {

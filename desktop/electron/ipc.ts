@@ -1,15 +1,19 @@
 import { clipboard, dialog, shell, type BrowserWindow, type IpcMain } from 'electron';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open as openFile, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
 import type { DesktopLoopRuntime } from './loop-executor.js';
+import type { CreateUserLoopTemplateInput, UserLoopTemplate } from './loop-types.js';
+import { isSafeLoopOutputFileName } from './loop-output-paths.js';
 
 type DesktopServices = ReturnType<typeof createDesktopServices>;
 
 interface RegisterDesktopIpcOptions {
   loopRuntime?: Pick<DesktopLoopRuntime, 'loopStore' | 'scanner' | 'runner' | 'listAnomalies'>;
 }
+
+const LOOP_OUTPUT_PREVIEW_LIMIT_BYTES = 256 * 1024;
 
 function log(level: string, msg: string, ...args: unknown[]) {
   const ts = new Date().toISOString();
@@ -290,6 +294,24 @@ export async function registerDesktopIpc(
     const loopRuntime = getLoopRuntime(options);
     return loopRuntime.loopStore.listLoopDefinitions();
   });
+  ipcMain.handle('desktop:loops:listUserTemplates', () => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.loopStore.listUserLoopTemplates();
+  });
+  ipcMain.handle('desktop:loops:createUserTemplate', (_event, input) => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.loopStore.createUserLoopTemplate(readCreateUserLoopTemplateInput(input));
+  });
+  ipcMain.handle('desktop:loops:openOutputDirectory', async (_event, loopId) => {
+    const loopRuntime = getLoopRuntime(options);
+    const id = readLoopId(loopId);
+    return openLoopOutputDirectory(id, loopRuntime.loopStore.getUserLoopTemplate(id));
+  });
+  ipcMain.handle('desktop:loops:readOutputPreview', async (_event, loopId) => {
+    const loopRuntime = getLoopRuntime(options);
+    const id = readLoopId(loopId);
+    return readLoopOutputPreview(id, loopRuntime.loopStore.getUserLoopTemplate(id));
+  });
   ipcMain.handle('desktop:loops:listRuns', (_event, loopId) => {
     const loopRuntime = getLoopRuntime(options);
     return loopRuntime.loopStore.listLoopRuns(readLoopId(loopId), 20);
@@ -546,6 +568,176 @@ function readLoopId(input: unknown): string {
     throw new Error('loopId must be a non-empty string');
   }
   return input;
+}
+
+async function openLoopOutputDirectory(loopId: string, template: UserLoopTemplate | undefined): Promise<Record<string, unknown>> {
+  const target = resolveUserLoopOutputTarget(loopId, template);
+  if (!target.ok) return target;
+  try {
+    await mkdir(target.outputDirectory, { recursive: true });
+    const error = await shell.openPath(target.outputDirectory);
+    if (error) {
+      return { ok: false, loopId, error: 'open_output_directory_failed', message: error, pathLabel: target.outputDirectory };
+    }
+    return { ok: true, loopId, pathLabel: target.outputDirectory };
+  } catch (error) {
+    return {
+      ok: false,
+      loopId,
+      error: 'open_output_directory_failed',
+      message: error instanceof Error ? error.message : String(error),
+      pathLabel: target.outputDirectory,
+    };
+  }
+}
+
+async function readLoopOutputPreview(loopId: string, template: UserLoopTemplate | undefined): Promise<Record<string, unknown>> {
+  const target = resolveUserLoopOutputTarget(loopId, template);
+  if (!target.ok) return target;
+  try {
+    const symlinkCheck = await lstat(target.outputPath);
+    if (symlinkCheck.isSymbolicLink()) {
+      return { ok: false, loopId, error: 'output_file_symlink', pathLabel: target.outputPath };
+    }
+    if (!symlinkCheck.isFile()) {
+      return { ok: false, loopId, error: 'output_not_file', pathLabel: target.outputPath };
+    }
+    if (symlinkCheck.size > LOOP_OUTPUT_PREVIEW_LIMIT_BYTES) {
+      return {
+        ok: false,
+        loopId,
+        error: 'output_file_too_large',
+        pathLabel: target.outputPath,
+        sizeBytes: symlinkCheck.size,
+        limitBytes: LOOP_OUTPUT_PREVIEW_LIMIT_BYTES,
+      };
+    }
+
+    const file = await openFile(target.outputPath, 'r');
+    try {
+      const fileStat = await file.stat();
+      if (!fileStat.isFile()) {
+        return { ok: false, loopId, error: 'output_not_file', pathLabel: target.outputPath };
+      }
+      if (fileStat.size > LOOP_OUTPUT_PREVIEW_LIMIT_BYTES) {
+        return {
+          ok: false,
+          loopId,
+          error: 'output_file_too_large',
+          pathLabel: target.outputPath,
+          sizeBytes: fileStat.size,
+          limitBytes: LOOP_OUTPUT_PREVIEW_LIMIT_BYTES,
+        };
+      }
+      const buffer = Buffer.alloc(fileStat.size);
+      if (fileStat.size > 0) {
+        await file.read(buffer, 0, fileStat.size, 0);
+      }
+      if (looksBinary(buffer)) {
+        return { ok: false, loopId, error: 'output_file_binary', pathLabel: target.outputPath, sizeBytes: fileStat.size };
+      }
+      return {
+        ok: true,
+        loopId,
+        pathLabel: target.outputPath,
+        content: buffer.toString('utf8'),
+        sizeBytes: fileStat.size,
+        truncated: false,
+      };
+    } finally {
+      await file.close();
+    }
+  } catch (error) {
+    const code = isRecord(error) && typeof error.code === 'string' ? error.code : '';
+    if (code === 'ENOENT') {
+      return { ok: false, loopId, error: 'missing_output_file', pathLabel: target.outputPath };
+    }
+    return {
+      ok: false,
+      loopId,
+      error: 'read_output_preview_failed',
+      message: error instanceof Error ? error.message : String(error),
+      pathLabel: target.outputPath,
+    };
+  }
+}
+
+function resolveUserLoopOutputTarget(
+  loopId: string,
+  template: UserLoopTemplate | undefined,
+): { ok: true; outputDirectory: string; outputPath: string } | { ok: false; loopId: string; error: string; message?: string; pathLabel?: string } {
+  if (!template) return { ok: false, loopId, error: 'loop_not_found' };
+  if (!isAbsolute(template.outputDirectory)) {
+    return {
+      ok: false,
+      loopId,
+      error: 'output_directory_relative_legacy',
+      pathLabel: template.outputDirectory,
+    };
+  }
+  if (!isSafeLoopOutputFileName(template.outputFileName)) {
+    return {
+      ok: false,
+      loopId,
+      error: 'output_file_name_invalid',
+      pathLabel: template.outputFileName,
+    };
+  }
+  const outputDirectory = resolve(template.outputDirectory);
+  const outputPath = resolve(outputDirectory, template.outputFileName);
+  if (dirname(outputPath) !== outputDirectory) {
+    return {
+      ok: false,
+      loopId,
+      error: 'output_file_escapes_directory',
+      pathLabel: outputPath,
+    };
+  }
+  return { ok: true, outputDirectory, outputPath };
+}
+
+function looksBinary(buffer: Buffer): boolean {
+  return buffer.includes(0);
+}
+
+function readCreateUserLoopTemplateInput(input: unknown): CreateUserLoopTemplateInput {
+  if (!isRecord(input)) {
+    throw new Error('user loop template input must be an object');
+  }
+  if (input.kind !== 'markdown_file') {
+    throw new Error('user loop template kind must be markdown_file');
+  }
+  const result: CreateUserLoopTemplateInput = {
+    loopId: readLoopId(input.loopId),
+    title: readNonEmptyString(input.title, 'title'),
+    description: typeof input.description === 'string' ? input.description : undefined,
+    kind: 'markdown_file',
+    prompt: readNonEmptyString(input.prompt, 'prompt'),
+    outputDirectory: readNonEmptyString(input.outputDirectory, 'outputDirectory'),
+    outputFileName: readNonEmptyString(input.outputFileName, 'outputFileName'),
+    now: Date.now(),
+  };
+  if (Object.prototype.hasOwnProperty.call(input, 'scheduleEnabled')) {
+    result.scheduleEnabled = input.scheduleEnabled === true;
+  }
+  if (isRecord(input.scheduleTrigger)) {
+    result.scheduleTrigger = input.scheduleTrigger;
+  }
+  if (Object.prototype.hasOwnProperty.call(input, 'autoRunApproved')) {
+    result.autoRunApproved = input.autoRunApproved === true;
+  }
+  return result;
+}
+
+function readNonEmptyString(input: unknown, fieldName: string): string {
+  if (typeof input !== 'string' || input.trim().length === 0) {
+    throw new Error(`${fieldName} must be a non-empty string`);
+  }
+  return input;
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+  return typeof input === 'object' && input !== null && !Array.isArray(input);
 }
 
 async function expandSelectedMaterialPaths(paths: string[]): Promise<string[]> {

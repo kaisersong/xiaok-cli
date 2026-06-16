@@ -200,6 +200,7 @@ export interface TaskCreateInput {
         role?: MaterialRole;
     }>;
     permissionMode?: TaskPermissionMode;
+    watchdogMs?: number;
     context?: TaskCreateContext;
 }
 export interface TaskSnapshot {
@@ -231,7 +232,7 @@ export interface TaskRuntimeHost {
         taskId: string;
         answer: UserAnswer;
     }): Promise<void>;
-    cancelTask(taskId: string): Promise<void>;
+    cancelTask(taskId: string, reason?: string): Promise<void>;
     getActiveTasks(): Promise<ActiveTaskRef[]>;
     /** @deprecated Use getActiveTasks() */
     getActiveTask(): Promise<ActiveTaskRef | null>;

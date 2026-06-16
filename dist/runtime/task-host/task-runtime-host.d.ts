@@ -14,6 +14,7 @@ export interface TaskRunnerInput {
     materials: MaterialRecord[];
     understanding: TaskUnderstanding;
     signal: AbortSignal;
+    deadlineMs?: number;
     history: HistoryMessage[];
     permissionMode?: 'plan' | 'auto' | 'default';
     emitRuntimeEvent(event: RuntimeEvent): void;
@@ -55,6 +56,7 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private readonly taskHistories;
     private readonly activeExecutions;
     private readonly executionPromises;
+    private readonly taskWatchdogs;
     private taskOrdinal;
     private sessionOrdinal;
     private readonly permissionModes;
@@ -70,7 +72,7 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         taskId: string;
         answer: UserAnswer;
     }): Promise<void>;
-    cancelTask(taskId: string): Promise<void>;
+    cancelTask(taskId: string, reason?: string): Promise<void>;
     getActiveTasks(): Promise<{
         taskId: string;
     }[]>;

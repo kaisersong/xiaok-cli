@@ -158,6 +158,9 @@ export interface Config {
     kswarm?: {
         maxConcurrentTasks?: number;
     };
+    automations?: {
+        globalBackgroundAutoRunEnabled?: boolean;
+    };
 }
 export declare const DEFAULT_INTENT_BOUNDARY_CONFIG: IntentBoundaryConfig;
 export declare const DEFAULT_CONFIG: Config;

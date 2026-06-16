@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, X, Clock, Edit3, Trash2, Play, ChevronLeft, XCircle } from 'lucide-react';
 import { api } from '../api';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLocale } from '../contexts/LocaleContext';
 import { getDesktopApi } from '../shared/desktop';
 import {
@@ -24,10 +24,13 @@ export interface ScheduledTask {
   name: string;
   description: string;
   prompt: string;
+  executorKind?: 'agent_task' | 'loop';
+  loopId?: string;
   frequency: 'manual' | 'hourly' | 'interval' | 'daily' | 'weekdays' | 'weekly';
   status: 'active' | 'paused';
   createdAt: number;
   updatedAt: number;
+  automationStoreVersion?: number;
   threadId?: string;       // Latest thread for this task
   runtimeTaskId?: string;  // Latest runtime task snapshot for this task
   lastRunAt?: number;
@@ -44,6 +47,16 @@ export interface ScheduledTask {
 
 type ModalMode = 'create' | 'edit' | null;
 type FormFrequency = 'manual' | 'hourly' | 'daily' | 'weekdays' | 'weekly';
+type ScheduledTaskUpdateConflict = {
+  ok: false;
+  code: 'stale_automation_view';
+  recoverable: true;
+  message?: string;
+  sourceVersions?: {
+    timedActionStore?: number;
+  };
+  current?: ScheduledTask;
+};
 type ScheduledFrequencyLabels = {
   scheduledManual: string;
   scheduledHourly: string;
@@ -97,6 +110,13 @@ function readTimedActionUpdate(value: unknown): { reviewedAt?: number; updatedAt
     reviewedAt: typeof record.reviewedAt === 'number' ? record.reviewedAt : undefined,
     updatedAt: typeof record.updatedAt === 'number' ? record.updatedAt : undefined,
   };
+}
+
+function isScheduledTaskUpdateConflict(value: unknown): value is ScheduledTaskUpdateConflict {
+  return typeof value === 'object'
+    && value !== null
+    && (value as { ok?: unknown }).ok === false
+    && (value as { code?: unknown }).code === 'stale_automation_view';
 }
 
 const DAY_OPTIONS = [
@@ -220,8 +240,13 @@ async function ensureThreadForRuntimeTask(task: ScheduledTask): Promise<Schedule
   return ensureAggregatedScheduledThread(normalized, runtimeTaskIds);
 }
 
-export function ScheduledPage() {
+interface ScheduledPageProps {
+  embedded?: boolean;
+}
+
+export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { t } = useLocale();
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -241,6 +266,10 @@ export function ScheduledPage() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [toastKind, setToastKind] = useState<'success' | 'info'>('info');
   const [confirmHighFreq, setConfirmHighFreq] = useState(false);
+  const loopIdFilter = searchParams.get('loopId')?.trim() ?? '';
+  const visibleTasks = loopIdFilter
+    ? tasks.filter(task => task.executorKind === 'loop' && task.loopId === loopIdFilter)
+    : tasks;
 
   const intervalLabels: Record<number, string> = {
     30: t.scheduledEvery30Min,
@@ -347,6 +376,9 @@ export function ScheduledPage() {
     setTimeout(() => setToastMsg(null), ttlMs);
   };
 
+  const editingLoopSchedule = modalMode === 'edit' && editingTask?.executorKind === 'loop';
+  const canSaveScheduledTask = !!formName.trim() && (editingLoopSchedule || !!formPrompt.trim());
+
   const openCreate = () => {
     setFormName('');
     setFormDesc('');
@@ -360,7 +392,7 @@ export function ScheduledPage() {
   const openEdit = (task: ScheduledTask) => {
     setFormName(task.name);
     setFormDesc(task.description ?? '');
-    setFormPrompt(task.prompt);
+    setFormPrompt(task.executorKind === 'loop' ? '' : task.prompt);
     setFormFrequency(task.frequency === 'interval' ? 'hourly' : task.frequency);
     setFormScheduleConfig(task.scheduleConfig || {});
     setEditingTask(task);
@@ -373,7 +405,8 @@ export function ScheduledPage() {
   };
 
   const handleSave = async () => {
-    if (!formName.trim() || !formPrompt.trim()) return;
+    const isLoopScheduleEdit = modalMode === 'edit' && editingTask?.executorKind === 'loop';
+    if (!formName.trim() || (!isLoopScheduleEdit && !formPrompt.trim())) return;
 
     if (modalMode === 'create') {
       const intervalMinutes = formScheduleConfig?.intervalMinutes ?? 60;
@@ -427,14 +460,27 @@ export function ScheduledPage() {
       const desktop = getDesktopApi();
       if (desktop?.updateScheduledTask && formFrequency !== 'manual') {
         try {
-          const saved = await desktop.updateScheduledTask({
+          const updateInput: Record<string, unknown> = {
             id: editingTask.id,
             name: formName.trim(),
             description: formDesc.trim(),
-            prompt: formPrompt.trim(),
             trigger: toTimedActionTrigger(formFrequency, formScheduleConfig, nextRunAt),
             nextDueAt: nextRunAt,
-          });
+            expectedUpdatedAt: editingTask.updatedAt,
+            expectedAutomationStoreVersion: editingTask.automationStoreVersion,
+          };
+          if (!isLoopScheduleEdit) {
+            updateInput.prompt = formPrompt.trim();
+          }
+          const saved = await desktop.updateScheduledTask(updateInput);
+          if (isScheduledTaskUpdateConflict(saved)) {
+            await loadTasks();
+            setSaving(false);
+            setConfirmHighFreq(false);
+            closeModal();
+            showToast(t.scheduledStaleConflict, 'info', 10_000);
+            return;
+          }
           if (saved) {
             await loadTasks();
             setSaving(false);
@@ -447,7 +493,7 @@ export function ScheduledPage() {
       }
       const updated = tasks.map(t =>
         t.id === editingTask.id
-          ? { ...t, name: formName.trim(), description: formDesc.trim(), prompt: formPrompt.trim(), frequency: formFrequency, scheduleConfig: formFrequency !== 'manual' ? formScheduleConfig : undefined, nextRunAt, updatedAt: now }
+          ? { ...t, name: formName.trim(), description: formDesc.trim(), prompt: t.executorKind === 'loop' ? t.prompt : formPrompt.trim(), frequency: formFrequency, scheduleConfig: formFrequency !== 'manual' ? formScheduleConfig : undefined, nextRunAt, updatedAt: now }
           : t
       );
       saveTasks(updated);
@@ -492,9 +538,22 @@ export function ScheduledPage() {
     setConfirmDeleteInstanceId(null);
   };
 
-  const handleToggle = (task: ScheduledTask) => {
+  const handleToggle = async (task: ScheduledTask) => {
+    const nextStatus = task.status === 'active' ? 'paused' : 'active';
+    const desktop = getDesktopApi();
+    if (desktop?.setScheduledTaskStatus) {
+      try {
+        const updated = await desktop.setScheduledTaskStatus(task.id, nextStatus);
+        if (updated) {
+          await loadTasks();
+          return;
+        }
+      } catch (e) {
+        console.warn('[Scheduled] setScheduledTaskStatus failed, falling back to local cache:', e);
+      }
+    }
     saveTasks(tasks.map(t =>
-      t.id === task.id ? { ...t, status: t.status === 'active' ? 'paused' : 'active' } : t
+      t.id === task.id ? { ...t, status: nextStatus } : t
     ));
   };
 
@@ -533,6 +592,19 @@ export function ScheduledPage() {
     setRunningId(task.id);
 
     try {
+      if (task.executorKind === 'loop') {
+        if (!task.loopId) return;
+        await api.runLoopNow(task.loopId);
+        const now = Date.now();
+        saveTasks(tasks.map(t =>
+          t.id === task.id
+            ? { ...t, lastRunAt: now, updatedAt: now, nextRunAt: computeNextRunAt(t.frequency, t.scheduleConfig, now) }
+            : t
+        ));
+        await loadTasks();
+        return;
+      }
+
       const normalizedTask = normalizeScheduledTaskRuntimeLink(task);
       let threadId = normalizedTask.threadId;
       let runtimeTaskId = normalizedTask.runtimeTaskId;
@@ -603,14 +675,18 @@ export function ScheduledPage() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[var(--c-bg-page)]">
+      <div className={`flex flex-1 items-center justify-center ${embedded ? '' : 'bg-[var(--c-bg-page)]'}`}>
         <div className="text-sm text-[var(--c-text-secondary)]">{t.commonLoading}</div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-1 flex-col bg-[var(--c-bg-page)]" data-testid="scheduled-page">
+    <div
+      className={`flex flex-1 flex-col ${embedded ? 'min-h-0' : 'bg-[var(--c-bg-page)]'}`}
+      data-testid="scheduled-page"
+      data-embedded={embedded ? 'true' : 'false'}
+    >
       {/* Toast */}
       {toastMsg && (
         <div className={`mx-auto mt-3 max-w-[600px] rounded-lg border px-4 py-2 text-center text-sm ${
@@ -642,12 +718,14 @@ export function ScheduledPage() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--c-border)] px-8 py-4">
         <div className="flex items-center gap-4">
-          <button type="button"
-            onClick={() => navigate('/')}
-            className="rounded-lg p-1 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
-          >
-            <ChevronLeft size={20} />
-          </button>
+          {!embedded && (
+            <button type="button"
+              onClick={() => navigate('/')}
+              className="rounded-lg p-1 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
+            >
+              <ChevronLeft size={20} />
+            </button>
+          )}
           <div>
             <h2 className="text-lg font-medium text-[var(--c-text-primary)]">{t.scheduledTitle}</h2>
             <p className="text-xs text-[var(--c-text-secondary)] mt-0.5">
@@ -666,7 +744,7 @@ export function ScheduledPage() {
 
       {/* Task list */}
       <div className="flex-1 overflow-y-auto px-8 py-4">
-        {tasks.length === 0 ? (
+        {visibleTasks.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <Clock size={48} className="mb-4 text-[var(--c-text-tertiary)] opacity-50" />
             <p className="text-sm text-[var(--c-text-secondary)]">{t.scheduledEmpty}</p>
@@ -683,7 +761,7 @@ export function ScheduledPage() {
           </div>
         ) : (
           <div className="mx-auto max-w-[700px] flex flex-col gap-3">
-            {tasks.map(task => (
+            {visibleTasks.map(task => (
               <div
                 key={task.id}
                 className="rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] p-5"
@@ -857,19 +935,24 @@ export function ScheduledPage() {
                 </div>
               </div>
 
-              {/* Prompt textarea */}
-              <div>
-                <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">
-                  {t.scheduledInstructions} <span className="text-red-500">*</span>
-                </label>
-                <textarea aria-label="查看今天的日历会议并汇总未读邮件，标记紧急事项。"
-                  value={formPrompt}
-                  onChange={e => setFormPrompt(e.target.value)}
-                  placeholder="查看今天的日历会议并汇总未读邮件，标记紧急事项。"
-                  rows={4}
-                  className="w-full resize-none rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
-                />
-              </div>
+              {editingLoopSchedule ? (
+                <div className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-deep)] px-3 py-2 text-xs text-[var(--c-text-secondary)]">
+                  {t.scheduledLinkedLoop}: <span className="font-mono text-[var(--c-text-primary)]">{editingTask?.loopId ?? editingTask?.id}</span>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">
+                    {t.scheduledInstructions} <span className="text-red-500">*</span>
+                  </label>
+                  <textarea aria-label="查看今天的日历会议并汇总未读邮件，标记紧急事项。"
+                    value={formPrompt}
+                    onChange={e => setFormPrompt(e.target.value)}
+                    placeholder="查看今天的日历会议并汇总未读邮件，标记紧急事项。"
+                    rows={4}
+                    className="w-full resize-none rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
+                  />
+                </div>
+              )}
 
               {/* Frequency */}
               <div>
@@ -982,7 +1065,7 @@ export function ScheduledPage() {
               </button>
               <button type="button"
                 onClick={handleSave}
-                disabled={saving || !formName.trim() || !formPrompt.trim()}
+                disabled={saving || !canSaveScheduledTask}
                 className="rounded-lg bg-[var(--c-accent)] px-5 py-2 text-sm text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
               >
                 {saving ? t.scheduledSaving : t.scheduledSave}

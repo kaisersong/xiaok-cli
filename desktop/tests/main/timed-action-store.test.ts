@@ -22,6 +22,28 @@ describe('TimedActionStore', () => {
     rmSync(rootDir, { recursive: true, force: true });
   });
 
+  it('keeps a monotonic automation store version for timed action facts', () => {
+    expect(store.getAutomationStoreVersion()).toBe(0);
+
+    store.createAction({
+      id: 'action_due',
+      title: '检查项目',
+      trigger: { kind: 'once', at: 1_000 },
+      executor: { kind: 'agent_task', prompt: '检查项目' },
+      source: 'agent',
+      now: 500,
+    });
+    const afterCreate = store.getAutomationStoreVersion();
+    expect(afterCreate).toBeGreaterThan(0);
+
+    const [claimed] = store.claimDueActions(2_500, 1);
+    const afterClaim = store.getAutomationStoreVersion();
+    expect(afterClaim).toBeGreaterThan(afterCreate);
+
+    store.finishRunFailure('action_due', claimed.runId, 2_700, 'agent crashed');
+    expect(store.getAutomationStoreVersion()).toBeGreaterThan(afterClaim);
+  });
+
   it('claims each due action once with a lock and recovery context', () => {
     const action = store.createAction({
       id: 'action_due',
@@ -113,6 +135,60 @@ describe('TimedActionStore', () => {
     expect(store.listRuns('action_skip')[0]).toMatchObject({
       status: 'complete',
       error: 'too old',
+    });
+  });
+
+  it('relinks stale loop action locks from terminal LoopRun decisions without counting success as a failure', () => {
+    store.createAction({
+      id: 'loop_relink',
+      title: '循环恢复',
+      trigger: { kind: 'interval', intervalMinutes: 5 },
+      executor: { kind: 'loop', loopId: 'user-loop-1' },
+      source: 'user',
+      consecutiveFailures: 2,
+      now: 0,
+    });
+    const [claimed] = store.claimDueActions(5 * 60_000, 1, { recoveryReason: 'normal_tick' });
+    store.markRunRunning('loop_relink', claimed.runId, 5 * 60_000);
+
+    const releaseStaleLocks = store.releaseStaleLocks as unknown as (
+      now: number,
+      staleAfterMs: number,
+      options: {
+        resolveLinkedLoopRun: (input: { actionId: string; timedActionRunId: string }) => {
+          loopRunId: string;
+          loopStatus: 'success' | 'failed' | 'blocked';
+        } | undefined;
+      }
+    ) => number;
+    const recovered = releaseStaleLocks.call(store, 65 * 60_000, 60_000, {
+      resolveLinkedLoopRun: ({ actionId, timedActionRunId }) => {
+        expect(actionId).toBe('loop_relink');
+        expect(timedActionRunId).toBe(claimed.runId);
+        return {
+          loopRunId: 'loop-run-success',
+          loopStatus: 'success',
+        };
+      },
+    });
+
+    expect(recovered).toBe(1);
+    expect(store.getAction('loop_relink')).toMatchObject({
+      status: 'active',
+      runCount: 1,
+      consecutiveFailures: 0,
+      lockedRunId: undefined,
+      lastError: undefined,
+    });
+    expect(store.getAction('loop_relink')?.nextDueAt).toBeGreaterThan(65 * 60_000);
+    expect(store.listRuns('loop_relink')[0]).toMatchObject({
+      status: 'success',
+      error: undefined,
+      decision: expect.objectContaining({
+        recoveryReason: 'stale_lock',
+        loopRunId: 'loop-run-success',
+        loopStatus: 'success',
+      }),
     });
   });
 

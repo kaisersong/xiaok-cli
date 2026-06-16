@@ -377,20 +377,20 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
 
       const nodes = completedRun.workflowRun.nodes ?? [];
       expect(nodes.find(node => node.id === 'script-runtime')?.status).toBe('completed');
-      expect(nodes.find(node => node.id === 'node-report_final_review-1')?.status).toBe('completed');
-      expect(nodes.find(node => node.id === 'node-report_final_review-2')?.status).toBe('completed');
-      expect(nodes.find(node => node.id === 'node-report_final_review-3')?.status).toBe('completed');
-      expect(nodes.find(node => node.id === 'node-report_final_review-4')?.status).toBe('completed');
-      expect(nodes.find(node => node.id === 'node-report_final_review-5')?.status).toBe('completed');
+      expect(nodes.find(node => node.id === 'script-agent-1')?.status).toBe('completed');
+      expect(nodes.find(node => node.id === 'script-agent-2')?.status).toBe('completed');
+      expect(nodes.find(node => node.id === 'script-agent-3')?.status).toBe('completed');
+      expect(nodes.find(node => node.id === 'script-agent-4')?.status).toBe('completed');
+      expect(nodes.find(node => node.id === 'script-agent-5')?.status).toBe('completed');
       expect(completedRun.workflowRun.parallelGroups?.[0]).toMatchObject({
         id: 'script-parallel-1',
         status: 'completed',
         completedCount: 3,
       });
       expect(nodes.filter(node => node.parallelGroupId === 'script-parallel-1').map(node => node.id)).toEqual(expect.arrayContaining([
-        'node-report_final_review-2',
-        'node-report_final_review-3',
-        'node-report_final_review-4',
+        'script-agent-2',
+        'script-agent-3',
+        'script-agent-4',
       ]));
 
       // Part A: the real KSwarm run must persist the script source so the

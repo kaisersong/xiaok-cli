@@ -16,13 +16,24 @@ import type {
   ConnectorTestResult,
 } from '../../../electron/preload-api';
 import type {
+  AutomationOverviewSnapshotView,
+  AutomationRunHistoryItemView,
+  AutomationsConfigView,
   EvidenceAnomalyView,
+  CreateLoopScheduleInputView,
+  CreateUserLoopTemplateInputView,
+  CreateUserLoopTemplateResultView,
   LoopDefinitionView,
+  LoopOutputActionResultView,
+  LoopOutputPreviewView,
   LoopRunView,
+  LoopScheduleBindingView,
   RunLoopNowResultView,
+  TimedActionView,
   ThreadMode,
   ThreadRecord,
   UpdateThreadSidebarRequest,
+  UserLoopTemplateView,
 } from './types';
 import type { ChannelBindingResponse, ChannelIdentityResponse, Persona } from './types';
 import { getDesktopApi } from '../shared/desktop';
@@ -362,6 +373,46 @@ export const api = {
 
   async runLoopNow(loopId: string): Promise<RunLoopNowResultView> {
     return await window.xiaokDesktop.runLoopNow(loopId) as RunLoopNowResultView;
+  },
+
+  async listUserLoopTemplates(): Promise<UserLoopTemplateView[]> {
+    return await window.xiaokDesktop.listUserLoopTemplates() as UserLoopTemplateView[];
+  },
+
+  async createUserLoopTemplate(input: CreateUserLoopTemplateInputView): Promise<CreateUserLoopTemplateResultView> {
+    return await window.xiaokDesktop.createUserLoopTemplate(input) as CreateUserLoopTemplateResultView;
+  },
+
+  async createLoopSchedule(input: CreateLoopScheduleInputView): Promise<TimedActionView> {
+    return await window.xiaokDesktop.createLoopSchedule(input) as TimedActionView;
+  },
+
+  async getLoopScheduleBindings(): Promise<LoopScheduleBindingView[]> {
+    return await window.xiaokDesktop.getLoopScheduleBindings() as LoopScheduleBindingView[];
+  },
+
+  async getAutomationOverviewSnapshot(): Promise<AutomationOverviewSnapshotView> {
+    return await window.xiaokDesktop.getAutomationOverviewSnapshot() as AutomationOverviewSnapshotView;
+  },
+
+  async getAutomationRunHistory(): Promise<AutomationRunHistoryItemView[]> {
+    return await window.xiaokDesktop.getAutomationRunHistory() as AutomationRunHistoryItemView[];
+  },
+
+  async getAutomationsConfig(): Promise<AutomationsConfigView> {
+    return await window.xiaokDesktop.getAutomationsConfig() as AutomationsConfigView;
+  },
+
+  async setGlobalBackgroundAutoRun(input: { enabled: boolean }): Promise<AutomationsConfigView> {
+    return await window.xiaokDesktop.setGlobalBackgroundAutoRun(input) as AutomationsConfigView;
+  },
+
+  async openLoopOutputDirectory(loopId: string): Promise<LoopOutputActionResultView> {
+    return await window.xiaokDesktop.openLoopOutputDirectory(loopId) as LoopOutputActionResultView;
+  },
+
+  async readLoopOutputPreview(loopId: string): Promise<LoopOutputPreviewView> {
+    return await window.xiaokDesktop.readLoopOutputPreview(loopId) as LoopOutputPreviewView;
   },
 
   // ---------------------

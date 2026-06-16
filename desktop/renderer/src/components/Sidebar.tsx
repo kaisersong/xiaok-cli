@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Search, X, Bolt, Pencil, RefreshCw, Clock, FolderKanban, ExternalLink } from 'lucide-react';
+import { Plus, Search, X, Bolt, Pencil, RefreshCw, FolderKanban, ExternalLink } from 'lucide-react';
 import { api, type ThreadResponse } from '../api';
 import { useThreadList } from '../contexts/thread-list';
 import { useKSwarm } from '../contexts/KSwarmContext';
@@ -45,7 +45,7 @@ interface SidebarScheduledTask {
   runtimeTaskId?: string;
 }
 
-type NavSection = 'new' | 'scheduled' | 'projects';
+type NavSection = 'new' | 'automations' | 'projects';
 
 interface SidebarProps {
   onOpenSettings?: () => void;
@@ -164,8 +164,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
 
   // Sync activeNav with route
   useEffect(() => {
-    if (routerLocation.pathname === '/scheduled') {
-      setActiveNav('scheduled');
+    if (routerLocation.pathname === '/scheduled' || routerLocation.pathname.startsWith('/automations')) {
+      setActiveNav('automations');
     } else if (routerLocation.pathname.startsWith('/projects')) {
       setActiveNav('projects');
     } else {
@@ -210,12 +210,12 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     if (task.threadId) {
       navigate(`/t/${task.threadId}`);
     } else {
-      navigate('/scheduled');
+      navigate('/automations/schedules');
     }
   };
 
-  const isOnScheduled = activeNav === 'scheduled';
-  const hideThreadList = activeNav === 'scheduled' || activeNav === 'projects';
+  const isOnScheduled = activeNav === 'automations';
+  const hideThreadList = activeNav === 'automations' || activeNav === 'projects';
   const updateVersion = updateStatus?.version || '新版本';
   const currentVersion = updateStatus?.currentVersion;
   const updateError = updateStatus?.error;
@@ -287,16 +287,16 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
           </button>
           <button
             type="button"
-            onClick={() => navigate('/scheduled')}
+            onClick={() => navigate('/automations')}
             className={`flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-colors ${
               isOnScheduled
                 ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]'
                 : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]'
             }`}
-            title={t.sidebarScheduled}
+            title={t.sidebarAutomations}
           >
-            <Clock size={16} className="shrink-0" />
-            <span>{t.sidebarScheduled}</span>
+            <Bolt size={16} className="shrink-0" />
+            <span>{t.sidebarAutomations}</span>
           </button>
           <button
             type="button"
@@ -320,7 +320,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       </div>
 
       {/* Scheduled tasks list (Claude-style) */}
-      {sidebarTasks.length > 0 && (activeNav === 'new' || activeNav === 'scheduled') && (
+      {sidebarTasks.length > 0 && (activeNav === 'new' || activeNav === 'automations') && (
         <div className="px-3 py-2">
           <div className="p-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
             {t.sidebarScheduled}

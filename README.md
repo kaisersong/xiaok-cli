@@ -46,6 +46,18 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+Xiaok Desktop v1.4.8 makes this model visible in the product. Loops are no longer buried in general settings: user loops, schedules, run history, diagnostics, and output previews are grouped under the Automations surface. A schedule can trigger a loop, a loop run can point back to the schedule run that claimed it, and the UI keeps scheduler status separate from task-content status.
+
+**What's New in v1.4.8:**
+
+- **Automations Surface for Loops and Schedules**: Desktop now groups user loops, scheduled runs, loop diagnostics, and recent failures under Automations. Loop diagnostics moved out of general settings, and schedule bindings show which timed action owns a loop trigger.
+- **User Loop Templates**: Users can define repeatable markdown-file loops with a prompt, output directory, output filename, manual run, and schedule linkage. Output directories are created automatically when needed, with cross-platform filename guards for Windows and macOS.
+- **Clickable Loop Outputs**: User loop cards can open the output directory and preview the latest output file through the existing artifact preview path, so the result is reachable from the loop screen instead of only from the filesystem.
+- **Scheduled Task Transcript Clarity**: Scheduled task system metadata stays hidden from the visible user prompt. The conversation now shows a light execution notice with task title, scheduled time, claimed time, and delay, separating scheduler timing from the task's own content result.
+- **Timeout and KSwarm Startup Reliability**: Desktop hardens task timeout classification, request-triggered service startup, and stale KSwarm service replacement when the process on port 4400 does not match the packaged service version.
+- **Skill Resource Fetching**: The CLI skill tool now returns lightweight manifest counts and exposes `skillFetchAssets` for on-demand reference/script/asset reads, reducing prompt bloat while keeping skill resources accessible.
+- **Release Validation**: v1.4.8 is prepared with 123 focused desktop main/renderer tests for Automations, loops, schedules, output previews, IPC, and scheduled prompt display; 40 desktop packaging contract tests for KSwarm and bundled plugins; 16 focused CLI skill/provider tests; desktop typecheck; CLI release build; desktop build; and the GitHub desktop release workflow triggered by the `desktop-v1.4.8` tag.
+
 **What's New in v1.4.6:**
 
 - **KSwarm Startup Reliability Follow-up**: Desktop now shares one guarded startup promise between explicit service start and request-triggered auto-start, preventing duplicate Intent Broker/KSwarm spawns during cold launch.
@@ -439,9 +451,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-1.4.6-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.4.6-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-setup-1.4.6.exe** — Windows installer (x64)
+- **xiaok-1.4.8-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.4.8-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-setup-1.4.8.exe** — Windows installer (x64)
 
 ### Features
 
@@ -450,7 +462,8 @@ Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases
 - **Project Management**: Kanban board with drag-and-drop, agent assignment, activity timeline
 - **KSwarm Multi-Agent**: Create, approve, recover, review, and deliver multi-agent projects from the UI
 - **Basic Dynamic Workflow**: Run project quick diagnosis, agent-backed review diagnosis, project-scoped High Quality workflows, and task-scoped manual workflow proposals as durable workflow runs with budget, cache, recovery, progress, Reviewer, artifact, and gate metadata
-- **Scheduled Tasks**: Create recurring tasks (hourly, daily, weekly, cron)
+- **Automations**: Create scheduled tasks, bind schedules to user loops, inspect run history, and open loop output files from the same surface
+- **Scheduled Tasks**: Create recurring tasks (hourly, daily, weekly, cron) with visible planned/actual execution timing in task transcripts
 - **Plugin System**: Install and manage MCP server plugins with enable/disable controls
 - **i18n**: Full Chinese/English support with runtime locale switching
 - **Settings UI**: Configure model providers, skills, channels, MCP servers
@@ -703,6 +716,8 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.4.8** — Automations and Loop Engineering release: moves user loops, schedules, diagnostics, run history, and output preview into one Desktop Automations surface; adds repeatable user loop templates with schedule bindings, automatic output directory creation, cross-platform output filename guards, clickable output directories, and artifact-backed output previews. Scheduled task transcripts now hide injected system metadata from the visible prompt and show a light planned/actual execution notice, so users can distinguish scheduler timing from task content quality. Desktop also hardens timeout classification, stale KSwarm service replacement, and skill resource loading through lightweight manifests plus on-demand `skillFetchAssets`.
 
 **v1.4.6** — Loop reliability follow-up: hardens the real desktop launch path around KSwarm/Intent Broker startup by sharing the KSwarm service start promise, preventing recursive stream-bridge close handling, packaging the compiled completion-evidence runtime guard, and pairing the desktop release with an Intent Broker replay fix for task-id-less approval/lifecycle events. The release gate covers focused KSwarm desktop tests, focused CLI completion-evidence/task-host tests, Intent Broker full tests, desktop build, live KSwarm/broker health checks, Computer Use live smoke, and the desktop `desktop-v1.4.6` release workflow.
 

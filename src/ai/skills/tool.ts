@@ -1,31 +1,64 @@
+import { readFileSync, realpathSync, statSync } from 'fs';
+import { resolve as resolvePath, sep as pathSep } from 'path';
 import type { Tool } from '../../types.js';
 import type { CapabilityRegistry } from '../../platform/runtime/capability-registry.js';
-import type { SkillCatalog, SkillMeta } from './loader.js';
+import type { SkillCatalog, SkillMeta, SkillResourceEntry, SkillResourceKind } from './loader.js';
 import { buildSkillExecutionPlan } from './planner.js';
 import type { SkillExecutionPlan, SkillPlanStep } from './planner.js';
 
-type SkillPlanStepWithTaskHints = SkillPlanStep & {
+interface ManifestSummary {
+  references: number;
+  scripts: number;
+  assets: number;
+}
+
+type SkillPlanStepLite = Omit<
+  SkillPlanStep,
+  'referencesManifest' | 'scriptsManifest' | 'assetsManifest'
+> & {
   taskHints: SkillMeta['taskHints'];
+  contentBytes: number;
+  manifestsAvailable: ManifestSummary;
 };
 
-type SkillExecutionPlanWithTaskHints = Omit<SkillExecutionPlan, 'resolved'> & {
-  resolved: SkillPlanStepWithTaskHints[];
+type SkillExecutionPlanLite = Omit<SkillExecutionPlan, 'resolved'> & {
+  resolved: SkillPlanStepLite[];
 };
 
-function enrichSkillPlan(plan: SkillExecutionPlan, skills: SkillMeta[]): SkillExecutionPlanWithTaskHints {
+function summarizeManifests(skill: SkillMeta | undefined): ManifestSummary {
+  if (!skill) return { references: 0, scripts: 0, assets: 0 };
+  return {
+    references: skill.referencesManifest.length,
+    scripts: skill.scriptsManifest.length,
+    assets: skill.assetsManifest.length,
+  };
+}
+
+function buildLitePlan(plan: SkillExecutionPlan, skills: SkillMeta[]): SkillExecutionPlanLite {
   const byName = new Map(skills.map((skill) => [skill.name, skill]));
 
   return {
     ...plan,
-    resolved: plan.resolved.map((step) => ({
-      ...step,
-      taskHints: byName.get(step.name)?.taskHints ?? {
-        taskGoals: [],
-        inputKinds: [],
-        outputKinds: [],
-        examples: [],
-      },
-    })),
+    resolved: plan.resolved.map((step) => {
+      const skill = byName.get(step.name);
+      const {
+        referencesManifest: _references,
+        scriptsManifest: _scripts,
+        assetsManifest: _assets,
+        ...rest
+      } = step;
+      return {
+        ...rest,
+        taskHints: skill?.taskHints ?? {
+          taskGoals: [],
+          inputKinds: [],
+          outputKinds: [],
+          examples: [],
+        },
+        contentBytes: Buffer.byteLength(step.content, 'utf8'),
+        manifestsAvailable: summarizeManifests(skill),
+      };
+    }),
   };
 }
 
@@ -111,7 +144,11 @@ Important:
 - When a skill matches the user's request, this is a BLOCKING REQUIREMENT: invoke the relevant Skill tool BEFORE generating any other response about the task
 - NEVER mention a skill without actually calling this tool
 - Do not invoke a skill that is already running
-- If you see skill content already loaded in the current conversation turn, follow the instructions directly instead of calling this tool again`,
+- If you see skill content already loaded in the current conversation turn, follow the instructions directly instead of calling this tool again
+
+Resource manifests:
+- The plan returned here lists \`manifestsAvailable\` counts (references / scripts / assets) and \`contentBytes\` for each step.
+- The actual contents of those manifests are NOT inlined. Use the \`skillFetchAssets\` tool to retrieve specific files when needed (skillName + kind + paths[]).`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -141,11 +178,212 @@ Important:
 
       try {
         const plan = buildSkillExecutionPlan(requested, skills);
-        return JSON.stringify(enrichSkillPlan(plan, listSkillRecords()), null, 2);
+        return JSON.stringify(buildLitePlan(plan, listSkillRecords()), null, 2);
       } catch {
         const available = listSkillNames().join(', ') || '（无）';
         return `Error: 找不到 skill "${requested.join(', ')}"。可用 skills：${available}`;
       }
+    },
+  };
+}
+
+const MANIFEST_KIND_BY_REQUEST: Record<'references' | 'scripts' | 'assets', SkillResourceKind> = {
+  references: 'reference',
+  scripts: 'script',
+  assets: 'asset',
+};
+
+const MAX_SKILL_FETCH_RESULT_BYTES = 64 * 1024;
+
+interface FetchedFile {
+  relativePath: string;
+  size: number;
+  truncated?: true;
+  error?: string;
+  content?: string;
+}
+
+function getManifestForKind(skill: SkillMeta, kind: 'references' | 'scripts' | 'assets'): SkillResourceEntry[] {
+  switch (kind) {
+    case 'references': return skill.referencesManifest;
+    case 'scripts': return skill.scriptsManifest;
+    case 'assets': return skill.assetsManifest;
+  }
+}
+
+function isPathContained(rootCanonical: string, candidateCanonical: string): boolean {
+  if (candidateCanonical === rootCanonical) return true;
+  const rootWithSep = rootCanonical.endsWith(pathSep) ? rootCanonical : rootCanonical + pathSep;
+  return candidateCanonical.startsWith(rootWithSep);
+}
+
+export function createSkillFetchAssetsTool(skills: SkillMeta[] | SkillCatalog): Tool {
+  const listSkills = (): SkillMeta[] => (Array.isArray(skills) ? skills : skills.list());
+  const findSkill = (name: string): SkillMeta | undefined =>
+    listSkills().find((skill) => skill.name === name || (skill.aliases ?? []).includes(name));
+
+  return {
+    permission: 'safe',
+    definition: {
+      name: 'skillFetchAssets',
+      description: `Fetch on-demand contents of files listed in a skill's references / scripts / assets manifest.
+
+Use this when the skill plan returned by the \`skill\` tool indicates manifestsAvailable counts > 0 and the agent needs the actual file contents to proceed.
+
+Inputs:
+- skillName: the skill name (no slash prefix).
+- kind: "references" | "scripts" | "assets".
+- paths: optional list of relative paths (as listed in the manifest). When omitted, the tool returns the manifest summary (relativePath + size) only, not file bodies.
+
+Behavior:
+- Files are read from disk on the fly with realpath containment check; paths outside the skill root are rejected.
+- Total returned bytes are capped at 64KB. If the cap is hit, remaining files are returned with size only and truncated=true.
+- Only paths present in the manifest are honored. Arbitrary paths are rejected.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          skillName: { type: 'string', description: 'Skill 名称（不含 / 前缀）' },
+          kind: {
+            type: 'string',
+            enum: ['references', 'scripts', 'assets'],
+            description: '资源类别',
+          },
+          paths: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '相对路径数组（manifest 中列出的）；省略则只返回清单摘要',
+          },
+        },
+        required: ['skillName', 'kind'],
+      },
+    },
+    async execute(input) {
+      const { skillName, kind, paths } = input as {
+        skillName?: string;
+        kind?: 'references' | 'scripts' | 'assets';
+        paths?: string[];
+      };
+      if (!skillName || !kind) {
+        return 'Error: skillFetchAssets 需要 skillName 和 kind';
+      }
+      if (!(kind in MANIFEST_KIND_BY_REQUEST)) {
+        return `Error: kind 只支持 references / scripts / assets，收到 "${kind}"`;
+      }
+
+      const skill = findSkill(skillName);
+      if (!skill) {
+        return `Error: 找不到 skill "${skillName}"`;
+      }
+
+      const manifest = getManifestForKind(skill, kind);
+      const summary = manifest.map((entry) => ({
+        relativePath: entry.relativePath,
+        size: entry.size,
+      }));
+
+      if (!paths || paths.length === 0) {
+        return JSON.stringify({
+          type: 'skill_assets_summary',
+          skillName: skill.name,
+          kind,
+          totalCount: manifest.length,
+          entries: summary,
+        }, null, 2);
+      }
+
+      let rootCanonical: string;
+      try {
+        rootCanonical = realpathSync(skill.rootDir);
+      } catch (error) {
+        return `Error: 无法解析 skill 根目录：${error instanceof Error ? error.message : String(error)}`;
+      }
+
+      const files: FetchedFile[] = [];
+      let cumulativeBytes = 0;
+      let truncatedReached = false;
+
+      for (const requestedPath of paths) {
+        const entry = manifest.find((item) => item.relativePath === requestedPath);
+        if (!entry) {
+          files.push({
+            relativePath: requestedPath,
+            size: 0,
+            error: 'not_in_manifest',
+          });
+          continue;
+        }
+
+        const targetAbs = resolvePath(skill.rootDir, requestedPath);
+        let targetCanonical: string;
+        try {
+          targetCanonical = realpathSync(targetAbs);
+        } catch (error) {
+          files.push({
+            relativePath: requestedPath,
+            size: entry.size,
+            error: `realpath_failed: ${error instanceof Error ? error.message : String(error)}`,
+          });
+          continue;
+        }
+
+        if (!isPathContained(rootCanonical, targetCanonical)) {
+          files.push({
+            relativePath: requestedPath,
+            size: entry.size,
+            error: 'path_escapes_skill_root',
+          });
+          continue;
+        }
+
+        let fileSize: number;
+        try {
+          fileSize = statSync(targetCanonical).size;
+        } catch (error) {
+          files.push({
+            relativePath: requestedPath,
+            size: entry.size,
+            error: `stat_failed: ${error instanceof Error ? error.message : String(error)}`,
+          });
+          continue;
+        }
+
+        if (truncatedReached || cumulativeBytes + fileSize > MAX_SKILL_FETCH_RESULT_BYTES) {
+          truncatedReached = true;
+          files.push({
+            relativePath: requestedPath,
+            size: fileSize,
+            truncated: true,
+          });
+          continue;
+        }
+
+        try {
+          const content = readFileSync(targetCanonical, 'utf8');
+          cumulativeBytes += Buffer.byteLength(content, 'utf8');
+          files.push({
+            relativePath: requestedPath,
+            size: fileSize,
+            content,
+          });
+        } catch (error) {
+          files.push({
+            relativePath: requestedPath,
+            size: fileSize,
+            error: `read_failed: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      }
+
+      return JSON.stringify({
+        type: 'skill_assets',
+        skillName: skill.name,
+        kind,
+        totalManifestCount: manifest.length,
+        bytesReturned: cumulativeBytes,
+        bytesCap: MAX_SKILL_FETCH_RESULT_BYTES,
+        truncated: truncatedReached,
+        files,
+      }, null, 2);
     },
   };
 }

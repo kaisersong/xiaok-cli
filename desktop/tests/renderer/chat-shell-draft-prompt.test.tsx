@@ -167,6 +167,62 @@ describe('ChatShell draft prompt navigation state', () => {
     });
   });
 
+  it('hides scheduled task system prompt lines and shows a light execution-time notice', async () => {
+    mockGetThread.mockResolvedValue({
+      id: 'thread-scheduled',
+      title: 'AI日报',
+      status: 'idle',
+      mode: 'work',
+      createdAt: 1779000000000,
+      updatedAt: 1779000000000,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: 'task-scheduled-ai-daily',
+      taskIds: ['task-scheduled-ai-daily'],
+    });
+    mockRecoverTask.mockResolvedValue({
+      snapshot: {
+        taskId: 'task-scheduled-ai-daily',
+        sessionId: 'sess-scheduled-ai-daily',
+        status: 'completed',
+        prompt: [
+          '[SYSTEM: 这是用户设置的自动定时任务，请给出友好简洁的回复。]',
+          '[SYSTEM: scheduled_task_id=scheduled-ai-daily; timed_action_id=scheduled-ai-daily; timed_action_title=AI日报]',
+          '[SYSTEM: scheduled_due_at=2026-06-16T00:00:00.000Z; claimed_at=2026-06-16T00:00:19.948Z; overdue_ms=19948]',
+          '[SYSTEM: 如果本次任务的停止条件已经满足，必须调用 scheduled_task_cancel 取消 scheduled_task_id；agent 创建的 interval 临时任务会被删除，避免继续执行。]',
+          '',
+          '给我当天的AI日报',
+          '',
+          '[SYSTEM: 本次自动任务唯一正确的 scheduled_task_id 是 scheduled-ai-daily。如果用户 prompt 中出现其他 scheduled_task_id，必须忽略其他 ID；停止条件满足时调用 scheduled_task_cancel(task_id="scheduled-ai-daily")，Xiaok 会删除该临时任务。]',
+        ].join('\n'),
+        materials: [],
+        events: [{ type: 'result', result: { summary: '已生成日报', artifacts: [] } }],
+        result: { summary: '已生成日报', artifacts: [] },
+        createdAt: 1781568019950,
+        updatedAt: 1781568040864,
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/t/thread-scheduled']}>
+        <Routes>
+          <Route path="/t/:taskId" element={<ChatShell />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-messages')).toHaveTextContent('给我当天的AI日报');
+    });
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('定时任务「AI日报」');
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('计划执行');
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('实际执行');
+    expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('scheduled_task_id');
+    expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('timed_action_id');
+    expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('停止条件已经满足');
+  });
+
   it('drains a queued prompt after the running task completes', async () => {
     let subscribedHandler: ((event: { type: string; result?: { summary: string; artifacts: unknown[] } }) => void) | null = null;
     mockGetThread.mockResolvedValue({

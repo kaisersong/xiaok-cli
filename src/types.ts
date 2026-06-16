@@ -150,6 +150,9 @@ export interface Config {
   kswarm?: {
     maxConcurrentTasks?: number;
   };
+  automations?: {
+    globalBackgroundAutoRunEnabled?: boolean;
+  };
 }
 
 const VALID_LEGACY_PROVIDERS = ['claude', 'openai', 'custom'] as const;
@@ -187,6 +190,9 @@ export const DEFAULT_CONFIG: Config = {
   skillDebug: false,
   intentBoundary: DEFAULT_INTENT_BOUNDARY_CONFIG,
   channels: {},
+  automations: {
+    globalBackgroundAutoRunEnabled: true,
+  },
 };
 
 /** 校验 legacy defaultModel 是否合法，防止脏数据写入 */

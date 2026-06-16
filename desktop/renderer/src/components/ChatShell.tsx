@@ -9,6 +9,7 @@ import type { ThreadRecord } from '../api/types';
 import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
 import { useSidebarCollapse } from '../layouts/AppLayout';
 import { sanitizeUserFacingErrorMessage } from '../lib/error-display';
+import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-display';
 import {
   buildProjectCardMessageFromToolResult,
   buildWorkflowMessageFromToolResult,
@@ -493,12 +494,19 @@ export function ChatShell() {
     let lastResult: TaskResult | null = null;
     const replayEvents: DesktopTaskEvent[] = []; // Local array for Canvas, not ref
     if (addPromptAsUser && snapshot?.prompt) {
-      // Strip scheduled task system prefix — it's for the model, not the user
-      const displayPrompt = snapshot.prompt.replace(/^\[SYSTEM:[^\]]*\]\n*/s, '');
+      const display = parseScheduledTaskPromptDisplay(snapshot.prompt);
+      if (display.notice) {
+        msgs.push({
+          id: `msg-scheduled-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          role: 'progress',
+          stage: 'completed',
+          content: display.notice,
+        });
+      }
       msgs.push({
         id: `msg-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: 'user',
-        content: formatUserMessageContent(displayPrompt, snapshot.materials),
+        content: formatUserMessageContent(display.displayPrompt, snapshot.materials),
       });
     }
 

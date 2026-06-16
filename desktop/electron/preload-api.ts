@@ -107,6 +107,16 @@ export const PRELOAD_API_KEYS = [
   'exportTraceBundle',
   'diagnose',
   'getLoopDefinitions',
+  'listUserLoopTemplates',
+  'createUserLoopTemplate',
+  'createLoopSchedule',
+  'getLoopScheduleBindings',
+  'getAutomationOverviewSnapshot',
+  'getAutomationRunHistory',
+  'getAutomationsConfig',
+  'setGlobalBackgroundAutoRun',
+  'openLoopOutputDirectory',
+  'readLoopOutputPreview',
   'getLoopRuns',
   'getEvidenceAnomalies',
   'runLoopNow',
@@ -114,6 +124,7 @@ export const PRELOAD_API_KEYS = [
   'getScheduledTasks',
   'createScheduledTask',
   'updateScheduledTask',
+  'setScheduledTaskStatus',
   'cancelScheduledTask',
   'getTimedActions',
   'getTimedActionRuns',
@@ -183,6 +194,201 @@ export const FULL_PRELOAD_KEYS: readonly string[] = [
   ...KSWARM_PROXY_KEYS,
   ...EXTRA_KEYS,
   ...THREAD_META_KEYS,
+];
+
+// P2: Explicit classification of preload keys.
+//
+// `EVENT_SUBSCRIPTION_KEYS` are renderer-side handlers that wire `ipcRenderer.on`
+// listeners. They do NOT correspond to a single `ipcMain.handle()` channel
+// (events are pushed via `webContents.send`). `subscribeTask` is a hybrid:
+// it both subscribes to push events AND triggers an invoke handler
+// `desktop:subscribeTask` to register the subscription on main side; we still
+// classify it as event subscription because its primary surface is a stream.
+export const EVENT_SUBSCRIPTION_KEYS = [
+  'subscribeTask',
+  'onUpdateStatus',
+  'onReminder',
+  'onScheduledTaskDue',
+  'onKSwarmStatus',
+  'onKSwarmWsEvent',
+  'onKSwarmConnectionStatus',
+] as const;
+
+// `LOCAL_CONSTANT_KEYS` are exposed as plain values from preload, never going
+// through IPC at runtime. Currently only `systemUsername`, captured at preload
+// boot time.
+export const LOCAL_CONSTANT_KEYS = [
+  'systemUsername',
+] as const;
+
+// `INVOKE_API_KEYS` are the strict subset of preload keys that map 1:1 to a
+// `ipcMain.handle()` channel and use `ipcRenderer.invoke()` from renderer.
+// Computed at module load by removing event/local categories from the full
+// surface so it remains in sync with the canonical lists above.
+export const INVOKE_API_KEYS: readonly string[] = FULL_PRELOAD_KEYS.filter(
+  (key) => !EVENT_SUBSCRIPTION_KEYS.includes(key as typeof EVENT_SUBSCRIPTION_KEYS[number])
+    && !LOCAL_CONSTANT_KEYS.includes(key as typeof LOCAL_CONSTANT_KEYS[number]),
+);
+
+// Explicit mapping from preload API key to its `ipcMain.handle()` channel
+// name. Tests cross-check this against the live preload implementation and the
+// main-process handler registry to catch drift.
+export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
+  getModelConfig: 'desktop:getModelConfig',
+  saveModelConfig: 'desktop:saveModelConfig',
+  createManagedXiaokAgent: 'desktop:createManagedXiaokAgent',
+  testProviderConnection: 'desktop:testProviderConnection',
+  listAvailableModelsForProvider: 'desktop:listAvailableModelsForProvider',
+  deleteProvider: 'desktop:deleteProvider',
+  deleteModel: 'desktop:deleteModel',
+  readClipboardFilePaths: 'desktop:readClipboardFilePaths',
+  readClipboardImage: 'desktop:readClipboardImage',
+  selectDirectory: 'desktop:selectDirectory',
+  selectMaterials: 'desktop:selectMaterials',
+  importMaterial: 'desktop:importMaterial',
+  createTask: 'desktop:createTask',
+  createTaskWithFiles: 'desktop:createTaskWithFiles',
+  answerQuestion: 'desktop:answerQuestion',
+  cancelTask: 'desktop:cancelTask',
+  getActiveTask: 'desktop:getActiveTask',
+  recoverTask: 'desktop:recoverTask',
+  openArtifact: 'desktop:openArtifact',
+  readFileContent: 'desktop:readFileContent',
+  listSkills: 'desktop:listSkills',
+  installSkill: 'desktop:installSkill',
+  uninstallSkill: 'desktop:uninstallSkill',
+  listChannels: 'desktop:listChannels',
+  testChannel: 'desktop:testChannel',
+  createChannel: 'desktop:createChannel',
+  updateChannel: 'desktop:updateChannel',
+  deleteChannel: 'desktop:deleteChannel',
+  listMCPInstalls: 'desktop:listMCPInstalls',
+  createMCPInstall: 'desktop:createMCPInstall',
+  updateMCPInstall: 'desktop:updateMCPInstall',
+  deleteMCPInstall: 'desktop:deleteMCPInstall',
+  listPluginMcpServers: 'desktop:listPluginMcpServers',
+  setPluginMcpServerEnabled: 'desktop:setPluginMcpServerEnabled',
+  restartPluginMcpServers: 'desktop:restartPluginMcpServers',
+  restartPluginMcpServer: 'desktop:restartPluginMcpServer',
+  getComputerUseCapabilityStatus: 'desktop:getComputerUseCapabilityStatus',
+  enableComputerUse: 'desktop:enableComputerUse',
+  reconnectComputerUse: 'desktop:reconnectComputerUse',
+  disableComputerUse: 'desktop:disableComputerUse',
+  openPluginDependencyPermissionSettings: 'desktop:openPluginDependencyPermissionSettings',
+  installPlugin: 'desktop:installPlugin',
+  listAvailablePlugins: 'desktop:listAvailablePlugins',
+  listPluginDependencyStatuses: 'desktop:listPluginDependencyStatuses',
+  installPluginDependency: 'desktop:installPluginDependency',
+  updatePluginDependency: 'desktop:updatePluginDependency',
+  diagnosePluginDependency: 'desktop:diagnosePluginDependency',
+  getUpdateStatus: 'desktop:getUpdateStatus',
+  checkForUpdates: 'desktop:checkForUpdates',
+  quitAndInstall: 'desktop:quitAndInstall',
+  createReminder: 'desktop:createReminder',
+  listReminders: 'desktop:listReminders',
+  cancelReminder: 'desktop:cancelReminder',
+  getReminderStatus: 'desktop:getReminderStatus',
+  getSkillDebugConfig: 'desktop:getSkillDebugConfig',
+  saveSkillDebugConfig: 'desktop:saveSkillDebugConfig',
+  getKswarmConfig: 'desktop:getKswarmConfig',
+  saveKswarmConfig: 'desktop:saveKswarmConfig',
+  getSkillStats: 'desktop:getSkillStats',
+  getServiceStatus: 'desktop:services:getStatus',
+  restartRelatedService: 'desktop:services:restart',
+  kswarmGetStatus: 'desktop:kswarm:getStatus',
+  kswarmStart: 'desktop:kswarm:start',
+  kswarmStop: 'desktop:kswarm:stop',
+  kswarmRestart: 'desktop:kswarm:restart',
+  kswarmResumeWorkflowRun: 'desktop:kswarm:resumeWorkflowRun',
+  kswarmStartProjectPlanning: 'desktop:kswarm:startProjectPlanning',
+  exportTraceBundle: 'desktop:trace:export',
+  diagnose: 'desktop:diagnose',
+  getLoopDefinitions: 'desktop:loops:listDefinitions',
+  listUserLoopTemplates: 'desktop:loops:listUserTemplates',
+  createUserLoopTemplate: 'desktop:loops:createUserTemplate',
+  createLoopSchedule: 'desktop:loops:createSchedule',
+  getLoopScheduleBindings: 'desktop:loops:getScheduleBindings',
+  getAutomationOverviewSnapshot: 'desktop:automations:getOverviewSnapshot',
+  getAutomationRunHistory: 'desktop:automations:getRunHistory',
+  getAutomationsConfig: 'desktop:automations:getConfig',
+  setGlobalBackgroundAutoRun: 'desktop:automations:setGlobalBackgroundAutoRun',
+  openLoopOutputDirectory: 'desktop:loops:openOutputDirectory',
+  readLoopOutputPreview: 'desktop:loops:readOutputPreview',
+  getLoopRuns: 'desktop:loops:listRuns',
+  getEvidenceAnomalies: 'desktop:loops:listAnomalies',
+  runLoopNow: 'desktop:loops:runNow',
+  syncScheduledTasks: 'desktop:syncScheduledTasks',
+  getScheduledTasks: 'desktop:getScheduledTasks',
+  createScheduledTask: 'desktop:createScheduledTask',
+  updateScheduledTask: 'desktop:updateScheduledTask',
+  setScheduledTaskStatus: 'desktop:setScheduledTaskStatus',
+  cancelScheduledTask: 'desktop:cancelScheduledTask',
+  getTimedActions: 'desktop:getTimedActions',
+  getTimedActionRuns: 'desktop:getTimedActionRuns',
+  approveTimedActionAuto: 'desktop:timedAction:approveAuto',
+  revokeTimedActionAuto: 'desktop:timedAction:revokeAuto',
+  listMemories: 'desktop:listMemories',
+  createMemory: 'desktop:createMemory',
+  updateMemory: 'desktop:updateMemory',
+  deleteMemory: 'desktop:deleteMemory',
+  importMemories: 'desktop:importMemories',
+  memoryStats: 'desktop:memoryStats',
+  memoryCompact: 'desktop:memoryCompact',
+  memoryPersonaTraits: 'desktop:memoryPersonaTraits',
+  memoryListLayer: 'desktop:memoryListLayer',
+  memoryDeleteEntry: 'desktop:memoryDeleteEntry',
+  memoryClearAll: 'desktop:memoryClearAll',
+  memoryGetModelId: 'desktop:memoryGetModelId',
+  memorySetModelId: 'desktop:memorySetModelId',
+  getEmbeddingModels: 'desktop:getEmbeddingModels',
+  downloadEmbeddingModel: 'desktop:downloadEmbeddingModel',
+  setEmbeddingModel: 'desktop:setEmbeddingModel',
+  getConnectorsConfig: 'desktop:getConnectorsConfig',
+  saveConnectorsConfig: 'desktop:saveConnectorsConfig',
+  listConnectorRuntimes: 'desktop:listConnectorRuntimes',
+  testConnectorProvider: 'desktop:testConnectorProvider',
+  // KSwarm proxy
+  kswarmProxyGet: 'desktop:kswarm:proxy:get',
+  kswarmProxyGetText: 'desktop:kswarm:proxy:getText',
+  kswarmProxyPost: 'desktop:kswarm:proxy:post',
+  kswarmProxyPostJson: 'desktop:kswarm:proxy:postJson',
+  kswarmProxyPut: 'desktop:kswarm:proxy:put',
+  kswarmProxyPatch: 'desktop:kswarm:proxy:patch',
+  kswarmProxyDelete: 'desktop:kswarm:proxy:delete',
+  kswarmStreamSubscribe: 'desktop:kswarm:stream:subscribe',
+  kswarmStreamUnsubscribe: 'desktop:kswarm:stream:unsubscribe',
+  kswarmStreamGetStatus: 'desktop:kswarm:stream:status',
+  connectionHealthz: 'desktop:connection:healthz',
+  connectionHealth: 'desktop:connection:health',
+  // Extra
+  showSaveDialog: 'desktop:showSaveDialog',
+  saveFile: 'desktop:saveFile',
+  listPrinciples: 'desktop:listPrinciples',
+  savePrinciple: 'desktop:savePrinciple',
+  deletePrinciple: 'desktop:deletePrinciple',
+  // Thread meta
+  getThreadLabels: 'desktop:getThreadLabels',
+  setThreadLabel: 'desktop:setThreadLabel',
+  unsetThreadLabel: 'desktop:unsetThreadLabel',
+  moveThreadLabel: 'desktop:moveThreadLabel',
+  getAppFlag: 'desktop:getAppFlag',
+  setAppFlag: 'desktop:setAppFlag',
+  migrateLegacyThreadMeta: 'desktop:migrateLegacyThreadMeta',
+};
+
+// Channels that are intentionally registered on main but not exposed via the
+// preload bridge today. Listed here so the IPC contract test does not flag
+// them, but kept under explicit watch — adding to this list should be a
+// deliberate decision (and ideally short-lived).
+export const KNOWN_UNROUTED_HANDLERS: readonly string[] = [
+  // Artifact editing handlers (ipc.ts:465-493) — predate the preload bridge
+  // and are not currently called from renderer. Track them here until they're
+  // either exposed or removed.
+  'desktop:artifactBackup',
+  'desktop:artifactRevert',
+  'desktop:artifactCleanup',
+  'desktop:artifactWatch',
+  'desktop:artifactUnwatch',
 ];
 
 export interface DesktopModelProviderView {
@@ -506,6 +712,16 @@ export interface DesktopApi {
   exportTraceBundle(input: DesktopTraceTarget): Promise<{ ok: boolean; path?: string; error?: string }>;
   diagnose(input: DesktopTraceTarget): Promise<unknown>;
   getLoopDefinitions(): Promise<unknown[]>;
+  listUserLoopTemplates(): Promise<unknown[]>;
+  createUserLoopTemplate(input: unknown): Promise<unknown>;
+  createLoopSchedule(input: unknown): Promise<unknown>;
+  getLoopScheduleBindings(): Promise<unknown[]>;
+  getAutomationOverviewSnapshot(): Promise<unknown>;
+  getAutomationRunHistory(): Promise<unknown[]>;
+  getAutomationsConfig(): Promise<{ globalBackgroundAutoRunEnabled: boolean }>;
+  setGlobalBackgroundAutoRun(input: { enabled: boolean }): Promise<{ globalBackgroundAutoRunEnabled: boolean }>;
+  openLoopOutputDirectory(loopId: string): Promise<unknown>;
+  readLoopOutputPreview(loopId: string): Promise<unknown>;
   getLoopRuns(loopId: string): Promise<unknown[]>;
   getEvidenceAnomalies(loopId: string): Promise<unknown[]>;
   runLoopNow(loopId: string): Promise<unknown>;
@@ -513,6 +729,7 @@ export interface DesktopApi {
   getScheduledTasks(): Promise<unknown[]>;
   createScheduledTask(input: unknown): Promise<unknown>;
   updateScheduledTask(input: unknown): Promise<unknown>;
+  setScheduledTaskStatus(id: string, status: 'active' | 'paused'): Promise<unknown | null>;
   cancelScheduledTask(id: string): Promise<boolean>;
   getTimedActions(): Promise<unknown[]>;
   getTimedActionRuns(actionId: string): Promise<unknown[]>;
@@ -769,6 +986,16 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     exportTraceBundle: (input) => ipcRenderer.invoke('desktop:trace:export', input) as Promise<{ ok: boolean; path?: string; error?: string }>,
     diagnose: (input) => ipcRenderer.invoke('desktop:diagnose', input) as Promise<unknown>,
     getLoopDefinitions: () => ipcRenderer.invoke('desktop:loops:listDefinitions') as Promise<unknown[]>,
+    listUserLoopTemplates: () => ipcRenderer.invoke('desktop:loops:listUserTemplates') as Promise<unknown[]>,
+    createUserLoopTemplate: (input) => ipcRenderer.invoke('desktop:loops:createUserTemplate', input) as Promise<unknown>,
+    createLoopSchedule: (input) => ipcRenderer.invoke('desktop:loops:createSchedule', input) as Promise<unknown>,
+    getLoopScheduleBindings: () => ipcRenderer.invoke('desktop:loops:getScheduleBindings') as Promise<unknown[]>,
+    getAutomationOverviewSnapshot: () => ipcRenderer.invoke('desktop:automations:getOverviewSnapshot') as Promise<unknown>,
+    getAutomationRunHistory: () => ipcRenderer.invoke('desktop:automations:getRunHistory') as Promise<unknown[]>,
+    getAutomationsConfig: () => ipcRenderer.invoke('desktop:automations:getConfig') as Promise<{ globalBackgroundAutoRunEnabled: boolean }>,
+    setGlobalBackgroundAutoRun: (input) => ipcRenderer.invoke('desktop:automations:setGlobalBackgroundAutoRun', input) as Promise<{ globalBackgroundAutoRunEnabled: boolean }>,
+    openLoopOutputDirectory: (loopId) => ipcRenderer.invoke('desktop:loops:openOutputDirectory', loopId) as Promise<unknown>,
+    readLoopOutputPreview: (loopId) => ipcRenderer.invoke('desktop:loops:readOutputPreview', loopId) as Promise<unknown>,
     getLoopRuns: (loopId) => ipcRenderer.invoke('desktop:loops:listRuns', loopId) as Promise<unknown[]>,
     getEvidenceAnomalies: (loopId) => ipcRenderer.invoke('desktop:loops:listAnomalies', loopId) as Promise<unknown[]>,
     runLoopNow: (loopId) => ipcRenderer.invoke('desktop:loops:runNow', loopId) as Promise<unknown>,
@@ -776,6 +1003,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks') as Promise<unknown[]>,
     createScheduledTask: (input) => ipcRenderer.invoke('desktop:createScheduledTask', input) as Promise<unknown>,
     updateScheduledTask: (input) => ipcRenderer.invoke('desktop:updateScheduledTask', input) as Promise<unknown>,
+    setScheduledTaskStatus: (id, status) => ipcRenderer.invoke('desktop:setScheduledTaskStatus', id, status) as Promise<unknown | null>,
     cancelScheduledTask: (id) => ipcRenderer.invoke('desktop:cancelScheduledTask', id) as Promise<boolean>,
     getTimedActions: () => ipcRenderer.invoke('desktop:getTimedActions') as Promise<unknown[]>,
     getTimedActionRuns: (actionId) => ipcRenderer.invoke('desktop:getTimedActionRuns', actionId) as Promise<unknown[]>,

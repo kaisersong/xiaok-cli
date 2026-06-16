@@ -458,7 +458,10 @@ describe('kswarm runtime bridge', () => {
         },
       },
     });
-    await delay(20);
+    await vi.waitFor(() => {
+      expect(handleWorkflowNodeHandoff).toHaveBeenCalled();
+      expect(posts.slice(1).map(post => post.body.kind)).toEqual(['workflow_node_progress']);
+    });
 
     expect(handleWorkflowNodeHandoff).toHaveBeenCalledWith(expect.objectContaining({
       targetParticipantId: 'xiaok-worker',
@@ -527,7 +530,10 @@ describe('kswarm runtime bridge', () => {
         },
       },
     });
-    await delay(20);
+    await vi.waitFor(() => {
+      expect(handleWorkflowNodeHandoff).toHaveBeenCalled();
+      expect(posts.slice(1).map(post => post.body.kind)).toEqual(['workflow_node_progress']);
+    });
 
     expect(handleWorkflowNodeHandoff).toHaveBeenCalledWith(expect.objectContaining({
       targetParticipantId: 'xiaok-worker',

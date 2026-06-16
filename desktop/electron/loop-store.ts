@@ -1,11 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { isSafeLoopOutputFileName } from './loop-output-paths.js';
 import {
   BUILT_IN_LOOP_IDS,
   type BeginLoopRunResult,
+  type CreateUserLoopTemplateInput,
+  type CreateUserLoopTemplateResult,
+  type IgnoredLegacyScheduleField,
   type LoopDefinition,
+  type LoopDefinitionOrigin,
   type LoopDefinitionStatus,
   type LoopRun,
   type LoopRunFailureKind,
@@ -14,6 +19,9 @@ import {
   type LoopStageKind,
   type LoopStageStatus,
   type LoopRunTrigger,
+  type RecoverStaleRunsResult,
+  type UserLoopTemplate,
+  type UserLoopTemplateKind,
 } from './loop-types.js';
 
 interface LoopDefinitionRow {
@@ -21,9 +29,34 @@ interface LoopDefinitionRow {
   title: string;
   description: string;
   status: LoopDefinitionStatus;
+  origin: LoopDefinitionOrigin;
   active_run_id: string | null;
+  deleted_at: number | null;
+  delete_reason: string | null;
   created_at: number;
   updated_at: number;
+}
+
+interface UserLoopTemplateRow {
+  loop_id: string;
+  kind: UserLoopTemplateKind;
+  prompt: string;
+  output_directory: string;
+  output_file_name: string;
+  schedule_action_id: string | null;
+  schedule_enabled: number;
+  schedule_trigger_json: string | null;
+  auto_run_approved: number;
+  created_at: number;
+  updated_at: number;
+}
+
+interface TableColumnRow {
+  name: string;
+}
+
+interface AutomationStoreMetadataRow {
+  value: number;
 }
 
 interface LoopRunRow {
@@ -75,7 +108,7 @@ const BUILT_IN_LOOPS: Array<Pick<LoopDefinition, 'id' | 'title' | 'description'>
 const EXECUTOR_CRASH_MESSAGE = 'Loop executor crashed or was interrupted.';
 const TERMINAL_STATUSES = new Set<LoopRunStatus>(['success', 'failed', 'blocked']);
 const TERMINAL_STAGE_STATUSES = new Set<LoopStageStatus>(['success', 'failed', 'blocked', 'skipped']);
-const LOOP_STAGE_KINDS = new Set<LoopStageKind>(['scan']);
+const LOOP_STAGE_KINDS = new Set<LoopStageKind>(['scan', 'execute', 'verify']);
 
 export class LoopStore {
   private readonly db: DatabaseSync;
@@ -92,35 +125,107 @@ export class LoopStore {
     this.db.close();
   }
 
+  getAutomationStoreVersion(): number {
+    const row = this.db.prepare(`
+      select value from automation_store_metadata where key = 'version'
+    `).get() as AutomationStoreMetadataRow | undefined;
+    return row?.value ?? 0;
+  }
+
   ensureBuiltInLoops(now: number): LoopDefinition[] {
-    for (const loop of BUILT_IN_LOOPS) {
-      this.db.prepare(`
-        insert into loop_definitions (
-          id, title, description, status, active_run_id, created_at, updated_at
-        ) values (
-          @id, @title, @description, 'active', null, @createdAt, @updatedAt
-        )
-        on conflict(id) do update set
-          title = excluded.title,
-          description = excluded.description,
-          updated_at = case
-            when loop_definitions.title != excluded.title
-              or loop_definitions.description != excluded.description
-            then excluded.updated_at
-            else loop_definitions.updated_at
-          end
-      `).run({
-        id: loop.id,
-        title: loop.title,
-        description: loop.description,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
+    this.transaction(() => {
+      for (const loop of BUILT_IN_LOOPS) {
+        this.db.prepare(`
+          insert into loop_definitions (
+            id, title, description, status, origin, active_run_id, created_at, updated_at
+          ) values (
+            @id, @title, @description, 'active', 'built_in', null, @createdAt, @updatedAt
+          )
+          on conflict(id) do update set
+            title = excluded.title,
+            description = excluded.description,
+            origin = 'built_in',
+            updated_at = case
+              when loop_definitions.title != excluded.title
+                or loop_definitions.description != excluded.description
+                or loop_definitions.origin != 'built_in'
+              then excluded.updated_at
+              else loop_definitions.updated_at
+            end
+        `).run({
+          id: loop.id,
+          title: loop.title,
+          description: loop.description,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      this.bumpAutomationStoreVersion();
+    });
 
     return BUILT_IN_LOOPS
       .map(loop => this.getLoopDefinition(loop.id))
       .filter((loop): loop is LoopDefinition => loop !== undefined);
+  }
+
+  createUserLoopTemplate(input: CreateUserLoopTemplateInput): CreateUserLoopTemplateResult {
+    validateUserLoopTemplateInput(input);
+    const ignoredLegacyScheduleFields = legacyScheduleFieldsIn(input);
+    return this.transaction(() => {
+      this.db.prepare(`
+        insert into loop_definitions (
+          id, title, description, status, origin, active_run_id, deleted_at, delete_reason, created_at, updated_at
+        ) values (
+          @id, @title, @description, 'active', 'user_template', null, null, null, @createdAt, @updatedAt
+        )
+      `).run({
+        id: input.loopId,
+        title: input.title,
+        description: input.description ?? '',
+        createdAt: input.now,
+        updatedAt: input.now,
+      });
+
+      this.db.prepare(`
+        insert into user_loop_templates (
+          loop_id, kind, prompt, output_directory, output_file_name,
+          schedule_action_id, schedule_enabled, schedule_trigger_json, auto_run_approved,
+          created_at, updated_at
+        ) values (
+          @loopId, @kind, @prompt, @outputDirectory, @outputFileName,
+          null, 0, null, 0,
+          @createdAt, @updatedAt
+        )
+      `).run({
+        loopId: input.loopId,
+        kind: input.kind,
+        prompt: input.prompt,
+        outputDirectory: input.outputDirectory,
+        outputFileName: input.outputFileName,
+        createdAt: input.now,
+        updatedAt: input.now,
+      });
+
+      const template = this.getUserLoopTemplate(input.loopId);
+      if (!template) {
+        throw new Error('User loop template insert did not persist a record.');
+      }
+      this.bumpAutomationStoreVersion();
+      return { template, ignoredLegacyScheduleFields };
+    });
+  }
+
+  getUserLoopTemplate(loopId: string): UserLoopTemplate | undefined {
+    const row = this.db.prepare('select * from user_loop_templates where loop_id = ?').get(loopId) as UserLoopTemplateRow | undefined;
+    return row ? this.userLoopTemplateRowToRecord(row) : undefined;
+  }
+
+  listUserLoopTemplates(): UserLoopTemplate[] {
+    const rows = typedRows<UserLoopTemplateRow>(this.db.prepare(`
+      select * from user_loop_templates
+      order by created_at asc, loop_id asc
+    `).all());
+    return rows.map(row => this.userLoopTemplateRowToRecord(row));
   }
 
   getLoopDefinition(loopId: string): LoopDefinition | undefined {
@@ -136,20 +241,32 @@ export class LoopStore {
     return rows.map(row => this.definitionRowToRecord(row));
   }
 
-  setLoopStatus(loopId: string, status: LoopDefinitionStatus, now: number): LoopDefinition | undefined {
-    const result = this.db.prepare(`
-      update loop_definitions
-      set status = ?, updated_at = ?
-      where id = ?
-    `).run(status, now, loopId);
-    if (result.changes === 0) return undefined;
-    return this.getLoopDefinition(loopId);
+  setLoopStatus(loopId: string, status: LoopDefinitionStatus, now: number, deleteReason?: string): LoopDefinition | undefined {
+    return this.transaction(() => {
+      const result = this.db.prepare(`
+        update loop_definitions
+        set status = @status,
+            updated_at = @updatedAt,
+            deleted_at = case when @status = 'deleted' then @updatedAt else null end,
+            delete_reason = case when @status = 'deleted' then @deleteReason else null end
+        where id = @loopId
+      `).run({
+        status,
+        updatedAt: now,
+        deleteReason: status === 'deleted' ? deleteReason ?? 'deleted' : null,
+        loopId,
+      });
+      if (result.changes === 0) return undefined;
+      this.bumpAutomationStoreVersion();
+      return this.getLoopDefinition(loopId);
+    });
   }
 
   beginLoopRun(loopId: string, trigger: LoopRunTrigger, now: number, staleAfterMs: number): BeginLoopRunResult {
     return this.transaction(() => {
       const definitionRow = this.getLoopDefinitionRow(loopId);
       if (!definitionRow) return { status: 'skipped', reason: 'missing_loop' };
+      if (definitionRow.status === 'deleted') return { status: 'skipped', reason: 'deleted_loop' };
       if (definitionRow.status === 'paused') return { status: 'skipped', reason: 'paused' };
 
       if (definitionRow.active_run_id) {
@@ -194,6 +311,7 @@ export class LoopStore {
       if (!run) {
         throw new Error('Loop run insert did not persist a record.');
       }
+      this.bumpAutomationStoreVersion();
       return { status: 'started', run };
     });
   }
@@ -239,31 +357,52 @@ export class LoopStore {
     });
   }
 
-  recoverStaleRuns(now: number, staleAfterMs: number): number {
-    return this.transaction(() => {
-      const rows = typedRows<LoopRunRow>(this.db.prepare(`
-        select * from loop_runs
-        where status = 'running'
-          and updated_at <= ?
-        order by started_at asc
-      `).all(now - staleAfterMs));
+  recoverStaleRuns(now: number, staleAfterMs: number): RecoverStaleRunsResult {
+    const failedRunIds: string[] = [];
+    try {
+      const recovered = this.transaction(() => {
+        const rows = typedRows<LoopRunRow>(this.db.prepare(`
+          select * from loop_runs
+          where status = 'running'
+            and updated_at <= ?
+          order by started_at asc
+        `).all(now - staleAfterMs));
 
-      for (const row of rows) {
-        this.markRunExecutorCrash(row, now);
-        this.clearActiveRun(row.loop_id, row.id, now);
-      }
+        for (const row of rows) {
+          this.markRunExecutorCrash(row, now);
+          this.clearActiveRun(row.loop_id, row.id, now);
+          failedRunIds.push(row.id);
+        }
 
-      return rows.length;
-    });
+        if (rows.length > 0) {
+          this.bumpAutomationStoreVersion();
+        }
+        return rows.length;
+      });
+      return { ok: true, recovered, failedRunIds };
+    } catch (error) {
+      return {
+        ok: false,
+        recovered: 0,
+        failedRunIds: [],
+        error: (error as Error).message || String(error),
+        partial: false,
+      };
+    }
   }
 
   touchLoopRun(runId: string, now: number): LoopRun | undefined {
-    this.db.prepare(`
-      update loop_runs
-      set updated_at = ?
-      where id = ? and status = 'running'
-    `).run(now, runId);
-    return this.getLoopRun(runId);
+    return this.transaction(() => {
+      const result = this.db.prepare(`
+        update loop_runs
+        set updated_at = ?
+        where id = ? and status = 'running'
+      `).run(now, runId);
+      if (result.changes === 1) {
+        this.bumpAutomationStoreVersion();
+      }
+      return this.getLoopRun(runId);
+    });
   }
 
   listLoopRuns(loopId: string, limit: number): LoopRun[] {
@@ -279,6 +418,23 @@ export class LoopStore {
   getLoopRun(runId: string): LoopRun | undefined {
     const row = this.getLoopRunRow(runId);
     return row ? this.runRowToRecord(row) : undefined;
+  }
+
+  findLoopRunByTimedActionRunId(timedActionRunId: string): LoopRun | undefined {
+    const needle = timedActionRunId.trim();
+    if (!needle) return undefined;
+    const rows = typedRows<LoopRunRow>(this.db.prepare(`
+      select * from loop_runs
+      where trigger_json like ?
+      order by started_at desc, id desc
+    `).all('%"timedActionRunId"%'));
+    for (const row of rows) {
+      const run = this.runRowToRecord(row);
+      if (run.trigger.timedActionRunId === needle) {
+        return run;
+      }
+    }
+    return undefined;
   }
 
   startLoopStage(
@@ -322,6 +478,7 @@ export class LoopStore {
       if (!stage) {
         throw new Error('Loop stage insert did not persist a record.');
       }
+      this.bumpAutomationStoreVersion();
       return stage;
     });
   }
@@ -392,7 +549,10 @@ export class LoopStore {
         title text not null,
         description text not null,
         status text not null,
+        origin text not null default 'built_in',
         active_run_id text,
+        deleted_at integer,
+        delete_reason text,
         created_at integer not null,
         updated_at integer not null
       );
@@ -444,7 +604,36 @@ export class LoopStore {
 
       create index if not exists idx_loop_stages_run
       on loop_stages(run_id, created_at);
+
+      create table if not exists user_loop_templates (
+        loop_id text primary key,
+        kind text not null,
+        prompt text not null,
+        output_directory text not null,
+        output_file_name text not null,
+        schedule_action_id text,
+        schedule_enabled integer not null default 0,
+        schedule_trigger_json text,
+        auto_run_approved integer not null default 0,
+        created_at integer not null,
+        updated_at integer not null,
+        foreign key(loop_id) references loop_definitions(id)
+      );
+
+      create table if not exists automation_store_metadata (
+        key text primary key,
+        value integer not null
+      );
     `);
+    this.ensureColumn('loop_definitions', 'origin', "text not null default 'built_in'");
+    this.ensureColumn('loop_definitions', 'deleted_at', 'integer');
+    this.ensureColumn('loop_definitions', 'delete_reason', 'text');
+  }
+
+  private ensureColumn(tableName: 'loop_definitions', columnName: string, definition: string): void {
+    const columns = typedRows<TableColumnRow>(this.db.prepare(`pragma table_info(${tableName})`).all());
+    if (columns.some(column => column.name === columnName)) return;
+    this.db.exec(`alter table ${tableName} add column ${columnName} ${definition}`);
   }
 
   private finishLoopRun(
@@ -487,6 +676,7 @@ export class LoopStore {
       if (result.changes === 1) {
         this.finishOpenStagesForTerminalRun(current.loop_id, runId, input, current.status, input.now);
         this.clearActiveRun(current.loop_id, runId, input.now);
+        this.bumpAutomationStoreVersion();
       }
       return this.getLoopRun(runId);
     });
@@ -528,7 +718,7 @@ export class LoopStore {
         return this.stageRowToRecord(current);
       }
 
-      this.db.prepare(`
+      const result = this.db.prepare(`
         update loop_stages
         set status = ?, evidence_ids_json = ?, finished_at = ?, updated_at = ?,
             summary = ?, failure_kind = ?, message = ?,
@@ -545,6 +735,9 @@ export class LoopStore {
         input.metadata ? JSON.stringify(input.metadata) : null,
         stageId
       );
+      if (result.changes === 1) {
+        this.bumpAutomationStoreVersion();
+      }
       return this.getLoopStage(stageId);
     });
   }
@@ -635,13 +828,40 @@ export class LoopStore {
     }
   }
 
+  private bumpAutomationStoreVersion(): void {
+    this.db.prepare(`
+      insert into automation_store_metadata(key, value)
+      values ('version', 1)
+      on conflict(key) do update set value = value + 1
+    `).run();
+  }
+
   private definitionRowToRecord(row: LoopDefinitionRow): LoopDefinition {
     return {
       id: row.id,
       title: row.title,
       description: row.description,
       status: row.status,
+      origin: row.origin,
       activeRunId: row.active_run_id ?? undefined,
+      deletedAt: row.deleted_at ?? undefined,
+      deleteReason: row.delete_reason ?? undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private userLoopTemplateRowToRecord(row: UserLoopTemplateRow): UserLoopTemplate {
+    return {
+      loopId: row.loop_id,
+      kind: row.kind,
+      prompt: row.prompt,
+      outputDirectory: row.output_directory,
+      outputFileName: row.output_file_name,
+      scheduleActionId: row.schedule_action_id ?? undefined,
+      scheduleEnabled: row.schedule_enabled === 1,
+      scheduleTrigger: row.schedule_trigger_json ? parseJson<Record<string, unknown>>(row.schedule_trigger_json) : undefined,
+      autoRunApproved: row.auto_run_approved === 1,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -691,4 +911,30 @@ function parseJson<T>(raw: string): T {
 
 function typedRows<T>(rows: unknown): T[] {
   return rows as T[];
+}
+
+function validateUserLoopTemplateInput(input: CreateUserLoopTemplateInput): void {
+  if (input.kind !== 'markdown_file') {
+    throw new Error('Unsupported user loop template kind.');
+  }
+  if (!isAbsolute(input.outputDirectory)) {
+    throw new Error('User loop outputDirectory must be an absolute path.');
+  }
+  if (!isSafeLoopOutputFileName(input.outputFileName)) {
+    throw new Error('User loop outputFileName must be a file name, not a path.');
+  }
+
+  const outputDirectory = resolve(input.outputDirectory);
+  const outputPath = resolve(outputDirectory, input.outputFileName);
+  if (dirname(outputPath) !== outputDirectory) {
+    throw new Error('User loop outputFileName must be a file name, not a path.');
+  }
+}
+
+function legacyScheduleFieldsIn(input: CreateUserLoopTemplateInput): IgnoredLegacyScheduleField[] {
+  const fields: IgnoredLegacyScheduleField[] = [];
+  if (Object.prototype.hasOwnProperty.call(input, 'scheduleEnabled')) fields.push('scheduleEnabled');
+  if (Object.prototype.hasOwnProperty.call(input, 'scheduleTrigger')) fields.push('scheduleTrigger');
+  if (Object.prototype.hasOwnProperty.call(input, 'autoRunApproved')) fields.push('autoRunApproved');
+  return fields;
 }

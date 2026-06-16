@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 
 import { DesktopSettings } from '../../renderer/src/components/DesktopSettings';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
@@ -69,12 +70,18 @@ describe('DesktopSettings MCP pane', () => {
     delete (globalThis as Record<string, unknown>).__APP_BUILD__;
   });
 
-  it('refreshes plugin MCP servers so late startup registrations become visible', async () => {
+  function renderSettings() {
     render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
+      <MemoryRouter>
+        <LocaleProvider>
+          <DesktopSettings onClose={() => {}} />
+        </LocaleProvider>
+      </MemoryRouter>,
     );
+  }
+
+  it('refreshes plugin MCP servers so late startup registrations become visible', async () => {
+    renderSettings();
 
     await screen.findByRole('button', { name: 'MCP 服务器' });
     fireEvent.click(screen.getByRole('button', { name: 'MCP 服务器' }));
@@ -107,11 +114,7 @@ describe('DesktopSettings MCP pane', () => {
       },
     ]);
 
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
+    renderSettings();
 
     await screen.findByRole('button', { name: 'MCP 服务器' });
     fireEvent.click(screen.getByRole('button', { name: 'MCP 服务器' }));
@@ -139,11 +142,7 @@ describe('DesktopSettings MCP pane', () => {
       },
     ]);
 
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
+    renderSettings();
 
     await screen.findByRole('button', { name: 'MCP 服务器' });
     fireEvent.click(screen.getByRole('button', { name: 'MCP 服务器' }));
@@ -185,11 +184,7 @@ describe('DesktopSettings MCP pane', () => {
       },
     ]);
 
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
+    renderSettings();
 
     await screen.findByRole('button', { name: 'MCP 服务器' });
     fireEvent.click(screen.getByRole('button', { name: 'MCP 服务器' }));
@@ -223,11 +218,7 @@ describe('DesktopSettings MCP pane', () => {
       },
     ]);
 
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
+    renderSettings();
 
     await screen.findByRole('button', { name: 'MCP 服务器' });
     fireEvent.click(screen.getByRole('button', { name: 'MCP 服务器' }));
@@ -268,11 +259,7 @@ describe('DesktopSettings MCP pane', () => {
       },
     ]);
 
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
+    renderSettings();
 
     await screen.findByRole('button', { name: 'MCP 服务器' });
     fireEvent.click(screen.getByRole('button', { name: 'MCP 服务器' }));
@@ -316,11 +303,7 @@ describe('DesktopSettings MCP pane', () => {
       },
     ]);
 
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
+    renderSettings();
 
     await screen.findByRole('button', { name: 'MCP 服务器' });
     fireEvent.click(screen.getByRole('button', { name: 'MCP 服务器' }));

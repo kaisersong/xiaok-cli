@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 import { DesktopSettings } from '../../renderer/src/components/DesktopSettings';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
@@ -11,6 +12,9 @@ const mocks = vi.hoisted(() => ({
   getLoopRuns: vi.fn(),
   getEvidenceAnomalies: vi.fn(),
   runLoopNow: vi.fn(),
+  listUserLoopTemplates: vi.fn(),
+  createUserLoopTemplate: vi.fn(),
+  createLoopSchedule: vi.fn(),
   getAccountSettings: vi.fn(),
   updateAccountSettings: vi.fn(),
 }));
@@ -27,10 +31,30 @@ vi.mock('../../renderer/src/api/bridge', () => ({
     getLoopRuns: mocks.getLoopRuns,
     getEvidenceAnomalies: mocks.getEvidenceAnomalies,
     runLoopNow: mocks.runLoopNow,
+    listUserLoopTemplates: mocks.listUserLoopTemplates,
+    createUserLoopTemplate: mocks.createUserLoopTemplate,
+    createLoopSchedule: mocks.createLoopSchedule,
     getAccountSettings: mocks.getAccountSettings,
     updateAccountSettings: mocks.updateAccountSettings,
   },
 }));
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{location.pathname}</div>;
+}
+
+function renderSettings(onClose = vi.fn()) {
+  render(
+    <MemoryRouter initialEntries={['/settings-test']}>
+      <LocaleProvider>
+        <DesktopSettings onClose={onClose} />
+        <LocationProbe />
+      </LocaleProvider>
+    </MemoryRouter>,
+  );
+  return { onClose };
+}
 
 describe('DesktopSettings service status', () => {
   beforeEach(() => {
@@ -136,6 +160,30 @@ describe('DesktopSettings service status', () => {
         updatedAt: 7_000,
       },
     });
+    mocks.listUserLoopTemplates.mockResolvedValue([]);
+    mocks.createUserLoopTemplate.mockResolvedValue({
+      template: {
+        loopId: 'new-loop',
+        kind: 'markdown_file',
+        prompt: 'Write a report.',
+        outputDirectory: '/tmp/xiaok-loops',
+        outputFileName: 'report.md',
+        scheduleEnabled: false,
+        autoRunApproved: false,
+        createdAt: 8_000,
+        updatedAt: 8_000,
+      },
+      ignoredLegacyScheduleFields: [],
+    });
+    mocks.createLoopSchedule.mockResolvedValue({
+      id: 'schedule-new-loop',
+      title: 'New loop schedule',
+      status: 'active',
+      trigger: { kind: 'interval', everyMs: 3_600_000 },
+      executor: { kind: 'loop', loopId: 'new-loop' },
+      createdAt: 8_000,
+      updatedAt: 8_000,
+    });
     mocks.getAccountSettings.mockResolvedValue({
       pipeline_trace_enabled: false,
       prompt_cache_debug_enabled: false,
@@ -151,18 +199,14 @@ describe('DesktopSettings service status', () => {
   });
 
   it('shows related service health and can restart a service from general settings', async () => {
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
+    renderSettings();
 
     await screen.findByText('服务状态');
     expect(screen.getByText('KSwarm')).toBeInTheDocument();
     expect(screen.getByText('Intent Broker')).toBeInTheDocument();
     expect(screen.getByText('Runtime Bridge')).toBeInTheDocument();
-    await screen.findByText('Loop 诊断');
-    expect(screen.getByText('Artifact Evidence Regression')).toBeInTheDocument();
+    expect(screen.queryByText('Loop 诊断')).not.toBeInTheDocument();
+    expect(mocks.getLoopDefinitions).not.toHaveBeenCalled();
     expect(screen.getAllByText('运行中').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('不可用')).toBeInTheDocument();
     expect(screen.getByText(/connection refused/)).toBeInTheDocument();
@@ -177,86 +221,19 @@ describe('DesktopSettings service status', () => {
     });
   });
 
-  it('can trigger the built-in loop from the visible settings page', async () => {
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
+  it('links to Automations instead of exposing loop runtime controls in Settings', async () => {
+    const { onClose } = renderSettings();
 
-    await screen.findByText('Artifact Evidence Regression');
-    expect(screen.getByText('Loop 诊断')).toBeInTheDocument();
-    expect(screen.getByText(/success/)).toBeInTheDocument();
-    expect(screen.getByText('开放异常')).toBeInTheDocument();
-    expect(screen.getByText('1')).toBeInTheDocument();
+    await screen.findByText('服务状态');
+    expect(screen.queryByRole('button', { name: '循环' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Loop 诊断')).not.toBeInTheDocument();
+    expect(mocks.getLoopDefinitions).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByLabelText('run-loop-artifact-evidence-regression'));
+    fireEvent.click(screen.getByRole('button', { name: '打开自动化' }));
 
     await waitFor(() => {
-      expect(mocks.runLoopNow).toHaveBeenCalledWith('artifact-evidence-regression');
+      expect(screen.getByTestId('location')).toHaveTextContent('/automations/loops');
     });
-  });
-
-  it('shows actionable loop anomaly details and can copy diagnostics summary', async () => {
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
-
-    await screen.findByText('Artifact Evidence Regression');
-    expect(screen.getByText('missing artifact')).toBeInTheDocument();
-    expect(screen.getByText('检查 artifact evidence')).toBeInTheDocument();
-    expect(screen.getByText('/tmp/xiaok/logs/kswarm-service.log')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByLabelText('copy-loop-diagnostics-artifact-evidence-regression'));
-
-    await waitFor(() => {
-      expect(globalThis.navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('missing artifact'));
-    });
-  });
-
-  it('keeps loop diagnostics visible when clipboard copy fails', async () => {
-    vi.mocked(globalThis.navigator.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard denied'));
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
-
-    await screen.findByText('Artifact Evidence Regression');
-    fireEvent.click(screen.getByLabelText('copy-loop-diagnostics-artifact-evidence-regression'));
-
-    await waitFor(() => {
-      expect(globalThis.navigator.clipboard.writeText).toHaveBeenCalled();
-    });
-    expect(screen.getByText('missing artifact')).toBeInTheDocument();
-    expect(screen.getByText('/tmp/xiaok/logs/kswarm-service.log')).toBeInTheDocument();
-  });
-
-  it('shows already-running state and clears it after a fresh diagnostics read', async () => {
-    mocks.runLoopNow.mockResolvedValueOnce({
-      status: 'already_running',
-      activeRunId: 'run-active',
-    });
-
-    render(
-      <LocaleProvider>
-        <DesktopSettings onClose={() => {}} />
-      </LocaleProvider>,
-    );
-
-    await screen.findByText('Artifact Evidence Regression');
-    fireEvent.click(screen.getByLabelText('run-loop-artifact-evidence-regression'));
-
-    await screen.findByText('已有运行中');
-    expect(screen.getByLabelText('run-loop-artifact-evidence-regression')).toBeDisabled();
-
-    fireEvent.click(screen.getByRole('button', { name: '刷新' }));
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('run-loop-artifact-evidence-regression')).not.toBeDisabled();
-    });
-    expect(screen.getByLabelText('run-loop-artifact-evidence-regression')).toHaveTextContent('立即运行');
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

@@ -148,5 +148,9 @@ function withNormalizedDefaults(config) {
             ...(config.intentBoundary ?? {}),
         },
         channels: { ...(config.channels ?? {}) },
+        automations: {
+            globalBackgroundAutoRunEnabled: true,
+            ...(config.automations ?? {}),
+        },
     };
 }

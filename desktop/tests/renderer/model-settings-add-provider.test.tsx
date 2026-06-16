@@ -1,6 +1,7 @@
 import React from 'react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 
 // Mock locale context
 vi.mock('../../renderer/src/contexts/LocaleContext', () => ({
@@ -56,7 +57,11 @@ import { DesktopSettings } from '../../renderer/src/components/DesktopSettings'
 import { api } from '../../renderer/src/api'
 
 function renderSettings() {
-  return render(<DesktopSettings onClose={vi.fn()} />)
+  return render(
+    <MemoryRouter>
+      <DesktopSettings onClose={vi.fn()} />
+    </MemoryRouter>,
+  )
 }
 
 beforeEach(() => {

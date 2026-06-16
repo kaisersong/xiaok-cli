@@ -3,3 +3,4 @@ import type { CapabilityRegistry } from '../../platform/runtime/capability-regis
 import type { SkillCatalog, SkillMeta } from './loader.js';
 export declare function formatSkillPayload(skill: SkillMeta): string;
 export declare function createSkillTool(skills: SkillMeta[] | SkillCatalog, capabilityRegistry?: CapabilityRegistry): Tool;
+export declare function createSkillFetchAssetsTool(skills: SkillMeta[] | SkillCatalog): Tool;
