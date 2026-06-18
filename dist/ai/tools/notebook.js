@@ -71,7 +71,7 @@ export function createNotebookTools(store) {
             permission: 'safe',
             definition: {
                 name: 'notebook_read',
-                description: '读取个人短备忘（偏好、身份、约定）。注意：查找文档、知识、资料请改用 kb_search 工具，不要用此工具。',
+                description: '读取长期笔记本中的个人备忘、偏好、身份信息和历史约定。可与 kb_search 同时使用。',
                 inputSchema: {
                     type: 'object',
                     properties: {
