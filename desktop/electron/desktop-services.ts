@@ -3271,11 +3271,11 @@ function buildSystemPrompt(): string {
 - skill_uninstall: 卸载一个技能（当用户说"卸载XX技能"时使用）
 - skill_list: 列出已安装的技能
 - report_progress: 向用户报告任务执行计划和进度
-- notebook_write: 将重要信息写入长期记忆（用户说"记住"、"帮我记一下"时使用）
-- notebook_read: 读取长期记忆笔记本
+- notebook_write: 将简短的个人偏好、身份信息写入长期记忆（仅限短文本备忘）
+- notebook_read: 读取个人偏好和简短备忘（注意：文档和知识检索请用 kb_search，不要用 notebook_read）
 - kb_list_collections: 列出知识库集合
 - kb_create_collection: 创建知识库集合
-- kb_search: 在知识库中检索相关内容片段（需传 collection_id）
+- kb_search: 在知识库中检索文档和知识片段（用户问知识性问题时优先使用此工具）
 - kb_get_source: 获取知识库中某文档的完整内容（支持分页）
 - inspect_project: 检查 KSwarm 项目状态、卡住任务和最新可读产物
 - create_project: 创建 KSwarm 多智能体协作项目；仅当用户明确说"创建项目""建个项目""用工作流""多智能体协作"时才能调用；单人可完成的任务（写报告、做调研、生成文档等）禁止调用此工具，直接执行即可。用户明确要求 workflow/动态工作流时必须传 executionMode="workflow"
