@@ -4363,14 +4363,19 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
 
   // Register KB (knowledge base) tools
   try {
-    const electronApp = require('electron').app;
-    const kbDbPath = join(electronApp.getPath('userData'), 'knowledge.db');
+    const kbUserData = process.platform === 'win32'
+      ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'xiaok-desktop')
+      : join(homedir(), 'Library', 'Application Support', 'xiaok-desktop');
+    const kbDbPath = join(kbUserData, 'knowledge.db');
     const kbStore = createKbStoreSqlite(kbDbPath);
     const kbRetriever = createKbRetriever({ db: (kbStore as any)._db ?? ({} as any), embedFn: () => null });
     for (const tool of createKbTools(kbStore, kbRetriever)) {
       registry.registerTool(tool);
     }
-  } catch {}
+    console.log('[desktop-services] KB tools registered successfully');
+  } catch (e) {
+    console.error('[desktop-services] KB tools registration failed:', e);
+  }
 
   return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
