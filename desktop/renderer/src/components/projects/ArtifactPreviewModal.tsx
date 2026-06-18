@@ -159,8 +159,8 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
   };
 
   const modalSizeClass = fullscreen
-    ? 'inset-4 max-w-none max-h-none'
-    : 'w-full max-w-3xl max-h-[85vh]';
+    ? 'absolute inset-2'
+    : 'w-[90vw] max-w-5xl h-[90vh]';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
