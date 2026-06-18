@@ -5327,6 +5327,21 @@ function createDesktopModelRunnerWithRegistry(
     registry.registerTool(tool);
   }
 
+  // Register KB (knowledge base) tools
+  try {
+    const kbUserData = process.platform === 'win32'
+      ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'xiaok-desktop')
+      : join(homedir(), 'Library', 'Application Support', 'xiaok-desktop');
+    const kbDbPath = join(kbUserData, 'knowledge.db');
+    const kbStore = createKbStoreSqlite(kbDbPath);
+    const kbRetriever = createKbRetriever({ db: (kbStore as any)._db ?? ({} as any), embedFn: () => null });
+    for (const tool of createKbTools(kbStore, kbRetriever)) {
+      registry.registerTool(tool);
+    }
+  } catch (e) {
+    console.error('[desktop-services] KB tools registration failed in WithRegistry:', e);
+  }
+
   return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
