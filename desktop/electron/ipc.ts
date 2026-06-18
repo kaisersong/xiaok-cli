@@ -586,7 +586,17 @@ export async function registerDesktopIpc(
 
   let kbStore: import('./kb-store.js').KbStore | null = null;
   function getKbStore() {
-    if (!kbStore) kbStore = createKbStoreSqlite(join(app.getPath('userData'), 'knowledge.db'));
+    if (!kbStore) {
+      kbStore = createKbStoreSqlite(join(app.getPath('userData'), 'knowledge.db'));
+      if (kbStore.listCollections().length === 0) {
+        kbStore.createCollection({
+          name: '我的知识库',
+          description: '默认知识库集合',
+          embeddingModelId: 'bge-small-zh-v1.5',
+          embeddingDim: 512,
+        });
+      }
+    }
     return kbStore;
   }
 
@@ -643,30 +653,39 @@ export async function registerDesktopIpc(
 
   ipcMain.handle('desktop:kb:search', async (_event, input) => {
     log('info', 'kb:search', { collectionId: input?.collectionId, query: input?.query?.slice(0, 50) });
-    // For now use the store's listChunks to find BM25-like matches (simple substring filter)
     const store = getKbStore();
-    const chunks = store.listChunks ? store.listChunks(input?.sourceIds?.[0] ?? '') : [];
-    // Simple text filter fallback until retriever is wired
-    const query = (input?.query ?? '').toLowerCase();
+    const query = (input?.query ?? '').trim();
     const topK = input?.topK ?? 10;
     if (!query) return [];
-    const allSources = store.listSources(input?.collectionId ?? '');
-    const results: Array<{ chunkId: string; sourceId: string; sourceTitle: string; collectionId: string; text: string; score: number }> = [];
-    for (const src of allSources) {
+    const collectionId = input?.collectionId ?? '';
+    const sourceIds = input?.sourceIds as string[] | undefined;
+    const allSources = store.listSources(collectionId);
+    const filteredSources = sourceIds?.length ? allSources.filter(s => sourceIds.includes(s.id)) : allSources;
+    const terms = query.split(/[\s,，、]+/).filter(Boolean).map((t: string) => t.toLowerCase());
+    const results: Array<{ chunkId: string; sourceId: string; sourceTitle: string; collectionId: string; text: string; pageIndex: number | null; slideIndex: number | null; sheetName: string | null; bm25Score: number; vectorScore: number; fusedScore: number }> = [];
+    for (const src of filteredSources) {
       const srcChunks = store.listChunks(src.id);
       for (const chunk of srcChunks) {
-        if (chunk.text.toLowerCase().includes(query)) {
+        const lower = chunk.text.toLowerCase();
+        const matchCount = terms.filter((t: string) => lower.includes(t)).length;
+        if (matchCount > 0) {
           results.push({
             chunkId: chunk.id,
             sourceId: chunk.sourceId,
             sourceTitle: src.title,
             collectionId: chunk.collectionId,
             text: chunk.text,
-            score: 1,
+            pageIndex: chunk.pageIndex,
+            slideIndex: chunk.slideIndex,
+            sheetName: chunk.sheetName,
+            bm25Score: matchCount / terms.length,
+            vectorScore: 0,
+            fusedScore: matchCount / terms.length,
           });
         }
       }
     }
+    results.sort((a, b) => b.fusedScore - a.fusedScore);
     return results.slice(0, topK);
   });
 }
