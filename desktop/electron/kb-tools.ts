@@ -55,7 +55,7 @@ export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
       permission: 'safe',
       definition: {
         name: 'kb_search',
-        description: '在指定知识库集合中检索相关片段。返回按相关度排序的文本片段及其来源。',
+        description: '【知识检索】在用户的知识库中搜索已保存的文档和资料。当用户提问涉及知识、资料、文档内容时优先使用此工具。',
         inputSchema: {
           type: 'object',
           properties: {
