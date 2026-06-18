@@ -106,7 +106,10 @@
   "mac": {
     "target": ["dir", "dmg", "zip"],
     "icon": "build/icon.icns",
-    "category": "public.app-category.productivity"
+    "category": "public.app-category.productivity",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "notarize": true
   },
   "win": {
     "target": ["nsis", "portable"],
