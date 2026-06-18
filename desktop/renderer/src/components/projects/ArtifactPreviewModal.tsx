@@ -104,11 +104,15 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
   const handleSendToChat = async () => {
     try {
       const filePath = artifact.path || artifact.filename || '';
+      if (!filePath) return;
+      const prompt = `请阅读附件「${displayName}」并给出你的分析。`;
       const thread = await api.createThread({ title: `讨论：${displayName}`.slice(0, 40) });
+      const result = await api.createTaskWithFiles({ prompt, filePaths: [filePath] });
+      await api.updateThreadTaskId(thread.id, result.taskId);
       onClose();
       navigate(`/t/${thread.id}`, {
         state: {
-          initialPrompt: `请阅读附件「${displayName}」并给出你的分析。`,
+          initialPrompt: prompt,
           initialFiles: [{ filePath, name: displayName }],
         },
       });
