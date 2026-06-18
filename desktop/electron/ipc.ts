@@ -678,13 +678,23 @@ export async function registerDesktopIpc(
     const sourceIds = input?.sourceIds as string[] | undefined;
     const allSources = store.listSources(collectionId);
     const filteredSources = sourceIds?.length ? allSources.filter(s => sourceIds.includes(s.id)) : allSources;
-    const terms = query.split(/[\s,，、]+/).filter(Boolean).map((t: string) => t.toLowerCase());
+    const rawTerms = query.split(/[\s,，、]+/).filter(Boolean).map((t: string) => t.toLowerCase());
+    const terms: string[] = [];
+    for (const t of rawTerms) {
+      terms.push(t);
+      if (/[\u4e00-\u9fff]/.test(t) && t.length > 2) {
+        for (let i = 0; i < t.length - 1; i++) {
+          terms.push(t.slice(i, i + 2));
+        }
+      }
+    }
+    const uniqueTerms = [...new Set(terms)];
     const results: Array<{ chunkId: string; sourceId: string; sourceTitle: string; collectionId: string; text: string; pageIndex: number | null; slideIndex: number | null; sheetName: string | null; bm25Score: number; vectorScore: number; fusedScore: number }> = [];
     for (const src of filteredSources) {
       const srcChunks = store.listChunks(src.id);
       for (const chunk of srcChunks) {
         const lower = chunk.text.toLowerCase();
-        const matchCount = terms.filter((t: string) => lower.includes(t)).length;
+        const matchCount = uniqueTerms.filter((t: string) => lower.includes(t)).length;
         if (matchCount > 0) {
           results.push({
             chunkId: chunk.id,
@@ -695,9 +705,9 @@ export async function registerDesktopIpc(
             pageIndex: chunk.pageIndex,
             slideIndex: chunk.slideIndex,
             sheetName: chunk.sheetName,
-            bm25Score: matchCount / terms.length,
+            bm25Score: matchCount / uniqueTerms.length,
             vectorScore: 0,
-            fusedScore: matchCount / terms.length,
+            fusedScore: matchCount / uniqueTerms.length,
           });
         }
       }
