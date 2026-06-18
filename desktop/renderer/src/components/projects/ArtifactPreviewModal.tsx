@@ -176,7 +176,7 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
   };
 
   const modalSizeClass = fullscreen
-    ? 'absolute inset-0 m-2 max-w-none max-h-none'
+    ? 'w-[calc(100vw-32px)] h-[calc(100vh-32px)]'
     : 'w-[90vw] max-w-5xl h-[90vh]';
 
   return (
