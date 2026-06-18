@@ -46,7 +46,16 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
-Xiaok Desktop v1.4.8 把这套模型放到了产品界面里。Loop 不再藏在通用设置中；用户循环、定时任务、运行历史、诊断和输出预览统一进入“自动化”入口。一个定时任务可以触发一个 loop，一个 loop run 可以反查是哪次定时调度 claim 了它，界面也会把“调度是否按时执行”和“任务内容是否正确”分开呈现。
+Xiaok Desktop v1.4.9 把这套模型放到了产品界面里。Loop 不再藏在通用设置中；用户循环、定时任务、运行历史、诊断和输出预览统一进入”自动化”入口。一个定时任务可以触发一个 loop，一个 loop run 可以反查是哪次定时调度 claim 了它，界面也会把”调度是否按时执行”和”任务内容是否正确”分开呈现。
+
+**v1.4.9 新特性：**
+
+- **通用循环（task_completion）**：新增 `task_completion` 作为第二种循环类型。该类型以 AI 任务正常完成为成功判据，无需产出文件，适用于状态检查、数据同步、巡检等场景。未授权自动执行的定时触发会被 block 而非静默以 plan-only 模式空跑。
+- **Cult-UI 组件基础设施（第一批）**：引入 `class-variance-authority`、`tailwind-merge`、`clsx` 作为 UI 工具基础。新增三个适配后的 cult-ui 组件：`AnimatedNumber`（弹簧数字过渡）、`DirectionAwareTabs`（带共享布局滑块动画的 pill tabs）、`ExpandableCard`（可访问的折叠面板 + framer-motion 动效）。
+- **自动化页 Tabs 动效升级**：自动化页面 tab 切换现在使用 spring 动画滑块（与 ModeSwitch 同精度），替换原有静态 CSS pill。保留现有 accent 色、无障碍属性和键盘导航。
+- **Kimi for Coding 兼容修复**：修复使用 Kimi for Coding 端点时的 403 错误。OpenAI 和 Anthropic SDK 适配器现在会清除 `X-Stainless-*` 指纹头，并使用 Kimi 白名单接受的正确 User-Agent 格式 `claude-cli/1.0.0 (external, cli)`。
+- **KSwarm 残留进程替换**：Desktop 启动时通过源码 hash 比对检测版本不一致的 KSwarm 进程，自动 kill 后启动新版本，修复升级后”旧版本进程存活导致新版异常”的问题。
+- **验证覆盖**：v1.4.9 通过 88 个 loop 测试（含 task_completion 的 plan-mode block、超时、crash recovery）、316 个 renderer 测试、desktop 主进程/渲染器构建以及 `desktop-v1.4.9` release tag workflow 验证。
 
 **v1.4.8 新特性：**
 

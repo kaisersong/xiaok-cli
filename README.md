@@ -46,7 +46,16 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
-Xiaok Desktop v1.4.8 makes this model visible in the product. Loops are no longer buried in general settings: user loops, schedules, run history, diagnostics, and output previews are grouped under the Automations surface. A schedule can trigger a loop, a loop run can point back to the schedule run that claimed it, and the UI keeps scheduler status separate from task-content status.
+Xiaok Desktop v1.4.9 makes this model visible in the product. Loops are no longer buried in general settings: user loops, schedules, run history, diagnostics, and output previews are grouped under the Automations surface. A schedule can trigger a loop, a loop run can point back to the schedule run that claimed it, and the UI keeps scheduler status separate from task-content status.
+
+**What's New in v1.4.9:**
+
+- **Generic Task Completion Loops**: Introduces `task_completion` as a second loop kind alongside `markdown_file`. Task completion loops succeed when the AI task finishes without requiring a file artifact, enabling status checks, data syncs, and patrol tasks. Scheduled triggers with unapproved auto-run are blocked rather than silently running in plan-only mode.
+- **Cult-UI Component Foundation (Batch 1)**: Adds `class-variance-authority`, `tailwind-merge`, and `clsx` as foundational UI utilities. Ships three adapted cult-ui components: `AnimatedNumber` (spring-based number transitions), `DirectionAwareTabs` (pill tabs with shared-layout sliding animation), and `ExpandableCard` (accessible collapsible panels with framer-motion).
+- **Direction-Aware Automations Tabs**: The Automations page tabs now use a spring-animated sliding pill indicator (matching ModeSwitch precision), replacing the previous static CSS pill tabs. Preserves existing accent color, a11y attributes, and keyboard navigation.
+- **Kimi for Coding Compatibility**: Fixes 403 errors when using Kimi for Coding endpoints. The OpenAI and Anthropic SDK adapters now strip X-Stainless-* fingerprint headers and use the correct `claude-cli/1.0.0 (external, cli)` User-Agent format that Kimi's client whitelist accepts.
+- **KSwarm Stale Service Replacement**: Desktop startup now detects version-mismatched KSwarm processes (via source hash comparison) and kills them before spawning the correct version, fixing the "old version survives app close" issue after upgrades.
+- **Release Validation**: v1.4.9 is verified with 88 loop tests (store + executor + runner including task_completion plan-mode block, timeout, crash recovery), 316 renderer tests, desktop main/renderer builds, and the `desktop-v1.4.9` release tag workflow.
 
 **What's New in v1.4.8:**
 
