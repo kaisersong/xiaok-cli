@@ -5394,9 +5394,39 @@ function createDesktopModelRunnerWithRegistry(
       }
     }
 
-    const systemPrompt = skillsContext
+    let systemPrompt = skillsContext
       ? `${BASE_SYSTEM_PROMPT}\n\nAvailable skills:\n${skillsContext}`
       : BASE_SYSTEM_PROMPT;
+
+    // Auto-inject KB search results into system prompt
+    try {
+      const kbUserDataPath = process.platform === 'win32'
+        ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'xiaok-desktop')
+        : join(homedir(), 'Library', 'Application Support', 'xiaok-desktop');
+      const kbAutoStore = createKbStoreSqlite(join(kbUserDataPath, 'knowledge.db'));
+      const collections = kbAutoStore.listCollections();
+      if (collections.length > 0 && collections[0].chunkCountCached > 0) {
+        const { segmentQuery: segQ } = await import('../../src/ai/memory/segment.js');
+        const segmented = segQ(effectivePrompt);
+        const terms = [...new Set(segmented.split(/\s+/).filter(Boolean).map((t: string) => t.toLowerCase()))];
+        const allSources = kbAutoStore.listSources(collections[0].id);
+        const matches: string[] = [];
+        for (const src of allSources) {
+          const chunks = kbAutoStore.listChunks(src.id);
+          for (const chunk of chunks) {
+            const lower = chunk.text.toLowerCase();
+            if (terms.some(t => lower.includes(t)) && matches.length < 5) {
+              matches.push(`[${src.title}] ${chunk.text.slice(0, 300)}`);
+            }
+          }
+        }
+        if (matches.length > 0) {
+          systemPrompt += `\n\n## 知识库自动检索结果\n\n以下是从用户知识库中匹配到的内容，请优先参考：\n\n${matches.join('\n\n---\n\n')}`;
+        }
+      }
+      kbAutoStore.close();
+    } catch {}
+
     const userText = materialsContext
       ? `${effectivePrompt}${materialsContext}`
       : effectivePrompt;
