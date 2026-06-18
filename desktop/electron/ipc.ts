@@ -596,6 +596,7 @@ export async function registerDesktopIpc(
           embeddingDim: 512,
         });
       }
+      (kbStore as any)._db?.prepare("UPDATE sources SET parse_status = 'parsed' WHERE parse_status = 'pending' AND id IN (SELECT DISTINCT source_id FROM chunks)").run();
     }
     return kbStore;
   }

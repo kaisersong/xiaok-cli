@@ -84,10 +84,12 @@ export function KnowledgePage() {
       void loadSources(collectionId);
       setSearchResults([]);
       setSearchQuery('');
+    } else if (collections.length > 0) {
+      navigate(`/knowledge/${collections[0].id}`, { replace: true });
     } else {
       setSources([]);
     }
-  }, [collectionId, loadSources]);
+  }, [collectionId, collections, loadSources, navigate]);
 
   const handleCreateCollection = async () => {
     if (!desktop?.kbCreateCollection || !newCollectionName.trim()) return;
