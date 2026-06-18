@@ -6,7 +6,7 @@ import { estimateTokens } from '../runtime/usage.js';
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
-const KIMI_CODING_COMPAT_USER_AGENT = 'claude-code/1.0';
+const KIMI_CODING_COMPAT_USER_AGENT = 'claude-cli/1.0.0 (external, cli)';
 function isRetryableError(error) {
     if (isAbortError(error))
         return false;
@@ -169,7 +169,17 @@ export class OpenAIAdapter {
             defaultHeaders: {
                 ...(defaultHeaders ?? {}),
                 ...(isKimiCodingEndpoint(baseUrl)
-                    ? { 'User-Agent': KIMI_CODING_COMPAT_USER_AGENT }
+                    ? {
+                        'User-Agent': KIMI_CODING_COMPAT_USER_AGENT,
+                        'X-Stainless-Lang': null,
+                        'X-Stainless-Package-Version': null,
+                        'X-Stainless-OS': null,
+                        'X-Stainless-Arch': null,
+                        'X-Stainless-Runtime': null,
+                        'X-Stainless-Runtime-Version': null,
+                        'X-Stainless-Retry-Count': null,
+                        'X-Stainless-Timeout': null,
+                    }
                     : {}),
             },
         });

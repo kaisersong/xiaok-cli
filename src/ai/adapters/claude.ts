@@ -6,6 +6,31 @@ import type { CachedToolDefinition, ModelCapabilities, StreamOptions, SystemProm
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
+const KIMI_CODING_COMPAT_USER_AGENT = 'claude-cli/1.0.0 (external, cli)';
+
+function isKimiCodingEndpoint(baseUrl?: string): boolean {
+  if (!baseUrl) return false;
+  try {
+    const url = new URL(baseUrl);
+    return url.hostname === 'api.kimi.com' && url.pathname.startsWith('/coding');
+  } catch {
+    return false;
+  }
+}
+
+function buildKimiCompatHeaders(): Record<string, string | null> {
+  return {
+    'User-Agent': KIMI_CODING_COMPAT_USER_AGENT,
+    'X-Stainless-Lang': null,
+    'X-Stainless-Package-Version': null,
+    'X-Stainless-OS': null,
+    'X-Stainless-Arch': null,
+    'X-Stainless-Runtime': null,
+    'X-Stainless-Runtime-Version': null,
+    'X-Stainless-Retry-Count': null,
+    'X-Stainless-Timeout': null,
+  };
+}
 
 function isRetryableError(error: unknown): boolean {
   if (isAbortError(error)) return false;
@@ -67,6 +92,9 @@ export class ClaudeAdapter implements ModelAdapter {
           apiKey: this.apiKey,
           baseURL: this.baseUrl,
           maxRetries: MAX_RETRIES,
+          ...(isKimiCodingEndpoint(this.baseUrl)
+            ? { defaultHeaders: buildKimiCompatHeaders() as Record<string, string> }
+            : {}),
         });
         this.client = client;
         return client;
