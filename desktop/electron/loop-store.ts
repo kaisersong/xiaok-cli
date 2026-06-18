@@ -264,6 +264,38 @@ export class LoopStore {
     });
   }
 
+  updateUserLoopTemplate(loopId: string, patch: { title?: string; description?: string; prompt?: string; outputDirectory?: string; outputFileName?: string }): UserLoopTemplate | undefined {
+    return this.transaction(() => {
+      const now = Date.now();
+      if (patch.title !== undefined || patch.description !== undefined) {
+        const sets: string[] = ['updated_at = @now'];
+        const params: Record<string, unknown> = { loopId, now };
+        if (patch.title !== undefined) { sets.push('title = @title'); params.title = patch.title; }
+        if (patch.description !== undefined) { sets.push('description = @description'); params.description = patch.description; }
+        this.db.prepare(`update loop_definitions set ${sets.join(', ')} where id = @loopId`).run(params as any);
+      }
+      const tplSets: string[] = ['updated_at = @now'];
+      const tplParams: Record<string, unknown> = { loopId, now };
+      if (patch.prompt !== undefined) { tplSets.push('prompt = @prompt'); tplParams.prompt = patch.prompt; }
+      if (patch.outputDirectory !== undefined) { tplSets.push('output_directory = @outputDirectory'); tplParams.outputDirectory = patch.outputDirectory; }
+      if (patch.outputFileName !== undefined) { tplSets.push('output_file_name = @outputFileName'); tplParams.outputFileName = patch.outputFileName; }
+      if (tplSets.length > 1) {
+        this.db.prepare(`update user_loop_templates set ${tplSets.join(', ')} where loop_id = @loopId`).run(tplParams as any);
+      }
+      this.bumpAutomationStoreVersion();
+      return this.getUserLoopTemplate(loopId);
+    });
+  }
+
+  deleteUserLoopTemplate(loopId: string): void {
+    this.transaction(() => {
+      const now = Date.now();
+      this.db.prepare("delete from user_loop_templates where loop_id = ?").run(loopId);
+      this.db.prepare("update loop_definitions set status = 'deleted', deleted_at = @now, delete_reason = 'user_deleted', updated_at = @now where id = @loopId").run({ loopId, now });
+      this.bumpAutomationStoreVersion();
+    });
+  }
+
   beginLoopRun(loopId: string, trigger: LoopRunTrigger, now: number, staleAfterMs: number): BeginLoopRunResult {
     return this.transaction(() => {
       const definitionRow = this.getLoopDefinitionRow(loopId);

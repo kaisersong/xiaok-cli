@@ -109,6 +109,8 @@ export const PRELOAD_API_KEYS = [
   'getLoopDefinitions',
   'listUserLoopTemplates',
   'createUserLoopTemplate',
+  'updateUserLoopTemplate',
+  'deleteUserLoopTemplate',
   'createLoopSchedule',
   'getLoopScheduleBindings',
   'getAutomationOverviewSnapshot',
@@ -315,6 +317,8 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getLoopDefinitions: 'desktop:loops:listDefinitions',
   listUserLoopTemplates: 'desktop:loops:listUserTemplates',
   createUserLoopTemplate: 'desktop:loops:createUserTemplate',
+  updateUserLoopTemplate: 'desktop:loops:updateUserTemplate',
+  deleteUserLoopTemplate: 'desktop:loops:deleteUserTemplate',
   createLoopSchedule: 'desktop:loops:createSchedule',
   getLoopScheduleBindings: 'desktop:loops:getScheduleBindings',
   getAutomationOverviewSnapshot: 'desktop:automations:getOverviewSnapshot',
@@ -732,6 +736,8 @@ export interface DesktopApi {
   getLoopDefinitions(): Promise<unknown[]>;
   listUserLoopTemplates(): Promise<unknown[]>;
   createUserLoopTemplate(input: unknown): Promise<unknown>;
+  updateUserLoopTemplate(loopId: string, patch: unknown): Promise<unknown>;
+  deleteUserLoopTemplate(loopId: string): Promise<void>;
   createLoopSchedule(input: unknown): Promise<unknown>;
   getLoopScheduleBindings(): Promise<unknown[]>;
   getAutomationOverviewSnapshot(): Promise<unknown>;
@@ -1017,6 +1023,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getLoopDefinitions: () => ipcRenderer.invoke('desktop:loops:listDefinitions') as Promise<unknown[]>,
     listUserLoopTemplates: () => ipcRenderer.invoke('desktop:loops:listUserTemplates') as Promise<unknown[]>,
     createUserLoopTemplate: (input) => ipcRenderer.invoke('desktop:loops:createUserTemplate', input) as Promise<unknown>,
+    updateUserLoopTemplate: (loopId, patch) => ipcRenderer.invoke('desktop:loops:updateUserTemplate', loopId, patch) as Promise<unknown>,
+    deleteUserLoopTemplate: (loopId) => ipcRenderer.invoke('desktop:loops:deleteUserTemplate', loopId) as Promise<void>,
     createLoopSchedule: (input) => ipcRenderer.invoke('desktop:loops:createSchedule', input) as Promise<unknown>,
     getLoopScheduleBindings: () => ipcRenderer.invoke('desktop:loops:getScheduleBindings') as Promise<unknown[]>,
     getAutomationOverviewSnapshot: () => ipcRenderer.invoke('desktop:automations:getOverviewSnapshot') as Promise<unknown>,

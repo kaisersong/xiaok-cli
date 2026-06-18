@@ -383,6 +383,14 @@ export const api = {
     return await window.xiaokDesktop.createUserLoopTemplate(input) as CreateUserLoopTemplateResultView;
   },
 
+  async updateUserLoopTemplate(loopId: string, patch: { title?: string; description?: string; prompt?: string; outputDirectory?: string; outputFileName?: string }): Promise<unknown> {
+    return await window.xiaokDesktop.updateUserLoopTemplate(loopId, patch);
+  },
+
+  async deleteUserLoopTemplate(loopId: string): Promise<void> {
+    await window.xiaokDesktop.deleteUserLoopTemplate(loopId);
+  },
+
   async createLoopSchedule(input: CreateLoopScheduleInputView): Promise<TimedActionView> {
     return await window.xiaokDesktop.createLoopSchedule(input) as TimedActionView;
   },

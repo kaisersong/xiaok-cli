@@ -320,6 +320,16 @@ export async function registerDesktopIpc(
     const loopRuntime = getLoopRuntime(options);
     return loopRuntime.loopStore.createUserLoopTemplate(readCreateUserLoopTemplateInput(input));
   });
+  ipcMain.handle('desktop:loops:updateUserTemplate', (_event, loopId, patch) => {
+    const loopRuntime = getLoopRuntime(options);
+    const id = readLoopId(loopId);
+    return loopRuntime.loopStore.updateUserLoopTemplate(id, patch ?? {});
+  });
+  ipcMain.handle('desktop:loops:deleteUserTemplate', (_event, loopId) => {
+    const loopRuntime = getLoopRuntime(options);
+    const id = readLoopId(loopId);
+    loopRuntime.loopStore.deleteUserLoopTemplate(id);
+  });
   ipcMain.handle('desktop:loops:openOutputDirectory', async (_event, loopId) => {
     const loopRuntime = getLoopRuntime(options);
     const id = readLoopId(loopId);

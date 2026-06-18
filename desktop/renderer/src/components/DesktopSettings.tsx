@@ -1891,7 +1891,13 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
   const [newLoopPrompt, setNewLoopPrompt] = useState('');
   const [newLoopOutputDirectory, setNewLoopOutputDirectory] = useState('');
   const [newLoopOutputFileName, setNewLoopOutputFileName] = useState('');
-
+  const [editingLoopId, setEditingLoopId] = useState<string | null>(null);
+  const [editLoopTitle, setEditLoopTitle] = useState('');
+  const [editLoopPrompt, setEditLoopPrompt] = useState('');
+  const [editLoopDesc, setEditLoopDesc] = useState('');
+  const [editLoopOutputDir, setEditLoopOutputDir] = useState('');
+  const [editLoopOutputFile, setEditLoopOutputFile] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
   const loadLoops = useCallback(async (silent = false) => {
     if (!silent) setLoopDiagnosticsLoading(true);
     setLoopDiagnosticsError('');
@@ -1973,6 +1979,45 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       showToast(error instanceof Error ? error.message : t.desktopSettings.userLoopOutputPreviewUnavailable);
     } finally {
       setPreviewingLoopId(null);
+    }
+  };
+
+  const handleEditLoop = (template: UserLoopTemplateView, definition?: LoopDefinitionView) => {
+    setEditingLoopId(template.loopId);
+    setEditLoopTitle(definition?.title ?? '');
+    setEditLoopDesc(definition?.description ?? '');
+    setEditLoopPrompt(template.prompt ?? '');
+    setEditLoopOutputDir(template.outputDirectory ?? '');
+    setEditLoopOutputFile(template.outputFileName ?? '');
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingLoopId || !editLoopTitle.trim()) return;
+    setSavingEdit(true);
+    try {
+      await api.updateUserLoopTemplate(editingLoopId, {
+        title: editLoopTitle.trim(),
+        description: editLoopDesc.trim(),
+        prompt: editLoopPrompt.trim(),
+        outputDirectory: editLoopOutputDir.trim() || undefined,
+        outputFileName: editLoopOutputFile.trim() || undefined,
+      });
+      setEditingLoopId(null);
+      await loadLoops(true);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '保存失败');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDeleteLoop = async (loopId: string) => {
+    if (!confirm('确定要删除这个循环吗？')) return;
+    try {
+      await api.deleteUserLoopTemplate(loopId);
+      await loadLoops(true);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '删除失败');
     }
   };
 
@@ -2239,6 +2284,24 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                         <RefreshCw size={14} className={isRunning ? 'animate-spin' : ''} />
                         {buttonLabel}
                       </button>
+                      <button
+                        type="button"
+                        aria-label={`edit-loop-${template.loopId}`}
+                        onClick={() => handleEditLoop(template, definition)}
+                        className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
+                      >
+                        <Edit3 size={14} />
+                        {t.commonEdit}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`delete-loop-${template.loopId}`}
+                        onClick={() => void handleDeleteLoop(template.loopId)}
+                        className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5 text-red-500 hover:text-red-600`}
+                      >
+                        <Trash2 size={14} />
+                        {t.commonDelete}
+                      </button>
                     </div>
                     {outputPreview ? (
                       <div className="mt-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-3">
@@ -2260,6 +2323,36 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                         )}
                       </div>
                     ) : null}
+                    {editingLoopId === template.loopId && (
+                      <div className="mt-3 rounded-lg border border-[var(--c-accent)] bg-[var(--c-bg-page)] p-3">
+                        <div className="grid gap-2">
+                          <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
+                            {t.desktopSettings.userLoopTitleLabel}
+                            <input type="text" value={editLoopTitle} onChange={e => setEditLoopTitle(e.target.value)} className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]" />
+                          </label>
+                          <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
+                            {t.desktopSettings.userLoopPromptLabel}
+                            <textarea value={editLoopPrompt} onChange={e => setEditLoopPrompt(e.target.value)} rows={3} className="resize-none rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]" />
+                          </label>
+                          {template.kind === 'markdown_file' && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
+                                {t.desktopSettings.userLoopOutputDirectoryLabel}
+                                <input type="text" value={editLoopOutputDir} onChange={e => setEditLoopOutputDir(e.target.value)} className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]" />
+                              </label>
+                              <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
+                                {t.desktopSettings.userLoopOutputFileNameLabel}
+                                <input type="text" value={editLoopOutputFile} onChange={e => setEditLoopOutputFile(e.target.value)} className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]" />
+                              </label>
+                            </div>
+                          )}
+                          <div className="flex justify-end gap-2 pt-1">
+                            <button type="button" onClick={() => setEditingLoopId(null)} className={`${btnSecondary} px-3 py-1.5`}>取消</button>
+                            <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit || !editLoopTitle.trim()} className={`${btnPrimary} px-3 py-1.5`}>{savingEdit ? '保存中...' : '保存'}</button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
