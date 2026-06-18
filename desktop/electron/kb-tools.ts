@@ -7,6 +7,7 @@
 
 import type { Tool } from '../../src/types.js';
 import type { KbStore, KbRetriever } from './kb-store.js';
+import { segmentQuery } from '../../src/ai/memory/segment.js';
 
 export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
   return [
@@ -68,16 +69,44 @@ export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
         },
       },
       async execute(input) {
-        const results = await retriever.search({
-          query: input.query as string,
-          collectionId: input.collection_id as string,
-          sourceIds: input.source_ids as string[] | undefined,
-          topK: (input.top_k as number) || 10,
-        });
-        if (results.length === 0) return '未找到相关内容。';
-        return results.map((r, i) => {
+        const query = (input.query as string || '').trim();
+        const collectionId = input.collection_id as string;
+        const sourceIds = input.source_ids as string[] | undefined;
+        const topK = (input.top_k as number) || 10;
+        if (!query || !collectionId) return '未找到相关内容。';
+
+        const segmented = segmentQuery(query);
+        const uniqueTerms = [...new Set(segmented.split(/\s+/).filter(Boolean).map((t: string) => t.toLowerCase()))];
+        if (uniqueTerms.length === 0) return '未找到相关内容。';
+
+        const allSources = store.listSources(collectionId);
+        const filteredSources = sourceIds?.length ? allSources.filter(s => sourceIds.includes(s.id)) : allSources;
+        const results: Array<{ sourceTitle: string; text: string; pageIndex: number | null; slideIndex: number | null; sheetName: string | null; score: number }> = [];
+
+        for (const src of filteredSources) {
+          const srcChunks = store.listChunks(src.id);
+          for (const chunk of srcChunks) {
+            const lower = chunk.text.toLowerCase();
+            const matchCount = uniqueTerms.filter(t => lower.includes(t)).length;
+            if (matchCount > 0) {
+              results.push({
+                sourceTitle: src.title,
+                text: chunk.text,
+                pageIndex: chunk.pageIndex,
+                slideIndex: chunk.slideIndex,
+                sheetName: chunk.sheetName,
+                score: matchCount / uniqueTerms.length,
+              });
+            }
+          }
+        }
+
+        results.sort((a, b) => b.score - a.score);
+        const top = results.slice(0, topK);
+        if (top.length === 0) return '未找到相关内容。';
+        return top.map((r, i) => {
           const loc = r.pageIndex != null ? ` [第${r.pageIndex + 1}页]` : r.slideIndex != null ? ` [幻灯片${r.slideIndex + 1}]` : r.sheetName ? ` [${r.sheetName}]` : '';
-          return `${i + 1}. 「${r.sourceTitle}」${loc} (score: ${r.fusedScore.toFixed(3)})\n   ${r.text.slice(0, 200)}`;
+          return `${i + 1}. 「${r.sourceTitle}」${loc} (score: ${r.score.toFixed(3)})\n   ${r.text.slice(0, 200)}`;
         }).join('\n\n');
       },
     },
