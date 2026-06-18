@@ -108,6 +108,7 @@ export function WelcomePage() {
           onChange={setPrompt}
           onSubmit={handleSubmit}
           placeholder="描述你的工作需求..."
+          autoFocus
         />
       </div>
 

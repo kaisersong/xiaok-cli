@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import remarkGfm from 'remark-gfm';
+import { BookOpen } from 'lucide-react';
 import { ChatInput } from './ChatInput';
 import { ToolStepsMessage } from './ToolStepsMessage';
 import { ProjectInlineCard } from './projects/ProjectInlineCard';
@@ -477,12 +478,43 @@ function ResultCard({
   onArtifactClick?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
   onArtifactOpenExternal?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
 }) {
+  const [kbSaved, setKbSaved] = useState(false);
   const hasSummary = Boolean(result?.summary?.trim());
   const hasArtifacts = Boolean(result?.artifacts && result.artifacts.length > 0);
   if (!hasSummary && !hasArtifacts && generatedFiles.length === 0) return null;
 
+  const handleSaveToKb = async () => {
+    if (!result?.summary) return;
+    const desktop = (window as any).xiaokDesktop;
+    if (!desktop?.kbAddSource || !desktop?.kbListCollections) return;
+    try {
+      const collections = await desktop.kbListCollections();
+      const collectionId = collections?.[0]?.id;
+      if (!collectionId) return;
+      await desktop.kbAddSource({
+        collectionId,
+        kind: 'paste',
+        title: result.summary.slice(0, 50).replace(/[#*\n]/g, '').trim() || '任务结果',
+        text: result.summary,
+      });
+      setKbSaved(true);
+      setTimeout(() => setKbSaved(false), 2500);
+    } catch {}
+  };
+
   return (
-    <div className="rounded-xl border border-[var(--c-accent)]/30 bg-[var(--c-bg-card)] p-4">
+    <div className="relative rounded-xl border border-[var(--c-accent)]/30 bg-[var(--c-bg-card)] p-4">
+      {hasSummary && (
+        <button
+          type="button"
+          onClick={() => void handleSaveToKb()}
+          title="添加到知识库"
+          className={`absolute right-3 top-3 flex items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors ${kbSaved ? 'text-[var(--c-accent)]' : 'text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'}`}
+        >
+          <BookOpen size={13} />
+          {kbSaved && <span>已添加</span>}
+        </button>
+      )}
       {hasSummary && result ? (
         <MarkdownRenderer content={result.summary} />
       ) : null}

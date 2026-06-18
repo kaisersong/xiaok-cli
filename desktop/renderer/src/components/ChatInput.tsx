@@ -27,6 +27,7 @@ interface ChatInputProps {
   disabled?: boolean;
   isRunning?: boolean;
   onStop?: () => void;
+  autoFocus?: boolean;
 }
 
 const TEXTAREA_MAX_HEIGHT = 220;
@@ -35,7 +36,7 @@ function basename(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath;
 }
 
-export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder = '回复...', disabled, isRunning, onStop }: ChatInputProps) {
+export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder = '回复...', disabled, isRunning, onStop, autoFocus }: ChatInputProps) {
   const [internalValue, setInternalValue] = useState(value ?? '');
   const [files, setFiles] = useState<AttachedFile[]>([]);
   const [focused, setFocused] = useState(false);
@@ -133,6 +134,12 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
   useEffect(() => {
     api.listSkills().then(list => setSkills(list)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (autoFocus && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [autoFocus]);
 
   useEffect(() => {
     if (value !== undefined) setInternalValue(value);
