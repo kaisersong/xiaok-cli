@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { X, Download, BookOpen } from 'lucide-react';
+import { X, Download, BookOpen, Maximize2, Minimize2 } from 'lucide-react';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmArtifact } from '../../hooks/useKSwarmClient';
 import { artifactDisplayName, downloadArtifact, resolveArtifactUrl } from './artifactActions';
@@ -21,6 +21,7 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
   const [error, setError] = useState<string | null>(null);
   const [kbSaving, setKbSaving] = useState(false);
   const [kbSaved, setKbSaved] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const displayName = artifactDisplayName(artifact);
 
   const isPreviewable = /\.(md|markdown|html|htm|txt|json|svg)$/i.test(displayName) ||
@@ -46,12 +47,16 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
         }
         const api = getDesktopApi();
         let text: string;
-        const kswarmPrefix = '/api/kswarm';
         if (url.includes(':4400') && api?.kswarmProxyGetText) {
           const path = new URL(url).pathname;
           const data = await api.kswarmProxyGetText(path);
           if (data === null || data === undefined) throw new Error('fetch failed');
           text = data;
+        } else if (api?.readFileContent && (artifact.path || artifact.filename)) {
+          const filePath = artifact.path || artifact.filename || '';
+          const data = await api.readFileContent(filePath);
+          text = typeof data === 'string' ? data : (data as any)?.text ?? '';
+          if (!text) throw new Error('empty content');
         } else {
           const res = await fetch(url);
           if (!res.ok) throw new Error(`${res.status}`);
@@ -81,12 +86,12 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
         setKbSaving(false);
         return;
       }
-      await desktop.kbAddSource({
-        collectionId: cols[0].id,
-        kind: 'paste',
-        title: displayName,
-        text: content,
-      });
+      const filePath = artifact.path || artifact.filename;
+      if (filePath && /\.(pdf|docx|pptx|xlsx|html|htm)$/i.test(filePath)) {
+        await desktop.kbAddSource({ collectionId: cols[0].id, kind: 'file', title: displayName, filePath, mimeType: artifact.mimeType || 'application/octet-stream' });
+      } else {
+        await desktop.kbAddSource({ collectionId: cols[0].id, kind: 'paste', title: displayName, text: content });
+      }
       setKbSaved(true);
       setTimeout(() => setKbSaved(false), 2500);
     } catch { /* ignore */ }
@@ -131,13 +136,13 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
     if (isHtml) {
       const previewContent = prepareHtmlArtifactPreview(content);
       return (
-        <iframe srcDoc={previewContent} className="h-[60vh] w-full rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-white" sandbox="allow-same-origin" title={displayName} />
+        <iframe srcDoc={previewContent} className="h-full w-full rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-white" sandbox="allow-same-origin allow-scripts" title={displayName} />
       );
     }
 
     if (isMarkdown) {
       return (
-        <div className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg bg-[var(--c-md-code-block-bg)] p-4 text-[13px] text-[var(--c-text-primary)]">
+        <div className="h-full overflow-auto whitespace-pre-wrap rounded-lg bg-[var(--c-md-code-block-bg)] p-4 text-[13px] text-[var(--c-text-primary)]">
           {renderMarkdown(content)}
         </div>
       );
@@ -146,12 +151,16 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
     if (isJson) {
       try {
         const formatted = JSON.stringify(JSON.parse(content), null, 2);
-        return <pre className="max-h-[60vh] overflow-auto rounded-lg bg-[var(--c-md-code-block-bg)] p-4 text-[12px] font-mono text-[var(--c-text-primary)]">{formatted}</pre>;
+        return <pre className="h-full overflow-auto rounded-lg bg-[var(--c-md-code-block-bg)] p-4 text-[12px] font-mono text-[var(--c-text-primary)]">{formatted}</pre>;
       } catch { /* fallthrough */ }
     }
 
-    return <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg bg-[var(--c-md-code-block-bg)] p-4 text-[13px] text-[var(--c-text-primary)]">{content}</pre>;
+    return <pre className="h-full overflow-auto whitespace-pre-wrap rounded-lg bg-[var(--c-md-code-block-bg)] p-4 text-[13px] text-[var(--c-text-primary)]">{content}</pre>;
   };
+
+  const modalSizeClass = fullscreen
+    ? 'inset-4 max-w-none max-h-none'
+    : 'w-full max-w-3xl max-h-[85vh]';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -161,9 +170,9 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
         onClick={onClose}
         onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
       />
-      <div className="relative w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-2xl border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-page)] shadow-xl flex flex-col">
+      <div className={`relative ${modalSizeClass} overflow-hidden rounded-2xl border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-page)] shadow-xl flex flex-col`}>
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[var(--c-border-subtle)] px-5 py-3">
+        <div className="flex items-center justify-between border-b border-[var(--c-border-subtle)] px-5 py-3 shrink-0">
           <div className="min-w-0 flex-1">
             <p className="text-[13px] font-medium text-[var(--c-text-heading)] truncate">{displayName}</p>
             <p className="text-[10px] text-[var(--c-text-muted)]">{artifact.mimeType || t.projectsDeliverableUnknownType}</p>
@@ -188,12 +197,15 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
                 )}
               </button>
             )}
+            <button type="button" aria-label="Toggle fullscreen" onClick={() => setFullscreen(f => !f)} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title={fullscreen ? '退出全屏' : '全屏'}>
+              {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            </button>
             <button type="button" aria-label="Download artifact" onClick={handleDownload} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title="下载"><Download size={15} /></button>
             <button type="button" aria-label="Close artifact preview" onClick={onClose} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]"><X size={15} /></button>
           </div>
         </div>
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-5">{renderContent()}</div>
+        <div className="flex-1 min-h-0 p-5">{renderContent()}</div>
       </div>
     </div>
   );
