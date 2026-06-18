@@ -54,6 +54,7 @@ export function KnowledgePage() {
   const [searchResults, setSearchResults] = useState<KbSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [privacyDismissed, setPrivacyDismissed] = useState(() => localStorage.getItem('kb-privacy-dismissed') === '1');
 
   const desktop = getDesktopApi();
 
@@ -235,6 +236,25 @@ export function KnowledgePage() {
           </button>
         </div>
       </header>
+
+      {/* Privacy notice */}
+      {!privacyDismissed && (
+        <div className="mx-6 mt-3 flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+          <span className="mt-0.5 shrink-0 text-base">🔒</span>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-blue-800">
+              知识库内容仅保存在本地设备，不会上传到任何服务器。但当 AI 检索知识库时，命中的文本会发送给当前对话使用的模型。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => { localStorage.setItem('kb-privacy-dismissed', '1'); setPrivacyDismissed(true); }}
+            className="shrink-0 rounded-md border border-blue-300 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+          >
+            知道了
+          </button>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         {/* Left: Collection list */}

@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { X, Download } from 'lucide-react';
+import { X, Download, BookOpen } from 'lucide-react';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmArtifact } from '../../hooks/useKSwarmClient';
 import { artifactDisplayName, downloadArtifact, resolveArtifactUrl } from './artifactActions';
@@ -19,6 +19,8 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [kbSaving, setKbSaving] = useState(false);
+  const [kbSaved, setKbSaved] = useState(false);
   const displayName = artifactDisplayName(artifact);
 
   const isPreviewable = /\.(md|markdown|html|htm|txt|json|svg)$/i.test(displayName) ||
@@ -67,6 +69,28 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
 
   const handleDownload = () => {
     downloadArtifact(artifact);
+  };
+
+  const handleSaveToKb = async () => {
+    const desktop = getDesktopApi();
+    if (!desktop?.kbListCollections || !desktop?.kbAddSource || !content) return;
+    setKbSaving(true);
+    try {
+      const cols = await desktop.kbListCollections() as Array<{ id: string; name: string }>;
+      if (cols.length === 0) {
+        setKbSaving(false);
+        return;
+      }
+      await desktop.kbAddSource({
+        collectionId: cols[0].id,
+        kind: 'paste',
+        title: displayName,
+        text: content,
+      });
+      setKbSaved(true);
+      setTimeout(() => setKbSaved(false), 2500);
+    } catch { /* ignore */ }
+    setKbSaving(false);
   };
 
   const isHtml = /\.(html|htm|svg)$/i.test(displayName) || artifact.mimeType?.includes('html') || artifact.mimeType?.includes('svg');
@@ -145,6 +169,25 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
             <p className="text-[10px] text-[var(--c-text-muted)]">{artifact.mimeType || t.projectsDeliverableUnknownType}</p>
           </div>
           <div className="flex items-center gap-1">
+            {content && (
+              <button
+                type="button"
+                aria-label="添加到知识库"
+                onClick={() => void handleSaveToKb()}
+                disabled={kbSaving}
+                className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] disabled:opacity-50"
+                title="添加到知识库"
+              >
+                {kbSaved ? (
+                  <span className="text-[11px] text-green-600">已添加</span>
+                ) : (
+                  <>
+                    <BookOpen size={14} />
+                    <span className="text-[11px]">知识库</span>
+                  </>
+                )}
+              </button>
+            )}
             <button type="button" aria-label="Download artifact" onClick={handleDownload} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title="下载"><Download size={15} /></button>
             <button type="button" aria-label="Close artifact preview" onClick={onClose} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]"><X size={15} /></button>
           </div>

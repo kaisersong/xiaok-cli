@@ -6,6 +6,7 @@ import { ProjectInlineCard } from './projects/ProjectInlineCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { A2uiArtifactBlock } from './a2ui/A2uiArtifactBlock';
 import { api } from '../api';
+import { getDesktopApi } from '../shared/desktop';
 import type { ThreadRecord } from '../api/types';
 import type { ArtifactSummary, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
 import { A2UI_MIME_TYPE, isA2UIMimeType } from '../../../../src/a2ui/index.js';
@@ -35,6 +36,109 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
         </svg>
       )}
     </button>
+  );
+}
+
+function SaveToKbButton({ text, className }: { text: string; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const [collections, setCollections] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [title, setTitle] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  const handleOpen = async () => {
+    const desktop = getDesktopApi();
+    if (!desktop?.kbListCollections) return;
+    try {
+      const cols = await desktop.kbListCollections() as Array<{ id: string; name: string }>;
+      setCollections(cols);
+      if (cols.length > 0 && !selectedId) setSelectedId(cols[0].id);
+    } catch { /* ignore */ }
+    setOpen(true);
+  };
+
+  const handleSave = async () => {
+    const desktop = getDesktopApi();
+    if (!desktop?.kbAddSource || !selectedId || !text.trim()) return;
+    setSaving(true);
+    try {
+      await desktop.kbAddSource({
+        collectionId: selectedId,
+        kind: 'paste',
+        title: title.trim() || '对话摘录',
+        text,
+      });
+      setOpen(false);
+      setTitle('');
+      setToast('已添加到知识库');
+      setTimeout(() => setToast(null), 2000);
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  // Close popover on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <span className={`relative inline-flex ${className ?? ''}`}>
+      <button
+        type="button"
+        onClick={() => void handleOpen()}
+        title="收藏到知识库"
+        className="flex items-center justify-center rounded p-1 text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2 2h12v14l-6-3-6 3V2z" />
+        </svg>
+      </button>
+      {open && (
+        <div ref={popoverRef} className="absolute left-0 top-full z-50 mt-1 w-64 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-3 shadow-lg">
+          <p className="mb-2 text-xs font-medium text-[var(--c-text-primary)]">收藏到知识库</p>
+          {collections.length === 0 ? (
+            <p className="text-xs text-[var(--c-text-tertiary)]">暂无集合，请先在知识库页面创建</p>
+          ) : (
+            <>
+              <select
+                value={selectedId}
+                onChange={e => setSelectedId(e.target.value)}
+                className="mb-2 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-2 py-1 text-xs outline-none"
+              >
+                {collections.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                placeholder="标题（可选）"
+                className="mb-2 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-2 py-1 text-xs outline-none"
+              />
+              <div className="flex justify-end gap-1.5">
+                <button type="button" onClick={() => setOpen(false)} className="rounded px-2 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">取消</button>
+                <button type="button" onClick={() => void handleSave()} disabled={saving} className="rounded bg-[var(--c-accent)] px-2 py-1 text-xs text-white disabled:opacity-50">{saving ? '保存中…' : '保存'}</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {toast && (
+        <span className="absolute left-0 top-full z-50 mt-1 whitespace-nowrap rounded-md border border-green-200 bg-green-50 px-2 py-1 text-xs text-green-700 shadow-sm">
+          {toast}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -169,8 +273,9 @@ export function ChatView({
                     <div data-role="user" className="max-w-[85%] rounded-2xl rounded-br-sm px-4 py-3 text-sm text-[var(--c-text-primary)] whitespace-pre-wrap break-words select-text" style={{ background: 'rgb(235,235,235)' }}>
                       {msg.content}
                     </div>
-                    <div className="mt-0.5 flex justify-end opacity-0 transition-opacity group-hover/usermsg:opacity-100">
+                    <div className="mt-0.5 flex justify-end gap-0.5 opacity-0 transition-opacity group-hover/usermsg:opacity-100">
                       <CopyButton text={msg.content} />
+                      <SaveToKbButton text={msg.content} />
                     </div>
                   </>
                 ) : msg.role === 'progress' ? (
@@ -245,8 +350,9 @@ export function ChatView({
                       onArtifactOpenExternal={onArtifactOpenExternal}
                     />
                     {msg.result?.summary?.trim() && (
-                      <div className="mt-0.5 opacity-0 transition-opacity group-hover/resultmsg:opacity-100">
+                      <div className="mt-0.5 flex gap-0.5 opacity-0 transition-opacity group-hover/resultmsg:opacity-100">
                         <CopyButton text={msg.result.summary} />
+                        <SaveToKbButton text={msg.result.summary} />
                       </div>
                     )}
                   </div>
@@ -255,8 +361,9 @@ export function ChatView({
                     <div className="max-w-[663px] text-sm text-[var(--c-text-primary)] leading-relaxed select-text">
                       <MarkdownRenderer content={msg.content} />
                     </div>
-                    <div className="mt-0.5 opacity-0 transition-opacity group-hover/assistantmsg:opacity-100">
+                    <div className="mt-0.5 flex gap-0.5 opacity-0 transition-opacity group-hover/assistantmsg:opacity-100">
                       <CopyButton text={msg.content} />
+                      <SaveToKbButton text={msg.content} />
                     </div>
                   </>
                 )}
