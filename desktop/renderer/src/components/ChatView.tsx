@@ -378,8 +378,8 @@ export function ChatView({
               </div>
             )}
 
-            {/* Result card + generated files */}
-            {(result && (status === 'completed' || status === 'idle')) || generatedFiles.length > 0 ? (
+            {/* Result card + generated files (only if not already shown as a message) */}
+            {!messages.some(m => m.role === 'result_card') && ((result && (status === 'completed' || status === 'idle')) || generatedFiles.length > 0) ? (
               <ResultCard
                 result={result}
                 generatedFiles={generatedFiles}
@@ -605,26 +605,36 @@ function ResultCard({
           {generatedFiles.map(f => {
             const ext = f.name?.split('.').pop()?.toUpperCase() || 'FILE';
             return (
-              <button
+              <div
                 key={f.filePath}
-                type="button"
-                onClick={(e) => {
-                  const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
-                  if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
-                  else onArtifactClick?.(info);
-                }}
-                className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)] cursor-pointer"
-                data-testid={`generated-file-${f.name}`}
+                className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)]"
               >
-                <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
-                  {'</>'}
+                <div
+                  className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
+                  onClick={(e) => {
+                    const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
+                    if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
+                    else onArtifactClick?.(info);
+                  }}
+                  data-testid={`generated-file-${f.name}`}
+                >
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
+                    {'</>'}
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-col items-start">
+                    <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{f.name}</span>
+                    <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
+                  </div>
                 </div>
-                <div className="flex min-w-0 flex-1 flex-col items-start">
-                  <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{f.name}</span>
-                  <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
-                </div>
-                <span className="shrink-0 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)]">打开</span>
-              </button>
+                <ArtifactKbButton artifactId={f.filePath} title={f.name} filePath={f.filePath} />
+                <span
+                  className="shrink-0 cursor-pointer rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
+                  onClick={() => {
+                    const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
+                    onArtifactClick?.(info);
+                  }}
+                >打开</span>
+              </div>
             );
           })}
         </div>
