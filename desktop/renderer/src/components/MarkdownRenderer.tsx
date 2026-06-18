@@ -3,7 +3,7 @@ import remarkGfm from 'remark-gfm';
 import { memo, type ReactNode, Children } from 'react';
 import { MermaidBlock } from './MermaidBlock';
 
-const FILE_PATH_RE = /(\/(?:Users|home|tmp|var|etc|opt)\/[\w./ -]+)/g;
+const FILE_PATH_RE = /(\/(?:Users|home|tmp|var|etc|opt)\/[\w./ -]+|[A-Z]:\\(?:Users|home)\\[\w.\\ -]+)/g;
 
 function linkifyFilePaths(children: ReactNode): ReactNode {
   return Children.map(children, child => {

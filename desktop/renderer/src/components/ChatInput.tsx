@@ -28,6 +28,7 @@ interface ChatInputProps {
   isRunning?: boolean;
   onStop?: () => void;
   autoFocus?: boolean;
+  initialFiles?: AttachedFile[];
 }
 
 const TEXTAREA_MAX_HEIGHT = 220;
@@ -36,9 +37,9 @@ function basename(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath;
 }
 
-export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder = '回复...', disabled, isRunning, onStop, autoFocus }: ChatInputProps) {
+export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder = '回复...', disabled, isRunning, onStop, autoFocus, initialFiles }: ChatInputProps) {
   const [internalValue, setInternalValue] = useState(value ?? '');
-  const [files, setFiles] = useState<AttachedFile[]>([]);
+  const [files, setFiles] = useState<AttachedFile[]>(initialFiles ?? []);
   const [focused, setFocused] = useState(false);
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
@@ -69,7 +70,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       // so we don't mistake a copied image file for a screenshot paste.
       const plainText = e.clipboardData?.getData('text/plain') ?? '';
       const lines = plainText.split(/\r?\n/).flatMap(l => { const t = l.trim(); return t ? [t] : []; });
-      const pathLines = lines.filter(l => /^\/[\w./ -]+$/.test(l));
+      const pathLines = lines.filter(l => /^\/[\w./ -]+$/.test(l) || /^[A-Z]:\\[\w.\\ -]+$/i.test(l));
       if (pathLines.length > 0 && pathLines.length === lines.length) {
         if (finderFilesPendingRef.current) {
           e.preventDefault();

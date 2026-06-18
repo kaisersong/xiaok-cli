@@ -222,7 +222,8 @@ export function ChatView({
   prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
   onComputerUseAction, onComputerUseDismiss,
   canvasOpen, onToggleCanvas, onArtifactClick, onArtifactOpenExternal,
-}: ChatViewProps) {
+  initialFiles,
+}: ChatViewProps & { initialFiles?: Array<{ filePath: string; name: string; isImage?: boolean }> }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
@@ -458,6 +459,7 @@ export function ChatView({
           disabled={status === 'waiting_user'}
           isRunning={status === 'running'}
           onStop={onCancel}
+          initialFiles={initialFiles}
         />
         <p className="text-[11px] text-[var(--c-text-tertiary)] text-center select-none">
           xiaok desktop v{__APP_VERSION__}

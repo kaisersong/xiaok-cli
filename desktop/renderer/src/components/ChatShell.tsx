@@ -1075,6 +1075,7 @@ export function ChatShell() {
           onComputerUseAction={handleComputerUseAction}
           onComputerUseDismiss={handleComputerUseDismiss}
           canvasOpen={canvasOpen}
+          initialFiles={!initialPrompt && initialFiles ? initialFiles.map(f => ({ filePath: f.filePath || '', name: f.name || f.originalName || '', isImage: false })) : undefined}
           onToggleCanvas={() => setCanvasOpen(v => !v)}
           onArtifactClick={async (artifact) => {
             let content = '';
