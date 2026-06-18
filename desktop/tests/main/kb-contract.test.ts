@@ -14,44 +14,9 @@ import { join } from 'node:path';
 import type { KbStore, Chunker, SourceExtractor } from '../../electron/kb-store.js';
 import type { Collection, Source, Chunk } from '../../electron/kb-types.js';
 
-// Stub factory — PR-A will replace with real implementation import
-function createStubKbStore(_dbPath: string): KbStore {
-  const notImpl = () => { throw new Error('not implemented'); };
-  return {
-    createCollection: notImpl,
-    getCollection: notImpl,
-    listCollections: notImpl,
-    renameCollection: notImpl,
-    deleteCollection: notImpl,
-    addSource: notImpl,
-    getSource: notImpl,
-    listSources: notImpl,
-    deleteSource: notImpl,
-    retrySource: notImpl,
-    getSourceEmbeddingProgress: notImpl,
-    insertChunks: notImpl,
-    listChunks: notImpl,
-    markChunkEmbedded: notImpl,
-    markChunkFailed: notImpl,
-    getCollectionState: notImpl,
-    getSourceWithContent: notImpl,
-    close: () => {},
-  };
-}
-
-function createStubChunker(): Chunker {
-  return {
-    chunk: () => { throw new Error('not implemented'); },
-  };
-}
-
-function createStubSourceExtractor(): SourceExtractor {
-  return {
-    extract: async () => { throw new Error('not implemented'); },
-    extractFromUrl: async () => { throw new Error('not implemented'); },
-    extractFromText: () => { throw new Error('not implemented'); },
-  };
-}
+import { createKbStoreSqlite } from '../../electron/kb-store-sqlite.js';
+import { createChunker } from '../../electron/kb-chunker.js';
+import { createSourceExtractor } from '../../electron/kb-source-extractor.js';
 
 describe('KB Contract — KbStore', () => {
   let rootDir: string;
@@ -60,7 +25,7 @@ describe('KB Contract — KbStore', () => {
   beforeEach(() => {
     rootDir = join(tmpdir(), `xiaok-kb-contract-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(rootDir, { recursive: true });
-    store = createStubKbStore(join(rootDir, 'knowledge.db'));
+    store = createKbStoreSqlite(join(rootDir, 'knowledge.db'));
   });
 
   afterEach(() => {
@@ -176,7 +141,12 @@ describe('KB Contract — KbStore', () => {
 
   it('getSourceWithContent supports offset/limit pagination', () => {
     const col = store.createCollection({ name: 'J', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'long', text: 'a'.repeat(100) });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'long' });
+    // Insert chunks manually (ingest pipeline would do this in production)
+    store.insertChunks(src.id, [
+      { idx: 0, text: 'a'.repeat(50), charStart: 0, charEnd: 50 },
+      { idx: 1, text: 'b'.repeat(50), charStart: 50, charEnd: 100 },
+    ]);
     const result = store.getSourceWithContent(src.id, 0, 50);
     expect(result).toBeDefined();
     expect(result!.text).toHaveLength(50);
@@ -188,7 +158,7 @@ describe('KB Contract — KbStore', () => {
 
 describe('KB Contract — Chunker', () => {
   it('splits text into overlapping chunks', () => {
-    const chunker = createStubChunker();
+    const chunker = createChunker();
     const result = chunker.chunk({ text: 'a'.repeat(1600) });
     expect(result.length).toBeGreaterThan(1);
     expect(result[0].charStart).toBe(0);
@@ -197,17 +167,22 @@ describe('KB Contract — Chunker', () => {
   });
 
   it('preserves page index for PDF-like content', () => {
-    const chunker = createStubChunker();
+    const chunker = createChunker();
+    // Need text long enough to produce multiple chunks
+    const page1 = 'a'.repeat(600);
+    const page2 = 'b'.repeat(600);
+    const text = page1 + page2;
     const result = chunker.chunk({
-      text: 'page1 content\n\npage2 content',
-      pageBreaks: [14],
+      text,
+      pageBreaks: [600],
     });
+    expect(result.length).toBeGreaterThan(1);
     const page2Chunks = result.filter(c => c.pageIndex === 1);
     expect(page2Chunks.length).toBeGreaterThan(0);
   });
 
   it('handles empty text', () => {
-    const chunker = createStubChunker();
+    const chunker = createChunker();
     const result = chunker.chunk({ text: '' });
     expect(result).toEqual([]);
   });
@@ -226,7 +201,7 @@ describe('KB Contract — SourceExtractor', () => {
   });
 
   it('extracts text from a plain text file', async () => {
-    const extractor = createStubSourceExtractor();
+    const extractor = createSourceExtractor();
     const filePath = join(rootDir, 'test.txt');
     writeFileSync(filePath, 'hello world');
     const result = await extractor.extract({ filePath, mimeType: 'text/plain' });
@@ -235,14 +210,14 @@ describe('KB Contract — SourceExtractor', () => {
   });
 
   it('extracts text from pasted content', () => {
-    const extractor = createStubSourceExtractor();
+    const extractor = createSourceExtractor();
     const result = extractor.extractFromText('some notes', 'My Notes');
     expect(result.ok).toBe(true);
     expect(result.text).toBe('some notes');
   });
 
   it('returns error for unsupported format', async () => {
-    const extractor = createStubSourceExtractor();
+    const extractor = createSourceExtractor();
     const filePath = join(rootDir, 'test.exe');
     writeFileSync(filePath, Buffer.alloc(10));
     const result = await extractor.extract({ filePath, mimeType: 'application/x-msdownload' });
