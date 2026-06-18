@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { X, FileText, Download, Eye, Code } from 'lucide-react'
+import { X, FileText, Download, Eye, Code, BookOpen } from 'lucide-react'
 import { apiBaseUrl } from '../shared/api/client'
 import type { ArtifactRef } from '../storage'
 import { MarkdownRenderer } from './MarkdownRenderer'
@@ -38,6 +38,27 @@ export function DocumentPanel({ artifact, artifacts, accessToken, runId, onClose
   const [downloadDone, setDownloadDone] = useState(false)
   const [downloadPressed, setDownloadPressed] = useState(false)
   const [closePressed, setClosePressed] = useState(false)
+  const [kbSaved, setKbSaved] = useState(false)
+  const [kbSavePressed, setKbSavePressed] = useState(false)
+
+  const handleSaveToKb = useCallback(async () => {
+    if (loadState.status !== 'text' || !loadState.content) return
+    const desktop = (window as any).xiaokDesktop
+    if (!desktop?.kbAddSource || !desktop?.kbListCollections) return
+    try {
+      const collections = await desktop.kbListCollections()
+      const collectionId = collections?.[0]?.id
+      if (!collectionId) return
+      await desktop.kbAddSource({
+        collectionId,
+        kind: 'paste',
+        title: artifact.display_name || artifact.key,
+        text: loadState.content,
+      })
+      setKbSaved(true)
+      setTimeout(() => setKbSaved(false), 2000)
+    } catch {}
+  }, [loadState, artifact])
 
   useEffect(() => {
     setLoadState({ status: 'loading' })
@@ -190,6 +211,33 @@ export function DocumentPanel({ artifact, artifacts, accessToken, runId, onClose
                 <Code size={14} />
               </button>
             </div>
+          )}
+          {loadState.status === 'text' && (
+            <button type="button"
+              onClick={() => void handleSaveToKb()}
+              title="添加到知识库"
+              onPointerDown={() => setKbSavePressed(true)}
+              onPointerUp={() => setKbSavePressed(false)}
+              onPointerLeave={() => setKbSavePressed(false)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: `${actionButtonSize}px`,
+                height: `${actionButtonSize}px`,
+                borderRadius: '8px',
+                border: 'none',
+                background: 'transparent',
+                color: kbSaved ? 'var(--c-accent)' : 'var(--c-text-secondary)',
+                cursor: 'pointer',
+                transform: kbSavePressed ? 'scale(0.96)' : 'scale(1)',
+                transition: 'background 150ms, color 150ms, transform 80ms ease-out',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--c-bg-deep)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+            >
+              {kbSaved ? <AnimatedCheck size={16} /> : <BookOpen size={16} />}
+            </button>
           )}
           <button type="button"
             onClick={() => void handleDownload()}
