@@ -938,13 +938,15 @@ function isRecord(input: unknown): input is Record<string, unknown> {
 async function expandSelectedMaterialPaths(paths: string[]): Promise<string[]> {
   const files: string[] = [];
   for (const path of paths) {
-    const entry = await stat(path);
-    if (entry.isFile()) {
-      files.push(path);
-      continue;
-    }
-    if (entry.isDirectory()) {
-      files.push(...await listFilesInDirectory(path));
+    try {
+      const entry = await stat(path);
+      if (entry.isFile()) {
+        files.push(path);
+      } else if (entry.isDirectory()) {
+        files.push(...await listFilesInDirectory(path));
+      }
+    } catch {
+      // Skip non-existent paths (e.g. pasted text that looks like a path)
     }
   }
   return files.sort();

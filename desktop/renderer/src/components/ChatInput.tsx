@@ -69,8 +69,8 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       // so we don't mistake a copied image file for a screenshot paste.
       const plainText = e.clipboardData?.getData('text/plain') ?? '';
       const lines = plainText.split(/\r?\n/).flatMap(l => { const t = l.trim(); return t ? [t] : []; });
-      const pathLines = lines.filter(l => l.startsWith('/'));
-      if (pathLines.length > 0) {
+      const pathLines = lines.filter(l => /^\/[\w./ -]+$/.test(l));
+      if (pathLines.length > 0 && pathLines.length === lines.length) {
         if (finderFilesPendingRef.current) {
           e.preventDefault();
           return;
