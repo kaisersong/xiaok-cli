@@ -1992,6 +1992,7 @@ export const zh: LocaleStrings = {
   sidebarNoResults: "无结果",
   sidebarNoRecent: "暂无最近任务",
   sidebarRename: "重命名",
+  sidebarKnowledge: "知识库",
 
   // automations page
   automationsTitle: "自动化",

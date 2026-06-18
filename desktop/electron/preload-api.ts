@@ -151,6 +151,14 @@ export const PRELOAD_API_KEYS = [
   'saveConnectorsConfig',
   'listConnectorRuntimes',
   'testConnectorProvider',
+  'kbListCollections',
+  'kbCreateCollection',
+  'kbDeleteCollection',
+  'kbListSources',
+  'kbAddSource',
+  'kbDeleteSource',
+  'kbGetCollectionState',
+  'kbSearch',
 ] as const;
 
 export const KSWARM_PROXY_KEYS = [
@@ -347,6 +355,14 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   saveConnectorsConfig: 'desktop:saveConnectorsConfig',
   listConnectorRuntimes: 'desktop:listConnectorRuntimes',
   testConnectorProvider: 'desktop:testConnectorProvider',
+  kbListCollections: 'desktop:kb:listCollections',
+  kbCreateCollection: 'desktop:kb:createCollection',
+  kbDeleteCollection: 'desktop:kb:deleteCollection',
+  kbListSources: 'desktop:kb:listSources',
+  kbAddSource: 'desktop:kb:addSource',
+  kbDeleteSource: 'desktop:kb:deleteSource',
+  kbGetCollectionState: 'desktop:kb:getCollectionState',
+  kbSearch: 'desktop:kb:search',
   // KSwarm proxy
   kswarmProxyGet: 'desktop:kswarm:proxy:get',
   kswarmProxyGetText: 'desktop:kswarm:proxy:getText',
@@ -757,6 +773,16 @@ export interface DesktopApi {
   listConnectorRuntimes(): Promise<ProviderRuntime[]>;
   testConnectorProvider(kind: 'search' | 'fetch'): Promise<ConnectorTestResult>;
 
+  // Knowledge Base
+  kbListCollections(): Promise<unknown[]>;
+  kbCreateCollection(input: unknown): Promise<unknown>;
+  kbDeleteCollection(id: string): Promise<void>;
+  kbListSources(collectionId: string): Promise<unknown[]>;
+  kbAddSource(input: unknown): Promise<unknown>;
+  kbDeleteSource(id: string): Promise<void>;
+  kbGetCollectionState(collectionId: string): Promise<unknown>;
+  kbSearch(input: unknown): Promise<unknown[]>;
+
   // Thread meta (GTD / pinned)
   getThreadLabels(): Promise<ThreadMetaSnapshot>;
   setThreadLabel(threadId: string, label: string): Promise<ThreadMetaWriteResult>;
@@ -1039,6 +1065,14 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     saveConnectorsConfig: (input) => ipcRenderer.invoke('desktop:saveConnectorsConfig', input) as Promise<ConnectorsConfigSnapshot>,
     listConnectorRuntimes: () => ipcRenderer.invoke('desktop:listConnectorRuntimes') as Promise<ProviderRuntime[]>,
     testConnectorProvider: (kind) => ipcRenderer.invoke('desktop:testConnectorProvider', kind) as Promise<ConnectorTestResult>,
+    kbListCollections: () => ipcRenderer.invoke('desktop:kb:listCollections') as Promise<unknown[]>,
+    kbCreateCollection: (input) => ipcRenderer.invoke('desktop:kb:createCollection', input) as Promise<unknown>,
+    kbDeleteCollection: (id) => ipcRenderer.invoke('desktop:kb:deleteCollection', id) as Promise<void>,
+    kbListSources: (collectionId) => ipcRenderer.invoke('desktop:kb:listSources', collectionId) as Promise<unknown[]>,
+    kbAddSource: (input) => ipcRenderer.invoke('desktop:kb:addSource', input) as Promise<unknown>,
+    kbDeleteSource: (id) => ipcRenderer.invoke('desktop:kb:deleteSource', id) as Promise<void>,
+    kbGetCollectionState: (collectionId) => ipcRenderer.invoke('desktop:kb:getCollectionState', collectionId) as Promise<unknown>,
+    kbSearch: (input) => ipcRenderer.invoke('desktop:kb:search', input) as Promise<unknown[]>,
     getThreadLabels: () => ipcRenderer.invoke('desktop:getThreadLabels') as Promise<ThreadMetaSnapshot>,
     setThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:setThreadLabel', threadId, label) as Promise<ThreadMetaWriteResult>,
     unsetThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:unsetThreadLabel', threadId, label) as Promise<ThreadMetaWriteResult>,

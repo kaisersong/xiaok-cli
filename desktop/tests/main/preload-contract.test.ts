@@ -137,6 +137,14 @@ describe('preload API contract', () => {
       'saveConnectorsConfig',
       'listConnectorRuntimes',
       'testConnectorProvider',
+      'kbListCollections',
+      'kbCreateCollection',
+      'kbDeleteCollection',
+      'kbListSources',
+      'kbAddSource',
+      'kbDeleteSource',
+      'kbGetCollectionState',
+      'kbSearch',
     ]);
   });
 

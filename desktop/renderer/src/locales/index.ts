@@ -1930,6 +1930,7 @@ export interface LocaleStrings {
   sidebarNoResults: string;
   sidebarNoRecent: string;
   sidebarRename: string;
+  sidebarKnowledge: string;
 
   // automations page
   automationsTitle: string;

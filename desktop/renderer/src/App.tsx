@@ -5,6 +5,7 @@ import { ChatShell } from './components/ChatShell';
 import { AutomationsPage } from './components/automations/AutomationsPage';
 import { ProjectsPage } from './components/projects/ProjectsPage';
 import { ProjectDetailPage } from './components/projects/ProjectDetailPage';
+import { KnowledgePage } from './components/KnowledgePage';
 import { useScheduledTaskBootstrap } from './hooks/useScheduledTaskBootstrap';
 
 export function App() {
@@ -20,6 +21,8 @@ export function App() {
         <Route path="automations/:tab" element={<AutomationsPage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/:projectId" element={<ProjectDetailPage />} />
+        <Route path="knowledge" element={<KnowledgePage />} />
+        <Route path="knowledge/:collectionId" element={<KnowledgePage />} />
       </Route>
     </Routes>
   );

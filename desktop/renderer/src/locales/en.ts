@@ -2012,6 +2012,7 @@ export const en: LocaleStrings = {
   sidebarNoResults: "No results",
   sidebarNoRecent: "No recent tasks",
   sidebarRename: "Rename",
+  sidebarKnowledge: "Knowledge",
 
   // automations page
   automationsTitle: "Automations",

@@ -577,6 +577,98 @@ export async function registerDesktopIpc(
     log('info', 'deletePrinciple result', result);
     return result;
   });
+
+  // ---- Knowledge Base ----
+  const { createKbStoreSqlite } = await import('./kb-store-sqlite.js');
+  const { createChunker } = await import('./kb-chunker.js');
+  const { createSourceExtractor } = await import('./kb-source-extractor.js');
+  const { app } = await import('electron');
+
+  let kbStore: import('./kb-store.js').KbStore | null = null;
+  function getKbStore() {
+    if (!kbStore) kbStore = createKbStoreSqlite(join(app.getPath('userData'), 'knowledge.db'));
+    return kbStore;
+  }
+
+  ipcMain.handle('desktop:kb:listCollections', async () => {
+    log('info', 'kb:listCollections');
+    return getKbStore().listCollections();
+  });
+
+  ipcMain.handle('desktop:kb:createCollection', async (_event, input) => {
+    log('info', 'kb:createCollection', { name: input?.name });
+    return getKbStore().createCollection(input);
+  });
+
+  ipcMain.handle('desktop:kb:deleteCollection', async (_event, id: string) => {
+    log('info', 'kb:deleteCollection', { id });
+    getKbStore().deleteCollection(id);
+  });
+
+  ipcMain.handle('desktop:kb:listSources', async (_event, collectionId: string) => {
+    log('info', 'kb:listSources', { collectionId });
+    return getKbStore().listSources(collectionId);
+  });
+
+  ipcMain.handle('desktop:kb:addSource', async (_event, input) => {
+    log('info', 'kb:addSource', { kind: input?.kind, title: input?.title });
+    const store = getKbStore();
+    const source = store.addSource(input);
+    // For 'paste' kind, run extractor + chunker synchronously
+    if (input?.kind === 'paste' && input?.text) {
+      try {
+        const extractor = createSourceExtractor();
+        const result = extractor.extractFromText(input.text, input.title || 'Pasted text');
+        if (result.ok && result.text) {
+          const chunker = createChunker();
+          const chunks = chunker.chunk({ text: result.text, mimeType: result.mimeType });
+          store.insertChunks(source.id, chunks);
+        }
+      } catch (e) {
+        log('error', 'kb:addSource paste processing failed', String(e));
+      }
+    }
+    return source;
+  });
+
+  ipcMain.handle('desktop:kb:deleteSource', async (_event, id: string) => {
+    log('info', 'kb:deleteSource', { id });
+    getKbStore().deleteSource(id);
+  });
+
+  ipcMain.handle('desktop:kb:getCollectionState', async (_event, collectionId: string) => {
+    log('info', 'kb:getCollectionState', { collectionId });
+    return getKbStore().getCollectionState(collectionId);
+  });
+
+  ipcMain.handle('desktop:kb:search', async (_event, input) => {
+    log('info', 'kb:search', { collectionId: input?.collectionId, query: input?.query?.slice(0, 50) });
+    // For now use the store's listChunks to find BM25-like matches (simple substring filter)
+    const store = getKbStore();
+    const chunks = store.listChunks ? store.listChunks(input?.sourceIds?.[0] ?? '') : [];
+    // Simple text filter fallback until retriever is wired
+    const query = (input?.query ?? '').toLowerCase();
+    const topK = input?.topK ?? 10;
+    if (!query) return [];
+    const allSources = store.listSources(input?.collectionId ?? '');
+    const results: Array<{ chunkId: string; sourceId: string; sourceTitle: string; collectionId: string; text: string; score: number }> = [];
+    for (const src of allSources) {
+      const srcChunks = store.listChunks(src.id);
+      for (const chunk of srcChunks) {
+        if (chunk.text.toLowerCase().includes(query)) {
+          results.push({
+            chunkId: chunk.id,
+            sourceId: chunk.sourceId,
+            sourceTitle: src.title,
+            collectionId: chunk.collectionId,
+            text: chunk.text,
+            score: 1,
+          });
+        }
+      }
+    }
+    return results.slice(0, topK);
+  });
 }
 
 function getLoopRuntime(options: RegisterDesktopIpcOptions): NonNullable<RegisterDesktopIpcOptions['loopRuntime']> {
