@@ -4363,20 +4363,11 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
 
   // Register KB (knowledge base) tools
   try {
-    const kbDbPath = join(dataRoot, 'knowledge.db');
+    const electronApp = require('electron').app;
+    const kbDbPath = join(electronApp.getPath('userData'), 'knowledge.db');
     const kbStore = createKbStoreSqlite(kbDbPath);
     const kbRetriever = createKbRetriever({ db: (kbStore as any)._db ?? ({} as any), embedFn: () => null });
     for (const tool of createKbTools(kbStore, kbRetriever)) {
-      registry.registerTool(tool);
-    }
-  } catch {}
-
-  // Register KB (knowledge base) tools
-  try {
-    const kbDbPath2 = join(dataRoot, 'knowledge.db');
-    const kbStore2 = createKbStoreSqlite(kbDbPath2);
-    const kbRetriever2 = createKbRetriever({ db: (kbStore2 as any)._db ?? ({} as any), embedFn: () => null });
-    for (const tool of createKbTools(kbStore2, kbRetriever2)) {
       registry.registerTool(tool);
     }
   } catch {}
