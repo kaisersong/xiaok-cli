@@ -1887,6 +1887,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
   const [creatingLoop, setCreatingLoop] = useState(false);
   const [createLoopError, setCreateLoopError] = useState('');
   const [newLoopTitle, setNewLoopTitle] = useState('');
+  const [newLoopKind, setNewLoopKind] = useState<'markdown_file' | 'task_completion'>('task_completion');
   const [newLoopPrompt, setNewLoopPrompt] = useState('');
   const [newLoopOutputDirectory, setNewLoopOutputDirectory] = useState('');
   const [newLoopOutputFileName, setNewLoopOutputFileName] = useState('');
@@ -1995,6 +1996,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
 
   const resetCreateForm = () => {
     setNewLoopTitle('');
+    setNewLoopKind('task_completion');
     setNewLoopPrompt('');
     setNewLoopOutputDirectory('');
     setNewLoopOutputFileName('');
@@ -2005,12 +2007,18 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
     const input: CreateUserLoopTemplateInputView = {
       loopId: createUserLoopId(),
       title: newLoopTitle.trim(),
-      kind: 'markdown_file',
+      kind: newLoopKind,
       prompt: newLoopPrompt.trim(),
-      outputDirectory: newLoopOutputDirectory.trim(),
-      outputFileName: newLoopOutputFileName.trim(),
+      ...(newLoopKind === 'markdown_file' ? {
+        outputDirectory: newLoopOutputDirectory.trim(),
+        outputFileName: newLoopOutputFileName.trim(),
+      } : {}),
     };
-    if (!input.title || !input.prompt || !input.outputDirectory || !input.outputFileName) {
+    if (!input.title || !input.prompt) {
+      setCreateLoopError(t.desktopSettings.userLoopCreateMissingFields);
+      return;
+    }
+    if (newLoopKind === 'markdown_file' && (!newLoopOutputDirectory.trim() || !newLoopOutputFileName.trim())) {
       setCreateLoopError(t.desktopSettings.userLoopCreateMissingFields);
       return;
     }
@@ -2050,7 +2058,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
             className={`${btnPrimary} inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5`}
           >
             <Plus size={14} />
-            {t.desktopSettings.newMarkdownLoop}
+            {t.desktopSettings.newLoop}
           </button>
         </div>
         <Card>
@@ -2072,6 +2080,18 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                   />
                 </label>
                 <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
+                  {t.desktopSettings.userLoopKindLabel}
+                  <select
+                    aria-label={t.desktopSettings.userLoopKindLabel}
+                    value={newLoopKind}
+                    onChange={(event) => setNewLoopKind(event.target.value as 'markdown_file' | 'task_completion')}
+                    className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]"
+                  >
+                    <option value="task_completion">{t.desktopSettings.userLoopKindTaskCompletion}</option>
+                    <option value="markdown_file">{t.desktopSettings.userLoopKindMarkdownFile}</option>
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
                   {t.desktopSettings.userLoopPromptLabel}
                   <textarea
                     aria-label={t.desktopSettings.userLoopPromptLabel}
@@ -2081,7 +2101,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                     className="resize-none rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]"
                   />
                 </label>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {newLoopKind === 'markdown_file' ? <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
                     {t.desktopSettings.userLoopOutputDirectoryLabel}
                     <input
@@ -2102,7 +2122,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                       className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]"
                     />
                   </label>
-                </div>
+                </div> : null}
               </div>
               {createLoopError ? (
                 <div className="mt-3 rounded-md border border-[var(--c-status-error-text)]/20 bg-[var(--c-status-error-bg,#fef2f2)] px-3 py-2 text-xs text-[var(--c-status-error-text)]">

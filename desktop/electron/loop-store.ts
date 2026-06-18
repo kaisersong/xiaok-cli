@@ -171,6 +171,8 @@ export class LoopStore {
   createUserLoopTemplate(input: CreateUserLoopTemplateInput): CreateUserLoopTemplateResult {
     validateUserLoopTemplateInput(input);
     const ignoredLegacyScheduleFields = legacyScheduleFieldsIn(input);
+    const outputDirectory = input.kind === 'task_completion' ? '' : input.outputDirectory;
+    const outputFileName = input.kind === 'task_completion' ? '' : input.outputFileName;
     return this.transaction(() => {
       this.db.prepare(`
         insert into loop_definitions (
@@ -200,8 +202,8 @@ export class LoopStore {
         loopId: input.loopId,
         kind: input.kind,
         prompt: input.prompt,
-        outputDirectory: input.outputDirectory,
-        outputFileName: input.outputFileName,
+        outputDirectory,
+        outputFileName,
         createdAt: input.now,
         updatedAt: input.now,
       });
@@ -480,6 +482,19 @@ export class LoopStore {
       }
       this.bumpAutomationStoreVersion();
       return stage;
+    });
+  }
+
+  updateLoopStageMetadata(stageId: string, patch: Record<string, unknown>): void {
+    const stage = this.getLoopStage(stageId);
+    if (!stage) return;
+    const merged = { ...stage.metadata, ...patch };
+    this.db.prepare(`
+      update loop_stages set metadata_json = @metadataJson, updated_at = @updatedAt where id = @id
+    `).run({
+      id: stageId,
+      metadataJson: JSON.stringify(merged),
+      updatedAt: Date.now(),
     });
   }
 
@@ -914,20 +929,22 @@ function typedRows<T>(rows: unknown): T[] {
 }
 
 function validateUserLoopTemplateInput(input: CreateUserLoopTemplateInput): void {
-  if (input.kind !== 'markdown_file') {
+  if (input.kind === 'markdown_file') {
+    if (!isAbsolute(input.outputDirectory)) {
+      throw new Error('User loop outputDirectory must be an absolute path.');
+    }
+    if (!isSafeLoopOutputFileName(input.outputFileName)) {
+      throw new Error('User loop outputFileName must be a file name, not a path.');
+    }
+    const outputDirectory = resolve(input.outputDirectory);
+    const outputPath = resolve(outputDirectory, input.outputFileName);
+    if (dirname(outputPath) !== outputDirectory) {
+      throw new Error('User loop outputFileName must be a file name, not a path.');
+    }
+  } else if (input.kind === 'task_completion') {
+    // task_completion: no output path validation needed
+  } else {
     throw new Error('Unsupported user loop template kind.');
-  }
-  if (!isAbsolute(input.outputDirectory)) {
-    throw new Error('User loop outputDirectory must be an absolute path.');
-  }
-  if (!isSafeLoopOutputFileName(input.outputFileName)) {
-    throw new Error('User loop outputFileName must be a file name, not a path.');
-  }
-
-  const outputDirectory = resolve(input.outputDirectory);
-  const outputPath = resolve(outputDirectory, input.outputFileName);
-  if (dirname(outputPath) !== outputDirectory) {
-    throw new Error('User loop outputFileName must be a file name, not a path.');
   }
 }
 

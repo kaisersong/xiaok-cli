@@ -1,7 +1,7 @@
 import { clipboard, dialog, shell, type BrowserWindow, type IpcMain } from 'electron';
 import { lstat, mkdir, open as openFile, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
 import type { DesktopLoopRuntime } from './loop-executor.js';
 import type { CreateUserLoopTemplateInput, UserLoopTemplate } from './loop-types.js';
@@ -14,6 +14,19 @@ interface RegisterDesktopIpcOptions {
 }
 
 const LOOP_OUTPUT_PREVIEW_LIMIT_BYTES = 256 * 1024;
+const DATA_URL_MIME_BY_EXTENSION = new Map<string, string>([
+  ['.pdf', 'application/pdf'],
+]);
+
+function getDataUrlMimeType(filePath: string): string | null {
+  return DATA_URL_MIME_BY_EXTENSION.get(extname(filePath).toLowerCase()) ?? null;
+}
+
+function decodeBase64DataUrl(content: string): Buffer | null {
+  const match = /^data:[^,;]+(?:;[^,]*)*;base64,([\s\S]*)$/i.exec(content);
+  if (!match) return null;
+  return Buffer.from(match[1], 'base64');
+}
 
 function log(level: string, msg: string, ...args: unknown[]) {
   const ts = new Date().toISOString();
@@ -165,6 +178,11 @@ export async function registerDesktopIpc(
     const filePath = input?.filePath as string;
     log('info', 'readFileContent', { filePath });
     try {
+      const dataUrlMimeType = getDataUrlMimeType(filePath);
+      if (dataUrlMimeType) {
+        const content = await readFile(filePath);
+        return { content: `data:${dataUrlMimeType};base64,${content.toString('base64')}` };
+      }
       const content = await readFile(filePath, 'utf-8');
       return { content };
     } catch (e) {
@@ -523,7 +541,12 @@ export async function registerDesktopIpc(
   ipcMain.handle('desktop:saveFile', async (_event, input: { filePath: string; content: string }) => {
     log('info', 'saveFile', { filePath: input?.filePath });
     try {
-      await writeFile(input.filePath, input.content, 'utf-8');
+      const binaryContent = decodeBase64DataUrl(input.content);
+      if (binaryContent) {
+        await writeFile(input.filePath, binaryContent);
+      } else {
+        await writeFile(input.filePath, input.content, 'utf-8');
+      }
       log('info', 'saveFile ok');
       return { success: true };
     } catch (e) {
@@ -704,19 +727,27 @@ function readCreateUserLoopTemplateInput(input: unknown): CreateUserLoopTemplate
   if (!isRecord(input)) {
     throw new Error('user loop template input must be an object');
   }
-  if (input.kind !== 'markdown_file') {
-    throw new Error('user loop template kind must be markdown_file');
+  if (input.kind !== 'markdown_file' && input.kind !== 'task_completion') {
+    throw new Error('user loop template kind must be markdown_file or task_completion');
   }
-  const result: CreateUserLoopTemplateInput = {
+  const base = {
     loopId: readLoopId(input.loopId),
     title: readNonEmptyString(input.title, 'title'),
     description: typeof input.description === 'string' ? input.description : undefined,
-    kind: 'markdown_file',
     prompt: readNonEmptyString(input.prompt, 'prompt'),
-    outputDirectory: readNonEmptyString(input.outputDirectory, 'outputDirectory'),
-    outputFileName: readNonEmptyString(input.outputFileName, 'outputFileName'),
     now: Date.now(),
   };
+  let result: CreateUserLoopTemplateInput;
+  if (input.kind === 'task_completion') {
+    result = { ...base, kind: 'task_completion' };
+  } else {
+    result = {
+      ...base,
+      kind: 'markdown_file',
+      outputDirectory: readNonEmptyString(input.outputDirectory, 'outputDirectory'),
+      outputFileName: readNonEmptyString(input.outputFileName, 'outputFileName'),
+    };
+  }
   if (Object.prototype.hasOwnProperty.call(input, 'scheduleEnabled')) {
     result.scheduleEnabled = input.scheduleEnabled === true;
   }

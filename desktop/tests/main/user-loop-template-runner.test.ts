@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -369,3 +370,229 @@ function taskSnapshot(taskId: string, status: TaskSnapshot['status']): TaskSnaps
     updatedAt: 2_000,
   };
 }
+
+describe('UserLoopTemplateRunner — task_completion kind', () => {
+  let rootDir: string;
+  let loopStore: LoopStore;
+  let evidenceStore: CompletionEvidenceStore;
+  let now: number;
+
+  beforeEach(() => {
+    rootDir = join(tmpdir(), `xiaok-task-completion-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(rootDir, { recursive: true });
+    loopStore = new LoopStore(join(rootDir, 'loops.sqlite'));
+    evidenceStore = new CompletionEvidenceStore(join(rootDir, 'completion-evidence.sqlite'));
+    now = 2_000;
+    loopStore.createUserLoopTemplate({
+      loopId: 'tc-loop-1',
+      title: 'Health Check',
+      kind: 'task_completion',
+      prompt: 'Check if all services are healthy.',
+      now: 1_000,
+    });
+  });
+
+  afterEach(() => {
+    evidenceStore.close();
+    loopStore.close();
+    rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('succeeds when task completes — no verify stage, evidence kind is answer', async () => {
+    const taskPort: UserLoopTaskPort = {
+      createTask: vi.fn().mockResolvedValue({ taskId: 'task_tc_success' }),
+      recoverTask: vi.fn().mockResolvedValue({ snapshot: taskSnapshot('task_tc_success', 'completed') }),
+      cancelTask: vi.fn(async () => undefined),
+    };
+    const run = expectStarted(loopStore.beginLoopRun('tc-loop-1', { kind: 'manual' }, 2_000, 60_000));
+    const runner = createUserLoopTemplateRunner({
+      loopStore,
+      evidenceStore,
+      taskPort,
+      now: () => now,
+    });
+
+    const result = await runner.runTemplateLoop({
+      loopId: 'tc-loop-1',
+      runId: run.id,
+      trigger: { kind: 'manual' },
+    });
+
+    expect(result).toMatchObject({ status: 'success' });
+    expect(taskPort.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'Check if all services are healthy.',
+      permissionMode: 'default',
+    }));
+    const finishedRun = loopStore.getLoopRun(run.id)!;
+    expect(finishedRun.status).toBe('success');
+    expect(finishedRun.summary).toContain('task_tc_success');
+    expect(finishedRun.summary).toContain('Check if all services');
+    // Only execute stage, no verify
+    const stages = loopStore.listLoopStages(run.id);
+    expect(stages).toHaveLength(1);
+    expect(stages[0]).toMatchObject({ stageKind: 'execute', status: 'success' });
+    // Evidence is 'answer' kind
+    const evidence = evidenceStore.listEvidenceForOwner('loop_run', run.id);
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]).toMatchObject({
+      kind: 'answer',
+      metadata: expect.objectContaining({ taskId: 'task_tc_success', promptPreview: expect.any(String) }),
+    });
+  });
+
+  it('fails when task fails', async () => {
+    const taskPort: UserLoopTaskPort = {
+      createTask: vi.fn().mockResolvedValue({ taskId: 'task_tc_fail' }),
+      recoverTask: vi.fn().mockResolvedValue({ snapshot: taskSnapshot('task_tc_fail', 'failed') }),
+      cancelTask: vi.fn(async () => undefined),
+    };
+    const run = expectStarted(loopStore.beginLoopRun('tc-loop-1', { kind: 'manual' }, 2_000, 60_000));
+    const runner = createUserLoopTemplateRunner({
+      loopStore,
+      evidenceStore,
+      taskPort,
+      now: () => now,
+    });
+
+    const result = await runner.runTemplateLoop({
+      loopId: 'tc-loop-1',
+      runId: run.id,
+      trigger: { kind: 'manual' },
+    });
+
+    expect(result).toMatchObject({ status: 'failed' });
+    expect(loopStore.getLoopRun(run.id)!.status).toBe('failed');
+    expect(loopStore.getLoopRun(run.id)!.message).toContain('failed');
+  });
+
+  it('blocks when scheduled trigger with autoRunApproved=false (plan mode)', async () => {
+    const taskPort: UserLoopTaskPort = {
+      createTask: vi.fn().mockResolvedValue({ taskId: 'should_not_be_created' }),
+      recoverTask: vi.fn(),
+      cancelTask: vi.fn(),
+    };
+    const run = expectStarted(loopStore.beginLoopRun('tc-loop-1', { kind: 'scheduled' }, 2_000, 60_000));
+    const runner = createUserLoopTemplateRunner({
+      loopStore,
+      evidenceStore,
+      taskPort,
+      now: () => now,
+    });
+
+    const result = await runner.runTemplateLoop({
+      loopId: 'tc-loop-1',
+      runId: run.id,
+      trigger: { kind: 'scheduled' },
+    });
+
+    expect(result).toMatchObject({ status: 'blocked' });
+    expect(loopStore.getLoopRun(run.id)!.status).toBe('blocked');
+    expect(loopStore.getLoopRun(run.id)!.nextActionKind).toBe('awaiting_auto_run_approval');
+    // Task should NOT be created
+    expect(taskPort.createTask).not.toHaveBeenCalled();
+  });
+
+  it('succeeds for scheduled trigger when autoRunApproved=true', async () => {
+    // Create a loop and manually set autoRunApproved (legacy field ignored on create)
+    loopStore.createUserLoopTemplate({
+      loopId: 'tc-loop-approved',
+      title: 'Approved Loop',
+      kind: 'task_completion',
+      prompt: 'Do the thing.',
+      now: 1_000,
+    });
+    // autoRunApproved is a legacy field ignored on create; set via raw DB
+    const db = new DatabaseSync(join(rootDir, 'loops.sqlite'));
+    db.prepare("update user_loop_templates set auto_run_approved = 1 where loop_id = 'tc-loop-approved'").run();
+    db.close();
+    const taskPort: UserLoopTaskPort = {
+      createTask: vi.fn().mockResolvedValue({ taskId: 'task_approved' }),
+      recoverTask: vi.fn().mockResolvedValue({ snapshot: taskSnapshot('task_approved', 'completed') }),
+      cancelTask: vi.fn(async () => undefined),
+    };
+    const run = expectStarted(loopStore.beginLoopRun('tc-loop-approved', { kind: 'scheduled' }, 2_000, 60_000));
+    const runner = createUserLoopTemplateRunner({
+      loopStore,
+      evidenceStore,
+      taskPort,
+      now: () => now,
+    });
+
+    const result = await runner.runTemplateLoop({
+      loopId: 'tc-loop-approved',
+      runId: run.id,
+      trigger: { kind: 'scheduled' },
+    });
+
+    expect(result).toMatchObject({ status: 'success' });
+    expect(taskPort.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      permissionMode: 'default',
+    }));
+  });
+
+  it('reports timeout as auto-cancelled', async () => {
+    let pollCount = 0;
+    const taskPort: UserLoopTaskPort = {
+      createTask: vi.fn().mockResolvedValue({ taskId: 'task_timeout' }),
+      recoverTask: vi.fn(async () => {
+        pollCount++;
+        if (pollCount > 3) {
+          return { snapshot: taskSnapshot('task_timeout', 'cancelled') };
+        }
+        return { snapshot: taskSnapshot('task_timeout', 'running' as TaskSnapshot['status']) };
+      }),
+      cancelTask: vi.fn(async () => undefined),
+    };
+    const run = expectStarted(loopStore.beginLoopRun('tc-loop-1', { kind: 'manual' }, 2_000, 60_000));
+    const runner = createUserLoopTemplateRunner({
+      loopStore,
+      evidenceStore,
+      taskPort,
+      now: () => now,
+      maxRunMs: 50,
+      pollIntervalMs: 10,
+      sleep: async () => { /* instant */ },
+    });
+
+    const result = await runner.runTemplateLoop({
+      loopId: 'tc-loop-1',
+      runId: run.id,
+      trigger: { kind: 'manual' },
+    });
+
+    expect(result).toMatchObject({ status: 'failed' });
+    expect(loopStore.getLoopRun(run.id)!.message).toContain('cancelled');
+  });
+
+  it('persists taskId to stage metadata immediately after task creation', async () => {
+    const taskPort: UserLoopTaskPort = {
+      createTask: vi.fn().mockResolvedValue({ taskId: 'task_persist_id' }),
+      recoverTask: vi.fn().mockResolvedValue({ snapshot: taskSnapshot('task_persist_id', 'completed') }),
+      cancelTask: vi.fn(async () => undefined),
+    };
+    const run = expectStarted(loopStore.beginLoopRun('tc-loop-1', { kind: 'manual' }, 2_000, 60_000));
+    const runner = createUserLoopTemplateRunner({
+      loopStore,
+      evidenceStore,
+      taskPort,
+      now: () => now,
+    });
+
+    await runner.runTemplateLoop({
+      loopId: 'tc-loop-1',
+      runId: run.id,
+      trigger: { kind: 'manual' },
+    });
+
+    const stages = loopStore.listLoopStages(run.id);
+    expect(stages[0].metadata).toMatchObject({ taskId: 'task_persist_id' });
+  });
+
+  it('does not require outputDirectory or outputFileName for creation', () => {
+    // Verify the template was created with empty output fields
+    const template = loopStore.getUserLoopTemplate('tc-loop-1');
+    expect(template).toBeDefined();
+    expect(template!.outputDirectory).toBe('');
+    expect(template!.outputFileName).toBe('');
+  });
+});

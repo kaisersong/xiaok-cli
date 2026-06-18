@@ -59,100 +59,176 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
     return lastTimestamp;
   };
 
+  async function runMarkdownFileLoop(
+    template: UserLoopTemplate,
+    input: RunUserLoopTemplateInput
+  ): Promise<UserLoopTemplateRunResult> {
+    const outputTarget = resolveUserLoopOutputTarget(template);
+    if (!outputTarget.ok) {
+      return blockRun(
+        options.loopStore,
+        options.evidenceStore,
+        input.runId,
+        outputTarget.nextActionKind,
+        outputTarget.message,
+        outputTarget.metadata,
+        timestamp()
+      );
+    }
+
+    const outputPath = outputTarget.outputPath;
+    const executeStartedAt = timestamp();
+    const executeStage = options.loopStore.startLoopStage(input.runId, input.loopId, 'execute', executeStartedAt, {
+      trigger: input.trigger,
+      outputPath,
+    });
+
+    let taskId: string;
+    try {
+      mkdirSync(template.outputDirectory, { recursive: true });
+      const created = await options.taskPort.createTask({
+        prompt: buildMarkdownLoopPrompt(template, outputPath),
+        materials: [],
+        permissionMode: permissionModeFor(input.trigger, template),
+        watchdogMs: DEFAULT_LOOP_TASK_WATCHDOG_MS,
+      });
+      taskId = created.taskId;
+    } catch (error) {
+      const message = (error as Error).message || 'User loop task creation failed.';
+      options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_failed', message, [], timestamp());
+      return failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
+    }
+
+    const snapshot = await waitForTerminalSnapshot({
+      taskPort: options.taskPort,
+      taskId,
+      maxRunMs,
+      pollIntervalMs,
+      sleep,
+    });
+    if (snapshot.status !== 'completed') {
+      const message = `User loop task failed: ${snapshot.status}`;
+      options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_failed', message, [], timestamp());
+      return failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
+    }
+
+    options.loopStore.finishLoopStageSuccess(executeStage.id, [], timestamp(), `Task ${taskId} completed.`, { taskId });
+    const verifyStartedAt = timestamp();
+    const verifyStage = options.loopStore.startLoopStage(input.runId, input.loopId, 'verify', verifyStartedAt, {
+      taskId,
+      outputPath,
+    });
+
+    const fileCheck = verifyMarkdownFile(outputPath);
+    if (!fileCheck.ok) {
+      const message = `Missing markdown file artifact: ${outputPath}`;
+      const stageEvidenceIds = recordBlockedEvidence(options.evidenceStore, 'loop_stage', verifyStage.id, timestamp(), message, {
+        outputPath,
+        reason: fileCheck.reason,
+      });
+      options.loopStore.finishLoopStageBlocked(verifyStage.id, stageEvidenceIds, message, timestamp(), {
+        outputPath,
+        reason: fileCheck.reason,
+      });
+      const runEvidenceIds = recordBlockedEvidence(options.evidenceStore, 'loop_run', input.runId, timestamp(), message, {
+        outputPath,
+        reason: fileCheck.reason,
+      });
+      const blocked = options.loopStore.finishLoopRunBlocked(
+        input.runId,
+        runEvidenceIds,
+        'missing_file_artifact',
+        message,
+        timestamp()
+      );
+      return resultFromRun('blocked', blocked, input.runId, options.loopStore);
+    }
+
+    const summary = `Markdown file artifact verified: ${outputPath}`;
+    const stageEvidenceIds = recordFileArtifactEvidence(options.evidenceStore, 'loop_stage', verifyStage.id, timestamp(), summary, outputPath);
+    options.loopStore.finishLoopStageSuccess(verifyStage.id, stageEvidenceIds, timestamp(), summary, { outputPath });
+    const runEvidenceIds = recordFileArtifactEvidence(options.evidenceStore, 'loop_run', input.runId, timestamp(), summary, outputPath);
+    const success = options.loopStore.finishLoopRunSuccess(input.runId, runEvidenceIds, timestamp(), summary);
+    return resultFromRun('success', success, input.runId, options.loopStore);
+  }
+
+  async function runTaskCompletionLoop(
+    template: UserLoopTemplate,
+    input: RunUserLoopTemplateInput
+  ): Promise<UserLoopTemplateRunResult> {
+    const effectivePermission = permissionModeFor(input.trigger, template);
+
+    if (effectivePermission === 'plan' && input.trigger.kind === 'scheduled') {
+      return blockRun(
+        options.loopStore,
+        options.evidenceStore,
+        input.runId,
+        'awaiting_auto_run_approval',
+        'Scheduled task_completion loop requires autoRunApproved=true to execute.',
+        { permissionMode: 'plan', loopId: input.loopId },
+        timestamp()
+      );
+    }
+
+    const executeStartedAt = timestamp();
+    const executeStage = options.loopStore.startLoopStage(input.runId, input.loopId, 'execute', executeStartedAt, {
+      trigger: input.trigger,
+    });
+
+    let taskId: string;
+    try {
+      const created = await options.taskPort.createTask({
+        prompt: template.prompt,
+        materials: [],
+        permissionMode: effectivePermission,
+        watchdogMs: DEFAULT_LOOP_TASK_WATCHDOG_MS,
+      });
+      taskId = created.taskId;
+    } catch (error) {
+      const message = (error as Error).message || 'Task creation failed.';
+      options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_failed', message, [], timestamp());
+      return failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
+    }
+
+    options.loopStore.updateLoopStageMetadata(executeStage.id, { taskId });
+
+    const snapshot = await waitForTerminalSnapshot({
+      taskPort: options.taskPort,
+      taskId,
+      maxRunMs,
+      pollIntervalMs,
+      sleep,
+      onPoll: () => options.loopStore.touchLoopRun(input.runId, timestamp()),
+    });
+
+    if (snapshot.status !== 'completed') {
+      const message = snapshot.status === 'cancelled'
+        ? `Task auto-cancelled after ${Math.round(maxRunMs / 60_000)} minutes timeout.`
+        : `Task ended with status: ${snapshot.status}`;
+      options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_failed', message, [], timestamp());
+      return failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
+    }
+
+    const summary = `Task ${taskId} completed. Prompt: ${template.prompt.slice(0, 80)}`;
+    options.loopStore.finishLoopStageSuccess(executeStage.id, [], timestamp(), summary, { taskId });
+    const runEvidenceIds = recordTaskCompletionEvidence(
+      options.evidenceStore, 'loop_run', input.runId, timestamp(), summary,
+      { taskId, promptPreview: template.prompt.slice(0, 100) }
+    );
+    const success = options.loopStore.finishLoopRunSuccess(input.runId, runEvidenceIds, timestamp(), summary);
+    return resultFromRun('success', success, input.runId, options.loopStore);
+  }
+
   return {
     async runTemplateLoop(input: RunUserLoopTemplateInput): Promise<UserLoopTemplateRunResult> {
       const template = options.loopStore.getUserLoopTemplate(input.loopId);
       if (!template) {
         return failRun(options.loopStore, input.runId, 'validation_failed', 'User loop template does not exist.', timestamp());
       }
-
-      const outputTarget = resolveUserLoopOutputTarget(template);
-      if (!outputTarget.ok) {
-        return blockRun(
-          options.loopStore,
-          options.evidenceStore,
-          input.runId,
-          outputTarget.nextActionKind,
-          outputTarget.message,
-          outputTarget.metadata,
-          timestamp()
-        );
+      if (template.kind === 'task_completion') {
+        return runTaskCompletionLoop(template, input);
       }
-
-      const outputPath = outputTarget.outputPath;
-      const executeStartedAt = timestamp();
-      const executeStage = options.loopStore.startLoopStage(input.runId, input.loopId, 'execute', executeStartedAt, {
-        trigger: input.trigger,
-        outputPath,
-      });
-
-      let taskId: string;
-      try {
-        mkdirSync(template.outputDirectory, { recursive: true });
-        const created = await options.taskPort.createTask({
-          prompt: buildMarkdownLoopPrompt(template, outputPath),
-          materials: [],
-          permissionMode: permissionModeFor(input.trigger, template),
-          watchdogMs: DEFAULT_LOOP_TASK_WATCHDOG_MS,
-        });
-        taskId = created.taskId;
-      } catch (error) {
-        const message = (error as Error).message || 'User loop task creation failed.';
-        options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_failed', message, [], timestamp());
-        return failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
-      }
-
-      const snapshot = await waitForTerminalSnapshot({
-        taskPort: options.taskPort,
-        taskId,
-        maxRunMs,
-        pollIntervalMs,
-        sleep,
-      });
-      if (snapshot.status !== 'completed') {
-        const message = `User loop task failed: ${snapshot.status}`;
-        options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_failed', message, [], timestamp());
-        return failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
-      }
-
-      options.loopStore.finishLoopStageSuccess(executeStage.id, [], timestamp(), `Task ${taskId} completed.`, { taskId });
-      const verifyStartedAt = timestamp();
-      const verifyStage = options.loopStore.startLoopStage(input.runId, input.loopId, 'verify', verifyStartedAt, {
-        taskId,
-        outputPath,
-      });
-
-      const fileCheck = verifyMarkdownFile(outputPath);
-      if (!fileCheck.ok) {
-        const message = `Missing markdown file artifact: ${outputPath}`;
-        const stageEvidenceIds = recordBlockedEvidence(options.evidenceStore, 'loop_stage', verifyStage.id, timestamp(), message, {
-          outputPath,
-          reason: fileCheck.reason,
-        });
-        options.loopStore.finishLoopStageBlocked(verifyStage.id, stageEvidenceIds, message, timestamp(), {
-          outputPath,
-          reason: fileCheck.reason,
-        });
-        const runEvidenceIds = recordBlockedEvidence(options.evidenceStore, 'loop_run', input.runId, timestamp(), message, {
-          outputPath,
-          reason: fileCheck.reason,
-        });
-        const blocked = options.loopStore.finishLoopRunBlocked(
-          input.runId,
-          runEvidenceIds,
-          'missing_file_artifact',
-          message,
-          timestamp()
-        );
-        return resultFromRun('blocked', blocked, input.runId, options.loopStore);
-      }
-
-      const summary = `Markdown file artifact verified: ${outputPath}`;
-      const stageEvidenceIds = recordFileArtifactEvidence(options.evidenceStore, 'loop_stage', verifyStage.id, timestamp(), summary, outputPath);
-      options.loopStore.finishLoopStageSuccess(verifyStage.id, stageEvidenceIds, timestamp(), summary, { outputPath });
-      const runEvidenceIds = recordFileArtifactEvidence(options.evidenceStore, 'loop_run', input.runId, timestamp(), summary, outputPath);
-      const success = options.loopStore.finishLoopRunSuccess(input.runId, runEvidenceIds, timestamp(), summary);
-      return resultFromRun('success', success, input.runId, options.loopStore);
+      return runMarkdownFileLoop(template, input);
     },
   };
 }
@@ -221,11 +297,13 @@ async function waitForTerminalSnapshot(input: {
   maxRunMs: number;
   pollIntervalMs: number;
   sleep: (ms: number) => Promise<void>;
+  onPoll?: () => void;
 }): Promise<TaskSnapshot> {
   const startedAt = Date.now();
   while (true) {
     const { snapshot } = await input.taskPort.recoverTask(input.taskId);
     if (isTerminalTaskSnapshot(snapshot)) return snapshot;
+    input.onPoll?.();
     if (Date.now() - startedAt >= input.maxRunMs) {
       try {
         await input.taskPort.cancelTask(input.taskId, 'loop_poll_timeout');
@@ -259,6 +337,34 @@ function verifyMarkdownFile(outputPath: string): { ok: true } | { ok: false; rea
   } catch {
     return { ok: false, reason: 'missing_file' };
   }
+}
+
+function recordTaskCompletionEvidence(
+  evidenceStore: CompletionEvidenceStore,
+  ownerKind: CompletionOwnerKind,
+  ownerId: string,
+  now: number,
+  summary: string,
+  metadata: { taskId: string; promptPreview: string }
+): string[] {
+  evidenceStore.upsertExpectation({
+    ownerKind,
+    ownerId,
+    expectedKinds: ['answer'],
+    source: 'loop_stage_contract',
+    confidence: 'explicit',
+    metadata: { loopContract: true, ...metadata },
+    now,
+  });
+  evidenceStore.insertEvidence({
+    ownerKind,
+    ownerId,
+    kind: 'answer',
+    summary,
+    metadata: { ...metadata, responseId: metadata.taskId },
+    now,
+  });
+  return evidenceStore.completeOwnerWithEvidence({ ownerKind, ownerId, now }).evidenceIds;
 }
 
 function recordFileArtifactEvidence(

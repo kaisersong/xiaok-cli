@@ -12,7 +12,7 @@ export type LoopRunStatus = 'running' | 'success' | 'failed' | 'blocked';
 
 export type LoopStageStatus = 'pending' | 'running' | 'success' | 'failed' | 'blocked' | 'skipped';
 export type LoopStageKind = 'scan' | 'execute' | 'verify';
-export type UserLoopTemplateKind = 'markdown_file';
+export type UserLoopTemplateKind = 'markdown_file' | 'task_completion';
 
 export type LoopRunFailureKind =
   | 'executor_crash'
@@ -54,19 +54,30 @@ export interface UserLoopTemplate {
   updatedAt: number;
 }
 
-export interface CreateUserLoopTemplateInput {
+interface CreateLoopInputBase {
   loopId: string;
   title: string;
   description?: string;
-  kind: UserLoopTemplateKind;
   prompt: string;
-  outputDirectory: string;
-  outputFileName: string;
   scheduleEnabled?: boolean;
   scheduleTrigger?: Record<string, unknown>;
   autoRunApproved?: boolean;
   now: number;
 }
+
+export interface CreateMarkdownFileLoopInput extends CreateLoopInputBase {
+  kind: 'markdown_file';
+  outputDirectory: string;
+  outputFileName: string;
+}
+
+export interface CreateTaskCompletionLoopInput extends CreateLoopInputBase {
+  kind: 'task_completion';
+  outputDirectory?: string;
+  outputFileName?: string;
+}
+
+export type CreateUserLoopTemplateInput = CreateMarkdownFileLoopInput | CreateTaskCompletionLoopInput;
 
 export type IgnoredLegacyScheduleField = 'scheduleEnabled' | 'scheduleTrigger' | 'autoRunApproved';
 

@@ -207,7 +207,7 @@ export interface LoopDefinitionView {
   updatedAt: number;
 }
 
-export type UserLoopTemplateKind = 'markdown_file';
+export type UserLoopTemplateKind = 'markdown_file' | 'task_completion';
 
 export interface UserLoopTemplateView {
   loopId: string;
@@ -229,8 +229,8 @@ export interface CreateUserLoopTemplateInputView {
   description?: string;
   kind: UserLoopTemplateKind;
   prompt: string;
-  outputDirectory: string;
-  outputFileName: string;
+  outputDirectory?: string;
+  outputFileName?: string;
 }
 
 export interface CreateUserLoopTemplateResultView {

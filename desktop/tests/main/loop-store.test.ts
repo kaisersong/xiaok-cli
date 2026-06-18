@@ -568,3 +568,103 @@ function expectStarted(result: ReturnType<LoopStore['beginLoopRun']>) {
   if (result.status !== 'started') throw new Error('expected loop run to start');
   return result.run;
 }
+
+describe('LoopStore — task_completion kind', () => {
+  let rootDir: string;
+  let store: LoopStore;
+
+  beforeEach(() => {
+    rootDir = join(tmpdir(), `xiaok-loop-store-tc-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(rootDir, { recursive: true });
+    store = new LoopStore(join(rootDir, 'loops.sqlite'));
+  });
+
+  afterEach(() => {
+    store.close();
+    rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('creates task_completion template without outputDirectory/outputFileName', () => {
+    const result = store.createUserLoopTemplate({
+      loopId: 'tc-1',
+      title: 'Service Check',
+      kind: 'task_completion',
+      prompt: 'Check services.',
+      now: 1_000,
+    });
+    expect(result.template).toMatchObject({
+      loopId: 'tc-1',
+      kind: 'task_completion',
+      prompt: 'Check services.',
+      outputDirectory: '',
+      outputFileName: '',
+    });
+  });
+
+  it('stores task_completion template with empty strings in DB (not null)', () => {
+    store.createUserLoopTemplate({
+      loopId: 'tc-2',
+      title: 'Data Sync',
+      kind: 'task_completion',
+      prompt: 'Sync data.',
+      now: 1_000,
+    });
+    const template = store.getUserLoopTemplate('tc-2');
+    expect(template).toBeDefined();
+    expect(template!.outputDirectory).toBe('');
+    expect(template!.outputFileName).toBe('');
+  });
+
+  it('rejects unsupported kind', () => {
+    expect(() => store.createUserLoopTemplate({
+      loopId: 'bad-kind',
+      title: 'Bad',
+      kind: 'unsupported' as any,
+      prompt: 'x',
+      now: 1_000,
+    })).toThrow('Unsupported user loop template kind.');
+  });
+
+  it('still validates outputDirectory for markdown_file kind', () => {
+    expect(() => store.createUserLoopTemplate({
+      loopId: 'md-1',
+      title: 'MD',
+      kind: 'markdown_file',
+      prompt: 'write',
+      outputDirectory: 'relative/path',
+      outputFileName: 'out.md',
+      now: 1_000,
+    })).toThrow('outputDirectory must be an absolute path');
+  });
+
+  it('creates loop definition with user_template origin for task_completion', () => {
+    store.createUserLoopTemplate({
+      loopId: 'tc-3',
+      title: 'Patrol',
+      kind: 'task_completion',
+      prompt: 'Patrol.',
+      now: 1_000,
+    });
+    const def = store.getLoopDefinition('tc-3');
+    expect(def).toMatchObject({
+      id: 'tc-3',
+      origin: 'user_template',
+      status: 'active',
+    });
+  });
+
+  it('updateLoopStageMetadata merges new fields into existing metadata', () => {
+    store.createUserLoopTemplate({
+      loopId: 'tc-meta',
+      title: 'Meta Test',
+      kind: 'task_completion',
+      prompt: 'test',
+      now: 1_000,
+    });
+    const run = expectStarted(store.beginLoopRun('tc-meta', { kind: 'manual' }, 2_000, 60_000));
+    const stage = store.startLoopStage(run.id, 'tc-meta', 'execute', 2_000, { trigger: { kind: 'manual' } });
+    store.updateLoopStageMetadata(stage.id, { taskId: 'task_123' });
+    const updated = store.getLoopStage(stage.id);
+    expect(updated!.metadata).toMatchObject({ trigger: { kind: 'manual' }, taskId: 'task_123' });
+  });
+});

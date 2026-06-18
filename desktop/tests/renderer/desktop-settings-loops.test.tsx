@@ -241,8 +241,9 @@ describe('Automations Loops page', () => {
   it('creates a Markdown loop template from the Loops page without schedule fields', async () => {
     renderSettings();
 
-    fireEvent.click(await screen.findByRole('button', { name: '新建 Markdown 循环' }));
+    fireEvent.click(await screen.findByRole('button', { name: '新建循环' }));
 
+    fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'markdown_file' } });
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'Daily Report' } });
     fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Write a short daily report.' } });
     fireEvent.change(screen.getByLabelText('输出目录'), { target: { value: '/tmp/xiaok-loop' } });

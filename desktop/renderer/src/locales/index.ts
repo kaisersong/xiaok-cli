@@ -1035,6 +1035,10 @@ export interface LocaleStrings {
     userLoopsLoading: string;
     userLoopsEmpty: string;
     newMarkdownLoop: string;
+    newLoop: string;
+    userLoopKindLabel: string;
+    userLoopKindTaskCompletion: string;
+    userLoopKindMarkdownFile: string;
     createLoop: string;
     creatingLoop: string;
     cancel: string;
