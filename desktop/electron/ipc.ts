@@ -638,6 +638,7 @@ export async function registerDesktopIpc(
       if (extractResult?.ok && extractResult.text) {
         const chunks = chunker.chunk({ text: extractResult.text, mimeType: extractResult.mimeType });
         store.insertChunks(source.id, chunks);
+        (store as any)._db?.prepare("UPDATE sources SET parse_status = 'parsed', updated_at = ? WHERE id = ?").run(Date.now(), source.id);
       }
     } catch (e) {
       log('error', 'kb:addSource processing failed', String(e));

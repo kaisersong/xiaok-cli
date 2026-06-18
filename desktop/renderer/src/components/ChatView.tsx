@@ -471,6 +471,7 @@ function ArtifactKbButton({ artifactId, title, filePath }: { artifactId: string;
   const [saved, setSaved] = useState(false);
   const handleSave = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (saved) return;
     const desktop = (window as any).xiaokDesktop;
     if (!desktop?.kbAddSource || !desktop?.kbListCollections) return;
     try {
@@ -485,17 +486,18 @@ function ArtifactKbButton({ artifactId, title, filePath }: { artifactId: string;
       if (!text) text = `[产物] ${title} (${artifactId})`;
       await desktop.kbAddSource({ collectionId, kind: 'paste', title: title || '产物', text });
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
     } catch {}
   };
   return (
     <button
       type="button"
       onClick={e => void handleSave(e)}
-      title="添加到知识库"
-      className={`shrink-0 rounded-md p-1.5 transition-colors ${saved ? 'text-[var(--c-accent)]' : 'text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'}`}
+      disabled={saved}
+      title={saved ? '已添加到知识库' : '添加到知识库'}
+      className={`shrink-0 flex items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors ${saved ? 'text-[var(--c-accent)] cursor-default' : 'text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] cursor-pointer'}`}
     >
-      <BookOpen size={14} />
+      <BookOpen size={13} />
+      {saved && <span>已添加</span>}
     </button>
   );
 }
