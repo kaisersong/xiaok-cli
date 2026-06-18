@@ -4,7 +4,20 @@ Native desktop surface for xiaok task delivery, scheduled automation, and KSwarm
 
 ## Current Release Focus
 
-v1.4.3 fuses the dynamic workflow surface into the project kanban, so workflow progress lives where users already manage tasks:
+v1.4.9 adds a local-first Personal Knowledge Base, automation lifecycle refinements, and artifact preview enhancements:
+
+- **Personal Knowledge Base (KB)**: Collection → Source → Chunk data model stored in SQLite. PDF, docx, pptx, and xlsx extraction via pdfjs-dist. Chinese full-text search with jieba segmentation. Agent tool integration through `kb_search`, `kb_get_source`, `kb_list_collections`, and `kb_create_collection`.
+- **Loop Edit/Delete**: User loops can now be modified and removed directly from the Automations panel, completing the CRUD lifecycle for loop management.
+- **Artifact Preview Enhancements**: Fullscreen toggle for artifact previews, HTML artifacts rendered in iframe with `allow-scripts`, and a "send to chat" button to discuss artifacts in the conversation context.
+- **Clickable File Paths**: File paths appearing in messages are now clickable and open in Finder (macOS) or Explorer (Windows). Supports both `/Users/...` and `C:\...` style paths.
+- **Paste Path Detection Fix**: Mixed text containing path-like substrings is no longer misidentified as file paths during paste operations.
+- **Workflow Status Strip Fix**: Fixed left-side clipping of the workflow status strip with fixed positioning.
+- **Generic Task Completion Loops**: `task_completion` as a second loop kind alongside `markdown_file`. Succeeds when the AI task finishes without requiring a file artifact.
+- **Cult-UI Component Foundation**: `AnimatedNumber`, `DirectionAwareTabs`, and `ExpandableCard` with spring animations and framer-motion.
+- **Kimi for Coding Compatibility**: Strips X-Stainless-* fingerprint headers and uses the correct User-Agent format for Kimi endpoints.
+- **KSwarm Stale Service Replacement**: Desktop startup detects version-mismatched KSwarm processes via source hash comparison and replaces them before spawning the correct version.
+
+Earlier release (v1.4.3) fused the dynamic workflow surface into the project kanban:
 
 - Each task card on the project kanban now shows a slim multi-segment workflow progress bar (completed / running / failed) plus a `工作流执行` chip and the latest workflow primary message. Users can read task health directly from the board instead of switching to a separate workflow panel.
 - Clicking any task card opens a right-side `TaskDetailDrawer` that consolidates task description, assigned agent, execution strategy, pipeline progress, the full workflow node list grouped by phase (with parallel groups, fan-out labels, failure policy, and per-node agent / status / error), review feedback, and artifacts. The drawer reuses the same KSwarm workflow snapshot used by the strip and refreshes alongside project polling.

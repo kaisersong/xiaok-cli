@@ -55,6 +55,12 @@ Xiaok Desktop v1.4.9 makes this model visible in the product. Loops are no longe
 - **Direction-Aware Automations Tabs**: The Automations page tabs now use a spring-animated sliding pill indicator (matching ModeSwitch precision), replacing the previous static CSS pill tabs. Preserves existing accent color, a11y attributes, and keyboard navigation.
 - **Kimi for Coding Compatibility**: Fixes 403 errors when using Kimi for Coding endpoints. The OpenAI and Anthropic SDK adapters now strip X-Stainless-* fingerprint headers and use the correct `claude-cli/1.0.0 (external, cli)` User-Agent format that Kimi's client whitelist accepts.
 - **KSwarm Stale Service Replacement**: Desktop startup now detects version-mismatched KSwarm processes (via source hash comparison) and kills them before spawning the correct version, fixing the "old version survives app close" issue after upgrades.
+- **Personal Knowledge Base (KB)**: Local-first knowledge base with Collection → Source → Chunk data model. Supports PDF, docx, pptx, and xlsx extraction via pdfjs-dist, Chinese full-text search with jieba segmentation, and agent tool integration through `kb_search`, `kb_get_source`, `kb_list_collections`, and `kb_create_collection`.
+- **Loop Edit/Delete**: User loops can now be modified and removed directly from the Automations panel, completing the CRUD lifecycle for loop management.
+- **Artifact Preview Enhancements**: Fullscreen toggle for artifact previews, HTML artifacts rendered in iframe with `allow-scripts`, and a new "send to chat" button to discuss artifacts in the conversation context.
+- **Clickable File Paths**: File paths appearing in messages are now clickable and open in Finder (macOS) or Explorer (Windows). Supports both `/Users/...` and `C:\...` style paths.
+- **Paste Path Detection Fix**: Mixed text containing path-like substrings is no longer misidentified as file paths during paste operations.
+- **Workflow Status Strip Fix**: Fixed left-side clipping of the workflow status strip by switching to fixed positioning.
 - **Release Validation**: v1.4.9 is verified with 88 loop tests (store + executor + runner including task_completion plan-mode block, timeout, crash recovery), 316 renderer tests, desktop main/renderer builds, and the `desktop-v1.4.9` release tag workflow.
 
 **What's New in v1.4.8:**
@@ -460,9 +466,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-1.4.8-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.4.8-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-setup-1.4.8.exe** — Windows installer (x64)
+- **xiaok-1.4.9-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.4.9-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-setup-1.4.9.exe** — Windows installer (x64)
 
 ### Features
 
@@ -725,6 +731,8 @@ npm run dev -- --help  # Run from source
 ---
 
 ## Version History
+
+**v1.4.9** — Knowledge Base and Automation refinement release: adds local-first Personal Knowledge Base with Collection/Source/Chunk model, PDF/docx/pptx/xlsx extraction, Chinese jieba segmentation search, and agent KB tools (kb_search, kb_get_source, kb_list_collections, kb_create_collection); loop edit/delete from the Automations panel; artifact preview fullscreen toggle with iframe allow-scripts and "send to chat"; clickable file paths in messages (Finder/Explorer); paste path detection fix; workflow status strip clipping fix; task_completion generic loops; cult-ui component foundation; direction-aware tabs animation; Kimi for Coding compatibility; and KSwarm stale service replacement on startup.
 
 **v1.4.8** — Automations and Loop Engineering release: moves user loops, schedules, diagnostics, run history, and output preview into one Desktop Automations surface; adds repeatable user loop templates with schedule bindings, automatic output directory creation, cross-platform output filename guards, clickable output directories, and artifact-backed output previews. Scheduled task transcripts now hide injected system metadata from the visible prompt and show a light planned/actual execution notice, so users can distinguish scheduler timing from task content quality. Desktop also hardens timeout classification, stale KSwarm service replacement, and skill resource loading through lightweight manifests plus on-demand `skillFetchAssets`.
 
