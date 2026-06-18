@@ -1,7 +1,36 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { memo } from 'react';
+import { memo, type ReactNode, Children } from 'react';
 import { MermaidBlock } from './MermaidBlock';
+
+const FILE_PATH_RE = /(\/(?:Users|home|tmp|var|etc|opt)\/[\w./ -]+)/g;
+
+function linkifyFilePaths(children: ReactNode): ReactNode {
+  return Children.map(children, child => {
+    if (typeof child !== 'string') return child;
+    const parts = child.split(FILE_PATH_RE);
+    if (parts.length === 1) return child;
+    return parts.map((part, i) => {
+      if (i % 2 === 1) {
+        return (
+          <span
+            key={i}
+            className="text-[var(--c-accent)] hover:underline cursor-pointer font-mono text-xs"
+            onClick={() => {
+              const api = (window as any).xiaokDesktop;
+              if (api?.openPath) api.openPath(part);
+              else if (api?.showItemInFolder) api.showItemInFolder(part);
+              else window.open(`file://${part}`, '_blank');
+            }}
+          >
+            {part}
+          </span>
+        );
+      }
+      return part;
+    });
+  });
+}
 
 interface MarkdownRendererProps {
   content: string;
@@ -98,7 +127,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, stream
             return <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>;
           },
           p({ children }) {
-            return <p className="text-sm leading-relaxed mb-3">{children}</p>;
+            return <p className="text-sm leading-relaxed mb-3">{linkifyFilePaths(children)}</p>;
           },
           table({ children }) {
             return (
