@@ -3,11 +3,13 @@
  */
 
 import { useState, useEffect } from 'react';
-import { X, Download, BookOpen, Maximize2, Minimize2 } from 'lucide-react';
+import { X, Download, BookOpen, Maximize2, Minimize2, MessageSquare } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmArtifact } from '../../hooks/useKSwarmClient';
 import { artifactDisplayName, downloadArtifact, resolveArtifactUrl } from './artifactActions';
 import { getDesktopApi } from '../../shared/desktop';
+import { api } from '../../api';
 
 interface ArtifactPreviewModalProps {
   artifact: KSwarmArtifact;
@@ -16,6 +18,7 @@ interface ArtifactPreviewModalProps {
 
 export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModalProps) {
   const { t } = useLocale();
+  const navigate = useNavigate();
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +101,20 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
     setKbSaving(false);
   };
 
+  const handleSendToChat = async () => {
+    try {
+      const filePath = artifact.path || artifact.filename || '';
+      const thread = await api.createThread({ title: `讨论：${displayName}`.slice(0, 40) });
+      onClose();
+      navigate(`/t/${thread.id}`, {
+        state: {
+          initialPrompt: `请阅读附件「${displayName}」并给出你的分析。`,
+          initialFiles: [{ filePath, name: displayName }],
+        },
+      });
+    } catch { /* ignore */ }
+  };
+
   const isHtml = /\.(html|htm|svg)$/i.test(displayName) || artifact.mimeType?.includes('html') || artifact.mimeType?.includes('svg');
   const isJson = /\.json$/i.test(displayName) || artifact.mimeType?.includes('json');
   const isMarkdown = /\.(md|markdown)$/i.test(displayName) || artifact.mimeType?.includes('markdown');
@@ -159,7 +176,7 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
   };
 
   const modalSizeClass = fullscreen
-    ? 'absolute inset-2'
+    ? 'absolute inset-0 m-2 max-w-none max-h-none'
     : 'w-[90vw] max-w-5xl h-[90vh]';
 
   return (
@@ -197,6 +214,16 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
                 )}
               </button>
             )}
+            <button
+              type="button"
+              aria-label="发送到对话"
+              onClick={() => void handleSendToChat()}
+              className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
+              title="发送到对话讨论"
+            >
+              <MessageSquare size={14} />
+              <span className="text-[11px]">讨论</span>
+            </button>
             <button type="button" aria-label="Toggle fullscreen" onClick={() => setFullscreen(f => !f)} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title={fullscreen ? '退出全屏' : '全屏'}>
               {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
             </button>
