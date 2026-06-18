@@ -159,6 +159,7 @@ export const PRELOAD_API_KEYS = [
   'kbDeleteSource',
   'kbGetCollectionState',
   'kbSearch',
+  'kbPickFiles',
 ] as const;
 
 export const KSWARM_PROXY_KEYS = [
@@ -363,6 +364,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   kbDeleteSource: 'desktop:kb:deleteSource',
   kbGetCollectionState: 'desktop:kb:getCollectionState',
   kbSearch: 'desktop:kb:search',
+  kbPickFiles: 'desktop:kb:pickFiles',
   // KSwarm proxy
   kswarmProxyGet: 'desktop:kswarm:proxy:get',
   kswarmProxyGetText: 'desktop:kswarm:proxy:getText',
@@ -782,6 +784,7 @@ export interface DesktopApi {
   kbDeleteSource(id: string): Promise<void>;
   kbGetCollectionState(collectionId: string): Promise<unknown>;
   kbSearch(input: unknown): Promise<unknown[]>;
+  kbPickFiles(): Promise<string[]>;
 
   // Thread meta (GTD / pinned)
   getThreadLabels(): Promise<ThreadMetaSnapshot>;
@@ -1073,6 +1076,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     kbDeleteSource: (id) => ipcRenderer.invoke('desktop:kb:deleteSource', id) as Promise<void>,
     kbGetCollectionState: (collectionId) => ipcRenderer.invoke('desktop:kb:getCollectionState', collectionId) as Promise<unknown>,
     kbSearch: (input) => ipcRenderer.invoke('desktop:kb:search', input) as Promise<unknown[]>,
+    kbPickFiles: () => ipcRenderer.invoke('desktop:kb:pickFiles') as Promise<string[]>,
     getThreadLabels: () => ipcRenderer.invoke('desktop:getThreadLabels') as Promise<ThreadMetaSnapshot>,
     setThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:setThreadLabel', threadId, label) as Promise<ThreadMetaWriteResult>,
     unsetThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:unsetThreadLabel', threadId, label) as Promise<ThreadMetaWriteResult>,

@@ -145,6 +145,7 @@ describe('preload API contract', () => {
       'kbDeleteSource',
       'kbGetCollectionState',
       'kbSearch',
+      'kbPickFiles',
     ]);
   });
 

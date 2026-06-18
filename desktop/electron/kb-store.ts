@@ -19,6 +19,7 @@ import type {
 } from './kb-types.js';
 
 export interface KbStore {
+  _db?: unknown;
   // Collection CRUD
   createCollection(input: CreateCollectionInput): Collection;
   getCollection(id: string): Collection | undefined;

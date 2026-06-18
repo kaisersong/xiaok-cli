@@ -275,6 +275,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
   }
 
   return {
+    _db: db,
     createCollection, getCollection, listCollections, renameCollection, deleteCollection,
     addSource, getSource, listSources, deleteSource, retrySource, getSourceEmbeddingProgress,
     insertChunks, listChunks, markChunkEmbedded, markChunkFailed,

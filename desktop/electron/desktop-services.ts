@@ -61,6 +61,9 @@ import {
   type ComputerUsePreference,
 } from './computer-use-capability-service.js';
 import { createNotebookTools } from '../../src/ai/tools/notebook.js';
+import { createKbTools } from './kb-tools.js';
+import { createKbStoreSqlite } from './kb-store-sqlite.js';
+import { createKbRetriever } from './kb-retrieval.js';
 import type { MemoryStore } from '../../src/ai/memory/store.js';
 import type { KSwarmService, KSwarmUnavailableError } from './kswarm-service.js';
 import { JsonKSwarmInitialPlanBootstrapStore, KSwarmInitialPlanBootstrapQueue } from './kswarm-initial-plan-bootstrap.js';
@@ -4341,6 +4344,26 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
   for (const tool of createNotebookTools(getDesktopMemoryStore(dataRoot))) {
     registry.registerTool(tool);
   }
+
+  // Register KB (knowledge base) tools
+  try {
+    const kbDbPath = join(dataRoot, 'knowledge.db');
+    const kbStore = createKbStoreSqlite(kbDbPath);
+    const kbRetriever = createKbRetriever({ db: (kbStore as any)._db ?? ({} as any), embedFn: () => null });
+    for (const tool of createKbTools(kbStore, kbRetriever)) {
+      registry.registerTool(tool);
+    }
+  } catch {}
+
+  // Register KB (knowledge base) tools
+  try {
+    const kbDbPath2 = join(dataRoot, 'knowledge.db');
+    const kbStore2 = createKbStoreSqlite(kbDbPath2);
+    const kbRetriever2 = createKbRetriever({ db: (kbStore2 as any)._db ?? ({} as any), embedFn: () => null });
+    for (const tool of createKbTools(kbStore2, kbRetriever2)) {
+      registry.registerTool(tool);
+    }
+  } catch {}
 
   return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;

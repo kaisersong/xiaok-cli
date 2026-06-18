@@ -157,6 +157,26 @@ export function KnowledgePage() {
     } catch { /* ignore */ }
   };
 
+  const handlePickFiles = async () => {
+    if (!desktop?.kbPickFiles || !desktop?.kbAddSource || !collectionId) return;
+    try {
+      const filePaths = await desktop.kbPickFiles();
+      for (const fp of filePaths) {
+        const name = fp.split('/').pop() || fp.split('\\').pop() || 'file';
+        await desktop.kbAddSource({
+          collectionId,
+          kind: 'file',
+          title: name,
+          filePath: fp,
+        });
+      }
+      if (filePaths.length > 0) {
+        await loadSources(collectionId);
+        await loadCollections();
+      }
+    } catch { /* ignore */ }
+  };
+
   const handleSearch = async () => {
     if (!desktop?.kbSearch || !collectionId || !searchQuery.trim()) {
       setSearchResults([]);
@@ -350,15 +370,17 @@ export function KnowledgePage() {
                 {dragOver ? (
                   <p className="text-sm text-[var(--c-accent)]">松开以添加文件</p>
                 ) : (
-                  <div className="flex items-center justify-center gap-3">
-                    <p className="text-sm text-[var(--c-text-secondary)]">拖入文件</p>
-                    <span className="text-[var(--c-text-tertiary)]">或</span>
+                  <div className="flex items-center justify-center gap-3 flex-wrap">
+                    <button type="button" onClick={() => void handlePickFiles()} className="flex items-center gap-1 rounded-md border border-[var(--c-border)] px-2 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
+                      <FileText size={12} /> 选择文件
+                    </button>
                     <button type="button" onClick={() => { setAddMode('paste'); setShowAddSource(true); }} className="flex items-center gap-1 rounded-md border border-[var(--c-border)] px-2 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
                       <ClipboardPaste size={12} /> 粘贴文本
                     </button>
                     <button type="button" onClick={() => { setAddMode('url'); setShowAddSource(true); }} className="flex items-center gap-1 rounded-md border border-[var(--c-border)] px-2 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
                       <Link size={12} /> 收录网页
                     </button>
+                    <span className="text-xs text-[var(--c-text-tertiary)]">或拖入文件</span>
                   </div>
                 )}
               </div>

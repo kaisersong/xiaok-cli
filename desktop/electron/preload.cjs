@@ -180,6 +180,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   kbDeleteSource: (id) => ipcRenderer.invoke('desktop:kb:deleteSource', id),
   kbGetCollectionState: (collectionId) => ipcRenderer.invoke('desktop:kb:getCollectionState', collectionId),
   kbSearch: (input) => ipcRenderer.invoke('desktop:kb:search', input),
+  kbPickFiles: () => ipcRenderer.invoke('desktop:kb:pickFiles'),
   kswarmProxyGet: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:get', path),
   kswarmProxyGetText: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:getText', path),
   kswarmProxyPost: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:post', path, body),

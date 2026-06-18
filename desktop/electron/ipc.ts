@@ -624,21 +624,38 @@ export async function registerDesktopIpc(
     log('info', 'kb:addSource', { kind: input?.kind, title: input?.title });
     const store = getKbStore();
     const source = store.addSource(input);
-    // For 'paste' kind, run extractor + chunker synchronously
-    if (input?.kind === 'paste' && input?.text) {
-      try {
-        const extractor = createSourceExtractor();
-        const result = extractor.extractFromText(input.text, input.title || 'Pasted text');
-        if (result.ok && result.text) {
-          const chunker = createChunker();
-          const chunks = chunker.chunk({ text: result.text, mimeType: result.mimeType });
-          store.insertChunks(source.id, chunks);
-        }
-      } catch (e) {
-        log('error', 'kb:addSource paste processing failed', String(e));
+    const extractor = createSourceExtractor();
+    const chunker = createChunker();
+    try {
+      let extractResult: { ok: boolean; text?: string; mimeType?: string } | null = null;
+      if (input?.kind === 'paste' && input?.text) {
+        extractResult = extractor.extractFromText(input.text, input.title || '粘贴文本');
+      } else if (input?.kind === 'file' && input?.filePath) {
+        extractResult = await extractor.extract({ filePath: input.filePath, mimeType: input.mimeType || 'application/octet-stream' });
+      } else if (input?.kind === 'url' && input?.uri) {
+        extractResult = await extractor.extractFromUrl(input.uri);
       }
+      if (extractResult?.ok && extractResult.text) {
+        const chunks = chunker.chunk({ text: extractResult.text, mimeType: extractResult.mimeType });
+        store.insertChunks(source.id, chunks);
+      }
+    } catch (e) {
+      log('error', 'kb:addSource processing failed', String(e));
     }
     return source;
+  });
+
+  ipcMain.handle('desktop:kb:pickFiles', async () => {
+    const { dialog } = await import('electron');
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: '文档', extensions: ['pdf', 'txt', 'md', 'docx', 'pptx', 'xlsx', 'html', 'json', 'csv'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled) return [];
+    return result.filePaths;
   });
 
   ipcMain.handle('desktop:kb:deleteSource', async (_event, id: string) => {
