@@ -620,6 +620,20 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     enqueuePlanBootstrap: input => initialPlanBootstrapQueue.enqueue(input),
   };
   registerKSwarmTools(registry, options.kswarmService, kswarmCreateProjectToolOptions);
+
+  // Register KB (knowledge base) tools on the main registry
+  try {
+    const kbUserData = process.platform === 'win32'
+      ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'xiaok-desktop')
+      : join(homedir(), 'Library', 'Application Support', 'xiaok-desktop');
+    const kbDbPath = join(kbUserData, 'knowledge.db');
+    const kbStore = createKbStoreSqlite(kbDbPath);
+    const kbRetriever = createKbRetriever({ db: (kbStore as any)._db ?? ({} as any), embedFn: () => null });
+    for (const tool of createKbTools(kbStore, kbRetriever)) {
+      registry.registerTool(tool);
+    }
+  } catch {}
+
   initialPlanBootstrapQueue.startRecovery();
   // [2026-05-10] Intent delegation disabled — passive tracking only, no functional value.
   // See docs/2026-05-10-desktop-intent-delegation-removal.md
@@ -4361,22 +4375,6 @@ function createDesktopModelRunner(dataRoot: string, materialRegistry?: MaterialR
     registry.registerTool(tool);
   }
 
-  // Register KB (knowledge base) tools
-  try {
-    const kbUserData = process.platform === 'win32'
-      ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'xiaok-desktop')
-      : join(homedir(), 'Library', 'Application Support', 'xiaok-desktop');
-    const kbDbPath = join(kbUserData, 'knowledge.db');
-    const kbStore = createKbStoreSqlite(kbDbPath);
-    const kbRetriever = createKbRetriever({ db: (kbStore as any)._db ?? ({} as any), embedFn: () => null });
-    for (const tool of createKbTools(kbStore, kbRetriever)) {
-      registry.registerTool(tool);
-    }
-    console.log('[desktop-services] KB tools registered successfully');
-  } catch (e) {
-    console.error('[desktop-services] KB tools registration failed:', e);
-  }
-
   return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
@@ -5325,21 +5323,6 @@ function createDesktopModelRunnerWithRegistry(
   // Register notebook (memory) tools — shared LayeredMemoryStore
   for (const tool of createNotebookTools(getDesktopMemoryStore(dataRoot))) {
     registry.registerTool(tool);
-  }
-
-  // Register KB (knowledge base) tools
-  try {
-    const kbUserData = process.platform === 'win32'
-      ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'xiaok-desktop')
-      : join(homedir(), 'Library', 'Application Support', 'xiaok-desktop');
-    const kbDbPath = join(kbUserData, 'knowledge.db');
-    const kbStore = createKbStoreSqlite(kbDbPath);
-    const kbRetriever = createKbRetriever({ db: (kbStore as any)._db ?? ({} as any), embedFn: () => null });
-    for (const tool of createKbTools(kbStore, kbRetriever)) {
-      registry.registerTool(tool);
-    }
-  } catch (e) {
-    console.error('[desktop-services] KB tools registration failed in WithRegistry:', e);
   }
 
   return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent }) => {
