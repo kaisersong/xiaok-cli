@@ -9,6 +9,14 @@ import { useLocale } from '../../contexts/LocaleContext';
 import { api } from '../../api';
 import type { AutomationOverviewSnapshotView } from '../../api/types';
 
+function formatRelativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3600_000) return `${Math.floor(diff / 60_000)}分钟前`;
+  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}小时前`;
+  return new Date(ts).toLocaleDateString();
+}
+
 type AutomationsTab = 'overview' | 'schedules' | 'loops' | 'diagnostics';
 
 const TABS: Array<{ key: AutomationsTab; labelKey: 'automationsOverview' | 'automationsSchedules' | 'automationsLoops' | 'automationsDiagnostics' }> = [
@@ -148,11 +156,17 @@ export function AutomationsPage() {
                     >
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-sm font-medium text-[var(--c-text-primary)]">{item.title}</span>
-                        <span className="text-xs text-[var(--c-text-tertiary)]">{item.status}</span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[10px] text-[var(--c-text-tertiary)]">{formatRelativeTime(item.occurredAt)}</span>
+                          <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600">{item.status}</span>
+                        </div>
                       </div>
                       {item.message && (
                         <p className="mt-1 text-xs leading-5 text-[var(--c-text-secondary)]">{item.message}</p>
                       )}
+                      <p className="mt-1.5 text-[10px] text-[var(--c-accent)]">
+                        {item.source === 'loop_run' ? '点击查看循环详情 →' : '点击查看定时任务 →'}
+                      </p>
                     </button>
                   ))}
                 </div>
