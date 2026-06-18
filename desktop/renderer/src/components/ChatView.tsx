@@ -467,6 +467,39 @@ export function ChatView({
   );
 }
 
+function ArtifactKbButton({ artifactId, title, filePath }: { artifactId: string; title: string; filePath?: string }) {
+  const [saved, setSaved] = useState(false);
+  const handleSave = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const desktop = (window as any).xiaokDesktop;
+    if (!desktop?.kbAddSource || !desktop?.kbListCollections) return;
+    try {
+      const collections = await desktop.kbListCollections();
+      const collectionId = collections?.[0]?.id;
+      if (!collectionId) return;
+      let text = '';
+      if (filePath && desktop.readFileContent) {
+        const content = await desktop.readFileContent(filePath);
+        text = typeof content === 'string' ? content : content?.text ?? '';
+      }
+      if (!text) text = `[产物] ${title} (${artifactId})`;
+      await desktop.kbAddSource({ collectionId, kind: 'paste', title: title || '产物', text });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch {}
+  };
+  return (
+    <button
+      type="button"
+      onClick={e => void handleSave(e)}
+      title="添加到知识库"
+      className={`shrink-0 rounded-md p-1.5 transition-colors ${saved ? 'text-[var(--c-accent)]' : 'text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'}`}
+    >
+      <BookOpen size={14} />
+    </button>
+  );
+}
+
 function ResultCard({
   result,
   generatedFiles,
@@ -533,26 +566,34 @@ function ResultCard({
             }
             const ext = a.title?.split('.').pop()?.toUpperCase() || 'FILE';
             return (
-              <button
-                key={a.artifactId}
-                type="button"
-                onClick={(e) => {
-                  const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
-                  if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
-                  else onArtifactClick?.(info);
-                }}
-                className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)] cursor-pointer"
-                data-testid={`generated-file-${a.title}`}
-              >
-                <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
-                  {'</>'}
+              <div key={a.artifactId} className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)]">
+                <div
+                  className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
+                  onClick={(e) => {
+                    const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
+                    if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
+                    else onArtifactClick?.(info);
+                  }}
+                  data-testid={`generated-file-${a.title}`}
+                >
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] text-xs font-mono text-[var(--c-text-tertiary)]">
+                    {'</>'}
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-col items-start">
+                    <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{a.title}</span>
+                    <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
+                  </div>
                 </div>
-                <div className="flex min-w-0 flex-1 flex-col items-start">
-                  <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{a.title}</span>
-                  <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
-                </div>
-                <span className="shrink-0 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)]">打开</span>
-              </button>
+                <ArtifactKbButton artifactId={a.artifactId} title={a.title} filePath={a.filePath} />
+                <span
+                  className="shrink-0 cursor-pointer rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
+                    onArtifactClick?.(info);
+                  }}
+                >打开</span>
+              </div>
             );
           })}
         </div>
