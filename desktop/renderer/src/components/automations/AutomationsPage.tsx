@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import { ScheduledPage } from '../ScheduledPage';
 import { LoopsPane } from '../DesktopSettings';
+import { DirectionAwareTabs, type DirectionAwareTab } from '../ui/direction-aware-tabs';
 import { useLocale } from '../../contexts/LocaleContext';
 import { api } from '../../api';
 import type { AutomationOverviewSnapshotView } from '../../api/types';
@@ -82,27 +83,13 @@ export function AutomationsPage() {
             <p className="mt-1 text-sm text-[var(--c-text-secondary)]">{t.automationsSubtitle}</p>
           </div>
         </div>
-        <div className="mt-5 flex flex-wrap gap-2" role="tablist" aria-label={t.automationsTitle}>
-          {TABS.map(item => {
-            const selected = activeTab === item.key;
-            return (
-              <button
-                key={item.key}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                onClick={() => openTab(item.key)}
-                className={[
-                  'rounded-md px-3 py-1.5 text-sm transition-colors',
-                  selected
-                    ? 'bg-[var(--c-accent)]/10 text-[var(--c-accent)]'
-                    : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]',
-                ].join(' ')}
-              >
-                {t[item.labelKey]}
-              </button>
-            );
-          })}
+        <div className="mt-5">
+          <DirectionAwareTabs
+            ariaLabel={t.automationsTitle}
+            tabs={TABS.map(item => ({ id: item.key, label: t[item.labelKey] })) as ReadonlyArray<DirectionAwareTab<AutomationsTab>>}
+            activeId={activeTab}
+            onChange={openTab}
+          />
         </div>
       </header>
 

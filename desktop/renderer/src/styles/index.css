@@ -21,6 +21,28 @@
   --c-input-shadow: 0 2px 16px -4px rgba(0,0,0,0.06);
   --c-input-shadow-focus: 0 4px 10px -2px rgba(0,0,0,0.10);
   --c-placeholder: #999999;
+
+  /* cult-ui / shadcn-compatible aliases (Tailwind v4 --color-* naming) */
+  --color-background: var(--c-bg-page);
+  --color-foreground: var(--c-text-primary);
+  --color-card: var(--c-bg-card);
+  --color-card-foreground: var(--c-text-primary);
+  --color-primary: var(--c-accent);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--c-bg-deep);
+  --color-secondary-foreground: var(--c-text-secondary);
+  --color-muted: var(--c-bg-deep);
+  --color-muted-foreground: var(--c-text-tertiary);
+  --color-accent: var(--c-accent);
+  --color-accent-foreground: #ffffff;
+  --color-destructive: #b91c1c;
+  --color-destructive-foreground: #ffffff;
+  --color-popover: var(--c-bg-card);
+  --color-popover-foreground: var(--c-text-primary);
+  --color-border: var(--c-border);
+  --color-input: var(--c-border);
+  --color-ring: var(--c-accent);
+  --radius: 0.5rem;
 }
 
 html, body, #root {
