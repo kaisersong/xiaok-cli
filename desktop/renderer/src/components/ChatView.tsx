@@ -478,13 +478,13 @@ function ArtifactKbButton({ artifactId, title, filePath }: { artifactId: string;
       const collections = await desktop.kbListCollections();
       const collectionId = collections?.[0]?.id;
       if (!collectionId) return;
-      let text = '';
-      if (filePath && desktop.readFileContent) {
-        const content = await desktop.readFileContent(filePath);
-        text = typeof content === 'string' ? content : content?.text ?? '';
+      if (filePath) {
+        const ext = filePath.split('.').pop()?.toLowerCase() || '';
+        const mimeMap: Record<string, string> = { pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', html: 'text/html', json: 'application/json', csv: 'text/csv', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+        await desktop.kbAddSource({ collectionId, kind: 'file', title: title || '产物', filePath, mimeType: mimeMap[ext] || 'application/octet-stream' });
+      } else {
+        await desktop.kbAddSource({ collectionId, kind: 'paste', title: title || '产物', text: `[产物] ${title} (${artifactId})` });
       }
-      if (!text) text = `[产物] ${title} (${artifactId})`;
-      await desktop.kbAddSource({ collectionId, kind: 'paste', title: title || '产物', text });
       setSaved(true);
     } catch {}
   };

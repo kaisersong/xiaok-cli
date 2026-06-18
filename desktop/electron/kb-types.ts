@@ -80,6 +80,7 @@ export interface AddSourceInput {
   title: string;
   uri?: string;
   filePath?: string;
+  mimeType?: string;
   text?: string;
 }
 

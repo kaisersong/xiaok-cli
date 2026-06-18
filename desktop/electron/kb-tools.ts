@@ -61,19 +61,24 @@ export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
           type: 'object',
           properties: {
             query: { type: 'string', description: '检索关键词或问题' },
-            collection_id: { type: 'string', description: '集合 ID（必填）' },
+            collection_id: { type: 'string', description: '集合 ID，不传则使用默认集合' },
             source_ids: { type: 'array', items: { type: 'string' }, description: '可选：限定到指定 source' },
             top_k: { type: 'number', description: '返回条数，默认 10' },
           },
-          required: ['query', 'collection_id'],
+          required: ['query'],
         },
       },
       async execute(input) {
         const query = (input.query as string || '').trim();
-        const collectionId = input.collection_id as string;
+        if (!query) return '未找到相关内容。';
+        let collectionId = input.collection_id as string | undefined;
+        if (!collectionId) {
+          const cols = store.listCollections();
+          if (cols.length === 0) return '知识库为空，还没有任何集合。';
+          collectionId = cols[0].id;
+        }
         const sourceIds = input.source_ids as string[] | undefined;
         const topK = (input.top_k as number) || 10;
-        if (!query || !collectionId) return '未找到相关内容。';
 
         const segmented = segmentQuery(query);
         const uniqueTerms = [...new Set(segmented.split(/\s+/).filter(Boolean).map((t: string) => t.toLowerCase()))];

@@ -165,11 +165,14 @@ export function KnowledgePage() {
       const filePaths = await desktop.kbPickFiles();
       for (const fp of filePaths) {
         const name = fp.split('/').pop() || fp.split('\\').pop() || 'file';
+        const ext = name.split('.').pop()?.toLowerCase() || '';
+        const mimeMap: Record<string, string> = { pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', html: 'text/html', htm: 'text/html', json: 'application/json', csv: 'text/csv', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
         await desktop.kbAddSource({
           collectionId,
           kind: 'file',
           title: name,
           filePath: fp,
+          mimeType: mimeMap[ext] || 'application/octet-stream',
         });
       }
       if (filePaths.length > 0) {
@@ -199,13 +202,26 @@ export function KnowledgePage() {
     const files = e.dataTransfer.files;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const text = await file.text();
-      await desktop.kbAddSource({
-        collectionId,
-        kind: 'paste',
-        title: file.name,
-        text,
-      });
+      const filePath = (file as any).path as string | undefined;
+      if (filePath) {
+        const ext = file.name.split('.').pop()?.toLowerCase() || '';
+        const mimeMap: Record<string, string> = { pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', html: 'text/html', htm: 'text/html', json: 'application/json', csv: 'text/csv', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+        await desktop.kbAddSource({
+          collectionId,
+          kind: 'file',
+          title: file.name,
+          filePath,
+          mimeType: mimeMap[ext] || file.type || 'application/octet-stream',
+        });
+      } else {
+        const text = await file.text();
+        await desktop.kbAddSource({
+          collectionId,
+          kind: 'paste',
+          title: file.name,
+          text,
+        });
+      }
     }
     await loadSources(collectionId);
     await loadCollections();

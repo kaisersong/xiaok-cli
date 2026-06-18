@@ -152,8 +152,8 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     const ts = now();
     db.prepare(`
       INSERT INTO sources (id, collection_id, kind, title, uri, mime_type, sha256, byte_size, raw_path, extracted_text_path, parse_status, parse_error, parse_attempts, chunk_count, metadata_json, created_at, updated_at)
-      VALUES (@id, @collectionId, @kind, @title, @uri, '', '', 0, '', '', 'pending', '', 0, 0, '{}', @ts, @ts)
-    `).run({ id, collectionId: input.collectionId, kind: input.kind, title: input.title, uri: input.uri ?? '', ts });
+      VALUES (@id, @collectionId, @kind, @title, @uri, @mimeType, '', 0, @rawPath, '', 'pending', '', 0, 0, '{}', @ts, @ts)
+    `).run({ id, collectionId: input.collectionId, kind: input.kind, title: input.title, uri: input.uri ?? '', mimeType: input.mimeType ?? '', rawPath: input.filePath ?? '', ts });
     return getSource(id)!;
   }
 

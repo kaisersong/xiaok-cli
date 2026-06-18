@@ -1,9 +1,7 @@
 /**
  * Knowledge Base — Source Extractor
  *
- * Extracts text from files. Reuses xiaok's existing ZIP-based docx/pptx/xlsx
- * extraction. PDF support requires pdfjs-dist in utilityProcess (PR-A2).
- * For now, PDF is marked as 'pending_pdf_support'.
+ * Extracts text from files: PDF (via pdfjs-dist), txt/md/html, docx, pptx, xlsx.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -34,7 +32,8 @@ export function createSourceExtractor(): SourceExtractor {
         }
 
         if (ext === '.pdf' || input.mimeType === 'application/pdf') {
-          return { ok: false, error: 'PDF support requires pdfjs-dist (available in PR-A2)' };
+          const text = await extractPdf(buf);
+          return { ok: true, text, mimeType: 'application/pdf' };
         }
 
         if (ext === '.docx') {
@@ -73,6 +72,23 @@ export function createSourceExtractor(): SourceExtractor {
       return { ok: true, text, mimeType: 'text/plain' };
     },
   };
+}
+
+async function extractPdf(buf: Buffer): Promise<string> {
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buf) });
+  const doc = await loadingTask.promise;
+  const pages: string[] = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    const text = content.items
+      .filter((item: any) => 'str' in item)
+      .map((item: any) => item.str)
+      .join('');
+    if (text.trim()) pages.push(text);
+  }
+  return pages.join('\n\n');
 }
 
 async function extractDocx(buf: Buffer): Promise<string> {

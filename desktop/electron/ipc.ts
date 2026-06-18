@@ -597,6 +597,28 @@ export async function registerDesktopIpc(
         });
       }
       (kbStore as any)._db?.prepare("UPDATE sources SET parse_status = 'parsed' WHERE parse_status = 'pending' AND id IN (SELECT DISTINCT source_id FROM chunks)").run();
+      const pendingSources = (kbStore as any)._db?.prepare("SELECT id, raw_path, mime_type FROM sources WHERE parse_status = 'pending' AND raw_path != ''").all() as Array<{ id: string; raw_path: string; mime_type: string }> | undefined;
+      if (pendingSources?.length) {
+        const store = kbStore!;
+        setImmediate(async () => {
+          const extractor = createSourceExtractor();
+          const chunker = createChunker();
+          for (const src of pendingSources) {
+            try {
+              const extractResult = await extractor.extract({ filePath: src.raw_path, mimeType: src.mime_type || 'application/octet-stream' });
+              if (extractResult.ok && extractResult.text) {
+                const chunks = chunker.chunk({ text: extractResult.text, mimeType: extractResult.mimeType });
+                store.insertChunks(src.id, chunks);
+                (store as any)._db?.prepare("UPDATE sources SET parse_status = 'parsed', updated_at = ? WHERE id = ?").run(Date.now(), src.id);
+              } else {
+                (store as any)._db?.prepare("UPDATE sources SET parse_status = 'failed', updated_at = ? WHERE id = ?").run(Date.now(), src.id);
+              }
+            } catch {
+              (store as any)._db?.prepare("UPDATE sources SET parse_status = 'failed', updated_at = ? WHERE id = ?").run(Date.now(), src.id);
+            }
+          }
+        });
+      }
     }
     return kbStore;
   }
