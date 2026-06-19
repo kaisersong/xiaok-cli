@@ -225,6 +225,7 @@ export function SearchFetchSettings() {
   const searchRuntimeStatus = {
     duckduckgo: runtimeStatusForName('web_search.duckduckgo'),
     tavily: runtimeStatusForName('web_search.tavily'),
+    firecrawl: runtimeStatusForName('web_search.firecrawl'),
     searxng: runtimeStatusForName('web_search.searxng'),
   }
 
@@ -298,25 +299,18 @@ export function SearchFetchSettings() {
         <ProviderSelectCard
           title={ds.fetchProviderFirecrawl}
           description={ds.fetchProviderFirecrawlDesc}
-          badge={<StatusBadge variant={fetchP === 'firecrawl' ? (config.fetch.firecrawlApiKey ? 'configured' : 'missing') : 'missing'} t={badgeT} />}
+          badge={<StatusBadge variant="free" t={badgeT} />}
           selected={fetchP === 'firecrawl'}
           onSelect={() => patchFetch({ provider: 'firecrawl' as FetchProvider })}
           status={<RuntimeStatusLabel state={fetchRuntimeStatus.firecrawl.runtime_state} reason={fetchRuntimeStatus.firecrawl.runtime_reason} />}
         >
           <div className="space-y-3">
             <div>
-              <label className={labelCls}><span className="flex items-center gap-1.5"><Key size={11} />{ds.apiKeyLabel}</span></label>
+              <label className={labelCls}><span className="flex items-center gap-1.5"><Key size={11} />{ds.apiKeyOptionalLabel}</span></label>
               <PasswordInput
                 value={config.fetch.firecrawlApiKey ?? ''}
                 onChange={(v) => patchFetch({ firecrawlApiKey: v || undefined })}
                 placeholder="fc-..."
-              />
-            </div>
-            <div>
-              <label className={labelCls}><span className="flex items-center gap-1.5"><Link size={11} />{ds.baseUrlLabel}</span></label>
-              <input aria-label="https://api.firecrawl.dev" type="text" className={inputCls} placeholder="https://api.firecrawl.dev"
-                value={config.fetch.firecrawlBaseUrl ?? ''}
-                onChange={(e) => patchFetch({ firecrawlBaseUrl: e.target.value || undefined })}
               />
             </div>
           </div>
@@ -335,6 +329,24 @@ export function SearchFetchSettings() {
           onSelect={() => patchSearch({ provider: 'duckduckgo' as SearchProvider })}
           status={<RuntimeStatusLabel state={searchRuntimeStatus.duckduckgo.runtime_state} reason={searchRuntimeStatus.duckduckgo.runtime_reason} />}
         />
+
+        <ProviderSelectCard
+          title="Firecrawl"
+          description={ds.fetchProviderFirecrawlDesc}
+          badge={<StatusBadge variant="free" t={badgeT} />}
+          selected={searchP === 'firecrawl'}
+          onSelect={() => patchSearch({ provider: 'firecrawl' as SearchProvider })}
+          status={<RuntimeStatusLabel state={searchRuntimeStatus.firecrawl.runtime_state} reason={searchRuntimeStatus.firecrawl.runtime_reason} />}
+        >
+          <div>
+            <label className={labelCls}><span className="flex items-center gap-1.5"><Key size={11} />{ds.apiKeyOptionalLabel}</span></label>
+            <PasswordInput
+              value={config.search.firecrawlApiKey ?? ''}
+              onChange={(v) => patchSearch({ firecrawlApiKey: v || undefined })}
+              placeholder="fc-..."
+            />
+          </div>
+        </ProviderSelectCard>
 
         <ProviderSelectCard
           title={ds.searchProviderTavily}
