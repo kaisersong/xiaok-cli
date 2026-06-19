@@ -1,4 +1,4 @@
-import { mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { CompletionEvidenceStore } from './completion-evidence-store.js';
 import type { CompletionOwnerKind } from './completion-evidence-types.js';
@@ -91,6 +91,7 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
         materials: [],
         permissionMode: permissionModeFor(input.trigger, template),
         watchdogMs: DEFAULT_LOOP_TASK_WATCHDOG_MS,
+        maxToolLoopIterations: 50,
       });
       taskId = created.taskId;
     } catch (error) {
@@ -123,6 +124,22 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
       taskId,
       outputPath,
     });
+
+    // Fallback: 如果 task 完成但文件不存在（通常是 finalization 阶段截断了 Write 工具），
+    // 尝试从 result.summary 提取 markdown 内容落盘
+    if (!existsSync(outputPath) && snapshot.result?.summary) {
+      const summary = snapshot.result.summary;
+      const hasMarkdownStructure = /^#\s+.+/m.test(summary) && summary.length > 500;
+      if (hasMarkdownStructure) {
+        try {
+          // 去除可能的代码块包裹（model 有时会用 ```markdown 包起来）
+          const cleaned = summary.replace(/^```(?:markdown|md)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+          writeFileSync(outputPath, cleaned, 'utf-8');
+        } catch {
+          // 写入失败则继续走正常 verify 流程
+        }
+      }
+    }
 
     const fileCheck = verifyMarkdownFile(outputPath);
     if (!fileCheck.ok) {
@@ -187,6 +204,7 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
         materials: [],
         permissionMode: effectivePermission,
         watchdogMs: DEFAULT_LOOP_TASK_WATCHDOG_MS,
+        maxToolLoopIterations: 50,
       });
       taskId = created.taskId;
     } catch (error) {

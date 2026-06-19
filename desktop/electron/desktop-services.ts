@@ -4058,6 +4058,7 @@ interface ToolLoopContext {
   dataRoot: string;
   taskStartTime: number;
   strategies: ToolLoopStrategies;
+  maxIterations?: number;
   onUsage?: (inputTokens: number, outputTokens: number) => void;
 }
 
@@ -4093,7 +4094,7 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
     });
   }
 
-  while (iteration < DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS) {
+  while (iteration < (ctx.maxIterations ?? DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS)) {
     throwIfAborted(ctx.signal);
     if (Date.now() > ctx.taskDeadline) throw new Error('任务超时，可能是网络不稳定或模型响应过慢。请检查网络后重试。');
     iteration++;
@@ -5136,7 +5137,7 @@ function createDesktopModelRunnerWithRegistry(
     registry.registerTool(tool);
   }
 
-  return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent }) => {
+  return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent, maxToolLoopIterations }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
@@ -5248,6 +5249,7 @@ function createDesktopModelRunnerWithRegistry(
       skillCatalog,
       dataRoot,
       taskStartTime,
+      maxIterations: maxToolLoopIterations,
       strategies: {
         compact: {
           enabled: false,

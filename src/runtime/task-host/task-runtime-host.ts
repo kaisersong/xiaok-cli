@@ -41,6 +41,7 @@ export interface TaskRunnerInput {
   deadlineMs?: number;
   history: HistoryMessage[];
   permissionMode?: 'plan' | 'auto' | 'default';
+  maxToolLoopIterations?: number;
   emitRuntimeEvent(event: RuntimeEvent): void;
 }
 
@@ -185,6 +186,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private taskOrdinal = 0;
   private sessionOrdinal = 0;
   private readonly permissionModes = new Map<string, TaskPermissionMode>();
+  private readonly maxToolLoopIterations = new Map<string, number>();
 
   constructor(private readonly options: InProcessTaskRuntimeHostOptions) {}
 
@@ -195,6 +197,9 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     }
     if (input.watchdogMs !== undefined && Number.isFinite(input.watchdogMs) && input.watchdogMs > 0) {
       this.taskWatchdogs.set(taskId, input.watchdogMs);
+    }
+    if (input.maxToolLoopIterations !== undefined && Number.isFinite(input.maxToolLoopIterations) && input.maxToolLoopIterations > 0) {
+      this.maxToolLoopIterations.set(taskId, input.maxToolLoopIterations);
     }
     const sessionId = this.createSessionId();
     const materials = input.materials.map((item) => {
@@ -378,6 +383,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         deadlineMs,
         history: [...taskHistory],
         permissionMode: this.permissionModes.get(taskId),
+        maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
         emitRuntimeEvent: (event) => {
           void this.appendRuntimeEvent(taskId, event);
         },
@@ -399,6 +405,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
             deadlineMs,
             history: [...taskHistory],
             permissionMode: this.permissionModes.get(taskId),
+            maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
             emitRuntimeEvent: (event) => {
               void this.appendRuntimeEvent(taskId, event);
             },
@@ -451,6 +458,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       this.taskHistories.delete(taskId);
       this.permissionModes.delete(taskId);
       this.taskWatchdogs.delete(taskId);
+      this.maxToolLoopIterations.delete(taskId);
       this.activeExecutions.delete(taskId);
       this.executionPromises.delete(taskId);
       this.cancellingTaskIds.delete(taskId);

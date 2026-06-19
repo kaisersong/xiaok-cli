@@ -153,6 +153,7 @@ export interface TaskCreateInput {
   materials: Array<{ materialId: string; role?: MaterialRole }>;
   permissionMode?: TaskPermissionMode;
   watchdogMs?: number;
+  maxToolLoopIterations?: number;
   context?: TaskCreateContext;
 }
 
