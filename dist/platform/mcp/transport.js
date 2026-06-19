@@ -10,6 +10,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { WebSocket } from 'ws';
 export const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 3_000;
+export const DEFAULT_MCP_CALL_TIMEOUT_MS = 120_000;
 export function resolveMcpStartupTimeoutMs(env = process.env) {
     const raw = env.XIAOK_MCP_STARTUP_TIMEOUT_MS;
     if (!raw) {
@@ -19,6 +20,16 @@ export function resolveMcpStartupTimeoutMs(env = process.env) {
     return Number.isFinite(parsed) && parsed > 0
         ? parsed
         : DEFAULT_MCP_STARTUP_TIMEOUT_MS;
+}
+export function resolveMcpCallToolTimeoutMs(env = process.env) {
+    const raw = env.XIAOK_MCP_CALL_TIMEOUT_MS;
+    if (!raw) {
+        return DEFAULT_MCP_CALL_TIMEOUT_MS;
+    }
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0
+        ? parsed
+        : DEFAULT_MCP_CALL_TIMEOUT_MS;
 }
 export function resolveStdioCommand(command, platform = process.platform, env = process.env) {
     if ((command === 'python' || command === 'python3') && env.XIAOK_PYTHON_CMD) {

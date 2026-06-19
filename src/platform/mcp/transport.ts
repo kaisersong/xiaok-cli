@@ -28,6 +28,7 @@ export interface McpClientConnection {
 }
 
 export const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 3_000;
+export const DEFAULT_MCP_CALL_TIMEOUT_MS = 120_000;
 
 export function resolveMcpStartupTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.XIAOK_MCP_STARTUP_TIMEOUT_MS;
@@ -39,6 +40,18 @@ export function resolveMcpStartupTimeoutMs(env: NodeJS.ProcessEnv = process.env)
   return Number.isFinite(parsed) && parsed > 0
     ? parsed
     : DEFAULT_MCP_STARTUP_TIMEOUT_MS;
+}
+
+export function resolveMcpCallToolTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.XIAOK_MCP_CALL_TIMEOUT_MS;
+  if (!raw) {
+    return DEFAULT_MCP_CALL_TIMEOUT_MS;
+  }
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_MCP_CALL_TIMEOUT_MS;
 }
 
 export function resolveStdioCommand(

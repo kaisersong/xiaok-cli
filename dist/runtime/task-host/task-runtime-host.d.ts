@@ -17,6 +17,7 @@ export interface TaskRunnerInput {
     deadlineMs?: number;
     history: HistoryMessage[];
     permissionMode?: 'plan' | 'auto' | 'default';
+    maxToolLoopIterations?: number;
     emitRuntimeEvent(event: RuntimeEvent): void;
 }
 export type TaskRunner = (input: TaskRunnerInput) => Promise<void>;
@@ -60,6 +61,7 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private taskOrdinal;
     private sessionOrdinal;
     private readonly permissionModes;
+    private readonly maxToolLoopIterations;
     constructor(options: InProcessTaskRuntimeHostOptions);
     createTask(input: TaskCreateInput): Promise<{
         taskId: string;

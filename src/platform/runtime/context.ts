@@ -25,7 +25,7 @@ import {
   mergeMcpServerConfigs,
   type McpServerConfigConflict,
 } from '../mcp/config.js';
-import { createMcpClientConnection, resolveMcpStartupTimeoutMs, resolveStdioCommand } from '../mcp/transport.js';
+import { createMcpClientConnection, resolveMcpCallToolTimeoutMs, resolveMcpStartupTimeoutMs, resolveStdioCommand } from '../mcp/transport.js';
 import type { NamedMcpServerConfig } from '../mcp/types.js';
 import {
   BUILT_IN_MCP_CLASSIFICATIONS,
@@ -338,6 +338,7 @@ async function connectWorkspaceMcpServers(
 ): Promise<Tool[]> {
   const tools: Tool[] = [];
   const startupTimeoutMs = resolveMcpStartupTimeoutMs();
+  const callToolTimeoutMs = resolveMcpCallToolTimeoutMs();
 
   for (const server of servers) {
     if (shouldStop()) {
@@ -397,7 +398,11 @@ async function connectWorkspaceMcpServers(
           {
             listTools: async () => schemas,
             callTool: async (name, input) => {
-              const result = await activeConnection.client.callTool({ name, arguments: input });
+              const result = await activeConnection.client.callTool(
+                { name, arguments: input },
+                undefined,
+                { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true },
+              );
               return normalizeMcpRuntimeToolResult(result).text;
             },
             dispose: activeConnection.dispose,

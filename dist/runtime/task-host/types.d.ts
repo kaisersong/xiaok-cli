@@ -201,6 +201,7 @@ export interface TaskCreateInput {
     }>;
     permissionMode?: TaskPermissionMode;
     watchdogMs?: number;
+    maxToolLoopIterations?: number;
     context?: TaskCreateContext;
 }
 export interface TaskSnapshot {

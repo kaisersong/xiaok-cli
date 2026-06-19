@@ -1,6 +1,5 @@
 import { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import { Code, Eye, Download } from 'lucide-react';
-import { ArtifactIframe } from './ArtifactIframe';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ArtifactEditableViewer, type AnnotationPayload } from './ArtifactEditableViewer';
 import { formatAnnotationForChat } from '../hooks/useArtifactAnnotation';
@@ -35,6 +34,7 @@ function getFileExtension(filename: string): string {
 
 function isTextFile(path: string, content: string): boolean {
   const ext = getFileExtension(path);
+  if (ext === 'pdf') return false;
   if (textFallbackExtensions.has(ext)) return true;
   // Check for binary content markers
   if (content.includes('\0')) return false;
@@ -53,6 +53,18 @@ function isImageFile(path: string): boolean {
   return /\.(png|jpg|jpeg|gif|svg|webp|ico)$/i.test(path);
 }
 
+function isPdfFile(path: string): boolean {
+  return /\.pdf$/i.test(path);
+}
+
+function isPdfDataUrl(content: string): boolean {
+  return /^data:application\/pdf(?:;[^,]*)*;base64,/i.test(content.trimStart());
+}
+
+function getFileName(path: string): string {
+  return path.split(/[\\/]/).pop() || path || 'download';
+}
+
 export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: CanvasPreviewProps) {
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
   const iframeSrc = useRef<string | null>(null);
@@ -60,7 +72,12 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
   const isHtml = isHtmlFile(filePath);
   const isMarkdown = isMarkdownFile(filePath);
   const isImage = isImageFile(filePath);
+  const isPdf = isPdfFile(filePath);
   const isText = isTextFile(filePath, content);
+  const fileName = useMemo(() => getFileName(filePath), [filePath]);
+  const pdfSrc = useMemo(() => (
+    isPdf && isPdfDataUrl(content) ? content.trim() : null
+  ), [content, isPdf]);
 
   // Create blob URL for HTML preview
   const htmlBlobUrl = useMemo(() => {
@@ -83,12 +100,12 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
 
   // Auto-select code mode for non-previewable files
   useEffect(() => {
-    if (!isHtml && !isMarkdown && !isImage) {
+    if (!isHtml && !isMarkdown && !isImage && !isPdf) {
       setViewMode('code');
     } else {
       setViewMode('preview');
     }
-  }, [filePath, isHtml, isMarkdown, isImage]);
+  }, [filePath, isHtml, isMarkdown, isImage, isPdf]);
 
   const handleAnnotation = useCallback((payload: AnnotationPayload) => {
     if (onAnnotation) {
@@ -111,11 +128,11 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
   }, [filePath]);
 
   const handleDownload = useCallback(async () => {
-    const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || 'download';
     const api = getDesktopApi() as any;
     if (api?.showSaveDialog && api?.saveFile) {
       const { canceled, filePath: savePath } = await api.showSaveDialog({
         defaultPath: fileName,
+        ...(isPdf ? { filters: [{ name: 'PDF', extensions: ['pdf'] }] } : {}),
       });
       if (canceled || !savePath) return;
       await api.saveFile({ filePath: savePath, content });
@@ -130,10 +147,11 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }
-  }, [filePath, content]);
+  }, [content, fileName, isPdf]);
 
   const hasCodeView = isText;
-  const hasPreview = isHtml || isMarkdown || isImage;
+  const hasPreview = isHtml || isMarkdown || isImage || isPdf;
+  const isFramedPreview = viewMode === 'preview' && (isHtml || isPdf);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -179,7 +197,7 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
       )}
 
       {/* Content */}
-      <div className={`flex-1 min-h-0 ${viewMode === 'preview' && isHtml ? 'flex flex-col overflow-hidden' : 'overflow-auto'}`}>
+      <div className={`flex-1 min-h-0 ${isFramedPreview ? 'flex flex-col overflow-hidden' : 'overflow-auto'}`}>
         {viewMode === 'preview' && isHtml && content && (
           <ArtifactEditableViewer
             htmlContent={content}
@@ -201,6 +219,20 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
           <div className="flex h-full items-center justify-center bg-[var(--c-bg-page)] p-4">
             <img src={content} alt={filePath} className="max-h-full max-w-full object-contain" />
           </div>
+        )}
+
+        {viewMode === 'preview' && isPdf && (
+          pdfSrc ? (
+            <iframe
+              title={`PDF preview: ${fileName}`}
+              src={pdfSrc}
+              className="h-full w-full border-0 bg-[var(--c-bg-card)]"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center p-6">
+              <p className="text-xs text-[var(--c-text-tertiary)]">PDF preview is loading...</p>
+            </div>
+          )
         )}
 
         {viewMode === 'code' && (

@@ -19,7 +19,7 @@ import { createReminderService } from '../../runtime/reminder/service.js';
 import { CapabilityRegistry } from './capability-registry.js';
 import { FileCapabilityHealthStore } from './health-store.js';
 import { loadSettingsMcpServers, loadPluginMcpServers, mergeMcpServerConfigs, } from '../mcp/config.js';
-import { createMcpClientConnection, resolveMcpStartupTimeoutMs, resolveStdioCommand } from '../mcp/transport.js';
+import { createMcpClientConnection, resolveMcpCallToolTimeoutMs, resolveMcpStartupTimeoutMs, resolveStdioCommand } from '../mcp/transport.js';
 import { BUILT_IN_MCP_CLASSIFICATIONS, classifyMcpServer, validateRegistry, } from '../mcp/server-classification.js';
 export async function createPlatformRuntimeContext(options) {
     const pluginRuntime = await loadPlatformPluginRuntime(options.cwd, options.builtinCommands);
@@ -235,6 +235,7 @@ async function connectWorkspaceLspServers(pluginRuntime, lspManager, cwd, capabi
 async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDisposable, shouldStop = () => false, classificationRegistry = BUILT_IN_MCP_CLASSIFICATIONS, platform = process.platform) {
     const tools = [];
     const startupTimeoutMs = resolveMcpStartupTimeoutMs();
+    const callToolTimeoutMs = resolveMcpCallToolTimeoutMs();
     for (const server of servers) {
         if (shouldStop()) {
             break;
@@ -284,7 +285,7 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
             tools.push(...buildMcpRuntimeTools({ name: server.name, command: '' }, {
                 listTools: async () => schemas,
                 callTool: async (name, input) => {
-                    const result = await activeConnection.client.callTool({ name, arguments: input });
+                    const result = await activeConnection.client.callTool({ name, arguments: input }, undefined, { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true });
                     return normalizeMcpRuntimeToolResult(result).text;
                 },
                 dispose: activeConnection.dispose,

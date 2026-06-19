@@ -87,6 +87,7 @@ export class InProcessTaskRuntimeHost {
     taskOrdinal = 0;
     sessionOrdinal = 0;
     permissionModes = new Map();
+    maxToolLoopIterations = new Map();
     constructor(options) {
         this.options = options;
     }
@@ -97,6 +98,9 @@ export class InProcessTaskRuntimeHost {
         }
         if (input.watchdogMs !== undefined && Number.isFinite(input.watchdogMs) && input.watchdogMs > 0) {
             this.taskWatchdogs.set(taskId, input.watchdogMs);
+        }
+        if (input.maxToolLoopIterations !== undefined && Number.isFinite(input.maxToolLoopIterations) && input.maxToolLoopIterations > 0) {
+            this.maxToolLoopIterations.set(taskId, input.maxToolLoopIterations);
         }
         const sessionId = this.createSessionId();
         const materials = input.materials.map((item) => {
@@ -263,6 +267,7 @@ export class InProcessTaskRuntimeHost {
                 deadlineMs,
                 history: [...taskHistory],
                 permissionMode: this.permissionModes.get(taskId),
+                maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
                 emitRuntimeEvent: (event) => {
                     void this.appendRuntimeEvent(taskId, event);
                 },
@@ -284,6 +289,7 @@ export class InProcessTaskRuntimeHost {
                         deadlineMs,
                         history: [...taskHistory],
                         permissionMode: this.permissionModes.get(taskId),
+                        maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
                         emitRuntimeEvent: (event) => {
                             void this.appendRuntimeEvent(taskId, event);
                         },
@@ -338,6 +344,7 @@ export class InProcessTaskRuntimeHost {
             this.taskHistories.delete(taskId);
             this.permissionModes.delete(taskId);
             this.taskWatchdogs.delete(taskId);
+            this.maxToolLoopIterations.delete(taskId);
             this.activeExecutions.delete(taskId);
             this.executionPromises.delete(taskId);
             this.cancellingTaskIds.delete(taskId);

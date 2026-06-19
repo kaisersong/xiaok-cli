@@ -48,6 +48,7 @@ import { selectModel } from '../ui/model-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
 import { executeReminderSlashCommand } from './chat-reminder.js';
 import { parseShellEscapeInput, runInteractiveShellCommand } from './chat-shell-escape.js';
+import { resolveAgentMaxIterations, runCleanupWithTimeout } from './chat-runtime-config.js';
 import { buildChatHelpText } from './registry.js';
 import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
@@ -612,37 +613,17 @@ async function runChat(initialInput, opts) {
             transcript_path: transcriptLogger.path,
         },
     });
-    const cleanupRuntimeResources = async () => {
-        const cleanupSteps = [
-            () => platform.dispose(),
-            () => disposeModelAdapter(adapter),
-            () => memoryStore.close?.(),
-            ...embeddedChannels.map((ch) => () => ch.cleanup()),
-        ];
-        for (const cleanupStep of cleanupSteps) {
-            try {
-                await cleanupStep();
-            }
-            catch (error) {
-                log.warn('chat cleanup failed', { error: String(error) });
-            }
-        }
+    const buildCleanupSteps = () => [
+        () => platform.dispose(),
+        () => disposeModelAdapter(adapter),
+        () => memoryStore.close?.(),
+        ...embeddedChannels.map((ch) => () => ch.cleanup()),
+    ];
+    const onCleanupError = (error) => {
+        log.warn('chat cleanup failed', { error: String(error) });
     };
     const cleanupRuntimeResourcesWithTimeout = async () => {
-        let timeout = null;
-        try {
-            await Promise.race([
-                cleanupRuntimeResources(),
-                new Promise((resolve) => {
-                    timeout = setTimeout(resolve, 2000);
-                }),
-            ]);
-        }
-        finally {
-            if (timeout) {
-                clearTimeout(timeout);
-            }
-        }
+        await runCleanupWithTimeout(buildCleanupSteps(), 2000, onCleanupError);
     };
     const rawRuntimeHooks = createRuntimeHooks();
     const runtimeHooks = {
@@ -673,7 +654,11 @@ async function runChat(initialInput, opts) {
         });
     }
     log.info('agent created', { provider: config.defaultProvider, model: config.defaultModelId, skills: skills.length });
-    agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, { hooks: runtimeHooks, memoryStore });
+    agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, {
+        hooks: runtimeHooks,
+        memoryStore,
+        maxIterations: resolveAgentMaxIterations(),
+    });
     agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
     agent.setPromptSnapshot(initialPromptSnapshot);
     runtimeFacade = new RuntimeFacade({
@@ -1815,7 +1800,7 @@ async function runChat(initialInput, opts) {
         finally {
             clearTurnIntentContext();
             await releaseSessionOwnershipForExit();
-            await cleanupRuntimeResources();
+            await cleanupRuntimeResourcesWithTimeout();
         }
         if (!opts.print && !opts.json) {
             process.stdout.write('\n');

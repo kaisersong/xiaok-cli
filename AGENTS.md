@@ -235,6 +235,11 @@
 
 ## Desktop Packaging
 
+- Apple Developer 注册信息：
+  - App ID Prefix / Team ID：`Y9YR86UG94`
+  - Bundle ID：`com.xiaok.desktop`（explicit）
+  - Description：`Xiaok Desktop`
+  - 当前注册阶段不需要额外启用 Capabilities / App Services / Capability Requests；Electron hardened runtime entitlements 由签名配置处理，macOS Accessibility / Screen Recording 等是用户本机 TCC 授权，不在 Apple Developer App ID 中申请。
 - `desktop/package.json` 的 `dependencies` 只保留 main process 运行时需要的包；纯 renderer 依赖放在 `devDependencies`。
 - Vite 打包 renderer 时不区分 dependencies / devDependencies，不影响前端构建。
 - `electron-builder.json` 的 `files` 不需要手动加 `node_modules/**/*`，electron-builder 默认会根据 `dependencies` 自动打包运行时模块。
