@@ -157,15 +157,29 @@ jobs:
             --identity "Developer ID Application: Kai Song (Y9YR86UG94)" \
             --keychain "$MACOS_SIGNING_KEYCHAIN"
 
-      - name: Package macOS installer
-        run: cd desktop && npx electron-builder --config electron-builder.json --mac --arm64 --publish never -c.mac.forceCodeSigning=true -c.mac.notarize=true
+      - name: Package signed macOS app
+        run: cd desktop && npx electron-builder --config electron-builder.json --mac dir --arm64 --publish never -c.mac.forceCodeSigning=true -c.mac.notarize=false
         env:
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Notarize macOS app
+        timeout-minutes: 75
+        run: scripts/notarize-macos-app.sh desktop/release/mac-arm64/xiaok.app
+        env:
           APPLE_API_KEY: ${{ runner.temp }}/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          NOTARY_TIMEOUT_SECONDS: "3600"
+          NOTARY_POLL_INTERVAL_SECONDS: "30"
+
+      - name: Package macOS distributables
+        run: cd desktop && npx electron-builder --config electron-builder.json --mac dmg zip --arm64 --publish never --prepackaged release/mac-arm64/xiaok.app -c.mac.notarize=false
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Verify macOS signature and notarization
         shell: bash
