@@ -9,7 +9,7 @@ export interface FetchRunInput {
     maxChars: number;
     signal?: AbortSignal;
 }
-export type FetchProviderName = 'web_fetch.basic' | 'web_fetch.jina';
+export type FetchProviderName = 'web_fetch.basic' | 'web_fetch.jina' | 'web_fetch.firecrawl';
 export interface FetchProvider {
     readonly name: FetchProviderName;
     readonly displayName: string;

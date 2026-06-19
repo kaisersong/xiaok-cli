@@ -5,10 +5,10 @@ export const DEFAULT_CONNECTORS_CONFIG = Object.freeze({
     search: { provider: 'duckduckgo' },
     fetch: { provider: 'basic' },
 });
-export const SEARCH_PROVIDER_NAMES = ['duckduckgo', 'tavily', 'brave', 'searxng'];
+export const SEARCH_PROVIDER_NAMES = ['duckduckgo', 'tavily', 'brave', 'firecrawl', 'searxng'];
 export const FETCH_PROVIDER_NAMES = ['basic', 'jina', 'firecrawl'];
 const NOT_IMPLEMENTED_SEARCH = new Set(['searxng']);
-const NOT_IMPLEMENTED_FETCH = new Set(['firecrawl']);
+const NOT_IMPLEMENTED_FETCH = new Set();
 export function isSearchProviderImplemented(name) {
     return !NOT_IMPLEMENTED_SEARCH.has(name);
 }
@@ -49,6 +49,7 @@ export function normalizeConnectorsConfig(input) {
             provider: searchProvider,
             tavilyApiKey: pickString(search.tavilyApiKey),
             braveApiKey: pickString(search.braveApiKey),
+            firecrawlApiKey: pickString(search.firecrawlApiKey),
             searxngBaseUrl: pickString(search.searxngBaseUrl),
         },
         fetch: {
@@ -84,6 +85,11 @@ export function resolveCliConnectorsConfig(base, env = process.env) {
     const braveKey = pickString(env.BRAVE_API_KEY);
     if (braveKey)
         normalized.search.braveApiKey = braveKey;
+    const firecrawlKey = pickString(env.FIRECRAWL_API_KEY);
+    if (firecrawlKey) {
+        normalized.search.firecrawlApiKey = firecrawlKey;
+        normalized.fetch.firecrawlApiKey = firecrawlKey;
+    }
     const envFetchProvider = pickString(env.XIAOK_FETCH_PROVIDER);
     if (envFetchProvider && FETCH_PROVIDER_NAMES.includes(envFetchProvider)) {
         normalized.fetch.provider = envFetchProvider;
@@ -104,6 +110,7 @@ export function evaluateProviderRuntimes(config) {
         searchRuntime('duckduckgo', searchSelected, config),
         searchRuntime('tavily', searchSelected, config),
         searchRuntime('brave', searchSelected, config),
+        searchRuntime('firecrawl', searchSelected, config),
         searchRuntime('searxng', searchSelected, config),
         fetchRuntime('basic', fetchSelected, config),
         fetchRuntime('jina', fetchSelected, config),
@@ -118,7 +125,7 @@ function searchRuntime(name, selected, config) {
     if (name !== selected) {
         return { provider_name, runtime_state: 'inactive' };
     }
-    if (name === 'duckduckgo') {
+    if (name === 'duckduckgo' || name === 'firecrawl') {
         return { provider_name, runtime_state: 'ready' };
     }
     if (name === 'tavily' && !config.search.tavilyApiKey) {

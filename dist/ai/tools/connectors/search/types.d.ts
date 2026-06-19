@@ -10,7 +10,7 @@ export interface SearchRunInput {
     count: number;
     signal?: AbortSignal;
 }
-export type SearchProviderName = 'web_search.duckduckgo' | 'web_search.tavily' | 'web_search.brave';
+export type SearchProviderName = 'web_search.duckduckgo' | 'web_search.tavily' | 'web_search.brave' | 'web_search.firecrawl';
 export interface SearchProvider {
     readonly name: SearchProviderName;
     readonly displayName: string;

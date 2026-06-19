@@ -1,9 +1,10 @@
-export type SearchProviderName = 'duckduckgo' | 'tavily' | 'brave' | 'searxng';
+export type SearchProviderName = 'duckduckgo' | 'tavily' | 'brave' | 'firecrawl' | 'searxng';
 export type FetchProviderName = 'basic' | 'jina' | 'firecrawl';
 export interface SearchConnectorConfig {
     provider: SearchProviderName;
     tavilyApiKey?: string;
     braveApiKey?: string;
+    firecrawlApiKey?: string;
     searxngBaseUrl?: string;
 }
 export interface FetchConnectorConfig {

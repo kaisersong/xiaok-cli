@@ -2,10 +2,12 @@ import type { ConnectorsConfig, ProviderRuntime } from './config.js';
 import { evaluateProviderRuntimes } from './config.js';
 import { createBraveSearchProvider } from './search/brave.js';
 import { createDuckDuckGoSearchProvider } from './search/duckduckgo.js';
+import { createFirecrawlSearchProvider } from './search/firecrawl.js';
 import { createTavilySearchProvider } from './search/tavily.js';
 import { SearchProviderError } from './search/types.js';
 import type { SearchHit, SearchProvider, SearchRunInput } from './search/types.js';
 import { createBasicFetchProvider } from './fetch/basic.js';
+import { createFirecrawlFetchProvider } from './fetch/firecrawl.js';
 import { createJinaFetchProvider } from './fetch/jina.js';
 import { FetchProviderError } from './fetch/types.js';
 import type { FetchProvider, FetchResult, FetchRunInput } from './fetch/types.js';
@@ -227,6 +229,16 @@ export class ConnectorRegistry {
         return fallback;
       }
     }
+    case 'firecrawl': {
+      try {
+        return createFirecrawlSearchProvider({
+          apiKey: config.search.firecrawlApiKey?.trim() || undefined,
+          fetchFn,
+        });
+      } catch {
+        return fallback;
+      }
+    }
     case 'duckduckgo':
     case 'searxng': // not implemented → use fallback
     default:
@@ -239,8 +251,12 @@ export class ConnectorRegistry {
     switch (config.fetch.provider) {
     case 'jina':
       return createJinaFetchProvider({ apiKey: config.fetch.jinaApiKey, fetchFn });
+    case 'firecrawl':
+      return createFirecrawlFetchProvider({
+        apiKey: config.fetch.firecrawlApiKey?.trim() || undefined,
+        fetchFn,
+      });
     case 'basic':
-    case 'firecrawl': // not implemented → use fallback
     default:
       return fallback;
     }

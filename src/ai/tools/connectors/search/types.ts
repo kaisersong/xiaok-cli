@@ -19,7 +19,8 @@ export interface SearchRunInput {
 export type SearchProviderName =
   | 'web_search.duckduckgo'
   | 'web_search.tavily'
-  | 'web_search.brave';
+  | 'web_search.brave'
+  | 'web_search.firecrawl';
 
 export interface SearchProvider {
   readonly name: SearchProviderName;

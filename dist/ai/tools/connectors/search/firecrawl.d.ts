@@ -1,0 +1,7 @@
+import { type SearchProvider } from './types.js';
+export interface FirecrawlSearchOptions {
+    apiKey?: string;
+    fetchFn?: typeof fetch;
+    endpoint?: string;
+}
+export declare function createFirecrawlSearchProvider(options?: FirecrawlSearchOptions): SearchProvider;

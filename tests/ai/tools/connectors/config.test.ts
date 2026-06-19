@@ -48,8 +48,10 @@ describe('connectors config', () => {
     expect(tavily?.runtime_state).toBe('missing_config');
     const searxng = runtimes.find((r) => r.provider_name === 'web_search.searxng');
     expect(searxng?.runtime_state).toBe('not_implemented');
-    const firecrawl = runtimes.find((r) => r.provider_name === 'web_fetch.firecrawl');
-    expect(firecrawl?.runtime_state).toBe('not_implemented');
+    const firecrawlFetch = runtimes.find((r) => r.provider_name === 'web_fetch.firecrawl');
+    expect(firecrawlFetch?.runtime_state).toBe('inactive');
+    const firecrawlSearch = runtimes.find((r) => r.provider_name === 'web_search.firecrawl');
+    expect(firecrawlSearch?.runtime_state).toBe('inactive');
   });
 
   it('runtime is ready when configured selected provider has its key', () => {

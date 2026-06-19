@@ -2,21 +2,22 @@
 // Same schema is consumed by both; only the persistence layer differs
 // (env / settings.json for CLI, encrypted store for desktop).
 
-export type SearchProviderName = 'duckduckgo' | 'tavily' | 'brave' | 'searxng';
+export type SearchProviderName = 'duckduckgo' | 'tavily' | 'brave' | 'firecrawl' | 'searxng';
 export type FetchProviderName = 'basic' | 'jina' | 'firecrawl';
 
 export interface SearchConnectorConfig {
   provider: SearchProviderName;
   tavilyApiKey?: string;
   braveApiKey?: string;
+  firecrawlApiKey?: string;
   searxngBaseUrl?: string; // reserved, v1 not implemented
 }
 
 export interface FetchConnectorConfig {
   provider: FetchProviderName;
   jinaApiKey?: string; // optional; Jina works keyless
-  firecrawlApiKey?: string; // reserved, v1 not implemented
-  firecrawlBaseUrl?: string; // reserved, v1 not implemented
+  firecrawlApiKey?: string;
+  firecrawlBaseUrl?: string;
 }
 
 export interface ConnectorsConfig {
@@ -29,11 +30,11 @@ export const DEFAULT_CONNECTORS_CONFIG: ConnectorsConfig = Object.freeze({
   fetch: { provider: 'basic' as FetchProviderName },
 }) as ConnectorsConfig;
 
-export const SEARCH_PROVIDER_NAMES: readonly SearchProviderName[] = ['duckduckgo', 'tavily', 'brave', 'searxng'];
+export const SEARCH_PROVIDER_NAMES: readonly SearchProviderName[] = ['duckduckgo', 'tavily', 'brave', 'firecrawl', 'searxng'];
 export const FETCH_PROVIDER_NAMES: readonly FetchProviderName[] = ['basic', 'jina', 'firecrawl'];
 
 const NOT_IMPLEMENTED_SEARCH: ReadonlySet<SearchProviderName> = new Set(['searxng']);
-const NOT_IMPLEMENTED_FETCH: ReadonlySet<FetchProviderName> = new Set(['firecrawl']);
+const NOT_IMPLEMENTED_FETCH: ReadonlySet<FetchProviderName> = new Set();
 
 export function isSearchProviderImplemented(name: SearchProviderName): boolean {
   return !NOT_IMPLEMENTED_SEARCH.has(name);
@@ -78,6 +79,7 @@ export function normalizeConnectorsConfig(input: unknown): ConnectorsConfig {
       provider: searchProvider,
       tavilyApiKey: pickString(search.tavilyApiKey),
       braveApiKey: pickString(search.braveApiKey),
+      firecrawlApiKey: pickString(search.firecrawlApiKey),
       searxngBaseUrl: pickString(search.searxngBaseUrl),
     },
     fetch: {
@@ -117,6 +119,11 @@ export function resolveCliConnectorsConfig(
   if (tavilyKey) normalized.search.tavilyApiKey = tavilyKey;
   const braveKey = pickString(env.BRAVE_API_KEY);
   if (braveKey) normalized.search.braveApiKey = braveKey;
+  const firecrawlKey = pickString(env.FIRECRAWL_API_KEY);
+  if (firecrawlKey) {
+    normalized.search.firecrawlApiKey = firecrawlKey;
+    normalized.fetch.firecrawlApiKey = firecrawlKey;
+  }
 
   const envFetchProvider = pickString(env.XIAOK_FETCH_PROVIDER) as FetchProviderName | undefined;
   if (envFetchProvider && FETCH_PROVIDER_NAMES.includes(envFetchProvider)) {
@@ -153,6 +160,7 @@ export function evaluateProviderRuntimes(config: ConnectorsConfig): ProviderRunt
     searchRuntime('duckduckgo', searchSelected, config),
     searchRuntime('tavily', searchSelected, config),
     searchRuntime('brave', searchSelected, config),
+    searchRuntime('firecrawl', searchSelected, config),
     searchRuntime('searxng', searchSelected, config),
     fetchRuntime('basic', fetchSelected, config),
     fetchRuntime('jina', fetchSelected, config),
@@ -172,7 +180,7 @@ function searchRuntime(
   if (name !== selected) {
     return { provider_name, runtime_state: 'inactive' };
   }
-  if (name === 'duckduckgo') {
+  if (name === 'duckduckgo' || name === 'firecrawl') {
     return { provider_name, runtime_state: 'ready' };
   }
   if (name === 'tavily' && !config.search.tavilyApiKey) {
