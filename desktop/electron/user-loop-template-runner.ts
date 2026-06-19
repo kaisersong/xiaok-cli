@@ -107,7 +107,12 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
       sleep,
     });
     if (snapshot.status !== 'completed') {
-      const message = `User loop task failed: ${snapshot.status}`;
+      const errorEvent = [...(snapshot.events ?? [])].reverse().find(e => (e as any).type === 'error') as { type: 'error'; message?: string } | undefined;
+      const errorReason = errorEvent?.message
+        || snapshot.result?.summary?.split('\n')[0]?.slice(0, 200)
+        || (snapshot.salvage?.reason)
+        || `状态 ${snapshot.status}`;
+      const message = `用户循环任务${snapshot.status === 'failed' ? '失败' : '未完成'}：${errorReason}`;
       options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_failed', message, [], timestamp());
       return failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
     }

@@ -151,7 +151,15 @@ export function AutomationsPage() {
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => openTab(item.source === 'loop_run' ? 'loops' : 'schedules')}
+                      onClick={() => {
+                        if (item.source === 'loop_run' && item.loopId) {
+                          navigate(`/automations/loops#loop-${item.loopId}`);
+                        } else if (item.actionId) {
+                          navigate(`/automations/schedules#task-${item.actionId}`);
+                        } else {
+                          openTab(item.source === 'loop_run' ? 'loops' : 'schedules');
+                        }
+                      }}
                       className="block w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2 text-left hover:bg-[var(--c-bg-deep)]"
                     >
                       <div className="flex items-center justify-between gap-3">

@@ -1939,6 +1939,22 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
     void loadLoops();
   }, [loadLoops]);
 
+  useEffect(() => {
+    if (loopDiagnosticsLoading) return;
+    const hash = window.location.hash;
+    if (!hash || !hash.startsWith('#loop-')) return;
+    const el = document.getElementById(hash.slice(1));
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.style.outline = '2px solid var(--c-accent)';
+      el.style.outlineOffset = '2px';
+      setTimeout(() => {
+        el.style.outline = '';
+        el.style.outlineOffset = '';
+      }, 2000);
+    }
+  }, [loopDiagnosticsLoading]);
+
   const handleRunLoopNow = async (loopId: string) => {
     if (runningLoopId) return;
     setRunningLoopId(loopId);
@@ -2198,6 +2214,9 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
               {userLoops.map(({ template, definition }) => {
                 const loopTitle = definition?.title ?? template.loopId;
                 const loopStatus = definition?.status ?? 'active';
+                const runs = loopRuns[template.loopId] ?? [];
+                const latestRun = runs[0];
+                const latestRunFailed = latestRun && (latestRun.status === 'failed' || latestRun.status === 'blocked');
                 const isRunning = runningLoopId === template.loopId;
                 const isPreviewing = previewingLoopId === template.loopId;
                 const outputPreview = loopOutputPreviews[template.loopId];
@@ -2210,7 +2229,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                     ? t.desktopSettings.loopDiagnosticsAlreadyRunning
                     : t.desktopSettings.loopDiagnosticsRunNow;
                 return (
-                  <div key={template.loopId} className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3">
+                  <div key={template.loopId} id={`loop-${template.loopId}`} className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 scroll-mt-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium text-[var(--c-text-heading)]">{loopTitle}</div>
@@ -2254,6 +2273,17 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                         {loopStatus}
                       </span>
                     </div>
+                    {latestRunFailed && (
+                      <div className="mt-3 rounded-md border border-red-200 bg-red-50/50 px-3 py-2 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-red-700">最近一次运行{latestRun.status === 'blocked' ? '阻塞' : '失败'}</span>
+                          <span className="text-[10px] text-red-600/70">{new Date(latestRun.startedAt).toLocaleString()}</span>
+                        </div>
+                        {latestRun.message && (
+                          <p className="mt-1 leading-5 text-red-700/90 break-words whitespace-pre-wrap">{latestRun.message}</p>
+                        )}
+                      </div>
+                    )}
                     <div className="mt-3 flex flex-wrap justify-end gap-2">
                       <button
                         type="button"
