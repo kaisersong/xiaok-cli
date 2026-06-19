@@ -148,19 +148,9 @@ export function AutomationsPage() {
               {overviewSnapshot && overviewSnapshot.recentFailures.length > 0 ? (
                 <div className="mt-3 space-y-2">
                   {overviewSnapshot.recentFailures.map(item => (
-                    <button
+                    <div
                       key={item.id}
-                      type="button"
-                      onClick={() => {
-                        if (item.source === 'loop_run' && item.loopId) {
-                          navigate(`/automations/loops#loop-${item.loopId}`);
-                        } else if (item.actionId) {
-                          navigate(`/automations/schedules#task-${item.actionId}`);
-                        } else {
-                          openTab(item.source === 'loop_run' ? 'loops' : 'schedules');
-                        }
-                      }}
-                      className="block w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2 text-left hover:bg-[var(--c-bg-deep)]"
+                      className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2"
                     >
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-sm font-medium text-[var(--c-text-primary)]">{item.title}</span>
@@ -170,12 +160,44 @@ export function AutomationsPage() {
                         </div>
                       </div>
                       {item.message && (
-                        <p className="mt-1 text-xs leading-5 text-[var(--c-text-secondary)]">{item.message}</p>
+                        <p className="mt-1 text-xs leading-5 text-[var(--c-text-secondary)] break-words whitespace-pre-wrap">{item.message}</p>
                       )}
-                      <p className="mt-1.5 text-[10px] text-[var(--c-accent)]">
-                        {item.source === 'loop_run' ? '点击查看循环详情 →' : '点击查看定时任务 →'}
-                      </p>
-                    </button>
+                      <div className="mt-2 flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (item.source === 'loop_run' && item.loopId) {
+                              navigate(`/automations/loops#loop-${item.loopId}`);
+                            } else if (item.actionId) {
+                              navigate(`/automations/schedules#task-${item.actionId}`);
+                            } else {
+                              openTab(item.source === 'loop_run' ? 'loops' : 'schedules');
+                            }
+                          }}
+                          className="text-[10px] text-[var(--c-accent)] hover:underline"
+                        >
+                          {item.source === 'loop_run' ? '查看循环详情 →' : '查看定时任务 →'}
+                        </button>
+                        {item.source === 'loop_run' && item.loopId && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!confirm(`清除「${item.title}」的失败/阻塞历史记录？`)) return;
+                              try {
+                                await api.clearLoopRunHistory(item.loopId!, ['failed', 'blocked']);
+                                const snapshot = await api.getAutomationOverviewSnapshot();
+                                setOverviewSnapshot(snapshot);
+                              } catch (e) {
+                                console.error('[Automations] clear failures failed', e);
+                              }
+                            }}
+                            className="text-[10px] text-[var(--c-text-tertiary)] hover:text-red-600 hover:underline"
+                          >
+                            清除此记录
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   ))}
                 </div>
               ) : (

@@ -296,6 +296,26 @@ export class LoopStore {
     });
   }
 
+  clearLoopRunHistory(loopId: string, statuses?: string[]): number {
+    return this.transaction(() => {
+      let runIds: string[];
+      if (statuses && statuses.length > 0) {
+        const placeholders = statuses.map(() => '?').join(',');
+        const rows = this.db.prepare(`select id from loop_runs where loop_id = ? and status in (${placeholders})`).all(loopId, ...statuses) as Array<{ id: string }>;
+        runIds = rows.map(r => r.id);
+      } else {
+        const rows = this.db.prepare('select id from loop_runs where loop_id = ?').all(loopId) as Array<{ id: string }>;
+        runIds = rows.map(r => r.id);
+      }
+      if (runIds.length === 0) return 0;
+      const idPlaceholders = runIds.map(() => '?').join(',');
+      this.db.prepare(`delete from loop_stages where run_id in (${idPlaceholders})`).run(...runIds);
+      const result = this.db.prepare(`delete from loop_runs where id in (${idPlaceholders})`).run(...runIds);
+      this.bumpAutomationStoreVersion();
+      return Number(result.changes ?? runIds.length);
+    });
+  }
+
   beginLoopRun(loopId: string, trigger: LoopRunTrigger, now: number, staleAfterMs: number): BeginLoopRunResult {
     return this.transaction(() => {
       const definitionRow = this.getLoopDefinitionRow(loopId);

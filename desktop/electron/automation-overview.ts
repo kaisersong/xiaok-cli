@@ -87,12 +87,14 @@ export function buildAutomationOverviewSnapshot(input: BuildAutomationOverviewSn
   const scheduleActions = actions.filter(isAutomationScheduleAction);
   const actionById = new Map(scheduleActions.map(action => [action.id, action]));
 
-  const loopFailures = definitions.flatMap(definition =>
-    input.loopStore
-      .listLoopRuns(definition.id, recentLimit)
-      .filter(run => FAILURE_LOOP_STATUSES.has(run.status))
-      .map(run => loopFailureItem(run, definition))
-  );
+  const loopFailures = definitions
+    .filter(definition => definition.status !== 'deleted')
+    .flatMap(definition =>
+      input.loopStore
+        .listLoopRuns(definition.id, recentLimit)
+        .filter(run => FAILURE_LOOP_STATUSES.has(run.status))
+        .map(run => loopFailureItem(run, definition))
+    );
 
   const timedActionFailures = scheduleActions.flatMap(action =>
     input.timedActionStore

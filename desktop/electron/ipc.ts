@@ -383,6 +383,20 @@ export async function registerDesktopIpc(
       throw e;
     }
   });
+  ipcMain.handle('desktop:loops:clearRunHistory', (_event, loopId, statuses) => {
+    log('info', 'loops:clearRunHistory', { loopId, statuses });
+    try {
+      const loopRuntime = getLoopRuntime(options);
+      const id = readLoopId(loopId);
+      const validStatuses = Array.isArray(statuses) && statuses.every(s => typeof s === 'string') ? statuses : undefined;
+      const removed = loopRuntime.loopStore.clearLoopRunHistory(id, validStatuses);
+      log('info', 'loops:clearRunHistory ok', { loopId: id, removed });
+      return { ok: true, removed };
+    } catch (e) {
+      log('error', 'loops:clearRunHistory failed', { loopId, error: String(e) });
+      throw e;
+    }
+  });
 
   // ---- Memory ----
   const { getDesktopMemoryStore } = await import('./desktop-services.js');

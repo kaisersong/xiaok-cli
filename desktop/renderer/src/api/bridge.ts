@@ -391,6 +391,10 @@ export const api = {
     await window.xiaokDesktop.deleteUserLoopTemplate(loopId);
   },
 
+  async clearLoopRunHistory(loopId: string, statuses?: string[]): Promise<{ ok: boolean; removed: number }> {
+    return await window.xiaokDesktop.clearLoopRunHistory(loopId, statuses);
+  },
+
   async createLoopSchedule(input: CreateLoopScheduleInputView): Promise<TimedActionView> {
     return await window.xiaokDesktop.createLoopSchedule(input) as TimedActionView;
   },
