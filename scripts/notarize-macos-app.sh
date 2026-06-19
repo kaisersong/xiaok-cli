@@ -2,11 +2,10 @@
 set -euo pipefail
 
 app_path="${1:-desktop/release/mac-arm64/xiaok.app}"
-timeout_seconds="${NOTARY_TIMEOUT_SECONDS:-3600}"
+timeout_seconds="${NOTARY_TIMEOUT_SECONDS:-1800}"
 poll_interval_seconds="${NOTARY_POLL_INTERVAL_SECONDS:-30}"
-submit_attempts="${NOTARY_SUBMIT_ATTEMPTS:-3}"
-submit_retry_seconds="${NOTARY_SUBMIT_RETRY_SECONDS:-20}"
-submit_timeout_seconds="${NOTARY_SUBMIT_TIMEOUT_SECONDS:-600}"
+reuse_in_progress="${NOTARY_REUSE_IN_PROGRESS:-true}"
+reuse_window_seconds="${NOTARY_REUSE_WINDOW_SECONDS:-86400}"
 
 : "${APPLE_API_KEY:?APPLE_API_KEY must point to the App Store Connect API key .p8 file}"
 : "${APPLE_API_KEY_ID:?APPLE_API_KEY_ID is required}"
@@ -36,163 +35,195 @@ fi
 
 app_base="$(basename "${app_path%.app}")"
 zip_path="$work_dir/${app_base}-notary.zip"
-submit_json="$work_dir/${app_base}-notary-submit.json"
+notary_archive_name="$(basename "$zip_path")"
+
+notary_auth_args=(
+  --key "$APPLE_API_KEY"
+  --key-id "$APPLE_API_KEY_ID"
+  --issuer "$APPLE_API_ISSUER"
+  --output-format json
+)
+
+json_value() {
+  local file_path="$1"
+  local field_name="$2"
+  /usr/bin/python3 - "$file_path" "$field_name" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+print(data.get(sys.argv[2]) or "")
+PY
+}
+
+try_staple_existing_ticket() {
+  echo "Checking for an existing notarization ticket"
+  if xcrun stapler staple "$app_path"; then
+    xcrun stapler validate "$app_path"
+    echo "Existing notarization ticket stapled successfully"
+    return 0
+  fi
+  echo "No existing ticket is currently available"
+  return 1
+}
+
+find_reusable_submission_id() {
+  local history_json="$work_dir/${app_base}-notary-history.json"
+  if ! xcrun notarytool history "${notary_auth_args[@]}" >"$history_json"; then
+    echo "Unable to read notarytool history; submitting a new archive" >&2
+    return 1
+  fi
+
+  /usr/bin/python3 - "$history_json" "$notary_archive_name" "$reuse_window_seconds" <<'PY'
+import datetime as dt
+import json
+import sys
+
+history_path, archive_name, window_seconds = sys.argv[1], sys.argv[2], int(sys.argv[3])
+with open(history_path, "r", encoding="utf-8") as handle:
+    payload = json.load(handle)
+
+if isinstance(payload, list):
+    entries = payload
+elif isinstance(payload, dict):
+    entries = (
+        payload.get("history")
+        or payload.get("submissions")
+        or payload.get("items")
+        or payload.get("data")
+        or []
+    )
+else:
+    entries = []
+
+now = dt.datetime.now(dt.timezone.utc)
+candidates = []
+for entry in entries:
+    if not isinstance(entry, dict):
+        continue
+    if entry.get("name") != archive_name:
+        continue
+    if entry.get("status") != "In Progress":
+        continue
+    submission_id = entry.get("id") or entry.get("submissionId")
+    created_raw = entry.get("createdDate") or entry.get("created_at")
+    if not submission_id or not created_raw:
+        continue
+    try:
+        created = dt.datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
+    except ValueError:
+        continue
+    age = (now - created).total_seconds()
+    if 0 <= age <= window_seconds:
+        candidates.append((created, submission_id))
+
+if candidates:
+    candidates.sort(reverse=True)
+    print(candidates[0][1])
+PY
+}
+
+poll_submission() {
+  local submission_id="$1"
+  local deadline=$((SECONDS + timeout_seconds))
+  local attempt=0
+  local last_status=""
+
+  echo "Notary submission id: $submission_id"
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    echo "::notice title=Apple notarization::Submission id ${submission_id}"
+  fi
+
+  while ((SECONDS < deadline)); do
+    attempt=$((attempt + 1))
+    local info_json="$work_dir/${app_base}-notary-info-${attempt}.json"
+    local info_err="$work_dir/${app_base}-notary-info-${attempt}.err"
+
+    if xcrun notarytool info "$submission_id" "${notary_auth_args[@]}" >"$info_json" 2>"$info_err"; then
+      local status
+      status="$(json_value "$info_json" status)"
+      if [[ "$status" != "$last_status" ]]; then
+        echo "Notary status: ${status:-unknown}"
+        last_status="$status"
+      else
+        echo "Notary status: ${status:-unknown} (poll $attempt)"
+      fi
+
+      case "$status" in
+        Accepted)
+          echo "Stapling notarization ticket to $app_path"
+          xcrun stapler staple "$app_path"
+          xcrun stapler validate "$app_path"
+          exit 0
+          ;;
+        Invalid | Rejected)
+          echo "Notarization failed with status: $status" >&2
+          local log_json="$work_dir/${app_base}-notary-log.json"
+          if xcrun notarytool log "$submission_id" "${notary_auth_args[@]}" >"$log_json"; then
+            cat "$log_json" >&2
+          fi
+          exit 1
+          ;;
+      esac
+    else
+      echo "notarytool info failed on poll $attempt; retrying" >&2
+      if [[ -s "$info_err" ]]; then
+        cat "$info_err" >&2
+      fi
+    fi
+
+    local remaining=$((deadline - SECONDS))
+    if ((remaining <= 0)); then
+      break
+    fi
+    if ((remaining < poll_interval_seconds)); then
+      sleep "$remaining"
+    else
+      sleep "$poll_interval_seconds"
+    fi
+  done
+
+  echo "Timed out after ${timeout_seconds}s waiting for notarization submission ${submission_id}" >&2
+  xcrun notarytool info "$submission_id" "${notary_auth_args[@]}" >&2 || true
+  exit 124
+}
+
+if try_staple_existing_ticket; then
+  exit 0
+fi
+
+if [[ "$reuse_in_progress" == "true" ]]; then
+  reusable_submission_id="$(find_reusable_submission_id || true)"
+  if [[ -n "$reusable_submission_id" ]]; then
+    echo "Reusing recent in-progress notarization submission: $reusable_submission_id"
+    poll_submission "$reusable_submission_id"
+  fi
+fi
 
 echo "Creating notarization archive: $zip_path"
 rm -f "$zip_path"
 ditto -c -k --keepParent "$app_path" "$zip_path"
+du -h "$zip_path"
 
-run_with_timeout() {
-  local timeout="$1"
-  local output_file="$2"
-  shift 2
-
-  rm -f "$output_file"
-  "$@" >"$output_file" &
-  local pid="$!"
-  local elapsed=0
-  local interval=5
-
-  while kill -0 "$pid" >/dev/null 2>&1; do
-    if ((elapsed >= timeout)); then
-      echo "Command exceeded ${timeout}s: $*" >&2
-      kill "$pid" >/dev/null 2>&1 || true
-      sleep 2
-      kill -9 "$pid" >/dev/null 2>&1 || true
-      wait "$pid" >/dev/null 2>&1 || true
-      return 124
-    fi
-
-    sleep "$interval"
-    elapsed=$((elapsed + interval))
-  done
-
-  set +e
-  wait "$pid"
-  local exit_code="$?"
-  set -e
-  return "$exit_code"
-}
-
-submission_id=""
-for ((attempt = 1; attempt <= submit_attempts; attempt++)); do
-  echo "Submitting notarization request (attempt $attempt/$submit_attempts)"
-  if run_with_timeout "$submit_timeout_seconds" "$submit_json" \
-    xcrun notarytool submit "$zip_path" \
-    --key "$APPLE_API_KEY" \
-    --key-id "$APPLE_API_KEY_ID" \
-    --issuer "$APPLE_API_ISSUER" \
-    --output-format json >"$submit_json"; then
-    submission_id="$(
-      /usr/bin/python3 - "$submit_json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-print(data.get("id") or data.get("submissionId") or "")
-PY
-    )"
-    if [[ -n "$submission_id" ]]; then
-      break
-    fi
-    echo "notarytool submit succeeded but did not return a submission id" >&2
+submit_json="$work_dir/${app_base}-notary-submit.json"
+echo "Submitting notarization request"
+if ! xcrun notarytool submit "$zip_path" "${notary_auth_args[@]}" >"$submit_json"; then
+  echo "notarytool submit failed" >&2
+  if [[ -s "$submit_json" ]]; then
     cat "$submit_json" >&2
-  else
-    echo "notarytool submit failed" >&2
-    if [[ -s "$submit_json" ]]; then
-      cat "$submit_json" >&2
-    fi
   fi
-
-  if ((attempt < submit_attempts)); then
-    sleep "$submit_retry_seconds"
-  fi
-done
-
-if [[ -z "$submission_id" ]]; then
-  echo "Unable to create an Apple notarization submission" >&2
   exit 1
 fi
 
-echo "Notary submission id: $submission_id"
-if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-  echo "::notice title=Apple notarization::Submission id ${submission_id}"
+submission_id="$(json_value "$submit_json" id)"
+if [[ -z "$submission_id" ]]; then
+  submission_id="$(json_value "$submit_json" submissionId)"
+fi
+if [[ -z "$submission_id" ]]; then
+  echo "notarytool submit succeeded but did not return a submission id" >&2
+  cat "$submit_json" >&2
+  exit 1
 fi
 
-deadline=$((SECONDS + timeout_seconds))
-attempt=0
-last_status=""
-
-while ((SECONDS < deadline)); do
-  attempt=$((attempt + 1))
-  info_json="$work_dir/${app_base}-notary-info-${attempt}.json"
-  info_err="$work_dir/${app_base}-notary-info-${attempt}.err"
-
-  if xcrun notarytool info "$submission_id" \
-    --key "$APPLE_API_KEY" \
-    --key-id "$APPLE_API_KEY_ID" \
-    --issuer "$APPLE_API_ISSUER" \
-    --output-format json >"$info_json" 2>"$info_err"; then
-    status="$(
-      /usr/bin/python3 - "$info_json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-print(data.get("status") or "")
-PY
-    )"
-    if [[ "$status" != "$last_status" ]]; then
-      echo "Notary status: ${status:-unknown}"
-      last_status="$status"
-    else
-      echo "Notary status: ${status:-unknown} (poll $attempt)"
-    fi
-
-    case "$status" in
-      Accepted)
-        echo "Stapling notarization ticket to $app_path"
-        xcrun stapler staple "$app_path"
-        xcrun stapler validate "$app_path"
-        exit 0
-        ;;
-      Invalid | Rejected)
-        echo "Notarization failed with status: $status" >&2
-        log_json="$work_dir/${app_base}-notary-log.json"
-        if xcrun notarytool log "$submission_id" \
-          --key "$APPLE_API_KEY" \
-          --key-id "$APPLE_API_KEY_ID" \
-          --issuer "$APPLE_API_ISSUER" \
-          --output-format json >"$log_json"; then
-          cat "$log_json" >&2
-        fi
-        exit 1
-        ;;
-    esac
-  else
-    echo "notarytool info failed on poll $attempt; retrying" >&2
-    if [[ -s "$info_err" ]]; then
-      cat "$info_err" >&2
-    fi
-  fi
-
-  remaining=$((deadline - SECONDS))
-  if ((remaining <= 0)); then
-    break
-  fi
-  if ((remaining < poll_interval_seconds)); then
-    sleep "$remaining"
-  else
-    sleep "$poll_interval_seconds"
-  fi
-done
-
-echo "Timed out after ${timeout_seconds}s waiting for notarization submission ${submission_id}" >&2
-xcrun notarytool info "$submission_id" \
-  --key "$APPLE_API_KEY" \
-  --key-id "$APPLE_API_KEY_ID" \
-  --issuer "$APPLE_API_ISSUER" \
-  --output-format json >&2 || true
-exit 124
+poll_submission "$submission_id"

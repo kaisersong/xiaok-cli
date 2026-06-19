@@ -60,8 +60,9 @@ describe('macOS release signing contract', () => {
     expect(workflow).toContain('--prepackaged release/mac-arm64/xiaok.app');
     expect(workflow).toContain('-c.mac.forceCodeSigning=true');
     expect(workflow).toContain('-c.mac.notarize=false');
-    expect(workflow).toContain('NOTARY_TIMEOUT_SECONDS: "3600"');
-    expect(workflow).toContain('NOTARY_SUBMIT_TIMEOUT_SECONDS: "600"');
+    expect(workflow).toContain('NOTARY_TIMEOUT_SECONDS: "1800"');
+    expect(workflow).toContain('NOTARY_REUSE_IN_PROGRESS: "true"');
+    expect(workflow).toContain('NOTARY_REUSE_WINDOW_SECONDS: "86400"');
     expect(workflow).toContain(`TeamIdentifier=${appleTeamId}`);
     expect(workflow).toContain('xcrun stapler validate');
     expect(workflow).not.toContain('-c.mac.notarize=true');
@@ -74,12 +75,14 @@ describe('macOS release signing contract', () => {
 
     expect(script).toContain('xcrun notarytool submit');
     expect(script).toContain('xcrun notarytool info');
+    expect(script).toContain('xcrun notarytool history');
     expect(script).toContain('xcrun notarytool log');
     expect(script).toContain('xcrun stapler staple "$app_path"');
     expect(script).toContain('xcrun stapler validate "$app_path"');
     expect(script).toContain('Notary submission id: $submission_id');
-    expect(script).toContain('submit_timeout_seconds="${NOTARY_SUBMIT_TIMEOUT_SECONDS:-600}"');
-    expect(script).toContain('run_with_timeout "$submit_timeout_seconds" "$submit_json"');
+    expect(script).toContain('try_staple_existing_ticket');
+    expect(script).toContain('find_reusable_submission_id');
+    expect(script).toContain('Reusing recent in-progress notarization submission');
     expect(script).not.toContain('--wait');
   });
 });
