@@ -183,7 +183,7 @@ jobs:
           NOTARY_TIMEOUT_SECONDS: "1800"
           NOTARY_POLL_INTERVAL_SECONDS: "30"
           NOTARY_REUSE_IN_PROGRESS: "true"
-          NOTARY_REUSE_WINDOW_SECONDS: "86400"
+          NOTARY_REUSE_WINDOW_SECONDS: "7200"
 
       - name: Package macOS distributables
         run: cd desktop && npx electron-builder --config electron-builder.json --mac dmg zip --arm64 --publish never --prepackaged release/mac-arm64/xiaok.app -c.mac.notarize=false

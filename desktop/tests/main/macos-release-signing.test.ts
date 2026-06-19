@@ -62,7 +62,7 @@ describe('macOS release signing contract', () => {
     expect(workflow).toContain('-c.mac.notarize=false');
     expect(workflow).toContain('NOTARY_TIMEOUT_SECONDS: "1800"');
     expect(workflow).toContain('NOTARY_REUSE_IN_PROGRESS: "true"');
-    expect(workflow).toContain('NOTARY_REUSE_WINDOW_SECONDS: "86400"');
+    expect(workflow).toContain('NOTARY_REUSE_WINDOW_SECONDS: "7200"');
     expect(workflow).toContain(`TeamIdentifier=${appleTeamId}`);
     expect(workflow).toContain('xcrun stapler validate');
     expect(workflow).not.toContain('-c.mac.notarize=true');
