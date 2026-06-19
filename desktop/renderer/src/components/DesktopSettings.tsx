@@ -2276,7 +2276,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                             <div className="flex flex-wrap items-center gap-2 pt-1">
                               <button
                                 type="button"
-                                onClick={() => handleOpenLoopSchedules(template.loopId)}
+                                onClick={() => navigate(`/automations/schedules?loopId=${encodeURIComponent(template.loopId)}&create=1&name=${encodeURIComponent(loopTitle)}`)}
                                 className="text-[var(--c-accent)] hover:underline text-xs"
                               >
                                 + 为此循环创建定时任务

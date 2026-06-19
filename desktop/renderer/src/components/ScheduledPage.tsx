@@ -246,7 +246,7 @@ interface ScheduledPageProps {
 
 export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useLocale();
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -388,6 +388,25 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
     setEditingTask(null);
     setModalMode('create');
   };
+
+  useEffect(() => {
+    if (searchParams.get('create') !== '1') return;
+    if (modalMode !== null) return;
+    const presetName = searchParams.get('name') ?? '';
+    setFormName(presetName);
+    setFormDesc('');
+    setFormPrompt('');
+    setFormFrequency('daily');
+    setFormScheduleConfig({ hour: 9, minute: 0 });
+    setEditingTask(null);
+    setModalMode('create');
+    // Strip the create flag from URL so refresh doesn't re-open
+    const next = new URLSearchParams(searchParams);
+    next.delete('create');
+    next.delete('name');
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.toString()]);
 
   const openEdit = (task: ScheduledTask) => {
     setFormName(task.name);
