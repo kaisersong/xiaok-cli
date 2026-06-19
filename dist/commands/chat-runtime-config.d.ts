@@ -6,7 +6,16 @@
  */
 export declare const DEFAULT_AGENT_MAX_ITERATIONS = 100;
 export declare const DEFAULT_CLEANUP_TIMEOUT_MS = 2000;
+export declare const DEFAULT_TURN_TIMEOUT_MS: number;
 export declare function resolveAgentMaxIterations(env?: NodeJS.ProcessEnv): number;
+/**
+ * Wall-clock timeout for a single non-interactive (`--print` / `--auto`) turn.
+ *
+ * Returns null when the user explicitly disables the deadline by setting
+ * XIAOK_TURN_TIMEOUT_MS to "0" or a negative value. Non-numeric input falls
+ * back to the default so a typo doesn't accidentally remove the safety net.
+ */
+export declare function resolveTurnTimeoutMs(env?: NodeJS.ProcessEnv): number | null;
 export type CleanupStep = () => void | Promise<void>;
 /**
  * Run cleanup steps sequentially with an overall timeout. If a step hangs,

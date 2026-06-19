@@ -48,7 +48,7 @@ import { selectModel } from '../ui/model-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
 import { executeReminderSlashCommand } from './chat-reminder.js';
 import { parseShellEscapeInput, runInteractiveShellCommand } from './chat-shell-escape.js';
-import { resolveAgentMaxIterations, runCleanupWithTimeout } from './chat-runtime-config.js';
+import { resolveAgentMaxIterations, resolveTurnTimeoutMs, runCleanupWithTimeout } from './chat-runtime-config.js';
 import { buildChatHelpText } from './registry.js';
 import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
@@ -266,15 +266,28 @@ async function runChat(initialInput, opts) {
         }
         currentTurnAbortController?.abort();
     };
-    const runRuntimeTurn = async (request, onChunk) => {
+    const runRuntimeTurn = async (request, onChunk, externalSignal) => {
         const previousController = currentTurnAbortController;
         const controller = new AbortController();
         currentTurnAbortController = controller;
+        const onExternalAbort = externalSignal
+            ? () => controller.abort()
+            : null;
+        if (externalSignal && onExternalAbort) {
+            if (externalSignal.aborted) {
+                controller.abort();
+            }
+            else {
+                externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+            }
+        }
         try {
-            const abortContext = { signal: controller.signal };
-            await runtimeFacade.runTurn(request, onChunk, abortContext.signal);
+            await runtimeFacade.runTurn(request, onChunk, controller.signal);
         }
         finally {
+            if (externalSignal && onExternalAbort) {
+                externalSignal.removeEventListener('abort', onExternalAbort);
+            }
             if (currentTurnAbortController === controller) {
                 currentTurnAbortController = previousController;
             }
@@ -1753,28 +1766,71 @@ async function runChat(initialInput, opts) {
             }
             await primeTurnIntentPlan();
             await maybePrepareFreshContextHandoff();
-            await runRuntimeTurn({
-                sessionId,
-                cwd,
-                source: 'chat',
-                input: inputBlocks,
-            }, (chunk) => {
-                if (chunk.type === 'text') {
-                    printChunks.push(chunk.delta);
-                    if (!opts.print && !opts.json) {
-                        mdRenderer.write(chunk.delta);
+            const turnTimeoutMs = resolveTurnTimeoutMs();
+            const turnDeadlineController = new AbortController();
+            let turnTimeoutFired = false;
+            const turnDeadlineTimer = turnTimeoutMs !== null
+                ? setTimeout(() => {
+                    turnTimeoutFired = true;
+                    turnDeadlineController.abort();
+                }, turnTimeoutMs)
+                : null;
+            try {
+                await runRuntimeTurn({
+                    sessionId,
+                    cwd,
+                    source: 'chat',
+                    input: inputBlocks,
+                }, (chunk) => {
+                    if (chunk.type === 'text') {
+                        printChunks.push(chunk.delta);
+                        if (!opts.print && !opts.json) {
+                            mdRenderer.write(chunk.delta);
+                        }
                     }
-                }
-                if (chunk.type === 'tool_use') {
-                    toolCallsList.push(chunk.name);
-                    if (chunk.name === 'AskUserQuestion') {
-                        askUserCalls += 1;
+                    if (chunk.type === 'tool_use') {
+                        toolCallsList.push(chunk.name);
+                        if (chunk.name === 'AskUserQuestion') {
+                            askUserCalls += 1;
+                        }
                     }
+                    if (chunk.type === 'usage') {
+                        statusBar.update(chunk.usage);
+                    }
+                }, turnDeadlineController.signal);
+            }
+            catch (turnError) {
+                if (turnTimeoutFired) {
+                    const partialText = printChunks.join('');
+                    process.stderr.write(`xiaok: turn timed out after ${turnTimeoutMs}ms (set XIAOK_TURN_TIMEOUT_MS=0 to disable)\n`);
+                    if (opts.print || opts.json) {
+                        process.stdout.write(formatPrintOutput({
+                            sessionId,
+                            text: partialText,
+                            usage: agent.getUsage(),
+                            num_turns: 1,
+                            ask_user_calls: askUserCalls,
+                            tool_calls: toolCallsList,
+                            duration_ms: Date.now() - startTime,
+                        }, Boolean(opts.json)) + '\n');
+                    }
+                    else {
+                        mdRenderer.flush();
+                        process.stdout.write('\n');
+                    }
+                    await flushStandardStreams();
+                    clearTurnIntentContext();
+                    await releaseSessionOwnershipForExit();
+                    await cleanupRuntimeResourcesWithTimeout();
+                    process.exit(124);
                 }
-                if (chunk.type === 'usage') {
-                    statusBar.update(chunk.usage);
+                throw turnError;
+            }
+            finally {
+                if (turnDeadlineTimer) {
+                    clearTimeout(turnDeadlineTimer);
                 }
-            });
+            }
             await finalizeCurrentTurnIntentIfNeeded();
             await persistSession();
             if (opts.print || opts.json) {
