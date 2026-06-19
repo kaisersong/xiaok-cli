@@ -39,26 +39,6 @@ export const USER_LOOP_STARTER_TEMPLATES: UserLoopStarterTemplate[] = [
     scheduleHint: '建议每天 18:00 触发',
   },
   {
-    templateId: 'weekly-project-review',
-    title: '每周项目复盘',
-    category: 'business',
-    description: '盘点本周 KSwarm 项目和重点任务的进展、卡点、下周计划，生成 Markdown 复盘报告。',
-    kind: 'markdown_file',
-    prompt:
-      '请生成一份本周项目复盘报告，写入 output_path 对应的 Markdown 文件。\n\n' +
-      '步骤：\n' +
-      '1. 通过 inspect_project 查看活跃 KSwarm 项目状态。\n' +
-      '2. 汇总每个项目本周的进展、阻塞、PO 决策、产出物。\n' +
-      '3. 列出本周关键交付物及链接（artifacts/路径）。\n' +
-      '4. 标记下周需要推进的事项和需要做出的决策。\n\n' +
-      '报告结构：\n' +
-      '# 本周项目复盘 [日期范围]\n\n' +
-      '## 概览\n## 各项目进展\n## 关键产出\n## 卡点与决策\n## 下周重点\n',
-    outputDirectory: '~/xiaok-loops/weekly-review',
-    outputFileName: 'weekly-review.md',
-    scheduleHint: '建议每周五 17:00 触发',
-  },
-  {
     templateId: 'industry-news-daily',
     title: '行业资讯日报',
     category: 'business',
@@ -78,44 +58,6 @@ export const USER_LOOP_STARTER_TEMPLATES: UserLoopStarterTemplate[] = [
     outputDirectory: '~/xiaok-loops/industry-news',
     outputFileName: 'industry-news.md',
     scheduleHint: '建议每天 09:00 触发',
-  },
-  {
-    templateId: 'competitor-tracking',
-    title: '竞品动态周报',
-    category: 'business',
-    description: '持续跟踪你关心的几个竞品的官网、博客、发布更新，生成周度对比报告。',
-    kind: 'markdown_file',
-    prompt:
-      '请生成本周竞品动态报告，写入 output_path 对应的 Markdown 文件。\n\n' +
-      '请把下面这一行的列表替换成你要跟踪的竞品名（用逗号分隔）：\n' +
-      '跟踪的竞品：[在这里填，例如：Cursor, Windsurf, Continue]\n\n' +
-      '步骤：\n' +
-      '1. 用 web_search 查询每个竞品最近 7 天的产品更新、发布、博客文章。\n' +
-      '2. 整理成统一结构：竞品名 / 关键变化 / 影响判断 / 来源链接。\n' +
-      '3. 末尾写一段"对我们的启示"——值得借鉴或需要警惕的点。\n',
-    outputDirectory: '~/xiaok-loops/competitor',
-    outputFileName: 'competitor-weekly.md',
-    scheduleHint: '建议每周一 09:00 触发',
-  },
-  {
-    templateId: 'knowledge-base-review',
-    title: '知识库每周回顾',
-    category: 'business',
-    description: '回顾本周加入知识库的内容，提取关键 takeaways，避免知识沉睡。',
-    kind: 'markdown_file',
-    prompt:
-      '请回顾本周加入知识库的内容并写一份摘要，写入 output_path。\n\n' +
-      '步骤：\n' +
-      '1. 用 kb_list_collections 查看所有集合。\n' +
-      '2. 对每个集合用 kb_search 检索 "本周" 相关的近期 source（或拉取 source 列表中最新的几个）。\n' +
-      '3. 对每个新 source 用 kb_get_source 取出关键段落，提炼 2-3 个核心 takeaways。\n' +
-      '4. 整理成结构化摘要，每条标注来源 source 标题。\n\n' +
-      '报告结构：\n' +
-      '# 知识库本周回顾 [日期]\n\n' +
-      '## 新增内容概览\n## 关键 Takeaways（按主题）\n## 待深挖的方向\n',
-    outputDirectory: '~/xiaok-loops/kb-review',
-    outputFileName: 'kb-weekly-review.md',
-    scheduleHint: '建议每周日 20:00 触发',
   },
   {
     templateId: 'repo-changes-watch',
