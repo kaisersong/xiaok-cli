@@ -397,33 +397,41 @@ async function createWindow(): Promise<BrowserWindow> {
     return timedActionService.createScheduledTask(input);
   });
   ipcMain.handle('desktop:loops:createSchedule', (_event, input) => {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) {
-      throw new Error('loop schedule input must be an object');
+    debugMain('loops:createSchedule', { loopId: (input as any)?.loopId, title: (input as any)?.title });
+    try {
+      if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        throw new Error('loop schedule input must be an object');
+      }
+      const record = input as Record<string, unknown>;
+      const loopId = typeof record.loopId === 'string' && record.loopId.trim().length > 0
+        ? record.loopId
+        : '';
+      if (!loopId) {
+        throw new Error('loopId must be a non-empty string');
+      }
+      const template = loopRuntime.loopStore.getUserLoopTemplate(loopId);
+      if (!template) {
+        throw new Error('user loop template does not exist');
+      }
+      if (!record.trigger || typeof record.trigger !== 'object' || Array.isArray(record.trigger)) {
+        throw new Error('trigger must be an object');
+      }
+      const result = timedActionService.createLoopSchedule({
+        id: typeof record.id === 'string' ? record.id : undefined,
+        loopId,
+        title: typeof record.title === 'string' && record.title.trim().length > 0
+          ? record.title
+          : loopRuntime.loopStore.getLoopDefinition(loopId)?.title ?? 'Loop schedule',
+        description: typeof record.description === 'string' ? record.description : undefined,
+        trigger: record.trigger as never,
+        source: 'user',
+      });
+      debugMain('loops:createSchedule ok', { loopId, actionId: (result as any)?.id });
+      return result;
+    } catch (e) {
+      debugMain('loops:createSchedule failed', { error: String(e) });
+      throw e;
     }
-    const record = input as Record<string, unknown>;
-    const loopId = typeof record.loopId === 'string' && record.loopId.trim().length > 0
-      ? record.loopId
-      : '';
-    if (!loopId) {
-      throw new Error('loopId must be a non-empty string');
-    }
-    const template = loopRuntime.loopStore.getUserLoopTemplate(loopId);
-    if (!template) {
-      throw new Error('user loop template does not exist');
-    }
-    if (!record.trigger || typeof record.trigger !== 'object' || Array.isArray(record.trigger)) {
-      throw new Error('trigger must be an object');
-    }
-    return timedActionService.createLoopSchedule({
-      id: typeof record.id === 'string' ? record.id : undefined,
-      loopId,
-      title: typeof record.title === 'string' && record.title.trim().length > 0
-        ? record.title
-        : loopRuntime.loopStore.getLoopDefinition(loopId)?.title ?? 'Loop schedule',
-      description: typeof record.description === 'string' ? record.description : undefined,
-      trigger: record.trigger as never,
-      source: 'user',
-    });
   });
   ipcMain.handle('desktop:loops:getScheduleBindings', () => {
     return timedActionService.listLoopScheduleBindings();

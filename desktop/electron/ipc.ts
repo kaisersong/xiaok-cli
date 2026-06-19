@@ -317,18 +317,41 @@ export async function registerDesktopIpc(
     return loopRuntime.loopStore.listUserLoopTemplates();
   });
   ipcMain.handle('desktop:loops:createUserTemplate', (_event, input) => {
-    const loopRuntime = getLoopRuntime(options);
-    return loopRuntime.loopStore.createUserLoopTemplate(readCreateUserLoopTemplateInput(input));
+    log('info', 'loops:createUserTemplate', { title: input?.title, kind: input?.kind, loopId: input?.loopId });
+    try {
+      const loopRuntime = getLoopRuntime(options);
+      const result = loopRuntime.loopStore.createUserLoopTemplate(readCreateUserLoopTemplateInput(input));
+      log('info', 'loops:createUserTemplate ok', { loopId: result.template.loopId });
+      return result;
+    } catch (e) {
+      log('error', 'loops:createUserTemplate failed', String(e));
+      throw e;
+    }
   });
   ipcMain.handle('desktop:loops:updateUserTemplate', (_event, loopId, patch) => {
-    const loopRuntime = getLoopRuntime(options);
-    const id = readLoopId(loopId);
-    return loopRuntime.loopStore.updateUserLoopTemplate(id, patch ?? {});
+    log('info', 'loops:updateUserTemplate', { loopId, patchKeys: patch ? Object.keys(patch) : [] });
+    try {
+      const loopRuntime = getLoopRuntime(options);
+      const id = readLoopId(loopId);
+      const result = loopRuntime.loopStore.updateUserLoopTemplate(id, patch ?? {});
+      log('info', 'loops:updateUserTemplate ok', { loopId: id, found: !!result });
+      return result;
+    } catch (e) {
+      log('error', 'loops:updateUserTemplate failed', { loopId, error: String(e) });
+      throw e;
+    }
   });
   ipcMain.handle('desktop:loops:deleteUserTemplate', (_event, loopId) => {
-    const loopRuntime = getLoopRuntime(options);
-    const id = readLoopId(loopId);
-    loopRuntime.loopStore.deleteUserLoopTemplate(id);
+    log('info', 'loops:deleteUserTemplate', { loopId });
+    try {
+      const loopRuntime = getLoopRuntime(options);
+      const id = readLoopId(loopId);
+      loopRuntime.loopStore.deleteUserLoopTemplate(id);
+      log('info', 'loops:deleteUserTemplate ok', { loopId: id });
+    } catch (e) {
+      log('error', 'loops:deleteUserTemplate failed', { loopId, error: String(e) });
+      throw e;
+    }
   });
   ipcMain.handle('desktop:loops:openOutputDirectory', async (_event, loopId) => {
     const loopRuntime = getLoopRuntime(options);
@@ -348,9 +371,17 @@ export async function registerDesktopIpc(
     const loopRuntime = getLoopRuntime(options);
     return loopRuntime.listAnomalies(readLoopId(loopId));
   });
-  ipcMain.handle('desktop:loops:runNow', (_event, loopId) => {
-    const loopRuntime = getLoopRuntime(options);
-    return loopRuntime.runner.runLoopNow(readLoopId(loopId));
+  ipcMain.handle('desktop:loops:runNow', async (_event, loopId) => {
+    log('info', 'loops:runNow', { loopId });
+    try {
+      const loopRuntime = getLoopRuntime(options);
+      const result = await loopRuntime.runner.runLoopNow(readLoopId(loopId));
+      log('info', 'loops:runNow result', { loopId, status: result.status });
+      return result;
+    } catch (e) {
+      log('error', 'loops:runNow failed', { loopId, error: String(e) });
+      throw e;
+    }
   });
 
   // ---- Memory ----

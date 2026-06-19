@@ -2011,6 +2011,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
     if (!editingLoopId || !editLoopTitle.trim()) return;
     setSavingEdit(true);
     try {
+      console.log('[LoopsPane] saving edit', { loopId: editingLoopId, title: editLoopTitle.trim() });
       await api.updateUserLoopTemplate(editingLoopId, {
         title: editLoopTitle.trim(),
         description: editLoopDesc.trim(),
@@ -2018,9 +2019,11 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
         outputDirectory: editLoopOutputDir.trim() || undefined,
         outputFileName: editLoopOutputFile.trim() || undefined,
       });
+      console.log('[LoopsPane] save edit ok', { loopId: editingLoopId });
       setEditingLoopId(null);
       await loadLoops(true);
     } catch (error) {
+      console.error('[LoopsPane] save edit failed', error);
       showToast(error instanceof Error ? error.message : '保存失败');
     } finally {
       setSavingEdit(false);
@@ -2030,9 +2033,12 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
   const handleDeleteLoop = async (loopId: string) => {
     if (!confirm('确定要删除这个循环吗？')) return;
     try {
+      console.log('[LoopsPane] deleting loop', { loopId });
       await api.deleteUserLoopTemplate(loopId);
+      console.log('[LoopsPane] delete loop ok', { loopId });
       await loadLoops(true);
     } catch (error) {
+      console.error('[LoopsPane] delete loop failed', error);
       showToast(error instanceof Error ? error.message : '删除失败');
     }
   };
@@ -2372,7 +2378,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                           </label>
                           <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
                             {t.desktopSettings.userLoopPromptLabel}
-                            <textarea value={editLoopPrompt} onChange={e => setEditLoopPrompt(e.target.value)} rows={3} className="resize-none rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]" />
+                            <textarea value={editLoopPrompt} onChange={e => setEditLoopPrompt(e.target.value)} rows={14} className="resize-y min-h-[200px] rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)] font-mono" />
                           </label>
                           {template.kind === 'markdown_file' && (
                             <div className="grid grid-cols-2 gap-2">
