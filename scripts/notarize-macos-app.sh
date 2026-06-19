@@ -2,7 +2,7 @@
 set -euo pipefail
 
 app_path="${1:-desktop/release/mac-arm64/xiaok.app}"
-timeout_seconds="${NOTARY_TIMEOUT_SECONDS:-1800}"
+timeout_seconds="${NOTARY_TIMEOUT_SECONDS:-7200}"
 poll_interval_seconds="${NOTARY_POLL_INTERVAL_SECONDS:-30}"
 reuse_in_progress="${NOTARY_REUSE_IN_PROGRESS:-true}"
 reuse_window_seconds="${NOTARY_REUSE_WINDOW_SECONDS:-7200}"
@@ -34,7 +34,21 @@ else
 fi
 
 app_base="$(basename "${app_path%.app}")"
-zip_path="$work_dir/${app_base}-notary.zip"
+archive_key="${NOTARY_ARCHIVE_KEY:-${GITHUB_SHA:-}}"
+if [[ -z "$archive_key" ]]; then
+  archive_key="$(
+    codesign -dv --verbose=4 "$app_path" 2>&1 \
+      | awk -F= '/^CDHash=/{print $2; exit}' \
+      | tr -cd '[:alnum:]'
+  )"
+fi
+archive_key="$(printf '%s' "$archive_key" | tr -cd '[:alnum:]')"
+archive_key="${archive_key:0:12}"
+if [[ -n "$archive_key" ]]; then
+  zip_path="$work_dir/${app_base}-${archive_key}-notary.zip"
+else
+  zip_path="$work_dir/${app_base}-notary.zip"
+fi
 notary_archive_name="$(basename "$zip_path")"
 
 notary_auth_args=(
@@ -186,6 +200,7 @@ poll_submission() {
 
   echo "Timed out after ${timeout_seconds}s waiting for notarization submission ${submission_id}" >&2
   xcrun notarytool info "$submission_id" "${notary_auth_args[@]}" >&2 || true
+  xcrun notarytool log "$submission_id" "${notary_auth_args[@]}" >&2 || true
   exit 124
 }
 

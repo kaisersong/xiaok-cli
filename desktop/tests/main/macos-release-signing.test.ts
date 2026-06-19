@@ -60,7 +60,9 @@ describe('macOS release signing contract', () => {
     expect(workflow).toContain('--prepackaged release/mac-arm64/xiaok.app');
     expect(workflow).toContain('-c.mac.forceCodeSigning=true');
     expect(workflow).toContain('-c.mac.notarize=false');
-    expect(workflow).toContain('NOTARY_TIMEOUT_SECONDS: "1800"');
+    expect(workflow).toContain('timeout-minutes: 135');
+    expect(workflow).toContain('NOTARY_ARCHIVE_KEY: ${{ github.sha }}');
+    expect(workflow).toContain('NOTARY_TIMEOUT_SECONDS: "7200"');
     expect(workflow).toContain('NOTARY_REUSE_IN_PROGRESS: "true"');
     expect(workflow).toContain('NOTARY_REUSE_WINDOW_SECONDS: "7200"');
     expect(workflow).toContain(`TeamIdentifier=${appleTeamId}`);
@@ -80,6 +82,8 @@ describe('macOS release signing contract', () => {
     expect(script).toContain('xcrun stapler staple "$app_path"');
     expect(script).toContain('xcrun stapler validate "$app_path"');
     expect(script).toContain('Notary submission id: $submission_id');
+    expect(script).toContain('archive_key="${NOTARY_ARCHIVE_KEY:-${GITHUB_SHA:-}}"');
+    expect(script).toContain('codesign -dv --verbose=4 "$app_path"');
     expect(script).toContain('try_staple_existing_ticket');
     expect(script).toContain('find_reusable_submission_id');
     expect(script).toContain('Reusing recent in-progress notarization submission');
