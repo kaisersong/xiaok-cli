@@ -6,6 +6,7 @@ timeout_seconds="${NOTARY_TIMEOUT_SECONDS:-3600}"
 poll_interval_seconds="${NOTARY_POLL_INTERVAL_SECONDS:-30}"
 submit_attempts="${NOTARY_SUBMIT_ATTEMPTS:-3}"
 submit_retry_seconds="${NOTARY_SUBMIT_RETRY_SECONDS:-20}"
+submit_timeout_seconds="${NOTARY_SUBMIT_TIMEOUT_SECONDS:-600}"
 
 : "${APPLE_API_KEY:?APPLE_API_KEY must point to the App Store Connect API key .p8 file}"
 : "${APPLE_API_KEY_ID:?APPLE_API_KEY_ID is required}"
@@ -41,10 +42,43 @@ echo "Creating notarization archive: $zip_path"
 rm -f "$zip_path"
 ditto -c -k --keepParent "$app_path" "$zip_path"
 
+run_with_timeout() {
+  local timeout="$1"
+  local output_file="$2"
+  shift 2
+
+  rm -f "$output_file"
+  "$@" >"$output_file" &
+  local pid="$!"
+  local elapsed=0
+  local interval=5
+
+  while kill -0 "$pid" >/dev/null 2>&1; do
+    if ((elapsed >= timeout)); then
+      echo "Command exceeded ${timeout}s: $*" >&2
+      kill "$pid" >/dev/null 2>&1 || true
+      sleep 2
+      kill -9 "$pid" >/dev/null 2>&1 || true
+      wait "$pid" >/dev/null 2>&1 || true
+      return 124
+    fi
+
+    sleep "$interval"
+    elapsed=$((elapsed + interval))
+  done
+
+  set +e
+  wait "$pid"
+  local exit_code="$?"
+  set -e
+  return "$exit_code"
+}
+
 submission_id=""
 for ((attempt = 1; attempt <= submit_attempts; attempt++)); do
   echo "Submitting notarization request (attempt $attempt/$submit_attempts)"
-  if xcrun notarytool submit "$zip_path" \
+  if run_with_timeout "$submit_timeout_seconds" "$submit_json" \
+    xcrun notarytool submit "$zip_path" \
     --key "$APPLE_API_KEY" \
     --key-id "$APPLE_API_KEY_ID" \
     --issuer "$APPLE_API_ISSUER" \
