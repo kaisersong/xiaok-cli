@@ -594,7 +594,24 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
     try {
       if (task.executorKind === 'loop') {
         if (!task.loopId) return;
-        await api.runLoopNow(task.loopId);
+        const result = await api.runLoopNow(task.loopId);
+        if (result.status === 'already_running') {
+          showToast('该循环正在运行中，请等待完成或先取消', 'info');
+          return;
+        }
+        if (result.status === 'skipped') {
+          const reasonMap: Record<string, string> = {
+            paused: '循环已暂停',
+            missing_loop: '循环不存在',
+            deleted_loop: '循环已删除',
+          };
+          showToast(reasonMap[result.reason] || `跳过：${result.reason}`, 'info');
+          return;
+        }
+        if (result.status === 'blocked' || result.status === 'failed') {
+          showToast(`循环${result.status === 'blocked' ? '阻塞' : '失败'}，请查看自动化诊断`, 'info');
+          return;
+        }
         const now = Date.now();
         saveTasks(tasks.map(t =>
           t.id === task.id
@@ -602,6 +619,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
             : t
         ));
         await loadTasks();
+        showToast('循环已启动', 'success');
         return;
       }
 
