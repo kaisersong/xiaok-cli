@@ -13,7 +13,7 @@ v1.4.9 adds a local-first Personal Knowledge Base, automation lifecycle refineme
 - **Paste Path Detection Fix**: Mixed text containing path-like substrings is no longer misidentified as file paths during paste operations.
 - **Workflow Status Strip Fix**: Fixed left-side clipping of the workflow status strip with fixed positioning.
 - **Generic Task Completion Loops**: `task_completion` as a second loop kind alongside `markdown_file`. Succeeds when the AI task finishes without requiring a file artifact.
-- **Cult-UI Component Foundation**: `AnimatedNumber`, `DirectionAwareTabs`, and `ExpandableCard` with spring animations and framer-motion.
+- **Cult-UI Component Foundation**: `AnimatedNumber`, `DirectionAwareTabs`, and `ExpandableCard` (under `desktop/renderer/src/components/ui/`) with spring animations via framer-motion. Cult-UI is **complementary, not a replacement** for the existing design system: the rest of the renderer keeps Tailwind utility classes plus CSS variables (`--c-bg-card`, `--c-border`, `--c-text-primary`, etc.). Cult-UI components are opt-in only for animation-heavy or motion-driven surfaces (currently the Automations tab strip). Tokens still flow from the same `@theme` aliases in `styles/index.css`, so cult-UI components inherit the active light/dark theme without a parallel token tree.
 - **Kimi for Coding Compatibility**: Strips X-Stainless-* fingerprint headers and uses the correct User-Agent format for Kimi endpoints.
 - **KSwarm Stale Service Replacement**: Desktop startup detects version-mismatched KSwarm processes via source hash comparison and replaces them before spawning the correct version.
 
