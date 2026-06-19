@@ -61,6 +61,7 @@ describe('macOS release signing contract', () => {
     expect(workflow).toContain('-c.mac.forceCodeSigning=true');
     expect(workflow).toContain('-c.mac.notarize=false');
     expect(workflow).toContain('NOTARY_TIMEOUT_SECONDS: "3600"');
+    expect(workflow).toContain('NOTARY_SUBMIT_TIMEOUT_SECONDS: "600"');
     expect(workflow).toContain(`TeamIdentifier=${appleTeamId}`);
     expect(workflow).toContain('xcrun stapler validate');
     expect(workflow).not.toContain('-c.mac.notarize=true');
@@ -77,6 +78,8 @@ describe('macOS release signing contract', () => {
     expect(script).toContain('xcrun stapler staple "$app_path"');
     expect(script).toContain('xcrun stapler validate "$app_path"');
     expect(script).toContain('Notary submission id: $submission_id');
+    expect(script).toContain('submit_timeout_seconds="${NOTARY_SUBMIT_TIMEOUT_SECONDS:-600}"');
+    expect(script).toContain('run_with_timeout "$submit_timeout_seconds" "$submit_json"');
     expect(script).not.toContain('--wait');
   });
 });
