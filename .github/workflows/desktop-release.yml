@@ -131,6 +131,41 @@ jobs:
           key_path.chmod(0o600)
           PY
 
+      - name: Import macOS signing certificate
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          cert_path="$RUNNER_TEMP/xiaok-developer-id.p12"
+          keychain_path="$RUNNER_TEMP/xiaok-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          cert_path = Path(os.environ["RUNNER_TEMP"]) / "xiaok-developer-id.p12"
+          cert_path.write_bytes(base64.b64decode(os.environ["MACOS_CERTIFICATE_P12_BASE64"]))
+          PY
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$cert_path" -k "$keychain_path" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain_path"
+
+          echo "MACOS_SIGNING_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+
+      - name: Sign macOS bundled wheel binaries
+        run: |
+          python3 scripts/sign-macos-wheel-binaries.py \
+            ../kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels \
+            --identity "Developer ID Application: Kai Song (Y9YR86UG94)" \
+            --keychain "$MACOS_SIGNING_KEYCHAIN"
+
       - name: Package macOS installer
         run: cd desktop && npx electron-builder --config electron-builder.json --mac --arm64 --publish never -c.mac.forceCodeSigning=true -c.mac.notarize=true
         env:
