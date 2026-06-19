@@ -29,6 +29,8 @@ describe('macOS release signing contract', () => {
 
     expect(workflow).toContain('Validate macOS signing secrets');
     expect(workflow).toContain('Write Apple notarization API key');
+    expect(workflow).toContain('Import macOS signing certificate');
+    expect(workflow).toContain('Sign macOS bundled wheel binaries');
     expect(workflow).toContain('Verify macOS signature and notarization');
 
     for (const secretName of [
@@ -45,6 +47,10 @@ describe('macOS release signing contract', () => {
     expect(workflow).toContain('CSC_LINK');
     expect(workflow).toContain('CSC_KEY_PASSWORD');
     expect(workflow).toContain('APPLE_API_KEY');
+    expect(workflow).toContain('security import "$cert_path"');
+    expect(workflow).toContain('scripts/sign-macos-wheel-binaries.py');
+    expect(workflow).toContain('--identity "Developer ID Application: Kai Song (Y9YR86UG94)"');
+    expect(workflow).toContain('--keychain "$MACOS_SIGNING_KEYCHAIN"');
     expect(workflow).toContain('-c.mac.forceCodeSigning=true');
     expect(workflow).toContain('-c.mac.notarize=true');
     expect(workflow).toContain(`TeamIdentifier=${appleTeamId}`);
