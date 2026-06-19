@@ -116,6 +116,8 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   getLoopDefinitions: () => ipcRenderer.invoke('desktop:loops:listDefinitions'),
   listUserLoopTemplates: () => ipcRenderer.invoke('desktop:loops:listUserTemplates'),
   createUserLoopTemplate: (input) => ipcRenderer.invoke('desktop:loops:createUserTemplate', input),
+  updateUserLoopTemplate: (loopId, patch) => ipcRenderer.invoke('desktop:loops:updateUserTemplate', loopId, patch),
+  deleteUserLoopTemplate: (loopId) => ipcRenderer.invoke('desktop:loops:deleteUserTemplate', loopId),
   createLoopSchedule: (input) => ipcRenderer.invoke('desktop:loops:createSchedule', input),
   getLoopScheduleBindings: () => ipcRenderer.invoke('desktop:loops:getScheduleBindings'),
   getAutomationOverviewSnapshot: () => ipcRenderer.invoke('desktop:automations:getOverviewSnapshot'),

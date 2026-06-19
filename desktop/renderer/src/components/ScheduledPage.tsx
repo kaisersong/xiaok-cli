@@ -377,7 +377,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
   };
 
   const editingLoopSchedule = modalMode === 'edit' && editingTask?.executorKind === 'loop';
-  const canSaveScheduledTask = !!formName.trim() && (editingLoopSchedule || !!formPrompt.trim());
+  const canSaveScheduledTask = !!formName.trim() && (editingLoopSchedule || (modalMode === 'create' && !!loopIdFilter) || !!formPrompt.trim());
 
   const openCreate = () => {
     setFormName('');
@@ -406,7 +406,8 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
 
   const handleSave = async () => {
     const isLoopScheduleEdit = modalMode === 'edit' && editingTask?.executorKind === 'loop';
-    if (!formName.trim() || (!isLoopScheduleEdit && !formPrompt.trim())) return;
+    const isLoopScheduleCreate = modalMode === 'create' && !!loopIdFilter;
+    if (!formName.trim() || (!isLoopScheduleEdit && !isLoopScheduleCreate && !formPrompt.trim())) return;
 
     if (modalMode === 'create') {
       const intervalMinutes = formScheduleConfig?.intervalMinutes ?? 60;
@@ -423,6 +424,27 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
 
     if (modalMode === 'create') {
       const desktop = getDesktopApi();
+      if (loopIdFilter && formFrequency !== 'manual') {
+        try {
+          await api.createLoopSchedule({
+            loopId: loopIdFilter,
+            title: formName.trim(),
+            description: formDesc.trim() || undefined,
+            trigger: toTimedActionTrigger(formFrequency, formScheduleConfig, nextRunAt),
+          });
+          await loadTasks();
+          setSaving(false);
+          setConfirmHighFreq(false);
+          closeModal();
+          showToast('循环定时任务已创建', 'success');
+          return;
+        } catch (e) {
+          console.error('[Scheduled] createLoopSchedule failed:', e);
+          showToast('创建循环定时任务失败：' + (e instanceof Error ? e.message : String(e)), 'info');
+          setSaving(false);
+          return;
+        }
+      }
       if (desktop?.createScheduledTask && formFrequency !== 'manual') {
         try {
           await desktop.createScheduledTask({
@@ -953,9 +975,9 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
                 </div>
               </div>
 
-              {editingLoopSchedule ? (
+              {editingLoopSchedule || (modalMode === 'create' && loopIdFilter) ? (
                 <div className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-deep)] px-3 py-2 text-xs text-[var(--c-text-secondary)]">
-                  {t.scheduledLinkedLoop}: <span className="font-mono text-[var(--c-text-primary)]">{editingTask?.loopId ?? editingTask?.id}</span>
+                  {t.scheduledLinkedLoop}: <span className="font-mono text-[var(--c-text-primary)]">{editingTask?.loopId ?? loopIdFilter}</span>
                 </div>
               ) : (
                 <div>

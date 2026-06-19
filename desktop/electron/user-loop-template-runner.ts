@@ -91,7 +91,7 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
         materials: [],
         permissionMode: permissionModeFor(input.trigger, template),
         watchdogMs: DEFAULT_LOOP_TASK_WATCHDOG_MS,
-        maxToolLoopIterations: 50,
+        maxToolLoopIterations: 500,
       });
       taskId = created.taskId;
     } catch (error) {
@@ -204,7 +204,7 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
         materials: [],
         permissionMode: effectivePermission,
         watchdogMs: DEFAULT_LOOP_TASK_WATCHDOG_MS,
-        maxToolLoopIterations: 50,
+        maxToolLoopIterations: 500,
       });
       taskId = created.taskId;
     } catch (error) {

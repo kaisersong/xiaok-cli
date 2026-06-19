@@ -2266,7 +2266,17 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                                 {t.desktopSettings.userLoopOpenSchedules}
                               </button>
                             </div>
-                          ) : null}
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenLoopSchedules(template.loopId)}
+                                className="text-[var(--c-accent)] hover:underline text-xs"
+                              >
+                                + 为此循环创建定时任务
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                       <span className="shrink-0 rounded-full bg-[var(--c-bg-deep)] px-2 py-0.5 text-[11px] text-[var(--c-text-secondary)]">
