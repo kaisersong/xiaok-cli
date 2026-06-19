@@ -31,6 +31,9 @@ describe('macOS release signing contract', () => {
     expect(workflow).toContain('Write Apple notarization API key');
     expect(workflow).toContain('Import macOS signing certificate');
     expect(workflow).toContain('Sign macOS bundled wheel binaries');
+    expect(workflow).toContain('Package signed macOS app');
+    expect(workflow).toContain('Notarize macOS app');
+    expect(workflow).toContain('Package macOS distributables');
     expect(workflow).toContain('Verify macOS signature and notarization');
 
     for (const secretName of [
@@ -49,13 +52,31 @@ describe('macOS release signing contract', () => {
     expect(workflow).toContain('APPLE_API_KEY');
     expect(workflow).toContain('security import "$cert_path"');
     expect(workflow).toContain('scripts/sign-macos-wheel-binaries.py');
+    expect(workflow).toContain('scripts/notarize-macos-app.sh desktop/release/mac-arm64/xiaok.app');
     expect(workflow).toContain('--identity "Developer ID Application: Kai Song (Y9YR86UG94)"');
     expect(workflow).toContain('--keychain "$MACOS_SIGNING_KEYCHAIN"');
+    expect(workflow).toContain('--mac dir --arm64');
+    expect(workflow).toContain('--mac dmg zip --arm64');
+    expect(workflow).toContain('--prepackaged release/mac-arm64/xiaok.app');
     expect(workflow).toContain('-c.mac.forceCodeSigning=true');
-    expect(workflow).toContain('-c.mac.notarize=true');
+    expect(workflow).toContain('-c.mac.notarize=false');
+    expect(workflow).toContain('NOTARY_TIMEOUT_SECONDS: "3600"');
     expect(workflow).toContain(`TeamIdentifier=${appleTeamId}`);
     expect(workflow).toContain('xcrun stapler validate');
+    expect(workflow).not.toContain('-c.mac.notarize=true');
     expect(workflow).not.toContain('APPLE_ID:');
     expect(workflow).not.toContain('APPLE_APP_SPECIFIC_PASSWORD');
+  });
+
+  it('keeps Apple notarization observable instead of hiding it inside electron-builder', async () => {
+    const script = await readFile(join(repoRoot, 'scripts', 'notarize-macos-app.sh'), 'utf8');
+
+    expect(script).toContain('xcrun notarytool submit');
+    expect(script).toContain('xcrun notarytool info');
+    expect(script).toContain('xcrun notarytool log');
+    expect(script).toContain('xcrun stapler staple "$app_path"');
+    expect(script).toContain('xcrun stapler validate "$app_path"');
+    expect(script).toContain('Notary submission id: $submission_id');
+    expect(script).not.toContain('--wait');
   });
 });
