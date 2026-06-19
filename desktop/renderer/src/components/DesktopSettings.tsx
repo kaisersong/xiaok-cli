@@ -63,6 +63,7 @@ import type {
 } from '../api/types';
 import { useLocale } from '../contexts/LocaleContext';
 import { useToast } from '../shared';
+import { USER_LOOP_STARTER_TEMPLATES, type UserLoopStarterTemplate } from './loops/userLoopStarterTemplates';
 import {
   buildLoopDiagnosticsSummary,
   getLoopAnomalyLogPaths,
@@ -2104,6 +2105,28 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
     }
   };
 
+  const handleCreateFromTemplate = async (template: UserLoopStarterTemplate) => {
+    const input: CreateUserLoopTemplateInputView = {
+      loopId: createUserLoopId(),
+      title: template.title,
+      kind: template.kind,
+      prompt: template.prompt,
+      ...(template.kind === 'markdown_file' ? {
+        outputDirectory: template.outputDirectory ?? '',
+        outputFileName: template.outputFileName ?? 'output.md',
+      } : {}),
+    };
+    try {
+      console.log('[LoopsPane] creating from template', { templateId: template.templateId });
+      await api.createUserLoopTemplate(input);
+      showToast(`已从模板创建：${template.title}，记得点编辑修改输出路径里的 ~/ 为完整路径`, 'success');
+      await loadLoops(true);
+    } catch (error) {
+      console.error('[LoopsPane] create from template failed', error);
+      showToast(error instanceof Error ? error.message : '从模板创建失败');
+    }
+  };
+
   const definitionById = new Map(loopDefinitions.map(loop => [loop.id, loop]));
   const builtInLoops = loopDefinitions.filter(loop => loop.origin !== 'user_template');
   const userLoops = userLoopTemplates.map(template => ({
@@ -2212,8 +2235,39 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
               {t.desktopSettings.userLoopsLoading}
             </div>
           ) : userLoops.length === 0 ? (
-            <div className="text-xs text-[var(--c-text-secondary)]">
-              {t.desktopSettings.userLoopsEmpty}
+            <div>
+              <p className="text-xs text-[var(--c-text-secondary)] mb-3">
+                {t.desktopSettings.userLoopsEmpty}
+              </p>
+              <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--c-text-muted)] mb-2">
+                从模板快速开始
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {USER_LOOP_STARTER_TEMPLATES.map(template => (
+                  <div
+                    key={template.templateId}
+                    className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 flex flex-col gap-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-sm font-medium text-[var(--c-text-heading)]">{template.title}</span>
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${template.category === 'business' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>
+                        {template.category === 'business' ? '业务' : '代码'}
+                      </span>
+                    </div>
+                    <p className="text-xs leading-5 text-[var(--c-text-secondary)] flex-1">{template.description}</p>
+                    {template.scheduleHint && (
+                      <p className="text-[10px] text-[var(--c-text-tertiary)]">{template.scheduleHint}</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleCreateFromTemplate(template)}
+                      className={`${btnSecondary} self-start px-3 py-1 text-xs`}
+                    >
+                      使用此模板
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : (
             <div className="flex flex-col gap-2">
