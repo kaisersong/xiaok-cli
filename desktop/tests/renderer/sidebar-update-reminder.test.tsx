@@ -117,7 +117,7 @@ describe('Sidebar update reminder', () => {
     expect(screen.queryByRole('button', { name: '定时任务' })).not.toBeInTheDocument();
   });
 
-  it('opens a popover with a version comparison when the reminder is clicked', async () => {
+  it('checks for updates when an available reminder is clicked', async () => {
     renderSidebar({
       checking: false,
       available: true,
@@ -133,42 +133,11 @@ describe('Sidebar update reminder', () => {
 
     fireEvent.click(button);
 
-    expect(await screen.findByText('v1.3.0')).toBeInTheDocument();
-    expect(screen.getByText('v1.3.1')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /前往 GitHub 下载/ })).toBeInTheDocument();
+    await waitFor(() => expect(mockApi.checkForUpdates).toHaveBeenCalledTimes(1));
+    expect(mockApi.quitAndInstall).not.toHaveBeenCalled();
   });
 
-  it('opens the GitHub releases page when the download button is clicked', async () => {
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
-
-    renderSidebar({
-      checking: false,
-      available: true,
-      downloading: false,
-      downloaded: false,
-      progress: 0,
-      version: '1.3.1',
-      currentVersion: '1.3.0',
-    });
-
-    const button = await screen.findByRole('button', { name: '升级到 1.3.1' });
-    fireEvent.click(button);
-
-    const downloadButton = await screen.findByRole('button', { name: /前往 GitHub 下载/ });
-    fireEvent.click(downloadButton);
-
-    expect(openSpy).toHaveBeenCalledWith(
-      'https://github.com/kaisersong/xiaok-cli/releases/latest',
-      '_blank',
-      'noopener,noreferrer',
-    );
-
-    openSpy.mockRestore();
-  });
-
-  it('never triggers auto check or install from the reminder (ad-hoc signing safe)', async () => {
-    vi.spyOn(window, 'open').mockReturnValue(null);
-
+  it('installs a downloaded update when the reminder is clicked', async () => {
     renderSidebar({
       checking: false,
       available: true,
@@ -179,19 +148,32 @@ describe('Sidebar update reminder', () => {
       currentVersion: '1.3.0',
     });
 
-    const button = await screen.findByRole('button', { name: '升级到 1.3.1' });
+    const button = await screen.findByRole('button', { name: '安装 1.3.1' });
     fireEvent.click(button);
 
-    const downloadButton = await screen.findByRole('button', { name: /前往 GitHub 下载/ });
-    fireEvent.click(downloadButton);
+    await waitFor(() => expect(mockApi.quitAndInstall).toHaveBeenCalledTimes(1));
+    expect(mockApi.checkForUpdates).not.toHaveBeenCalled();
+  });
+
+  it('does not trigger another update action while an update action is busy', async () => {
+    renderSidebar({
+      checking: false,
+      available: true,
+      downloading: true,
+      downloaded: false,
+      progress: 42,
+      version: '1.3.1',
+      currentVersion: '1.3.0',
+    });
+
+    const button = await screen.findByRole('button', { name: '42%' });
+    fireEvent.click(button);
 
     expect(mockApi.checkForUpdates).not.toHaveBeenCalled();
     expect(mockApi.quitAndInstall).not.toHaveBeenCalled();
   });
 
-  it('shows a quiet manual download hint when update checks do not complete', async () => {
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
-
+  it('shows a quiet retry action when update checks do not complete', async () => {
     renderSidebar({
       checking: false,
       available: false,
@@ -202,26 +184,15 @@ describe('Sidebar update reminder', () => {
       error: 'Cannot find latest-mac.yml',
     });
 
-    const button = await screen.findByRole('button', { name: '检查更新未完成' });
+    const button = await screen.findByRole('button', { name: '重新检查更新' });
     expect(button.className).not.toContain('border-amber');
     expect(button.className).not.toContain('bg-amber');
     expect(button.querySelector('svg')).toBeNull();
 
     fireEvent.click(button);
 
-    expect(await screen.findAllByText('检查更新未完成')).toHaveLength(2);
-    expect(screen.queryByText('更新检查失败')).not.toBeInTheDocument();
-    expect(screen.getByText('v1.4.0')).toBeInTheDocument();
-    expect(screen.getByText(/Cannot find latest-mac.yml/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /前往 GitHub 下载/ }));
-    expect(openSpy).toHaveBeenCalledWith(
-      'https://github.com/kaisersong/xiaok-cli/releases/latest',
-      '_blank',
-      'noopener,noreferrer',
-    );
-
-    openSpy.mockRestore();
+    await waitFor(() => expect(mockApi.checkForUpdates).toHaveBeenCalledTimes(1));
+    expect(mockApi.quitAndInstall).not.toHaveBeenCalled();
   });
 
   it('lists scheduled tasks without a three-row nested scroll container on scheduled page', async () => {
