@@ -111,13 +111,14 @@ export interface MeResponse {
 // Config types
 export interface CaptchaConfig { enabled: boolean; }
 export interface MemoryConfig { enabled: boolean; }
-export type ConnectorsSearchProvider = 'duckduckgo' | 'tavily' | 'brave' | 'searxng';
+export type ConnectorsSearchProvider = 'duckduckgo' | 'tavily' | 'brave' | 'firecrawl' | 'searxng';
 export type ConnectorsFetchProvider = 'basic' | 'jina' | 'firecrawl';
 export interface ConnectorsConfig {
   search: {
     provider: ConnectorsSearchProvider;
     tavilyApiKey?: string;
     braveApiKey?: string;
+    firecrawlApiKey?: string;
     searxngBaseUrl?: string;
   };
   fetch: {

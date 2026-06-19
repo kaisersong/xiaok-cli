@@ -50,11 +50,12 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     envPrefixes: ['KIMI'],
     defaultModel: {
       modelId: 'kimi-default',
-      model: 'kimi-k2.6',
-      label: 'Kimi K2.6',
+      model: 'kimi-k2.7',
+      label: 'Kimi K2.7',
       capabilities: ['tools', 'thinking'],
     },
     availableModels: [
+      { modelId: 'kimi-k2.7', model: 'kimi-k2.7', label: 'Kimi K2.7', capabilities: ['tools', 'thinking'] },
       { modelId: 'kimi-k2.6', model: 'kimi-k2.6', label: 'Kimi K2.6', capabilities: ['tools', 'thinking'] },
       { modelId: 'kimi-k2.5', model: 'kimi-k2.5', label: 'Kimi K2.5', capabilities: ['tools', 'thinking'] },
       { modelId: 'kimi-for-coding', model: 'kimi-for-coding', label: 'Kimi for Coding', capabilities: ['tools', 'thinking'] },
@@ -86,11 +87,12 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     envPrefixes: ['GLM'],
     defaultModel: {
       modelId: 'glm-default',
-      model: 'GLM-5.1',
-      label: 'GLM 5.1',
+      model: 'GLM-5.2',
+      label: 'GLM 5.2',
       capabilities: ['tools'],
     },
     availableModels: [
+      { modelId: 'glm-5.2', model: 'GLM-5.2', label: 'GLM 5.2', capabilities: ['tools'] },
       { modelId: 'glm-5.1', model: 'GLM-5.1', label: 'GLM 5.1', capabilities: ['tools'] },
       { modelId: 'glm-5', model: 'GLM-5', label: 'GLM 5', capabilities: ['tools'] },
       { modelId: 'glm-5-turbo', model: 'GLM-5-Turbo', label: 'GLM 5 Turbo', capabilities: ['tools'] },

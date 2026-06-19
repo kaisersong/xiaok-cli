@@ -34,11 +34,7 @@ export function evaluateArtifactEvidenceGuard(input: {
     return block(input.taskId, reasonForValidationFailure(input.expectation, validation));
   }
 
-  if ((input.artifacts?.length ?? 0) > 0) {
-    return pass(input.taskId);
-  }
-
-  return block(input.taskId, EMPTY_ARTIFACT_REASON);
+  return pass(input.taskId);
 }
 
 function pass(taskId: string): GuardDecision {

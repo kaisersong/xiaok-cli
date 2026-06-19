@@ -55,6 +55,83 @@ export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
     {
       permission: 'safe',
       definition: {
+        name: 'kb_add_source',
+        description: '向知识库写入内容。支持三种方式：paste（直接传文本）、file（本地文件路径）、url（网页地址）。写入后自动分片索引，后续可通过 kb_search 检索。',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            collection_id: { type: 'string', description: '目标集合 ID，不传则使用第一个集合' },
+            title: { type: 'string', description: '文档标题' },
+            kind: { type: 'string', enum: ['paste', 'file', 'url'], description: '写入方式：paste=文本内容, file=本地文件, url=网页' },
+            text: { type: 'string', description: 'kind=paste 时必填，要写入的文本内容' },
+            file_path: { type: 'string', description: 'kind=file 时必填，本地文件路径' },
+            url: { type: 'string', description: 'kind=url 时必填，网页地址' },
+          },
+          required: ['title', 'kind'],
+        },
+      },
+      async execute(input) {
+        const kind = input.kind as string;
+        const title = (input.title as string || '').trim();
+        if (!title) return '错误：title 不能为空。';
+
+        let collectionId = input.collection_id as string | undefined;
+        if (!collectionId) {
+          const cols = store.listCollections();
+          if (cols.length === 0) return '错误：知识库中没有集合，请先用 kb_create_collection 创建一个。';
+          collectionId = cols[0].id;
+        }
+
+        if (kind === 'paste') {
+          const text = (input.text as string || '').trim();
+          if (!text) return '错误：kind=paste 时 text 不能为空。';
+          const source = store.addSource({ collectionId, kind: 'paste', title, text });
+          const chunks = simpleChunk(text);
+          store.insertChunks(source.id, chunks);
+          markSourceParsed(store, source.id);
+          return `已写入「${title}」到知识库（${chunks.length} 片段）。`;
+        }
+
+        if (kind === 'file') {
+          const filePath = (input.file_path as string || '').trim();
+          if (!filePath) return '错误：kind=file 时 file_path 不能为空。';
+          const source = store.addSource({ collectionId, kind: 'file', title, filePath });
+          try {
+            const { readFileSync } = await import('node:fs');
+            const text = readFileSync(filePath, 'utf-8');
+            const chunks = simpleChunk(text);
+            store.insertChunks(source.id, chunks);
+            markSourceParsed(store, source.id);
+            return `已写入文件「${title}」到知识库（${chunks.length} 片段）。`;
+          } catch (e) {
+            return `错误：读取文件失败 — ${e instanceof Error ? e.message : String(e)}`;
+          }
+        }
+
+        if (kind === 'url') {
+          const url = (input.url as string || '').trim();
+          if (!url) return '错误：kind=url 时 url 不能为空。';
+          const source = store.addSource({ collectionId, kind: 'url', title, uri: url });
+          try {
+            const resp = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+            if (!resp.ok) return `错误：抓取 URL 失败 — HTTP ${resp.status}`;
+            const text = await resp.text();
+            const plainText = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            const chunks = simpleChunk(plainText);
+            store.insertChunks(source.id, chunks);
+            markSourceParsed(store, source.id);
+            return `已写入 URL「${title}」到知识库（${chunks.length} 片段）。`;
+          } catch (e) {
+            return `错误：抓取 URL 失败 — ${e instanceof Error ? e.message : String(e)}`;
+          }
+        }
+
+        return '错误：kind 必须是 paste、file 或 url 之一。';
+      },
+    },
+    {
+      permission: 'safe',
+      definition: {
         name: 'kb_search',
         description: '【知识检索】在用户的知识库中搜索已保存的文档和资料。当用户提问涉及知识、资料、文档内容时优先使用此工具。',
         inputSchema: {
@@ -148,4 +225,27 @@ export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
       },
     },
   ];
+}
+
+const CHUNK_SIZE = 800;
+const CHUNK_OVERLAP = 100;
+
+function simpleChunk(text: string): Array<{ idx: number; text: string; charStart: number; charEnd: number }> {
+  const chunks: Array<{ idx: number; text: string; charStart: number; charEnd: number }> = [];
+  let start = 0;
+  let idx = 0;
+  while (start < text.length) {
+    const end = Math.min(start + CHUNK_SIZE, text.length);
+    chunks.push({ idx, text: text.slice(start, end), charStart: start, charEnd: end });
+    idx++;
+    start = end - CHUNK_OVERLAP;
+    if (start >= text.length) break;
+  }
+  return chunks;
+}
+
+function markSourceParsed(store: KbStore, sourceId: string): void {
+  try {
+    (store as any)._db?.prepare("UPDATE sources SET parse_status = 'parsed', updated_at = ? WHERE id = ?").run(Date.now(), sourceId);
+  } catch {}
 }

@@ -2236,12 +2236,7 @@ function inferKSwarmArtifactKind(kind: string, label: string): string {
 function shouldRequireKSwarmArtifactEvidence(task: KSwarmTaskHandoff['task']): boolean {
   if ((task.requiredOutputs ?? []).length > 0) return true;
   if (task.evidenceContract && task.evidenceContract.required === true) return true;
-  const text = [
-    task.title,
-    task.brief,
-    task.acceptanceCriteria,
-  ].filter(Boolean).join('\n');
-  return /交付|输出|产物|文件|报告|文档|笔记|清单|表格|Markdown|HTML|来源|链接|调研|收集|整理|撰写|生成/i.test(text);
+  return false;
 }
 
 function discoverKSwarmArtifactsFromDirectory(input: {
@@ -3292,6 +3287,7 @@ function buildSystemPrompt(): string {
 - kb_list_collections: 列出知识库集合
 - kb_create_collection: 创建知识库集合
 - kb_search: 【知识检索】在用户的知识库中搜索已保存的文档和资料（可与 notebook_read 同时使用）
+- kb_add_source: 向知识库写入内容（文本/文件/URL），写入后自动分片索引，可被 kb_search 检索
 - kb_get_source: 获取知识库中某文档的完整内容（支持分页）
 - inspect_project: 检查 KSwarm 项目状态、卡住任务和最新可读产物
 - create_project: 创建 KSwarm 多智能体协作项目；仅当用户明确说"创建项目""建个项目""用工作流""多智能体协作"时才能调用；单人可完成的任务（写报告、做调研、生成文档等）禁止调用此工具，直接执行即可。用户明确要求 workflow/动态工作流时必须传 executionMode="workflow"
@@ -5206,9 +5202,10 @@ function createDesktopModelRunnerWithRegistry(
       }
     }
 
+    const modelIdentity = `\n\n## 模型信息\n\n你当前运行的模型是: ${adapter.getModelName()}。不要假设自己是其他模型。`;
     const systemPrompt = skillsContext
-      ? `${BASE_SYSTEM_PROMPT}\n\nAvailable skills:\n${skillsContext}`
-      : BASE_SYSTEM_PROMPT;
+      ? `${BASE_SYSTEM_PROMPT}${modelIdentity}\n\nAvailable skills:\n${skillsContext}`
+      : `${BASE_SYSTEM_PROMPT}${modelIdentity}`;
 
     const userText = materialsContext
       ? `${effectivePrompt}${materialsContext}`

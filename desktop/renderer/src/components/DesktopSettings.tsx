@@ -217,6 +217,7 @@ function ModelPane() {
   const [testing, setTesting] = useState<Record<string, boolean>>({});
   const [testResults, setTestResults] = useState<Record<string, TestProviderConnectionResult>>({});
   const [showAddModel, setShowAddModel] = useState<string>('');
+  const [customModelInput, setCustomModelInput] = useState('');
 
   useEffect(() => {
     api.getModelConfig()
@@ -288,6 +289,27 @@ function ModelPane() {
       const updated = await api.getModelConfig();
       setConfig(updated);
       setSuccess(`已添加模型 ${foundModel.label}`);
+      setShowAddModel('');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddCustomModel = async (providerId: string, modelName: string) => {
+    if (!config || !modelName.trim()) return;
+    setSaving(true);
+    setError('');
+    try {
+      await api.saveModelConfig({
+        providerId,
+        modelName: modelName.trim(),
+        label: modelName.trim(),
+      });
+      const updated = await api.getModelConfig();
+      setConfig(updated);
+      setSuccess(`已添加自定义模型 ${modelName.trim()}`);
       setShowAddModel('');
     } catch (e) {
       setError((e as Error).message);
@@ -512,27 +534,47 @@ function ModelPane() {
                       const profileModels = profile?.availableModels ?? [];
                       const configuredModels = config.models.filter(m => m.provider === provider.id);
                       const addable = profileModels.filter(m => !configuredModels.some(cm => cm.model === m.model));
-                      if (addable.length === 0) return null;
                       return (
                         <div className="mt-2">
                           <button type="button"
-                            onClick={() => setShowAddModel(prev => prev === provider.id ? '' : provider.id)}
+                            onClick={() => { setShowAddModel(prev => prev === provider.id ? '' : provider.id); setCustomModelInput(''); }}
                             className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
                           >
                             <Plus size={12} /> 添加模型
                           </button>
                           {showAddModel === provider.id && (
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              {addable.map(m => (
+                            <div className="mt-2 space-y-2">
+                              {addable.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {addable.map(m => (
+                                    <button type="button"
+                                      key={m.modelId}
+                                      onClick={() => handleAddModel(m.modelId)}
+                                      disabled={saving}
+                                      className="rounded-md px-2 py-1 text-xs bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] hover:bg-[var(--c-accent)]/10 hover:text-[var(--c-accent)] transition-colors disabled:opacity-50"
+                                    >
+                                      {m.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={customModelInput}
+                                  onChange={e => setCustomModelInput(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter' && customModelInput.trim()) { void handleAddCustomModel(provider.id, customModelInput); setCustomModelInput(''); } }}
+                                  placeholder="输入自定义模型名，如 GLM-5.2"
+                                  className="flex-1 rounded-md border border-[var(--c-border)] bg-[var(--c-bg)] px-2.5 py-1 text-xs text-[var(--c-text-primary)] placeholder:text-[var(--c-text-tertiary)] outline-none focus:border-[var(--c-accent)]"
+                                />
                                 <button type="button"
-                                  key={m.modelId}
-                                  onClick={() => handleAddModel(m.modelId)}
-                                  disabled={saving}
-                                  className="rounded-md px-2 py-1 text-xs bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] hover:bg-[var(--c-accent)]/10 hover:text-[var(--c-accent)] transition-colors disabled:opacity-50"
+                                  onClick={() => { void handleAddCustomModel(provider.id, customModelInput); setCustomModelInput(''); }}
+                                  disabled={saving || !customModelInput.trim()}
+                                  className="shrink-0 rounded-md bg-[var(--c-accent)] px-3 py-1 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-40"
                                 >
-                                  {m.label}
+                                  添加
                                 </button>
-                              ))}
+                              </div>
                             </div>
                           )}
                         </div>
@@ -3399,6 +3441,7 @@ const SEARCH_PROVIDERS: Array<{
   notImplemented?: boolean;
 }> = [
   { key: 'duckduckgo', label: 'DuckDuckGo', description: '默认，无需 API Key（兜底）' },
+  { key: 'firecrawl', label: 'Firecrawl', description: '免费 1000 次/月，无需注册' },
   { key: 'tavily', label: 'Tavily', description: '高质量搜索，需要 API Key' },
   { key: 'brave', label: 'Brave Search', description: '注重隐私，需要 API Key' },
 ];
@@ -3411,7 +3454,7 @@ const FETCH_PROVIDERS: Array<{
 }> = [
   { key: 'basic', label: 'Basic', description: '默认，直接 HTTP 抓取（兜底）' },
   { key: 'jina', label: 'Jina Reader', description: '清洗为干净 Markdown，可选 API Key' },
-  { key: 'firecrawl', label: 'Firecrawl', description: '高质量爬取（暂未实现）', notImplemented: true },
+  { key: 'firecrawl', label: 'Firecrawl', description: '高质量爬取，免费 1000 次/月，可选 API Key' },
 ];
 
 function maskApiKey(key: string): string {
@@ -3693,6 +3736,14 @@ function ToolsPane() {
                         onChange={v => setDraft(d => d ? { ...d, search: { ...d.search, braveApiKey: v } } : d)}
                       />
                     )}
+                    {checked && opt.key === 'firecrawl' && (
+                      <ApiKeyInput
+                        ariaLabel="firecrawl-search-api-key"
+                        placeholder="Firecrawl API Key (可选，留空用免费额度)"
+                        storedValue={search.firecrawlApiKey || ''}
+                        onChange={v => setDraft(d => d ? { ...d, search: { ...d.search, firecrawlApiKey: v } } : d)}
+                      />
+                    )}
                   </div>
                 </label>
               </Card>
@@ -3734,6 +3785,14 @@ function ToolsPane() {
                         placeholder="Jina API Key (可选，留空走免费额度)"
                         storedValue={fetchCfg.jinaApiKey || ''}
                         onChange={v => setDraft(d => d ? { ...d, fetch: { ...d.fetch, jinaApiKey: v } } : d)}
+                      />
+                    )}
+                    {checked && opt.key === 'firecrawl' && (
+                      <ApiKeyInput
+                        ariaLabel="firecrawl-fetch-api-key"
+                        placeholder="Firecrawl API Key (可选，留空用免费额度)"
+                        storedValue={fetchCfg.firecrawlApiKey || ''}
+                        onChange={v => setDraft(d => d ? { ...d, fetch: { ...d.fetch, firecrawlApiKey: v } } : d)}
                       />
                     )}
                   </div>
