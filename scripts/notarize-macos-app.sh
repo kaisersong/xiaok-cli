@@ -5,7 +5,7 @@ app_path="${1:-desktop/release/mac-arm64/xiaok.app}"
 timeout_seconds="${NOTARY_TIMEOUT_SECONDS:-1800}"
 poll_interval_seconds="${NOTARY_POLL_INTERVAL_SECONDS:-30}"
 reuse_in_progress="${NOTARY_REUSE_IN_PROGRESS:-true}"
-reuse_window_seconds="${NOTARY_REUSE_WINDOW_SECONDS:-86400}"
+reuse_window_seconds="${NOTARY_REUSE_WINDOW_SECONDS:-7200}"
 
 : "${APPLE_API_KEY:?APPLE_API_KEY must point to the App Store Connect API key .p8 file}"
 : "${APPLE_API_KEY_ID:?APPLE_API_KEY_ID is required}"
