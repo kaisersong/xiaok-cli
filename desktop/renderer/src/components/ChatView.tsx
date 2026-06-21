@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import remarkGfm from 'remark-gfm';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, ChevronDown } from 'lucide-react';
 import { ChatInput } from './ChatInput';
 import { ToolStepsMessage } from './ToolStepsMessage';
 import { ProjectInlineCard } from './projects/ProjectInlineCard';
@@ -228,6 +228,7 @@ export function ChatView({
   const bottomRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const lastScrollTimeRef = useRef(0);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
   // Track whether user manually scrolled away from bottom
   useEffect(() => {
@@ -235,7 +236,9 @@ export function ChatView({
     if (!el) return;
     const onScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = el;
-      isAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 50;
+      const atBottom = scrollHeight - scrollTop - clientHeight < 50;
+      isAtBottomRef.current = atBottom;
+      setShowScrollToBottom(!atBottom);
     };
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
@@ -248,6 +251,7 @@ export function ChatView({
     if (now - lastScrollTimeRef.current < 100) return;
     lastScrollTimeRef.current = now;
     bottomRef.current?.scrollIntoView({ behavior: 'instant' as ScrollBehavior });
+    setShowScrollToBottom(false);
   }, [messages, streamingText, status]);
 
   // Keyboard shortcut: Ctrl+Shift+C to toggle canvas
@@ -436,6 +440,21 @@ export function ChatView({
             <div ref={bottomRef} />
           </div>
         </div>
+      </div>
+
+      {/* Scroll to bottom floating button */}
+      <div className="relative mx-auto w-full" style={{ maxWidth: 800 }}>
+        <button
+          type="button"
+          onClick={() => {
+            bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+            setShowScrollToBottom(false);
+          }}
+          className={`absolute -top-12 left-1/2 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-[var(--c-border)] bg-[var(--c-bg)] shadow-lg transition-all duration-200 hover:bg-[var(--c-bg-sub)] ${showScrollToBottom ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 translate-y-2'}`}
+          aria-label="跳到最新"
+        >
+          <ChevronDown size={16} className="text-[var(--c-text-secondary)]" />
+        </button>
       </div>
 
       {/* Input area */}
