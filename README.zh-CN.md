@@ -62,6 +62,12 @@ Xiaok Desktop v1.4.9 把这套模型放到了产品界面里。Loop 不再藏在
 - **粘贴路径检测修复**：包含路径片段的混合文本不再被误识别为文件路径。
 - **工作流状态条裁剪修复**：通过切换为 fixed 定位，修复工作流状态条左侧被裁剪的问题。
 - **验证覆盖**：v1.4.9 通过 88 个 loop 测试（含 task_completion 的 plan-mode block、超时、crash recovery）、316 个 renderer 测试、desktop 主进程/渲染器构建以及 `desktop-v1.4.9` release tag workflow 验证。
+- **Firecrawl 免 Key 搜索与抓取**：集成 Firecrawl 作为新的 web_search 和 web_fetch 提供商。无需 API key 即可使用（每月 1000 次免费额度）；可选配置 key 以获得更高速率。通过 `XIAOK_SEARCH_PROVIDER=firecrawl` 环境变量或 Desktop 设置面板配置。
+- **KB 写入工具**：新增 `kb_add_source` Agent 工具，允许在对话中直接向知识库写入内容。支持 paste（文本）、file（本地文件路径）和 url（网页）三种模式，自动分块和索引。
+- **CLI Headless 挂起修复**：修复 `xiaok chat --auto --print` 无限挂起的问题。新增 Agent maxIterations（默认 100）、MCP callTool 超时（默认 120s）、单任务模式的带超时清理，以及 wall-clock turn deadline（默认 4 分钟，超时退出码 124）。
+- **自定义模型名称**：用户现在可以在 Desktop 设置中添加任意模型名称（不再受硬编码注册表限制）。注册表已更新 GLM-5.2 和 Kimi K2.7。
+- **二进制文件预览**：PPT/Word/Excel 等二进制文件现在在产物预览面板中显示"用系统应用打开"按钮，而不是乱码文本。
+- **乐观产物证据**：completion guard 默认不再阻断没有文件产物的任务。只有显式声明了 `requiredOutputs` 或 `evidenceContract` 的任务才会被检查。
 
 **v1.4.8 新特性：**
 
@@ -417,12 +423,18 @@ npm run build
       "protocol": "openai_legacy",
       "apiKey": "your-kimi-key",
       "baseUrl": "https://api.kimi.com/coding/v1"
+    },
+    "firecrawl": {
+      "type": "first_party",
+      "protocol": "firecrawl",
+      "apiKey": "",
+      "baseUrl": "https://api.firecrawl.dev"
     }
   },
   "models": {
     "anthropic-default": {
       "provider": "anthropic",
-      "model": "claude-opus-4-6",
+      "model": "claude-opus-4-7",
       "label": "Anthropic Default",
       "capabilities": ["tools"]
     },
@@ -602,6 +614,7 @@ xiaok yzjchannel serve
 - **工具输入校验** — JSON Schema 验证器，每次调用前校验
 - **类型化记忆** — user/feedback/project/reference 分类存储
 - **本地 daemon + 提醒** — 基于 SQLite 的 durable reminder scheduler，daemon/client 隔离
+- **Firecrawl 免 Key 网页搜索 + 抓取** — 结构化 JSON 搜索和 Markdown 抓取，无需注册 API key
 
 ### 技能系统
 

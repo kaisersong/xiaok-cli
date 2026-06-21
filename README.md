@@ -62,6 +62,12 @@ Xiaok Desktop v1.4.9 makes this model visible in the product. Loops are no longe
 - **Paste Path Detection Fix**: Mixed text containing path-like substrings is no longer misidentified as file paths during paste operations.
 - **Workflow Status Strip Fix**: Fixed left-side clipping of the workflow status strip by switching to fixed positioning.
 - **Release Validation**: v1.4.9 is verified with 88 loop tests (store + executor + runner including task_completion plan-mode block, timeout, crash recovery), 316 renderer tests, desktop main/renderer builds, and the `desktop-v1.4.9` release tag workflow.
+- **Firecrawl Keyless Search & Scrape**: Integrated Firecrawl as a new web_search and web_fetch provider. Works without API key (1000 free credits/month); optional key for higher rate limits. Configurable via `XIAOK_SEARCH_PROVIDER=firecrawl` env or Desktop settings panel.
+- **KB Write Tool**: New `kb_add_source` agent tool allows writing content into the knowledge base from conversations. Supports paste (text), file (local path), and url (web page) modes with automatic chunking and indexing.
+- **CLI Headless Hang Fix**: Fixed `xiaok chat --auto --print` hanging indefinitely. Added Agent maxIterations (default 100), MCP callTool timeout (default 120s), cleanup-with-timeout for single-task mode, and a wall-clock turn deadline (default 4 min, exit 124 on timeout).
+- **Custom Model Names**: Users can now add arbitrary model names in Desktop settings (not limited to the hardcoded registry). Registry updated with GLM-5.2 and Kimi K2.7.
+- **Binary File Preview**: PPT/Word/Excel and other binary files now show "open with system app" button instead of garbled text in the artifact preview panel.
+- **Optimistic Artifact Evidence**: The completion guard no longer blocks tasks that have no file artifacts by default. Only tasks with explicit `requiredOutputs` or `evidenceContract` are checked.
 
 **What's New in v1.4.8:**
 
@@ -417,12 +423,18 @@ Use the source install path only if you are developing on `xiaok-cli` itself or 
       "protocol": "openai_legacy",
       "apiKey": "your-kimi-key",
       "baseUrl": "https://api.kimi.com/coding/v1"
+    },
+    "firecrawl": {
+      "type": "first_party",
+      "protocol": "firecrawl",
+      "apiKey": "",
+      "baseUrl": "https://api.firecrawl.dev"
     }
   },
   "models": {
     "anthropic-default": {
       "provider": "anthropic",
-      "model": "claude-opus-4-6",
+      "model": "claude-opus-4-7",
       "label": "Anthropic Default",
       "capabilities": ["tools"]
     },
@@ -602,6 +614,7 @@ xiaok yzjchannel serve
 - **Tool input validation** — JSON Schema validator before each call
 - **Typed memory** — user/feedback/project/reference classification
 - **Local daemon + reminders** — durable reminder scheduler on SQLite with daemon/client isolation
+- **Firecrawl keyless web search + scrape** — structured JSON search and markdown scrape without API key registration
 
 ### Skill System
 
