@@ -174,6 +174,12 @@ export async function registerDesktopIpc(
     log('info', 'openArtifact', { artifactId: input?.artifactId });
     return services.openArtifact(input.artifactId);
   });
+  ipcMain.handle('desktop:openFileInSystemApp', async (_event, input) => {
+    const filePath = input?.filePath as string;
+    if (!filePath || !isAbsolute(filePath)) return { ok: false, error: 'invalid_path' };
+    const error = await shell.openPath(filePath);
+    return error ? { ok: false, error } : { ok: true };
+  });
   ipcMain.handle('desktop:readFileContent', async (_event, input) => {
     const filePath = input?.filePath as string;
     log('info', 'readFileContent', { filePath });

@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   getActiveTask: () => ipcRenderer.invoke('desktop:getActiveTask'),
   recoverTask: (taskId) => ipcRenderer.invoke('desktop:recoverTask', { taskId }),
   openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }),
+  openFileInSystemApp: (filePath) => ipcRenderer.invoke('desktop:openFileInSystemApp', { filePath }),
   listChannels: () => ipcRenderer.invoke('desktop:listChannels'),
   testChannel: (channelId) => ipcRenderer.invoke('desktop:testChannel', channelId),
   createChannel: (input) => ipcRenderer.invoke('desktop:createChannel', input),
