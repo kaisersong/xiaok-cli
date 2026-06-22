@@ -63,6 +63,9 @@ type ScheduledFrequencyLabels = {
   scheduledDaily: string;
   scheduledWeekdays: string;
   scheduledWeekly: string;
+  scheduledEvery30Sec: string;
+  scheduledEveryMinute: string;
+  scheduledEvery5Min: string;
   scheduledEvery30Min: string;
   scheduledEveryHour: string;
   scheduledEvery2Hours: string;
@@ -86,6 +89,9 @@ const FREQUENCY_OPTIONS = [
 const SCHEDULED_CONTEXT_PREFIX = `[SYSTEM: 这是用户设置的自动定时任务，请给出友好简洁的回复。]\n\n`;
 
 const INTERVAL_OPTIONS = [
+  { value: 0.5 },
+  { value: 1 },
+  { value: 5 },
   { value: 30 },
   { value: 60 },
   { value: 120 },
@@ -205,19 +211,23 @@ export function formatScheduledFrequency(
   task: Pick<ScheduledTask, 'frequency' | 'scheduleConfig'>,
   labels: ScheduledFrequencyLabels
 ): string {
-  const intervalLabels: Record<number, string> = {
-    30: labels.scheduledEvery30Min,
-    60: labels.scheduledEveryHour,
-    120: labels.scheduledEvery2Hours,
-    180: labels.scheduledEvery3Hours,
-    240: labels.scheduledEvery4Hours,
-    360: labels.scheduledEvery6Hours,
-    480: labels.scheduledEvery8Hours,
-    720: labels.scheduledEvery12Hours,
+  const intervalLabelMap: Record<string, string> = {
+    '0.5': labels.scheduledEvery30Sec,
+    '1': labels.scheduledEveryMinute,
+    '5': labels.scheduledEvery5Min,
+    '30': labels.scheduledEvery30Min,
+    '60': labels.scheduledEveryHour,
+    '120': labels.scheduledEvery2Hours,
+    '180': labels.scheduledEvery3Hours,
+    '240': labels.scheduledEvery4Hours,
+    '360': labels.scheduledEvery6Hours,
+    '480': labels.scheduledEvery8Hours,
+    '720': labels.scheduledEvery12Hours,
   };
   if (task.frequency === 'interval' || task.frequency === 'hourly') {
     const minutes = task.scheduleConfig?.intervalMinutes ?? 60;
-    if (intervalLabels[minutes]) return intervalLabels[minutes];
+    const key = String(minutes);
+    if (intervalLabelMap[key]) return intervalLabelMap[key];
     return labels.scheduledEveryNMinutes(minutes);
   }
   const frequencyLabels: Record<string, string> = {
@@ -271,15 +281,18 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
     ? tasks.filter(task => task.executorKind === 'loop' && task.loopId === loopIdFilter)
     : tasks;
 
-  const intervalLabels: Record<number, string> = {
-    30: t.scheduledEvery30Min,
-    60: t.scheduledEveryHour,
-    120: t.scheduledEvery2Hours,
-    180: t.scheduledEvery3Hours,
-    240: t.scheduledEvery4Hours,
-    360: t.scheduledEvery6Hours,
-    480: t.scheduledEvery8Hours,
-    720: t.scheduledEvery12Hours,
+  const intervalLabels: Record<string, string> = {
+    '0.5': t.scheduledEvery30Sec,
+    '1': t.scheduledEveryMinute,
+    '5': t.scheduledEvery5Min,
+    '30': t.scheduledEvery30Min,
+    '60': t.scheduledEveryHour,
+    '120': t.scheduledEvery2Hours,
+    '180': t.scheduledEvery3Hours,
+    '240': t.scheduledEvery4Hours,
+    '360': t.scheduledEvery6Hours,
+    '480': t.scheduledEvery8Hours,
+    '720': t.scheduledEvery12Hours,
   };
 
   const frequencyLabels: Record<string, string> = {
@@ -1048,7 +1061,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
                       className="w-full appearance-none rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)] pr-8"
                     >
                       {INTERVAL_OPTIONS.map(opt => (
-                        <option key={opt.value} value={opt.value}>{intervalLabels[opt.value] || String(opt.value)}</option>
+                        <option key={opt.value} value={opt.value}>{intervalLabels[String(opt.value)] || String(opt.value)}</option>
                       ))}
                     </select>
                     <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center">

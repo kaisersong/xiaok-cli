@@ -30,6 +30,7 @@ import { ThreadMetaStore } from './thread-meta-store.js';
 import { TimedActionService } from './timed-action-service.js';
 import { TimedActionScheduler } from './timed-action-scheduler.js';
 import { createDesktopTimedActionExecutors } from './timed-action-executors.js';
+import { createElectronDesktopNotificationPort } from './desktop-notifications.js';
 import { createDesktopLoopRuntime } from './loop-executor.js';
 import { buildAutomationOverviewSnapshot, buildAutomationRunHistory } from './automation-overview.js';
 import { attachDesktopContextMenu } from './context-menu.js';
@@ -373,15 +374,44 @@ async function createWindow(): Promise<BrowserWindow> {
     onRunComplete: (event) => {
       if (event.action.executor.kind !== 'agent_task') return;
       if (window.isDestroyed()) return;
+      const success = event.status === 'success';
+      const title = event.action.title || event.action.id;
       window.webContents.send('desktop:scheduledTaskDue', {
         taskId: event.action.id,
         runtimeTaskId: event.runtimeTaskId,
         completed: true,
-        success: event.status === 'success',
+        success,
+        title,
         lastRunAt: event.action.lastDueAt ?? event.finishedAt,
         nextRunAt: event.action.nextDueAt,
         error: event.error,
       });
+      try {
+        const notificationPort = createElectronDesktopNotificationPort();
+        const notificationTitle = success
+          ? `定时任务已完成：${title}`
+          : `定时任务失败：${title}`;
+        const notificationBody = success
+          ? '点击查看运行结果。'
+          : (event.error ? `失败原因：${event.error}` : '点击查看失败详情。');
+        void notificationPort.show({
+          title: notificationTitle,
+          body: notificationBody,
+          silent: false,
+          onClick: () => {
+            try {
+              if (window.isDestroyed()) return;
+              if (window.isMinimized()) window.restore();
+              window.show();
+              window.focus();
+              window.webContents.send('desktop:scheduledTaskFocus', {
+                taskId: event.action.id,
+                runtimeTaskId: event.runtimeTaskId,
+              });
+            } catch { /* focus is best-effort */ }
+          },
+        });
+      } catch { /* notification is best-effort */ }
     },
   });
   timedActionScheduler.start();

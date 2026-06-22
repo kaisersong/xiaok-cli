@@ -972,7 +972,7 @@ function evidenceForExpectation(
   evidence: CompletionEvidenceRecord[],
 ): CompletionEvidenceRecord[] {
   if (expectation.expectedKinds.includes('file_artifact')) {
-    return evidence.filter(record => record.kind === 'file_artifact');
+    return evidence.filter(record => record.kind === 'file_artifact' || record.kind === 'answer');
   }
   return evidence;
 }

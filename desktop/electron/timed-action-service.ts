@@ -333,7 +333,7 @@ export class TimedActionService {
   ): TimedActionPolicy {
     const next: TimedActionPolicy = { ...(policy ?? {}) };
     if (trigger.kind === 'interval' && source === 'agent') {
-      next.minIntervalMinutes = next.minIntervalMinutes ?? 5;
+      next.minIntervalMinutes = next.minIntervalMinutes ?? 0.5;
       if (trigger.intervalMinutes < next.minIntervalMinutes) {
         throw new Error(`intervalMinutes must be at least ${next.minIntervalMinutes}`);
       }

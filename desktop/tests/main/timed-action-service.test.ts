@@ -51,7 +51,7 @@ describe('TimedActionService', () => {
     expect(action?.policy).toMatchObject({
       maxRuns: 288,
       maxConsecutiveFailures: 3,
-      minIntervalMinutes: 5,
+      minIntervalMinutes: 0.5,
     });
     expect(action?.policy.expiresAt).toBe(1_000 + 24 * 60 * 60_000);
   });
@@ -343,9 +343,9 @@ describe('TimedActionService', () => {
     expect(() => service.createScheduledTask({
       name: '过密检查',
       prompt: '检查项目',
-      trigger: { kind: 'interval', intervalMinutes: 1 },
+      trigger: { kind: 'interval', intervalMinutes: 0.25 },
       source: 'agent',
-    })).toThrow('intervalMinutes must be at least 5');
+    })).toThrow('intervalMinutes must be at least 0.5');
   });
 
   it('deletes agent-created interval scheduled tasks when they are cancelled after running', () => {

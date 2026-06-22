@@ -70,7 +70,7 @@ export class TimedActionScheduler {
     private readonly options: TimedActionSchedulerOptions
   ) {
     this.now = options.now ?? (() => Date.now());
-    this.scanIntervalMs = options.scanIntervalMs ?? 30_000;
+    this.scanIntervalMs = options.scanIntervalMs ?? 10_000;
     this.resolveExecutorTimeoutMs = resolveExecutorTimeoutMsFromOptions(options);
     this.maxClaimPerTick = options.maxClaimPerTick ?? 20;
     this.maxAgentConcurrent = options.maxAgentConcurrent ?? 2;

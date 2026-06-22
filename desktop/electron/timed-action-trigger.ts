@@ -2,7 +2,7 @@ import type { TimedActionTrigger } from './timed-action-types.js';
 
 export function validateTrigger(trigger: TimedActionTrigger, minIntervalMinutes?: number): void {
   if (trigger.kind === 'interval') {
-    const min = minIntervalMinutes ?? 1;
+    const min = minIntervalMinutes ?? 0.5;
     if (!Number.isFinite(trigger.intervalMinutes) || trigger.intervalMinutes < min) {
       throw new Error(`intervalMinutes must be at least ${min}`);
     }

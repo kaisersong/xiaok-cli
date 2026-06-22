@@ -30,10 +30,31 @@ export function useScheduledTaskBootstrap(): void {
       runtimeTaskId?: string;
       completed?: boolean;
       success?: boolean;
+      title?: string;
       lastRunAt?: number;
       nextRunAt?: number;
+      error?: string;
     }) => {
       if (!payload.completed) return;
+      // Mark task as unread for sidebar badge
+      try {
+        const unreadRaw = localStorage.getItem('xiaok:scheduled-unread');
+        const unread: Record<string, number> = unreadRaw ? JSON.parse(unreadRaw) : {};
+        unread[payload.taskId] = (unread[payload.taskId] ?? 0) + 1;
+        localStorage.setItem('xiaok:scheduled-unread', JSON.stringify(unread));
+      } catch { /* best-effort */ }
+      // Dispatch in-app toast event
+      try {
+        window.dispatchEvent(new CustomEvent('xiaok:scheduled-toast', {
+          detail: {
+            taskId: payload.taskId,
+            title: payload.title ?? '',
+            success: payload.success ?? false,
+            error: payload.error,
+          },
+        }));
+      } catch { /* best-effort */ }
+
       const raw = localStorage.getItem(STORAGE_KEY);
       let currentTasks = raw ? JSON.parse(raw) : [];
       let idx = currentTasks.findIndex((t: any) => t.id === payload.taskId);
