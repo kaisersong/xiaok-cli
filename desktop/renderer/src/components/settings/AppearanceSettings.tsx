@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { ChevronDown, Monitor, Sun, Moon } from 'lucide-react'
 import type { Locale } from '../../locales'
-import type { Theme } from '../shared/contexts/theme'
+import type { Theme } from '../../shared/contexts/theme'
 import { useLocale } from '../../contexts/LocaleContext'
 import { useTheme } from '../../contexts/ThemeContext'
 import { readGtdEnabled, writeGtdEnabled } from '../../storage'
@@ -372,6 +372,7 @@ export function SidebarGroupingPicker() {
             >
               <div
                 style={{
+                  position: 'relative',
                   width: 96,
                   height: 64,
                   borderRadius: 10,
@@ -386,6 +387,27 @@ export function SidebarGroupingPicker() {
                 }}
               >
                 <Preview />
+                {active && (
+                  <div
+                    aria-hidden="true"
+                    style={{
+                      position: 'absolute',
+                      top: 4,
+                      right: 4,
+                      width: 16,
+                      height: 16,
+                      borderRadius: '50%',
+                      background: 'var(--c-accent)',
+                      display: 'grid',
+                      placeItems: 'center',
+                      color: '#fff',
+                    }}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 8 6.5 11.5 13 5" />
+                    </svg>
+                  </div>
+                )}
               </div>
               <span
                 className="text-xs"

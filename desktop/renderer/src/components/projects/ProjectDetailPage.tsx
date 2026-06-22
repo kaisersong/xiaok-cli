@@ -277,7 +277,7 @@ function toText(value: unknown): string {
   return '';
 }
 
-function buildSwarmContinueContext(detail: ProjectFullDetail, intervention: ProjectIntervention, projectId: string) {
+function buildSwarmContinueContext(detail: ProjectFullDetail, intervention: ProjectIntervention, projectId: string, t: ReturnType<typeof useLocale>['t']) {
   const actionContext = intervention.secondaryAction?.context || {};
   const primaryFailure = intervention.primaryFailure || {};
   const primaryAction = intervention.primaryAction || null;
@@ -896,7 +896,7 @@ export function ProjectDetailPage() {
         result?.error === 'recovery_budget_exceeded'
       ) {
         if (detail) {
-          const context = buildSwarmContinueContext(detail, intervention, projectId);
+          const context = buildSwarmContinueContext(detail, intervention, projectId, t);
           window.sessionStorage.setItem('xiaok.swarmContinueContext', JSON.stringify({
             ...context,
             xiaokContext: result.xiaokContext || {},
@@ -922,7 +922,7 @@ export function ProjectDetailPage() {
     if (!projectId || !detail || actionLoading !== null) return;
     setActionLoading('ask_xiaok');
     try {
-      const context = buildSwarmContinueContext(detail, intervention, projectId);
+      const context = buildSwarmContinueContext(detail, intervention, projectId, t);
       const draftPrompt = buildXiaokInterventionDraft(context);
       const storedContext = { ...context, draftPrompt };
       window.sessionStorage.setItem('xiaok.swarmContinueContext', JSON.stringify(storedContext));

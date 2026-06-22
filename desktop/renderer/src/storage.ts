@@ -1,5 +1,8 @@
 // Storage shim for xiaok desktop — localStorage-based implementations
 
+import type { FontSize, FontFamily, CodeFontFamily, ThemePreset, ThemeDefinition } from './themes/types'
+export type { FontSize, FontFamily, CodeFontFamily, ThemePreset, ThemeDefinition }
+
 export type Theme = 'system' | 'light' | 'dark'
 export type AppMode = 'chat' | 'work'
 
@@ -123,10 +126,6 @@ export function writeDeveloperPromptCacheDebugEnabled(_value: boolean): void { /
 
 // ---- Font settings ----
 
-export type FontSize = 'small' | 'default' | 'large'
-export type FontFamily = string
-export type CodeFontFamily = string
-
 export interface FontSettings {
   fontSize: FontSize
   fontFamily: FontFamily
@@ -134,19 +133,26 @@ export interface FontSettings {
 }
 
 export function readFontSettingsFromStorage(): FontSettings {
+  const fallback: FontSettings = { fontSize: 'normal', fontFamily: 'default', codeFontFamily: 'jetbrains-mono' }
   try {
     const raw = localStorage.getItem('xiaok:font-settings')
-    return raw ? JSON.parse(raw) : { fontSize: 'default', fontFamily: '', codeFontFamily: '' }
-  } catch { return { fontSize: 'default', fontFamily: '', codeFontFamily: '' } }
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw) as Partial<FontSettings>
+    const validBodyFonts: FontFamily[] = ['default', 'inter', 'system', 'serif', 'noto-sans', 'source-sans', 'custom']
+    const validCodeFonts: CodeFontFamily[] = ['jetbrains-mono', 'fira-code', 'cascadia-code', 'source-code-pro']
+    const validSizes: FontSize[] = ['compact', 'normal', 'relaxed']
+    return {
+      fontFamily: validBodyFonts.includes(parsed.fontFamily as FontFamily) ? (parsed.fontFamily as FontFamily) : 'default',
+      codeFontFamily: validCodeFonts.includes(parsed.codeFontFamily as CodeFontFamily) ? (parsed.codeFontFamily as CodeFontFamily) : 'jetbrains-mono',
+      fontSize: validSizes.includes(parsed.fontSize as FontSize) ? (parsed.fontSize as FontSize) : 'normal',
+    }
+  } catch { return fallback }
 }
 export function writeFontSettingsToStorage(settings: FontSettings): void {
   try { localStorage.setItem('xiaok:font-settings', JSON.stringify(settings)) } catch { /* noop */ }
 }
 
 // ---- Theme presets ----
-
-export type ThemePreset = 'light' | 'dark' | 'system' | 'ocean' | 'forest' | 'sunset'
-export interface ThemeDefinition { name: string; colors: Record<string, string> }
 
 export function readThemePresetFromStorage(): ThemePreset {
   try { return (localStorage.getItem('xiaok:theme-preset') as ThemePreset) || 'default' } catch { return 'default' }

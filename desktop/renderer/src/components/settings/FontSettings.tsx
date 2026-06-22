@@ -187,6 +187,7 @@ function FontOptionButton({
       onMouseLeave={() => setHovered(false)}
       className={className}
       style={{
+        position: 'relative',
         border: `0.5px solid ${active || hovered ? 'var(--c-border-mid)' : 'var(--c-border-subtle)'}`,
         outline: active ? '1.5px solid var(--c-accent)' : 'none',
         outlineOffset: '-1px',
@@ -198,6 +199,28 @@ function FontOptionButton({
       }}
     >
       {children}
+      {active && (
+        <span
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            top: -5,
+            right: -5,
+            width: 14,
+            height: 14,
+            borderRadius: '50%',
+            background: 'var(--c-accent)',
+            display: 'grid',
+            placeItems: 'center',
+            color: '#fff',
+            boxShadow: '0 0 0 2px var(--c-bg-page)',
+          }}
+        >
+          <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 8 6.5 11.5 13 5" />
+          </svg>
+        </span>
+      )}
     </button>
   )
 }

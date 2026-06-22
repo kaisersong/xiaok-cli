@@ -56,6 +56,7 @@ export interface ThreadListContextValue {
   removeThread: (threadId: string) => void
   updateTitle: (threadId: string, title: string) => void
   updateCollaborationMode: (threadId: string, collaborationMode: CollaborationMode, revision?: number) => void
+  setThreadGtdBucket: (threadId: string, bucket: ThreadGtdBucket | null) => void
   markRunning: (threadId: string) => void
   markIdle: (threadId: string) => void
   markCompletionRead: (threadId: string) => void
@@ -500,6 +501,21 @@ export function ThreadListProvider({ children }: { children: ReactNode }) {
     )
   }, [])
 
+  const setThreadGtdBucket = useCallback((threadId: string, bucket: ThreadGtdBucket | null) => {
+    setThreads((prev) =>
+      prev.map((t) => (t.id === threadId ? { ...t, sidebar_gtd_bucket: bucket } : t)),
+    )
+    if (!accessToken) return
+    void updateThreadSidebarState(accessToken, threadId, { sidebar_gtd_bucket: bucket }).then((updated) => {
+      if (!mountedRef.current) return
+      setThreads((prev) =>
+        prev.map((t) => (t.id === threadId ? { ...t, ...updated } : t)),
+      )
+    }).catch((err) => {
+      console.warn('[thread-list] setThreadGtdBucket failed', err)
+    })
+  }, [accessToken])
+
   const markRunning = useCallback((threadId: string) => {
     clearCompletedUnread([threadId])
     if (!runningThreadIdsRef.current.has(threadId)) {
@@ -555,6 +571,7 @@ export function ThreadListProvider({ children }: { children: ReactNode }) {
     removeThread,
     updateTitle,
     updateCollaborationMode,
+    setThreadGtdBucket,
     markRunning,
     markIdle,
     markCompletionRead,
@@ -573,6 +590,7 @@ export function ThreadListProvider({ children }: { children: ReactNode }) {
     removeThread,
     updateTitle,
     updateCollaborationMode,
+    setThreadGtdBucket,
     markRunning,
     markIdle,
     markCompletionRead,

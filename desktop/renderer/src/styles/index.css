@@ -6,9 +6,13 @@
   --c-bg-card: #ffffff;
   --c-bg-deep: rgba(0,0,0,0.04);
   --c-bg-sub: rgba(0,0,0,0.02);
+  --c-bg-hover: rgba(0,0,0,0.06);
+  --c-bg-menu: #ffffff;
   --c-text-primary: #1a1a1a;
   --c-text-secondary: #666666;
   --c-text-tertiary: #999999;
+  --c-text-heading: #1a1a1a;
+  --c-text-muted: #999999;
   --c-text-icon: #666666;
   --c-accent: #0b6e6e;
   --c-accent-send: #0b6e6e;
@@ -16,6 +20,8 @@
   --c-accent-send-text: #ffffff;
   --c-border: #e0e0e0;
   --c-border-subtle: #eeeeee;
+  --c-border-mid: #d0d0d0;
+  --c-dropdown-shadow: 0 8px 24px -8px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.08);
   --c-input-border-color: #e0e0e0;
   --c-input-border-color-focus: #0b6e6e;
   --c-input-shadow: 0 2px 16px -4px rgba(0,0,0,0.06);
@@ -43,6 +49,37 @@
   --color-input: var(--c-border);
   --color-ring: var(--c-accent);
   --radius: 0.5rem;
+}
+
+/* Dark theme overrides — applied when <html data-theme="dark"> is set */
+html[data-theme='dark'] {
+  --c-bg-page: #1c1b1a;
+  --c-bg-sidebar: #141413;
+  --c-bg-card: #262524;
+  --c-bg-deep: rgba(255,255,255,0.06);
+  --c-bg-sub: rgba(255,255,255,0.03);
+  --c-bg-hover: rgba(255,255,255,0.08);
+  --c-bg-menu: #262524;
+  --c-text-primary: #e8e6e3;
+  --c-text-secondary: #a8a5a0;
+  --c-text-tertiary: #6e6b66;
+  --c-text-heading: #f0eeeb;
+  --c-text-muted: #6e6b66;
+  --c-text-icon: #a8a5a0;
+  --c-accent: #4ec5c5;
+  --c-accent-send: #4ec5c5;
+  --c-accent-send-hover: #6ad8d8;
+  --c-accent-send-text: #0a1414;
+  --c-border: #3a3835;
+  --c-border-subtle: #2c2a28;
+  --c-border-mid: #4a4845;
+  --c-dropdown-shadow: 0 8px 24px -8px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.3);
+  --c-input-border-color: #3a3835;
+  --c-input-border-color-focus: #4ec5c5;
+  --c-input-shadow: 0 2px 16px -4px rgba(0,0,0,0.3);
+  --c-input-shadow-focus: 0 4px 10px -2px rgba(0,0,0,0.4);
+  --c-placeholder: #6e6b66;
+  color-scheme: dark;
 }
 
 html, body, #root {

@@ -1290,7 +1290,7 @@ function ChannelsPane() {
                         try {
                           const result = await api.testChannel(ch.id);
                           if (result.success) {
-                            setSuccess(ts.channelsTestSuccess(result.latencyMs));
+                            setSuccess(ts.channelsTestSuccess(result.latencyMs ?? 0));
                           } else {
                             setError(result.error || ts.channelsTestFailed);
                           }

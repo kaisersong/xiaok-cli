@@ -268,7 +268,11 @@ const DEFAULT_LIGHT: ThemeColorVars = {
 }
 
 function resolveVars(partial: Partial<ThemeColorVars>, base: ThemeColorVars): ThemeColorVars {
-  return { ...base, ...partial }
+  const filtered: ThemeColorVars = { ...base }
+  for (const [key, value] of Object.entries(partial)) {
+    if (value !== undefined) filtered[key] = value
+  }
+  return filtered
 }
 
 type Props = {
