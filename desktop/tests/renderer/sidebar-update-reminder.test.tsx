@@ -121,10 +121,10 @@ describe('Sidebar update reminder', () => {
 
     expect(await screen.findByText('v1.3.0')).toBeInTheDocument();
     expect(screen.getByText('v1.3.1')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /前往 GitHub 下载/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /下载更新/ })).toBeInTheDocument();
   });
 
-  it('opens the GitHub releases page when the download button is clicked', async () => {
+  it('starts auto-update download when the download button is clicked', async () => {
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
 
     renderSidebar({
@@ -140,19 +140,16 @@ describe('Sidebar update reminder', () => {
     const button = await screen.findByRole('button', { name: '升级到 1.3.1' });
     fireEvent.click(button);
 
-    const downloadButton = await screen.findByRole('button', { name: /前往 GitHub 下载/ });
+    const downloadButton = await screen.findByRole('button', { name: /下载更新/ });
     fireEvent.click(downloadButton);
 
-    expect(openSpy).toHaveBeenCalledWith(
-      'https://github.com/kaisersong/xiaok-cli/releases/latest',
-      '_blank',
-      'noopener,noreferrer',
-    );
+    expect(mockApi.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(openSpy).not.toHaveBeenCalled();
 
     openSpy.mockRestore();
   });
 
-  it('never triggers auto check or install from the reminder (ad-hoc signing safe)', async () => {
+  it('downloaded state shows restart-and-install button', async () => {
     vi.spyOn(window, 'open').mockReturnValue(null);
 
     renderSidebar({
@@ -168,11 +165,11 @@ describe('Sidebar update reminder', () => {
     const button = await screen.findByRole('button', { name: '升级到 1.3.1' });
     fireEvent.click(button);
 
-    const downloadButton = await screen.findByRole('button', { name: /前往 GitHub 下载/ });
-    fireEvent.click(downloadButton);
+    const installButton = await screen.findByRole('button', { name: /立即重启安装/ });
+    fireEvent.click(installButton);
 
+    expect(mockApi.quitAndInstall).toHaveBeenCalledTimes(1);
     expect(mockApi.checkForUpdates).not.toHaveBeenCalled();
-    expect(mockApi.quitAndInstall).not.toHaveBeenCalled();
   });
 
   it('shows a quiet manual download hint when update checks do not complete', async () => {

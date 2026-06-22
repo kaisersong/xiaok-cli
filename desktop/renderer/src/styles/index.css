@@ -185,6 +185,7 @@ body {
 .step-icon--running {
   color: var(--c-accent);
   animation: pulse-opacity 2s ease-in-out infinite;
+  will-change: opacity;
 }
 
 .step-icon--completed {

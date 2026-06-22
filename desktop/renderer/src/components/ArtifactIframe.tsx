@@ -566,12 +566,24 @@ ${ARTIFACT_SVG_STYLES}
     if (pendingExternal === 0) window._notifyHeight();
   };
 
-  window._notifyHeight = function() {
+  var lastNotifiedHeight = -1;
+  var notifyHeightRafScheduled = false;
+  var notifyHeightCore = function() {
     var root = document.getElementById('root');
     if (!root) return;
     var rect = root.getBoundingClientRect();
     var height = Math.max(root.scrollHeight, Math.ceil(rect.height), document.body.scrollHeight) + ${heightPadding};
+    if (height === lastNotifiedHeight) return;
+    lastNotifiedHeight = height;
     window.parent.postMessage({ type: 'xiaok:artifact:action', action: 'resize', height: height }, '*');
+  };
+  window._notifyHeight = function() {
+    if (notifyHeightRafScheduled) return;
+    notifyHeightRafScheduled = true;
+    requestAnimationFrame(function() {
+      notifyHeightRafScheduled = false;
+      notifyHeightCore();
+    });
   };
 
   var morphScript = document.querySelector('script[src*="morphdom"]');
@@ -608,7 +620,7 @@ ${ARTIFACT_SVG_STYLES}
   });
 
   new MutationObserver(function() { window._notifyHeight(); })
-    .observe(document.getElementById('root'), { childList: true, subtree: true, attributes: true });
+    .observe(document.getElementById('root'), { childList: true, subtree: true });
 
   if (typeof ResizeObserver === 'function') {
     var resizeObserver = new ResizeObserver(function() { window._notifyHeight(); });

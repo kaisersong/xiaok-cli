@@ -228,6 +228,20 @@ export function ChatShell() {
   const queuedDrainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
   const streamRef = useRef('');
+  const streamRafRef = useRef<number | null>(null);
+  const flushStreamingText = () => {
+    if (streamRafRef.current !== null) return;
+    streamRafRef.current = requestAnimationFrame(() => {
+      streamRafRef.current = null;
+      setStreamingText(streamRef.current);
+    });
+  };
+  const cancelStreamingFlush = () => {
+    if (streamRafRef.current !== null) {
+      cancelAnimationFrame(streamRafRef.current);
+      streamRafRef.current = null;
+    }
+  };
   const currentLoadIdRef = useRef<string | null>(null);
   const mountGenRef = useRef(0);
   const allEventsRef = useRef<DesktopTaskEvent[]>([]);
@@ -287,13 +301,14 @@ export function ChatShell() {
       case 'assistant_delta': {
         const delta = (event as { type: 'assistant_delta'; delta: string }).delta;
         streamRef.current += delta;
-        setStreamingText(streamRef.current);
+        flushStreamingText();
         setStatus('running');
         break;
       }
       case 'task_cancelled': {
         const partialText = (event as { type: 'task_cancelled'; partialText?: string }).partialText || streamRef.current;
         streamRef.current = '';
+        cancelStreamingFlush();
         setStreamingText('');
         if (partialText.trim()) {
           setMessages(prev => [...prev, {
@@ -335,6 +350,7 @@ export function ChatShell() {
           const finalContent = streamRef.current.trim();
           // Clear streaming FIRST to prevent one-frame duplicate display
           streamRef.current = '';
+          cancelStreamingFlush();
           setStreamingText('');
           if (finalContent) {
             setMessages(prev => [...prev, {
@@ -355,6 +371,7 @@ export function ChatShell() {
           const finalText = streamRef.current || r.summary;
           // Clear streaming FIRST to prevent one-frame duplicate display
           streamRef.current = '';
+          cancelStreamingFlush();
           setStreamingText('');
           setResult(resultWithArtifacts);
           if (finalText.trim()) {
@@ -478,6 +495,7 @@ export function ChatShell() {
       case 'error': {
         const msg = (event as { type: 'error'; message: string }).message;
         streamRef.current = '';
+        cancelStreamingFlush();
         setStreamingText('');
         setMessages(prev => [...prev, {
           id: `msg-${Date.now()}-error`,
@@ -648,6 +666,7 @@ export function ChatShell() {
     unsubRef.current?.();
     unsubRef.current = null;
     streamRef.current = '';
+    cancelStreamingFlush();
     setStreamingText('');
     setResult(null);
     setMessages([]);
@@ -844,6 +863,7 @@ export function ChatShell() {
     setMessages(prev => sealedResultCard ? [...prev, sealedResultCard, userMsg] : [...prev, userMsg]);
     setPrompt('');
     setStatus('running');
+    cancelStreamingFlush();
     setStreamingText('');
     streamRef.current = '';
     currentTaskEventsRef.current = [];
@@ -962,11 +982,18 @@ export function ChatShell() {
     await api.cancelTask(thread.currentTaskId);
     setStatus('idle');
     streamRef.current = '';
+    cancelStreamingFlush();
     setStreamingText('');
   };
 
   useEffect(() => {
-    return () => { unsubRef.current?.(); };
+    return () => {
+      unsubRef.current?.();
+      if (streamRafRef.current !== null) {
+        cancelAnimationFrame(streamRafRef.current);
+        streamRafRef.current = null;
+      }
+    };
   }, []);
 
   // Drain queued prompt when current task completes
