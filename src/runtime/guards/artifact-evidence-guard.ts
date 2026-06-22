@@ -32,10 +32,12 @@ export function evaluateArtifactEvidenceGuard(input: {
       return pass(input.taskId);
     }
     // A text answer is always sufficient evidence — even when the prompt classifier
-    // guessed file_artifact. Users iterate via chat; missing files are fixed by
-    // follow-up turns, not by blocking the entire task as failed.
+    // guessed file_artifact / project_update / log_diagnostic etc. Users iterate via
+    // chat; missing artifacts are fixed by follow-up turns, not by blocking the
+    // entire task as failed.
     if (
-      input.expectation?.expectedKinds.includes('file_artifact')
+      input.expectation
+      && !input.expectation.expectedKinds.includes('answer')
       && hasAnyAnswerEvidence(input.taskId, input.evidence)
     ) {
       return pass(input.taskId);
