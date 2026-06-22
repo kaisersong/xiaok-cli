@@ -2340,6 +2340,12 @@ export interface LocaleStrings {
   sidebarUpdateAutoCheckFailed: string;
   sidebarUpdateManualDownload: string;
   sidebarUpdateGoToGithub: string;
+  sidebarUpdateDownloadHint: string;
+  sidebarUpdateDownloading: string;
+  sidebarUpdateReadyToInstall: string;
+  sidebarUpdateDownloadNow: string;
+  sidebarUpdateInstallNow: string;
+  sidebarUpdateInstalling: string;
   // sidebar - tooltip labels
   sidebarTooltipProject: string;
   sidebarTooltipStatus: string;

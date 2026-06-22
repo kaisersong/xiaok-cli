@@ -2394,6 +2394,12 @@ export const zh: LocaleStrings = {
   sidebarUpdateAutoCheckFailed: "自动更新检查暂时没有完成。需要更新时，可前往 GitHub 下载最新版，下载后将应用拖入「应用程序」覆盖安装即可。",
   sidebarUpdateManualDownload: "请前往 GitHub 下载最新版本，下载后将应用拖入「应用程序」覆盖安装即可。",
   sidebarUpdateGoToGithub: "前往 GitHub 下载",
+  sidebarUpdateDownloadHint: "发现新版本，将自动下载并提示安装。",
+  sidebarUpdateDownloading: "正在下载更新…",
+  sidebarUpdateReadyToInstall: "更新已下载完成，重启应用即可生效。",
+  sidebarUpdateDownloadNow: "下载更新",
+  sidebarUpdateInstallNow: "立即重启安装",
+  sidebarUpdateInstalling: "正在安装…",
   // sidebar - tooltip labels
   sidebarTooltipProject: "项目",
   sidebarTooltipStatus: "状态",

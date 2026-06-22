@@ -2414,6 +2414,12 @@ export const en: LocaleStrings = {
   sidebarUpdateAutoCheckFailed: "Auto-update check did not complete. To update, download the latest version from GitHub and drag it into Applications to replace the existing app.",
   sidebarUpdateManualDownload: "Please download the latest version from GitHub and drag it into Applications to replace the existing app.",
   sidebarUpdateGoToGithub: "Download from GitHub",
+  sidebarUpdateDownloadHint: "A new version was found. It will download automatically.",
+  sidebarUpdateDownloading: "Downloading update…",
+  sidebarUpdateReadyToInstall: "Update downloaded. Restart the app to apply it.",
+  sidebarUpdateDownloadNow: "Download update",
+  sidebarUpdateInstallNow: "Restart and install",
+  sidebarUpdateInstalling: "Installing…",
   // sidebar - tooltip labels
   sidebarTooltipProject: "Project",
   sidebarTooltipStatus: "Status",

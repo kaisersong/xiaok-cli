@@ -806,10 +806,13 @@ function collectProjectUpdateEvidence(taskId, snapshot) {
     return records;
 }
 function evidenceForExpectation(expectation, evidence) {
-    if (expectation.expectedKinds.includes('file_artifact')) {
-        return evidence.filter(record => record.kind === 'file_artifact');
+    if (expectation.expectedKinds.includes('answer')) {
+        return evidence;
     }
-    return evidence;
+    // Keep answer evidence alongside the expected kinds so the guard's fallback path
+    // can recognize substantive text completions even when the classifier asked for a
+    // different deliverable kind.
+    return evidence.filter(record => record.kind === 'answer' || expectation.expectedKinds.includes(record.kind));
 }
 function hasCreateProjectEvent(snapshot) {
     return snapshot.events.some(event => (event.type === 'canvas_tool_call' || event.type === 'canvas_tool_result')

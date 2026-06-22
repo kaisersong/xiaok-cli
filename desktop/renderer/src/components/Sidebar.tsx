@@ -611,17 +611,52 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                       <p className="mb-3 text-xs leading-relaxed text-[var(--c-text-secondary)]">
                         {hasUpdateFailure
                           ? t.sidebarUpdateAutoCheckFailed
-                          : t.sidebarUpdateManualDownload}
+                          : updateStatus?.downloaded
+                            ? t.sidebarUpdateReadyToInstall
+                            : updateStatus?.downloading
+                              ? t.sidebarUpdateDownloading
+                              : t.sidebarUpdateDownloadHint}
                       </p>
 
-                      <button
-                        type="button"
-                        onClick={handleOpenGithubReleases}
-                        className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-[var(--c-accent)] px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
-                      >
-                        <ExternalLink size={15} />
-                        <span>{t.sidebarUpdateGoToGithub}</span>
-                      </button>
+                      {hasUpdateFailure ? (
+                        <button
+                          type="button"
+                          onClick={handleOpenGithubReleases}
+                          className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-[var(--c-accent)] px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
+                        >
+                          <ExternalLink size={15} />
+                          <span>{t.sidebarUpdateGoToGithub}</span>
+                        </button>
+                      ) : updateStatus?.downloaded ? (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setShowUpdatePopover(false);
+                            try { await api.quitAndInstall(); } catch (e) { log.error('quitAndInstall failed', e); }
+                          }}
+                          disabled={Boolean(updateStatus?.installing)}
+                          className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-[var(--c-accent)] px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 active:scale-[0.98] disabled:opacity-60"
+                        >
+                          <RefreshCw size={15} />
+                          <span>{updateStatus?.installing ? t.sidebarUpdateInstalling : t.sidebarUpdateInstallNow}</span>
+                        </button>
+                      ) : updateStatus?.downloading ? (
+                        <div className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-[var(--c-bg-deep)] px-3 text-sm text-[var(--c-text-secondary)]">
+                          <RefreshCw size={15} className="animate-spin" />
+                          <span>{Math.round(updateStatus.progress ?? 0)}%</span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try { await api.checkForUpdates(); } catch (e) { log.error('checkForUpdates failed', e); }
+                          }}
+                          className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-[var(--c-accent)] px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
+                        >
+                          <RefreshCw size={15} />
+                          <span>{t.sidebarUpdateDownloadNow}</span>
+                        </button>
+                      )}
                     </div>
                   </>,
                   document.body,
