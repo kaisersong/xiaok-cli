@@ -2,12 +2,13 @@ import { useState, useEffect, useRef, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Search, X, Bolt, Pencil, RefreshCw, FolderKanban, ExternalLink, BookOpen } from 'lucide-react';
+import { Plus, Search, X, Bolt, Pencil, RefreshCw, FolderKanban, ExternalLink, BookOpen, MoreHorizontal } from 'lucide-react';
 import { api, type ThreadResponse } from '../api';
 import { useThreadList } from '../contexts/thread-list';
 import { useKSwarm } from '../contexts/KSwarmContext';
 import { useLocale } from '../contexts/LocaleContext';
 import { getDesktopApi } from '../shared/desktop';
+import { ConfirmDialog } from './shared/ConfirmDialog';
 import {
   collectScheduledRuntimeTaskIds,
   ensureAggregatedScheduledThread,
@@ -66,10 +67,21 @@ interface SidebarDetailsRow {
 export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const navigate = useNavigate();
   const routerLocation = useLocation();
-  const { threads, removeThread, updateTitle } = useThreadList();
+  const { threads, removeThread, updateTitle, setThreadGtdBucket } = useThreadList();
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [gtdEnabled, setGtdEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem('xiaok:gtd-enabled') === 'true'; } catch { return false; }
+  });
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<boolean>).detail;
+      setGtdEnabled(Boolean(detail));
+    };
+    window.addEventListener('xiaok:gtd-enabled-changed', handler);
+    return () => window.removeEventListener('xiaok:gtd-enabled-changed', handler);
+  }, []);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [showUpdatePopover, setShowUpdatePopover] = useState(false);
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
@@ -78,6 +90,12 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const [sidebarTasks, setSidebarTasks] = useState<SidebarScheduledTask[]>([]);
   const [scheduledThreadIds, setScheduledThreadIds] = useState<Set<string>>(new Set());
   const [scheduledRuntimeTaskIds, setScheduledRuntimeTaskIds] = useState<Set<string>>(new Set());
+  const [scheduledUnread, setScheduledUnread] = useState<Record<string, number>>(() => {
+    try {
+      const raw = localStorage.getItem('xiaok:scheduled-unread');
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  });
 
   const { projects } = useKSwarm();
   const { t } = useLocale();
@@ -150,6 +168,28 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     };
   }, []);
 
+  useEffect(() => {
+    const reload = () => {
+      try {
+        const raw = localStorage.getItem('xiaok:scheduled-unread');
+        setScheduledUnread(raw ? JSON.parse(raw) : {});
+      } catch { setScheduledUnread({}); }
+    };
+    const storageHandler = (e: StorageEvent) => {
+      if (e.key === 'xiaok:scheduled-unread') reload();
+    };
+    const changeHandler = () => reload();
+    const dueHandler = () => reload();
+    window.addEventListener('storage', storageHandler);
+    window.addEventListener('xiaok:scheduled-unread-changed', changeHandler);
+    window.addEventListener('xiaok:scheduled-tasks-updated', dueHandler);
+    return () => {
+      window.removeEventListener('storage', storageHandler);
+      window.removeEventListener('xiaok:scheduled-unread-changed', changeHandler);
+      window.removeEventListener('xiaok:scheduled-tasks-updated', dueHandler);
+    };
+  }, []);
+
   // Subscribe to update status
   useEffect(() => {
     const unsub = api.onUpdateStatus((status) =>
@@ -180,12 +220,27 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     : threads
   ).filter(t => !scheduledThreadIds.has(t.id) && !threadHasAnyRuntimeTask(t, scheduledRuntimeTaskIds));
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const [deleteCandidate, setDeleteCandidate] = useState<{ id: string; title: string } | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const handleDelete = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    log.info('deleteThread', id);
-    await api.deleteThread(id);
-    removeThread(id);
-    log.info('deleteThread ok');
+    const t = threads.find(x => x.id === id);
+    setDeleteCandidate({ id, title: t?.title || '' });
+  };
+
+  const performDelete = async () => {
+    if (!deleteCandidate) return;
+    setDeleteLoading(true);
+    try {
+      log.info('deleteThread', deleteCandidate.id);
+      await api.deleteThread(deleteCandidate.id);
+      removeThread(deleteCandidate.id);
+      log.info('deleteThread ok');
+    } finally {
+      setDeleteLoading(false);
+      setDeleteCandidate(null);
+    }
   };
 
   const handleDoubleClick = (thread: ThreadResponse) => {
@@ -209,6 +264,16 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   };
 
   const handleScheduledClick = (task: SidebarScheduledTask) => {
+    try {
+      const raw = localStorage.getItem('xiaok:scheduled-unread');
+      const unread: Record<string, number> = raw ? JSON.parse(raw) : {};
+      if (unread[task.id]) {
+        delete unread[task.id];
+        localStorage.setItem('xiaok:scheduled-unread', JSON.stringify(unread));
+        setScheduledUnread(unread);
+        window.dispatchEvent(new CustomEvent('xiaok:scheduled-unread-changed'));
+      }
+    } catch { /* best-effort */ }
     if (task.threadId) {
       navigate(`/t/${task.threadId}`);
     } else {
@@ -346,6 +411,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                 key={task.id}
                 task={task}
                 onOpen={handleScheduledClick}
+                unreadCount={scheduledUnread[task.id]}
               />
             ))}
           </div>
@@ -394,33 +460,83 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
 
           {/* Thread list */}
           <div className="flex-1 overflow-y-auto px-3 py-1">
-            <div className="py-1 text-xs font-medium text-[var(--c-text-secondary)]">
-              {t.sidebarRecent}
-            </div>
+            {!gtdEnabled && (
+              <div className="py-1 text-xs font-medium text-[var(--c-text-secondary)]">
+                {t.sidebarRecent}
+              </div>
+            )}
             {filteredThreads.length === 0 && (
               <p className="py-3 text-center text-xs text-[var(--c-text-secondary)]">
                 {searchQuery ? t.sidebarNoResults : t.sidebarNoRecent}
               </p>
             )}
-            {filteredThreads.map(thread => {
-              const isSelected = routerLocation.pathname === `/t/${thread.id}`;
-              return (
-              <SidebarThreadListItem
-                key={thread.id}
-                thread={thread}
-                title={thread.title || t.untitled}
-                isSelected={isSelected}
-                isEditing={editingId === thread.id}
-                editTitle={editTitle}
-                renameLabel={t.sidebarRename}
-                onOpen={() => navigate(`/t/${thread.id}`)}
-                onEditStart={() => handleDoubleClick(thread)}
-                onDelete={e => handleDelete(e, thread.id)}
-                onEditTitleChange={setEditTitle}
-                onRenameSubmit={handleRenameSubmit}
-                onRenameKeyDown={handleRenameKeyDown}
-              />
-            );})}
+            {gtdEnabled ? (
+              (() => {
+                const buckets: Array<{ key: 'active' | 'archived'; label: string }> = [
+                  { key: 'active', label: t.gtdActive },
+                  { key: 'archived', label: t.gtdArchived },
+                ];
+                const grouped: Record<'active' | 'archived', ThreadResponse[]> = { active: [], archived: [] };
+                for (const th of filteredThreads) {
+                  const isArchived = th.sidebar_gtd_bucket === 'archived';
+                  grouped[isArchived ? 'archived' : 'active'].push(th);
+                }
+                return (
+                  <>
+                    {buckets.map(({ key, label }) => (
+                      grouped[key].length > 0 && (
+                        <div key={key} className="mb-2">
+                          <div className="py-1 text-xs font-medium text-[var(--c-text-secondary)]">{label}</div>
+                          {grouped[key].map(thread => {
+                            const isSelected = routerLocation.pathname === `/t/${thread.id}`;
+                            return (
+                              <SidebarThreadListItem
+                                key={thread.id}
+                                thread={thread}
+                                title={thread.title || t.untitled}
+                                isSelected={isSelected}
+                                isEditing={editingId === thread.id}
+                                editTitle={editTitle}
+                                renameLabel={t.sidebarRename}
+                                onOpen={() => navigate(`/t/${thread.id}`)}
+                                onEditStart={() => handleDoubleClick(thread)}
+                                onDelete={e => handleDelete(e, thread.id)}
+                                onEditTitleChange={setEditTitle}
+                                onRenameSubmit={handleRenameSubmit}
+                                onRenameKeyDown={handleRenameKeyDown}
+                                gtdEnabled={true}
+                                onMoveToBucket={(bucket) => setThreadGtdBucket(thread.id, bucket === 'archived' ? 'archived' : 'inbox')}
+                              />
+                            );
+                          })}
+                        </div>
+                      )
+                    ))}
+                  </>
+                );
+              })()
+            ) : (
+              filteredThreads.map(thread => {
+                const isSelected = routerLocation.pathname === `/t/${thread.id}`;
+                return (
+                <SidebarThreadListItem
+                  key={thread.id}
+                  thread={thread}
+                  title={thread.title || t.untitled}
+                  isSelected={isSelected}
+                  isEditing={editingId === thread.id}
+                  editTitle={editTitle}
+                  renameLabel={t.sidebarRename}
+                  onOpen={() => navigate(`/t/${thread.id}`)}
+                  onEditStart={() => handleDoubleClick(thread)}
+                  onDelete={e => handleDelete(e, thread.id)}
+                  onEditTitleChange={setEditTitle}
+                  onRenameSubmit={handleRenameSubmit}
+                  onRenameKeyDown={handleRenameKeyDown}
+                  gtdEnabled={false}
+                />
+              );})
+            )}
           </div>
         </>
       )}
@@ -524,6 +640,16 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        open={deleteCandidate !== null}
+        onClose={() => !deleteLoading && setDeleteCandidate(null)}
+        onConfirm={performDelete}
+        title={t.deleteThreadConfirmTitle}
+        message={t.deleteThreadConfirmBody}
+        confirmLabel={t.deleteThreadConfirm}
+        cancelLabel={t.deleteThreadCancel}
+        loading={deleteLoading}
+      />
     </aside>
   );
 }
@@ -574,9 +700,11 @@ function SidebarProjectListItem({
 function SidebarScheduledTaskListItem({
   task,
   onOpen,
+  unreadCount,
 }: {
   task: SidebarScheduledTask;
   onOpen: (task: SidebarScheduledTask) => void;
+  unreadCount?: number;
 }) {
   const details = useDelayedSidebarDetails<HTMLButtonElement>();
   const { t } = useLocale();
@@ -594,8 +722,15 @@ function SidebarScheduledTaskListItem({
         className="flex items-center justify-between rounded-lg px-3 py-1.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-card)]"
       >
         <div className="flex min-w-0 items-center gap-2">
-          <div className="size-1.5 shrink-0 rounded-full bg-[var(--c-accent)]/40" />
-          <span className="truncate">{task.name}</span>
+          <div
+            className={`size-1.5 shrink-0 rounded-full ${
+              unreadCount && unreadCount > 0
+                ? 'bg-[var(--c-accent)]'
+                : 'bg-[var(--c-accent)]/40'
+            }`}
+            aria-label={unreadCount && unreadCount > 0 ? `${unreadCount} unread` : undefined}
+          />
+          <span className={`truncate ${unreadCount && unreadCount > 0 ? 'font-medium text-[var(--c-text-primary)]' : ''}`}>{task.name}</span>
         </div>
         <span className="ml-2 shrink-0 text-[var(--c-text-tertiary)]">{task.frequency}</span>
       </button>
@@ -629,6 +764,8 @@ function SidebarThreadListItem({
   onEditTitleChange,
   onRenameSubmit,
   onRenameKeyDown,
+  gtdEnabled,
+  onMoveToBucket,
 }: {
   thread: ThreadResponse;
   title: string;
@@ -642,10 +779,14 @@ function SidebarThreadListItem({
   onEditTitleChange: (title: string) => void;
   onRenameSubmit: () => void;
   onRenameKeyDown: (event: React.KeyboardEvent) => void;
+  gtdEnabled?: boolean;
+  onMoveToBucket?: (bucket: 'active' | 'archived') => void;
 }) {
   const details = useDelayedSidebarDetails<HTMLDivElement>();
   const inputRef = useRef<HTMLInputElement>(null);
   const { t } = useLocale();
+  const [bucketMenuOpen, setBucketMenuOpen] = useState(false);
+  const bucketMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isEditing) {
@@ -654,6 +795,16 @@ function SidebarThreadListItem({
       details.hideDetails();
     }
   }, [isEditing]);
+
+  useEffect(() => {
+    if (!bucketMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (bucketMenuRef.current?.contains(e.target as Node)) return;
+      setBucketMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [bucketMenuOpen]);
 
   const taskIds = thread.taskIds.length > 0 ? thread.taskIds.join(', ') : null;
 
@@ -686,6 +837,55 @@ function SidebarThreadListItem({
           />
         ) : (
           <span className="flex-1 truncate">{title}</span>
+        )}
+        {gtdEnabled && onMoveToBucket && !isEditing && (
+          <div ref={bucketMenuRef} className="relative ml-1 hidden shrink-0 group-hover:block">
+            <button
+              type="button"
+              onClick={e => {
+                e.stopPropagation();
+                setBucketMenuOpen(v => !v);
+              }}
+              className="p-0.5 text-[var(--c-text-secondary)] hover:text-[var(--c-text-primary)]"
+              title={t.gtdMoveToInbox}
+            >
+              <MoreHorizontal className="size-3" />
+            </button>
+            {bucketMenuOpen && (
+              <div
+                className="absolute right-0 top-full z-50 mt-1 flex w-32 flex-col rounded-lg py-1"
+                style={{
+                  background: 'var(--c-bg-menu)',
+                  border: '0.5px solid var(--c-border-subtle)',
+                  boxShadow: 'var(--c-dropdown-shadow)',
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                {([
+                  { key: 'active' as const, label: t.gtdMoveToActive },
+                  { key: 'archived' as const, label: t.gtdMoveToArchived },
+                ]).map(({ key, label }) => {
+                  const isCurrent = key === 'archived'
+                    ? thread.sidebar_gtd_bucket === 'archived'
+                    : thread.sidebar_gtd_bucket !== 'archived';
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => {
+                        onMoveToBucket(key);
+                        setBucketMenuOpen(false);
+                      }}
+                      className="px-3 py-1.5 text-left text-xs text-[var(--c-text-primary)] hover:bg-[var(--c-bg-deep)]"
+                      style={{ fontWeight: isCurrent ? 600 : 400 }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
         <button
           type="button"

@@ -1,5 +1,5 @@
 import React, { useState, createContext, useContext } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Sidebar, PanelLeftClose } from 'lucide-react';
 import { SidebarComponent } from '../components/Sidebar';
 import { DesktopSettings } from '../components/DesktopSettings';
@@ -12,7 +12,7 @@ interface SidebarContextValue {
 
 const SidebarContext = createContext<SidebarContextValue>({ collapsed: false, setCollapsed: () => {} });
 const TITLEBAR_BUTTON_SIZE = 28;
-const TITLEBAR_BUTTON_TOP = 12;
+const TITLEBAR_BUTTON_TOP = 4;
 
 type TitlebarControl = {
   key: string;
@@ -54,6 +54,8 @@ export function AppLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { t } = useLocale();
+  const location = useLocation();
+  const hideTopFade = /^\/projects\/[^/]+/.test(location.pathname);
   const navigateHistory = (delta: -1 | 1, event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     if (delta < 0 && window.history.length <= 1) return;
@@ -68,21 +70,21 @@ export function AppLayout() {
         {
           key: 'back',
           label: t.appLayoutBack,
-          left: 78,
+          left: 132,
           icon: <ChevronLeft size={16} />,
           onClick: (event) => navigateHistory(-1, event),
         },
         {
           key: 'forward',
           label: t.appLayoutForward,
-          left: 110,
+          left: 164,
           icon: <ChevronRight size={16} />,
           onClick: (event) => navigateHistory(1, event),
         },
         {
           key: 'expand',
           label: t.appLayoutExpandSidebar,
-          left: 142,
+          left: 196,
           icon: <Sidebar size={16} />,
           onClick: (event) => {
             event.stopPropagation();
@@ -91,24 +93,28 @@ export function AppLayout() {
         },
       ]
     : [
+        // 注意: 这三个值与 sidebar 宽度（w-60 = 240px）紧密相关。
+        // 按钮 28px 宽 + 4px 间隔 + 16px 距分界线右侧 padding。
+        // 历史上多次被改回 148/180/212 导致按钮溢出 sidebar 边界，
+        // 修改前请阅读 docs/known-issues/titlebar-button-position.md
         {
           key: 'back',
           label: t.appLayoutBack,
-          left: 148,
+          left: 132,
           icon: <ChevronLeft size={16} />,
           onClick: (event) => navigateHistory(-1, event),
         },
         {
           key: 'forward',
           label: t.appLayoutForward,
-          left: 180,
+          left: 164,
           icon: <ChevronRight size={16} />,
           onClick: (event) => navigateHistory(1, event),
         },
         {
           key: 'collapse',
           label: t.appLayoutCollapseSidebar,
-          left: 212,
+          left: 196,
           icon: <PanelLeftClose size={16} />,
           onClick: (event) => {
             event.stopPropagation();
@@ -164,15 +170,23 @@ export function AppLayout() {
           {!sidebarCollapsed && (
             <SidebarComponent onOpenSettings={() => setSettingsOpen(true)} />
           )}
-          <main className="relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--c-bg-page)]" style={{ scrollbarGutter: 'stable' }}>
-            {/* Frosted glass fade at top of content */}
-            <div className="pointer-events-none sticky top-0 z-10 h-8 shrink-0" style={{
-              background: 'linear-gradient(to bottom, rgba(247,245,241,0.95) 0%, rgba(247,245,241,0.5) 60%, transparent 100%)',
-              backdropFilter: 'blur(4px)',
-              WebkitBackdropFilter: 'blur(4px)',
-            }} />
-            <Outlet />
-          </main>
+          <div className="relative flex min-w-0 flex-1 flex-col">
+            {/* Frosted glass fade at top of content - overlay above main, fixed at top of viewport */}
+            {!hideTopFade && (
+              <div
+                className="pointer-events-none absolute inset-x-0 top-0 z-10 h-6"
+                aria-hidden="true"
+                style={{
+                  background: 'linear-gradient(to bottom, color-mix(in srgb, var(--c-bg-page) 70%, transparent) 0%, color-mix(in srgb, var(--c-bg-page) 30%, transparent) 70%, transparent 100%)',
+                  backdropFilter: 'blur(1.5px)',
+                  WebkitBackdropFilter: 'blur(1.5px)',
+                }}
+              />
+            )}
+            <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--c-bg-page)]" style={{ scrollbarGutter: 'stable' }}>
+              <Outlet />
+            </main>
+          </div>
         </div>
       </div>
     </SidebarContext.Provider>

@@ -54,7 +54,7 @@ describe('AppLayout', () => {
 
     expect(titlebarButtons).toEqual(buttons)
     expect(buttons.map((button) => button.getAttribute('title'))).toEqual(['后退', '前进', '收起侧边栏'])
-    expect(buttons.map((button) => button.style.left)).toEqual(['148px', '180px', '212px'])
+    expect(buttons.map((button) => button.style.left)).toEqual(['132px', '164px', '196px'])
     expect(buttons.every((button) => button.style.width === '28px')).toBe(true)
     expect(buttons.every((button) => button.style.height === '28px')).toBe(true)
     expect(buttons.every((button) => button.dataset.appRegion === 'no-drag')).toBe(true)
@@ -106,7 +106,7 @@ describe('AppLayout', () => {
     ]
 
     expect(titlebarButtons).toEqual(buttons)
-    expect(buttons.map((button) => button.style.left)).toEqual(['78px', '110px', '142px'])
+    expect(buttons.map((button) => button.style.left)).toEqual(['132px', '164px', '196px'])
     expect(buttons.every((button) => button.style.width === '28px')).toBe(true)
     expect(buttons.every((button) => button.style.height === '28px')).toBe(true)
     expect(buttons.every((button) => button.dataset.appRegion === 'no-drag')).toBe(true)

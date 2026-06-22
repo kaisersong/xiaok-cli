@@ -32,12 +32,14 @@ export interface LocaleStrings {
   gtdWaiting: string;
   gtdSomeday: string;
   gtdArchived: string;
+  gtdActive: string;
   // GTD actions
   gtdMoveToInbox: string;
   gtdMoveToTodo: string;
   gtdMoveToWaiting: string;
   gtdMoveToSomeday: string;
   gtdMoveToArchived: string;
+  gtdMoveToActive: string;
   // pin
   pinThread: string;
   unpinThread: string;
@@ -2439,6 +2441,9 @@ export interface LocaleStrings {
   scheduledDayOfWeek: string;
   scheduledManual: string;
   scheduledHourly: string;
+  scheduledEvery30Sec: string;
+  scheduledEveryMinute: string;
+  scheduledEvery5Min: string;
   scheduledEvery30Min: string;
   scheduledEveryHour: string;
   scheduledEvery2Hours: string;
