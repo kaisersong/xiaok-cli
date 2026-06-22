@@ -46,7 +46,29 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
-Xiaok Desktop v1.4.9 把这套模型放到了产品界面里。Loop 不再藏在通用设置中；用户循环、定时任务、运行历史、诊断和输出预览统一进入”自动化”入口。一个定时任务可以触发一个 loop，一个 loop run 可以反查是哪次定时调度 claim 了它，界面也会把”调度是否按时执行”和”任务内容是否正确”分开呈现。
+Xiaok Desktop v1.4.11 把这套模型放到了产品界面里。Loop 不再藏在通用设置中；用户循环、定时任务、运行历史、诊断和输出预览统一进入”自动化”入口。一个定时任务可以触发一个 loop，一个 loop run 可以反查是哪次定时调度 claim 了它，界面也会把”调度是否按时执行”和”任务内容是否正确”分开呈现。
+
+**v1.4.11 新特性：**
+
+- **Loop 自我改进反馈闭环**：verify 阶段失败时，异步 LLM 提取器（haiku 级 + 纯规则兜底）会从失败上下文中提炼一条改进建议。建议默认进入”待确认”队列，不会自动注入 prompt——由用户决定采纳、忽略，或让其 14 天后过期。一旦采纳，规则会注入下次运行的 prompt，并在连续 3 次无效后自动停用。新增独立 `loop_learned_constraints` SQLite 表，含四元组 supersede、命中计数、过期清理；新增三个 IPC 通道（`listLoopConstraints` / `setLoopConstraintActive` / `confirmLoopConstraint`）。
+- **定时任务通知**：每次定时任务完成都会触发系统桌面通知（成功/失败 + 原因）以及应用内 toast。`useScheduledTaskBootstrap` 监听 `desktop:scheduledTaskDue`，无论用户当前在哪个页面都能看到结果。
+- **更快的调度节奏**：定时任务扫描间隔从 30 秒降到 10 秒；agent 来源的最低间隔从 5 分钟降到 0.5 分钟。每 30 秒/每 1 分钟/每 5 分钟成为一等公民选项。
+- **Renderer typecheck baseline 修复**：修复 v1.4.10 i18n 重构引入的 21 个 typecheck 错误。`FontSize` / `ThemePreset` / `FontFamily` 类型现在以 `themes/types.ts` 为唯一来源，`storage.ts` 重新导出并对历史 localStorage 值做兜底校验。`ThemeProvider` 从空 stub 升级为真正的 Context 实现，会把 `data-theme=dark` 写到 `<html>` 上并监听 `prefers-color-scheme` —— 深色模式现在真的能用了。
+- **可用的深色主题**：新增完整的暖色深色调色板，`html[data-theme='dark']` 覆盖所有 `--c-*` token；新增流程图专用 token (`--c-graph-node-*`, `--c-graph-edge-*`)，为后续项目流程图视图打基础。
+- **侧边栏细节**：标题栏历史导航按钮（`<` / `>` / 折叠）现在与 macOS 红绿灯按钮垂直对齐（top: 4），并留在 sidebar 240px 边界内（left: 132/164/196，右内边距 16px）。项目详情页移除顶部毛玻璃遮罩，报告标题不再被遮。新增 `docs/known-issues/titlebar-button-position.md` 记录几何约束—— 这个位置已经被回退过三次。
+- **GTD 简化**：GTD 分组从 5 类（积压/待办/等待/搁置/已归档）精简为 2 类：**进行中 / 已归档**。`xiaok:gtd-enabled-changed` 事件现在真的会让 sidebar 重新渲染；hover 任意会话时显示 `⋯` 按钮可在两类之间切换。底层 5 类 schema 保留以备未来扩展。
+- **删除会话二次确认**：sidebar 删除会话改为 `ConfirmDialog` 弹窗确认，与现有线程清理体验一致，避免误点。
+- **乐观艺术品 evidence（Phase 2）**：completion guard 不再因 `file_artifact` 期望但没有实际文件而 block 任务。只要有 substantive answer，task 视为成功；缺文件由后续对话补救，不再硬失败。
+- **System Prompt 防编造规则**：`buildSystemPrompt` 新增”工具优先 / 真实数据优先”段落，禁止从对话历史推断任务/项目/定时任务/通道/skill/记忆/产物状态——每条状态声明必须能在最近一次工具返回中找到原始字段。
+- **发布验证**：v1.4.11 通过 1160 个 desktop main + renderer 测试（含 35 个新增 loop-learned-constraints 测试）、electron 完整 typecheck、renderer baseline gate（0 个错误）、build:main + build:renderer + pack:dir 全绿，并在 `/Applications/xiaok.app` 实装验证。
+
+**v1.4.10 新特性：**
+
+- **全量 i18n 覆盖**：renderer locale 文件（`zh.ts` / `en.ts` / `index.ts`）每个增加约 1100 行，移除自动化、项目、设置、知识库、记忆、定时任务和共享对话框中的硬编码中文字符串。所有可见 UI 文案都走 `t.*` key。
+- **外观设置重构**：新增 `themes/types.ts` 和 `themes/presets.ts`，定义六预设主题系统（default / terra / github / nord / catppuccin / tokyo-night / custom）。字体家族从 `string` 改为 typed union（`default / inter / system / serif / noto-sans / source-sans / custom`），字号变为 `compact / normal / relaxed`。
+- **主题颜色编辑器**：用户可以编辑单个颜色 token（背景 / 文字 / 边框 / 强调色），保存为自定义主题；编辑器对每个组件做安全预览。
+- **死代码清理**：renderer 中多个未使用的 import 和组件被移除。
+- **发布验证**：v1.4.10 在 i18n + 外观 commit 上打 tag，通过 macOS 发布流程发布。（类型系统拆分引入的 typecheck 错误已在 v1.4.11 中修复。）
 
 **v1.4.9 新特性：**
 

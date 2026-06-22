@@ -31,12 +31,12 @@ export function evaluateArtifactEvidenceGuard(input: {
     if (validation.ok) {
       return pass(input.taskId);
     }
-    // A substantive text answer is always sufficient evidence — even when the prompt
-    // classifier guessed file_artifact. Users iterate via chat; missing files are
-    // fixed by follow-up turns, not by blocking the entire task as failed.
+    // A text answer is always sufficient evidence — even when the prompt classifier
+    // guessed file_artifact. Users iterate via chat; missing files are fixed by
+    // follow-up turns, not by blocking the entire task as failed.
     if (
       input.expectation?.expectedKinds.includes('file_artifact')
-      && hasSubstantiveAnswerEvidence(input.taskId, input.evidence)
+      && hasAnyAnswerEvidence(input.taskId, input.evidence)
     ) {
       return pass(input.taskId);
     }
@@ -83,17 +83,16 @@ function reasonForValidationFailure(
   return validation.message ?? EMPTY_ARTIFACT_REASON;
 }
 
-function hasSubstantiveAnswerEvidence(
+function hasAnyAnswerEvidence(
   taskId: string,
   evidence: CompletionEvidenceRecord[] | undefined,
 ): boolean {
   if (!evidence || evidence.length === 0) return false;
-  const MIN_ANSWER_LENGTH = 40;
   return evidence.some(record =>
     record.ownerKind === 'task'
     && record.ownerId === taskId
     && record.kind === 'answer'
     && typeof record.summary === 'string'
-    && record.summary.trim().length >= MIN_ANSWER_LENGTH,
+    && record.summary.trim().length > 0,
   );
 }

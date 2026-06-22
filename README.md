@@ -46,7 +46,29 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
-Xiaok Desktop v1.4.9 makes this model visible in the product. Loops are no longer buried in general settings: user loops, schedules, run history, diagnostics, and output previews are grouped under the Automations surface. A schedule can trigger a loop, a loop run can point back to the schedule run that claimed it, and the UI keeps scheduler status separate from task-content status.
+Xiaok Desktop v1.4.11 makes this model visible in the product. Loops are no longer buried in general settings: user loops, schedules, run history, diagnostics, and output previews are grouped under the Automations surface. A schedule can trigger a loop, a loop run can point back to the schedule run that claimed it, and the UI keeps scheduler status separate from task-content status.
+
+**What's New in v1.4.11:**
+
+- **Loop Self-Improving Feedback Loop**: When a verify stage fails, an asynchronous LLM extractor (haiku-class, with pure-rule fallback) proposes a one-sentence improvement rule. Suggestions land in a "pending review" queue rather than auto-injecting into prompts—users decide whether to adopt, ignore, or let them auto-expire after 14 days. Adopted rules are injected into the next run's prompt and self-deactivate after 3 consecutive ineffective injections. Independent `loop_learned_constraints` SQLite table with four-tuple supersede, hit counters, stale GC, and three new IPC channels (`listLoopConstraints` / `setLoopConstraintActive` / `confirmLoopConstraint`).
+- **Scheduled Task Notifications**: Every scheduled task completion now triggers a system desktop notification (success/failure with reason) plus an in-app toast. Bootstrap hook listens to `desktop:scheduledTaskDue` and surfaces the result regardless of which page is active.
+- **Faster Scheduler Cadence**: Timed-action scanner interval reduced from 30s to 10s; `agent` source minimum interval relaxed from 5min to 0.5min. Sub-minute schedules (every 30s / 1min / 5min) are now first-class options.
+- **Renderer Typecheck Baseline Healed**: Fixed 21 typecheck errors introduced by the v1.4.10 i18n refactor. `FontSize` / `ThemePreset` / `FontFamily` types now have a single source of truth in `themes/types.ts`; `storage.ts` re-exports them and validates legacy localStorage values. The `ThemeProvider` stub became a real Context implementation with `data-theme=dark` application and `prefers-color-scheme` listening—dark mode actually works now.
+- **Dark Mode That Works**: Added a complete warm-dark palette with `html[data-theme='dark']` overrides for all `--c-*` tokens. New graph-specific tokens (`--c-graph-node-*`, `--c-graph-edge-*`) prepare the ground for the upcoming project flow-graph view.
+- **Sidebar Polish**: Titlebar history navigation buttons (`<` / `>` / collapse) now align vertically with the macOS traffic-light buttons (top: 4) and stay inside the sidebar's 240px boundary (left: 132/164/196 with 16px right padding). Project detail pages drop the top frosted-glass overlay so report headers are no longer covered. Added a `docs/known-issues/titlebar-button-position.md` to document the geometry constraints—this position has been regressed three times.
+- **GTD Sidebar Simplified**: GTD grouping was reduced from 5 buckets (inbox/todo/waiting/someday/archived) to 2: **进行中 / 已归档**. The `xiaok:gtd-enabled-changed` event now actually rerenders the sidebar, with a hover `⋯` menu to move chats between active and archived. The 5-bucket schema is preserved for forward compatibility.
+- **Delete-Chat Confirmation**: Chat deletion in the sidebar now asks for confirmation before destruction, matching the existing `ConfirmDialog` pattern used for thread cleanup elsewhere.
+- **Optimistic Artifact Evidence (Phase 2)**: The completion guard no longer blocks tasks classified as `file_artifact` if a substantive answer is present. Users iterate via chat; missing files become a follow-up turn instead of a hard task failure.
+- **System-Prompt Anti-Fabrication Rules**: `buildSystemPrompt` now includes a "tool-first / real-data-first" preamble that forbids inferring task / project / scheduled-task / channel / skill / memory / artifact status from conversation history. Each status claim must cite a real field from the most recent tool return.
+- **Release Validation**: v1.4.11 is verified with 1160 desktop main + renderer tests (including 35 new loop-learned-constraints tests), full electron typecheck clean, renderer baseline gate clean (0 diagnostics), build:main + build:renderer + pack:dir green, and live install at `/Applications/xiaok.app`.
+
+**What's New in v1.4.10:**
+
+- **i18n Complete Coverage**: Renderer locale files (`zh.ts`, `en.ts`, `index.ts`) gained ~1100 lines per file, eliminating hardcoded Chinese strings across automations, projects, settings, knowledge, memory, scheduled tasks, and shared dialogs. All visible UI text now flows through `t.*` keys.
+- **Appearance Settings Refactor**: New `themes/types.ts` and `themes/presets.ts` define a six-preset theme system (default / terra / github / nord / catppuccin / tokyo-night / custom). Font families switch from `string` to a typed union (`default / inter / system / serif / noto-sans / source-sans / custom`); font sizes become `compact / normal / relaxed`.
+- **Theme Color Editor**: Users can now edit individual color tokens (background / text / border / accent groups) and persist a custom theme. Editor also handles per-component preview safely.
+- **Dead Code Cleanup**: Various unused imports and components removed across renderer.
+- **Release Validation**: v1.4.10 was tagged on the i18n + appearance commit and shipped via the macOS release workflow. (Subsequent typecheck errors introduced by the type-system split are addressed in v1.4.11.)
 
 **What's New in v1.4.9:**
 
