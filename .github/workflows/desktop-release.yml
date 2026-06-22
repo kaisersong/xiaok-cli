@@ -14,13 +14,16 @@ on:
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
 jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Create Draft GitHub Release
-        run: gh release create "${{ github.ref_name }}" --title "Desktop ${{ github.ref_name }}" --generate-notes --draft || true
+        run: gh release create "${{ env.RELEASE_TAG }}" --title "Desktop ${{ env.RELEASE_TAG }}" --generate-notes --draft || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -90,7 +93,7 @@ jobs:
         run: cd desktop && npx electron-builder --config electron-builder.json --mac --arm64 --publish never
 
       - name: Upload to GitHub Release
-        run: gh release upload "${{ github.ref_name }}" desktop/release/*.dmg desktop/release/*-mac.zip desktop/release/latest-mac.yml --clobber
+        run: gh release upload "${{ env.RELEASE_TAG }}" desktop/release/*.dmg desktop/release/*-mac.zip desktop/release/latest-mac.yml --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -156,7 +159,7 @@ jobs:
         run: cd desktop && npx electron-builder --config electron-builder.json --win nsis --publish never
 
       - name: Upload to GitHub Release
-        run: gh release upload "${{ github.ref_name }}" desktop/release/*.exe desktop/release/latest.yml --clobber
+        run: gh release upload "${{ env.RELEASE_TAG }}" desktop/release/*.exe desktop/release/latest.yml --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -167,16 +170,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Verify draft desktop updater release assets
-        run: node scripts/verify-desktop-release.mjs "${{ github.ref_name }}" --prepublish
+        run: node scripts/verify-desktop-release.mjs "${{ env.RELEASE_TAG }}" --prepublish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish GitHub Release as latest
-        run: gh release edit "${{ github.ref_name }}" --draft=false --latest
+        run: gh release edit "${{ env.RELEASE_TAG }}" --draft=false --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify published desktop updater release assets
-        run: node scripts/verify-desktop-release.mjs "${{ github.ref_name }}"
+        run: node scripts/verify-desktop-release.mjs "${{ env.RELEASE_TAG }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
