@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext'
 import { ChatView } from '../../renderer/src/components/ChatView'
 
 vi.mock('../../renderer/src/components/ChatInput', () => ({
@@ -11,34 +12,36 @@ describe('ChatView failed state', () => {
     Element.prototype.scrollIntoView = vi.fn()
 
     render(
-      <ChatView
-        thread={{
-          id: 'thread-failed',
-          title: '失败会话',
-          status: 'failed',
-          mode: 'work',
-          createdAt: 1,
-          updatedAt: 1,
-          starred: false,
-          gtdBucket: 'inbox',
-          pinnedAt: null,
-          currentTaskId: null,
-          taskIds: [],
-        }}
-        messages={[]}
-        streamingText=""
-        status="failed"
-        currentQuestion={null}
-        result={null}
-        generatedFiles={[]}
-        prompt=""
-        onPromptChange={vi.fn()}
-        onSubmit={vi.fn()}
-        onAnswer={vi.fn()}
-        onCancel={vi.fn()}
-        canvasOpen={false}
-        onToggleCanvas={vi.fn()}
-      />
+      <LocaleProvider>
+        <ChatView
+          thread={{
+            id: 'thread-failed',
+            title: '失败会话',
+            status: 'failed',
+            mode: 'work',
+            createdAt: 1,
+            updatedAt: 1,
+            starred: false,
+            gtdBucket: 'inbox',
+            pinnedAt: null,
+            currentTaskId: null,
+            taskIds: [],
+          }}
+          messages={[]}
+          streamingText=""
+          status="failed"
+          currentQuestion={null}
+          result={null}
+          generatedFiles={[]}
+          prompt=""
+          onPromptChange={vi.fn()}
+          onSubmit={vi.fn()}
+          onAnswer={vi.fn()}
+          onCancel={vi.fn()}
+          canvasOpen={false}
+          onToggleCanvas={vi.fn()}
+        />
+      </LocaleProvider>
     )
 
     expect(screen.queryByText('Task failed. Please try again.')).not.toBeInTheDocument()

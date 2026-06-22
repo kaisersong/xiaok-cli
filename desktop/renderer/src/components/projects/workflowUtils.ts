@@ -1,5 +1,68 @@
 import { AlertTriangle, CheckCircle2, Loader, Workflow } from 'lucide-react';
 import type { KSwarmTask, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
+import type { LocaleStrings } from '../../locales';
+
+export interface WorkflowLabels {
+  nodeStatusPending: string;
+  nodeStatusReady: string;
+  nodeStatusRunning: string;
+  nodeStatusCompleted: string;
+  nodeStatusFailed: string;
+  nodeStatusBlocked: string;
+  nodeStatusCancelled: string;
+  progressRunning: (progress: string) => string;
+  progressBlocked: (progress: string) => string;
+  progressFailed: (progress: string) => string;
+  progressCancelled: (progress: string) => string;
+  progressCompleted: (progress: string) => string;
+  failurePolicyRequiredAll: string;
+  failurePolicyCollectErrors: string;
+  failurePolicyFailFast: string;
+  failurePolicyQuorum: string;
+  failurePolicyDefault: string;
+  workflowExecLabel: string;
+  scopePrefix: string;
+  checkpointWaiting: string;
+  checkpointFailed: string;
+  groupProgress: (done: number, total: number) => string;
+  parallelBranchPrefix: string;
+  cacheSaved: (count: number) => string;
+  recoveryResumeCompleted: string;
+  recoveryWaitRuntime: string;
+  recoveryRerunFromStart: string;
+}
+
+export function buildWorkflowLabels(t: LocaleStrings): WorkflowLabels {
+  return {
+    nodeStatusPending: t.projectsNodeStatusPending,
+    nodeStatusReady: t.projectsNodeStatusReady,
+    nodeStatusRunning: t.projectsNodeStatusRunning,
+    nodeStatusCompleted: t.projectsNodeStatusCompleted,
+    nodeStatusFailed: t.projectsNodeStatusFailed,
+    nodeStatusBlocked: t.projectsNodeStatusBlocked,
+    nodeStatusCancelled: t.projectsNodeStatusCancelled,
+    progressRunning: t.projectsWorkflowProgressRunning,
+    progressBlocked: t.projectsWorkflowProgressBlocked,
+    progressFailed: t.projectsWorkflowProgressFailed,
+    progressCancelled: t.projectsWorkflowProgressCancelled,
+    progressCompleted: t.projectsWorkflowProgressCompleted,
+    failurePolicyRequiredAll: t.projectsFailurePolicyRequiredAll,
+    failurePolicyCollectErrors: t.projectsFailurePolicyCollectErrors,
+    failurePolicyFailFast: t.projectsFailurePolicyFailFast,
+    failurePolicyQuorum: t.projectsFailurePolicyQuorum,
+    failurePolicyDefault: t.projectsFailurePolicyDefault,
+    workflowExecLabel: t.projectsInlineWorkflowExec,
+    scopePrefix: t.projectsWorkflowTaskLabel,
+    checkpointWaiting: t.projectsWorkflowCheckpointWaiting,
+    checkpointFailed: t.projectsWorkflowCheckpointFailed,
+    groupProgress: t.projectsWorkflowCompletedCount,
+    parallelBranchPrefix: t.projectsWorkflowParallelBranch,
+    cacheSaved: t.projectsWorkflowCacheSaved,
+    recoveryResumeCompleted: t.projectsRecoveryResumeCompleted,
+    recoveryWaitRuntime: t.projectsRecoveryWaitRuntime,
+    recoveryRerunFromStart: t.projectsRecoveryRerunFromStart,
+  };
+}
 
 export function getStatusIcon(status: string) {
   if (status === 'completed') return CheckCircle2;
@@ -14,36 +77,36 @@ export function getToneClass(status: string) {
   return 'border-[var(--c-border-subtle)] bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]';
 }
 
-export function labelNodeStatus(status: string): string {
-  const labels: Record<string, string> = {
-    pending: '待运行',
-    ready: '就绪',
-    running: '运行中',
-    completed: '完成',
-    failed: '失败',
-    blocked: '阻塞',
-    cancelled: '已取消',
+export function labelNodeStatus(status: string, labels: WorkflowLabels): string {
+  const map: Record<string, string> = {
+    pending: labels.nodeStatusPending,
+    ready: labels.nodeStatusReady,
+    running: labels.nodeStatusRunning,
+    completed: labels.nodeStatusCompleted,
+    failed: labels.nodeStatusFailed,
+    blocked: labels.nodeStatusBlocked,
+    cancelled: labels.nodeStatusCancelled,
   };
-  return labels[status] || status;
+  return map[status] || status;
 }
 
-export function formatWorkflowProgress(status: string, completed: number, total: number) {
+export function formatWorkflowProgress(status: string, completed: number, total: number, labels: WorkflowLabels) {
   const progress = `${completed}/${total}`;
-  if (status === 'running') return `执行中 ${progress}`;
-  if (status === 'blocked') return `已阻塞 ${progress}`;
-  if (status === 'failed') return `失败 ${progress}`;
-  if (status === 'cancelled') return `已取消 ${progress}`;
-  return `已完成 ${progress}`;
+  if (status === 'running') return labels.progressRunning(progress);
+  if (status === 'blocked') return labels.progressBlocked(progress);
+  if (status === 'failed') return labels.progressFailed(progress);
+  if (status === 'cancelled') return labels.progressCancelled(progress);
+  return labels.progressCompleted(progress);
 }
 
-export function labelFailurePolicy(policy?: string) {
-  const labels: Record<string, string> = {
-    required_all: '全部必需',
-    collect_errors: '收集错误',
-    fail_fast: '快速失败',
-    quorum: '达到法定数量',
+export function labelFailurePolicy(policy: string | undefined, labels: WorkflowLabels) {
+  const map: Record<string, string> = {
+    required_all: labels.failurePolicyRequiredAll,
+    collect_errors: labels.failurePolicyCollectErrors,
+    fail_fast: labels.failurePolicyFailFast,
+    quorum: labels.failurePolicyQuorum,
   };
-  return labels[policy || ''] || policy || '默认';
+  return map[policy || ''] || policy || labels.failurePolicyDefault;
 }
 
 export function readString(value: unknown): string {
@@ -59,10 +122,10 @@ export function normalizePublicProgress(value: unknown) {
   return Math.max(0, Math.min(100, Math.round(numberValue)));
 }
 
-export function getPatternPublicView(workflowRun?: KSwarmWorkflowRun | null) {
+export function getPatternPublicView(workflowRun: KSwarmWorkflowRun | null | undefined, labels: WorkflowLabels) {
   const view = workflowRun?.publicView;
   const patternLabel = readString(view?.patternLabel);
-  if (!view || !patternLabel || patternLabel === '工作流执行') return null;
+  if (!view || !patternLabel || patternLabel === labels.workflowExecLabel) return null;
   return {
     ...view,
     patternLabel,
@@ -70,8 +133,8 @@ export function getPatternPublicView(workflowRun?: KSwarmWorkflowRun | null) {
   };
 }
 
-export function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
-  const publicView = getPatternPublicView(workflowRun);
+export function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun, labels: WorkflowLabels) {
+  const publicView = getPatternPublicView(workflowRun, labels);
   const gateDecision = workflowRun.gateDecision ?? readDecisionFromOutput(getNodeOutput(workflowRun, 'reduce-review-gate'));
   const gateText = gateDecision?.status
     ? `Gate：${gateDecision.status}${gateDecision.reason ? ` · ${gateDecision.reason}` : ''}`
@@ -101,12 +164,12 @@ export function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
           recoveryLabel: readString(publicView.recoveryAction?.label),
         }
       : null,
-    scopeText: workflowRun.sourceTask ? `任务：${workflowRun.sourceTask.title || workflowRun.sourceTask.id}` : '',
-    cacheText: formatCacheSummary(workflowRun),
-    recoveryText: formatRecoverySummary(workflowRun.recovery),
+    scopeText: workflowRun.sourceTask ? `${labels.scopePrefix}${workflowRun.sourceTask.title || workflowRun.sourceTask.id}` : '',
+    cacheText: formatCacheSummary(workflowRun, labels),
+    recoveryText: formatRecoverySummary(workflowRun.recovery, labels),
     progressText: readString(workflowRun.progressState?.lastMaterialProgress?.message),
     checkpointText: checkpoints?.total
-      ? `${checkpoints.completed || 0}/${checkpoints.total}${checkpoints.waiting ? `，等待 ${checkpoints.waiting}` : ''}${checkpoints.failed ? `，失败 ${checkpoints.failed}` : ''}`
+      ? `${checkpoints.completed || 0}/${checkpoints.total}${checkpoints.waiting ? `，${labels.checkpointWaiting} ${checkpoints.waiting}` : ''}${checkpoints.failed ? `，${labels.checkpointFailed} ${checkpoints.failed}` : ''}`
       : '',
     parallelGroups: (workflowRun.parallelGroups || []).map((group) => {
       const branchNodes = nodesByParallelGroup.get(group.id) || [];
@@ -118,9 +181,9 @@ export function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
       return {
         id: group.id,
         label: group.label || group.primitiveId || group.id,
-        status: labelNodeStatus(group.status),
-        progress: `完成 ${group.completedCount || 0}/${group.totalCount || branchNodes.length}`,
-        failurePolicy: labelFailurePolicy(group.failurePolicy),
+        status: labelNodeStatus(group.status, labels),
+        progress: labels.groupProgress(group.completedCount || 0, group.totalCount || branchNodes.length),
+        failurePolicy: labelFailurePolicy(group.failurePolicy, labels),
         branchText: branchLabels.join(' / '),
       };
     }),
@@ -137,13 +200,13 @@ export function buildGenericWorkflowView(workflowRun: KSwarmWorkflowRun) {
       return {
         id: node.id,
         title: node.title,
-        status: labelNodeStatus(node.status),
+        status: labelNodeStatus(node.status, labels),
         rawStatus: node.status,
         agent: node.assignedAgent || node.producerAgent || '',
         summary,
         reviewText,
         branchText: node.parallelGroupId
-          ? `并行分支：${node.fanoutItemLabel || node.fanoutItemKey || node.parallelGroupId}`
+          ? `${labels.parallelBranchPrefix}${node.fanoutItemLabel || node.fanoutItemKey || node.parallelGroupId}`
           : '',
         error: node.error || '',
       };
@@ -172,17 +235,17 @@ function readDecisionFromOutput(output: Record<string, unknown>) {
   };
 }
 
-function formatCacheSummary(workflowRun: KSwarmWorkflowRun) {
+function formatCacheSummary(workflowRun: KSwarmWorkflowRun, labels: WorkflowLabels) {
   const stored = workflowRun.summary?.cache?.storedNodeCount || 0;
   if (stored <= 0) return '';
-  return `已保存节点结果 ${stored}`;
+  return labels.cacheSaved(stored);
 }
 
-function formatRecoverySummary(recovery?: KSwarmWorkflowRun['recovery'] | null) {
+function formatRecoverySummary(recovery: KSwarmWorkflowRun['recovery'] | null | undefined, labels: WorkflowLabels) {
   if (!recovery || recovery.mode === 'not_needed') return '';
-  if (recovery.mode === 'resume_completed_nodes') return '复用已完成节点';
-  if (recovery.mode === 'blocked_waiting_runtime') return '等待运行时恢复';
-  if (recovery.mode === 'rerun_from_start') return '需要从头重跑';
+  if (recovery.mode === 'resume_completed_nodes') return labels.recoveryResumeCompleted;
+  if (recovery.mode === 'blocked_waiting_runtime') return labels.recoveryWaitRuntime;
+  if (recovery.mode === 'rerun_from_start') return labels.recoveryRerunFromStart;
   return recovery.mode || '';
 }
 

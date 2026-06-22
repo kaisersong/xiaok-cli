@@ -158,6 +158,20 @@
 - scheduler 负责 claim due action、调用 executor、记录结果、计算下一次触发；业务是否补跑 overdue 由 executor 决定。
 - 改 IPC / preload contract 时，同步更新 main handler、`preload-api.ts`、`preload.cjs`、renderer API type 和 contract tests。
 
+## 国际化 (i18n) 强制要求
+
+- renderer 中所有用户可见的字符串（标签、按钮文案、placeholder、toast、confirm、状态文本、错误信息、空状态提示）必须通过 `t.*` locale 引用，禁止硬编码中文或英文。
+- 唯一例外：发送给 AI 模型的 system prompt / template prompt 内容、代码注释、技术标识符（URL、命令名、协议名）。
+- 新增或修改功能时，同步在三个 locale 文件中添加对应 key：
+  - `desktop/renderer/src/locales/index.ts`（类型定义）
+  - `desktop/renderer/src/locales/zh.ts`（中文值）
+  - `desktop/renderer/src/locales/en.ts`（英文值）
+- 纯工具函数（`.ts` 文件，无 React hooks）需要返回用户可见文本时，通过参数接收 locale labels，不要硬编码。
+- 带变量的字符串使用函数类型 key：`keyName: (param: type) => string`。
+- locale key 命名使用 camelCase，按功能分组到嵌套对象（`desktopSettings.*`、`knowledge.*`、`chatView.*`、`projects.*` 等）。
+- 不要使用 `locale === 'zh' ? '中文' : 'English'` 三元表达式，一律走 `t.*` 系统。
+- PR review 时检查：新增的 `.tsx` / `.ts` 文件中不应出现 `[\u4e00-\u9fff]` 范围的硬编码字符（AI prompt 除外）。
+
 ## Desktop 验证
 
 - desktop main / service / scheduler:

@@ -90,6 +90,12 @@ vi.mock('../../renderer/src/components/TaskPanel', () => ({
   TaskPanel: () => null,
 }));
 
+vi.mock('../../renderer/src/layouts/AppLayout', () => ({
+  useSidebarCollapse: () => ({ collapsed: false, setCollapsed: () => {} }),
+  AppLayout: () => null,
+}));
+
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { ChatShell } from '../../renderer/src/components/ChatShell';
 
 afterEach(() => {
@@ -120,9 +126,11 @@ describe('ChatShell draft prompt navigation state', () => {
         pathname: '/t/thread-draft',
         state: { draftPrompt: '请诊断外贸趋势分析，并在安全时调用 continue_project。' },
       }]}>
-        <Routes>
-          <Route path="/t/:taskId" element={<ChatShell />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 
@@ -155,9 +163,11 @@ describe('ChatShell draft prompt navigation state', () => {
           initialFiles: [{ filePath: 'D:\\reports\\board-review.docx', name: 'board-review.docx' }],
         },
       }]}>
-        <Routes>
-          <Route path="/t/:taskId" element={<ChatShell />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 
@@ -206,9 +216,11 @@ describe('ChatShell draft prompt navigation state', () => {
 
     render(
       <MemoryRouter initialEntries={['/t/thread-scheduled']}>
-        <Routes>
-          <Route path="/t/:taskId" element={<ChatShell />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 
@@ -259,9 +271,11 @@ describe('ChatShell draft prompt navigation state', () => {
 
     render(
       <MemoryRouter initialEntries={['/t/thread-queued']}>
-        <Routes>
-          <Route path="/t/:taskId" element={<ChatShell />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 
@@ -322,9 +336,11 @@ describe('ChatShell draft prompt navigation state', () => {
 
     render(
       <MemoryRouter initialEntries={['/t/thread-existing']}>
-        <Routes>
-          <Route path="/t/:taskId" element={<ChatShell />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 
@@ -376,9 +392,11 @@ describe('ChatShell draft prompt navigation state', () => {
 
     render(
       <MemoryRouter initialEntries={['/t/thread-files']}>
-        <Routes>
-          <Route path="/t/:taskId" element={<ChatShell />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 
@@ -448,9 +466,11 @@ describe('ChatShell draft prompt navigation state', () => {
 
     render(
       <MemoryRouter initialEntries={['/t/thread-artifact-scope']}>
-        <Routes>
-          <Route path="/t/:taskId" element={<ChatShell />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 
@@ -519,9 +539,11 @@ describe('ChatShell draft prompt navigation state', () => {
 
     render(
       <MemoryRouter initialEntries={['/t/thread-current-file']}>
-        <Routes>
-          <Route path="/t/:taskId" element={<ChatShell />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 
@@ -595,9 +617,11 @@ describe('ChatShell draft prompt navigation state', () => {
 
     render(
       <MemoryRouter initialEntries={['/t/thread-a2ui-replay']}>
-        <Routes>
-          <Route path="/t/:taskId" element={<ChatShell />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 
@@ -631,9 +655,11 @@ describe('ChatShell draft prompt navigation state', () => {
 
     render(
       <MemoryRouter initialEntries={['/t/thread-a2ui-live']}>
-        <Routes>
-          <Route path="/t/:taskId" element={<ChatShell />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 
@@ -689,9 +715,11 @@ describe('ChatShell draft prompt navigation state', () => {
 
     render(
       <MemoryRouter initialEntries={['/t/thread-help']}>
-        <Routes>
-          <Route path="/t/:taskId" element={<ChatShell />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 
@@ -722,9 +750,11 @@ describe('ChatShell draft prompt navigation state', () => {
 
     render(
       <MemoryRouter initialEntries={['/t/thread-legacy']}>
-        <Routes>
-          <Route path="/t/:taskId" element={<ChatShell />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 
@@ -756,9 +786,11 @@ describe('ChatShell draft prompt navigation state', () => {
 
     render(
       <MemoryRouter initialEntries={['/t/thread-auth-error']}>
-        <Routes>
-          <Route path="/t/:taskId" element={<ChatShell />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 

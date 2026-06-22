@@ -12,6 +12,7 @@ const electronMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('electron', () => ({
+  app: { getPath: () => '/tmp/xiaok-electron-test' },
   clipboard: { read: electronMocks.clipboardRead },
   dialog: { showOpenDialog: electronMocks.showOpenDialog },
   shell: {

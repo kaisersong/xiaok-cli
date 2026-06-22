@@ -2,6 +2,7 @@ import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { ProjectInlineCard } from '../../renderer/src/components/projects/ProjectInlineCard';
 
 const mockKSwarmState = vi.hoisted(() => ({
@@ -29,7 +30,9 @@ function renderCard(overrides = {}) {
   };
   return render(
     <MemoryRouter>
-      <ProjectInlineCard {...props} />
+      <LocaleProvider>
+        <ProjectInlineCard {...props} />
+      </LocaleProvider>
     </MemoryRouter>
   );
 }

@@ -4,6 +4,7 @@ import hljs from 'highlight.js/lib/core'
 import python from 'highlight.js/lib/languages/python'
 import bash from 'highlight.js/lib/languages/bash'
 import type { CodeExecution } from './CodeExecutionCard'
+import { useLocale } from '../contexts/LocaleContext'
 
 hljs.registerLanguage('python', python)
 hljs.registerLanguage('bash', bash)
@@ -33,6 +34,7 @@ type Props = {
 }
 
 export function CodeExecutionPanel({ execution, onClose }: Props) {
+  const { t } = useLocale()
   const isPython = execution.language === 'python'
   const failed = execution.status === 'failed'
   const outputText = execution.output && execution.output.trim()
@@ -41,7 +43,7 @@ export function CodeExecutionPanel({ execution, onClose }: Props) {
       ? execution.errorMessage
       : undefined
   const emptyOutputText = !outputText && execution.status !== 'running'
-    ? execution.emptyLabel?.trim() || 'Execution completed with no output'
+    ? execution.emptyLabel?.trim() || t.codeExecutionNoOutput
     : undefined
 
   const highlightedCode = useMemo(() => {
@@ -86,7 +88,7 @@ export function CodeExecutionPanel({ execution, onClose }: Props) {
               {isPython ? 'Python' : 'Shell'}
             </span>
             <span style={{ fontSize: '11px', color: 'var(--c-text-muted)', lineHeight: '14px' }}>
-              Code
+              {t.codeExecutionCode}
             </span>
           </div>
         </div>
@@ -134,7 +136,7 @@ export function CodeExecutionPanel({ execution, onClose }: Props) {
         {(outputText || emptyOutputText) && (
           <div style={{ padding: '0 20px 16px', marginTop: execution.code ? '4px' : '0' }}>
             <div style={{ fontSize: '11px', color: 'var(--c-text-muted)', marginBottom: '6px', fontWeight: 500 }}>
-              output
+              {t.codeExecutionOutput}
             </div>
             <pre
               style={{

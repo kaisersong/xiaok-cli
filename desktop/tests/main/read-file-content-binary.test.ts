@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('electron', () => ({
+  app: { getPath: () => '/tmp/xiaok-electron-test' },
   clipboard: { read: vi.fn(), readImage: vi.fn() },
   dialog: { showOpenDialog: vi.fn(), showSaveDialog: vi.fn() },
   shell: { openExternal: vi.fn(), openPath: vi.fn(), showItemInFolder: vi.fn() },

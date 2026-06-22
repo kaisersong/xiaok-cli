@@ -105,7 +105,7 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
     try {
       const filePath = artifact.path || artifact.filename || '';
       if (!filePath) return;
-      const thread = await api.createThread({ title: `讨论：${displayName}`.slice(0, 40) });
+      const thread = await api.createThread({ title: t.projectsDiscussPrefix(displayName).slice(0, 40) });
       onClose();
       navigate(`/t/${thread.id}`, {
         state: {
@@ -153,7 +153,7 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
     if (isHtml) {
       const previewContent = prepareHtmlArtifactPreview(content);
       return (
-        <iframe srcDoc={previewContent} className="h-full w-full rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-white" sandbox="allow-same-origin allow-scripts" title={displayName} />
+        <iframe srcDoc={previewContent} className="h-full w-full rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-white" sandbox="allow-scripts" title={displayName} />
       );
     }
 
@@ -198,36 +198,36 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
             {content && (
               <button
                 type="button"
-                aria-label="添加到知识库"
+                aria-label={t.projectsArtifactAddToKb}
                 onClick={() => void handleSaveToKb()}
                 disabled={kbSaving}
                 className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] disabled:opacity-50"
-                title="添加到知识库"
+                title={t.projectsArtifactAddToKb}
               >
                 {kbSaved ? (
-                  <span className="text-[11px] text-green-600">已添加</span>
+                  <span className="text-[11px] text-green-600">{t.projectsArtifactKbAdded}</span>
                 ) : (
                   <>
                     <BookOpen size={14} />
-                    <span className="text-[11px]">知识库</span>
+                    <span className="text-[11px]">{t.projectsArtifactKb}</span>
                   </>
                 )}
               </button>
             )}
             <button
               type="button"
-              aria-label="发送到对话"
+              aria-label={t.projectsArtifactSendToChat}
               onClick={() => void handleSendToChat()}
               className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
-              title="发送到对话讨论"
+              title={t.projectsArtifactSendToChat}
             >
               <MessageSquare size={14} />
-              <span className="text-[11px]">讨论</span>
+              <span className="text-[11px]">{t.projectsArtifactDiscuss}</span>
             </button>
-            <button type="button" aria-label="Toggle fullscreen" onClick={() => setFullscreen(f => !f)} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title={fullscreen ? '退出全屏' : '全屏'}>
+            <button type="button" aria-label="Toggle fullscreen" onClick={() => setFullscreen(f => !f)} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title={fullscreen ? t.projectsArtifactExitFullscreen : t.projectsArtifactFullscreen}>
               {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
             </button>
-            <button type="button" aria-label="Download artifact" onClick={handleDownload} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title="下载"><Download size={15} /></button>
+            <button type="button" aria-label="Download artifact" onClick={handleDownload} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]" title={t.projectsArtifactDownload}><Download size={15} /></button>
             <button type="button" aria-label="Close artifact preview" onClick={onClose} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]"><X size={15} /></button>
           </div>
         </div>

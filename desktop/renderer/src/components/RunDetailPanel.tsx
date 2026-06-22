@@ -251,8 +251,8 @@ export function RunDetailPanel({ runId, accessToken, onClose }: Props) {
       })
     return merged
   }, [events, pipelineEvents])
-  const executionLabel = locale.startsWith('zh') ? '本轮执行' : 'Execution'
-  const threadLabel = locale.startsWith('zh') ? '对话线程' : 'Thread'
+  const executionLabel = t.runDetailExecutionLabel
+  const threadLabel = t.runDetailThreadLabel
 
   const tabs: { key: TabKey; label: string }[] = [
     { key: 'thread', label: threadLabel },

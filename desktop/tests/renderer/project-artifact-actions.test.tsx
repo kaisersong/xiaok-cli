@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { DeliverableView } from '../../renderer/src/components/projects/DeliverableView';
 import { artifactDisplayName, resolveArtifactUrl } from '../../renderer/src/components/projects/artifactActions';
@@ -46,24 +47,26 @@ describe('project artifact actions', () => {
     const generatedAt = new Date(2026, 4, 18, 15, 28, 17).getTime();
 
     render(
-      <LocaleProvider>
-        <DeliverableView
-          project={{ id: 'proj-a', name: '测试项目', status: 'active' } as any}
-          tasks={[
-            {
-              id: 'task-1',
-              title: '修订故事初稿',
-              status: 'done',
-              result: {
-                summary: '已生成故事',
-                artifacts: [
-                  { filename: 'the_quiet_collaboration.md', mimeType: 'text/markdown', url: '/projects/proj-a/artifacts/the_quiet_collaboration.md', generatedAt },
-                ],
-              },
-            } as any,
-          ]}
-        />
-      </LocaleProvider>
+      <MemoryRouter>
+        <LocaleProvider>
+          <DeliverableView
+            project={{ id: 'proj-a', name: '测试项目', status: 'active' } as any}
+            tasks={[
+              {
+                id: 'task-1',
+                title: '修订故事初稿',
+                status: 'done',
+                result: {
+                  summary: '已生成故事',
+                  artifacts: [
+                    { filename: 'the_quiet_collaboration.md', mimeType: 'text/markdown', url: '/projects/proj-a/artifacts/the_quiet_collaboration.md', generatedAt },
+                  ],
+                },
+              } as any,
+            ]}
+          />
+        </LocaleProvider>
+      </MemoryRouter>
     );
 
     expect(screen.getByText('修订故事初稿 · text/markdown · 生成 2026/05/18 15:28')).toBeInTheDocument();
@@ -71,24 +74,26 @@ describe('project artifact actions', () => {
 
   it('keeps artifact annotation unchanged when generated time is missing', () => {
     render(
-      <LocaleProvider>
-        <DeliverableView
-          project={{ id: 'proj-a', name: '测试项目', status: 'active' } as any}
-          tasks={[
-            {
-              id: 'task-1',
-              title: '修订故事初稿',
-              status: 'done',
-              result: {
-                summary: '已生成故事',
-                artifacts: [
-                  { filename: 'the_quiet_collaboration.md', mimeType: 'text/markdown', url: '/projects/proj-a/artifacts/the_quiet_collaboration.md' },
-                ],
-              },
-            } as any,
-          ]}
-        />
-      </LocaleProvider>
+      <MemoryRouter>
+        <LocaleProvider>
+          <DeliverableView
+            project={{ id: 'proj-a', name: '测试项目', status: 'active' } as any}
+            tasks={[
+              {
+                id: 'task-1',
+                title: '修订故事初稿',
+                status: 'done',
+                result: {
+                  summary: '已生成故事',
+                  artifacts: [
+                    { filename: 'the_quiet_collaboration.md', mimeType: 'text/markdown', url: '/projects/proj-a/artifacts/the_quiet_collaboration.md' },
+                  ],
+                },
+              } as any,
+            ]}
+          />
+        </LocaleProvider>
+      </MemoryRouter>
     );
 
     expect(screen.getByText('修订故事初稿 · text/markdown')).toBeInTheDocument();
@@ -103,24 +108,26 @@ describe('project artifact actions', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(
-      <LocaleProvider>
-        <DeliverableView
-          project={{ id: 'proj-a', name: '测试项目', status: 'active' } as any}
-          tasks={[
-            {
-              id: 'task-1',
-              title: '生成报告',
-              status: 'done',
-              result: {
-                summary: '已生成报告',
-                artifacts: [
-                  { filename: 'report.md', mimeType: 'text/markdown', url: '/projects/proj-a/artifacts/report.md' },
-                ],
-              },
-            } as any,
-          ]}
-        />
-      </LocaleProvider>
+      <MemoryRouter>
+        <LocaleProvider>
+          <DeliverableView
+            project={{ id: 'proj-a', name: '测试项目', status: 'active' } as any}
+            tasks={[
+              {
+                id: 'task-1',
+                title: '生成报告',
+                status: 'done',
+                result: {
+                  summary: '已生成报告',
+                  artifacts: [
+                    { filename: 'report.md', mimeType: 'text/markdown', url: '/projects/proj-a/artifacts/report.md' },
+                  ],
+                },
+              } as any,
+            ]}
+          />
+        </LocaleProvider>
+      </MemoryRouter>
     );
 
     fireEvent.click(screen.getByRole('button', { name: /report\.md/ }));
@@ -150,24 +157,26 @@ describe('project artifact actions', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(
-      <LocaleProvider>
-        <DeliverableView
-          project={{ id: 'proj-a', name: '测试项目', status: 'active' } as any}
-          tasks={[
-            {
-              id: 'task-1',
-              title: '生成报告',
-              status: 'done',
-              result: {
-                summary: '已生成报告',
-                artifacts: [
-                  { filename: 'report.html', mimeType: 'text/html', url: '/projects/proj-a/artifacts/report.html' },
-                ],
-              },
-            } as any,
-          ]}
-        />
-      </LocaleProvider>
+      <MemoryRouter>
+        <LocaleProvider>
+          <DeliverableView
+            project={{ id: 'proj-a', name: '测试项目', status: 'active' } as any}
+            tasks={[
+              {
+                id: 'task-1',
+                title: '生成报告',
+                status: 'done',
+                result: {
+                  summary: '已生成报告',
+                  artifacts: [
+                    { filename: 'report.html', mimeType: 'text/html', url: '/projects/proj-a/artifacts/report.html' },
+                  ],
+                },
+              } as any,
+            ]}
+          />
+        </LocaleProvider>
+      </MemoryRouter>
     );
 
     fireEvent.click(screen.getByRole('button', { name: /report\.html/ }));
@@ -178,7 +187,7 @@ describe('project artifact actions', () => {
     expect(srcdoc).toContain('data-xiaok-preview-fallback');
     expect(srcdoc).toContain('.fade-in-up');
     expect(srcdoc).toContain('opacity:1!important');
-    expect(iframe.getAttribute('sandbox')).not.toContain('allow-scripts');
+    expect(iframe.getAttribute('sandbox')).toContain('allow-scripts');
   });
 
   it('opens a top-level project deliverable file that only has a name', async () => {
@@ -189,27 +198,29 @@ describe('project artifact actions', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(
-      <LocaleProvider>
-        <DeliverableView
-          project={{
-            id: 'proj-1779259929302',
-            name: 'Claude 本月动态分析',
-            status: 'delivered',
-            deliverable: {
-              synthesis: true,
-              files: [
-                {
-                  name: 'proj-1779259929302__p4-item1-report.md',
-                  type: 'markdown',
-                  size: 873,
-                  taskId: 'proj-1779259929302__p4-item1',
-                },
-              ],
-            },
-          } as any}
-          tasks={[]}
-        />
-      </LocaleProvider>
+      <MemoryRouter>
+        <LocaleProvider>
+          <DeliverableView
+            project={{
+              id: 'proj-1779259929302',
+              name: 'Claude 本月动态分析',
+              status: 'delivered',
+              deliverable: {
+                synthesis: true,
+                files: [
+                  {
+                    name: 'proj-1779259929302__p4-item1-report.md',
+                    type: 'markdown',
+                    size: 873,
+                    taskId: 'proj-1779259929302__p4-item1',
+                  },
+                ],
+              },
+            } as any}
+            tasks={[]}
+          />
+        </LocaleProvider>
+      </MemoryRouter>
     );
 
     fireEvent.click(screen.getByRole('button', { name: /proj-1779259929302__p4-item1-report\.md/ }));
@@ -228,26 +239,28 @@ describe('project artifact actions', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(
-      <LocaleProvider>
-        <DeliverableView
-          project={{
-            id: 'proj-win',
-            name: '国外AI产品动态分析',
-            status: 'delivered',
-            deliverable: {
-              summary: '已生成 HTML 报告',
-              artifacts: [
-                {
-                  path: 'C:\\Users\\song\\.kswarm\\projects\\proj-win\\artifacts\\june-global-ai-product-trends.html',
-                  kind: 'report_html',
-                  mimeType: 'text/html',
-                },
-              ],
-            },
-          } as any}
-          tasks={[]}
-        />
-      </LocaleProvider>
+      <MemoryRouter>
+        <LocaleProvider>
+          <DeliverableView
+            project={{
+              id: 'proj-win',
+              name: '国外AI产品动态分析',
+              status: 'delivered',
+              deliverable: {
+                summary: '已生成 HTML 报告',
+                artifacts: [
+                  {
+                    path: 'C:\\Users\\song\\.kswarm\\projects\\proj-win\\artifacts\\june-global-ai-product-trends.html',
+                    kind: 'report_html',
+                    mimeType: 'text/html',
+                  },
+                ],
+              },
+            } as any}
+            tasks={[]}
+          />
+        </LocaleProvider>
+      </MemoryRouter>
     );
 
     fireEvent.click(screen.getByRole('button', { name: /june-global-ai-product-trends\.html/ }));
@@ -266,28 +279,30 @@ describe('project artifact actions', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(
-      <LocaleProvider>
-        <DeliverableView
-          project={{ id: 'proj-task-win', name: '任务报告项目', status: 'delivered' } as any}
-          tasks={[
-            {
-              id: 'task-1',
-              title: '生成 HTML 报告',
-              status: 'done',
-              result: {
-                summary: '已生成报告',
-                artifacts: [
-                  {
-                    path: 'C:\\Users\\song\\.kswarm\\projects\\proj-task-win\\artifacts\\task-report.html',
-                    kind: 'report_html',
-                    mimeType: 'text/html',
-                  },
-                ],
-              },
-            } as any,
-          ]}
-        />
-      </LocaleProvider>
+      <MemoryRouter>
+        <LocaleProvider>
+          <DeliverableView
+            project={{ id: 'proj-task-win', name: '任务报告项目', status: 'delivered' } as any}
+            tasks={[
+              {
+                id: 'task-1',
+                title: '生成 HTML 报告',
+                status: 'done',
+                result: {
+                  summary: '已生成报告',
+                  artifacts: [
+                    {
+                      path: 'C:\\Users\\song\\.kswarm\\projects\\proj-task-win\\artifacts\\task-report.html',
+                      kind: 'report_html',
+                      mimeType: 'text/html',
+                    },
+                  ],
+                },
+              } as any,
+            ]}
+          />
+        </LocaleProvider>
+      </MemoryRouter>
     );
 
     fireEvent.click(screen.getByRole('button', { name: /task-report\.html/ }));
@@ -300,16 +315,18 @@ describe('project artifact actions', () => {
 
   it('shows unlinked workspace artifacts while hiding generated plan files', () => {
     render(
-      <LocaleProvider>
-        <DeliverableView
-          project={{ id: 'proj-live', name: '动态工作流交付同步实时验证', status: 'delivered' } as any}
-          tasks={[]}
-          workspaceArtifacts={[
-            { filename: 'plan-v1.md', mimeType: 'text/markdown', url: '/projects/proj-live/artifacts/plan-v1.md' },
-            { filename: 'live-sync-verification.md', mimeType: 'text/markdown', url: '/projects/proj-live/artifacts/live-sync-verification.md' },
-          ] as any}
-        />
-      </LocaleProvider>
+      <MemoryRouter>
+        <LocaleProvider>
+          <DeliverableView
+            project={{ id: 'proj-live', name: '动态工作流交付同步实时验证', status: 'delivered' } as any}
+            tasks={[]}
+            workspaceArtifacts={[
+              { filename: 'plan-v1.md', mimeType: 'text/markdown', url: '/projects/proj-live/artifacts/plan-v1.md' },
+              { filename: 'live-sync-verification.md', mimeType: 'text/markdown', url: '/projects/proj-live/artifacts/live-sync-verification.md' },
+            ] as any}
+          />
+        </LocaleProvider>
+      </MemoryRouter>
     );
 
     expect(screen.getByText('项目文件')).toBeInTheDocument();

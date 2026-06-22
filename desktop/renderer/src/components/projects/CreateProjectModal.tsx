@@ -169,11 +169,11 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{t.projectsCreateName}</label>
-            <input aria-label="例：竞品分析报告"
+            <input aria-label={t.projectsCreateProjectNamePlaceholder}
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder="例：竞品分析报告"
+              placeholder={t.projectsCreateProjectNamePlaceholder}
               className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-placeholder)] outline-none transition-all focus:border-[var(--c-input-border-color-focus)] focus:shadow-[var(--c-input-shadow-focus)]"
               autoFocus
             />
@@ -181,11 +181,11 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
 
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{t.projectsCreateGoal}</label>
-            <input aria-label="描述你希望完成什么..."
+            <input aria-label={t.projectsCreateProjectGoalPlaceholder}
               type="text"
               value={goal}
               onChange={e => setGoal(e.target.value)}
-              placeholder="描述你希望完成什么..."
+              placeholder={t.projectsCreateProjectGoalPlaceholder}
               className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-placeholder)] outline-none transition-all focus:border-[var(--c-input-border-color-focus)] focus:shadow-[var(--c-input-shadow-focus)]"
             />
           </div>
@@ -194,10 +194,10 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
             <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">
               {t.projectsCreateRequirements}
             </label>
-            <textarea aria-label="格式要求、参考资料、限制条件、期望的产出物形式..."
+            <textarea aria-label={t.projectsCreateProjectRequirementsPlaceholder}
               value={requirements}
               onChange={e => setRequirements(e.target.value)}
-              placeholder="格式要求、参考资料、限制条件、期望的产出物形式..."
+              placeholder={t.projectsCreateProjectRequirementsPlaceholder}
               rows={4}
               className="rounded-lg border-[0.5px] border-[var(--c-input-border-color)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-placeholder)] outline-none transition-all focus:border-[var(--c-input-border-color-focus)] focus:shadow-[var(--c-input-shadow-focus)] resize-none"
             />
@@ -207,7 +207,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{t.projectsCreatePoAgent}</label>
             {agents.length === 0 ? (
-              <p className="text-[12px] text-[var(--c-text-muted)] py-2">暂无可用智能体，请先在 kswarm 中创建</p>
+              <p className="text-[12px] text-[var(--c-text-muted)] py-2">{t.projectsCreateNoAgents}</p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {(poAgents.length > 0 ? poAgents : agents).map(agent => {
@@ -229,7 +229,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
                       {selected && <Check size={12} className="text-[var(--c-status-success-text)]" />}
                       <span>{agent.name}</span>
                       {agent.status === 'offline' && (
-                        <span className="text-[10px] text-[var(--c-text-muted)]">(离线)</span>
+                        <span className="text-[10px] text-[var(--c-text-muted)]">({t.projectsCreateAgentOffline})</span>
                       )}
                     </button>
                   );
@@ -242,7 +242,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
           {workerAgents.length > 0 && (
             <div className="flex flex-col gap-1.5">
               <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">
-                {t.projectsCreateWorkerAgent} <span className="text-[var(--c-text-muted)]">(可多选，可选)</span>
+                {t.projectsCreateWorkerAgent} <span className="text-[var(--c-text-muted)]">({t.projectsCreateWorkerOptional})</span>
               </label>
               <div className="flex flex-wrap gap-1.5">
                 {workerAgents.map(agent => {
@@ -270,7 +270,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
           {/* Work folder */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-medium text-[var(--c-text-tertiary)]">
-              {t.projectsCreateWorkDir} <span className="text-[var(--c-text-muted)]">(可选，留空自动创建)</span>
+              {t.projectsCreateWorkDir} <span className="text-[var(--c-text-muted)]">({t.projectsCreateWorkDirOptional})</span>
             </label>
             <div className="flex items-center gap-2">
               <input aria-label="~/projects/my-project"
@@ -284,7 +284,7 @@ export function CreateProjectModal({ open, agents, onClose, onCreate }: CreatePr
                 type="button"
                 onClick={handlePickWorkFolder}
                 className="rounded-lg p-2 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] transition-colors duration-150"
-                title="选择目录"
+                title={t.projectsCreateSelectDir}
               >
                 <FolderOpen size={15} />
               </button>

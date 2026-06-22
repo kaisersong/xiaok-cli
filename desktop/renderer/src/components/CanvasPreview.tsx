@@ -4,6 +4,7 @@ import { MarkdownRenderer } from './MarkdownRenderer';
 import { ArtifactEditableViewer, type AnnotationPayload } from './ArtifactEditableViewer';
 import { formatAnnotationForChat } from '../hooks/useArtifactAnnotation';
 import { getDesktopApi } from '../shared/desktop';
+import { useLocale } from '../contexts/LocaleContext';
 
 interface CanvasPreviewProps {
   filePath: string;
@@ -70,6 +71,7 @@ function getFileName(path: string): string {
 }
 
 export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: CanvasPreviewProps) {
+  const { t } = useLocale();
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
   const iframeSrc = useRef<string | null>(null);
 
@@ -139,24 +141,6 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
     }
   }, [filePath]);
 
-  if (isBinary) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
-        <div className="text-center">
-          <p className="text-sm font-medium text-[var(--c-text-primary)]">{fileName}</p>
-          <p className="mt-1 text-xs text-[var(--c-text-muted)]">此文件类型不支持预览</p>
-        </div>
-        <button
-          type="button"
-          onClick={handleOpenInSystemApp}
-          className="inline-flex items-center gap-2 rounded-lg bg-[var(--c-accent)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
-        >
-          用系统默认应用打开
-        </button>
-      </div>
-    );
-  }
-
   const handleDownload = useCallback(async () => {
     const api = getDesktopApi() as any;
     if (api?.showSaveDialog && api?.saveFile) {
@@ -178,6 +162,24 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
       URL.revokeObjectURL(url);
     }
   }, [content, fileName, isPdf]);
+
+  if (isBinary) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
+        <div className="text-center">
+          <p className="text-sm font-medium text-[var(--c-text-primary)]">{fileName}</p>
+          <p className="mt-1 text-xs text-[var(--c-text-muted)]">{t.canvasPreviewUnsupported}</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleOpenInSystemApp}
+          className="inline-flex items-center gap-2 rounded-lg bg-[var(--c-accent)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+        >
+          {t.canvasPreviewOpenSystem}
+        </button>
+      </div>
+    );
+  }
 
   const hasCodeView = isText;
   const hasPreview = isHtml || isMarkdown || isImage || isPdf;
@@ -218,7 +220,7 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
             type="button"
             onClick={handleDownload}
             className="ml-auto flex items-center gap-1 rounded p-1 text-xs text-[var(--c-text-tertiary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]"
-            title="下载到本地"
+            title={t.canvasPreviewDownload}
           >
             <Download size={12} />
           </button>
@@ -256,6 +258,7 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
             <iframe
               title={`PDF preview: ${fileName}`}
               src={pdfSrc}
+              sandbox="allow-same-origin"
               className="h-full w-full border-0 bg-[var(--c-bg-card)]"
             />
           ) : (

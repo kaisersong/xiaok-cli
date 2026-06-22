@@ -1,6 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { A2UI_MIME_TYPE, compileRenderUiToA2ui } from '../../../src/a2ui/index.js';
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { ChatView } from '../../renderer/src/components/ChatView';
 
 const { mockReadFileContent } = vi.hoisted(() => ({
@@ -38,8 +39,9 @@ describe('ChatView A2UI result card', () => {
     });
 
     render(
-      <ChatView
-        thread={{
+      <LocaleProvider>
+        <ChatView
+          thread={{
           id: 'thread-a2ui',
           title: 'A2UI 结果',
           status: 'completed',
@@ -77,6 +79,7 @@ describe('ChatView A2UI result card', () => {
         canvasOpen={false}
         onToggleCanvas={vi.fn()}
       />
+      </LocaleProvider>
     );
 
     expect(await screen.findByRole('heading', { name: 'Ops overview' })).toBeDefined();

@@ -2,6 +2,7 @@ import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext'
 import { AppLayout } from '../../renderer/src/layouts/AppLayout'
 
 vi.mock('../../renderer/src/components/Sidebar', () => ({
@@ -19,11 +20,13 @@ vi.mock('../../renderer/src/components/DesktopSettings', () => ({
 function renderLayout() {
   return render(
     <MemoryRouter initialEntries={['/']}>
-      <Routes>
-        <Route element={<AppLayout />}>
-          <Route index element={<div data-testid="outlet-content">content</div>} />
-        </Route>
-      </Routes>
+      <LocaleProvider>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route index element={<div data-testid="outlet-content">content</div>} />
+          </Route>
+        </Routes>
+      </LocaleProvider>
     </MemoryRouter>,
   )
 }

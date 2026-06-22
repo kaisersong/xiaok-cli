@@ -71,6 +71,7 @@ type ScheduledFrequencyLabels = {
   scheduledEvery6Hours: string;
   scheduledEvery8Hours: string;
   scheduledEvery12Hours: string;
+  scheduledEveryNMinutes: (n: number) => string;
 };
 
 const FREQUENCY_OPTIONS = [
@@ -217,8 +218,7 @@ export function formatScheduledFrequency(
   if (task.frequency === 'interval' || task.frequency === 'hourly') {
     const minutes = task.scheduleConfig?.intervalMinutes ?? 60;
     if (intervalLabels[minutes]) return intervalLabels[minutes];
-    const english = labels.scheduledEvery30Min.toLowerCase().startsWith('every ');
-    return english ? `Every ${minutes} minutes` : `每 ${minutes} 分钟`;
+    return labels.scheduledEveryNMinutes(minutes);
   }
   const frequencyLabels: Record<string, string> = {
     manual: labels.scheduledManual,
@@ -455,11 +455,11 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
           setSaving(false);
           setConfirmHighFreq(false);
           closeModal();
-          showToast('循环定时任务已创建', 'success');
+          showToast(t.scheduledLoopCreated, 'success');
           return;
         } catch (e) {
           console.error('[Scheduled] createLoopSchedule failed:', e);
-          showToast('创建循环定时任务失败：' + (e instanceof Error ? e.message : String(e)), 'info');
+          showToast(t.scheduledLoopCreateFailed(e instanceof Error ? e.message : String(e)), 'info');
           setSaving(false);
           return;
         }
@@ -637,20 +637,20 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
         if (!task.loopId) return;
         const result = await api.runLoopNow(task.loopId);
         if (result.status === 'already_running') {
-          showToast('该循环正在运行中，请等待完成或先取消', 'info');
+          showToast(t.scheduledLoopAlreadyRunning, 'info');
           return;
         }
         if (result.status === 'skipped') {
           const reasonMap: Record<string, string> = {
-            paused: '循环已暂停',
-            missing_loop: '循环不存在',
-            deleted_loop: '循环已删除',
+            paused: t.scheduledLoopPaused,
+            missing_loop: t.scheduledLoopMissing,
+            deleted_loop: t.scheduledLoopDeleted,
           };
-          showToast(reasonMap[result.reason] || `跳过：${result.reason}`, 'info');
+          showToast(reasonMap[result.reason] || `${result.reason}`, 'info');
           return;
         }
         if (result.status === 'blocked' || result.status === 'failed') {
-          showToast(`循环${result.status === 'blocked' ? '阻塞' : '失败'}，请查看自动化诊断`, 'info');
+          showToast(t.scheduledLoopBlockedOrFailed(result.status), 'info');
           return;
         }
         const now = Date.now();
@@ -660,7 +660,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
             : t
         ));
         await loadTasks();
-        showToast('循环已启动', 'success');
+        showToast(t.scheduledLoopStarted, 'success');
         return;
       }
 
@@ -852,8 +852,8 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
                       <p className="mt-1 text-xs text-[var(--c-text-secondary)] line-clamp-1">{task.description}</p>
                     )}
                     <div className="mt-2 flex gap-4 text-xs text-[var(--c-text-tertiary)]">
-                      <span>Last run: {formatTime(task.lastRunAt)}</span>
-                      {task.nextRunAt && <span>Next: {formatTime(task.nextRunAt)}</span>}
+                      <span>{t.scheduledLastRunLabel}: {formatTime(task.lastRunAt)}</span>
+                      {task.nextRunAt && <span>{t.scheduledNextLabel}: {formatTime(task.nextRunAt)}</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
@@ -972,11 +972,11 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
                   <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">
                     {t.scheduledName} <span className="text-red-500">*</span>
                   </label>
-                  <input aria-label="每日简报"
+                  <input aria-label={t.scheduledNamePlaceholder}
                     type="text"
                     value={formName}
                     onChange={e => setFormName(e.target.value)}
-                    placeholder="每日简报"
+                    placeholder={t.scheduledNamePlaceholder}
                     className="w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
                   />
                 </div>
@@ -984,11 +984,11 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
                   <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">
                     {t.scheduledDescription} <span className="text-red-500">*</span>
                   </label>
-                  <input aria-label="汇总日历和收件箱"
+                  <input aria-label={t.scheduledDescPlaceholder}
                     type="text"
                     value={formDesc}
                     onChange={e => setFormDesc(e.target.value)}
-                    placeholder="汇总日历和收件箱"
+                    placeholder={t.scheduledDescPlaceholder}
                     className="w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
                   />
                 </div>
@@ -1003,10 +1003,10 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
                   <label className="block text-xs text-[var(--c-text-secondary)] mb-1.5">
                     {t.scheduledInstructions} <span className="text-red-500">*</span>
                   </label>
-                  <textarea aria-label="查看今天的日历会议并汇总未读邮件，标记紧急事项。"
+                  <textarea aria-label={t.scheduledPromptPlaceholder}
                     value={formPrompt}
                     onChange={e => setFormPrompt(e.target.value)}
-                    placeholder="查看今天的日历会议并汇总未读邮件，标记紧急事项。"
+                    placeholder={t.scheduledPromptPlaceholder}
                     rows={4}
                     className="w-full resize-none rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
                   />

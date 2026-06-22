@@ -1,10 +1,12 @@
 import { useMemo } from 'react';
 import { X, CheckCircle2, Circle, Loader2, AlertCircle, Ban, Workflow } from 'lucide-react';
 import type { KSwarmProject, KSwarmTask, KSwarmArtifact, KSwarmWorkflowRun, KSwarmWorkflowNode } from '../../hooks/useKSwarmClient';
+import { useLocale } from '../../contexts/LocaleContext';
 import { TaskWorkflowProgressBar } from './TaskWorkflowProgressBar';
 import {
   getStatusIcon, getToneClass, labelNodeStatus, labelFailurePolicy,
-  computeTaskPipelineProgress, readString,
+  computeTaskPipelineProgress, readString, buildWorkflowLabels,
+  type WorkflowLabels,
 } from './workflowUtils';
 
 interface TaskDetailDrawerProps {
@@ -24,11 +26,11 @@ function formatTimestamp(ts: unknown): string {
   return new Date(num).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-function statusLabel(status: KSwarmTask['status']): string {
+function statusLabel(status: KSwarmTask['status'], t: ReturnType<typeof import('../../contexts/LocaleContext').useLocale>['t']): string {
   const map: Record<string, string> = {
-    pending: '待处理', dispatched: '已派发', accepted: '已接受',
-    in_progress: '进行中', submitted: '已提交', review: '审核中',
-    done: '已完成', failed: '失败', blocked: '阻塞', cancelled: '已取消',
+    pending: t.projectsTaskStatusPending, dispatched: t.projectsTaskStatusDispatched, accepted: t.projectsTaskStatusAccepted,
+    in_progress: t.projectsTaskStatusInProgress, submitted: t.projectsTaskStatusSubmitted, review: t.projectsTaskStatusReview,
+    done: t.projectsTaskStatusDone, failed: t.projectsTaskStatusFailed, blocked: t.projectsTaskStatusBlocked, cancelled: t.projectsTaskStatusCancelled,
   };
   return map[status] || status;
 }
@@ -49,6 +51,8 @@ export function TaskDetailDrawer({
   onStartTaskWorkflow,
   onPreviewArtifact,
 }: TaskDetailDrawerProps) {
+  const { t } = useLocale();
+  const wfLabels = useMemo(() => buildWorkflowLabels(t), [t]);
   const pipelineProgress = useMemo(
     () => workflowRun ? computeTaskPipelineProgress(workflowRun) : null,
     [workflowRun],
@@ -84,7 +88,7 @@ export function TaskDetailDrawer({
     >
       <section
         role="dialog"
-        aria-label="任务详情"
+        aria-label={t.projectsTaskDetailTitle}
         className="h-full w-[min(480px,100vw)] overflow-y-auto border-l border-[var(--c-border-subtle)] bg-[var(--c-bg-page)] p-5 shadow-xl"
         onMouseDown={e => e.stopPropagation()}
       >
@@ -96,7 +100,7 @@ export function TaskDetailDrawer({
             </h2>
             <div className="mt-1 flex items-center gap-2">
               <span className={`text-[11px] font-medium ${statusTone(task.status)}`}>
-                {statusLabel(task.status)}
+                {statusLabel(task.status, t)}
               </span>
               {task.assignedAgent && (
                 <span className="text-[10px] text-[var(--c-text-muted)]">
@@ -107,7 +111,7 @@ export function TaskDetailDrawer({
           </div>
           <button
             type="button"
-            aria-label="关闭"
+            aria-label={t.commonClose}
             onMouseDown={closeFromButton}
             onClick={closeFromButton}
             className="ml-auto shrink-0 rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
@@ -127,21 +131,21 @@ export function TaskDetailDrawer({
         {task.execution && (
           <div className="mt-3 inline-flex items-center gap-1 rounded-full bg-[var(--c-accent)]/10 px-2 py-0.5 text-[10px] text-[var(--c-accent)]">
             <Workflow size={10} />
-            <span>{task.execution.strategy === 'workflow' ? '工作流执行' : '快速执行'}</span>
+            <span>{task.execution.strategy === 'workflow' ? t.projectsTaskWorkflowExec : t.projectsTaskDirectExec}</span>
           </div>
         )}
 
         {/* Time */}
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[var(--c-text-muted)]">
-          {task.createdAt && <span>创建 {formatTimestamp(task.createdAt)}</span>}
-          {task.startedAt && <span>开始 {formatTimestamp(task.startedAt)}</span>}
-          {task.completedAt && <span>完成 {formatTimestamp(task.completedAt)}</span>}
+          {task.createdAt && <span>{t.projectsTaskCreated} {formatTimestamp(task.createdAt)}</span>}
+          {task.startedAt && <span>{t.projectsTaskStarted} {formatTimestamp(task.startedAt)}</span>}
+          {task.completedAt && <span>{t.projectsTaskCompleted} {formatTimestamp(task.completedAt)}</span>}
         </div>
 
         {/* Pipeline progress */}
         {pipelineProgress && pipelineProgress.total > 0 && (
           <div className="mt-4">
-            <div className="mb-1 text-[10px] font-medium text-[var(--c-text-muted)]">工作流进度</div>
+            <div className="mb-1 text-[10px] font-medium text-[var(--c-text-muted)]">{t.projectsTaskWorkflowProgress}</div>
             <TaskWorkflowProgressBar progress={pipelineProgress} height="md" />
           </div>
         )}
@@ -149,13 +153,13 @@ export function TaskDetailDrawer({
         {/* Workflow nodes by phase */}
         {nodesByPhase.length > 0 && (
           <div className="mt-4 space-y-3">
-            <div className="text-[10px] font-medium text-[var(--c-text-muted)]">节点详情</div>
+            <div className="text-[10px] font-medium text-[var(--c-text-muted)]">{t.projectsTaskNodeDetails}</div>
             {nodesByPhase.map(phase => (
               <div key={phase.id}>
                 <div className="mb-1.5 text-[11px] font-medium text-[var(--c-text-secondary)]">{phase.title}</div>
                 <div className="space-y-1.5">
                   {phase.nodes.map(node => (
-                    <NodeRow key={node.id} node={node} parallelGroups={parallelGroups} />
+                    <NodeRow key={node.id} node={node} parallelGroups={parallelGroups} wfLabels={wfLabels} />
                   ))}
                 </div>
               </div>
@@ -166,7 +170,7 @@ export function TaskDetailDrawer({
         {/* Parallel groups summary */}
         {parallelGroups.length > 0 && (
           <div className="mt-4 space-y-1.5">
-            <div className="text-[10px] font-medium text-[var(--c-text-muted)]">并行分组</div>
+            <div className="text-[10px] font-medium text-[var(--c-text-muted)]">{t.projectsTaskParallelGroups}</div>
             {parallelGroups.map(pg => (
               <div key={pg.id} className="flex items-center gap-2 rounded-lg bg-[var(--c-bg-card)] px-2.5 py-1.5 text-[11px]">
                 <span className="font-medium text-[var(--c-text-secondary)]">{pg.label}</span>
@@ -175,7 +179,7 @@ export function TaskDetailDrawer({
                 </span>
                 {pg.failurePolicy && (
                   <span className="ml-auto text-[10px] text-[var(--c-text-muted)]">
-                    {labelFailurePolicy(pg.failurePolicy)}
+                    {labelFailurePolicy(pg.failurePolicy, wfLabels)}
                   </span>
                 )}
               </div>
@@ -186,7 +190,7 @@ export function TaskDetailDrawer({
         {/* Review */}
         {review && (
           <div className="mt-4">
-            <div className="mb-1 text-[10px] font-medium text-[var(--c-text-muted)]">审核结果</div>
+            <div className="mb-1 text-[10px] font-medium text-[var(--c-text-muted)]">{t.projectsTaskReviewResult}</div>
             <div className={`rounded-lg border-[0.5px] px-3 py-2 text-[11px] ${
               review.passed
                 ? 'border-[var(--c-status-success-text)]/20 bg-[var(--c-status-success-text)]/5 text-[var(--c-status-success-text)]'
@@ -201,7 +205,7 @@ export function TaskDetailDrawer({
         {/* Artifacts */}
         {hasArtifacts && (
           <div className="mt-4">
-            <div className="mb-1.5 text-[10px] font-medium text-[var(--c-text-muted)]">产物</div>
+            <div className="mb-1.5 text-[10px] font-medium text-[var(--c-text-muted)]">{t.projectsTaskArtifacts}</div>
             <div className="flex flex-wrap gap-1.5">
               {resultArtifacts.map((art: KSwarmArtifact, i: number) => (
                 <button
@@ -221,10 +225,10 @@ export function TaskDetailDrawer({
         {(task.status === 'failed' || task.status === 'blocked') && (
           <div className="mt-4">
             <div className="mb-1 text-[10px] font-medium text-[var(--c-text-muted)]">
-              {task.status === 'blocked' ? '阻塞原因' : '失败原因'}
+              {task.status === 'blocked' ? t.projectsTaskBlockedReason : t.projectsTaskFailureReason}
             </div>
             <p className="rounded-lg bg-[var(--c-status-error-text)]/5 px-3 py-2 text-[11px] leading-relaxed text-[var(--c-status-error-text)]">
-              {task.blockedReason || task.failureReason || task.lastFailureClass || task.failureClass || '未知'}
+              {task.blockedReason || task.failureReason || task.lastFailureClass || task.failureClass || t.projectsTaskUnknownReason}
             </p>
           </div>
         )}
@@ -238,7 +242,7 @@ export function TaskDetailDrawer({
               className="flex items-center gap-1.5 rounded-lg bg-[var(--c-accent)]/10 px-3 py-2 text-[12px] font-medium text-[var(--c-accent)] hover:bg-[var(--c-accent)]/20"
             >
               <Workflow size={13} />
-              <span>用工作流执行</span>
+              <span>{t.projectsTaskStartWorkflow}</span>
             </button>
           </div>
         )}
@@ -247,7 +251,7 @@ export function TaskDetailDrawer({
   );
 }
 
-function NodeRow({ node, parallelGroups }: { node: KSwarmWorkflowNode; parallelGroups: any[] }) {
+function NodeRow({ node, parallelGroups, wfLabels }: { node: KSwarmWorkflowNode; parallelGroups: any[]; wfLabels: WorkflowLabels }) {
   const StatusIcon = getStatusIcon(node.status);
   const toneClass = getToneClass(node.status);
   const pgLabel = node.parallelGroupId
@@ -267,7 +271,7 @@ function NodeRow({ node, parallelGroups }: { node: KSwarmWorkflowNode; parallelG
         <div className="flex items-center gap-2 text-[10px] text-[var(--c-text-muted)]">
           {node.assignedAgent && <span>{node.assignedAgent}</span>}
           {pgLabel && <span>· {pgLabel}</span>}
-          <span className="ml-auto">{labelNodeStatus(node.status)}</span>
+          <span className="ml-auto">{labelNodeStatus(node.status, wfLabels)}</span>
         </div>
         {node.error && (
           <p className="mt-0.5 truncate text-[10px] text-[var(--c-status-error-text)]">{node.error}</p>

@@ -58,10 +58,10 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
   }, [provider]);
 
   const providerOptions = [
-    { value: '', label: '跟随平台配置' },
+    { value: '', label: t.projectsAgentFollowPlatform },
     ...desktopProviders.map(p => ({
       value: p.id,
-      label: `${p.label}${p.apiKeyConfigured ? '' : ' (未配置 API Key)'}`,
+      label: `${p.label}${p.apiKeyConfigured ? '' : ` (${t.projectsEditAgentApiKeyNotConfigured})`}`,
     })),
   ];
 
@@ -131,7 +131,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="edit-agent-provider" className="text-[12px] font-medium text-[var(--c-text-secondary)]">LLM 提供商</label>
+            <label htmlFor="edit-agent-provider" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsEditAgentProviderLabel}</label>
             <select
               id="edit-agent-provider"
               data-testid="provider-select"
@@ -156,7 +156,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
                     onChange={e => setModel(e.target.value)}
                     className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]"
                   >
-                    <option value="">选择模型</option>
+                    <option value="">{t.projectsEditAgentSelectModel}</option>
                     {desktopModels.map(m => <option key={m.modelId} value={m.model}>{m.label}</option>)}
                   </select>
                 ) : (
@@ -199,10 +199,10 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
 
           <div className="flex flex-col gap-1.5">
             <label className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsEditAgentInstructions}</label>
-            <textarea aria-label="系统提示词..."
+            <textarea aria-label={t.projectsEditAgentSystemPromptPlaceholder}
               value={instructions}
               onChange={e => setInstructions(e.target.value)}
-              placeholder="系统提示词..."
+              placeholder={t.projectsEditAgentSystemPromptPlaceholder}
               rows={3}
               className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-text-muted)] transition-colors duration-150 focus:border-[var(--c-border)] resize-none"
             />

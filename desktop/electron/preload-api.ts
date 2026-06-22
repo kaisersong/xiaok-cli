@@ -53,6 +53,7 @@ export const PRELOAD_API_KEYS = [
   'getActiveTask',
   'recoverTask',
   'openArtifact',
+  'openFileInSystemApp',
   'readFileContent',
   'listSkills',
   'installSkill',
@@ -265,6 +266,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getActiveTask: 'desktop:getActiveTask',
   recoverTask: 'desktop:recoverTask',
   openArtifact: 'desktop:openArtifact',
+  openFileInSystemApp: 'desktop:openFileInSystemApp',
   readFileContent: 'desktop:readFileContent',
   listSkills: 'desktop:listSkills',
   installSkill: 'desktop:installSkill',
@@ -667,6 +669,7 @@ export interface DesktopApi {
   getActiveTask(): Promise<{ taskId: string } | null>;
   recoverTask(taskId: string): Promise<{ snapshot: TaskSnapshot }>;
   openArtifact(artifactId: string): Promise<void>;
+  openFileInSystemApp(filePath: string): Promise<void>;
   readFileContent(filePath: string): Promise<{ content: string; error?: string }>;
   listSkills(): Promise<Array<{ name: string; aliases: string[]; description: string; source: string; tier: string }>>;
   installSkill(skillName: string): Promise<{ success: boolean; message: string }>;
@@ -943,6 +946,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getActiveTask: () => ipcRenderer.invoke('desktop:getActiveTask') as ReturnType<DesktopApi['getActiveTask']>,
     recoverTask: (taskId) => ipcRenderer.invoke('desktop:recoverTask', { taskId }) as ReturnType<DesktopApi['recoverTask']>,
     openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }) as Promise<void>,
+    openFileInSystemApp: (filePath) => ipcRenderer.invoke('desktop:openFileInSystemApp', { filePath }) as Promise<void>,
     readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }) as Promise<{ content: string; error?: string }>,
     listSkills: () => ipcRenderer.invoke('desktop:listSkills') as ReturnType<DesktopApi['listSkills']>,
     installSkill: (skillName) => ipcRenderer.invoke('desktop:installSkill', skillName) as Promise<{ success: boolean; message: string }>,

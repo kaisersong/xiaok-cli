@@ -221,19 +221,12 @@ describe('DesktopSettings service status', () => {
     });
   });
 
-  it('links to Automations instead of exposing loop runtime controls in Settings', async () => {
-    const { onClose } = renderSettings();
+  it('does not expose loop runtime controls in Settings', async () => {
+    renderSettings();
 
     await screen.findByText('服务状态');
     expect(screen.queryByRole('button', { name: '循环' })).not.toBeInTheDocument();
     expect(screen.queryByText('Loop 诊断')).not.toBeInTheDocument();
     expect(mocks.getLoopDefinitions).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: '打开自动化' }));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('location')).toHaveTextContent('/automations/loops');
-    });
-    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

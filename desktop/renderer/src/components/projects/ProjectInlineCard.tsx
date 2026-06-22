@@ -1,8 +1,10 @@
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FolderKanban } from 'lucide-react';
+import { useLocale } from '../../contexts/LocaleContext';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import type { KSwarmProjectExecutionMode } from '../../hooks/useKSwarmClient';
-import { getInlineProjectStatusText, normalizeInlineExecutionMode } from './project-inline-utils';
+import { getInlineProjectStatusText, buildInlineProjectLabels, normalizeInlineExecutionMode } from './project-inline-utils';
 
 interface ProjectInlineCardProps {
   projectId: string;
@@ -16,6 +18,8 @@ interface ProjectInlineCardProps {
 
 export function ProjectInlineCard({ projectId, name, goal, status, createdAt, memberCount, executionMode }: ProjectInlineCardProps) {
   const navigate = useNavigate();
+  const { t } = useLocale();
+  const inlineLabels = useMemo(() => buildInlineProjectLabels(t), [t]);
   const { projects } = useKSwarm();
   const liveProject = projects.find(project => project.id === projectId);
   const displayName = liveProject?.name || name;
@@ -27,7 +31,7 @@ export function ProjectInlineCard({ projectId, name, goal, status, createdAt, me
     status: displayStatus,
     executionMode: displayExecutionMode,
     latestWorkflowRun: liveProject?.latestWorkflowRun || null,
-  });
+  }, inlineLabels);
 
   return (
     <button
@@ -46,7 +50,7 @@ export function ProjectInlineCard({ projectId, name, goal, status, createdAt, me
         {displayGoal}
       </div>
       <div className="flex items-center gap-3 text-xs text-[var(--c-text-muted)]">
-        <span>{displayMemberCount} 个智能体</span>
+        <span>{t.projectsInlineAgentCount(displayMemberCount)}</span>
         <span>·</span>
         <span>{statusText}</span>
       </div>

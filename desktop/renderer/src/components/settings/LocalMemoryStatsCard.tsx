@@ -28,7 +28,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
-function formatTimeAgo(dateStr: string | undefined): string {
+function formatTimeAgo(dateStr: string | undefined, ds: { relativeTimeJustNow: string; relativeTimeMinutesAgo: (n: number) => string; relativeTimeHoursAgo: (n: number) => string; relativeTimeDaysAgo: (n: number) => string }): string {
   if (!dateStr) return ''
   // SQLite datetime('now') stores UTC without Z suffix — normalize before parsing
   let normalized = dateStr
@@ -40,14 +40,14 @@ function formatTimeAgo(dateStr: string | undefined): string {
   const then = new Date(normalized).getTime()
   if (Number.isNaN(then)) return ''
   const diffMs = Date.now() - then
-  if (diffMs < 0) return '刚刚'
+  if (diffMs < 0) return ds.relativeTimeJustNow
   const minutes = Math.floor(diffMs / 60_000)
-  if (minutes < 1) return '刚刚'
-  if (minutes < 60) return `${minutes} 分钟前`
+  if (minutes < 1) return ds.relativeTimeJustNow
+  if (minutes < 60) return ds.relativeTimeMinutesAgo(minutes)
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} 小时前`
+  if (hours < 24) return ds.relativeTimeHoursAgo(hours)
   const days = Math.floor(hours / 24)
-  return `${days} 天前`
+  return ds.relativeTimeDaysAgo(days)
 }
 
 export function LocalMemoryStatsCard() {
@@ -221,13 +221,13 @@ export function LocalMemoryStatsCard() {
           imported++
         }
       }
-      setImportResult(`导入 ${imported} 条记忆`)
+      setImportResult(ds.memoryImportedCount(imported))
       setImportText('')
       void loadData()
       setTimeout(() => { setImportResult(null); setImportModalOpen(false) }, 1500)
     } catch (err) {
       console.error('import failed', err)
-      setImportResult('导入失败')
+      setImportResult(ds.memoryImportFailed)
     }
   }, [memoryApi, importText, loadData])
 
@@ -420,7 +420,7 @@ export function LocalMemoryStatsCard() {
                     ))}
                     {entry.createdAt && (
                       <span className="text-[11px] text-[var(--c-text-muted)]">
-                        {formatTimeAgo(entry.createdAt)}
+                        {formatTimeAgo(entry.createdAt, ds)}
                       </span>
                     )}
                   </div>
@@ -510,10 +510,10 @@ export function LocalMemoryStatsCard() {
       </Modal>
 
       {/* Edit Modal */}
-      <Modal open={!!editingEntry} onClose={() => setEditingEntry(null)} title="编辑记忆" width="480px">
+      <Modal open={!!editingEntry} onClose={() => setEditingEntry(null)} title={ds.memoryEditTitle} width="480px">
         <div className="flex flex-col gap-3">
           <textarea
-            aria-label="编辑记忆"
+            aria-label={ds.memoryEditTitle}
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
             rows={4}

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { apiBaseUrl } from '../../shared/api/client';
 import type { ArtifactRef } from '../../storage';
 import { A2uiArtifactRenderer } from './A2uiArtifactRenderer';
+import { useLocale } from '../../contexts/LocaleContext';
 
 type Props = {
   artifactRef: ArtifactRef;
@@ -10,6 +11,7 @@ type Props = {
 };
 
 export function A2uiArtifactBlock({ artifactRef, accessToken, content }: Props) {
+  const { t } = useLocale();
   const [loadedContent, setLoadedContent] = useState<string | null>(content ?? null);
   const [failed, setFailed] = useState(false);
 
@@ -42,10 +44,10 @@ export function A2uiArtifactBlock({ artifactRef, accessToken, content }: Props) 
   }, [artifactRef.artifactId, artifactRef.key, accessToken, content]);
 
   if (failed) {
-    return <div role="alert" style={{ color: 'var(--c-text-secondary)', fontSize: 13 }}>无法加载该交互式 UI</div>;
+    return <div role="alert" style={{ color: 'var(--c-text-secondary)', fontSize: 13 }}>{t.a2uiLoadFailed}</div>;
   }
   if (!loadedContent) {
-    return <div style={{ color: 'var(--c-text-tertiary)', fontSize: 13 }}>正在解析交互式 UI...</div>;
+    return <div style={{ color: 'var(--c-text-tertiary)', fontSize: 13 }}>{t.a2uiLoading}</div>;
   }
   return <A2uiArtifactRenderer artifactContent={loadedContent} artifactRef={artifactRef} />;
 }

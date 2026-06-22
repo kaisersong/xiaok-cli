@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Plus, Trash2, Star, X, Eye, EyeOff, Mic, ChevronDown, Pencil } from 'lucide-react'
 import { getDesktopApi } from '../shared/desktop'
@@ -37,9 +37,9 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
   ],
 }
 
-const LANGUAGES = [
+const LANGUAGES_BASE = [
   { value: '', label: 'auto' }, // auto-detect
-  { value: 'zh', label: '中文' },
+  { value: 'zh', label: '' }, // filled dynamically
   { value: 'en', label: 'English' },
   { value: 'ja', label: '日本語' },
   { value: 'ko', label: '한국어' },
@@ -499,6 +499,11 @@ export function VoiceSettings({ accessToken, initialConfig = null }: Props) {
   const { t } = useLocale()
   const ds = t.desktopSettings
   const api = getDesktopApi()
+
+  const LANGUAGES = useMemo(() =>
+    LANGUAGES_BASE.map((l) => l.value === 'zh' ? { ...l, label: ds.voiceLangZh } : l),
+    [ds.voiceLangZh],
+  )
 
   const [voiceEnabled, setVoiceEnabled] = useState(false)
   const [voiceLanguage, setVoiceLanguage] = useState('')

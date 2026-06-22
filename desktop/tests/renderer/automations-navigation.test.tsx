@@ -36,6 +36,7 @@ vi.mock('../../renderer/src/components/ScheduledPage', () => ({
 }));
 
 vi.mock('../../renderer/src/contexts/LocaleContext', () => ({
+  LocaleProvider: ({ children }: { children: React.ReactNode }) => children,
   useLocale: () => ({
     t: {
       automationsTitle: '自动化',
@@ -61,6 +62,37 @@ vi.mock('../../renderer/src/contexts/LocaleContext', () => ({
       automationsOverviewFailuresCount: '待处理',
     },
   }),
+}));
+
+vi.mock('../../renderer/src/themes/presets', () => ({
+  BUILTIN_PRESETS: {},
+}));
+
+vi.mock('../../renderer/src/themes/types', () => ({
+  COLOR_GROUPS: [],
+}));
+
+vi.mock('../../renderer/src/contexts/AppearanceContext', () => ({
+  useAppearance: () => ({
+    fontFamily: 'default',
+    codeFontFamily: 'jetbrains-mono',
+    fontSize: 'normal',
+    themePreset: 'default',
+    customThemeId: null,
+    customThemes: {},
+    setFontFamily: () => {},
+    setCodeFontFamily: () => {},
+    setFontSize: () => {},
+    setThemePreset: () => {},
+    setActiveCustomTheme: () => {},
+    saveCustomTheme: () => {},
+    deleteCustomTheme: () => {},
+    setPreviewVars: () => {},
+    setCustomBodyFont: () => {},
+    customBodyFont: null,
+    activeThemeVars: { dark: {}, light: {} },
+  }),
+  AppearanceProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 const apiMocks = vi.hoisted(() => ({

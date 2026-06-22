@@ -68,7 +68,7 @@ export function AgentsPage() {
       <div className="flex items-center justify-between border-b border-[var(--c-border-subtle)] px-6 py-4">
         <div className="flex items-center gap-3">
           <h1 className="text-[14px] font-semibold text-[var(--c-text-heading)]">{t.projectsPageAgents}</h1>
-          <span className="text-[11px] text-[var(--c-text-muted)]">{agents.length} 个</span>
+          <span className="text-[11px] text-[var(--c-text-muted)]">{t.projectsAgentCountLabel(agents.length)}</span>
           {!connected && (
             <span className="rounded-full bg-[var(--c-error-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--c-status-warning-text)]">
               {t.projectsPageOffline}
@@ -95,7 +95,7 @@ export function AgentsPage() {
             <div className="text-center">
               <p className="text-sm font-medium text-[var(--c-text-primary)]">{t.projectsAgentNoAgents}</p>
               <p className="mt-1 text-xs text-[var(--c-text-tertiary)]">
-                创建智能体来组建你的 AI 团队
+                {t.projectsAgentCreateHint}
               </p>
             </div>
             <button
@@ -104,7 +104,7 @@ export function AgentsPage() {
               className="mt-2 flex items-center gap-1.5 rounded-lg border-[0.5px] border-[var(--c-border-subtle)] px-4 py-1.5 text-sm font-medium text-[var(--c-text-secondary)] transition-colors duration-150 hover:bg-[var(--c-bg-deep)]"
             >
               <Plus size={15} />
-              <span>创建第一个智能体</span>
+              <span>{t.projectsAgentCreateFirstAgent}</span>
             </button>
           </div>
         ) : (

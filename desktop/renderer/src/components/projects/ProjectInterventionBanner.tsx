@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AlertTriangle, Info, MessageCircle, Play } from 'lucide-react';
 import type { ProjectIntervention } from '../../hooks/useKSwarmClient';
+import { useLocale } from '../../contexts/LocaleContext';
 import { ProjectInterventionDetailDrawer } from './ProjectInterventionDetailDrawer';
 
 interface ProjectInterventionBannerProps {
@@ -10,13 +11,14 @@ interface ProjectInterventionBannerProps {
   onAskXiaok(): void;
 }
 
-function getSecondaryActionLabel(intervention: ProjectIntervention): string {
+function getSecondaryActionLabel(intervention: ProjectIntervention, t: ReturnType<typeof import('../../contexts/LocaleContext').useLocale>['t']): string {
   const label = intervention.secondaryAction?.label?.trim();
-  if (!label || label === '问小K') return '让小K帮忙';
+  if (!label || label === '问小K') return t.projectsInterventionAskXiaokDefault;
   return label;
 }
 
 export function ProjectInterventionBanner({ intervention, busy = false, onContinue, onAskXiaok }: ProjectInterventionBannerProps) {
+  const { t } = useLocale();
   const [detailOpen, setDetailOpen] = useState(false);
   if (!intervention?.required) return null;
 
@@ -29,7 +31,7 @@ export function ProjectInterventionBanner({ intervention, busy = false, onContin
         <div className="flex flex-wrap items-center gap-2">
           <AlertTriangle size={13} className="text-[var(--c-status-warning-text)]" />
           <span className="text-[12px] font-semibold text-[var(--c-status-warning-text)]">
-            {intervention.headline || '需要处理'}
+            {intervention.headline || t.projectsInterventionDefaultHeadline}
           </span>
           {intervention.primaryTaskTitle && (
             <span className="max-w-[260px] truncate rounded bg-[var(--c-bg-page)]/70 px-1.5 py-0.5 text-[10px] text-[var(--c-text-muted)]">
@@ -48,7 +50,7 @@ export function ProjectInterventionBanner({ intervention, busy = false, onContin
             className="inline-flex items-center gap-1 rounded-lg bg-[var(--c-btn-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--c-btn-text)] hover:brightness-[1.08] disabled:opacity-50"
           >
             <Play size={11} />
-            <span>{busy ? '推进中' : intervention.primaryAction?.label || '继续推进'}</span>
+            <span>{busy ? t.projectsInterventionBusy : intervention.primaryAction?.label || t.projectsInterventionContinueDefault}</span>
           </button>
           <button
             type="button"
@@ -57,7 +59,7 @@ export function ProjectInterventionBanner({ intervention, busy = false, onContin
             className="inline-flex items-center gap-1 rounded-lg bg-[var(--c-bg-page)] px-2.5 py-1 text-[11px] font-medium text-[var(--c-text-primary)] hover:bg-[var(--c-bg-card)] disabled:opacity-50"
           >
             <MessageCircle size={11} />
-            <span>{getSecondaryActionLabel(intervention)}</span>
+            <span>{getSecondaryActionLabel(intervention, t)}</span>
           </button>
           <button
             type="button"
@@ -65,7 +67,7 @@ export function ProjectInterventionBanner({ intervention, busy = false, onContin
             className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] text-[var(--c-text-muted)] hover:bg-[var(--c-bg-page)] hover:text-[var(--c-text-primary)]"
           >
             <Info size={11} />
-            <span>查看原因</span>
+            <span>{t.projectsInterventionViewReason}</span>
           </button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { ArtifactEditableViewer } from '../../renderer/src/components/ArtifactEditableViewer';
 
 describe('ArtifactEditableViewer sandbox policy', () => {
@@ -18,13 +19,15 @@ describe('ArtifactEditableViewer sandbox policy', () => {
 
   it('does not combine allow-scripts with allow-same-origin', () => {
     const { container } = render(
-      <ArtifactEditableViewer
-        htmlContent="<html><body><button>hello</button></body></html>"
-        filePath="/tmp/artifact.html"
-        onAnnotation={vi.fn()}
-        onRevert={vi.fn()}
-        onFinish={vi.fn()}
-      />,
+      <LocaleProvider>
+        <ArtifactEditableViewer
+          htmlContent="<html><body><button>hello</button></body></html>"
+          filePath="/tmp/artifact.html"
+          onAnnotation={vi.fn()}
+          onRevert={vi.fn()}
+          onFinish={vi.fn()}
+        />
+      </LocaleProvider>,
     );
 
     const frame = container.querySelector('iframe') as HTMLIFrameElement;

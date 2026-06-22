@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ArtifactEditingState } from '../hooks/artifact-editing-state';
+import { useLocale } from '../contexts/LocaleContext';
 
 interface ArtifactToolbarProps {
   state: ArtifactEditingState;
@@ -10,6 +11,7 @@ interface ArtifactToolbarProps {
 }
 
 export function ArtifactToolbar({ state, onToggleAnnotate, onRevert, onFinish, onRefresh }: ArtifactToolbarProps) {
+  const { t } = useLocale();
   const isAnnotating = state === 'annotating';
   const showRevertAndFinish = state === 'reviewing';
 
@@ -18,16 +20,16 @@ export function ArtifactToolbar({ state, onToggleAnnotate, onRevert, onFinish, o
       <button type="button"
         className={`artifact-toolbar-btn ${isAnnotating ? 'active' : ''}`}
         onClick={onToggleAnnotate}
-        title={isAnnotating ? '完成修订' : '开启修订'}
+        title={isAnnotating ? t.artifactFinishRevision : t.artifactStartRevision}
       >
         <span className="artifact-toolbar-icon">{isAnnotating ? '✓' : '✏'}</span>
-        <span>{isAnnotating ? '完成修订' : '修订'}</span>
+        <span>{isAnnotating ? t.artifactFinishRevision : t.artifactRevision}</span>
       </button>
       {onRefresh && (
         <button type="button"
           className="artifact-toolbar-btn"
           onClick={onRefresh}
-          title="刷新预览"
+          title={t.artifactRefreshPreview}
         >
           <span className="artifact-toolbar-icon">↻</span>
         </button>
@@ -37,26 +39,26 @@ export function ArtifactToolbar({ state, onToggleAnnotate, onRevert, onFinish, o
           <button type="button"
             className="artifact-toolbar-btn"
             onClick={onRevert}
-            title="撤回修改"
+            title={t.artifactRevertChanges}
           >
             <span className="artifact-toolbar-icon">↩</span>
-            <span>撤回</span>
+            <span>{t.artifactRevert}</span>
           </button>
           <button type="button"
             className="artifact-toolbar-btn"
             onClick={onFinish}
-            title="完成编辑"
+            title={t.artifactFinishEditing}
           >
             <span className="artifact-toolbar-icon">✓</span>
-            <span>完成</span>
+            <span>{t.artifactFinish}</span>
           </button>
         </>
       )}
       {state === 'submitted' && (
-        <span className="artifact-toolbar-status">等待 Agent 响应...</span>
+        <span className="artifact-toolbar-status">{t.artifactWaitingAgent}</span>
       )}
       {state === 'timeout_idle' && (
-        <span className="artifact-toolbar-status">Agent 未响应，可继续操作</span>
+        <span className="artifact-toolbar-status">{t.artifactAgentNotResponding}</span>
       )}
     </div>
   );

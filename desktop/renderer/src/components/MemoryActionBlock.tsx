@@ -2,23 +2,25 @@ import type { CSSProperties } from 'react'
 import { Brain, Check, Loader2, Pencil, Search, Eye, Trash2, X } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { MemoryActionRef } from '../storage'
+import { useLocale } from '../contexts/LocaleContext'
+import type { LocaleStrings } from '../locales'
 
 type Props = {
   actions: MemoryActionRef[]
   live?: boolean
 }
 
-function getToolLabel(toolName: MemoryActionRef['toolName']): string {
+function getToolLabel(toolName: MemoryActionRef['toolName'], t: LocaleStrings): string {
   switch (toolName) {
-    case 'memory_write': return '写入记忆'
-    case 'memory_edit': return '编辑记忆'
-    case 'memory_search': return '搜索记忆'
-    case 'memory_read': return '读取记忆'
-    case 'memory_forget': return '删除记忆'
-    case 'notebook_write': return '写入笔记'
-    case 'notebook_read': return '读取笔记'
-    case 'notebook_edit': return '编辑笔记'
-    case 'notebook_forget': return '删除笔记'
+    case 'memory_write': return t.memoryActionWrite
+    case 'memory_edit': return t.memoryActionEdit
+    case 'memory_search': return t.memoryActionSearch
+    case 'memory_read': return t.memoryActionRead
+    case 'memory_forget': return t.memoryActionForget
+    case 'notebook_write': return t.memoryActionNotebookWrite
+    case 'notebook_read': return t.memoryActionNotebookRead
+    case 'notebook_edit': return t.memoryActionNotebookEdit
+    case 'notebook_forget': return t.memoryActionNotebookForget
   }
 }
 
@@ -75,8 +77,8 @@ function getArgSummary(action: MemoryActionRef): string {
   return ''
 }
 
-function MemoryActionRow({ action, live }: { action: MemoryActionRef; live?: boolean }) {
-  const label = getToolLabel(action.toolName)
+function MemoryActionRow({ action, live, t }: { action: MemoryActionRef; live?: boolean; t: LocaleStrings }) {
+  const label = getToolLabel(action.toolName, t)
   const argSummary = getArgSummary(action)
   const isActive = action.status === 'active'
   const isError = action.status === 'error'
@@ -127,6 +129,7 @@ function MemoryActionRow({ action, live }: { action: MemoryActionRef; live?: boo
 }
 
 export function MemoryActionBlock({ actions, live }: Props) {
+  const { t } = useLocale()
   if (actions.length === 0) return null
 
   return (
@@ -157,11 +160,11 @@ export function MemoryActionBlock({ actions, live }: Props) {
         }}
       >
         <Brain size={11} />
-        记忆操作
+        {t.memoryActionBlockTitle}
       </div>
       <AnimatePresence initial={false}>
         {actions.map((action) => (
-          <MemoryActionRow key={action.id} action={action} live={live} />
+          <MemoryActionRow key={action.id} action={action} live={live} t={t} />
         ))}
       </AnimatePresence>
     </motion.div>

@@ -2,6 +2,7 @@ import React, { Component, useMemo, type ErrorInfo, type ReactNode } from 'react
 import type { ArtifactRef } from '../../storage';
 import { validateA2uiMessages, type A2UIMessage } from '../../../../../src/a2ui/index.js';
 import { A2uiSurfaceRenderer } from './A2uiSurfaceRenderer';
+import { useLocale } from '../../contexts/LocaleContext';
 
 type Props = {
   artifactContent: string;
@@ -12,7 +13,7 @@ type ErrorBoundaryState = {
   error: string | null;
 };
 
-class A2uiErrorBoundary extends Component<{ resetKey: string; children: ReactNode }, ErrorBoundaryState> {
+class A2uiErrorBoundary extends Component<{ resetKey: string; errorMessage: string; children: ReactNode }, ErrorBoundaryState> {
   state: ErrorBoundaryState = { error: null };
 
   componentDidUpdate(prevProps: { resetKey: string }) {
@@ -26,12 +27,13 @@ class A2uiErrorBoundary extends Component<{ resetKey: string; children: ReactNod
   }
 
   render() {
-    if (this.state.error) return <A2uiRenderError />;
+    if (this.state.error) return <A2uiRenderError message={this.props.errorMessage} />;
     return this.props.children;
   }
 }
 
 export function A2uiArtifactRenderer({ artifactContent, artifactRef }: Props) {
+  const { t } = useLocale();
   const parsed = useMemo(() => {
     try {
       const messages = JSON.parse(artifactContent);
@@ -43,17 +45,18 @@ export function A2uiArtifactRenderer({ artifactContent, artifactRef }: Props) {
     }
   }, [artifactContent, artifactRef.key, artifactRef.artifactId]);
 
-  if (!parsed.ok) return <A2uiRenderError />;
+  if (!parsed.ok) return <A2uiRenderError message={t.a2uiRenderError} />;
 
   const resetKey = `${artifactRef.key ?? artifactRef.artifactId}:${artifactContent.length}`;
   return (
-    <A2uiErrorBoundary resetKey={resetKey}>
+    <A2uiErrorBoundary resetKey={resetKey} errorMessage={t.a2uiRenderError}>
       <A2uiSurfaceRenderer messages={parsed.messages} />
     </A2uiErrorBoundary>
   );
 }
 
-function A2uiRenderError() {
+function A2uiRenderError({ message }: { message?: string }) {
+  const { t } = useLocale();
   return (
     <div
       role="alert"
@@ -67,7 +70,7 @@ function A2uiRenderError() {
         fontSize: 13,
       }}
     >
-      无法渲染该交互式 UI
+      {message || t.a2uiRenderError}
     </div>
   );
 }

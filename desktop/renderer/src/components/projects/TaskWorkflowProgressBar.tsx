@@ -1,3 +1,4 @@
+import { useLocale } from '../../contexts/LocaleContext';
 import type { TaskPipelineProgress } from './workflowUtils';
 
 interface TaskWorkflowProgressBarProps {
@@ -6,6 +7,7 @@ interface TaskWorkflowProgressBarProps {
 }
 
 export function TaskWorkflowProgressBar({ progress, height = 'sm' }: TaskWorkflowProgressBarProps) {
+  const { t } = useLocale();
   if (progress.total === 0) return null;
 
   const completedPct = (progress.completed / progress.total) * 100;
@@ -38,7 +40,7 @@ export function TaskWorkflowProgressBar({ progress, height = 'sm' }: TaskWorkflo
         </div>
       </div>
       <span className="truncate text-[10px] leading-none text-[var(--c-text-muted)]">
-        {progress.primaryMessage || `${progress.completed}/${progress.total} 节点`}
+        {progress.primaryMessage || t.projectsTaskProgressNodes(String(progress.completed), String(progress.total))}
       </span>
     </div>
   );

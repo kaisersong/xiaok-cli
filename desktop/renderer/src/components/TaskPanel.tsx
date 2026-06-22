@@ -1,5 +1,6 @@
 import React from 'react';
 import type { TaskResult, ArtifactSummary } from '../../../shared/task-types';
+import { useLocale } from '../contexts/LocaleContext';
 
 interface PlanStepItem {
   id: string;
@@ -32,6 +33,7 @@ function StepIcon({ status }: { status: string }) {
 }
 
 export function TaskPanel({ planSteps, status, result, generatedFiles, onFileClick, onArtifactClick }: TaskPanelProps) {
+  const { t } = useLocale();
   if (planSteps.length === 0) return null;
 
   const hasResults = (result?.artifacts && result.artifacts.length > 0) || generatedFiles.length > 0;
@@ -40,7 +42,7 @@ export function TaskPanel({ planSteps, status, result, generatedFiles, onFileCli
   return (
     <div className="task-panel">
       <div className="task-panel__section">
-        <div className="task-panel__heading">进度</div>
+        <div className="task-panel__heading">{t.taskPanelProgress}</div>
         <ul className="task-panel__steps">
           {planSteps.map((step) => (
             <li key={step.id} className={`task-panel__step task-panel__step--${step.status}`}>
@@ -53,7 +55,7 @@ export function TaskPanel({ planSteps, status, result, generatedFiles, onFileCli
 
       {showResults && (
         <div className="task-panel__section">
-          <div className="task-panel__heading">生成结果</div>
+          <div className="task-panel__heading">{t.taskPanelResults}</div>
           <ul className="task-panel__results">
             {result?.artifacts?.map((artifact) => (
               <li key={artifact.artifactId}>

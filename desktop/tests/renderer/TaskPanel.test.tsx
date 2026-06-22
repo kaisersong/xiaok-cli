@@ -2,6 +2,7 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { TaskPanel } from '../../renderer/src/components/TaskPanel';
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 
 describe('TaskPanel', () => {
   const defaultProps = {
@@ -19,13 +20,15 @@ describe('TaskPanel', () => {
 
   it('renders nothing when planSteps is empty', () => {
     const { container } = render(
-      <TaskPanel {...defaultProps} planSteps={[]} />
+      <LocaleProvider>
+        <TaskPanel {...defaultProps} planSteps={[]} />
+      </LocaleProvider>
     );
     expect(container.innerHTML).toBe('');
   });
 
   it('renders plan steps with correct labels', () => {
-    render(<TaskPanel {...defaultProps} />);
+    render(<LocaleProvider><TaskPanel {...defaultProps} /></LocaleProvider>);
     expect(screen.getByText('分析需求')).toBeTruthy();
     expect(screen.getByText('生成方案')).toBeTruthy();
     expect(screen.getByText('输出文档')).toBeTruthy();
@@ -40,7 +43,9 @@ describe('TaskPanel', () => {
       { id: 's5', label: 'Failed', status: 'failed' },
     ];
     const { container } = render(
-      <TaskPanel {...defaultProps} planSteps={steps} />
+      <LocaleProvider>
+        <TaskPanel {...defaultProps} planSteps={steps} />
+      </LocaleProvider>
     );
     const icons = container.querySelectorAll('.step-icon');
     expect(icons[0].textContent).toBe('●'); // completed
@@ -51,7 +56,7 @@ describe('TaskPanel', () => {
   });
 
   it('applies correct CSS class per step status', () => {
-    const { container } = render(<TaskPanel {...defaultProps} />);
+    const { container } = render(<LocaleProvider><TaskPanel {...defaultProps} /></LocaleProvider>);
     const stepElements = container.querySelectorAll('.task-panel__step');
     expect(stepElements[0].classList.contains('task-panel__step--completed')).toBe(true);
     expect(stepElements[1].classList.contains('task-panel__step--running')).toBe(true);
@@ -60,10 +65,12 @@ describe('TaskPanel', () => {
 
   it('does not show results section when task is still running', () => {
     const { container } = render(
-      <TaskPanel
-        {...defaultProps}
-        result={{ summary: '完成', artifacts: [{ artifactId: 'a1', kind: 'pptx', title: '方案.pptx', createdAt: 'now', previewAvailable: true, filePath: '/tmp/a.pptx' }] }}
-      />
+      <LocaleProvider>
+        <TaskPanel
+          {...defaultProps}
+          result={{ summary: '完成', artifacts: [{ artifactId: 'a1', kind: 'pptx', title: '方案.pptx', createdAt: 'now', previewAvailable: true, filePath: '/tmp/a.pptx' }] }}
+        />
+      </LocaleProvider>
     );
     expect(container.querySelector('.task-panel__results')).toBeNull();
   });
@@ -76,7 +83,9 @@ describe('TaskPanel', () => {
       ],
     };
     render(
-      <TaskPanel {...defaultProps} status="completed" result={result} />
+      <LocaleProvider>
+        <TaskPanel {...defaultProps} status="completed" result={result} />
+      </LocaleProvider>
     );
     expect(screen.getByText('方案.pptx')).toBeTruthy();
     expect(screen.getByText('生成结果')).toBeTruthy();
@@ -91,7 +100,9 @@ describe('TaskPanel', () => {
       ],
     };
     const { container } = render(
-      <TaskPanel {...defaultProps} status="completed" result={result} onArtifactClick={onArtifactClick} />
+      <LocaleProvider>
+        <TaskPanel {...defaultProps} status="completed" result={result} onArtifactClick={onArtifactClick} />
+      </LocaleProvider>
     );
     const resultItem = within(container).getByRole('button', { name: '方案.pptx' });
     fireEvent.click(resultItem);
@@ -110,7 +121,9 @@ describe('TaskPanel', () => {
       { filePath: '/tmp/b.md', name: '笔记.md' }, // unique, should show
     ];
     render(
-      <TaskPanel {...defaultProps} status="completed" result={result} generatedFiles={generatedFiles} />
+      <LocaleProvider>
+        <TaskPanel {...defaultProps} status="completed" result={result} generatedFiles={generatedFiles} />
+      </LocaleProvider>
     );
     // 笔记.md should be visible as a generated file
     expect(screen.getByText('笔记.md')).toBeTruthy();
@@ -120,7 +133,9 @@ describe('TaskPanel', () => {
     const onFileClick = vi.fn();
     const generatedFiles = [{ filePath: '/tmp/b.md', name: '笔记.md' }];
     const { container } = render(
-      <TaskPanel {...defaultProps} status="completed" result={{ summary: '完成', artifacts: [] }} generatedFiles={generatedFiles} onFileClick={onFileClick} />
+      <LocaleProvider>
+        <TaskPanel {...defaultProps} status="completed" result={{ summary: '完成', artifacts: [] }} generatedFiles={generatedFiles} onFileClick={onFileClick} />
+      </LocaleProvider>
     );
     const resultItem = within(container).getByRole('button', { name: '笔记.md' });
     fireEvent.click(resultItem);
@@ -135,13 +150,15 @@ describe('TaskPanel', () => {
       ],
     };
     render(
-      <TaskPanel {...defaultProps} status="idle" result={result} />
+      <LocaleProvider>
+        <TaskPanel {...defaultProps} status="idle" result={result} />
+      </LocaleProvider>
     );
     expect(screen.getByText('报告.html')).toBeTruthy();
   });
 
   it('renders heading "进度"', () => {
-    const { container } = render(<TaskPanel {...defaultProps} />);
+    const { container } = render(<LocaleProvider><TaskPanel {...defaultProps} /></LocaleProvider>);
     const heading = container.querySelector('.task-panel__heading');
     expect(heading).toBeTruthy();
     expect(heading!.textContent).toBe('进度');

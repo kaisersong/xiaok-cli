@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Download, Check, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
+import { useLocale } from '../../contexts/LocaleContext'
 
 interface ModelEntry {
   id: string
@@ -15,6 +16,8 @@ interface ModelEntry {
 type DownloadState = { modelId: string; status: 'downloading' | 'done' | 'error'; error?: string } | null
 
 export function MemoryModelSettings() {
+  const { t } = useLocale()
+  const ds = t.desktopSettings
   const [models, setModels] = useState<ModelEntry[]>([])
   const [downloadState, setDownloadState] = useState<DownloadState>(null)
   const [loading, setLoading] = useState(true)
@@ -55,12 +58,12 @@ export function MemoryModelSettings() {
     }
   }
 
-  if (loading) return <div className="text-sm text-[var(--c-text-muted)]">加载中...</div>
+  if (loading) return <div className="text-sm text-[var(--c-text-muted)]">{t.loading}</div>
 
   return (
     <div className="space-y-2">
-      <div className="text-xs font-medium text-[var(--c-text-secondary)]">向量化模型</div>
-      <p className="text-xs text-[var(--c-text-muted)]">选择本地向量化模型。点击即可下载并切换。</p>
+      <div className="text-xs font-medium text-[var(--c-text-secondary)]">{ds.embeddingModelTitle}</div>
+      <p className="text-xs text-[var(--c-text-muted)]">{ds.embeddingModelDesc}</p>
 
       <div className="mt-2 space-y-1">
         {models.map(model => {
@@ -99,7 +102,7 @@ export function MemoryModelSettings() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-[var(--c-text-primary)]">{model.name}</span>
-                    <span className="text-[10px] text-[var(--c-text-muted)]">{model.size} · {model.dims}维</span>
+                    <span className="text-[10px] text-[var(--c-text-muted)]">{model.size} · {ds.embeddingModelDims(model.dims)}</span>
                   </div>
                   <div className="text-xs text-[var(--c-text-muted)]">{model.languages}</div>
                 </div>
@@ -109,17 +112,17 @@ export function MemoryModelSettings() {
                   {isDownloading ? (
                     <span className="flex items-center gap-1.5 text-xs text-[var(--c-text-muted)]">
                       <Loader2 className="size-3.5 animate-spin" />
-                      <span>下载中…</span>
+                      <span>{ds.embeddingModelDownloading}</span>
                     </span>
                   ) : model.downloaded ? (
                     <span className="flex items-center gap-1 text-xs text-green-600">
                       <Check className="size-3.5" />
-                      <span>已下载</span>
+                      <span>{ds.embeddingModelDownloaded}</span>
                     </span>
                   ) : (
                     <span className="flex items-center gap-1 text-xs text-[var(--c-text-muted)]">
                       <Download className="size-3.5" />
-                      <span>点击下载</span>
+                      <span>{ds.embeddingModelClickToDownload}</span>
                     </span>
                   )}
 
@@ -127,7 +130,7 @@ export function MemoryModelSettings() {
                     <button type="button"
                       onClick={(e) => { e.stopPropagation(); setExpandedId(isExpanded ? null : model.id) }}
                       className="flex size-6 items-center justify-center rounded text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]"
-                      title="手动下载指引"
+                      title={ds.embeddingModelManualGuideTitle}
                     >
                       {isExpanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
                     </button>
@@ -143,16 +146,16 @@ export function MemoryModelSettings() {
 
               {isExpanded && (
                 <div className="mt-1 ml-7 rounded-md bg-[var(--c-bg-deep)] p-3 text-xs text-[var(--c-text-secondary)] space-y-1.5">
-                  <div className="font-medium text-[var(--c-text-primary)]">手动下载指引</div>
-                  <div>1. 浏览器打开以下链接下载文件：</div>
+                  <div className="font-medium text-[var(--c-text-primary)]">{ds.embeddingModelManualGuideTitle}</div>
+                  <div>{ds.embeddingModelManualStep1}</div>
                   {model.manualHint.urls.map(u => (
                     <div key={u.file} className="pl-3 break-all">
                       <span className="text-[var(--c-text-primary)]">{u.file}</span>：{u.url}
                     </div>
                   ))}
-                  <div>2. 将文件放入目录：</div>
+                  <div>{ds.embeddingModelManualStep2}</div>
                   <div className="pl-3 rounded bg-[var(--c-bg-base)] px-2 py-1 font-mono text-[var(--c-text-primary)]">{model.manualHint.targetDir}</div>
-                  <div>3. 放好后刷新此页面即可</div>
+                  <div>{ds.embeddingModelManualStep3}</div>
                 </div>
               )}
             </div>
@@ -169,25 +172,25 @@ export function MemoryModelSettings() {
         >
           <div className="rounded-xl border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-5 shadow-xl max-w-sm w-full mx-4" onClick={e => e.stopPropagation()}>
             <div className="text-sm font-medium text-[var(--c-text-primary)] mb-2">
-              {confirmModel.downloaded ? '切换模型' : '下载并切换模型'}
+              {confirmModel.downloaded ? ds.embeddingModelSwitchTitle : ds.embeddingModelDownloadAndSwitchTitle}
             </div>
             <div className="text-xs text-[var(--c-text-secondary)] mb-4">
               {confirmModel.downloaded
-                ? `确定切换到「${confirmModel.name}」？`
-                : `确定下载并切换到「${confirmModel.name}」？（约 ${confirmModel.size}）`}
+                ? ds.embeddingModelSwitchConfirm(confirmModel.name)
+                : ds.embeddingModelDownloadAndSwitchConfirm(confirmModel.name, confirmModel.size)}
             </div>
             <div className="flex justify-end gap-2">
               <button type="button"
                 onClick={() => setConfirmModel(null)}
                 className="rounded-md border border-[var(--c-border-subtle)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
               >
-                取消
+                {ds.embeddingModelCancel}
               </button>
               <button type="button"
                 onClick={handleConfirm}
                 className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white hover:opacity-90"
               >
-                确定
+                {ds.embeddingModelConfirm}
               </button>
             </div>
           </div>

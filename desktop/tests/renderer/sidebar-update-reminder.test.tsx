@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { SidebarComponent } from '../../renderer/src/components/Sidebar';
 
 const mockApi = vi.hoisted(() => ({
@@ -28,23 +29,6 @@ vi.mock('../../renderer/src/api', () => ({
 
 vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
   useKSwarm: () => ({ projects: mockKSwarmState.projects }),
-}));
-
-vi.mock('../../renderer/src/contexts/LocaleContext', () => ({
-  useLocale: () => ({
-    t: {
-      sidebarNewTask: '新建任务',
-      sidebarAutomations: '自动化',
-      sidebarScheduled: '定时任务',
-      sidebarProjects: '项目',
-      sidebarSearch: '搜索...',
-      sidebarRecent: '最近',
-      sidebarNoResults: '没有结果',
-      sidebarNoRecent: '暂无记录',
-      sidebarRename: '重命名',
-      untitled: '未命名',
-    },
-  }),
 }));
 
 const mockThreadList = vi.hoisted(() => ({
@@ -86,7 +70,9 @@ function renderSidebar(status: {
 
   render(
     <MemoryRouter initialEntries={[initialEntry]}>
-      <SidebarComponent onOpenSettings={() => {}} />
+      <LocaleProvider>
+        <SidebarComponent onOpenSettings={() => {}} />
+      </LocaleProvider>
     </MemoryRouter>,
   );
 }

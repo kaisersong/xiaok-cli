@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { ArtifactToolbar } from '../../renderer/src/components/ArtifactToolbar';
 import type { ArtifactEditingState } from '../../renderer/src/hooks/artifact-editing-state';
 
@@ -17,12 +18,14 @@ describe('ArtifactToolbar', () => {
 
   function renderToolbar(state: ArtifactEditingState) {
     return render(
-      <ArtifactToolbar
-        state={state}
-        onToggleAnnotate={mockToggle}
-        onRevert={mockRevert}
-        onFinish={mockFinish}
-      />,
+      <LocaleProvider>
+        <ArtifactToolbar
+          state={state}
+          onToggleAnnotate={mockToggle}
+          onRevert={mockRevert}
+          onFinish={mockFinish}
+        />
+      </LocaleProvider>,
     );
   }
 

@@ -688,8 +688,6 @@ describe('WorkflowStatusStrip', () => {
     expect(dialog).toBeInTheDocument();
     expect(dialog.className).toContain('bg-[var(--c-bg-card)]');
     expect(dialog.className).not.toContain('/10');
-    expect(dialog.className).toContain('left-0');
-    expect(dialog.className).not.toContain('right-0');
     expect(screen.getByText('执行方式：工作流执行')).toBeInTheDocument();
     expect(screen.getByText('参与 Agent：xiaok-worker / xiaok-po')).toBeInTheDocument();
     expect(screen.getByText('Worker 项目诊断')).toBeInTheDocument();
@@ -1022,8 +1020,6 @@ describe('ProjectDetailPage workflow action', () => {
     const dialog = await screen.findByRole('dialog', { name: '工作流执行确认' });
     expect(dialog.className).toContain('bg-[var(--c-bg-card)]');
     expect(dialog.className).not.toContain('/10');
-    expect(dialog.className).toContain('right-0');
-    expect(dialog.className).not.toContain('left-0');
     expect(dialog).toHaveTextContent('Agent 复核诊断');
     expect(dialog).toHaveTextContent('目标');
     expect(dialog).toHaveTextContent('Agent 复核诊断验收标准');

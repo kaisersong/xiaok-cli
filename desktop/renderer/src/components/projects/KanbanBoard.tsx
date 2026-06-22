@@ -73,7 +73,7 @@ function formatTaskTimestamp(value: number): string {
   return TASK_TIMESTAMP_FORMATTER.format(new Date(value)).replace(',', '');
 }
 
-function getTaskTimeMeta(task: KSwarmTask): { label: string; value: number } | null {
+function getTaskTimeMeta(task: KSwarmTask, t: ReturnType<typeof import('../../contexts/LocaleContext').useLocale>['t']): { label: string; value: number } | null {
   const rawTask = task as KSwarmTask & {
     runTelemetry?: { startedAt?: number | string; startedAtMs?: number | string };
     runLease?: { startedAt?: number | string; createdAt?: number | string };
@@ -93,7 +93,7 @@ function getTaskTimeMeta(task: KSwarmTask): { label: string; value: number } | n
       task.updatedAt,
       task.createdAt,
     ]);
-    return value ? { label: '启动时间', value } : null;
+    return value ? { label: t.projectsKanbanStartTime, value } : null;
   }
 
   if (task.status === 'done') {
@@ -102,52 +102,52 @@ function getTaskTimeMeta(task: KSwarmTask): { label: string; value: number } | n
       task.reviewResult?.reviewedAt,
       task.updatedAt,
     ]);
-    return value ? { label: '完成时间', value } : null;
+    return value ? { label: t.projectsKanbanCompleteTime, value } : null;
   }
 
   return null;
 }
 
-function getProjectExecutionPreview(mode?: KSwarmProject['executionMode']): { label: string; reason?: string; tone: 'direct' | 'workflow' } | null {
+function getProjectExecutionPreview(mode: KSwarmProject['executionMode'] | undefined, t: ReturnType<typeof import('../../contexts/LocaleContext').useLocale>['t']): { label: string; reason?: string; tone: 'direct' | 'workflow' } | null {
   if (mode === 'workflow_preferred') {
-    return { label: '工作流执行', reason: '高质量', tone: 'workflow' };
+    return { label: t.projectsKanbanExecWorkflow, reason: t.projectsKanbanExecHighQuality, tone: 'workflow' };
   }
   if (mode === 'auto') {
-    return { label: '智能选择', tone: 'direct' };
+    return { label: t.projectsKanbanExecAutoSelect, tone: 'direct' };
   }
   if (mode === 'direct') {
-    return { label: '快速执行', tone: 'direct' };
+    return { label: t.projectsKanbanExecDirect, tone: 'direct' };
   }
   return null;
 }
 
-function getTaskExecutionView(task: KSwarmTask, projectExecutionMode?: KSwarmProject['executionMode']): { label: string; reason?: string; tone: 'direct' | 'workflow' } | null {
+function getTaskExecutionView(task: KSwarmTask, projectExecutionMode: KSwarmProject['executionMode'] | undefined, t: ReturnType<typeof import('../../contexts/LocaleContext').useLocale>['t']): { label: string; reason?: string; tone: 'direct' | 'workflow' } | null {
   const execution = task.execution;
-  if (!execution?.strategy) return getProjectExecutionPreview(projectExecutionMode);
+  if (!execution?.strategy) return getProjectExecutionPreview(projectExecutionMode, t);
   if (execution.strategy === 'workflow') {
     return {
-      label: '工作流执行',
-      reason: formatExecutionReason(execution.reasonCode),
+      label: t.projectsKanbanExecWorkflow,
+      reason: formatExecutionReason(execution.reasonCode, t),
       tone: 'workflow',
     };
   }
   return {
-    label: '快速执行',
-    reason: formatExecutionReason(execution.reasonCode),
+    label: t.projectsKanbanExecDirect,
+    reason: formatExecutionReason(execution.reasonCode, t),
     tone: 'direct',
   };
 }
 
-function formatExecutionReason(reasonCode?: string): string {
+function formatExecutionReason(reasonCode: string | undefined, t: ReturnType<typeof import('../../contexts/LocaleContext').useLocale>['t']): string {
   const labels: Record<string, string> = {
-    delivery_review: '交付复核',
-    quality_requested: '质量门禁',
-    multi_source_evidence: '证据链',
-    retry_after_failure: '失败恢复',
-    rework_after_review: '返工复核',
-    blocked_or_unclear: '阻塞诊断',
-    project_workflow_preferred: '高质量',
-    manual_task_workflow: '手动指定',
+    delivery_review: t.projectsKanbanReasonDeliveryReview,
+    quality_requested: t.projectsKanbanReasonQualityGate,
+    multi_source_evidence: t.projectsKanbanReasonEvidenceChain,
+    retry_after_failure: t.projectsKanbanReasonRetryAfterFailure,
+    rework_after_review: t.projectsKanbanReasonReworkReview,
+    blocked_or_unclear: t.projectsKanbanReasonBlockedDiagnose,
+    project_workflow_preferred: t.projectsKanbanReasonHighQuality,
+    manual_task_workflow: t.projectsKanbanReasonManualWorkflow,
     simple_direct: '',
     project_direct_default: '',
   };
@@ -176,7 +176,7 @@ function TaskCard({
   const [acting, setActing] = useState(false);
   const displayTitle = getTaskDisplayTitle(task);
   const description = typeof task.description === 'string' ? task.description.trim() : '';
-  const taskTime = getTaskTimeMeta(task);
+  const taskTime = getTaskTimeMeta(task, t);
   const isFailed = task.status === 'failed';
   const isBlocked = task.status === 'blocked';
   const isCancelled = task.status === 'cancelled';
@@ -187,12 +187,12 @@ function TaskCard({
   const resultArtifacts = Array.isArray(result.artifacts) ? result.artifacts : [];
   const hasArtifacts = resultArtifacts.length > 0;
   const failureReason = task.blockedReason || task.failureReason || task.lastFailureClass || task.failureClass || review?.feedback || '';
-  const executionView = getTaskExecutionView(task, projectExecutionMode);
+  const executionView = getTaskExecutionView(task, projectExecutionMode, t);
 
   const recoveryBadge = (() => {
-    if (task.suspendedAt) return { icon: PauseCircle, label: '已暂停 · 待恢复' };
+    if (task.suspendedAt) return { icon: PauseCircle, label: t.projectsKanbanSuspended };
     if (typeof task.retryNotBefore === 'number' && Number.isFinite(task.retryNotBefore) && task.retryNotBefore > Date.now()) {
-      return { icon: RotateCcw, label: '等待重试' };
+      return { icon: RotateCcw, label: t.projectsKanbanWaitRetry };
     }
     return null;
   })();
@@ -250,7 +250,7 @@ function TaskCard({
           {!acting && (canCancel || canMarkDone || onStartTaskWorkflow) && (
             <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
               {onStartTaskWorkflow && (
-                <button type="button" onClick={handleStartTaskWorkflow} className="rounded p-0.5 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]" title="用工作流执行" aria-label="用工作流执行">
+                <button type="button" onClick={handleStartTaskWorkflow} className="rounded p-0.5 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]" title={t.projectsKanbanUseWorkflow} aria-label={t.projectsKanbanUseWorkflow}>
                   <Workflow size={12} />
                 </button>
               )}
@@ -341,7 +341,7 @@ function TaskCard({
         {(isFailed || isBlocked || isCancelled) && (
           <div className="mt-1.5 space-y-1">
             <span className="inline-block rounded-full bg-[var(--c-error-bg)] px-1.5 py-0.5 text-[10px] text-[var(--c-status-error-text)]">
-              {isBlocked ? '阻塞' : isCancelled ? '已取消' : '失败'}
+              {isBlocked ? t.projectsKanbanBlocked : isCancelled ? t.projectsKanbanCancelled : t.projectsKanbanFailed}
             </span>
             {failureReason && (
               <p className="text-[10px] leading-snug text-[var(--c-status-error-text)] line-clamp-3">{failureReason}</p>
@@ -351,7 +351,7 @@ function TaskCard({
         {isDone && (
           <div className="mt-1.5">
             <span className="inline-block rounded-full bg-[var(--c-status-success-text)]/10 px-1.5 py-0.5 text-[10px] text-[var(--c-status-success-text)]">
-              已完成
+              {t.projectsKanbanTaskDone}
             </span>
           </div>
         )}

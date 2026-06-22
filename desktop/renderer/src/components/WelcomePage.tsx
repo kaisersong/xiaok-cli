@@ -3,19 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { ChatInput } from './ChatInput';
 import { api } from '../api';
 import { getDesktopApi } from '../shared/desktop';
-
-const QUICK_PROMPTS = [
-  '帮我写一篇产品调研报告',
-  '生成一份竞品对比分析',
-  '帮我整理会议纪要并提取待办',
-  '写一份项目立项方案',
-  '帮我写本周工作总结',
-  '写一份介绍小K的演示文稿',
-  '创建项目, 让2个智能体搞定本月国外主要AI产品动态分析',
-  '创建定时任务：每天早上9点生成AI日报',
-  '设计一个工作流：资料收集、撰写、评审后交付报告',
-  '创建Loop：每周自动检查项目状态并输出Markdown报告',
-];
+import { useLocale } from '../contexts/LocaleContext';
 
 function useProfileName() {
   const [name, setName] = useState(() =>
@@ -62,9 +50,10 @@ export function WelcomePage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [prompt, setPrompt] = useState('');
+  const { t } = useLocale();
 
   const username = useProfileName();
-  const greeting = `${username}，我们一起来搞定工作吧！`;
+  const greeting = `${username}${t.welcome.greetingSuffix}`;
   const typedGreeting = useTypewriter(greeting, 60);
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
@@ -107,14 +96,14 @@ export function WelcomePage() {
           value={prompt}
           onChange={setPrompt}
           onSubmit={handleSubmit}
-          placeholder="描述你的工作需求..."
+          placeholder={t.welcome.inputPlaceholder}
           autoFocus
         />
       </div>
 
       <div className="w-full max-w-2xl">
         <div data-testid="quick-prompts" className="flex flex-wrap justify-center gap-2">
-          {QUICK_PROMPTS.map((p) => (
+          {t.welcome.quickPrompts.map((p) => (
             <button
               key={p}
               type="button"

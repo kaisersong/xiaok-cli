@@ -41,7 +41,7 @@ function statusDotColor(s: HealthStatus): string {
 // Impression card — Claude-style preview card with hover animations
 // ---------------------------------------------------------------------------
 
-function formatTimeAgo(dateStr: string | undefined, lang: 'zh' | 'en'): string {
+function formatTimeAgo(dateStr: string | undefined, _lang: 'zh' | 'en', ds?: { relativeTimeJustNow: string; relativeTimeMinutesAgo: (n: number) => string; relativeTimeHoursAgo: (n: number) => string; relativeTimeDaysAgo: (n: number) => string }): string {
   if (!dateStr) return ''
   const normalized = dateStr.includes('T') || dateStr.includes('Z') || dateStr.includes('+')
     ? dateStr
@@ -50,12 +50,20 @@ function formatTimeAgo(dateStr: string | undefined, lang: 'zh' | 'en'): string {
   if (Number.isNaN(then)) return ''
   const diffMs = Date.now() - then
   const minutes = Math.floor(diffMs / 60_000)
-  if (minutes < 1) return lang === 'zh' ? '刚刚' : 'just now'
-  if (minutes < 60) return lang === 'zh' ? `${minutes} 分钟前` : `${minutes}m ago`
+  if (!ds) {
+    // Fallback for callers that do not pass ds (should not happen in practice)
+    if (minutes < 1) return 'just now'
+    if (minutes < 60) return `${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h ago`
+    return `${Math.floor(hours / 24)}d ago`
+  }
+  if (minutes < 1) return ds.relativeTimeJustNow
+  if (minutes < 60) return ds.relativeTimeMinutesAgo(minutes)
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return lang === 'zh' ? `${hours} 小时前` : `${hours}h ago`
+  if (hours < 24) return ds.relativeTimeHoursAgo(hours)
   const days = Math.floor(hours / 24)
-  return lang === 'zh' ? `${days} 天前` : `${days}d ago`
+  return ds.relativeTimeDaysAgo(days)
 }
 
 function ImpressionCard({
@@ -82,11 +90,11 @@ function ImpressionCard({
     modalTitle: string
   }
 }) {
-  const { locale } = useLocale()
+  const { locale, t: localeT } = useLocale()
   const [hovered, setHovered] = useState(false)
   const [miniHovered, setMiniHovered] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
-  const timeAgo = formatTimeAgo(updatedAt, locale)
+  const timeAgo = formatTimeAgo(updatedAt, locale, localeT.desktopSettings)
   const hasContent = impression.trim().length > 0
 
   const timeLabel = timeAgo

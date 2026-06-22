@@ -1,18 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Workflow, X } from 'lucide-react';
 import type { KSwarmWorkflowProposal, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
+import { useLocale } from '../../contexts/LocaleContext';
+import type { LocaleStrings } from '../../locales';
 import {
   getStatusIcon,
   getToneClass,
   labelNodeStatus,
-  labelFailurePolicy,
   formatWorkflowProgress,
   readString,
   readNumber,
-  normalizePublicProgress,
   getPatternPublicView,
   buildGenericWorkflowView,
   getNodeOutput,
+  buildWorkflowLabels,
+  type WorkflowLabels,
 } from './workflowUtils';
 
 interface WorkflowStatusStripProps {
@@ -28,24 +30,6 @@ interface WorkflowStatusStripProps {
   compact?: boolean;
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  awaiting_approval: '工作流待确认',
-  running: '工作流执行中',
-  blocked: '工作流阻塞',
-  completed: '工作流完成',
-  failed: '工作流失败',
-  cancelled: '工作流已取消',
-};
-
-const BUILTIN_DIAGNOSE_STATUS_LABELS: Record<string, string> = {
-  awaiting_approval: '系统诊断待确认',
-  running: '系统诊断中',
-  blocked: '系统诊断阻塞',
-  completed: '系统诊断完成',
-  failed: '系统诊断失败',
-  cancelled: '系统诊断已取消',
-};
-
 export function WorkflowStatusStrip({
   workflowRun,
   busy,
@@ -58,6 +42,8 @@ export function WorkflowStatusStrip({
   disabledReason,
   compact: compactMode = false,
 }: WorkflowStatusStripProps) {
+  const { t } = useLocale();
+  const wfLabels = useMemo(() => buildWorkflowLabels(t), [t]);
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -65,15 +51,23 @@ export function WorkflowStatusStrip({
   const isBuiltinDiagnose = workflowRun?.workflowId === 'project-diagnose' && workflowRun.source === 'builtin';
   const isCompletedScriptWorkflowAwaitingDelivery = Boolean(workflowRun && isScriptWorkflowAwaitingDelivery(workflowRun));
   const displayStatus = isCompletedScriptWorkflowAwaitingDelivery ? 'blocked' : status;
-  const patternPublicView = getPatternPublicView(workflowRun);
-  const workflowDisplayName = workflowRun ? getWorkflowDisplayName(workflowRun) : '';
+  const patternPublicView = getPatternPublicView(workflowRun, wfLabels);
+  const workflowDisplayName = workflowRun ? getWorkflowDisplayName(workflowRun, t) : '';
+  const diagnoseStatusLabels: Record<string, string> = {
+    awaiting_approval: t.projectsDiagnoseStatusAwaitingApproval,
+    running: t.projectsDiagnoseStatusRunning,
+    blocked: t.projectsDiagnoseStatusBlocked,
+    completed: t.projectsDiagnoseStatusCompleted,
+    failed: t.projectsDiagnoseStatusFailed,
+    cancelled: t.projectsDiagnoseStatusCancelled,
+  };
   const label = workflowRun
     ? patternPublicView
       ? patternPublicView.patternLabel
       : isBuiltinDiagnose
-      ? (BUILTIN_DIAGNOSE_STATUS_LABELS[status] || status)
+      ? (diagnoseStatusLabels[status] || status)
       : workflowDisplayName
-    : '最近工作流：尚未运行';
+    : t.projectsWorkflowIdle;
   const summary = workflowRun?.summary;
   const action = workflowRun?.diagnosis?.recommendedActions?.[0];
   const completed = summary?.completed ?? 0;
@@ -82,25 +76,25 @@ export function WorkflowStatusStrip({
     ? patternPublicView
       ? formatPublicWorkflowProgress(patternPublicView)
       : isBuiltinDiagnose
-      ? `已完成 ${completed}/${total}`
+      ? t.projectsWorkflowProgressCompleted(`${completed}/${total}`)
       : isCompletedScriptWorkflowAwaitingDelivery
-        ? '执行完成，待确认交付物'
-        : (summary?.primaryMessage || formatWorkflowProgress(status, completed, total))
-    : '选择快速诊断或 Agent 复核';
+        ? t.projectsWorkflowCompletedAwaitingDelivery
+        : (summary?.primaryMessage || formatWorkflowProgress(status, completed, total, wfLabels))
+    : t.projectsWorkflowIdleHint;
   const effectiveProgressText = disabledReason || progressText;
   const sourceText = workflowRun
     ? patternPublicView
-      ? 'KSwarm 策略视图'
+      ? t.projectsWorkflowKswarmView
       : isBuiltinDiagnose
-      ? '系统内置，未调用智能体'
-      : '工作流执行'
-    : '读取项目状态，不调用智能体';
-  const diagnosis = isBuiltinDiagnose && workflowRun ? buildSystemDiagnosisView(workflowRun) : null;
-  const genericWorkflow = workflowRun && !diagnosis ? buildGenericWorkflowView(workflowRun) : null;
-  const compact = diagnosis ? buildCompactDiagnosisSummary(diagnosis) : null;
+      ? t.projectsWorkflowBuiltinSource
+      : t.projectsWorkflowExecSource
+    : t.projectsWorkflowNoAgentSource;
+  const diagnosis = isBuiltinDiagnose && workflowRun ? buildSystemDiagnosisView(workflowRun, wfLabels, t) : null;
+  const genericWorkflow = workflowRun && !diagnosis ? buildGenericWorkflowView(workflowRun, wfLabels) : null;
+  const compact = diagnosis ? buildCompactDiagnosisSummary(diagnosis, t) : null;
   const StatusIcon = getStatusIcon(displayStatus);
   const toneClass = getToneClass(displayStatus);
-  const dialogLabel = diagnosis ? '系统诊断详情' : getWorkflowDialogLabel(workflowRun);
+  const dialogLabel = diagnosis ? t.projectsWorkflowDiagnosisDialog : getWorkflowDialogLabel(workflowRun, t);
   const handleStartDiagnose = () => {
     setMenuOpen(false);
     onStartDiagnose();
@@ -171,31 +165,31 @@ export function WorkflowStatusStrip({
         }}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
-        aria-label="运行工作流"
+        aria-label={t.projectsWorkflowRunAriaLabel}
         disabled={busy || Boolean(disabledReason)}
         title={disabledReason || undefined}
         className="inline-flex items-center gap-1 rounded-md bg-[var(--c-bg-page)] px-2 py-1 font-medium text-[var(--c-text-primary)] hover:bg-[var(--c-bg-deep)] disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Workflow size={12} />
-        <span>{busy ? '工作流运行中' : disabledReason ? '工作流不可用' : '运行工作流'}</span>
+        <span>{busy ? t.projectsWorkflowRunningBtn : disabledReason ? t.projectsWorkflowUnavailableBtn : t.projectsWorkflowRunBtn}</span>
         <ChevronDown size={12} />
       </button>
 
       {menuOpen && !busy && (
         <div
           role="menu"
-          aria-label="选择工作流"
+          aria-label={t.projectsWorkflowMenuAriaLabel}
           className="absolute right-0 top-full z-50 mt-2 w-[min(320px,calc(100vw-48px))] rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-1.5 text-[var(--c-text-secondary)] shadow-xl"
         >
           <WorkflowMenuItem
-            title="快速诊断"
-            description="系统内置，不调用智能体，秒级检查项目状态。"
+            title={t.projectsWorkflowQuickDiagnose}
+            description={t.projectsWorkflowQuickDiagnoseDesc}
             onClick={handleStartDiagnose}
           />
           {onStartAgentWorkflow && (
             <WorkflowMenuItem
-              title="Agent 复核诊断"
-              description="Worker Agent 诊断，Reviewer Agent 对抗性复核，并经过 gate 归约。"
+              title={t.projectsWorkflowAgentReview}
+              description={t.projectsWorkflowAgentReviewDesc}
               onClick={handleStartAgentWorkflow}
             />
           )}
@@ -221,11 +215,11 @@ export function WorkflowStatusStrip({
             {genericWorkflow && (
               <>
                 <span className="rounded bg-[var(--c-bg-page)]/70 px-1.5 py-0.5 text-[10px] text-[var(--c-text-secondary)]">
-                  执行方式：工作流执行
+                  {t.projectsWorkflowExecLabel}
                 </span>
                 {genericWorkflow.agentText && (
                   <span className="rounded bg-[var(--c-bg-page)]/70 px-1.5 py-0.5 text-[10px] text-[var(--c-text-secondary)]">
-                    参与 Agent：{genericWorkflow.agentText}
+                    {t.projectsWorkflowAgentLabel}{genericWorkflow.agentText}
                   </span>
                 )}
               </>
@@ -238,7 +232,7 @@ export function WorkflowStatusStrip({
             <button
               type="button"
               onClick={() => setOpen(false)}
-              aria-label={`关闭${dialogLabel}`}
+              aria-label={`${t.projectsWorkflowCloseDialogPrefix}${dialogLabel}`}
               className="ml-auto rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-page)] hover:text-[var(--c-text-primary)]"
             >
               <X size={12} />
@@ -254,7 +248,7 @@ export function WorkflowStatusStrip({
                 onClick={onCancelWorkflowRun}
                 className="rounded-md border border-[var(--c-status-error-text)]/35 px-2 py-1 text-[10px] font-medium text-[var(--c-status-error-text)] hover:bg-[var(--c-error-bg)]"
               >
-                取消工作流
+                {t.projectsWorkflowCancelRun}
               </button>
             </div>
           )}
@@ -264,20 +258,20 @@ export function WorkflowStatusStrip({
       {workflowProposal && (
         <div
           role="dialog"
-          aria-label="工作流执行确认"
+          aria-label={t.projectsWorkflowConfirmTitle}
           className={`absolute ${compactMode ? 'right-0' : 'left-0'} top-full z-50 mt-2 w-[min(620px,calc(100vw-48px))] rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-secondary)] shadow-xl`}
         >
           <div className="flex items-start gap-2">
             <div className="min-w-0">
               <p className="text-[12px] font-semibold text-[var(--c-text-primary)]">{workflowProposal.title}</p>
               <p className="mt-0.5 text-[10px] leading-relaxed text-[var(--c-text-muted)]">
-                目标：{workflowProposal.goal || workflowProposal.description || workflowProposal.title}
+                {t.projectsWorkflowGoalLabel}{workflowProposal.goal || workflowProposal.description || workflowProposal.title}
               </p>
             </div>
             <button
               type="button"
               onClick={onDismissWorkflowProposal}
-              aria-label="关闭工作流执行确认"
+              aria-label={`${t.projectsWorkflowCloseDialogPrefix}${t.projectsWorkflowConfirmTitle}`}
               className="ml-auto rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-page)] hover:text-[var(--c-text-primary)]"
             >
               <X size={12} />
@@ -292,7 +286,7 @@ export function WorkflowStatusStrip({
               onClick={onDismissWorkflowProposal}
               className="rounded-md px-2 py-1 text-[11px] font-medium text-[var(--c-text-muted)] hover:bg-[var(--c-bg-page)]"
             >
-              取消
+              {t.projectsWorkflowConfirmCancel}
             </button>
             <button
               type="button"
@@ -300,7 +294,7 @@ export function WorkflowStatusStrip({
               onClick={onConfirmWorkflowProposal}
               className="rounded-md bg-[var(--c-text-primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--c-bg-card)] disabled:opacity-60"
             >
-              运行一次
+              {t.projectsWorkflowConfirmRun}
             </button>
           </div>
         </div>
@@ -310,26 +304,27 @@ export function WorkflowStatusStrip({
 }
 
 function WorkflowProposalDetails({ proposal }: { proposal: KSwarmWorkflowProposal }) {
+  const { t } = useLocale();
   return (
     <div className="mt-2 space-y-2 border-t border-current/10 pt-2 text-[10px] text-[var(--c-text-secondary)]">
       {proposal.sourceTask && (
-        <p className="leading-relaxed"><span className="font-medium text-[var(--c-text-primary)]">任务：</span>{proposal.sourceTask.title || proposal.sourceTask.id}</p>
+        <p className="leading-relaxed"><span className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowTaskLabel}</span>{proposal.sourceTask.title || proposal.sourceTask.id}</p>
       )}
       {proposal.source === 'po_generated' && (
-        <p className="leading-relaxed text-[var(--c-text-muted)]">PO 生成建议，需人工确认；当前执行的是 validated workflow IR，不执行 raw JavaScript。</p>
+        <p className="leading-relaxed text-[var(--c-text-muted)]">{t.projectsWorkflowPoGenHint}</p>
       )}
-      <p className="leading-relaxed"><span className="font-medium text-[var(--c-text-primary)]">验收：</span>{proposal.acceptanceRubric.title}</p>
+      <p className="leading-relaxed"><span className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowAcceptanceLabel}</span>{proposal.acceptanceRubric.title}</p>
       <div className="grid gap-1 sm:grid-cols-2">
         {proposal.acceptanceRubric.machineChecks.map((check) => (
-          <span key={check.id} className="rounded bg-[var(--c-bg-page)] px-2 py-1">机器检查：{check.title}</span>
+          <span key={check.id} className="rounded bg-[var(--c-bg-page)] px-2 py-1">{t.projectsWorkflowMachineCheck}{check.title}</span>
         ))}
         {proposal.acceptanceRubric.judgmentChecks.map((check) => (
-          <span key={check.id} className="rounded bg-[var(--c-bg-page)] px-2 py-1">Reviewer 判断：{check.title}</span>
+          <span key={check.id} className="rounded bg-[var(--c-bg-page)] px-2 py-1">{t.projectsWorkflowReviewerCheck}{check.title}</span>
         ))}
       </div>
       {proposal.assumptions && proposal.assumptions.length > 0 && (
         <div className="space-y-1">
-          <p className="font-medium text-[var(--c-text-primary)]">主要假设</p>
+          <p className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowAssumptions}</p>
           {proposal.assumptions.map((item) => (
             <p key={item} className="leading-relaxed text-[var(--c-text-muted)]">{item}</p>
           ))}
@@ -337,11 +332,11 @@ function WorkflowProposalDetails({ proposal }: { proposal: KSwarmWorkflowProposa
       )}
       {proposal.phases.length > 0 && (
         <div className="space-y-1">
-          <p className="font-medium text-[var(--c-text-primary)]">阶段</p>
+          <p className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowPhases}</p>
           {proposal.phases.map((phase) => (
             <p key={phase.id} className="leading-relaxed">
               <span className="text-[var(--c-text-primary)]">{phase.title}</span>
-              <span className="text-[var(--c-text-muted)]"> · {phase.nodes.length} 个节点</span>
+              <span className="text-[var(--c-text-muted)]"> · {t.projectsWorkflowPhaseNodes(phase.nodes.length)}</span>
             </p>
           ))}
         </div>
@@ -365,41 +360,42 @@ function WorkflowMenuItem({ title, description, onClick }: { title: string; desc
 }
 
 function SystemDiagnosisDetails({ diagnosis }: { diagnosis: ReturnType<typeof buildSystemDiagnosisView> }) {
+  const { t } = useLocale();
   return (
     <div className="mt-2 border-t border-current/10 pt-2 text-[10px] text-[var(--c-text-secondary)]">
       <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
-        <DiagnosisMetric label="项目状态" value={diagnosis.projectStatus} />
-        <DiagnosisMetric label="健康状态" value={diagnosis.healthState} />
-        <DiagnosisMetric label="任务" value={String(diagnosis.taskCount)} />
-        <DiagnosisMetric label="阻塞" value={String(diagnosis.blockedCount)} />
-        <DiagnosisMetric label="等待" value={String(diagnosis.waitingCount)} />
-        <DiagnosisMetric label="可派发" value={String(diagnosis.dispatchableCount)} />
+        <DiagnosisMetric label={t.projectsWorkflowDiagProjectStatus} value={diagnosis.projectStatus} />
+        <DiagnosisMetric label={t.projectsWorkflowDiagHealthState} value={diagnosis.healthState} />
+        <DiagnosisMetric label={t.projectsWorkflowDiagTasks} value={String(diagnosis.taskCount)} />
+        <DiagnosisMetric label={t.projectsWorkflowDiagBlocked} value={String(diagnosis.blockedCount)} />
+        <DiagnosisMetric label={t.projectsWorkflowDiagWaiting} value={String(diagnosis.waitingCount)} />
+        <DiagnosisMetric label={t.projectsWorkflowDiagDispatchable} value={String(diagnosis.dispatchableCount)} />
       </div>
       {diagnosis.gate && (
         <p className="mt-2 leading-relaxed">
-          <span className="font-medium text-[var(--c-text-primary)]">门禁：</span>{diagnosis.gate}
+          <span className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowDiagGate}</span>{diagnosis.gate}
         </p>
       )}
       {diagnosis.actionLabel && (
         <p className="mt-2 leading-relaxed">
-          <span className="font-medium text-[var(--c-text-primary)]">建议：</span>{diagnosis.actionLabel}
+          <span className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowDiagSuggestion}</span>{diagnosis.actionLabel}
           {diagnosis.actionReason && <span className="text-[var(--c-text-muted)]"> · {diagnosis.actionReason}</span>}
         </p>
       )}
       {diagnosis.blockedTasks.length > 0 && (
         <div className="mt-2 space-y-1">
-          <p className="font-medium text-[var(--c-text-primary)]">阻塞任务</p>
+          <p className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowDiagBlockedTasks}</p>
           {diagnosis.blockedTasks.map((task) => (
             <p key={`${task.taskId}-${task.message}`} className="leading-relaxed">
               <span className="font-mono text-[var(--c-text-primary)]">{task.taskId || 'unknown'}</span>
-              <span className="text-[var(--c-text-muted)]"> · {task.message || '任务已阻塞'}</span>
+              <span className="text-[var(--c-text-muted)]"> · {task.message || t.projectsWorkflowDiagTaskBlocked}</span>
             </p>
           ))}
         </div>
       )}
       {diagnosis.evidence.length > 0 && (
         <p className="mt-2 leading-relaxed text-[var(--c-text-muted)]">
-          诊断依据：{diagnosis.evidence.join(' / ')}
+          {t.projectsWorkflowDiagEvidence}{diagnosis.evidence.join(' / ')}
         </p>
       )}
     </div>
@@ -407,29 +403,30 @@ function SystemDiagnosisDetails({ diagnosis }: { diagnosis: ReturnType<typeof bu
 }
 
 function GenericWorkflowDetails({ workflow }: { workflow: ReturnType<typeof buildGenericWorkflowView> }) {
+  const { t } = useLocale();
   return (
     <div className="mt-2 border-t border-current/10 pt-2 text-[10px] text-[var(--c-text-secondary)]">
       {workflow.publicView && (
         <div className="mb-2 space-y-1 rounded-md border border-[var(--c-border-subtle)] bg-[var(--c-bg-page)] px-2 py-1.5">
           <p className="leading-relaxed">
-            <span className="font-medium text-[var(--c-text-primary)]">策略：</span>{workflow.publicView.patternLabel}
+            <span className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowStrategyLabel}</span>{workflow.publicView.patternLabel}
           </p>
           {workflow.publicView.reasonLabel && (
             <p className="leading-relaxed">
-              <span className="font-medium text-[var(--c-text-primary)]">选择依据：</span>{workflow.publicView.reasonLabel}
+              <span className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowReasonLabel}</span>{workflow.publicView.reasonLabel}
             </p>
           )}
           <p className="leading-relaxed">
-            <span className="font-medium text-[var(--c-text-primary)]">公开进度：</span>{workflow.publicView.progress}%
+            <span className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowPublicProgress}</span>{workflow.publicView.progress}%
           </p>
           {workflow.publicView.currentPhase && (
             <p className="leading-relaxed">
-              <span className="font-medium text-[var(--c-text-primary)]">当前阶段：</span>{workflow.publicView.currentPhase}
+              <span className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowCurrentPhase}</span>{workflow.publicView.currentPhase}
             </p>
           )}
           {workflow.publicView.recoveryLabel && (
             <p className="leading-relaxed">
-              <span className="font-medium text-[var(--c-text-primary)]">恢复建议：</span>{workflow.publicView.recoveryLabel}
+              <span className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowRecoverySuggestion}</span>{workflow.publicView.recoveryLabel}
             </p>
           )}
         </div>
@@ -446,22 +443,22 @@ function GenericWorkflowDetails({ workflow }: { workflow: ReturnType<typeof buil
       )}
       {workflow.recoveryText && (
         <p className="mt-1 leading-relaxed">
-          <span className="font-medium text-[var(--c-text-primary)]">恢复方式：</span>{workflow.recoveryText}
+          <span className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowRecoveryLabel}</span>{workflow.recoveryText}
         </p>
       )}
       {workflow.progressText && (
         <p className="mt-1 leading-relaxed">
-          <span className="font-medium text-[var(--c-text-primary)]">最近进展：</span>{workflow.progressText}
+          <span className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowLatestProgress}</span>{workflow.progressText}
         </p>
       )}
       {workflow.checkpointText && (
         <p className="mt-1 leading-relaxed">
-          <span className="font-medium text-[var(--c-text-primary)]">脚本检查点：</span>{workflow.checkpointText}
+          <span className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowScriptCheckpoint}</span>{workflow.checkpointText}
         </p>
       )}
       {workflow.parallelGroups.length > 0 && (
         <div className="mt-2 space-y-1">
-          <p className="font-medium text-[var(--c-text-primary)]">并行编排</p>
+          <p className="font-medium text-[var(--c-text-primary)]">{t.projectsWorkflowParallelOrch}</p>
           {workflow.parallelGroups.map((group) => (
             <div
               key={group.id}
@@ -473,8 +470,8 @@ function GenericWorkflowDetails({ workflow }: { workflow: ReturnType<typeof buil
                 <span className="ml-auto shrink-0 text-[var(--c-text-secondary)]">{group.progress}</span>
               </div>
               <p className="mt-1 leading-relaxed text-[var(--c-text-muted)]">
-                策略：{group.failurePolicy}
-                {group.branchText ? ` · 分支：${group.branchText}` : ''}
+                {t.projectsWorkflowPolicy}{group.failurePolicy}
+                {group.branchText ? ` · ${t.projectsWorkflowBranch}${group.branchText}` : ''}
               </p>
             </div>
           ))}
@@ -482,7 +479,7 @@ function GenericWorkflowDetails({ workflow }: { workflow: ReturnType<typeof buil
       )}
       {workflow.blockingFailures.length > 0 && (
         <div className="mt-1 space-y-1">
-          <p className="font-medium text-[var(--c-status-error-text)]">阻塞失败</p>
+          <p className="font-medium text-[var(--c-status-error-text)]">{t.projectsWorkflowBlockingFailures}</p>
           {workflow.blockingFailures.map((failure) => (
             <p key={`${failure.nodeId}-${failure.reason}`} className="leading-relaxed text-[var(--c-status-error-text)]">
               {failure.title || failure.nodeId} · {failure.reason || failure.status}
@@ -540,19 +537,19 @@ function DiagnosisMetric({ label, value }: { label: string; value: string }) {
 
 
 
-function buildCompactDiagnosisSummary(diagnosis: ReturnType<typeof buildSystemDiagnosisView>) {
+function buildCompactDiagnosisSummary(diagnosis: ReturnType<typeof buildSystemDiagnosisView>, t: LocaleStrings) {
   return {
     health: diagnosis.healthState,
-    taskCount: `${diagnosis.taskCount} 个任务`,
-    blocker: diagnosis.blockedCount > 0 ? `${diagnosis.blockedCount} 阻塞` : '无阻塞',
+    taskCount: t.projectsWorkflowDiagCompactTasks(diagnosis.taskCount),
+    blocker: diagnosis.blockedCount > 0 ? t.projectsWorkflowDiagBlockerCount(diagnosis.blockedCount) : t.projectsWorkflowDiagNoBlocker,
   };
 }
 
-function buildSystemDiagnosisView(workflowRun: KSwarmWorkflowRun) {
+function buildSystemDiagnosisView(workflowRun: KSwarmWorkflowRun, wfLabels: WorkflowLabels, t: LocaleStrings) {
   const diagnosis = workflowRun.diagnosis;
   const collectOutput = getNodeOutput(workflowRun, 'collect-project-state');
-  const projectStatus = labelProjectStatus(readString(collectOutput.projectStatus));
-  const healthState = labelHealthState(readString(diagnosis?.healthState ?? collectOutput.healthState));
+  const projectStatus = labelProjectStatus(readString(collectOutput.projectStatus), t);
+  const healthState = labelHealthState(readString(diagnosis?.healthState ?? collectOutput.healthState), t);
   const taskCount = readNumber(collectOutput.taskCount, 0);
   const blockedTasks = diagnosis?.blockedTasks ?? [];
   const action = diagnosis?.recommendedActions?.[0];
@@ -568,17 +565,25 @@ function buildSystemDiagnosisView(workflowRun: KSwarmWorkflowRun) {
     actionLabel: action?.label || workflowRun.summary.primaryMessage || '',
     actionReason: action?.reason || '',
     blockedTasks,
-    evidence: workflowRun.nodes.map((node) => `${node.title}${node.status === 'completed' ? ' ✓' : ` ${labelNodeStatus(node.status)}`}`),
+    evidence: workflowRun.nodes.map((node) => `${node.title}${node.status === 'completed' ? ' \u2713' : ` ${labelNodeStatus(node.status, wfLabels)}`}`),
   };
 }
 
 
 
 
-function getWorkflowDisplayName(workflowRun: KSwarmWorkflowRun) {
-  if (workflowRun.workflowId === 'agent-review-smoke') return 'Agent 复核诊断';
-  if (workflowRun.workflowId === 'po-generated-task-workflow') return 'PO 生成任务工作流';
-  return workflowRun.title || STATUS_LABELS[workflowRun.status] || workflowRun.status;
+function getWorkflowDisplayName(workflowRun: KSwarmWorkflowRun, t: LocaleStrings) {
+  if (workflowRun.workflowId === 'agent-review-smoke') return t.projectsWorkflowAgentReviewName;
+  if (workflowRun.workflowId === 'po-generated-task-workflow') return t.projectsWorkflowPoTaskName;
+  const statusLabels: Record<string, string> = {
+    awaiting_approval: t.projectsWorkflowStatusAwaitingApproval,
+    running: t.projectsWorkflowStatusRunning,
+    blocked: t.projectsWorkflowStatusBlocked,
+    completed: t.projectsWorkflowStatusCompleted,
+    failed: t.projectsWorkflowStatusFailed,
+    cancelled: t.projectsWorkflowStatusCancelled,
+  };
+  return workflowRun.title || statusLabels[workflowRun.status] || workflowRun.status;
 }
 
 
@@ -597,38 +602,38 @@ function isScriptWorkflowAwaitingDelivery(workflowRun: KSwarmWorkflowRun) {
   return delivery?.status !== 'delivered';
 }
 
-function getWorkflowDialogLabel(workflowRun?: KSwarmWorkflowRun | null) {
-  if (!workflowRun) return '工作流详情';
-  if (workflowRun.workflowId === 'agent-review-smoke') return 'Agent 复核诊断详情';
-  return '工作流详情';
+function getWorkflowDialogLabel(workflowRun: KSwarmWorkflowRun | null | undefined, t: LocaleStrings) {
+  if (!workflowRun) return t.projectsWorkflowDialogDefault;
+  if (workflowRun.workflowId === 'agent-review-smoke') return t.projectsWorkflowDialogAgentReview;
+  return t.projectsWorkflowDialogDefault;
 }
 
-function labelProjectStatus(status: string): string {
+function labelProjectStatus(status: string, t: LocaleStrings): string {
   const labels: Record<string, string> = {
-    active: '进行中',
-    created: '待批准',
-    draft: '草稿',
-    planning: '规划中',
-    review: '待审核',
-    delivered: '已交付',
-    closed: '已关闭',
+    active: t.projectsLabelStatusActive,
+    created: t.projectsLabelStatusCreated,
+    draft: t.projectsLabelStatusDraft,
+    planning: t.projectsLabelStatusPlanning,
+    review: t.projectsLabelStatusReview,
+    delivered: t.projectsLabelStatusDelivered,
+    closed: t.projectsLabelStatusClosed,
   };
-  return labels[status] || status || '未知';
+  return labels[status] || status || t.projectsLabelStatusUnknown;
 }
 
-function labelHealthState(state: string): string {
+function labelHealthState(state: string, t: LocaleStrings): string {
   const labels: Record<string, string> = {
-    idle: '空闲',
-    healthy: '健康',
-    running: '运行中',
-    dispatchable: '可派发',
-    waiting: '等待中',
-    needs_review: '待审核',
-    blocked: '阻塞',
-    failed: '失败',
-    complete: '已完成',
-    closed: '已关闭',
-    unknown: '未知',
+    idle: t.projectsHealthIdle,
+    healthy: t.projectsHealthHealthy,
+    running: t.projectsHealthRunning,
+    dispatchable: t.projectsHealthDispatchable,
+    waiting: t.projectsHealthWaiting,
+    needs_review: t.projectsHealthNeedsReview,
+    blocked: t.projectsHealthBlocked,
+    failed: t.projectsHealthFailed,
+    complete: t.projectsHealthComplete,
+    closed: t.projectsHealthClosed,
+    unknown: t.projectsHealthUnknown,
   };
-  return labels[state] || state || '未知';
+  return labels[state] || state || t.projectsHealthUnknown;
 }

@@ -138,9 +138,7 @@ export function ConnectionSettingsContent({ initialConfig = null }: Props) {
 
     const parsedPort = Number.parseInt(localPort, 10)
     if (mode === 'local' && localPortMode === 'manual' && (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535)) {
-      setLocalError(locale === 'zh'
-        ? `${ct.manualPort}必须在 1 到 65535 之间。`
-        : `${ct.manualPort} must be between 1 and 65535.`)
+      setLocalError(t.connectionPortRange(ct.manualPort))
       return
     }
 
@@ -176,7 +174,7 @@ export function ConnectionSettingsContent({ initialConfig = null }: Props) {
     } finally {
       setSaving(false)
     }
-  }, [api, ct.manualPort, locale, localPort, localPortMode, mode, saasUrl, selfHostedUrl, t.requestFailed])
+  }, [api, ct.manualPort, localPort, localPortMode, mode, saasUrl, selfHostedUrl, t.connectionPortRange, t.requestFailed])
 
   const handleTest = useCallback(async () => {
     setTestResult(null)

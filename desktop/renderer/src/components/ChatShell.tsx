@@ -8,11 +8,13 @@ import { TaskPanel } from './TaskPanel';
 import type { ThreadRecord } from '../api/types';
 import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
 import { useSidebarCollapse } from '../layouts/AppLayout';
+import { useLocale } from '../contexts/LocaleContext';
 import { sanitizeUserFacingErrorMessage } from '../lib/error-display';
 import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-display';
 import {
   buildProjectCardMessageFromToolResult,
   buildWorkflowMessageFromToolResult,
+  type WorkflowLabels,
 } from './chatToolResultMessages';
 
 const log = createLogger('ChatShell');
@@ -111,12 +113,12 @@ function displayNameFromFileRef(file: DisplayFileRef): string | undefined {
   return raw.split(/[\\/]/).filter(Boolean).pop() || raw;
 }
 
-function formatUserMessageContent(prompt: string, files?: DisplayFileRef[]): string {
+function formatUserMessageContent(prompt: string, files?: DisplayFileRef[], attachmentLabel = '附件:'): string {
   const fileNames = (files ?? [])
     .map(displayNameFromFileRef)
     .filter((name): name is string => Boolean(name));
   if (fileNames.length === 0) return prompt;
-  return `${prompt}\n\n附件: ${fileNames.join(', ')}`;
+  return `${prompt}\n\n${attachmentLabel} ${fileNames.join(', ')}`;
 }
 
 function addGeneratedFile(target: GeneratedFile[], seen: Set<string>, fp: string | undefined): void {
@@ -176,7 +178,7 @@ function buildResultCardMessage(input: {
   };
 }
 
-function parseComputerUseRecoverableAction(response: string): ComputerUseActionData | null {
+function parseComputerUseRecoverableAction(response: string, cuFallback: string): ComputerUseActionData | null {
   try {
     const parsed = JSON.parse(response) as {
       ok?: unknown;
@@ -189,7 +191,7 @@ function parseComputerUseRecoverableAction(response: string): ComputerUseActionD
     }
     return {
       code: parsed.code,
-      message: typeof parsed.message === 'string' ? parsed.message : 'Computer Use 当前不可用。',
+      message: typeof parsed.message === 'string' ? parsed.message : cuFallback,
       ...(typeof parsed.userAction?.type === 'string' ? { actionType: parsed.userAction.type } : {}),
       ...(typeof parsed.userAction?.label === 'string' ? { label: parsed.userAction.label } : {}),
       status: 'idle',
@@ -207,6 +209,7 @@ export function ChatShell() {
   const { taskId } = useParams<{ taskId: string }>();
   const location = useLocation();
   const sidebarCollapse = useSidebarCollapse();
+  const { t } = useLocale();
   const sidebarWasCollapsedRef = useRef(false);
   const [thread, setThread] = useState<ThreadRecord | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -432,7 +435,7 @@ export function ChatShell() {
         const immediateMessage = ev.ok && ev.toolName === 'create_project'
           ? buildProjectCardMessageFromToolResult(ev.response)
           : ev.ok && (ev.toolName === 'run_dynamic_workflow_script' || ev.toolName === 'get_dynamic_workflow_status')
-            ? buildWorkflowMessageFromToolResult(ev.response)
+            ? buildWorkflowMessageFromToolResult(ev.response, t as WorkflowLabels)
             : null;
         if (immediateMessage) {
           setMessages(prev => prev.some(msg => msg.id === immediateMessage.id) ? prev : [...prev, immediateMessage]);
@@ -454,7 +457,7 @@ export function ChatShell() {
           });
         }
         if (ev.toolName === 'xiaok_computer_use') {
-          const action = parseComputerUseRecoverableAction(ev.response);
+          const action = parseComputerUseRecoverableAction(ev.response, t.chatShell.cuUnavailable);
           if (action && !computerUseActionCodesRef.current.has(action.code)) {
             computerUseActionCodesRef.current.add(action.code);
             setMessages(prev => [...prev, {
@@ -506,7 +509,7 @@ export function ChatShell() {
       msgs.push({
         id: `msg-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: 'user',
-        content: formatUserMessageContent(display.displayPrompt, snapshot.materials),
+        content: formatUserMessageContent(display.displayPrompt, snapshot.materials, t.chatShell.attachmentLabel),
       });
     }
 
@@ -551,11 +554,11 @@ export function ChatShell() {
             if (message) msgs.push(message);
           }
           if (evR.ok && (evR.toolName === 'run_dynamic_workflow_script' || evR.toolName === 'get_dynamic_workflow_status')) {
-            const message = buildWorkflowMessageFromToolResult(evR.response);
+            const message = buildWorkflowMessageFromToolResult(evR.response, t as WorkflowLabels);
             if (message) msgs.push(message);
           }
           if (evR.toolName === 'xiaok_computer_use') {
-            const action = parseComputerUseRecoverableAction(evR.response);
+            const action = parseComputerUseRecoverableAction(evR.response, t.chatShell.cuUnavailable);
             if (action && !computerUseActionCodesRef.current.has(action.code)) {
               computerUseActionCodesRef.current.add(action.code);
               msgs.push({
@@ -661,19 +664,19 @@ export function ChatShell() {
       setMessages([{
         id: `msg-initial-user`,
         role: 'user',
-        content: formatUserMessageContent(initialPrompt, initialFiles),
+        content: formatUserMessageContent(initialPrompt, initialFiles, t.chatShell.attachmentLabel),
       }]);
       setStatus('running');
     }
 
-    api.getThread(taskId).then(async (t) => {
+    api.getThread(taskId).then(async (threadData) => {
       // Check if this is still the current load (prevent race condition)
       if (mountGenRef.current !== gen) return;
 
-      if (t) {
+      if (threadData) {
         // Replay all tasks in the thread to show full conversation history
-        const allTaskIds = (t.taskIds && t.taskIds.length > 0) ? t.taskIds
-          : t.currentTaskId ? [t.currentTaskId] : [];
+        const allTaskIds = (threadData.taskIds && threadData.taskIds.length > 0) ? threadData.taskIds
+          : threadData.currentTaskId ? [threadData.currentTaskId] : [];
         const isEmptyHelpThread = allTaskIds.length === 0 && !initialPrompt;
         if (isEmptyHelpThread) {
           if (draftPrompt) {
@@ -681,14 +684,14 @@ export function ChatShell() {
           } else if (storedDraft?.draftPrompt) {
             setPrompt(storedDraft.draftPrompt);
           } else {
-            const legacyDraft = readLegacySwarmDraftForThread(t);
+            const legacyDraft = readLegacySwarmDraftForThread(threadData);
             if (legacyDraft?.draftPrompt) {
               setPrompt(legacyDraft.draftPrompt);
-              writeStoredThreadDraft(t.id, legacyDraft);
+              writeStoredThreadDraft(threadData.id, legacyDraft);
             }
           }
         }
-        console.log(`[ChatShell] Loading thread=${taskId.slice(0,8)} title="${t.title}" currentTaskId=${t.currentTaskId ?? 'none'}`);
+        console.log(`[ChatShell] Loading thread=${taskId.slice(0,8)} title="${threadData.title}" currentTaskId=${threadData.currentTaskId ?? 'none'}`);
         const allMessages: ChatMessage[] = [];
         let lastResult: TaskResult | null = null;
         let lastStatus: 'idle' | 'running' | 'waiting_user' = 'idle';
@@ -743,7 +746,7 @@ export function ChatShell() {
         if (mountGenRef.current !== gen) return;
 
         // Now set all state atomically after final check
-        setThread(t);
+        setThread(threadData);
         if (allMessages.length > 0) {
           setMessages(allMessages);
         }
@@ -831,7 +834,7 @@ export function ChatShell() {
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}-user`,
       role: 'user',
-      content: formatUserMessageContent(text, files),
+      content: formatUserMessageContent(text, files, t.chatShell.attachmentLabel),
     };
     const sealedResultCard = buildResultCardMessage({
       idHint: `${thread?.currentTaskId || 'current'}-${Date.now()}`,
@@ -888,7 +891,7 @@ export function ChatShell() {
       unsubRef.current?.();
       unsubRef.current = api.subscribeTask(newTaskId, handleEvent);
     } catch (e) {
-      const displayMessage = sanitizeUserFacingErrorMessage(e, '任务创建失败，请检查模型配置或稍后重试。');
+      const displayMessage = sanitizeUserFacingErrorMessage(e, t.chatShell.taskCreateFailed);
       log.error('handleSubmit error', JSON.stringify({ message: displayMessage, raw: e instanceof Error ? e.message : String(e) }));
       setMessages(prev => [...prev, {
         id: `msg-${Date.now()}-err`,
@@ -923,19 +926,19 @@ export function ChatShell() {
   };
 
   const handleComputerUseAction = async (messageId: string, action: ComputerUseActionData) => {
-    updateComputerUseActionMessage(messageId, { status: 'working', detail: '正在处理 Computer Use 状态...' });
+    updateComputerUseActionMessage(messageId, { status: 'working', detail: t.chatShell.cuProcessing });
     try {
       if (isComputerUseSettingsAction(action.actionType)) {
         const permission = action.code === 'COMPUTER_USE_NEEDS_SCREEN_RECORDING' ? 'screen' : 'accessibility';
         await api.openPluginDependencyPermissionSettings({ permission });
-        updateComputerUseActionMessage(messageId, { status: 'idle', detail: '已打开系统设置。请确认授权对象是 CuaDriver.app。' });
+        updateComputerUseActionMessage(messageId, { status: 'idle', detail: t.chatShell.cuSettingsOpened });
         return;
       }
       const next = await api.enableComputerUse();
       if (next.state === 'ready') {
-        updateComputerUseActionMessage(messageId, { status: 'ready', detail: 'Computer Use 已启用。你可以继续让 xiaok 截图或查看窗口。' });
+        updateComputerUseActionMessage(messageId, { status: 'ready', detail: t.chatShell.cuReady });
       } else {
-        updateComputerUseActionMessage(messageId, { status: 'failed', detail: next.lastError || 'Computer Use 连接失败。' });
+        updateComputerUseActionMessage(messageId, { status: 'failed', detail: next.lastError || t.chatShell.cuConnectFailed });
       }
     } catch (error) {
       updateComputerUseActionMessage(messageId, {
@@ -951,7 +954,7 @@ export function ChatShell() {
     } catch {
       // Best-effort cooldown only.
     }
-    updateComputerUseActionMessage(messageId, { status: 'dismissed', detail: '本次会话已暂不启用 Computer Use。' });
+    updateComputerUseActionMessage(messageId, { status: 'dismissed', detail: t.chatShell.cuDismissed });
   };
 
   const handleCancel = async () => {

@@ -28,8 +28,8 @@ const ALLOWED_OCCURRENCES = [
   { file: 'src/components/settings/MemoryConfigModal.tsx', line: 616, reason: 'connectionHealth IPC arg' },
   { file: 'src/components/settings/MemoryConfigModal.tsx', line: 619, reason: 'setNowledgeDraft baseUrl assignment (string value)' },
   { file: 'src/components/settings/MemoryConfigModal.tsx', line: 871, reason: 'placeholder text' },
-  { file: 'src/components/settings/MemorySettings.tsx', line: 994, reason: 'connectionHealth arg (IPC, not direct fetch)' },
-  { file: 'src/components/settings/MemorySettings.tsx', line: 997, reason: 'string assignment from IPC result' },
+  { file: 'src/components/settings/MemorySettings.tsx', line: 1002, reason: 'connectionHealth arg (IPC, not direct fetch)' },
+  { file: 'src/components/settings/MemorySettings.tsx', line: 1005, reason: 'string assignment from IPC result' },
   { file: 'src/components/projects/artifactActions.ts', line: 4, reason: 'getKswarmBaseUrl return value (used for URL construction, fetched via IPC proxy)' },
   { file: 'src/components/projects/ArtifactPreviewModal.tsx', line: 46, reason: 'comparison string to route through IPC proxy' },
 ];

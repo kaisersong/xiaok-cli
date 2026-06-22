@@ -4,6 +4,7 @@
 
 import { useNavigate } from 'react-router-dom';
 import { FolderKanban, ArrowRight } from 'lucide-react';
+import { useLocale } from '../../contexts/LocaleContext';
 import {
   getCompactProjectHealthLabel,
   getNormalizedProjectHealthStatus,
@@ -35,6 +36,7 @@ interface ProjectProgressCardProps {
 
 export function ProjectProgressCard({ project }: ProjectProgressCardProps) {
   const navigate = useNavigate();
+  const { t } = useLocale();
   const totalTasks = project.taskCount || 0;
   const doneTasks = project.doneCount || 0;
   const stoppedTasks = project.stoppedCount || 0;
@@ -42,8 +44,8 @@ export function ProjectProgressCard({ project }: ProjectProgressCardProps) {
   const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
   const statusLabels: Record<string, string> = {
-    draft: '草稿', planning: '规划中', created: '已创建',
-    active: '进行中', review: '审核中', delivered: '已交付', closed: '已关闭',
+    draft: t.projectsStatusDraft, planning: t.projectsStatusPlanning, created: t.projectsStatusCreated,
+    active: t.projectsStatusActive, review: t.projectsStatusReview, delivered: t.projectsStatusDelivered, closed: t.projectsStatusClosed,
   };
   const healthStatus = getNormalizedProjectHealthStatus(project.projectHealth);
   const hasHealthSignal = shouldShowProjectHealth(healthStatus);
@@ -66,7 +68,7 @@ export function ProjectProgressCard({ project }: ProjectProgressCardProps) {
         <div className="flex items-center gap-2">
           <p className="text-[13px] font-medium text-[var(--c-text-primary)] truncate">{project.name}</p>
           <span className="shrink-0 rounded-full bg-[var(--c-bg-deep)] px-2 py-0.5 text-[10px] text-[var(--c-text-muted)]">
-            {hasHealthSignal ? getCompactProjectHealthLabel(healthStatus) : (statusLabels[project.status] || project.status)}
+            {hasHealthSignal ? getCompactProjectHealthLabel(healthStatus, t) : (statusLabels[project.status] || project.status)}
           </span>
         </div>
         {hasHealthSignal && project.projectHealth?.message && (
@@ -77,14 +79,14 @@ export function ProjectProgressCard({ project }: ProjectProgressCardProps) {
             <div className="h-1 flex-1 overflow-hidden rounded-full bg-[var(--c-bg-deep)]">
               <div className="h-full rounded-full bg-[var(--c-status-success-text)] transition-all" style={{ width: `${progress}%` }} />
             </div>
-            <span className="shrink-0 text-[10px] text-[var(--c-text-muted)]">{stoppedTasks > 0 ? `${doneTasks} 完成 · ${stoppedTasks} 停止` : `${doneTasks}/${totalTasks}`}</span>
+            <span className="shrink-0 text-[10px] text-[var(--c-text-muted)]">{stoppedTasks > 0 ? t.projectsProgressDoneStopped(doneTasks, stoppedTasks) : t.projectsProgressTasks(doneTasks, totalTasks)}</span>
           </div>
         )}
         {(dispatchableCount > 0 || blockedCount > 0 || waitingCount > 0) && (
           <div className="mt-1.5 flex flex-wrap gap-2 text-[10px] text-[var(--c-text-muted)]">
-            <span>可派发 {dispatchableCount}</span>
-            <span>阻塞 {blockedCount}</span>
-            <span>等待 {waitingCount}</span>
+            <span>{t.projectsDetailDispatchableLabel} {dispatchableCount}</span>
+            <span>{t.projectsDetailBlockedLabel} {blockedCount}</span>
+            <span>{t.projectsDetailWaitingLabel} {waitingCount}</span>
           </div>
         )}
       </div>

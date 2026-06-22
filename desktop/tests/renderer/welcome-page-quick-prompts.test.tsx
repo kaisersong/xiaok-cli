@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 
 const { mockCreateThread, mockCreateTask, mockCreateTaskWithFiles, mockUpdateThreadTaskId } = vi.hoisted(() => ({
   mockCreateThread: vi.fn(),
@@ -43,7 +44,9 @@ describe('WelcomePage quick prompts', () => {
   it('renders quick prompts in a flex-wrap layout with all items visible', () => {
     render(
       <MemoryRouter>
-        <WelcomePage />
+        <LocaleProvider>
+          <WelcomePage />
+        </LocaleProvider>
       </MemoryRouter>
     );
 
@@ -84,10 +87,12 @@ describe('WelcomePage quick prompts', () => {
 
     render(
       <MemoryRouter initialEntries={['/']}>
-        <Routes>
-          <Route path="/" element={<WelcomePage />} />
-          <Route path="/t/:threadId" element={<RouteStateDump />} />
-        </Routes>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/" element={<WelcomePage />} />
+            <Route path="/t/:threadId" element={<RouteStateDump />} />
+          </Routes>
+        </LocaleProvider>
       </MemoryRouter>
     );
 

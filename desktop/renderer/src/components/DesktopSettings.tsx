@@ -38,6 +38,7 @@ import { api } from '../api';
 import { LocalMemoryStatsCard } from './settings/LocalMemoryStatsCard';
 import { MemoryModelSettings } from './settings/MemoryModelSettings';
 import { McpErrorRemediationBanner } from './settings/McpErrorRemediationBanner';
+import { DesktopAppearanceSettings } from './settings/DesktopAppearanceSettings';
 import type {
   DesktopModelConfigSnapshot,
   DesktopRelatedServiceId,
@@ -62,8 +63,9 @@ import type {
   UserLoopTemplateView,
 } from '../api/types';
 import { useLocale } from '../contexts/LocaleContext';
+import type { LocaleStrings } from '../locales/index';
 import { useToast } from '../shared';
-import { USER_LOOP_STARTER_TEMPLATES, type UserLoopStarterTemplate } from './loops/userLoopStarterTemplates';
+import { resolveUserLoopStarterTemplates, type UserLoopStarterTemplate } from './loops/userLoopStarterTemplates';
 import {
   buildLoopDiagnosticsSummary,
   getLoopAnomalyLogPaths,
@@ -79,18 +81,20 @@ interface NavItem {
   label: string;
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { key: 'general', icon: SlidersHorizontal, label: '通用设置' },
-  { key: 'model', icon: Cpu, label: '模型设置' },
-  { key: 'skills', icon: Puzzle, label: '技能管理' },
-  { key: 'channels', icon: Globe, label: '消息通道' },
-  { key: 'mcp', icon: Plug, label: 'MCP 服务器' },
-  { key: 'tools', icon: Wrench, label: '工具管理' },
-  { key: 'appearance', icon: Palette, label: '外观设置' },
-  { key: 'data', icon: HardDrive, label: '数据管理' },
-  { key: 'memory', icon: Brain, label: '记忆管理' },
-  { key: 'about', icon: Info, label: '关于' },
-];
+function getNavItems(t: ReturnType<typeof useLocale>['t']): NavItem[] {
+  return [
+    { key: 'general', icon: SlidersHorizontal, label: t.desktopSettings.navGeneral },
+    { key: 'model', icon: Cpu, label: t.desktopSettings.navModel },
+    { key: 'skills', icon: Puzzle, label: t.desktopSettings.navSkills },
+    { key: 'channels', icon: Globe, label: t.desktopSettings.navChannels },
+    { key: 'mcp', icon: Plug, label: t.desktopSettings.navMcp },
+    { key: 'tools', icon: Wrench, label: t.desktopSettings.navTools },
+    { key: 'appearance', icon: Palette, label: t.desktopSettings.navAppearance },
+    { key: 'data', icon: HardDrive, label: t.desktopSettings.navData },
+    { key: 'memory', icon: Brain, label: t.desktopSettings.navMemory },
+    { key: 'about', icon: Info, label: t.desktopSettings.navAbout },
+  ];
+}
 
 interface Props {
   onClose: () => void;
@@ -99,12 +103,7 @@ interface Props {
 export function DesktopSettings({ onClose }: Props) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const { t } = useLocale();
-  const navigate = useNavigate();
-
-  const openAutomations = useCallback(() => {
-    onClose();
-    navigate('/automations/loops');
-  }, [navigate, onClose]);
+  const navItems = getNavItems(t);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-[var(--c-bg-page)]">
@@ -119,12 +118,12 @@ export function DesktopSettings({ onClose }: Props) {
             className="flex h-[36px] w-full items-center gap-2 rounded-lg px-3 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
           >
             <ChevronLeft size={16} />
-            <span>返回</span>
+            <span>{t.desktopSettings.back}</span>
           </button>
         </div>
         <div className="px-3">
           <div className="flex flex-col gap-[2px]">
-            {NAV_ITEMS.map(({ key, icon: Icon, label }) => {
+            {navItems.map(({ key, icon: Icon, label }) => {
               const navLabel = label;
               return (
               <button type="button"
@@ -154,8 +153,8 @@ export function DesktopSettings({ onClose }: Props) {
           {activeTab === 'channels' && <ChannelsPane />}
           {activeTab === 'mcp' && <McpPane />}
           {activeTab === 'tools' && <ToolsPane />}
-          {activeTab === 'general' && <GeneralPane onOpenAutomations={openAutomations} />}
-          {activeTab === 'appearance' && <AppearancePane />}
+          {activeTab === 'general' && <GeneralPane />}
+          {activeTab === 'appearance' && <DesktopAppearanceSettings />}
           {activeTab === 'data' && <DataPane />}
           {activeTab === 'memory' && <MemoryPane />}
           {activeTab === 'about' && <AboutPane />}
@@ -206,6 +205,7 @@ interface SkillItem {
 }
 
 function ModelPane() {
+  const { t } = useLocale();
   const [config, setConfig] = useState<DesktopModelConfigSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -241,7 +241,7 @@ function ModelPane() {
       const updated = await api.saveModelConfig(input);
       setConfig(updated);
       setApiKey('');
-      setSuccess(`已更新 ${updated.providers.find(p => p.id === selectedProvider)?.label} 的 API Key`);
+      setSuccess(t.desktopSettings.apiKeyUpdated(updated.providers.find(p => p.id === selectedProvider)?.label ?? selectedProvider));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -257,9 +257,9 @@ function ModelPane() {
       const result = await api.testProviderConnection({ providerId });
       setTestResults(prev => ({ ...prev, [providerId]: result }));
       if (result.success) {
-        setSuccess(`连接成功，延迟 ${result.latencyMs}ms`);
+        setSuccess(t.desktopSettings.connectionSuccessLatency(result.latencyMs ?? 0));
       } else {
-        setError(result.error || '连接失败');
+        setError(result.error || t.desktopSettings.connectionFailed);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -288,7 +288,7 @@ function ModelPane() {
       });
       const updated = await api.getModelConfig();
       setConfig(updated);
-      setSuccess(`已添加模型 ${foundModel.label}`);
+      setSuccess(t.desktopSettings.modelAdded(foundModel.label));
       setShowAddModel('');
     } catch (e) {
       setError((e as Error).message);
@@ -309,7 +309,7 @@ function ModelPane() {
       });
       const updated = await api.getModelConfig();
       setConfig(updated);
-      setSuccess(`已添加自定义模型 ${modelName.trim()}`);
+      setSuccess(t.desktopSettings.customModelAdded(modelName.trim()));
       setShowAddModel('');
     } catch (e) {
       setError((e as Error).message);
@@ -331,7 +331,7 @@ function ModelPane() {
         modelId,
       });
       setConfig(updated);
-      setSuccess(`当前模型已切换为 ${model.label}`);
+      setSuccess(t.desktopSettings.modelSwitched(model.label));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -340,19 +340,19 @@ function ModelPane() {
   };
 
   const handleDeleteModel = async (modelId: string) => {
-    if (!confirm('确定删除此模型配置？')) return;
+    if (!confirm(t.desktopSettings.confirmDeleteModel)) return;
     try {
       await api.deleteModel(modelId);
       const updated = await api.getModelConfig();
       setConfig(updated);
-      setSuccess('模型已删除');
+      setSuccess(t.desktopSettings.modelDeleted);
     } catch (e) {
       setError((e as Error).message);
     }
   };
 
   const handleDeleteProvider = async (providerId: string) => {
-    if (!confirm('确定删除此提供商配置？')) return;
+    if (!confirm(t.desktopSettings.confirmDeleteProvider)) return;
     try {
       await api.deleteProvider(providerId);
       const updated = await api.getModelConfig();
@@ -360,7 +360,7 @@ function ModelPane() {
       if (selectedProvider === providerId && updated.providers.length > 0) {
         setSelectedProvider(updated.providers[0].id);
       }
-      setSuccess('提供商已删除');
+      setSuccess(t.desktopSettings.providerDeleted);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -377,7 +377,7 @@ function ModelPane() {
   return (
     <>
       <Section>
-        <SectionHeader icon={Cpu}>模型提供商</SectionHeader>
+        <SectionHeader icon={Cpu}>{t.desktopSettings.modelProviders}</SectionHeader>
         {(() => {
           const currentModel = config?.models.find(m => m.id === config.defaultModelId) ?? config?.models.find(m => m.isDefault);
           const currentProvider = currentModel ? config?.providers.find(p => p.id === currentModel.provider) : null;
@@ -386,7 +386,7 @@ function ModelPane() {
             <Card className="mb-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-xs text-[var(--c-text-secondary)]">当前使用模型</div>
+                  <div className="text-xs text-[var(--c-text-secondary)]">{t.desktopSettings.currentModel}</div>
                   <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-semibold text-[var(--c-text-primary)]">{currentModel.label}</span>
                     <span className="rounded-md bg-[var(--c-bg-deep)] px-2 py-0.5 text-xs text-[var(--c-text-secondary)]">
@@ -418,16 +418,16 @@ function ModelPane() {
                       <span className="text-sm font-medium">{provider.label}</span>
                       {provider.apiKeyConfigured ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs text-green-600">
-                          <Check size={12} /> 已配置
+                          <Check size={12} /> {t.desktopSettings.configured}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 rounded-full bg-yellow-50 px-2 py-0.5 text-xs text-yellow-600">
-                          <AlertCircle size={12} /> 未配置
+                          <AlertCircle size={12} /> {t.desktopSettings.notConfigured}
                         </span>
                       )}
                     </div>
                     <div className="mt-1 text-xs text-[var(--c-text-secondary)]">
-                      协议: {provider.protocol}
+                      {t.desktopSettings.protocol}: {provider.protocol}
                       {provider.baseUrl && ` · ${provider.baseUrl}`}
                     </div>
                     <div className="mt-1.5 flex items-center gap-2 flex-wrap">
@@ -437,18 +437,18 @@ function ModelPane() {
                         className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors disabled:opacity-50"
                       >
                         {testing[provider.id] ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
-                        测试连接
+                        {t.desktopSettings.testConnection}
                       </button>
                       <button type="button"
                         onClick={() => { setSelectedProvider(prev => prev === provider.id ? '' : provider.id); setApiKey(''); }}
                         className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
                       >
-                        <Edit3 size={12} /> {provider.apiKeyConfigured ? '更新 Key' : '设置 Key'}
+                        <Edit3 size={12} /> {provider.apiKeyConfigured ? t.desktopSettings.updateKey : t.desktopSettings.setKey}
                       </button>
                       {testResult && (
                         <span className={`text-xs truncate max-w-[200px] ${testResult.success ? 'text-green-600' : 'text-red-500'}`}>
                           {testResult.success
-                            ? `延迟 ${testResult.latencyMs}ms`
+                            ? t.desktopSettings.latencyMs(testResult.latencyMs ?? 0)
                             : testResult.error}
                         </span>
                       )}
@@ -457,7 +457,7 @@ function ModelPane() {
                           onClick={() => handleDeleteProvider(provider.id)}
                           className="inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1 text-xs text-red-500 hover:bg-red-50 transition-colors"
                         >
-                          <Trash2 size={12} /> 删除
+                          <Trash2 size={12} /> {t.desktopSettings.deleteLabel}
                         </button>
                       )}
                     </div>
@@ -485,7 +485,7 @@ function ModelPane() {
                           disabled={saving || !apiKey.trim()}
                           className="shrink-0 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white hover:opacity-90 disabled:opacity-50"
                         >
-                          {saving ? '...' : '保存'}
+                          {saving ? '...' : t.desktopSettings.saveLabel}
                         </button>
                       </div>
                     )}
@@ -494,7 +494,7 @@ function ModelPane() {
                 {/* Model list */}
                 {config?.models && (
                   <div className="mt-3 pt-3 border-t border-[var(--c-border-subtle)]">
-                    <div className="text-xs text-[var(--c-text-secondary)] mb-1.5">已配置模型</div>
+                    <div className="text-xs text-[var(--c-text-secondary)] mb-1.5">{t.desktopSettings.configuredModels}</div>
                     <div className="flex flex-wrap gap-1.5">
                       {config.models
                         .filter(m => m.provider === provider.id)
@@ -508,20 +508,20 @@ function ModelPane() {
                             }`}
                           >
                             {m.label}
-                            {config.defaultModelId === m.id && ' (默认)'}
+                            {config.defaultModelId === m.id && ` ${t.desktopSettings.defaultBadge}`}
                             {config.defaultModelId !== m.id && (
                               <button type="button"
                                 onClick={() => void handleSetDefaultModel(m.id)}
                                 disabled={saving}
                                 className="ml-1 rounded px-1 text-[10px] text-[var(--c-accent)] hover:bg-[var(--c-accent)]/10 disabled:opacity-50"
                               >
-                                设为默认
+                                {t.desktopSettings.setAsDefault}
                               </button>
                             )}
                             <button type="button"
                               onClick={() => handleDeleteModel(m.id)}
                               className="ml-1 hover:text-red-500"
-                              title="删除模型"
+                              title={t.desktopSettings.deleteModel}
                             >
                               <X size={10} />
                             </button>
@@ -540,7 +540,7 @@ function ModelPane() {
                             onClick={() => { setShowAddModel(prev => prev === provider.id ? '' : provider.id); setCustomModelInput(''); }}
                             className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
                           >
-                            <Plus size={12} /> 添加模型
+                            <Plus size={12} /> {t.desktopSettings.addModel}
                           </button>
                           {showAddModel === provider.id && (
                             <div className="mt-2 space-y-2">
@@ -564,7 +564,8 @@ function ModelPane() {
                                   value={customModelInput}
                                   onChange={e => setCustomModelInput(e.target.value)}
                                   onKeyDown={e => { if (e.key === 'Enter' && customModelInput.trim()) { void handleAddCustomModel(provider.id, customModelInput); setCustomModelInput(''); } }}
-                                  placeholder="输入自定义模型名，如 GLM-5.2"
+                                  placeholder={t.desktopSettings.customModelPlaceholder}
+                                  aria-label={t.desktopSettings.customModelPlaceholder}
                                   className="flex-1 rounded-md border border-[var(--c-border)] bg-[var(--c-bg)] px-2.5 py-1 text-xs text-[var(--c-text-primary)] placeholder:text-[var(--c-text-tertiary)] outline-none focus:border-[var(--c-accent)]"
                                 />
                                 <button type="button"
@@ -572,7 +573,7 @@ function ModelPane() {
                                   disabled={saving || !customModelInput.trim()}
                                   className="shrink-0 rounded-md bg-[var(--c-accent)] px-3 py-1 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-40"
                                 >
-                                  添加
+                                  {t.desktopSettings.addLabel}
                                 </button>
                               </div>
                             </div>
@@ -605,12 +606,12 @@ function ModelPane() {
       )}
 
       <Section>
-        <SectionHeader icon={Plus}>添加模型提供商</SectionHeader>
+        <SectionHeader icon={Plus}>{t.desktopSettings.addModelProvider}</SectionHeader>
         <AddProviderCard
           config={config}
           onAdded={(updated) => {
             setConfig(updated);
-            setSuccess('提供商已添加');
+            setSuccess(t.desktopSettings.providerAdded);
           }}
           onError={setError}
         />
@@ -632,6 +633,7 @@ function AddProviderCard({
   onAdded: (updated: DesktopModelConfigSnapshot) => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useLocale();
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [providerApiKey, setProviderApiKey] = useState('');
@@ -659,11 +661,11 @@ function AddProviderCard({
   const handleAdd = async () => {
     if (!selectedProfileId) return;
     if (isCustom && !customName.trim()) {
-      onError('请输入自定义提供商名称');
+      onError(t.desktopSettings.customNameRequired);
       return;
     }
     if (isCustom && !baseUrl.trim()) {
-      onError('自定义提供商需要 Base URL');
+      onError(t.desktopSettings.customBaseUrlRequired);
       return;
     }
     setSaving(true);
@@ -690,26 +692,26 @@ function AddProviderCard({
     <Card>
       <div className="flex flex-col gap-3">
         <div>
-          <label htmlFor="desktop-model-provider-profile" className="block text-xs text-[var(--c-text-secondary)] mb-1.5">选择提供商</label>
+          <label htmlFor="desktop-model-provider-profile" className="block text-xs text-[var(--c-text-secondary)] mb-1.5">{t.desktopSettings.selectProvider}</label>
           <select
             id="desktop-model-provider-profile"
             value={selectedProfileId}
             onChange={e => handleProfileChange(e.target.value)}
             className={inputCls}
           >
-            <option value="">— 选择提供商 —</option>
+            <option value="">{t.desktopSettings.selectProviderPlaceholder}</option>
             {profiles.map(p => (
               <option key={p.id} value={p.id}>
-                {p.label}{configuredIds.has(p.id) ? ' (已配置)' : ''}
+                {p.label}{configuredIds.has(p.id) ? ` ${t.desktopSettings.alreadyConfigured}` : ''}
               </option>
             ))}
-            <option value="__custom__">自定义 (OpenAI 兼容)</option>
+            <option value="__custom__">{t.desktopSettings.customOpenaiCompatible}</option>
           </select>
         </div>
 
         {isCustom && (
           <div>
-            <label htmlFor="desktop-custom-provider-name" className="block text-xs text-[var(--c-text-secondary)] mb-1.5">提供商名称</label>
+            <label htmlFor="desktop-custom-provider-name" className="block text-xs text-[var(--c-text-secondary)] mb-1.5">{t.desktopSettings.providerName}</label>
             <input
               id="desktop-custom-provider-name"
               value={customName}
@@ -723,7 +725,7 @@ function AddProviderCard({
         {selectedProfileId && (
           <>
             <div>
-              <label htmlFor="desktop-provider-base-url" className="block text-xs text-[var(--c-text-secondary)] mb-1.5">Base URL</label>
+              <label htmlFor="desktop-provider-base-url" className="block text-xs text-[var(--c-text-secondary)] mb-1.5">{t.commonBaseUrl}</label>
               <input
                 id="desktop-provider-base-url"
                 value={baseUrl}
@@ -733,7 +735,7 @@ function AddProviderCard({
               />
             </div>
             <div>
-              <label htmlFor="desktop-provider-api-key" className="block text-xs text-[var(--c-text-secondary)] mb-1.5">API Key</label>
+              <label htmlFor="desktop-provider-api-key" className="block text-xs text-[var(--c-text-secondary)] mb-1.5">{t.commonApiKey}</label>
               <div className="relative">
                 <input
                   id="desktop-provider-api-key"
@@ -756,7 +758,7 @@ function AddProviderCard({
             {/* Available models preview */}
             {selectedProfile?.availableModels && selectedProfile.availableModels.length > 0 && (
               <div>
-                <div className="block text-xs text-[var(--c-text-secondary)] mb-1.5">可用模型</div>
+                <div className="block text-xs text-[var(--c-text-secondary)] mb-1.5">{t.desktopSettings.availableModels}</div>
                 <div className="flex flex-wrap gap-1.5">
                   {selectedProfile.availableModels.map(m => (
                     <span
@@ -767,13 +769,13 @@ function AddProviderCard({
                     </span>
                   ))}
                 </div>
-                <span className="mt-1 block text-[11px] text-[var(--c-text-muted)]">添加后默认模型: {selectedProfile.defaultModelLabel}</span>
+                <span className="mt-1 block text-[11px] text-[var(--c-text-muted)]">{t.desktopSettings.defaultModelAfterAdd(selectedProfile.defaultModelLabel)}</span>
               </div>
             )}
 
             {!isCustom && selectedProfile && (
               <div className="text-[11px] text-[var(--c-text-muted)]">
-                协议: {selectedProfile.protocol}
+                {t.desktopSettings.protocol}: {selectedProfile.protocol}
               </div>
             )}
 
@@ -783,7 +785,7 @@ function AddProviderCard({
                 disabled={saving}
                 className={btnPrimary}
               >
-                {saving ? '添加中...' : '添加提供商'}
+                {saving ? t.desktopSettings.addingProvider : t.desktopSettings.addProvider}
               </button>
             </div>
           </>
@@ -794,6 +796,7 @@ function AddProviderCard({
 }
 
 function SkillsPane() {
+  const { t } = useLocale();
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState(false);
@@ -842,7 +845,7 @@ function SkillsPane() {
   };
 
   const handleUninstall = async (skillName: string) => {
-    if (!confirm(`确定卸载技能 "${skillName}"？`)) return;
+    if (!confirm(t.desktopSettings.confirmUninstallSkill(skillName))) return;
     setInstalling(true);
     setError('');
     try {
@@ -873,7 +876,7 @@ function SkillsPane() {
   return (
     <>
       <Section>
-        <SectionHeader icon={Puzzle}>已安装技能 ({skills.length})</SectionHeader>
+        <SectionHeader icon={Puzzle}>{t.desktopSettings.installedSkills(skills.length)}</SectionHeader>
         {/* Status messages */}
         {success && (
           <div className="mb-3 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-600">
@@ -894,7 +897,7 @@ function SkillsPane() {
           </div>
         )}
         <p className="text-xs text-[var(--c-text-secondary)] mb-4">
-          技能扩展了 xiaok 的能力，可以通过输入 /技能名 来使用。
+          {t.desktopSettings.skillsDesc}
         </p>
 
         {/* Install button */}
@@ -903,7 +906,7 @@ function SkillsPane() {
           className="inline-flex items-center gap-2 mb-4 rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
         >
           <Plus size={16} />
-          安装技能
+          {t.desktopSettings.installSkill}
         </button>
 
         {/* Install form */}
@@ -911,24 +914,24 @@ function SkillsPane() {
           <Card className="mb-4">
             <div className="flex flex-col gap-3">
               <div>
-                <label htmlFor="desktop-install-skill-name" className="block text-xs text-[var(--c-text-secondary)] mb-1">技能名称</label>
+                <label htmlFor="desktop-install-skill-name" className="block text-xs text-[var(--c-text-secondary)] mb-1">{t.desktopSettings.skillName}</label>
                 <input
                   id="desktop-install-skill-name"
                   type="text"
                   value={installName}
                   onChange={e => setInstallName(e.target.value)}
-                  placeholder="例如: code-review"
+                  placeholder={t.desktopSettings.skillNamePlaceholder}
                   className={inputCls}
                 />
               </div>
               <div className="text-xs text-[var(--c-text-secondary)]">
-                安装命令: <code className="bg-[var(--c-bg-deep)] px-1.5 py-0.5 rounded">clawhub install {installName || '<技能名>'}</code>
+                {t.desktopSettings.installCommand} <code className="bg-[var(--c-bg-deep)] px-1.5 py-0.5 rounded">clawhub install {installName || `<${t.desktopSettings.skillNameExample}>`}</code>
               </div>
               <div className="flex gap-2">
                 <button type="button" onClick={handleInstall} disabled={installing || !installName.trim()} className={btnPrimary}>
-                  {installing ? '安装中...' : '确认安装'}
+                  {installing ? t.desktopSettings.installing : t.desktopSettings.confirmInstall}
                 </button>
-                <button type="button" onClick={() => setShowInstall(false)} className={btnSecondary}>取消</button>
+                <button type="button" onClick={() => setShowInstall(false)} className={btnSecondary}>{t.desktopSettings.cancelLabel}</button>
               </div>
             </div>
           </Card>
@@ -939,7 +942,7 @@ function SkillsPane() {
             <Card>
               <div className="flex items-center gap-3 text-sm text-[var(--c-text-secondary)]">
                 <Info size={16} />
-                暂无已安装的技能。使用 <code className="bg-[var(--c-bg-deep)] px-1.5 py-0.5 rounded">clawhub install &lt;技能名&gt;</code> 安装
+                {t.desktopSettings.noInstalledSkills} <code className="bg-[var(--c-bg-deep)] px-1.5 py-0.5 rounded">clawhub install &lt;{t.desktopSettings.skillNameExample}&gt;</code> {t.desktopSettings.noInstalledSkillsHint}
               </div>
             </Card>
           ) : (
@@ -966,7 +969,7 @@ function SkillsPane() {
                         <span className="text-xs text-[var(--c-text-tertiary)]">[{skill.tier}]</span>
                         {stats && stats.totalCalls > 0 && (
                           <span className="ml-auto text-xs text-[var(--c-text-tertiary)]">
-                            {stats.totalCalls} 次调用 · 平均 {Math.round(stats.avgDurationMs / 1000)}s
+                            {t.desktopSettings.skillStats(stats.totalCalls, Math.round(stats.avgDurationMs / 1000))}
                           </span>
                         )}
                       </div>
@@ -988,7 +991,7 @@ function SkillsPane() {
                     <button type="button"
                       onClick={() => handleUninstall(skill.name)}
                       className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 transition-colors"
-                      title="卸载"
+                      title={t.desktopSettings.uninstall}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -1001,14 +1004,14 @@ function SkillsPane() {
       </Section>
 
       <Section>
-        <SectionHeader>技能来源</SectionHeader>
+        <SectionHeader>{t.desktopSettings.skillSources}</SectionHeader>
         <Card>
           <div className="text-xs text-[var(--c-text-secondary)]">
-            技能来自 ClawHub 技能市场。使用以下命令管理技能:
+            {t.desktopSettings.skillSourcesDesc}
             <div className="mt-2 flex flex-col gap-1 font-mono">
-              <code className="bg-[var(--c-bg-deep)] px-2 py-1 rounded">clawhub search &lt;关键词&gt;</code>
-              <code className="bg-[var(--c-bg-deep)] px-2 py-1 rounded">clawhub install &lt;技能名&gt;</code>
-              <code className="bg-[var(--c-bg-deep)] px-2 py-1 rounded">clawhub uninstall &lt;技能名&gt;</code>
+              <code className="bg-[var(--c-bg-deep)] px-2 py-1 rounded">clawhub search &lt;{t.desktopSettings.skillSourcesSearch}&gt;</code>
+              <code className="bg-[var(--c-bg-deep)] px-2 py-1 rounded">clawhub install &lt;{t.desktopSettings.skillSourcesInstall}&gt;</code>
+              <code className="bg-[var(--c-bg-deep)] px-2 py-1 rounded">clawhub uninstall &lt;{t.desktopSettings.skillSourcesUninstall}&gt;</code>
               <code className="bg-[var(--c-bg-deep)] px-2 py-1 rounded">clawhub list</code>
             </div>
           </div>
@@ -1037,53 +1040,57 @@ interface ChannelConfig {
   updatedAt: number;
 }
 
-// Channel type specific configuration fields
-const CHANNEL_TYPE_CONFIG: Record<string, { label: string; fields: Array<{ key: string; label: string; placeholder: string; required?: boolean }> }> = {
-  yunzhijia: {
-    label: '云之家',
-    fields: [
-      { key: 'appId', label: 'App ID', placeholder: '应用ID', required: true },
-      { key: 'appSecret', label: 'App Secret', placeholder: '应用密钥', required: true },
-      { key: 'token', label: 'Token', placeholder: '访问令牌' },
-    ],
-  },
-  feishu: {
-    label: '飞书',
-    fields: [
-      { key: 'appId', label: 'App ID', placeholder: '飞书应用ID', required: true },
-      { key: 'appSecret', label: 'App Secret', placeholder: '飞书应用密钥', required: true },
-    ],
-  },
-  discord: {
-    label: 'Discord',
-    fields: [
-      { key: 'botToken', label: 'Bot Token', placeholder: 'Discord Bot Token', required: true },
-      { key: 'chatId', label: 'Channel ID', placeholder: '频道ID (可选)' },
-    ],
-  },
-  weixin: {
-    label: '微信',
-    fields: [
-      { key: 'appId', label: 'App ID', placeholder: '微信公众号/企业微信AppID', required: true },
-      { key: 'appSecret', label: 'App Secret', placeholder: '应用密钥', required: true },
-      { key: 'token', label: 'Token', placeholder: '消息推送Token' },
-    ],
-  },
-  qq: {
-    label: 'QQ',
-    fields: [
-      { key: 'appId', label: 'App ID', placeholder: 'QQ机器人AppID', required: true },
-      { key: 'appSecret', label: 'App Secret', placeholder: 'App Secret', required: true },
-    ],
-  },
-  telegram: {
-    label: 'Telegram',
-    fields: [
-      { key: 'botToken', label: 'Bot Token', placeholder: 'Telegram Bot Token', required: true },
-      { key: 'chatId', label: 'Chat ID', placeholder: '群组/频道ID (可选)' },
-    ],
-  },
-};
+// Channel type specific configuration fields (i18n-aware)
+type ChannelTypeConfigMap = Record<string, { label: string; fields: Array<{ key: string; label: string; placeholder: string; required?: boolean }> }>;
+
+function getChannelTypeConfig(ts: ReturnType<typeof useLocale>['t']['desktopSettings']): ChannelTypeConfigMap {
+  return {
+    yunzhijia: {
+      label: ts.channelTypeYunzhijia,
+      fields: [
+        { key: 'appId', label: 'App ID', placeholder: ts.channelFieldAppId, required: true },
+        { key: 'appSecret', label: 'App Secret', placeholder: ts.channelFieldAppSecret, required: true },
+        { key: 'token', label: 'Token', placeholder: ts.channelFieldToken },
+      ],
+    },
+    feishu: {
+      label: ts.channelTypeFeishu,
+      fields: [
+        { key: 'appId', label: 'App ID', placeholder: ts.channelFieldFeishuAppId, required: true },
+        { key: 'appSecret', label: 'App Secret', placeholder: ts.channelFieldFeishuAppSecret, required: true },
+      ],
+    },
+    discord: {
+      label: ts.channelTypeDiscord,
+      fields: [
+        { key: 'botToken', label: 'Bot Token', placeholder: 'Discord Bot Token', required: true },
+        { key: 'chatId', label: 'Channel ID', placeholder: ts.channelFieldDiscordChannelId },
+      ],
+    },
+    weixin: {
+      label: ts.channelTypeWeixin,
+      fields: [
+        { key: 'appId', label: 'App ID', placeholder: ts.channelFieldWeixinAppId, required: true },
+        { key: 'appSecret', label: 'App Secret', placeholder: ts.channelFieldAppSecret, required: true },
+        { key: 'token', label: 'Token', placeholder: ts.channelFieldWeixinToken },
+      ],
+    },
+    qq: {
+      label: ts.channelTypeQQ,
+      fields: [
+        { key: 'appId', label: 'App ID', placeholder: ts.channelFieldQQAppId, required: true },
+        { key: 'appSecret', label: 'App Secret', placeholder: 'App Secret', required: true },
+      ],
+    },
+    telegram: {
+      label: ts.channelTypeTelegram,
+      fields: [
+        { key: 'botToken', label: 'Bot Token', placeholder: 'Telegram Bot Token', required: true },
+        { key: 'chatId', label: 'Chat ID', placeholder: ts.channelFieldTelegramChatId },
+      ],
+    },
+  };
+}
 
 function ChannelsPane() {
   const [channels, setChannels] = useState<ChannelConfig[]>([]);
@@ -1095,6 +1102,10 @@ function ChannelsPane() {
   const [testingChannel, setTestingChannel] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const { t } = useLocale();
+  const ts = t.desktopSettings;
+  const channelTypeConfig = getChannelTypeConfig(ts);
 
   const load = () => {
     api.listChannels()
@@ -1112,11 +1123,11 @@ function ChannelsPane() {
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
-    const typeConfig = CHANNEL_TYPE_CONFIG[newType];
+    const typeConfig = channelTypeConfig[newType];
     // Check required fields
     for (const field of typeConfig.fields) {
       if (field.required && !newFields[field.key]?.trim()) {
-        alert(`请填写 ${field.label}`);
+        alert(ts.channelsFieldRequired(field.label));
         return;
       }
     }
@@ -1136,7 +1147,7 @@ function ChannelsPane() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('确定删除此通道？')) return;
+    if (!confirm(ts.channelsDeleteConfirm)) return;
     try {
       await api.deleteChannel(id);
       load();
@@ -1165,7 +1176,7 @@ function ChannelsPane() {
   return (
     <>
       <Section>
-        <SectionHeader icon={Globe}>消息通道</SectionHeader>
+        <SectionHeader icon={Globe}>{ts.channelsTitle}</SectionHeader>
         {/* Status messages */}
         {success && (
           <div className="mb-3 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-600">
@@ -1186,7 +1197,7 @@ function ChannelsPane() {
           </div>
         )}
         <p className="text-xs text-[var(--c-text-secondary)] mb-4">
-          配置第三方平台接入，让 xiaok 可以在这些平台上提供服务
+          {ts.channelsDesc}
         </p>
 
         {/* Add button */}
@@ -1195,7 +1206,7 @@ function ChannelsPane() {
           className="inline-flex items-center gap-2 mb-4 rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
         >
           <Plus size={16} />
-          添加通道
+          {ts.channelsAdd}
         </button>
 
         {/* Add form */}
@@ -1203,31 +1214,31 @@ function ChannelsPane() {
           <Card className="mb-4">
             <div className="flex flex-col gap-3">
               <div>
-                <label htmlFor="desktop-channel-name" className="block text-xs text-[var(--c-text-secondary)] mb-1">名称</label>
+                <label htmlFor="desktop-channel-name" className="block text-xs text-[var(--c-text-secondary)] mb-1">{ts.channelsNameLabel}</label>
                 <input
                   id="desktop-channel-name"
                   type="text"
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
-                  placeholder="例如: 团队通知"
+                  placeholder={ts.channelsNamePlaceholder}
                   className={inputCls}
                 />
               </div>
               <div>
-                <label htmlFor="desktop-channel-type" className="block text-xs text-[var(--c-text-secondary)] mb-1">类型</label>
+                <label htmlFor="desktop-channel-type" className="block text-xs text-[var(--c-text-secondary)] mb-1">{ts.channelsTypeLabel}</label>
                 <select
                   id="desktop-channel-type"
                   value={newType}
                   onChange={e => setNewType(e.target.value)}
                   className={inputCls}
                 >
-                  {Object.entries(CHANNEL_TYPE_CONFIG).map(([type, cfg]) => (
+                  {Object.entries(channelTypeConfig).map(([type, cfg]) => (
                     <option key={type} value={type}>{cfg.label}</option>
                   ))}
                 </select>
               </div>
               {/* Type-specific fields */}
-              {CHANNEL_TYPE_CONFIG[newType].fields.map(field => (
+              {channelTypeConfig[newType].fields.map(field => (
                 <div key={field.key}>
                   <label htmlFor={`desktop-channel-field-${field.key}`} className="block text-xs text-[var(--c-text-secondary)] mb-1">
                     {field.label} {field.required && <span className="text-red-500">*</span>}
@@ -1243,8 +1254,8 @@ function ChannelsPane() {
                 </div>
               ))}
               <div className="flex gap-2">
-                <button type="button" onClick={handleCreate} className={btnPrimary}>创建</button>
-                <button type="button" onClick={() => setShowAdd(false)} className={btnSecondary}>取消</button>
+                <button type="button" onClick={handleCreate} className={btnPrimary}>{ts.channelsCreateBtn}</button>
+                <button type="button" onClick={() => setShowAdd(false)} className={btnSecondary}>{ts.channelsCancelBtn}</button>
               </div>
             </div>
           </Card>
@@ -1256,7 +1267,7 @@ function ChannelsPane() {
             <Card>
               <div className="flex items-center gap-3 text-sm text-[var(--c-text-secondary)]">
                 <Info size={16} />
-                暂无配置的消息通道
+                {ts.channelsEmpty}
               </div>
             </Card>
           ) : (
@@ -1268,7 +1279,7 @@ function ChannelsPane() {
                     <div>
                       <div className="text-sm font-medium">{ch.name}</div>
                       <div className="text-xs text-[var(--c-text-secondary)]">
-                        {CHANNEL_TYPE_CONFIG[ch.type]?.label || ch.type} · 创建: {new Date(ch.createdAt).toLocaleDateString()}
+                        {channelTypeConfig[ch.type]?.label || ch.type} · {ts.channelsCreatedAt} {new Date(ch.createdAt).toLocaleDateString()}
                       </div>
                     </div>
                   </div>
@@ -1279,9 +1290,9 @@ function ChannelsPane() {
                         try {
                           const result = await api.testChannel(ch.id);
                           if (result.success) {
-                            setSuccess(`连接成功，延迟 ${result.latencyMs}ms`);
+                            setSuccess(ts.channelsTestSuccess(result.latencyMs));
                           } else {
-                            setError(result.error || '连接失败');
+                            setError(result.error || ts.channelsTestFailed);
                           }
                         } catch (e) {
                           setError((e as Error).message);
@@ -1293,7 +1304,7 @@ function ChannelsPane() {
                       className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors disabled:opacity-50"
                     >
                       {testingChannel === ch.id ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
-                      测试
+                      {ts.channelsTestBtn}
                     </button>
                     <button type="button"
                       onClick={() => handleToggle(ch)}
@@ -1301,7 +1312,7 @@ function ChannelsPane() {
                         ch.enabled ? 'bg-green-50 text-green-600' : 'bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]'
                       }`}
                     >
-                      {ch.enabled ? '启用中' : '已禁用'}
+                      {ch.enabled ? ts.channelsEnabled : ts.channelsDisabled}
                     </button>
                     <button type="button"
                       onClick={() => handleDelete(ch.id)}
@@ -1348,6 +1359,8 @@ interface PluginDependencyStatus {
 }
 
 function McpPane() {
+  const { t } = useLocale();
+  const ts = t.desktopSettings;
   const [installs, setInstalls] = useState<MCPInstallConfig[]>([]);
   const [pluginServers, setPluginServers] = useState<Array<{ name: string; pluginName: string; toolCount: number; connected: boolean; enabled: boolean; lastError?: string; lastErrorDetail?: { category: 'python_version_too_old' | 'python_module_missing' | null; message: string; detectedVersion?: string; requiredVersion?: string; command?: string; missingModule?: string } }>>([]);
   const [dependencies, setDependencies] = useState<PluginDependencyStatus[]>([]);
@@ -1406,7 +1419,7 @@ function McpPane() {
 
   const handleInstallDependency = async (dependency: PluginDependencyStatus) => {
     if (!dependency.canInstall) return;
-    const confirmed = window.confirm(`${dependency.displayName} 是本机 macOS 自动化组件。安装前请确认你信任该插件来源。`);
+    const confirmed = window.confirm(ts.mcpInstallConfirm(dependency.displayName));
     if (!confirmed) return;
     const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:install`;
     setDependencyAction(actionKey);
@@ -1416,7 +1429,7 @@ function McpPane() {
         dependencyId: dependency.dependencyId,
         confirmed: true,
       });
-      if (!result.success) alert(result.error || '安装失败');
+      if (!result.success) alert(result.error || ts.mcpInstallFailed);
       load();
     } catch (e) {
       alert((e as Error).message);
@@ -1427,14 +1440,14 @@ function McpPane() {
 
   const handleSetupPluginDependency = async (dependency: PluginDependencyStatus) => {
     if (!dependency.canInstall) return;
-    const confirmed = window.confirm(`${formatPluginDependencyTitle(dependency)} 会安装 xiaok 插件，并从官方来源安装 ${dependency.displayName}。继续？`);
+    const confirmed = window.confirm(ts.mcpSetupConfirm(formatPluginDependencyTitle(dependency), dependency.displayName));
     if (!confirmed) return;
     const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:setup`;
     setDependencyAction(actionKey);
     try {
       const pluginResult = await api.installPlugin(dependency.pluginName);
       if (!pluginResult.success) {
-        alert(pluginResult.error || '插件安装失败');
+        alert(pluginResult.error || ts.mcpPluginInstallFailed);
         return;
       }
       const result = await api.installPluginDependency({
@@ -1442,7 +1455,7 @@ function McpPane() {
         dependencyId: dependency.dependencyId,
         confirmed: true,
       });
-      if (!result.success) alert(result.error || '安装失败');
+      if (!result.success) alert(result.error || ts.mcpInstallFailed);
       load();
     } catch (e) {
       alert((e as Error).message);
@@ -1453,7 +1466,7 @@ function McpPane() {
 
   const handleUpdateDependency = async (dependency: PluginDependencyStatus) => {
     if (!dependency.canUpdate) return;
-    const confirmed = window.confirm(`更新 ${dependency.displayName} 需要替换本机 driver。继续？`);
+    const confirmed = window.confirm(ts.mcpUpdateConfirm(dependency.displayName));
     if (!confirmed) return;
     const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:update`;
     setDependencyAction(actionKey);
@@ -1463,7 +1476,7 @@ function McpPane() {
         dependencyId: dependency.dependencyId,
         confirmed: true,
       });
-      if (!result.success) alert(result.error || '更新失败');
+      if (!result.success) alert(result.error || ts.mcpUpdateFailed);
       load();
     } catch (e) {
       alert((e as Error).message);
@@ -1481,7 +1494,7 @@ function McpPane() {
         pluginName: dependency.pluginName,
         dependencyId: dependency.dependencyId,
       });
-      if (!result.success) alert(result.error || '诊断失败');
+      if (!result.success) alert(result.error || ts.mcpDiagnoseFailed);
       load();
     } catch (e) {
       alert((e as Error).message);
@@ -1536,13 +1549,13 @@ function McpPane() {
     <>
       {dependencies.length > 0 && (
         <Section>
-          <SectionHeader icon={Package}>插件依赖</SectionHeader>
+          <SectionHeader icon={Package}>{ts.mcpPluginDeps}</SectionHeader>
           <div className="flex flex-col gap-2">
             {dependencies.map(dependency => {
               const pluginInstalled = dependency.pluginInstalled ?? pluginServers.some(server => server.pluginName === dependency.pluginName);
               const dependencyServer = pluginServers.find(server => server.pluginName === dependency.pluginName);
-              const statusText = formatPluginDependencyStatus(dependency, dependencyServer);
-              const dependencyLayerRows = formatPluginDependencyLayerRows(dependency, pluginInstalled, dependencyServer);
+              const statusText = formatPluginDependencyStatus(dependency, dependencyServer, ts);
+              const dependencyLayerRows = formatPluginDependencyLayerRows(dependency, pluginInstalled, dependencyServer, ts);
               const isSettingUp = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:setup`;
               const isInstalling = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:install`;
               const isUpdating = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:update`;
@@ -1587,7 +1600,7 @@ function McpPane() {
                           className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
                         >
                           <Settings size={12} />
-                          打开辅助功能
+                          {ts.mcpOpenAccessibility}
                         </button>
                       )}
                       {dependency.code === 'permission_screen_missing' && (
@@ -1597,7 +1610,7 @@ function McpPane() {
                           className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
                         >
                           <Settings size={12} />
-                          打开屏幕录制
+                          {ts.mcpOpenScreenRecording}
                         </button>
                       )}
                       {canReconnectMcp && (
@@ -1608,7 +1621,7 @@ function McpPane() {
                           className="inline-flex items-center gap-1 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
                         >
                           {(isComputerUse ? isEnablingComputerUse : isRestartingMcp) ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                          {isComputerUse ? '启用 Computer Use' : (dependencyServer?.enabled === false ? '连接 MCP' : '重连 MCP')}
+                          {isComputerUse ? ts.mcpEnableComputerUse : (dependencyServer?.enabled === false ? ts.mcpConnectMcp : ts.mcpReconnectMcp)}
                         </button>
                       )}
                       {dependency.canInstall && dependency.state === 'missing' && !pluginInstalled && (
@@ -1619,7 +1632,7 @@ function McpPane() {
                           className="inline-flex items-center gap-1 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
                         >
                           {isSettingUp ? <Loader2 size={12} className="animate-spin" /> : <Package size={12} />}
-                          安装并启用
+                          {ts.mcpInstallAndEnable}
                         </button>
                       )}
                       {dependency.canInstall && dependency.state === 'missing' && pluginInstalled && (
@@ -1630,7 +1643,7 @@ function McpPane() {
                           className="inline-flex items-center gap-1 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
                         >
                           {isInstalling ? <Loader2 size={12} className="animate-spin" /> : <Package size={12} />}
-                          安装 Driver
+                          {ts.mcpInstallDriver}
                         </button>
                       )}
                       {dependency.canUpdate && dependency.state !== 'missing' && (
@@ -1641,7 +1654,7 @@ function McpPane() {
                           className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
                         >
                           {isUpdating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                          更新
+                          {ts.mcpUpdate}
                         </button>
                       )}
                       {dependency.canDiagnose && (
@@ -1652,7 +1665,7 @@ function McpPane() {
                           className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
                         >
                           {isDiagnosing ? <Loader2 size={12} className="animate-spin" /> : <Wrench size={12} />}
-                          诊断
+                          {ts.mcpDiagnose}
                         </button>
                       )}
                     </div>
@@ -1666,9 +1679,9 @@ function McpPane() {
 
       {pluginServers.length > 0 && (
         <Section>
-          <SectionHeader icon={Plug}>插件 MCP 服务</SectionHeader>
+          <SectionHeader icon={Plug}>{ts.mcpPluginMcpServices}</SectionHeader>
           <p className="text-xs text-[var(--c-text-secondary)] mb-4">
-            从 ~/.xiaok/plugins/ 自动发现的 MCP 服务器
+            {ts.mcpPluginMcpServicesDesc}
           </p>
           <div className="flex flex-col gap-2">
             {pluginServers.map(server => (
@@ -1689,7 +1702,7 @@ function McpPane() {
                     </div>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded ${server.connected ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                    {server.connected ? '已连接' : '未连接'}
+                    {server.connected ? ts.mcpConnected : ts.mcpDisconnected}
                   </span>
                 </div>
                 {!server.connected && server.lastErrorDetail?.category && (
@@ -1702,9 +1715,9 @@ function McpPane() {
       )}
 
       <Section>
-        <SectionHeader icon={Plug}>MCP 服务器</SectionHeader>
+        <SectionHeader icon={Plug}>{ts.mcpServersTitle}</SectionHeader>
         <p className="text-xs text-[var(--c-text-secondary)] mb-4">
-          通过 Model Context Protocol (MCP) 扩展 xiaok 的工具能力
+          {ts.mcpServersDesc}
         </p>
 
         <button type="button"
@@ -1712,25 +1725,25 @@ function McpPane() {
           className="inline-flex items-center gap-2 mb-4 rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
         >
           <Plus size={16} />
-          添加 MCP 服务器
+          {ts.mcpAddServer}
         </button>
 
         {showAdd && (
           <Card className="mb-4">
             <div className="flex flex-col gap-3">
               <div>
-                <label htmlFor="desktop-mcp-server-name" className="block text-xs text-[var(--c-text-secondary)] mb-1">名称</label>
+                <label htmlFor="desktop-mcp-server-name" className="block text-xs text-[var(--c-text-secondary)] mb-1">{ts.mcpNameLabel}</label>
                 <input
                   id="desktop-mcp-server-name"
                   type="text"
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
-                  placeholder="例如: filesystem"
+                  placeholder={ts.mcpNamePlaceholder}
                   className={inputCls}
                 />
               </div>
               <div>
-                <label htmlFor="desktop-mcp-server-command" className="block text-xs text-[var(--c-text-secondary)] mb-1">命令</label>
+                <label htmlFor="desktop-mcp-server-command" className="block text-xs text-[var(--c-text-secondary)] mb-1">{ts.mcpCommandLabel}</label>
                 <input
                   id="desktop-mcp-server-command"
                   type="text"
@@ -1741,7 +1754,7 @@ function McpPane() {
                 />
               </div>
               <div>
-                <label htmlFor="desktop-mcp-server-args" className="block text-xs text-[var(--c-text-secondary)] mb-1">参数 (空格分隔，可选)</label>
+                <label htmlFor="desktop-mcp-server-args" className="block text-xs text-[var(--c-text-secondary)] mb-1">{ts.mcpArgsLabel}</label>
                 <input
                   id="desktop-mcp-server-args"
                   type="text"
@@ -1752,8 +1765,8 @@ function McpPane() {
                 />
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={handleCreate} className={btnPrimary}>创建</button>
-                <button type="button" onClick={() => setShowAdd(false)} className={btnSecondary}>取消</button>
+                <button type="button" onClick={handleCreate} className={btnPrimary}>{ts.mcpCreateBtn}</button>
+                <button type="button" onClick={() => setShowAdd(false)} className={btnSecondary}>{ts.mcpCancelBtn}</button>
               </div>
             </div>
           </Card>
@@ -1764,7 +1777,7 @@ function McpPane() {
             <Card>
               <div className="flex items-center gap-3 text-sm text-[var(--c-text-secondary)]">
                 <Info size={16} />
-                暂无 MCP 服务器配置
+                {ts.mcpEmpty}
               </div>
             </Card>
           ) : (
@@ -1779,7 +1792,7 @@ function McpPane() {
                         {install.command}{install.args?.length ? ` ${install.args.join(' ')}` : ''}
                       </code>
                       <div className="text-xs text-[var(--c-text-tertiary)]">
-                        来源: {install.source} · 创建: {new Date(install.createdAt).toLocaleDateString()}
+                        {ts.mcpSourceLabel} {install.source} · {ts.mcpCreatedAtLabel} {new Date(install.createdAt).toLocaleDateString()}
                       </div>
                     </div>
                   </div>
@@ -1806,71 +1819,76 @@ function formatPluginDependencyTitle(dependency: PluginDependencyStatus): string
 
 function formatPluginDependencyStatus(
   dependency: PluginDependencyStatus,
-  server?: { connected: boolean; toolCount: number },
+  server: { connected: boolean; toolCount: number } | undefined,
+  ts: LocaleStrings['desktopSettings'],
 ): string {
-  if (dependency.code === 'binary_missing') return `需要安装 ${dependency.displayName}`;
-  if (dependency.code === 'permission_accessibility_missing') return '需要辅助功能权限';
-  if (dependency.code === 'permission_screen_missing') return '需要屏幕录制权限';
-  if (dependency.code === 'version_too_old') return '需要更新 Driver';
-  if (dependency.pluginName === 'cua-computer-use' && dependency.state === 'ready' && server?.connected === false) return '未启用';
-  if (dependency.state === 'ready') return '可用';
-  if (dependency.state === 'unsupported') return '当前平台不支持';
-  return '需要处理';
+  if (dependency.code === 'binary_missing') return ts.mcpDepNeedsInstall(dependency.displayName);
+  if (dependency.code === 'permission_accessibility_missing') return ts.mcpDepNeedsAccessibility;
+  if (dependency.code === 'permission_screen_missing') return ts.mcpDepNeedsScreenRecording;
+  if (dependency.code === 'version_too_old') return ts.mcpDepNeedsUpdate;
+  if (dependency.pluginName === 'cua-computer-use' && dependency.state === 'ready' && server?.connected === false) return ts.mcpDepNotEnabled;
+  if (dependency.state === 'ready') return ts.mcpDepAvailable;
+  if (dependency.state === 'unsupported') return ts.mcpDepUnsupported;
+  return ts.mcpDepNeedsAttention;
 }
 
 function formatPluginDependencyLayerRows(
   dependency: PluginDependencyStatus,
   pluginInstalled: boolean,
-  server?: { connected: boolean; toolCount: number },
+  server: { connected: boolean; toolCount: number } | undefined,
+  ts: LocaleStrings['desktopSettings'],
 ): Array<{ label: string; value: string }> {
   return [
-    { label: '插件', value: pluginInstalled ? '已安装' : '未安装' },
-    { label: dependency.displayName, value: formatDriverLayerStatus(dependency) },
-    { label: '权限', value: formatPermissionLayerStatus(dependency, server) },
-    { label: dependency.pluginName === 'cua-computer-use' ? '服务连接' : 'MCP', value: formatMcpLayerStatus(dependency, server) },
-    { label: '工具', value: formatToolLayerStatus(dependency, server) },
+    { label: ts.mcpLayerPlugin, value: pluginInstalled ? ts.mcpLayerInstalled : ts.mcpLayerNotInstalled },
+    { label: dependency.displayName, value: formatDriverLayerStatus(dependency, ts) },
+    { label: ts.mcpLayerPermission, value: formatPermissionLayerStatus(dependency, server, ts) },
+    { label: dependency.pluginName === 'cua-computer-use' ? ts.mcpLayerServiceConn : 'MCP', value: formatMcpLayerStatus(dependency, server, ts) },
+    { label: ts.mcpLayerTools, value: formatToolLayerStatus(dependency, server, ts) },
   ];
 }
 
-function formatDriverLayerStatus(dependency: PluginDependencyStatus): string {
-  if (dependency.state === 'unsupported') return '当前平台不支持';
-  if (dependency.code === 'binary_missing') return '未安装';
-  if (dependency.code === 'version_too_old') return dependency.version ? `${dependency.version}，需要更新` : '需要更新';
-  if (dependency.state === 'ready') return dependency.version || '已安装';
-  if (dependency.resolvedBinary) return '已安装但不可用';
-  return '未确认';
+function formatDriverLayerStatus(dependency: PluginDependencyStatus, ts: LocaleStrings['desktopSettings']): string {
+  if (dependency.state === 'unsupported') return ts.mcpDriverUnsupported;
+  if (dependency.code === 'binary_missing') return ts.mcpDriverNotInstalled;
+  if (dependency.code === 'version_too_old') return dependency.version ? `${dependency.version}，${ts.mcpDriverNeedsUpdate}` : ts.mcpDriverNeedsUpdate;
+  if (dependency.state === 'ready') return dependency.version || ts.mcpLayerInstalled;
+  if (dependency.resolvedBinary) return ts.mcpDriverInstalledUnavailable;
+  return ts.mcpDriverUnconfirmed;
 }
 
 function formatPermissionLayerStatus(
   dependency: PluginDependencyStatus,
-  server?: { connected: boolean; toolCount: number },
+  server: { connected: boolean; toolCount: number } | undefined,
+  ts: LocaleStrings['desktopSettings'],
 ): string {
-  if (dependency.code === 'permission_accessibility_missing') return '缺辅助功能权限';
-  if (dependency.code === 'permission_screen_missing') return '缺屏幕录制权限';
-  if (dependency.pluginName === 'cua-computer-use' && dependency.state === 'ready' && server?.connected === false) return '启用后验证';
-  if (dependency.state === 'ready') return '已授权';
-  if (dependency.state === 'missing' || dependency.state === 'unsupported') return '未检查';
-  return '未确认';
+  if (dependency.code === 'permission_accessibility_missing') return ts.mcpPermAccessibilityMissing;
+  if (dependency.code === 'permission_screen_missing') return ts.mcpPermScreenMissing;
+  if (dependency.pluginName === 'cua-computer-use' && dependency.state === 'ready' && server?.connected === false) return ts.mcpPermVerifyAfterEnable;
+  if (dependency.state === 'ready') return ts.mcpPermGranted;
+  if (dependency.state === 'missing' || dependency.state === 'unsupported') return ts.mcpPermNotChecked;
+  return ts.mcpPermUnconfirmed;
 }
 
 function formatMcpLayerStatus(
   dependency: PluginDependencyStatus,
-  server?: { connected: boolean; toolCount: number },
+  server: { connected: boolean; toolCount: number } | undefined,
+  ts: LocaleStrings['desktopSettings'],
 ): string {
-  if (!dependency.pluginInstalled && dependency.state === 'missing') return '未安装';
-  if (!server) return '未注册';
-  return server.connected ? '已连接' : '未连接';
+  if (!dependency.pluginInstalled && dependency.state === 'missing') return ts.mcpLayerNotInstalled;
+  if (!server) return ts.mcpLayerNotRegistered;
+  return server.connected ? ts.mcpConnected : ts.mcpDisconnected;
 }
 
 function formatToolLayerStatus(
   dependency: PluginDependencyStatus,
-  server?: { connected: boolean; toolCount: number },
+  server: { connected: boolean; toolCount: number } | undefined,
+  ts: LocaleStrings['desktopSettings'],
 ): string {
-  if (dependency.state !== 'ready') return '不可用';
-  if (!server) return '等待注册';
-  if (!server.connected) return dependency.pluginName === 'cua-computer-use' ? '等待启用' : 'MCP 未连接';
-  if (dependency.pluginName === 'cua-computer-use' && server.toolCount === 1) return 'wrapper 已注册';
-  if (dependency.pluginName === 'cua-computer-use') return 'raw tools 未隐藏';
+  if (dependency.state !== 'ready') return ts.mcpToolUnavailable;
+  if (!server) return ts.mcpToolWaitRegister;
+  if (!server.connected) return dependency.pluginName === 'cua-computer-use' ? ts.mcpToolWaitEnable : ts.mcpToolMcpDisconnected;
+  if (dependency.pluginName === 'cua-computer-use' && server.toolCount === 1) return ts.mcpToolWrapperRegistered;
+  if (dependency.pluginName === 'cua-computer-use') return ts.mcpToolRawNotHidden;
   return `${server.toolCount} tools`;
 }
 
@@ -1991,10 +2009,11 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       el.style.outline = '2px solid var(--c-accent)';
       el.style.outlineOffset = '2px';
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         el.style.outline = '';
         el.style.outlineOffset = '';
       }, 2000);
+      return () => clearTimeout(timer);
     }
   }, [loopDiagnosticsLoading]);
 
@@ -2067,14 +2086,14 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       await loadLoops(true);
     } catch (error) {
       console.error('[LoopsPane] save edit failed', error);
-      showToast(error instanceof Error ? error.message : '保存失败');
+      showToast(error instanceof Error ? error.message : t.desktopSettings.saveLoopFailed);
     } finally {
       setSavingEdit(false);
     }
   };
 
   const handleDeleteLoop = async (loopId: string) => {
-    if (!confirm('确定要删除这个循环吗？')) return;
+    if (!confirm(t.desktopSettings.deleteLoopConfirm)) return;
     try {
       console.log('[LoopsPane] deleting loop', { loopId });
       await api.deleteUserLoopTemplate(loopId);
@@ -2082,7 +2101,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       await loadLoops(true);
     } catch (error) {
       console.error('[LoopsPane] delete loop failed', error);
-      showToast(error instanceof Error ? error.message : '删除失败');
+      showToast(error instanceof Error ? error.message : t.desktopSettings.deleteLoopFailed);
     }
   };
 
@@ -2161,11 +2180,11 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
     try {
       console.log('[LoopsPane] creating from template', { templateId: template.templateId });
       await api.createUserLoopTemplate(input);
-      showToast(`已从模板创建：${template.title}，记得点编辑修改输出路径里的 ~/ 为完整路径`, 'success');
+      showToast(t.desktopSettings.createdFromTemplate(template.title), 'success');
       await loadLoops(true);
     } catch (error) {
       console.error('[LoopsPane] create from template failed', error);
-      showToast(error instanceof Error ? error.message : '从模板创建失败');
+      showToast(error instanceof Error ? error.message : t.desktopSettings.createFromTemplateFailed);
     }
   };
 
@@ -2282,10 +2301,10 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                 {t.desktopSettings.userLoopsEmpty}
               </p>
               <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--c-text-muted)] mb-2">
-                从模板快速开始
+                {t.desktopSettings.quickStartFromTemplate}
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
-                {USER_LOOP_STARTER_TEMPLATES.map(template => (
+                {resolveUserLoopStarterTemplates(t).map(template => (
                   <div
                     key={template.templateId}
                     className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 flex flex-col gap-2"
@@ -2293,7 +2312,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                     <div className="flex items-start justify-between gap-2">
                       <span className="text-sm font-medium text-[var(--c-text-heading)]">{template.title}</span>
                       <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${template.category === 'business' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>
-                        {template.category === 'business' ? '业务' : '代码'}
+                        {template.category === 'business' ? t.desktopSettings.categoryBusiness : t.desktopSettings.categoryCode}
                       </span>
                     </div>
                     <p className="text-xs leading-5 text-[var(--c-text-secondary)] flex-1">{template.description}</p>
@@ -2305,7 +2324,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                       onClick={() => void handleCreateFromTemplate(template)}
                       className={`${btnSecondary} self-start px-3 py-1 text-xs`}
                     >
-                      使用此模板
+                      {t.desktopSettings.useThisTemplate}
                     </button>
                   </div>
                 ))}
@@ -2375,7 +2394,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                                 onClick={() => navigate(`/automations/schedules?loopId=${encodeURIComponent(template.loopId)}&create=1&name=${encodeURIComponent(loopTitle)}`)}
                                 className="text-[var(--c-accent)] hover:underline text-xs"
                               >
-                                + 为此循环创建定时任务
+                                {t.desktopSettings.createScheduleForLoop}
                               </button>
                             </div>
                           )}
@@ -2388,7 +2407,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                     {latestRunFailed && (
                       <div className="mt-3 rounded-md border border-red-200 bg-red-50/50 px-3 py-2 text-xs">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium text-red-700">最近一次运行{latestRun.status === 'blocked' ? '阻塞' : '失败'}</span>
+                          <span className="font-medium text-red-700">{latestRun.status === 'blocked' ? t.desktopSettings.lastRunBlocked : t.desktopSettings.lastRunFailed}</span>
                           <span className="text-[10px] text-red-600/70">{new Date(latestRun.startedAt).toLocaleString()}</span>
                         </div>
                         {latestRun.message && (
@@ -2489,8 +2508,8 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                             </div>
                           )}
                           <div className="flex justify-end gap-2 pt-1">
-                            <button type="button" onClick={() => setEditingLoopId(null)} className={`${btnSecondary} px-3 py-1.5`}>取消</button>
-                            <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit || !editLoopTitle.trim()} className={`${btnPrimary} px-3 py-1.5`}>{savingEdit ? '保存中...' : '保存'}</button>
+                            <button type="button" onClick={() => setEditingLoopId(null)} className={`${btnSecondary} px-3 py-1.5`}>{t.desktopSettings.loopEditCancel}</button>
+                            <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit || !editLoopTitle.trim()} className={`${btnPrimary} px-3 py-1.5`}>{savingEdit ? t.desktopSettings.loopEditSaving : t.desktopSettings.loopEditSave}</button>
                           </div>
                         </div>
                       </div>
@@ -2669,7 +2688,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
 
 // ---- General ----
 
-function GeneralPane({ onOpenAutomations }: { onOpenAutomations: () => void }) {
+function GeneralPane() {
   const { locale, setLocale, t } = useLocale();
   const [skillDebug, setSkillDebug] = useState(false);
   const [savingSkillDebug, setSavingSkillDebug] = useState(false);
@@ -2690,11 +2709,11 @@ function GeneralPane({ onOpenAutomations }: { onOpenAutomations: () => void }) {
     try {
       setServiceStatus(await api.getServiceStatus());
     } catch (error) {
-      setServiceStatusError(error instanceof Error ? error.message : '服务状态读取失败');
+      setServiceStatusError(error instanceof Error ? error.message : t.desktopSettings.serviceStatusLoadError);
     } finally {
       if (!silent) setServiceStatusLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     api.getSkillDebugConfig().then(c => {
@@ -2744,7 +2763,7 @@ function GeneralPane({ onOpenAutomations }: { onOpenAutomations: () => void }) {
       await api.restartRelatedService(serviceId);
       await loadServiceStatus(true);
     } catch (error) {
-      setServiceStatusError(error instanceof Error ? error.message : '服务重启失败');
+      setServiceStatusError(error instanceof Error ? error.message : t.desktopSettings.serviceRestartFailed);
     } finally {
       setRestartingService(null);
     }
@@ -2782,7 +2801,7 @@ function GeneralPane({ onOpenAutomations }: { onOpenAutomations: () => void }) {
         ctx.drawImage(img, 0, 0, size, size);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
         if (dataUrl.length > 140000) {
-          alert('头像文件过大，请选择更小的图片');
+          alert(t.desktopSettings.avatarTooLarge);
           return;
         }
         localStorage.setItem('xiaok_avatar_url', dataUrl);
@@ -2800,7 +2819,7 @@ function GeneralPane({ onOpenAutomations }: { onOpenAutomations: () => void }) {
   return (
     <>
       <Section>
-        <SectionHeader icon={User}>个人资料</SectionHeader>
+        <SectionHeader icon={User}>{t.desktopSettings.profileTitle}</SectionHeader>
         <Card>
           <div className="flex items-center gap-4">
             {/* Avatar */}
@@ -2815,26 +2834,26 @@ function GeneralPane({ onOpenAutomations }: { onOpenAutomations: () => void }) {
                   {initial}
                 </div>
               )}
-              <label className="absolute -bottom-0.5 -right-0.5 flex size-5 cursor-pointer items-center justify-center rounded-full bg-[var(--c-bg-card)] shadow" title="更换头像">
+              <label className="absolute -bottom-0.5 -right-0.5 flex size-5 cursor-pointer items-center justify-center rounded-full bg-[var(--c-bg-card)] shadow" title={t.desktopSettings.changeAvatar}>
                 <Camera size={10} />
-                <input aria-label="更换头像" type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
+                <input aria-label={t.desktopSettings.changeAvatar} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
               </label>
             </div>
             {/* Name */}
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               {editingName ? (
                 <div className="flex items-center gap-2">
-                  <input aria-label="输入你的名字"
+                  <input aria-label={t.desktopSettings.enterYourName}
                     type="text"
                     value={nameInput}
                     onChange={(e) => setNameInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') setEditingName(false); }}
                     className="min-w-0 flex-1 rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]"
-                    placeholder="输入你的名字"
+                    placeholder={t.desktopSettings.enterYourName}
                     autoFocus
                   />
-                  <button type="button" onClick={handleSaveName} className="text-xs text-[var(--c-accent)]">保存</button>
-                  <button type="button" onClick={() => setEditingName(false)} className="text-xs text-[var(--c-text-tertiary)]">取消</button>
+                  <button type="button" onClick={handleSaveName} className="text-xs text-[var(--c-accent)]">{t.desktopSettings.save}</button>
+                  <button type="button" onClick={() => setEditingName(false)} className="text-xs text-[var(--c-text-tertiary)]">{t.desktopSettings.cancelAction}</button>
                 </div>
               ) : (
                 <button
@@ -2842,19 +2861,19 @@ function GeneralPane({ onOpenAutomations }: { onOpenAutomations: () => void }) {
                   onClick={handleStartEditName}
                   className="truncate text-left text-sm font-medium text-[var(--c-text-heading)] hover:text-[var(--c-accent)]"
                 >
-                  {displayName || '点击设置名字'}
+                  {displayName || t.desktopSettings.clickToSetName}
                 </button>
               )}
-              <span className="text-xs text-[var(--c-text-tertiary)]">小K 回复时会称呼你</span>
+              <span className="text-xs text-[var(--c-text-tertiary)]">{t.desktopSettings.nameCallHint}</span>
             </div>
           </div>
         </Card>
       </Section>
       <Section>
-        <SectionHeader icon={SlidersHorizontal}>语言</SectionHeader>
+        <SectionHeader icon={SlidersHorizontal}>{t.desktopSettings.languageTitle}</SectionHeader>
         <Card>
           <p className="text-xs text-[var(--c-text-secondary)] mb-4">
-            选择界面显示语言
+            {t.desktopSettings.languageDesc}
           </p>
           <div className="flex gap-3">
             <button type="button"
@@ -2865,8 +2884,8 @@ function GeneralPane({ onOpenAutomations }: { onOpenAutomations: () => void }) {
                   : 'border-[var(--c-border)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'
               }`}
             >
-              <div className="font-medium">中文</div>
-              <div className="text-xs text-[var(--c-text-tertiary)] mt-0.5">Chinese</div>
+              <div className="font-medium">{t.desktopSettings.langZh}</div>
+              <div className="text-xs text-[var(--c-text-tertiary)] mt-0.5">{t.desktopSettings.langZhSub}</div>
             </button>
             <button type="button"
               onClick={() => setLocale('en')}
@@ -2876,40 +2895,21 @@ function GeneralPane({ onOpenAutomations }: { onOpenAutomations: () => void }) {
                   : 'border-[var(--c-border)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'
               }`}
             >
-              <div className="font-medium">English</div>
-              <div className="text-xs text-[var(--c-text-tertiary)] mt-0.5">英文</div>
+              <div className="font-medium">{t.desktopSettings.langEn}</div>
+              <div className="text-xs text-[var(--c-text-tertiary)] mt-0.5">{t.desktopSettings.langEnSub}</div>
             </button>
           </div>
         </Card>
       </Section>
 
       <Section>
-        <SectionHeader icon={RefreshCw}>{t.automationsTitle}</SectionHeader>
-        <Card>
-          <div className="flex items-start justify-between gap-4">
-            <p className="text-xs leading-5 text-[var(--c-text-secondary)]">
-              {t.automationsSubtitle}
-            </p>
-            <button
-              type="button"
-              onClick={onOpenAutomations}
-              className={`${btnSecondary} inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5`}
-            >
-              <RefreshCw size={14} />
-              {t.desktopSettings.openAutomations}
-            </button>
-          </div>
-        </Card>
-      </Section>
-
-      <Section>
-        <SectionHeader icon={Server}>服务状态</SectionHeader>
+        <SectionHeader icon={Server}>{t.desktopSettings.serviceStatusTitle}</SectionHeader>
         <Card>
           <div className="flex flex-col gap-3">
             {serviceStatusLoading && !serviceStatus ? (
               <div className="flex items-center gap-2 text-xs text-[var(--c-text-secondary)]">
                 <Loader2 size={14} className="animate-spin" />
-                <span>检查中</span>
+                <span>{t.desktopSettings.serviceStatusChecking}</span>
               </div>
             ) : null}
             {serviceStatus?.services.map(service => (
@@ -2930,15 +2930,15 @@ function GeneralPane({ onOpenAutomations }: { onOpenAutomations: () => void }) {
       </Section>
 
       <Section>
-        <SectionHeader icon={Cpu}>任务并发</SectionHeader>
+        <SectionHeader icon={Cpu}>{t.desktopSettings.taskConcurrencyTitle}</SectionHeader>
         <Card>
           <p className="text-xs text-[var(--c-text-secondary)] mb-4">
-            同时执行的最大任务数。值越大并行越快，但会占用更多资源。修改后需重启服务生效。
+            {t.desktopSettings.taskConcurrencyDesc}
           </p>
           <div className="flex items-center gap-4">
             <input
               type="range"
-              aria-label="最大并发任务数"
+              aria-label={t.desktopSettings.taskConcurrencyAria}
               min={1}
               max={10}
               step={1}
@@ -2952,27 +2952,27 @@ function GeneralPane({ onOpenAutomations }: { onOpenAutomations: () => void }) {
             {savingConcurrency && <Loader2 size={14} className="animate-spin text-[var(--c-text-tertiary)]" />}
           </div>
           <div className="mt-2 flex justify-between text-[10px] text-[var(--c-text-tertiary)]">
-            <span>1 (串行)</span>
-            <span>10 (最大并行)</span>
+            <span>{t.desktopSettings.taskConcurrencyMin}</span>
+            <span>{t.desktopSettings.taskConcurrencyMax}</span>
           </div>
         </Card>
       </Section>
 
       <Section>
-        <SectionHeader icon={Zap}>Stage 调试输出</SectionHeader>
+        <SectionHeader icon={Zap}>{t.desktopSettings.stageDebugTitle}</SectionHeader>
         <Card>
           <p className="text-xs text-[var(--c-text-secondary)] mb-4">
-            开启后，每次对话都会在任务开始前显示 Stage 分析（意图识别、Context 检查、耗时预估）
+            {t.desktopSettings.stageDebugDesc}
           </p>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               {savingSkillDebug && <Loader2 size={16} className="animate-spin text-[var(--c-text-tertiary)]" />}
               <span className="text-sm text-[var(--c-text-primary)]">
-                {skillDebug ? '已开启' : '已关闭'}
+                {skillDebug ? t.desktopSettings.stageDebugOn : t.desktopSettings.stageDebugOff}
               </span>
             </div>
             <button type="button"
-              aria-label="切换 Stage 调试输出"
+              aria-label={t.desktopSettings.stageDebugToggleAria}
               onClick={() => handleSkillDebugToggle(!skillDebug)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                 skillDebug ? 'bg-[var(--c-accent)]' : 'bg-[var(--c-border)]'
@@ -2989,12 +2989,12 @@ function GeneralPane({ onOpenAutomations }: { onOpenAutomations: () => void }) {
       </Section>
 
       <Section>
-        <SectionHeader icon={Info}>应用信息</SectionHeader>
+        <SectionHeader icon={Info}>{t.desktopSettings.appInfoTitle}</SectionHeader>
         <Card>
           <div className="text-xs text-[var(--c-text-secondary)] space-y-1">
-            <div>版本: v{__APP_VERSION__} ({__APP_BUILD__})</div>
-            <div>构建: Electron + React</div>
-            <div>数据路径: ~/.xiaok/config.json</div>
+            <div>{t.desktopSettings.appInfoVersion} v{__APP_VERSION__} ({__APP_BUILD__})</div>
+            <div>{t.desktopSettings.appInfoBuild}</div>
+            <div>{t.desktopSettings.appInfoDataPath}</div>
           </div>
         </Card>
       </Section>
@@ -3011,11 +3011,12 @@ function ServiceStatusRow({
   restarting: boolean;
   onRestart: (serviceId: DesktopRelatedServiceId) => void;
 }) {
-  const status = getRelatedServiceDisplayStatus(service);
+  const { t } = useLocale();
+  const status = getRelatedServiceDisplayStatus(service, t);
   const meta = [
     `:${service.port}`,
     service.pid ? `PID ${service.pid}` : '',
-    service.restartCount ? `重启 ${service.restartCount}` : '',
+    service.restartCount ? `${t.desktopSettings.serviceRestartCount} ${service.restartCount}` : '',
     service.detail || '',
   ].filter(Boolean).join(' · ');
 
@@ -3039,39 +3040,39 @@ function ServiceStatusRow({
       <button
         type="button"
         aria-label={`restart-service-${service.id}`}
-        title={`${service.label} 重启`}
+        title={`${service.label} ${t.desktopSettings.serviceRestart}`}
         onClick={() => onRestart(service.id)}
         disabled={restarting}
         className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[var(--c-border)] px-2.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)] disabled:cursor-not-allowed disabled:opacity-50"
       >
         {restarting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-        <span>重启</span>
+        <span>{t.desktopSettings.serviceRestart}</span>
       </button>
     </div>
   );
 }
 
-function getRelatedServiceDisplayStatus(service: DesktopRelatedServiceStatus): {
+function getRelatedServiceDisplayStatus(service: DesktopRelatedServiceStatus, t: ReturnType<typeof useLocale>['t']): {
   label: string;
   dotClass: string;
   badgeClass: string;
 } {
   if (service.reachable && service.running) {
     return {
-      label: '运行中',
+      label: t.desktopSettings.serviceStatusRunning,
       dotClass: 'bg-[var(--c-status-success-text,#16a34a)]',
       badgeClass: 'bg-[var(--c-status-ok-bg,#dcfce7)] text-[var(--c-status-ok-text,#166534)]',
     };
   }
   if (service.running) {
     return {
-      label: '异常',
+      label: t.desktopSettings.serviceStatusAbnormal,
       dotClass: 'bg-[var(--c-status-warning-text,#d97706)]',
       badgeClass: 'bg-[var(--c-status-warning-bg,#fef3c7)] text-[var(--c-status-warning-text,#92400e)]',
     };
   }
   return {
-    label: '不可用',
+    label: t.desktopSettings.serviceStatusUnavailable,
     dotClass: 'bg-[var(--c-status-error-text,#dc2626)]',
     badgeClass: 'bg-[var(--c-status-error-bg,#fee2e2)] text-[var(--c-status-error-text,#991b1b)]',
   };
@@ -3080,11 +3081,12 @@ function getRelatedServiceDisplayStatus(service: DesktopRelatedServiceStatus): {
 // ---- Memory ----
 
 function MemoryPane() {
+  const { t } = useLocale();
   return (
     <Section>
-      <SectionHeader icon={Brain}>记忆管理</SectionHeader>
+      <SectionHeader icon={Brain}>{t.desktopSettings.memoryPaneTitle}</SectionHeader>
       <p className="text-xs text-[var(--c-text-secondary)] mb-4">
-        管理你的偏好、工作流和项目知识。新对话会自动加载相关记忆。
+        {t.desktopSettings.memoryPaneDesc}
       </p>
       <LocalMemoryStatsCard />
       <div className="mt-6">
@@ -3093,124 +3095,14 @@ function MemoryPane() {
     </Section>
   );
 }
-// ---- Appearance ----
-
-function AppearancePane() {
-  const [fontSize, setFontSize] = useState<string>('default');
-  const [density, setDensity] = useState<string>('default');
-  const [themeMode, setThemeMode] = useState<string>('system');
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  // Load config on mount
-  useEffect(() => {
-    api.getAppearanceConfig().then(c => {
-      setFontSize(c.fontSize || 'default');
-      setDensity(c.density || 'default');
-      setThemeMode(c.themeMode || 'system');
-    });
-  }, []);
-
-  // Save when any setting changes
-  const handleSave = async (newConfig: Record<string, string>) => {
-    setSaving(true);
-    setSaved(false);
-    try {
-      await api.saveAppearanceConfig(newConfig);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <>
-      {saved && (
-        <div className="mb-4 rounded-lg bg-green-50 border border-green-200 px-4 py-2 text-sm text-green-600 flex items-center gap-2">
-          <Check size={14} /> 已保存
-        </div>
-      )}
-
-      <Section>
-        <SectionHeader icon={Palette}>字体大小</SectionHeader>
-        <div className="flex gap-2">
-          {['small', 'default', 'large'].map(size => (
-            <button type="button"
-              key={size}
-              onClick={() => {
-                setFontSize(size);
-                handleSave({ fontSize: size, density, themeMode });
-              }}
-              disabled={saving}
-              className={`rounded-lg px-4 py-2 text-sm transition-colors ${
-                fontSize === size
-                  ? 'bg-[var(--c-accent)]/10 text-[var(--c-accent)] border border-[var(--c-accent)]/30'
-                  : 'border border-[var(--c-border)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'
-              }`}
-            >
-              {size === 'default' ? '默认' : size === 'small' ? '小' : '大'}
-            </button>
-          ))}
-        </div>
-      </Section>
-
-      <Section>
-        <SectionHeader>密度</SectionHeader>
-        <div className="flex gap-2">
-          {['default', 'compact'].map(d => (
-            <button type="button"
-              key={d}
-              onClick={() => {
-                setDensity(d);
-                handleSave({ fontSize, density: d, themeMode });
-              }}
-              disabled={saving}
-              className={`rounded-lg px-4 py-2 text-sm transition-colors ${
-                density === d
-                  ? 'bg-[var(--c-accent)]/10 text-[var(--c-accent)] border border-[var(--c-accent)]/30'
-                  : 'border border-[var(--c-border)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'
-              }`}
-            >
-              {d === 'default' ? '舒适' : '紧凑'}
-            </button>
-          ))}
-        </div>
-      </Section>
-
-      <Section>
-        <SectionHeader>主题</SectionHeader>
-        <div className="flex gap-2">
-          {['light', 'dark', 'system'].map(mode => (
-            <button type="button"
-              key={mode}
-              onClick={() => {
-                setThemeMode(mode);
-                handleSave({ fontSize, density, themeMode: mode });
-              }}
-              disabled={saving}
-              className={`rounded-lg px-4 py-2 text-sm transition-colors ${
-                themeMode === mode
-                  ? 'bg-[var(--c-accent)]/10 text-[var(--c-accent)] border border-[var(--c-accent)]/30'
-                  : 'border border-[var(--c-border)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'
-              }`}
-            >
-              {mode === 'light' ? '浅色' : mode === 'dark' ? '深色' : '跟随系统'}
-            </button>
-          ))}
-        </div>
-      </Section>
-    </>
-  );
-}
-
 // ---- Data ----
 
 function DataPane() {
+  const { t } = useLocale();
   const [clearing, setClearing] = useState(false);
 
   const handleClear = async () => {
-    if (!confirm('确定要清除所有本地数据吗？包括对话历史和设置。')) return;
+    if (!confirm(t.desktopSettings.clearDataConfirm)) return;
     setClearing(true);
     try {
       // Clear IndexedDB
@@ -3218,11 +3110,11 @@ function DataPane() {
       dbReq.onsuccess = () => {
         // Clear localStorage
         localStorage.clear();
-        alert('数据已清除，页面将刷新');
+        alert(t.desktopSettings.dataCleared);
         window.location.reload();
       };
       dbReq.onerror = () => {
-        alert('清除失败: ' + dbReq.error?.message);
+        alert(t.desktopSettings.clearFailed(dbReq.error?.message ?? ''));
         setClearing(false);
       };
     } catch (e) {
@@ -3234,15 +3126,15 @@ function DataPane() {
   return (
     <>
       <Section>
-        <SectionHeader icon={Database}>本地数据</SectionHeader>
+        <SectionHeader icon={Database}>{t.desktopSettings.localData}</SectionHeader>
         <Card>
           <div className="flex items-start gap-3">
             <Database size={18} className="text-[var(--c-accent)] shrink-0 mt-0.5" />
             <div className="flex-1">
-              <div className="text-sm font-medium">数据存储位置</div>
+              <div className="text-sm font-medium">{t.desktopSettings.dataStorageLocation}</div>
               <div className="text-xs text-[var(--c-text-secondary)] mt-1">
-                所有对话历史存储在 IndexedDB (xiaok-desktop)<br />
-                设置信息存储在 localStorage
+                {t.desktopSettings.dataStorageIndexedDb}<br />
+                {t.desktopSettings.dataStorageLocalStorage}
               </div>
             </div>
           </div>
@@ -3250,7 +3142,7 @@ function DataPane() {
       </Section>
 
       <Section>
-        <SectionHeader icon={SlidersHorizontal}>配置路径</SectionHeader>
+        <SectionHeader icon={SlidersHorizontal}>{t.desktopSettings.configPath}</SectionHeader>
         <Card>
           <code className="text-sm font-mono text-[var(--c-text-secondary)]">
             ~/.xiaok/config.json
@@ -3259,13 +3151,13 @@ function DataPane() {
       </Section>
 
       <Section>
-        <SectionHeader icon={Trash2}>危险操作</SectionHeader>
+        <SectionHeader icon={Trash2}>{t.desktopSettings.dangerZone}</SectionHeader>
         <Card>
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium">清除所有数据</div>
+              <div className="text-sm font-medium">{t.desktopSettings.clearAllData}</div>
               <div className="text-xs text-[var(--c-text-secondary)] mt-1">
-                删除所有对话历史、设置和缓存数据
+                {t.desktopSettings.clearAllDataDesc}
               </div>
             </div>
             <button type="button"
@@ -3273,7 +3165,7 @@ function DataPane() {
               disabled={clearing}
               className={btnDanger}
             >
-              {clearing ? '清除中...' : '清除数据'}
+              {clearing ? t.desktopSettings.clearing : t.desktopSettings.clearData}
             </button>
           </div>
         </Card>
@@ -3285,6 +3177,7 @@ function DataPane() {
 // ---- About ----
 
 function AboutPane() {
+  const { t } = useLocale();
   const [updateStatus, setUpdateStatus] = useState<{ checking: boolean; available: boolean; downloading: boolean; downloaded: boolean; installing?: boolean; progress: number; version?: string; error?: string } | null>(null);
   const [checking, setChecking] = useState(false);
 
@@ -3310,34 +3203,34 @@ function AboutPane() {
   return (
     <>
       <Section>
-        <SectionHeader icon={Info}>关于 xiaok</SectionHeader>
+        <SectionHeader icon={Info}>{t.desktopSettings.aboutTitle}</SectionHeader>
         <Card>
           <div className="text-sm">
             <div className="font-medium text-base">xiaok desktop</div>
             <div className="text-xs text-[var(--c-text-secondary)] mt-2">
-              本地模式 · 无需登录 · 数据保存在本地
+              {t.desktopSettings.aboutLocalMode}
             </div>
             <div className="text-xs text-[var(--c-text-tertiary)] mt-3">
-              AI 助手应用，支持多模态意图识别、工具调用和技能扩展
+              {t.desktopSettings.aboutAppDesc}
             </div>
           </div>
         </Card>
       </Section>
 
       <Section>
-        <SectionHeader icon={Zap}>软件更新</SectionHeader>
+        <SectionHeader icon={Zap}>{t.desktopSettings.softwareUpdate}</SectionHeader>
         <Card>
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium">
-                {updateStatus?.installing ? '正在安装' : updateStatus?.downloaded ? '更新已就绪' : updateStatus?.downloading ? '正在下载' : updateStatus?.available ? '发现新版本' : '当前版本'}
+                {updateStatus?.installing ? t.desktopSettings.aboutInstalling : updateStatus?.downloaded ? t.desktopSettings.aboutUpdateReady : updateStatus?.downloading ? t.desktopSettings.aboutDownloading : updateStatus?.available ? t.desktopSettings.aboutNewVersion : t.desktopSettings.aboutCurrentVersion}
               </div>
               <div className="text-xs text-[var(--c-text-secondary)] mt-1">
-                {updateStatus?.installing ? `正在安装 v${updateStatus.version || '新版本'}，应用将自动重启` :
-                 updateStatus?.downloaded ? `v${updateStatus.version || '新版本'} 已下载，点击安装` :
-                 updateStatus?.downloading ? `下载进度 ${updateStatus.progress}%` :
-                 updateStatus?.available ? `v${updateStatus.version || '新版本'} 可用` :
-                 updateStatus?.checking || checking ? '正在检查...' :
+                {updateStatus?.installing ? t.desktopSettings.aboutInstallingVersion(updateStatus.version || '') :
+                 updateStatus?.downloaded ? t.desktopSettings.aboutDownloadedVersion(updateStatus.version || '') :
+                 updateStatus?.downloading ? t.desktopSettings.aboutDownloadProgress(updateStatus.progress) :
+                 updateStatus?.available ? t.desktopSettings.aboutVersionAvailable(updateStatus.version || '') :
+                 updateStatus?.checking || checking ? t.desktopSettings.aboutChecking :
                  `v${__APP_VERSION__}`}
               </div>
               {updateStatus?.error && (
@@ -3347,7 +3240,7 @@ function AboutPane() {
             <div className="flex gap-2">
               {updateStatus?.downloaded ? (
                 <button type="button" onClick={handleInstallUpdate} disabled={updateStatus.installing} className={btnPrimary}>
-                  {updateStatus.installing ? '安装中...' : '安装并重启'}
+                  {updateStatus.installing ? t.desktopSettings.aboutInstallProgress : t.desktopSettings.aboutInstallRestart}
                 </button>
               ) : updateStatus?.downloading ? (
                 <div className="flex items-center gap-2 text-[var(--c-accent)]">
@@ -3356,7 +3249,7 @@ function AboutPane() {
                 </div>
               ) : (
                 <button type="button" onClick={handleCheckUpdate} disabled={checking || updateStatus?.checking} className={btnSecondary}>
-                  {checking || updateStatus?.checking ? '检查中...' : '检查更新'}
+                  {checking || updateStatus?.checking ? t.desktopSettings.aboutCheckingUpdates : t.desktopSettings.aboutCheckUpdates}
                 </button>
               )}
             </div>
@@ -3365,14 +3258,14 @@ function AboutPane() {
       </Section>
 
       <Section>
-        <SectionHeader icon={Cpu}>核心功能</SectionHeader>
+        <SectionHeader icon={Cpu}>{t.desktopSettings.coreFeatures}</SectionHeader>
         <div className="flex flex-col gap-2">
           <Card>
             <div className="flex items-start gap-3">
               <Zap size={16} className="text-[var(--c-accent)] shrink-0 mt-0.5" />
               <div>
-                <div className="text-sm font-medium">意图识别</div>
-                <div className="text-xs text-[var(--c-text-secondary)]">智能理解用户意图，分解复杂任务</div>
+                <div className="text-sm font-medium">{t.desktopSettings.featureIntentRecognition}</div>
+                <div className="text-xs text-[var(--c-text-secondary)]">{t.desktopSettings.featureIntentRecognitionDesc}</div>
               </div>
             </div>
           </Card>
@@ -3380,8 +3273,8 @@ function AboutPane() {
             <div className="flex items-start gap-3">
               <SlidersHorizontal size={16} className="text-[var(--c-accent)] shrink-0 mt-0.5" />
               <div>
-                <div className="text-sm font-medium">工具调用</div>
-                <div className="text-xs text-[var(--c-text-secondary)]">文件操作、命令执行、代码编辑</div>
+                <div className="text-sm font-medium">{t.desktopSettings.featureToolCalling}</div>
+                <div className="text-xs text-[var(--c-text-secondary)]">{t.desktopSettings.featureToolCallingDesc}</div>
               </div>
             </div>
           </Card>
@@ -3389,8 +3282,8 @@ function AboutPane() {
             <div className="flex items-start gap-3">
               <Puzzle size={16} className="text-[var(--c-accent)] shrink-0 mt-0.5" />
               <div>
-                <div className="text-sm font-medium">技能扩展</div>
-                <div className="text-xs text-[var(--c-text-secondary)]">通过技能扩展 AI 能力边界</div>
+                <div className="text-sm font-medium">{t.desktopSettings.featureSkillExtension}</div>
+                <div className="text-xs text-[var(--c-text-secondary)]">{t.desktopSettings.featureSkillExtensionDesc}</div>
               </div>
             </div>
           </Card>
@@ -3398,8 +3291,8 @@ function AboutPane() {
             <div className="flex items-start gap-3">
               <Plug size={16} className="text-[var(--c-accent)] shrink-0 mt-0.5" />
               <div>
-                <div className="text-sm font-medium">MCP 协议</div>
-                <div className="text-xs text-[var(--c-text-secondary)]">支持 Model Context Protocol 扩展</div>
+                <div className="text-sm font-medium">{t.desktopSettings.featureMcp}</div>
+                <div className="text-xs text-[var(--c-text-secondary)]">{t.desktopSettings.featureMcpDesc}</div>
               </div>
             </div>
           </Card>
@@ -3407,7 +3300,7 @@ function AboutPane() {
       </Section>
 
       <Section>
-        <SectionHeader>支持的 AI 提供商</SectionHeader>
+        <SectionHeader>{t.desktopSettings.supportedProviders}</SectionHeader>
         <Card>
           <div className="flex flex-wrap gap-2">
             {['OpenAI', 'Anthropic', 'DeepSeek', 'Kimi', 'GLM', 'MiniMax', 'Gemini'].map(name => (
@@ -3420,11 +3313,11 @@ function AboutPane() {
       </Section>
 
       <Section>
-        <SectionHeader>版本信息</SectionHeader>
+        <SectionHeader>{t.desktopSettings.versionInfo}</SectionHeader>
         <Card>
           <div className="text-xs text-[var(--c-text-secondary)]">
-            <div>版本: v{__APP_VERSION__} ({__APP_BUILD__})</div>
-            <div className="mt-1">构建: Electron + React</div>
+            <div>{t.desktopSettings.versionLabel}: v{__APP_VERSION__} ({__APP_BUILD__})</div>
+            <div className="mt-1">{t.desktopSettings.buildLabel}: Electron + React</div>
           </div>
         </Card>
       </Section>
@@ -3437,24 +3330,24 @@ function AboutPane() {
 const SEARCH_PROVIDERS: Array<{
   key: ConnectorsSearchProvider;
   label: string;
-  description: string;
+  descKey: 'searchDuckduckgoDesc' | 'searchFirecrawlDesc' | 'searchTavilyDesc' | 'searchBraveDesc';
   notImplemented?: boolean;
 }> = [
-  { key: 'duckduckgo', label: 'DuckDuckGo', description: '默认，无需 API Key（兜底）' },
-  { key: 'firecrawl', label: 'Firecrawl', description: '免费 1000 次/月，无需注册' },
-  { key: 'tavily', label: 'Tavily', description: '高质量搜索，需要 API Key' },
-  { key: 'brave', label: 'Brave Search', description: '注重隐私，需要 API Key' },
+  { key: 'duckduckgo', label: 'DuckDuckGo', descKey: 'searchDuckduckgoDesc' },
+  { key: 'firecrawl', label: 'Firecrawl', descKey: 'searchFirecrawlDesc' },
+  { key: 'tavily', label: 'Tavily', descKey: 'searchTavilyDesc' },
+  { key: 'brave', label: 'Brave Search', descKey: 'searchBraveDesc' },
 ];
 
 const FETCH_PROVIDERS: Array<{
   key: ConnectorsFetchProvider;
   label: string;
-  description: string;
+  descKey: 'fetchBasicDesc' | 'fetchJinaDesc' | 'fetchFirecrawlDesc';
   notImplemented?: boolean;
 }> = [
-  { key: 'basic', label: 'Basic', description: '默认，直接 HTTP 抓取（兜底）' },
-  { key: 'jina', label: 'Jina Reader', description: '清洗为干净 Markdown，可选 API Key' },
-  { key: 'firecrawl', label: 'Firecrawl', description: '高质量爬取，免费 1000 次/月，可选 API Key' },
+  { key: 'basic', label: 'Basic', descKey: 'fetchBasicDesc' },
+  { key: 'jina', label: 'Jina Reader', descKey: 'fetchJinaDesc' },
+  { key: 'firecrawl', label: 'Firecrawl', descKey: 'fetchFirecrawlDesc' },
 ];
 
 function maskApiKey(key: string): string {
@@ -3462,20 +3355,20 @@ function maskApiKey(key: string): string {
   return key.slice(0, 4) + '•'.repeat(Math.min(key.length - 8, 12)) + key.slice(-4);
 }
 
-function runtimeStateLabel(state: ConnectorsProviderRuntime['runtime_state']): { text: string; tone: 'ok' | 'warn' | 'err' | 'mute' } {
+function runtimeStateLabel(state: ConnectorsProviderRuntime['runtime_state'], ds: LocaleStrings['desktopSettings']): { text: string; tone: 'ok' | 'warn' | 'err' | 'mute' } {
   switch (state) {
-    case 'ready': return { text: '可用', tone: 'ok' };
-    case 'inactive': return { text: '未启用', tone: 'mute' };
-    case 'missing_config': return { text: '未配置', tone: 'warn' };
-    case 'invalid_config': return { text: '配置无效', tone: 'err' };
-    case 'not_implemented': return { text: '暂未实现', tone: 'mute' };
+    case 'ready': return { text: ds.connectorStatusReady, tone: 'ok' };
+    case 'inactive': return { text: ds.connectorStatusInactive, tone: 'mute' };
+    case 'missing_config': return { text: ds.connectorStatusMissingConfig, tone: 'warn' };
+    case 'invalid_config': return { text: ds.connectorStatusInvalidConfig, tone: 'err' };
+    case 'not_implemented': return { text: ds.connectorStatusNotImplemented, tone: 'mute' };
     default: return { text: state, tone: 'mute' };
   }
 }
 
-function RuntimeBadge({ runtime }: { runtime?: ConnectorsProviderRuntime }) {
+function RuntimeBadge({ runtime, ds }: { runtime?: ConnectorsProviderRuntime; ds: LocaleStrings['desktopSettings'] }) {
   if (!runtime) return null;
-  const { text, tone } = runtimeStateLabel(runtime.runtime_state);
+  const { text, tone } = runtimeStateLabel(runtime.runtime_state, ds);
   const toneCls =
     tone === 'ok' ? 'bg-green-50 text-green-600' :
     tone === 'warn' ? 'bg-yellow-50 text-yellow-600' :
@@ -3495,7 +3388,7 @@ interface ApiKeyInputProps {
   onChange: (newValue: string) => void;
 }
 
-function ApiKeyInput({ ariaLabel, placeholder, storedValue, onChange }: ApiKeyInputProps) {
+function ApiKeyInput({ ariaLabel, placeholder, storedValue, onChange, ds }: ApiKeyInputProps & { ds: LocaleStrings['desktopSettings'] }) {
   const [editing, setEditing] = useState(!storedValue);
   const [editValue, setEditValue] = useState('');
 
@@ -3537,7 +3430,7 @@ function ApiKeyInput({ ariaLabel, placeholder, storedValue, onChange }: ApiKeyIn
           className="shrink-0 rounded-lg border border-[var(--c-border)] px-3 py-2 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
           aria-label={`edit-${ariaLabel}`}
         >
-          更换
+          {ds.connectorChangeKey}
         </button>
       </div>
     );
@@ -3566,7 +3459,7 @@ function ApiKeyInput({ ariaLabel, placeholder, storedValue, onChange }: ApiKeyIn
           className="shrink-0 rounded-lg border border-[var(--c-border)] px-3 py-2 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors"
           aria-label={`cancel-edit-${ariaLabel}`}
         >
-          取消
+          {ds.connectorCancelEdit}
         </button>
       )}
     </div>
@@ -3577,7 +3470,7 @@ interface TestButtonProps {
   kind: 'search' | 'fetch';
 }
 
-function TestButton({ kind }: TestButtonProps) {
+function TestButton({ kind, ds }: TestButtonProps & { ds: LocaleStrings['desktopSettings'] }) {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ success: boolean; latencyMs: number; detail?: string; error?: string } | null>(null);
 
@@ -3604,7 +3497,7 @@ function TestButton({ kind }: TestButtonProps) {
         aria-label={`test-${kind}`}
       >
         {testing ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
-        测试连接
+        {ds.connectorTestConnection}
       </button>
       {result && (
         result.success
@@ -3616,6 +3509,7 @@ function TestButton({ kind }: TestButtonProps) {
 }
 
 function ToolsPane() {
+  const { t } = useLocale();
   const [snapshot, setSnapshot] = useState<ConnectorsConfigSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -3650,9 +3544,9 @@ function ToolsPane() {
       if (next) {
         setSnapshot(next);
         setDraft(next.config);
-        setSuccess('已保存');
+        setSuccess(t.desktopSettings.connectorSaved);
       } else {
-        setError('保存失败：桌面端未连接');
+        setError(t.desktopSettings.connectorSaveFailedNoDesktop);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -3672,7 +3566,7 @@ function ToolsPane() {
   if (!draft) {
     return (
       <div className="text-sm text-[var(--c-text-secondary)]">
-        无法加载连接器配置。{error && <div className="mt-2 text-red-500">{error}</div>}
+        {t.desktopSettings.connectorLoadFailed}{error && <div className="mt-2 text-red-500">{error}</div>}
       </div>
     );
   }
@@ -3683,19 +3577,19 @@ function ToolsPane() {
   return (
     <>
       <Section>
-        <SectionHeader icon={Wrench}>网络工具</SectionHeader>
+        <SectionHeader icon={Wrench}>{t.desktopSettings.networkTools}</SectionHeader>
         <div className="text-xs text-[var(--c-text-secondary)] mb-3">
-          配置 web_search 与 web_fetch 使用的 provider。切换时自动 fallback 到默认 provider。
+          {t.desktopSettings.networkToolsDesc}
         </div>
         {snapshot?.loadStatus === 'parse_failed' && (
           <div className="mb-3 rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
-            连接器配置文件格式异常已被备份，已恢复为默认值。
+            {t.desktopSettings.connectorConfigParseError}
           </div>
         )}
       </Section>
 
       <Section>
-        <SectionHeader icon={Search}>搜索 Provider</SectionHeader>
+        <SectionHeader icon={Search}>{t.desktopSettings.searchProviderTitle}</SectionHeader>
         <div className="flex flex-col gap-3">
           {SEARCH_PROVIDERS.map(opt => {
             const checked = search.provider === opt.key;
@@ -3717,31 +3611,34 @@ function ToolsPane() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium">{opt.label}</span>
-                      <RuntimeBadge runtime={runtime} />
+                      <RuntimeBadge runtime={runtime} ds={t.desktopSettings} />
                     </div>
-                    <div className="mt-1 text-xs text-[var(--c-text-secondary)]">{opt.description}</div>
+                    <div className="mt-1 text-xs text-[var(--c-text-secondary)]">{t.desktopSettings[opt.descKey]}</div>
                     {checked && opt.key === 'tavily' && (
                       <ApiKeyInput
                         ariaLabel="tavily-api-key"
-                        placeholder="Tavily API Key (tvly-...)"
+                        placeholder={t.desktopSettings.tavilyApiKeyPlaceholder}
                         storedValue={search.tavilyApiKey || ''}
                         onChange={v => setDraft(d => d ? { ...d, search: { ...d.search, tavilyApiKey: v } } : d)}
+                        ds={t.desktopSettings}
                       />
                     )}
                     {checked && opt.key === 'brave' && (
                       <ApiKeyInput
                         ariaLabel="brave-api-key"
-                        placeholder="Brave Search API Key"
+                        placeholder={t.desktopSettings.braveApiKeyPlaceholder}
                         storedValue={search.braveApiKey || ''}
                         onChange={v => setDraft(d => d ? { ...d, search: { ...d.search, braveApiKey: v } } : d)}
+                        ds={t.desktopSettings}
                       />
                     )}
                     {checked && opt.key === 'firecrawl' && (
                       <ApiKeyInput
                         ariaLabel="firecrawl-search-api-key"
-                        placeholder="Firecrawl API Key (可选，留空用免费额度)"
+                        placeholder={t.desktopSettings.firecrawlApiKeyPlaceholder}
                         storedValue={search.firecrawlApiKey || ''}
                         onChange={v => setDraft(d => d ? { ...d, search: { ...d.search, firecrawlApiKey: v } } : d)}
+                        ds={t.desktopSettings}
                       />
                     )}
                   </div>
@@ -3750,11 +3647,11 @@ function ToolsPane() {
             );
           })}
         </div>
-        <TestButton kind="search" />
+        <TestButton kind="search" ds={t.desktopSettings} />
       </Section>
 
       <Section>
-        <SectionHeader icon={LinkIcon}>抓取 Provider</SectionHeader>
+        <SectionHeader icon={LinkIcon}>{t.desktopSettings.fetchProviderTitle}</SectionHeader>
         <div className="flex flex-col gap-3">
           {FETCH_PROVIDERS.map(opt => {
             const checked = fetchCfg.provider === opt.key;
@@ -3776,23 +3673,25 @@ function ToolsPane() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium">{opt.label}</span>
-                      <RuntimeBadge runtime={runtime} />
+                      <RuntimeBadge runtime={runtime} ds={t.desktopSettings} />
                     </div>
-                    <div className="mt-1 text-xs text-[var(--c-text-secondary)]">{opt.description}</div>
+                    <div className="mt-1 text-xs text-[var(--c-text-secondary)]">{t.desktopSettings[opt.descKey]}</div>
                     {checked && opt.key === 'jina' && (
                       <ApiKeyInput
                         ariaLabel="jina-api-key"
-                        placeholder="Jina API Key (可选，留空走免费额度)"
+                        placeholder={t.desktopSettings.jinaApiKeyPlaceholder}
                         storedValue={fetchCfg.jinaApiKey || ''}
                         onChange={v => setDraft(d => d ? { ...d, fetch: { ...d.fetch, jinaApiKey: v } } : d)}
+                        ds={t.desktopSettings}
                       />
                     )}
                     {checked && opt.key === 'firecrawl' && (
                       <ApiKeyInput
                         ariaLabel="firecrawl-fetch-api-key"
-                        placeholder="Firecrawl API Key (可选，留空用免费额度)"
+                        placeholder={t.desktopSettings.firecrawlApiKeyPlaceholder}
                         storedValue={fetchCfg.firecrawlApiKey || ''}
                         onChange={v => setDraft(d => d ? { ...d, fetch: { ...d.fetch, firecrawlApiKey: v } } : d)}
+                        ds={t.desktopSettings}
                       />
                     )}
                   </div>
@@ -3801,7 +3700,7 @@ function ToolsPane() {
             );
           })}
         </div>
-        <TestButton kind="fetch" />
+        <TestButton kind="fetch" ds={t.desktopSettings} />
       </Section>
 
       <Section>
@@ -3812,7 +3711,7 @@ function ToolsPane() {
             disabled={saving}
             onClick={handleSave}
           >
-            {saving ? <span className="inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" />保存中</span> : '保存'}
+            {saving ? <span className="inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" />{t.desktopSettings.connectorSaving}</span> : t.desktopSettings.connectorSaveBtn}
           </button>
           {success && <span className="text-xs text-green-600">{success}</span>}
           {error && <span className="text-xs text-red-500">{error}</span>}

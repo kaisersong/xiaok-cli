@@ -3,13 +3,38 @@ import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
-// Mock locale context
-vi.mock('../../renderer/src/contexts/LocaleContext', () => ({
-  useLocale: () => ({
-    t: { desktopSettings: {} },
-    locale: 'zh',
-    setLocale: vi.fn(),
+// Use real LocaleProvider instead of mocking useLocale
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext'
+
+vi.mock('../../renderer/src/themes/presets', () => ({
+  BUILTIN_PRESETS: {},
+}))
+
+vi.mock('../../renderer/src/themes/types', () => ({
+  COLOR_GROUPS: [],
+}))
+
+vi.mock('../../renderer/src/contexts/AppearanceContext', () => ({
+  useAppearance: () => ({
+    fontFamily: 'default',
+    codeFontFamily: 'jetbrains-mono',
+    fontSize: 'normal',
+    themePreset: 'default',
+    customThemeId: null,
+    customThemes: {},
+    setFontFamily: () => {},
+    setCodeFontFamily: () => {},
+    setFontSize: () => {},
+    setThemePreset: () => {},
+    setActiveCustomTheme: () => {},
+    saveCustomTheme: () => {},
+    deleteCustomTheme: () => {},
+    setPreviewVars: () => {},
+    setCustomBodyFont: () => {},
+    customBodyFont: null,
+    activeThemeVars: { dark: {}, light: {} },
   }),
+  AppearanceProvider: ({ children }: { children: React.ReactNode }) => children,
 }))
 
 // Mock LocalMemoryStats
@@ -59,7 +84,9 @@ import { api } from '../../renderer/src/api'
 function renderSettings() {
   return render(
     <MemoryRouter>
-      <DesktopSettings onClose={vi.fn()} />
+      <LocaleProvider>
+        <DesktopSettings onClose={vi.fn()} />
+      </LocaleProvider>
     </MemoryRouter>,
   )
 }

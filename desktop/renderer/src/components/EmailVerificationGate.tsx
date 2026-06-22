@@ -83,7 +83,7 @@ export function EmailVerificationGate({ accessToken, email, onVerified, onPollVe
     setOtpError('')
     setShowOtp(true)
     setOtpSending(true)
-    try { await sendEmailOTP(email) } catch { setOtpError('发送失败，请重试') } finally {
+    try { await sendEmailOTP(email) } catch { setOtpError(t.emailGateSendFailed) } finally {
       setOtpSending(false)
       startCountdown(setOtpCountdown, otpTimer)
     }
@@ -206,7 +206,7 @@ export function EmailVerificationGate({ accessToken, email, onVerified, onPollVe
               onClick={() => {
                 if (otpCountdown > 0 || otpSending) return
                 setOtpSending(true)
-                sendEmailOTP(email).catch(() => { setOtpError('发送失败，请重试') }).finally(() => {
+                sendEmailOTP(email).catch(() => { setOtpError(t.emailGateSendFailed) }).finally(() => {
                   setOtpSending(false)
                   startCountdown(setOtpCountdown, otpTimer)
                 })

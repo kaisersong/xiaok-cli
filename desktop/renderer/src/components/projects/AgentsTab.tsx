@@ -70,7 +70,7 @@ export function AgentsTab() {
           </div>
           <div className="text-center">
             <p className="text-sm font-medium text-[var(--c-text-primary)]">{t.projectsAgentNoAgents}</p>
-            <p className="mt-1 text-xs text-[var(--c-text-tertiary)]">点击右上角「新建智能体」创建</p>
+            <p className="mt-1 text-xs text-[var(--c-text-tertiary)]">{t.projectsAgentCreateAgentTabHint}</p>
           </div>
         </div>
       ) : (

@@ -601,7 +601,7 @@ export function PrinciplesTab({ addTrigger = 0, importTrigger = 0 }: { addTrigge
                   type="button"
                   onClick={() => handleReclassify(principle.id, 'rule')}
                   className="rounded-md p-1 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]"
-                  title={t.projectsPrincipleMoveToRules ?? '移到规则'}
+                  title={t.projectsPrincipleMoveToRules}
                 >
                   <ArrowRight size={13} />
                 </button>

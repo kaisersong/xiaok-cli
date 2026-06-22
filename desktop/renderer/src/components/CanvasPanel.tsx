@@ -5,6 +5,7 @@ import { CanvasPreview } from './CanvasPreview';
 import { ToolsPanel } from './ToolsPanel';
 import { CanvasEmptyState } from './CanvasEmptyState';
 import { api } from '../api';
+import { useLocale } from '../contexts/LocaleContext';
 import type { DesktopTaskEvent } from '../../../shared/task-types';
 
 interface CanvasPanelProps {
@@ -26,6 +27,7 @@ const TABS: Array<{ key: CanvasTab; label: string; icon: typeof X }> = [
 ];
 
 export function CanvasPanel({ events, onClose, initialPreviewFile, initialPreviewContent, expanded, onToggleExpand, onAnnotation }: CanvasPanelProps) {
+  const { t } = useLocale();
   const [activeTab, setActiveTab] = useState<CanvasTab>('workspace');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [previewContent, setPreviewContent] = useState<string>('');
@@ -145,7 +147,7 @@ export function CanvasPanel({ events, onClose, initialPreviewFile, initialPrevie
               type="button"
               onClick={onToggleExpand}
               className="rounded p-1 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
-              title={expanded ? '收起 Canvas' : '展开 Canvas'}
+              title={expanded ? t.canvasPanelCollapseCanvas : t.canvasPanelExpandCanvas}
             >
               {expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
             </button>

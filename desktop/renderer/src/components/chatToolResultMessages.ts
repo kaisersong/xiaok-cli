@@ -1,5 +1,12 @@
 import type { ChatMessage } from './ChatView';
 
+export interface WorkflowLabels {
+  chatWorkflowCompleted: string;
+  chatWorkflowBlockedOrFailed: (status: string, reason: string) => string;
+  chatWorkflowStarted: string;
+  chatWorkflowProjectId: string;
+}
+
 export function buildProjectCardMessageFromToolResult(response: string): ChatMessage | null {
   const data = parseJsonRecord(response);
   if (data?.type !== 'project_card') return null;
@@ -23,7 +30,7 @@ export function buildProjectCardMessageFromToolResult(response: string): ChatMes
   };
 }
 
-export function buildWorkflowMessageFromToolResult(response: string): ChatMessage | null {
+export function buildWorkflowMessageFromToolResult(response: string, labels: WorkflowLabels): ChatMessage | null {
   const data = parseJsonRecord(response);
   if (!data?.ok) return null;
   const workflowRunId = readString(data.workflowRunId);
@@ -34,7 +41,7 @@ export function buildWorkflowMessageFromToolResult(response: string): ChatMessag
   return {
     id: `msg-workflow-${workflowRunId}-${status}`,
     role: 'assistant',
-    content: formatWorkflowStatusMessage({ workflowId, workflowRunId, projectId, status, data }),
+    content: formatWorkflowStatusMessage({ workflowId, workflowRunId, projectId, status, data }, labels),
   };
 }
 
@@ -44,22 +51,22 @@ function formatWorkflowStatusMessage(input: {
   projectId: string;
   status: string;
   data: Record<string, unknown>;
-}): string {
+}, labels: WorkflowLabels): string {
   const lines = [];
   if (input.status === 'completed') {
-    lines.push('动态工作流已完成。');
+    lines.push(labels.chatWorkflowCompleted);
   } else if (input.status === 'blocked' || input.status === 'failed') {
     const reason = readString(readRecord(input.data.gateDecision).reason)
       || readString(input.data.error)
       || readString(input.data.message)
       || input.status;
-    lines.push(`动态工作流已${input.status === 'blocked' ? '阻塞' : '失败'}：${reason}`);
+    lines.push(labels.chatWorkflowBlockedOrFailed(input.status, reason));
   } else {
-    lines.push('动态工作流已启动，正在后台执行。');
+    lines.push(labels.chatWorkflowStarted);
   }
   lines.push(`Workflow：${input.workflowId}`);
   lines.push(`Run ID：${input.workflowRunId}`);
-  if (input.projectId) lines.push(`项目 ID：${input.projectId}`);
+  if (input.projectId) lines.push(`${labels.chatWorkflowProjectId}：${input.projectId}`);
   return lines.join('\n');
 }
 

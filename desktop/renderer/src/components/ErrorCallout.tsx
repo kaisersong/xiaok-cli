@@ -21,10 +21,10 @@ export function RunErrorNotice({ error, onDismiss }: { error: AppError; onDismis
   const formatted = formatErrorForDisplay(error, locale, t.requestFailed)
   const detailLines = (formatted.detailLines.length > 0 ? formatted.detailLines : [formatted.title])
     .map(flattenDetailLine)
-  const dismissLabel = locale === 'zh' ? '关闭' : 'Close'
+  const dismissLabel = t.errorCalloutClose
   const toggleLabel = expanded
-    ? (locale === 'zh' ? '收起' : 'Collapse')
-    : (locale === 'zh' ? '展开' : 'Expand')
+    ? t.errorCalloutCollapse
+    : t.errorCalloutExpand
 
   return (
     <div

@@ -354,6 +354,7 @@ function AddProviderModal({ accessToken, p, onClose, onCreated }: {
   onClose: () => void
   onCreated: () => void
 }) {
+  const { t: localeT } = useLocale()
   const [name, setName] = useState('')
   const [preset, setPreset] = useState<VendorPresetKey>('openai_responses')
   const [apiKey, setApiKey] = useState('')
@@ -443,7 +444,7 @@ function AddProviderModal({ accessToken, p, onClose, onCreated }: {
               maxLength={500}
             />
             {baseUrl.trim() && !baseUrl.trim().startsWith('https://') && !baseUrl.trim().startsWith('http://') && (
-              <span className="mt-1 block text-xs text-[var(--c-text-muted)]">需以 https:// 开头</span>
+              <span className="mt-1 block text-xs text-[var(--c-text-muted)]">{localeT.desktopSettings.baseUrlHttpsHint}</span>
             )}
           </div>
         </div>
@@ -488,6 +489,7 @@ function ProviderDetail({ provider, accessToken, onUpdated, onDeleted, p }: {
   onDeleted: () => void
   p: ReturnType<typeof useLocale>['t']['adminProviders']
 }) {
+  const { t } = useLocale()
   const [formPreset, setFormPreset] = useState<VendorPresetKey>(() => toVendorKey(provider.provider, provider.openai_api_mode))
   const [formName, setFormName] = useState(provider.name)
   const [formApiKey, setFormApiKey] = useState('')
@@ -564,7 +566,7 @@ function ProviderDetail({ provider, accessToken, onUpdated, onDeleted, p }: {
             maxLength={500}
           />
           {formBaseUrl.trim() && !formBaseUrl.trim().startsWith('https://') && !formBaseUrl.trim().startsWith('http://') && (
-            <p className="mt-1 text-xs text-[var(--c-text-muted)]">需以 https:// 开头</p>
+            <p className="mt-1 text-xs text-[var(--c-text-muted)]">{t.desktopSettings.baseUrlHttpsHint}</p>
           )}
         </LabelField>
       </div>

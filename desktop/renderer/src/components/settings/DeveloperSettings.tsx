@@ -597,7 +597,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
               </div>
             </div>
             <PanelButton onClick={() => onNavigate('design-tokens')}>
-              查看
+              {ds.designTokensView}
             </PanelButton>
           </div>
         )}

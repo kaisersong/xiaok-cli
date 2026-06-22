@@ -61,13 +61,13 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const hasInterventionSignal = project.projectIntervention?.required === true;
   const visibleStatus = hasInterventionSignal
     ? {
-        label: '需要处理',
+        label: t.projectsInterventionDefaultHeadline,
         color: 'text-[var(--c-status-warning-text)]',
         icon: AlertTriangle,
       }
     : hasHealthSignal
     ? {
-        label: getCompactProjectHealthLabel(healthStatus),
+        label: getCompactProjectHealthLabel(healthStatus, t),
         color: healthStatus === 'failed' || healthStatus === 'blocked'
           ? 'text-[var(--c-status-error-text)]'
           : 'text-[var(--c-status-warning-text)]',
@@ -124,7 +124,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
           </div>
         ) : (
           <button type="button" onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
-            className="rounded-md p-1 text-[var(--c-text-muted)] hover:text-[var(--c-status-error-text)] hover:bg-[var(--c-bg-page)]" title="删除项目">
+            className="rounded-md p-1 text-[var(--c-text-muted)] hover:text-[var(--c-status-error-text)] hover:bg-[var(--c-bg-page)]" title={t.projectsCardDeleteTitle}>
             <Trash2 size={14} />
           </button>
         )}
@@ -166,7 +166,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
               <div className="h-full rounded-full bg-[var(--c-status-success-text)] transition-all" style={{ width: `${progress}%` }} />
             </div>
             <div className="flex items-center justify-between text-[10px] text-[var(--c-text-muted)]">
-              <span>{stoppedTasks > 0 ? `${doneTasks} 完成 · ${stoppedTasks} 停止` : `${doneTasks}/${totalTasks} 任务`}</span>
+              <span>{stoppedTasks > 0 ? t.projectsCardTaskProgressStopped(doneTasks, stoppedTasks) : t.projectsCardTaskProgress(doneTasks, totalTasks)}</span>
               <span>{progress}%</span>
             </div>
           </div>

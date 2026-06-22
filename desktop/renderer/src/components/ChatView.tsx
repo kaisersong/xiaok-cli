@@ -8,12 +8,14 @@ import { MarkdownRenderer } from './MarkdownRenderer';
 import { A2uiArtifactBlock } from './a2ui/A2uiArtifactBlock';
 import { api } from '../api';
 import { getDesktopApi } from '../shared/desktop';
+import { useLocale } from '../contexts/LocaleContext';
 import type { ThreadRecord } from '../api/types';
 import type { ArtifactSummary, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
 import { A2UI_MIME_TYPE, isA2UIMimeType } from '../../../../src/a2ui/index.js';
 
 function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useLocale();
   const handleCopy = useCallback(async () => {
     await navigator.clipboard.writeText(text);
     setCopied(true);
@@ -23,7 +25,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
     <button
       type="button"
       onClick={handleCopy}
-      title="复制"
+      title={t.chatView.copyTitle}
       className={`flex items-center justify-center rounded p-1 text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)] ${className ?? ''}`}
     >
       {copied ? (
@@ -48,6 +50,7 @@ function SaveToKbButton({ text, className }: { text: string; className?: string 
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const { t } = useLocale();
 
   const handleOpen = async () => {
     const desktop = getDesktopApi();
@@ -68,12 +71,12 @@ function SaveToKbButton({ text, className }: { text: string; className?: string 
       await desktop.kbAddSource({
         collectionId: selectedId,
         kind: 'paste',
-        title: title.trim() || '对话摘录',
+        title: title.trim() || t.chatView.chatExcerpt,
         text,
       });
       setOpen(false);
       setTitle('');
-      setToast('已添加到知识库');
+      setToast(t.chatView.addedToKb);
       setTimeout(() => setToast(null), 2000);
     } catch { /* ignore */ }
     setSaving(false);
@@ -96,7 +99,8 @@ function SaveToKbButton({ text, className }: { text: string; className?: string 
       <button
         type="button"
         onClick={() => void handleOpen()}
-        title="收藏到知识库"
+        title={t.chatView.saveToKbTitle}
+        aria-label={t.chatView.saveToKbTitle}
         className="flex items-center justify-center rounded p-1 text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]"
       >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -105,9 +109,9 @@ function SaveToKbButton({ text, className }: { text: string; className?: string 
       </button>
       {open && (
         <div ref={popoverRef} className="absolute left-0 top-full z-50 mt-1 w-64 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-3 shadow-lg">
-          <p className="mb-2 text-xs font-medium text-[var(--c-text-primary)]">收藏到知识库</p>
+          <p className="mb-2 text-xs font-medium text-[var(--c-text-primary)]">{t.chatView.saveToKbTitle}</p>
           {collections.length === 0 ? (
-            <p className="text-xs text-[var(--c-text-tertiary)]">暂无集合，请先在知识库页面创建</p>
+            <p className="text-xs text-[var(--c-text-tertiary)]">{t.chatView.noCollections}</p>
           ) : (
             <>
               <select
@@ -123,12 +127,13 @@ function SaveToKbButton({ text, className }: { text: string; className?: string 
                 type="text"
                 value={title}
                 onChange={e => setTitle(e.target.value)}
-                placeholder="标题（可选）"
+                placeholder={t.chatView.titleOptional}
+                aria-label={t.chatView.titleOptional}
                 className="mb-2 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-2 py-1 text-xs outline-none"
               />
               <div className="flex justify-end gap-1.5">
-                <button type="button" onClick={() => setOpen(false)} className="rounded px-2 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">取消</button>
-                <button type="button" onClick={() => void handleSave()} disabled={saving} className="rounded bg-[var(--c-accent)] px-2 py-1 text-xs text-white disabled:opacity-50">{saving ? '保存中…' : '保存'}</button>
+                <button type="button" onClick={() => setOpen(false)} className="rounded px-2 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">{t.chatView.cancel}</button>
+                <button type="button" onClick={() => void handleSave()} disabled={saving} className="rounded bg-[var(--c-accent)] px-2 py-1 text-xs text-white disabled:opacity-50">{saving ? t.chatView.saving : t.chatView.save}</button>
               </div>
             </>
           )}
@@ -224,6 +229,7 @@ export function ChatView({
   canvasOpen, onToggleCanvas, onArtifactClick, onArtifactOpenExternal,
   initialFiles,
 }: ChatViewProps & { initialFiles?: Array<{ filePath: string; name: string; isImage?: boolean }> }) {
+  const { t } = useLocale();
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
@@ -314,9 +320,9 @@ export function ChatView({
                   />
                 ) : msg.role === 'computer_use_action' && msg.computerUseAction ? (
                   <div className="max-w-[663px] rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-4 text-sm text-[var(--c-text-primary)] shadow-sm">
-                    <div className="font-medium">需要启用 Computer Use</div>
+                    <div className="font-medium">{t.chatView.needsComputerUse}</div>
                     <div className="mt-1 text-[var(--c-text-secondary)]">
-                      {msg.computerUseAction.message || 'xiaok 需要通过 CUA Driver 查看屏幕和窗口内容。'}
+                      {msg.computerUseAction.message || t.chatView.cuDefaultMessage}
                     </div>
                     {msg.computerUseAction.detail ? (
                       <div className="mt-2 text-xs text-[var(--c-text-muted)]">{msg.computerUseAction.detail}</div>
@@ -330,10 +336,10 @@ export function ChatView({
                           className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
                         >
                           {msg.computerUseAction.status === 'working'
-                            ? '处理中'
+                            ? t.chatView.cuProcessing
                             : msg.computerUseAction.status === 'ready'
-                              ? '已启用'
-                              : msg.computerUseAction.label || '启用 Computer Use'}
+                              ? t.chatView.cuEnabled
+                              : msg.computerUseAction.label || t.chatView.enableComputerUse}
                         </button>
                       ) : null}
                       {msg.computerUseAction.status !== 'ready' ? (
@@ -342,7 +348,7 @@ export function ChatView({
                           onClick={() => onComputerUseDismiss?.(msg.id)}
                           className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs font-medium text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-hover)]"
                         >
-                          暂不启用
+                          {t.chatView.cuDismiss}
                         </button>
                       ) : null}
                     </div>
@@ -433,7 +439,7 @@ export function ChatView({
                 <svg viewBox="0 0 16 16" className="mt-0.5 size-4 shrink-0 text-red-500" fill="currentColor">
                   <path d="M8 1a7 7 0 100 14A7 7 0 008 1zM7 4.5a1 1 0 112 0v3a1 1 0 11-2 0v-3zm1 7a1 1 0 100-2 1 1 0 000 2z" />
                 </svg>
-                <p className="text-sm text-[var(--c-text-secondary)]">任务未完成，请检查模型配置或稍后重试。</p>
+                <p className="text-sm text-[var(--c-text-secondary)]">{t.chatView.taskFailed}</p>
               </div>
             )}
 
@@ -451,7 +457,7 @@ export function ChatView({
             setShowScrollToBottom(false);
           }}
           className={`absolute -top-12 left-1/2 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-[var(--c-border)] bg-[var(--c-bg)] shadow-lg transition-all duration-200 hover:bg-[var(--c-bg-sub)] ${showScrollToBottom ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 translate-y-2'}`}
-          aria-label="跳到最新"
+          aria-label={t.chatView.scrollToBottom}
         >
           <ChevronDown size={16} className="text-[var(--c-text-secondary)]" />
         </button>
@@ -474,7 +480,7 @@ export function ChatView({
           onQueue={onQueue}
           queuedText={queuedText}
           onCancelQueue={onCancelQueue}
-          placeholder={status === 'running' ? '输入消息...' : '回复...'}
+          placeholder={status === 'running' ? t.chatView.inputPlaceholder : t.chatView.replyPlaceholder}
           disabled={status === 'waiting_user'}
           isRunning={status === 'running'}
           onStop={onCancel}
@@ -490,6 +496,7 @@ export function ChatView({
 
 function ArtifactKbButton({ artifactId, title, filePath }: { artifactId: string; title: string; filePath?: string }) {
   const [saved, setSaved] = useState(false);
+  const { t } = useLocale();
   const handleSave = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (saved) return;
@@ -502,9 +509,9 @@ function ArtifactKbButton({ artifactId, title, filePath }: { artifactId: string;
       if (filePath) {
         const ext = filePath.split('.').pop()?.toLowerCase() || '';
         const mimeMap: Record<string, string> = { pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', html: 'text/html', json: 'application/json', csv: 'text/csv', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
-        await desktop.kbAddSource({ collectionId, kind: 'file', title: title || '产物', filePath, mimeType: mimeMap[ext] || 'application/octet-stream' });
+        await desktop.kbAddSource({ collectionId, kind: 'file', title: title || t.chatView.artifact, filePath, mimeType: mimeMap[ext] || 'application/octet-stream' });
       } else {
-        await desktop.kbAddSource({ collectionId, kind: 'paste', title: title || '产物', text: `[产物] ${title} (${artifactId})` });
+        await desktop.kbAddSource({ collectionId, kind: 'paste', title: title || t.chatView.artifact, text: `[${t.chatView.artifact}] ${title} (${artifactId})` });
       }
       setSaved(true);
     } catch {}
@@ -514,11 +521,11 @@ function ArtifactKbButton({ artifactId, title, filePath }: { artifactId: string;
       type="button"
       onClick={e => void handleSave(e)}
       disabled={saved}
-      title={saved ? '已添加到知识库' : '添加到知识库'}
+      title={saved ? t.chatView.addedToKb : t.chatView.addToKb}
       className={`shrink-0 flex items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors ${saved ? 'text-[var(--c-accent)] cursor-default' : 'text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] cursor-pointer'}`}
     >
       <BookOpen size={13} />
-      {saved && <span>已添加</span>}
+      {saved && <span>{t.chatView.added}</span>}
     </button>
   );
 }
@@ -535,6 +542,7 @@ function ResultCard({
   onArtifactOpenExternal?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
 }) {
   const [kbSaved, setKbSaved] = useState(false);
+  const { t } = useLocale();
   const hasSummary = Boolean(result?.summary?.trim());
   const hasArtifacts = Boolean(result?.artifacts && result.artifacts.length > 0);
   if (!hasSummary && !hasArtifacts && generatedFiles.length === 0) return null;
@@ -550,7 +558,7 @@ function ResultCard({
       await desktop.kbAddSource({
         collectionId,
         kind: 'paste',
-        title: result.summary.slice(0, 50).replace(/[#*\n]/g, '').trim() || '任务结果',
+        title: result.summary.slice(0, 50).replace(/[#*\n]/g, '').trim() || t.chatView.taskResult,
         text: result.summary,
       });
       setKbSaved(true);
@@ -564,11 +572,11 @@ function ResultCard({
         <button
           type="button"
           onClick={() => void handleSaveToKb()}
-          title="添加到知识库"
+          title={t.chatView.addToKb}
           className={`absolute right-3 top-3 flex items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors ${kbSaved ? 'text-[var(--c-accent)]' : 'text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'}`}
         >
           <BookOpen size={13} />
-          {kbSaved && <span>已添加</span>}
+          {kbSaved && <span>{t.chatView.added}</span>}
         </button>
       )}
       {hasSummary && result ? (
@@ -591,11 +599,20 @@ function ResultCard({
             return (
               <div key={a.artifactId} className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)]">
                 <div
+                  role="button"
+                  tabIndex={0}
                   className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
                   onClick={(e) => {
                     const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
                     if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
                     else onArtifactClick?.(info);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
+                      onArtifactClick?.(info);
+                    }
                   }}
                   data-testid={`generated-file-${a.title}`}
                 >
@@ -608,14 +625,15 @@ function ResultCard({
                   </div>
                 </div>
                 <ArtifactKbButton artifactId={a.artifactId} title={a.title} filePath={a.filePath} />
-                <span
+                <button
+                  type="button"
                   className="shrink-0 cursor-pointer rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
                   onClick={(e) => {
                     e.stopPropagation();
                     const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
                     onArtifactClick?.(info);
                   }}
-                >打开</span>
+                >{t.chatView.open}</button>
               </div>
             );
           })}
@@ -631,11 +649,20 @@ function ResultCard({
                 className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)]"
               >
                 <div
+                  role="button"
+                  tabIndex={0}
                   className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
                   onClick={(e) => {
                     const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
                     if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
                     else onArtifactClick?.(info);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
+                      onArtifactClick?.(info);
+                    }
                   }}
                   data-testid={`generated-file-${f.name}`}
                 >
@@ -648,13 +675,14 @@ function ResultCard({
                   </div>
                 </div>
                 <ArtifactKbButton artifactId={f.filePath} title={f.name} filePath={f.filePath} />
-                <span
+                <button
+                  type="button"
                   className="shrink-0 cursor-pointer rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
                   onClick={() => {
                     const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
                     onArtifactClick?.(info);
                   }}
-                >打开</span>
+                >{t.chatView.open}</button>
               </div>
             );
           })}
@@ -682,6 +710,7 @@ function A2uiResultArtifactPreview({
 }) {
   const [content, setContent] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const { t } = useLocale();
 
   useEffect(() => {
     let cancelled = false;
@@ -735,13 +764,13 @@ function A2uiResultArtifactPreview({
           className="shrink-0 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-hover)]"
           data-testid={`generated-file-${artifact.title}`}
         >
-          打开
+          {t.chatView.open}
         </button>
       </div>
       {failed ? (
-        <div role="alert" className="text-sm text-[var(--c-text-secondary)]">无法加载该交互式 UI</div>
+        <div role="alert" className="text-sm text-[var(--c-text-secondary)]">{t.chatView.a2uiLoadFailed}</div>
       ) : content === null ? (
-        <div className="text-sm text-[var(--c-text-tertiary)]">正在解析交互式 UI...</div>
+        <div className="text-sm text-[var(--c-text-tertiary)]">{t.chatView.a2uiLoading}</div>
       ) : (
         <A2uiArtifactBlock
           content={content}

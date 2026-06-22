@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback } from 'react'
 import { Maximize2, Minimize2 } from 'lucide-react'
 import mermaid from 'mermaid'
 import { ensureMermaidInit, shouldFallbackToMermaidSource } from './mermaid-utils'
+import { useLocale } from '../contexts/LocaleContext'
 
 const DEBOUNCE_MS = 200
 const MIN_HEIGHT = 200
@@ -14,6 +15,7 @@ type Props = {
 }
 
 export function MermaidBlock({ content }: Props) {
+  const { t } = useLocale()
   const containerRef = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -150,7 +152,7 @@ export function MermaidBlock({ content }: Props) {
             maxHeight: expanded ? undefined : `${COLLAPSED_MAX_HEIGHT}px`,
           }}
         >
-          {content.trim() || 'Mermaid 图表内容为空'}
+          {content.trim() || t.mermaidEmpty}
         </pre>
       ) : (
         <div style={{ position: 'relative' }}>
@@ -167,7 +169,7 @@ export function MermaidBlock({ content }: Props) {
                 pointerEvents: 'none',
               }}
             >
-              正在渲染图表...
+              {t.mermaidRendering}
             </div>
           ) : null}
           <div

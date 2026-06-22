@@ -9,11 +9,11 @@ import { useLocale } from '../../contexts/LocaleContext';
 import { api } from '../../api';
 import type { AutomationOverviewSnapshotView } from '../../api/types';
 
-function formatRelativeTime(ts: number): string {
+function formatRelativeTime(ts: number, t: Pick<import('../../locales').LocaleStrings, 'automationsRelativeJustNow' | 'automationsRelativeMinutesAgo' | 'automationsRelativeHoursAgo'>): string {
   const diff = Date.now() - ts;
-  if (diff < 60_000) return '刚刚';
-  if (diff < 3600_000) return `${Math.floor(diff / 60_000)}分钟前`;
-  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}小时前`;
+  if (diff < 60_000) return t.automationsRelativeJustNow;
+  if (diff < 3600_000) return t.automationsRelativeMinutesAgo(Math.floor(diff / 60_000));
+  if (diff < 86400_000) return t.automationsRelativeHoursAgo(Math.floor(diff / 3600_000));
   return new Date(ts).toLocaleDateString();
 }
 
@@ -155,7 +155,7 @@ export function AutomationsPage() {
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-sm font-medium text-[var(--c-text-primary)]">{item.title}</span>
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-[10px] text-[var(--c-text-tertiary)]">{formatRelativeTime(item.occurredAt)}</span>
+                          <span className="text-[10px] text-[var(--c-text-tertiary)]">{formatRelativeTime(item.occurredAt, t)}</span>
                           <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600">{item.status}</span>
                         </div>
                       </div>
@@ -176,13 +176,13 @@ export function AutomationsPage() {
                           }}
                           className="text-[10px] text-[var(--c-accent)] hover:underline"
                         >
-                          {item.source === 'loop_run' ? '查看循环详情 →' : '查看定时任务 →'}
+                          {item.source === 'loop_run' ? `${t.automationsViewLoopDetail} →` : `${t.automationsViewScheduleDetail} →`}
                         </button>
                         {item.source === 'loop_run' && item.loopId && (
                           <button
                             type="button"
                             onClick={async () => {
-                              if (!confirm(`清除「${item.title}」的失败/阻塞历史记录？`)) return;
+                              if (!confirm(t.automationsClearConfirm(item.title))) return;
                               try {
                                 await api.clearLoopRunHistory(item.loopId!, ['failed', 'blocked']);
                                 const snapshot = await api.getAutomationOverviewSnapshot();
@@ -193,7 +193,7 @@ export function AutomationsPage() {
                             }}
                             className="text-[10px] text-[var(--c-text-tertiary)] hover:text-red-600 hover:underline"
                           >
-                            清除此记录
+                            {t.automationsClearRecord}
                           </button>
                         )}
                       </div>

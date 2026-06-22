@@ -39,9 +39,9 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
   const [step, setStep] = useState<1 | 2>(1);
 
   const AGENT_TYPES: Array<{ id: AgentType; label: string; desc: string; icon: typeof Bot; roles: string[] }> = [
-    { id: 'worker', label: t.projectsAgentTypeWorker, desc: '编码、测试、设计、写作', icon: Bot, roles: ['worker'] },
-    { id: 'po', label: t.projectsAgentTypePo, desc: '规划、协调、审核', icon: Crown, roles: ['project_owner'] },
-    { id: 'all', label: t.projectsAgentTypeAll, desc: '兼顾管理与执行', icon: Zap, roles: ['project_owner', 'worker'] },
+    { id: 'worker', label: t.projectsAgentTypeWorker, desc: t.projectsAgentTypeWorkerDesc, icon: Bot, roles: ['worker'] },
+    { id: 'po', label: t.projectsAgentTypePo, desc: t.projectsAgentTypePoDesc, icon: Crown, roles: ['project_owner'] },
+    { id: 'all', label: t.projectsAgentTypeAll, desc: t.projectsAgentTypeAllDesc, icon: Zap, roles: ['project_owner', 'worker'] },
   ];
   const [agentType, setAgentType] = useState<AgentType>('worker');
   const [name, setName] = useState('');
@@ -123,13 +123,13 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
   // Build runtime options: xiaok always first, then detected, then rest
   const runtimeOptions = runtimes.length > 0
     ? [
-        { type: 'xiaok', displayName: 'xiaok', description: 'xiaok 内置智能体', detected: true },
+        { type: 'xiaok', displayName: 'xiaok', description: t.projectsAgentXiaokBuiltin, detected: true },
         ...runtimes.filter(r => r.type !== 'xiaok'),
       ]
-    : [{ type: 'xiaok', displayName: 'xiaok', description: 'xiaok 内置智能体', detected: true }];
+    : [{ type: 'xiaok', displayName: 'xiaok', description: t.projectsAgentXiaokBuiltin, detected: true }];
 
   const providerOptions = [
-    { value: '', label: '跟随平台配置' },
+    { value: '', label: t.projectsAgentFollowPlatform },
     ...llmProviders.map(p => ({ value: p, label: p === 'openai' ? 'OpenAI' : p === 'anthropic' ? 'Anthropic (Claude)' : p === 'ollama' ? 'Ollama (本地)' : p })),
   ];
 
@@ -147,7 +147,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
       >
         <div className="mb-5 flex items-center justify-between">
           <h2 className="text-[15px] font-semibold text-[var(--c-text-heading)]">
-            {step === 1 ? t.projectsAgentTypeTitle : '配置智能体'}
+            {step === 1 ? t.projectsAgentTypeTitle : t.projectsAgentConfigTitle}
           </h2>
           <button type="button" aria-label="Close agent modal" onClick={handleClose} className="flex size-7 items-center justify-center rounded-md text-[var(--c-text-muted)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)] hover:text-[var(--c-text-secondary)]">
             <X size={14} />
@@ -175,20 +175,20 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
               );
             })}
             <div className="mt-3 flex justify-end">
-              <button type="button" onClick={() => setStep(2)} className="rounded-lg bg-[var(--c-btn-bg)] px-4 py-2 text-sm font-medium text-[var(--c-btn-text)] transition-colors duration-150 hover:brightness-[1.08]">下一步</button>
+              <button type="button" onClick={() => setStep(2)} className="rounded-lg bg-[var(--c-btn-bg)] px-4 py-2 text-sm font-medium text-[var(--c-btn-text)] transition-colors duration-150 hover:brightness-[1.08]">{t.projectsAgentNextStep}</button>
             </div>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="create-agent-name" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsAgentName}</label>
-              <input id="create-agent-name" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例：研究员、编码专家"
+              <input id="create-agent-name" type="text" value={name} onChange={e => setName(e.target.value)} placeholder={t.projectsCreateAgentNamePlaceholder}
                 className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]"
                 autoFocus />
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <div className="text-[12px] font-medium text-[var(--c-text-secondary)]">本机智能体平台</div>
+              <div className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsAgentRuntimeTitle}</div>
               <div className="flex flex-wrap gap-1.5">
                 {runtimeOptions.map(rt => (
                   <button key={rt.type} type="button" onClick={() => { setRuntimeType(rt.type); setProvider(''); setModel(''); }}
@@ -198,8 +198,8 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
                         : 'bg-[var(--c-bg-sub)] text-[var(--c-text-secondary)] hover:text-[var(--c-text-primary)]'
                     }`}>
                     {rt.displayName}
-                    {rt.type === 'xiaok' && <span className="ml-1 text-[10px] opacity-70">推荐</span>}
-                    {!rt.detected && rt.type !== 'xiaok' && <span className="ml-1 text-[10px] opacity-50">未安装</span>}
+                    {rt.type === 'xiaok' && <span className="ml-1 text-[10px] opacity-70">{t.projectsAgentRecommended}</span>}
+                    {!rt.detected && rt.type !== 'xiaok' && <span className="ml-1 text-[10px] opacity-50">{t.projectsAgentNotInstalled}</span>}
                   </button>
                 ))}
               </div>
@@ -207,31 +207,31 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
 
             {isXiaok ? (
               <div className="rounded-xl border border-[var(--c-border-subtle)] bg-[var(--c-bg-sub)] p-3">
-                <p className="text-[12px] font-medium text-[var(--c-text-primary)]">将直接使用 xiaok 当前桌面环境运行</p>
+                <p className="text-[12px] font-medium text-[var(--c-text-primary)]">{t.projectsAgentXiaokRunDesc}</p>
                 <p className="mt-1 text-[10px] text-[var(--c-text-muted)]">
-                  provider、模型和本地 runtime 由桌面端自动绑定，无需手动填写。
+                  {t.projectsAgentXiaokRunSubDesc}
                 </p>
               </div>
             ) : (
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="agent-provider" className="text-[12px] font-medium text-[var(--c-text-secondary)]">LLM 提供商</label>
+                <label htmlFor="agent-provider" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsAgentProviderLabel}</label>
                 <select id="agent-provider" data-testid="provider-select" value={provider} onChange={e => { setProvider(e.target.value); setModel(''); if (!e.target.value) { setBaseUrl(''); setApiKey(''); } }}
                   className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]">
                   {providerOptions.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
                 </select>
-                <p className="text-[10px] text-[var(--c-text-muted)]">默认跟随平台已配置的 provider，无需手动填写</p>
+                <p className="text-[10px] text-[var(--c-text-muted)]">{t.projectsAgentFollowPlatformHint}</p>
               </div>
             )}
 
             {!isXiaok && provider && (
               <>
                 <div className="flex flex-col gap-1.5">
-                  <label htmlFor="agent-model" className="text-[12px] font-medium text-[var(--c-text-secondary)]">模型</label>
+                  <label htmlFor="agent-model" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsAgentModelLabel}</label>
                   {kswarmModels.length > 0 ? (
                     <select id="agent-model" data-testid="model-select" value={model} onChange={e => setModel(e.target.value)}
                       className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]">
-                      <option value="">选择模型</option>
-                      {kswarmModels.map(m => <option key={m.id} value={m.id}>{m.label}{m.default ? ' (默认)' : ''}</option>)}
+                      <option value="">{t.projectsAgentSelectModel}</option>
+                      {kswarmModels.map(m => <option key={m.id} value={m.id}>{m.label}{m.default ? ` (${t.projectsAgentModelDefault})` : ''}</option>)}
                     </select>
                   ) : (
                     <input id="agent-model" data-testid="model-input" type="text" value={model} onChange={e => setModel(e.target.value)}
@@ -258,13 +258,13 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
             )}
 
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="create-agent-instructions" className="text-[12px] font-medium text-[var(--c-text-secondary)]">指令 <span className="text-[var(--c-text-muted)]">(可选)</span></label>
-              <textarea id="create-agent-instructions" value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="系统提示词或行为指令..." rows={2}
+              <label htmlFor="create-agent-instructions" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsAgentInstructionsLabel} <span className="text-[var(--c-text-muted)]">({t.projectsAgentInstructionsOptional})</span></label>
+              <textarea id="create-agent-instructions" value={instructions} onChange={e => setInstructions(e.target.value)} placeholder={t.projectsCreateAgentInstructionsPlaceholder} rows={2}
                 className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)] resize-none" />
             </div>
 
             <div className="mt-3 flex justify-between">
-              <button type="button" onClick={() => setStep(1)} className="rounded-lg bg-[var(--c-bg-page)] px-4 py-2 text-sm font-medium text-[var(--c-text-secondary)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)]">返回</button>
+              <button type="button" onClick={() => setStep(1)} className="rounded-lg bg-[var(--c-bg-page)] px-4 py-2 text-sm font-medium text-[var(--c-text-secondary)] transition-colors duration-150 hover:bg-[var(--c-bg-sub)]">{t.projectsAgentBack}</button>
               <button type="button" onClick={handleCreate} disabled={!name.trim() || loading}
                 className="rounded-lg bg-[var(--c-btn-bg)] px-4 py-2 text-sm font-medium text-[var(--c-btn-text)] transition-colors duration-150 hover:brightness-[1.08] disabled:opacity-50 disabled:pointer-events-none">
                 {loading ? t.projectsAgentCreating : t.projectsAgentCreate}

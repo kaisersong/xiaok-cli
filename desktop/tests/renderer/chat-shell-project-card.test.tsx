@@ -3,7 +3,18 @@ import {
   buildProjectCardMessageFromToolResult,
   buildWorkflowMessageFromToolResult,
 } from '../../renderer/src/components/chatToolResultMessages';
-import { getInlineProjectStatusText } from '../../renderer/src/components/projects/project-inline-utils';
+import type { WorkflowLabels } from '../../renderer/src/components/chatToolResultMessages';
+import { getInlineProjectStatusText, buildInlineProjectLabels } from '../../renderer/src/components/projects/project-inline-utils';
+import { zh } from '../../renderer/src/locales/zh';
+
+const inlineLabels = buildInlineProjectLabels(zh);
+
+const workflowLabels: WorkflowLabels = {
+  chatWorkflowCompleted: zh.chatWorkflowCompleted,
+  chatWorkflowBlockedOrFailed: zh.chatWorkflowBlockedOrFailed,
+  chatWorkflowStarted: zh.chatWorkflowStarted,
+  chatWorkflowProjectId: zh.chatWorkflowProjectId,
+};
 
 describe('ChatShell project card detection', () => {
   it('detects create_project canvas_tool_result and produces project_card message', () => {
@@ -40,13 +51,13 @@ describe('ChatShell project card detection', () => {
       status: 'created',
       executionMode: 'workflow_preferred',
       latestWorkflowRun: { id: 'wf-1', status: 'running' } as any,
-    })).toBe('Workflow 运行中');
+    }, inlineLabels)).toBe('Workflow 运行中');
 
     expect(getInlineProjectStatusText({
       status: 'created',
       executionMode: 'workflow',
       latestWorkflowRun: null,
-    })).toBe('工作流执行');
+    }, inlineLabels)).toBe('工作流执行');
   });
 
   it('detects run_dynamic_workflow_script result and produces visible workflow feedback', () => {
@@ -57,7 +68,7 @@ describe('ChatShell project card detection', () => {
       workflowId: 'analysis_workflow',
       status: 'running',
       backgroundJob: { status: 'running' },
-    }));
+    }), workflowLabels);
 
     expect(msg?.role).toBe('assistant');
     expect(msg?.content).toContain('动态工作流已启动');

@@ -218,7 +218,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
 
   const isOnScheduled = activeNav === 'automations';
   const hideThreadList = activeNav === 'automations' || activeNav === 'projects' || activeNav === 'knowledge';
-  const updateVersion = updateStatus?.version || '新版本';
+  const updateVersion = updateStatus?.version || t.sidebarUpdateNewVersion;
   const currentVersion = updateStatus?.currentVersion;
   const updateError = updateStatus?.error;
   const hasActiveUpdate = Boolean(updateStatus && (
@@ -229,11 +229,11 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   ));
   const hasUpdateFailure = Boolean(updateError && !hasActiveUpdate);
   const showUpdateReminder = Boolean(updateStatus && (hasActiveUpdate || updateError));
-  const updateReminderLabel = hasUpdateFailure ? '检查更新未完成' : `升级到 ${updateVersion}`;
-  const updatePopoverTitle = hasUpdateFailure ? '检查更新未完成' : '发现新版本';
+  const updateReminderLabel = hasUpdateFailure ? t.sidebarUpdateCheckIncomplete : t.sidebarUpdateUpgradeTo(updateVersion);
+  const updatePopoverTitle = hasUpdateFailure ? t.sidebarUpdateCheckIncomplete : t.sidebarUpdateFoundNewVersion;
   const updateReminderTitle = hasUpdateFailure
-    ? `检查更新未完成，点击查看下载方式`
-    : `发现新版本: v${updateVersion}，点击查看更新方式`;
+    ? t.sidebarUpdateCheckIncompleteHint
+    : t.sidebarUpdateFoundVersionHint(updateVersion);
   const updateReminderButtonClassName = hasUpdateFailure
     ? 'inline-flex h-8 items-center rounded-md px-1.5 text-[11px] font-medium text-[var(--c-text-tertiary)] transition-[background-color,color,transform] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)] active:scale-[0.96]'
     : 'inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--c-accent)] px-2 text-xs font-medium text-white transition-[background-color,color,transform] duration-[60ms] hover:opacity-90 active:scale-[0.96]';
@@ -456,7 +456,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                       onKeyDown={(e) => { if (e.key === 'Escape') setShowUpdatePopover(false) }}
                       role="button"
                       tabIndex={-1}
-                      aria-label="关闭弹窗"
+                      aria-label={t.sidebarUpdateClosePopover}
                     />
                     <div
                       className="fixed z-50 w-72 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 shadow-lg"
@@ -467,7 +467,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                         <button
                           type="button"
                           onClick={() => setShowUpdatePopover(false)}
-                          aria-label="关闭"
+                          aria-label={t.sidebarUpdateClose}
                           className="flex size-6 items-center justify-center rounded text-[var(--c-text-icon)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
                         >
                           <X size={14} />
@@ -494,8 +494,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
 
                       <p className="mb-3 text-xs leading-relaxed text-[var(--c-text-secondary)]">
                         {hasUpdateFailure
-                          ? '自动更新检查暂时没有完成。需要更新时，可前往 GitHub 下载最新版，下载后将应用拖入「应用程序」覆盖安装即可。'
-                          : '请前往 GitHub 下载最新版本，下载后将应用拖入「应用程序」覆盖安装即可。'}
+                          ? t.sidebarUpdateAutoCheckFailed
+                          : t.sidebarUpdateManualDownload}
                       </p>
 
                       <button
@@ -504,7 +504,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                         className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-[var(--c-accent)] px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
                       >
                         <ExternalLink size={15} />
-                        <span>前往 GitHub 下载</span>
+                        <span>{t.sidebarUpdateGoToGithub}</span>
                       </button>
                     </div>
                   </>,
@@ -536,6 +536,7 @@ function SidebarProjectListItem({
   onOpen: (projectId: string) => void;
 }) {
   const details = useDelayedSidebarDetails<HTMLButtonElement>();
+  const { t } = useLocale();
 
   return (
     <>
@@ -560,9 +561,9 @@ function SidebarProjectListItem({
           testId={`sidebar-project-details-${project.id}`}
           position={details.detailsPosition}
           rows={[
-            { label: '项目', value: project.name },
-            { label: '状态', value: project.status },
-            { label: '项目 ID', value: project.id, mono: true },
+            { label: t.sidebarTooltipProject, value: project.name },
+            { label: t.sidebarTooltipStatus, value: project.status },
+            { label: t.sidebarTooltipProjectId, value: project.id, mono: true },
           ]}
         />
       )}
@@ -578,6 +579,7 @@ function SidebarScheduledTaskListItem({
   onOpen: (task: SidebarScheduledTask) => void;
 }) {
   const details = useDelayedSidebarDetails<HTMLButtonElement>();
+  const { t } = useLocale();
 
   return (
     <>
@@ -602,11 +604,11 @@ function SidebarScheduledTaskListItem({
           testId={`sidebar-scheduled-details-${task.id}`}
           position={details.detailsPosition}
           rows={[
-            { label: '定时任务', value: task.name },
-            { label: '频率', value: task.frequency },
-            { label: '任务 ID', value: task.id, mono: true },
-            { label: '会话 ID', value: task.threadId, mono: true },
-            { label: '运行任务 ID', value: task.runtimeTaskId, mono: true },
+            { label: t.sidebarTooltipScheduledTask, value: task.name },
+            { label: t.sidebarTooltipFrequency, value: task.frequency },
+            { label: t.sidebarTooltipTaskId, value: task.id, mono: true },
+            { label: t.sidebarTooltipThreadId, value: task.threadId, mono: true },
+            { label: t.sidebarTooltipRuntimeTaskId, value: task.runtimeTaskId, mono: true },
           ]}
         />
       )}
@@ -643,6 +645,7 @@ function SidebarThreadListItem({
 }) {
   const details = useDelayedSidebarDetails<HTMLDivElement>();
   const inputRef = useRef<HTMLInputElement>(null);
+  const { t } = useLocale();
 
   useEffect(() => {
     if (isEditing) {
@@ -708,11 +711,11 @@ function SidebarThreadListItem({
           testId={`sidebar-thread-details-${thread.id}`}
           position={details.detailsPosition}
           rows={[
-            { label: '最近任务', value: title },
-            { label: '状态', value: thread.status },
-            { label: '会话 ID', value: thread.id, mono: true },
-            { label: '当前任务 ID', value: thread.currentTaskId, mono: true },
-            { label: '任务 ID', value: taskIds, mono: true },
+            { label: t.sidebarTooltipRecentTask, value: title },
+            { label: t.sidebarTooltipStatus, value: thread.status },
+            { label: t.sidebarTooltipThreadId, value: thread.id, mono: true },
+            { label: t.sidebarTooltipCurrentTaskId, value: thread.currentTaskId, mono: true },
+            { label: t.sidebarTooltipTaskId, value: taskIds, mono: true },
           ]}
         />
       )}

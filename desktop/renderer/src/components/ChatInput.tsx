@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
 import { Send, Square, X, Plus } from 'lucide-react';
 import { api } from '../api';
+import { useLocale } from '../contexts/LocaleContext';
 
 interface AttachedFile {
   filePath: string;
@@ -37,7 +38,9 @@ function basename(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath;
 }
 
-export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder = '回复...', disabled, isRunning, onStop, autoFocus, initialFiles }: ChatInputProps) {
+export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder, disabled, isRunning, onStop, autoFocus, initialFiles }: ChatInputProps) {
+  const { t } = useLocale();
+  const resolvedPlaceholder = placeholder ?? t.chatInput.replyPlaceholder;
   const [internalValue, setInternalValue] = useState(value ?? '');
   const [files, setFiles] = useState<AttachedFile[]>(initialFiles ?? []);
   const [focused, setFocused] = useState(false);
@@ -289,7 +292,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
     const hasText = internalValue.trim();
     const hasFiles = files.length > 0;
     if (hasText || hasFiles) {
-      onSubmit(internalValue.trim() || '请处理这些文件', files);
+      onSubmit(internalValue.trim() || t.chatInput.processFiles, files);
       setInternalValue('');
       onChange?.('');
       setFiles([]);
@@ -326,7 +329,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
           style={{ maxWidth: '100%' }}
         >
           <div className="p-2 text-xs text-[var(--c-text-secondary)] border-b border-[var(--c-border)]">
-            技能命令 (↑↓选择, Tab确认)
+            {t.chatInput.skillCommandHint}
           </div>
           <div className="max-h-[200px] overflow-y-auto">
             {matchedSkills.map((skill, i) => (
@@ -431,7 +434,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
             border: '0.5px solid var(--c-border-subtle)',
           }}
         >
-          <span className="text-xs text-[var(--c-text-secondary)] shrink-0">队列中</span>
+          <span className="text-xs text-[var(--c-text-secondary)] shrink-0">{t.chatInput.queued}</span>
           <span className="text-sm text-[var(--c-text-primary)] truncate flex-1" title={queuedText}>{queuedText}</span>
           {onCancelQueue && (
             <button
@@ -476,7 +479,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
         >
           {/* Textarea */}
           <div style={{ position: 'relative', marginBottom: '8px' }}>
-            <textarea aria-label={placeholder}
+            <textarea aria-label={resolvedPlaceholder}
               ref={textareaCallbackRef}
               rows={1}
               className="w-full resize-none bg-transparent outline-none"
@@ -485,7 +488,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
               onKeyDown={handleKeyDown}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
-              placeholder={placeholder}
+              placeholder={resolvedPlaceholder}
               disabled={disabled}
               style={{
                 fontFamily: 'inherit',

@@ -149,7 +149,7 @@ export type ThemePreset = 'light' | 'dark' | 'system' | 'ocean' | 'forest' | 'su
 export interface ThemeDefinition { name: string; colors: Record<string, string> }
 
 export function readThemePresetFromStorage(): ThemePreset {
-  try { return (localStorage.getItem('xiaok:theme-preset') as ThemePreset) || 'system' } catch { return 'system' }
+  try { return (localStorage.getItem('xiaok:theme-preset') as ThemePreset) || 'default' } catch { return 'default' }
 }
 export function writeThemePresetToStorage(preset: ThemePreset): void {
   try { localStorage.setItem('xiaok:theme-preset', preset) } catch { /* noop */ }

@@ -52,14 +52,17 @@ function mergeWorkflowRunIntoDetail(detail: ProjectFullDetail | null, workflowRu
 }
 const SWARM_CONTEXT_STORAGE_KEY = 'xiaok.swarmContinueContext';
 
-const EXECUTION_MODE_OPTIONS: Array<{ value: KSwarmProjectExecutionMode; label: string }> = [
-  { value: 'direct', label: '快速执行' },
-  { value: 'auto', label: '智能选择' },
-  { value: 'workflow_preferred', label: '高质量执行' },
-];
+function getExecutionModeOptions(t: ReturnType<typeof useLocale>['t']): Array<{ value: KSwarmProjectExecutionMode; label: string }> {
+  return [
+    { value: 'direct', label: t.projectsDetailExecDirect },
+    { value: 'auto', label: t.projectsDetailExecAuto },
+    { value: 'workflow_preferred', label: t.projectsDetailExecWorkflowPreferred },
+  ];
+}
 
-function getExecutionModeLabel(mode?: KSwarmProjectExecutionMode) {
-  return EXECUTION_MODE_OPTIONS.find(option => option.value === mode)?.label || '快速执行';
+function getExecutionModeLabel(mode: KSwarmProjectExecutionMode | undefined, t: ReturnType<typeof useLocale>['t']) {
+  const options = getExecutionModeOptions(t);
+  return options.find(option => option.value === mode)?.label || t.projectsDetailExecDirect;
 }
 
 function workflowOwnsProjectProgress(workflowRun?: KSwarmWorkflowRun | null) {
@@ -78,16 +81,18 @@ function ProjectExecutionModeControl({
   busy: boolean;
   onChange: (mode: KSwarmProjectExecutionMode) => void;
 }) {
+  const { t } = useLocale();
   const current = value || 'direct';
+  const executionModeOptions = getExecutionModeOptions(t);
   return (
     <div
       role="group"
-      aria-label="项目执行方式"
+      aria-label={t.projectsDetailExecutionModeGroup}
       className="ml-2 flex min-w-0 items-center gap-2 border-l border-[var(--c-border-subtle)] py-1.5 pl-3"
     >
-      <span className="shrink-0 text-[11px] font-medium text-[var(--c-text-muted)]">执行方式</span>
+      <span className="shrink-0 text-[11px] font-medium text-[var(--c-text-muted)]">{t.projectsDetailExecutionModeLabel}</span>
       <div className="inline-flex overflow-hidden rounded-md border border-[var(--c-border-subtle)] bg-[var(--c-bg-page)] p-0.5">
-        {EXECUTION_MODE_OPTIONS.map((option) => {
+        {executionModeOptions.map((option) => {
           const active = option.value === current;
           return (
             <button
@@ -134,7 +139,7 @@ function SummaryCollapsible({ summary, score, taskScores }: { summary: string; s
             {score}/10
           </span>
         )}
-        <span className="ml-auto text-[11px] text-[var(--c-text-muted)]">{expanded ? '收起' : '展开'}</span>
+        <span className="ml-auto text-[11px] text-[var(--c-text-muted)]">{expanded ? t.projectsDetailSummaryCollapse : t.projectsDetailSummaryExpand}</span>
       </button>
       {expanded && (
         <div className="border-t border-[var(--c-border-subtle)]/50">
@@ -143,7 +148,7 @@ function SummaryCollapsible({ summary, score, taskScores }: { summary: string; s
           </div>
           {taskScores && taskScores.length > 0 && (
             <div className="px-4 pb-3">
-              <h5 className="text-[11px] font-semibold text-[var(--c-text-muted)] mb-2">任务评分</h5>
+              <h5 className="text-[11px] font-semibold text-[var(--c-text-muted)] mb-2">{t.projectsDetailTaskScores}</h5>
               <div className="space-y-1.5">
                 {taskScores.map((ts, i) => (
                   <div key={i} className="flex items-center gap-2 text-[11px]">
@@ -304,7 +309,7 @@ function buildSwarmContinueContext(detail: ProjectFullDetail, intervention: Proj
     taskId,
     taskTitle,
     message: intervention.message || '',
-    headline: intervention.headline || '需要处理',
+    headline: intervention.headline || t.projectsInterventionNeedsAttention,
     lastFailure,
     downstreamBlockedCount,
     strategy,
@@ -437,7 +442,7 @@ export function ProjectDetailPage() {
   const TABS: Array<{ id: TabId; label: string; icon: typeof FileText }> = useMemo(() => [
     { id: 'plan', label: t.projectsDetailPlan, icon: FileText },
     { id: 'board', label: t.projectsDetailKanban, icon: LayoutGrid },
-    { id: 'agents', label: '智能体', icon: Users },
+    { id: 'agents', label: t.projectsDetailAgentsTab, icon: Users },
     { id: 'activity', label: t.projectsDetailActivity, icon: Clock },
     { id: 'deliverables', label: t.projectsDetailDeliverables, icon: Package },
   ], [t]);
@@ -604,10 +609,10 @@ export function ProjectDetailPage() {
 
   const describeDispatchResult = (result: DispatchTasksResult | null | undefined) => {
     const workflowCount = (result?.workflowRuns?.length ?? 0) + (result?.workflowNodeDispatches?.length ?? 0);
-    if (workflowCount > 0) return '已启动任务工作流，正在生成交付物。';
+    if (workflowCount > 0) return t.projectsDetailDispatchWorkflowStarted;
     const dispatchedCount = result?.dispatched?.length ?? 0;
-    if (dispatchedCount > 0) return `已分发 ${dispatchedCount} 个任务。`;
-    return '没有可分发任务，项目状态已刷新。';
+    if (dispatchedCount > 0) return t.projectsDetailDispatchTasksDispatched(dispatchedCount);
+    return t.projectsDetailDispatchNone;
   };
 
   const startRetryCooldown = () => {
@@ -623,17 +628,17 @@ export function ProjectDetailPage() {
       const result = await fn();
       await refreshOnce();
       if (action === 'approve' && !result) {
-        showNotice({ action: 'approve', kind: 'error', message: '审批失败：项目准备未完成，请检查智能体状态或重新制定计划。' }, 8_000);
+        showNotice({ action: 'approve', kind: 'error', message: t.projectsDetailApproveFailedNotReady }, 8_000);
       } else if (action === 'approve') {
-        showNotice({ action: 'approve', kind: 'success', message: '审批已通过，可分发任务。' }, 5_000);
+        showNotice({ action: 'approve', kind: 'success', message: t.projectsDetailApproveSuccess }, 5_000);
       } else if (action === 'dispatch') {
         showNotice({ action: 'dispatch', kind: 'success', message: describeDispatchResult(result) }, 5_000);
       }
     } catch {
       if (action === 'approve') {
-        showNotice({ action: 'approve', kind: 'error', message: '审批失败：项目准备未完成，请检查智能体状态或重新制定计划。' }, 8_000);
+        showNotice({ action: 'approve', kind: 'error', message: t.projectsDetailApproveFailedNotReady }, 8_000);
       } else if (action === 'dispatch') {
-        showNotice({ action: 'dispatch', kind: 'error', message: '分发任务失败，请稍后重试。' }, 8_000);
+        showNotice({ action: 'dispatch', kind: 'error', message: t.projectsDetailDispatchFailed }, 8_000);
       }
     } finally {
       setActionLoading(null);
@@ -647,12 +652,12 @@ export function ProjectDetailPage() {
       const updated = await updateProjectExecutionMode(projectId, executionMode);
       if (updated) {
         setDetail(prev => prev ? { ...prev, project: { ...prev.project, executionMode: updated.executionMode || executionMode } } : prev);
-        showNotice({ action: 'execution_mode', kind: 'success', message: `已切换为${getExecutionModeLabel(updated.executionMode || executionMode)}。` }, 5_000);
+        showNotice({ action: 'execution_mode', kind: 'success', message: t.projectsDetailExecModeSwitched(getExecutionModeLabel(updated.executionMode || executionMode, t)) }, 5_000);
       } else {
-        showNotice({ action: 'execution_mode', kind: 'error', message: '切换执行方式失败，请稍后重试。' }, 8_000);
+        showNotice({ action: 'execution_mode', kind: 'error', message: t.projectsDetailExecModeFailed }, 8_000);
       }
     } catch {
-      showNotice({ action: 'execution_mode', kind: 'error', message: '切换执行方式失败，请稍后重试。' }, 8_000);
+      showNotice({ action: 'execution_mode', kind: 'error', message: t.projectsDetailExecModeFailed }, 8_000);
     } finally {
       setActionLoading(null);
     }
@@ -666,12 +671,12 @@ export function ProjectDetailPage() {
       if (ok) {
         setDetail(prev => prev ? { ...prev, project: { ...prev.project, status: 'closed' } } : prev);
         setConfirmClose(false);
-        showNotice({ action: 'close', kind: 'success', message: '项目已关闭。' }, 5_000);
+        showNotice({ action: 'close', kind: 'success', message: t.projectsDetailCloseSuccess }, 5_000);
       } else {
-        showNotice({ action: 'close', kind: 'error', message: '关闭项目失败，请稍后重试。' }, 8_000);
+        showNotice({ action: 'close', kind: 'error', message: t.projectsDetailCloseFailed }, 8_000);
       }
     } catch {
-      showNotice({ action: 'close', kind: 'error', message: '关闭项目失败，请稍后重试。' }, 8_000);
+      showNotice({ action: 'close', kind: 'error', message: t.projectsDetailCloseFailed }, 8_000);
     } finally {
       setActionLoading(null);
     }
@@ -680,22 +685,22 @@ export function ProjectDetailPage() {
   const handleRetryPlan = async () => {
     if (!projectId || actionLoading || retryCooldownUntil > Date.now()) return;
     setActionLoading('retry');
-    showNotice({ action: 'retry', kind: 'info', message: '正在通知 PO 重新制定计划...' });
+    showNotice({ action: 'retry', kind: 'info', message: t.projectsDetailRetryNotifying });
     try {
       const result = await retryPlan(projectId);
       if (result?.ok) {
         const message = result.poReassigned && result.poAgent
-          ? `已改派到 ${result.poAgent} 并重新制定计划，正在等待 PO 提交新计划。`
-          : '已发起重新制定计划，正在等待 PO 提交新计划。';
+          ? t.projectsDetailRetryReassigned(result.poAgent)
+          : t.projectsDetailRetrySuccess;
         startRetryCooldown();
         showNotice({ action: 'retry', kind: 'success', message }, RETRY_PLAN_COOLDOWN_MS);
       } else {
         setRetryCooldownUntil(0);
-        showNotice({ action: 'retry', kind: 'error', message: '重新制定计划失败，请稍后重试。' }, 8_000);
+        showNotice({ action: 'retry', kind: 'error', message: t.projectsDetailRetryFailed }, 8_000);
       }
     } catch {
       setRetryCooldownUntil(0);
-      showNotice({ action: 'retry', kind: 'error', message: '重新制定计划失败，请稍后重试。' }, 8_000);
+      showNotice({ action: 'retry', kind: 'error', message: t.projectsDetailRetryFailed }, 8_000);
     } finally {
       await refreshOnce();
       setActionLoading(null);
@@ -720,9 +725,9 @@ export function ProjectDetailPage() {
       } else {
         downloadTextFile(defaultName, md, 'text/markdown;charset=utf-8');
       }
-      showNotice({ action: 'export', kind: 'success', message: '已导出项目报告。' }, 5_000);
+      showNotice({ action: 'export', kind: 'success', message: t.projectsDetailExportSuccess }, 5_000);
     } catch {
-      showNotice({ action: 'export', kind: 'error', message: '导出失败，请稍后重试。' }, 8_000);
+      showNotice({ action: 'export', kind: 'error', message: t.projectsDetailExportFailed }, 8_000);
     } finally {
       setActionLoading(null);
     }
@@ -736,12 +741,12 @@ export function ProjectDetailPage() {
       await refreshOnce();
       if (workflowRun) {
         setDetail(prev => mergeWorkflowRunIntoDetail(prev, workflowRun));
-        showNotice({ action: 'workflow', kind: 'success', message: '快速诊断已完成。' }, 5_000);
+        showNotice({ action: 'workflow', kind: 'success', message: t.projectsDetailDiagnoseSuccess }, 5_000);
       } else {
-        showNotice({ action: 'workflow', kind: 'error', message: '启动快速诊断失败，请稍后重试。' }, 8_000);
+        showNotice({ action: 'workflow', kind: 'error', message: t.projectsDetailDiagnoseFailed }, 8_000);
       }
     } catch {
-      showNotice({ action: 'workflow', kind: 'error', message: '启动快速诊断失败，请稍后重试。' }, 8_000);
+      showNotice({ action: 'workflow', kind: 'error', message: t.projectsDetailDiagnoseFailed }, 8_000);
     } finally {
       setActionLoading(null);
     }
@@ -755,10 +760,10 @@ export function ProjectDetailPage() {
       if (proposal) {
         setWorkflowProposal(proposal);
       } else {
-        showNotice({ action: 'workflow', kind: 'error', message: '生成 Agent 复核诊断计划失败，请稍后重试。' }, 8_000);
+        showNotice({ action: 'workflow', kind: 'error', message: t.projectsDetailAgentReviewFailed }, 8_000);
       }
     } catch {
-      showNotice({ action: 'workflow', kind: 'error', message: '生成 Agent 复核诊断计划失败，请稍后重试。' }, 8_000);
+      showNotice({ action: 'workflow', kind: 'error', message: t.projectsDetailAgentReviewFailed }, 8_000);
     } finally {
       setActionLoading(null);
     }
@@ -772,10 +777,10 @@ export function ProjectDetailPage() {
       if (proposal) {
         setWorkflowProposal(proposal);
       } else {
-        showNotice({ action: 'workflow', kind: 'error', message: '生成任务工作流计划失败，请稍后重试。' }, 8_000);
+        showNotice({ action: 'workflow', kind: 'error', message: t.projectsDetailTaskWorkflowFailed }, 8_000);
       }
     } catch {
-      showNotice({ action: 'workflow', kind: 'error', message: '生成任务工作流计划失败，请稍后重试。' }, 8_000);
+      showNotice({ action: 'workflow', kind: 'error', message: t.projectsDetailTaskWorkflowFailed }, 8_000);
     } finally {
       setActionLoading(null);
     }
@@ -793,14 +798,14 @@ export function ProjectDetailPage() {
       if (workflowRun) {
         setWorkflowProposal(null);
         setDetail(prev => mergeWorkflowRunIntoDetail(prev, workflowRun));
-        const message = taskId ? '任务工作流已启动。' : 'Agent 复核诊断已启动。';
+        const message = taskId ? t.projectsDetailWorkflowTaskStarted : t.projectsDetailWorkflowAgentStarted;
         showNotice({ action: 'workflow', kind: 'success', message }, 5_000);
       } else {
-        const message = workflowProposal.scope?.taskId ? '启动任务工作流失败，请稍后重试。' : '启动 Agent 复核诊断失败，请稍后重试。';
+        const message = workflowProposal.scope?.taskId ? t.projectsDetailWorkflowTaskStartFailed : t.projectsDetailWorkflowAgentStartFailed;
         showNotice({ action: 'workflow', kind: 'error', message }, 8_000);
       }
     } catch {
-      const message = workflowProposal.scope?.taskId ? '启动任务工作流失败，请稍后重试。' : '启动 Agent 复核诊断失败，请稍后重试。';
+      const message = workflowProposal.scope?.taskId ? t.projectsDetailWorkflowTaskStartFailed : t.projectsDetailWorkflowAgentStartFailed;
       showNotice({ action: 'workflow', kind: 'error', message }, 8_000);
     } finally {
       setActionLoading(null);
@@ -816,12 +821,12 @@ export function ProjectDetailPage() {
       await refreshOnce();
       if (workflowRun) {
         setDetail(prev => mergeWorkflowRunIntoDetail(prev, workflowRun));
-        showNotice({ action: 'workflow', kind: 'success', message: '工作流已取消。' }, 5_000);
+        showNotice({ action: 'workflow', kind: 'success', message: t.projectsDetailWorkflowCancelSuccess }, 5_000);
       } else {
-        showNotice({ action: 'workflow', kind: 'error', message: '取消工作流失败，请稍后重试。' }, 8_000);
+        showNotice({ action: 'workflow', kind: 'error', message: t.projectsDetailWorkflowCancelFailed }, 8_000);
       }
     } catch {
-      showNotice({ action: 'workflow', kind: 'error', message: '取消工作流失败，请稍后重试。' }, 8_000);
+      showNotice({ action: 'workflow', kind: 'error', message: t.projectsDetailWorkflowCancelFailed }, 8_000);
     } finally {
       setActionLoading(null);
     }
@@ -838,7 +843,7 @@ export function ProjectDetailPage() {
         || intervention.primaryAction?.params?.resumeWorkflowRunId
         || '';
       if (!workflowRunId) {
-        showNotice({ action: 'continue', kind: 'error', message: '缺少工作流运行 ID，请改用「让小K帮忙」。' }, 8_000);
+        showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailContinueMissingWorkflowId }, 8_000);
         return;
       }
       setActionLoading('continue');
@@ -846,16 +851,16 @@ export function ProjectDetailPage() {
         const api = getDesktopApi() as { kswarmResumeWorkflowRun?: (input: { projectId: string; workflowRunId: string }) => Promise<{ restored: boolean; reason?: string; jobId?: string }> } | null;
         const result = await api?.kswarmResumeWorkflowRun?.({ projectId, workflowRunId });
         if (result?.restored || result?.reason === 'already_running') {
-          showNotice({ action: 'continue', kind: 'success', message: '已直接续跑动态工作流。' }, 5_000);
+          showNotice({ action: 'continue', kind: 'success', message: t.projectsDetailContinueResumedWorkflow }, 5_000);
         } else if (result?.reason === 'no_script_source') {
-          showNotice({ action: 'continue', kind: 'error', message: '该工作流缺少脚本源，无法直接续跑，请改用「让小K帮忙」。' }, 8_000);
+          showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailContinueNoScript }, 8_000);
         } else if (result?.reason === 'kswarm_unavailable') {
-          showNotice({ action: 'continue', kind: 'error', message: '内核未就绪，请稍后重试。' }, 8_000);
+          showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailContinueKswarmUnavailable }, 8_000);
         } else {
-          showNotice({ action: 'continue', kind: 'error', message: '直接续跑失败，请改用「让小K帮忙」。' }, 8_000);
+          showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailContinueResumeFailed }, 8_000);
         }
       } catch {
-        showNotice({ action: 'continue', kind: 'error', message: '直接续跑失败，请稍后重试。' }, 8_000);
+        showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailContinueResumeFailedRetry }, 8_000);
       } finally {
         await refreshOnce();
         setActionLoading(null);
@@ -873,18 +878,18 @@ export function ProjectDetailPage() {
       if (result?.ok) {
         const message = result.outcome === 'submitted_for_review'
           ? (result.reviewNotification === 'sent'
-            ? '已通知 PO 复审。'
+            ? t.projectsDetailContinueNotifiedPo
             : result.reviewNotification === 'failed'
-              ? '复审通知发送失败，请稍后重试或让小K帮忙。'
+              ? t.projectsDetailContinueNotifyFailed
               : result.reviewNotification === 'not_available'
-                ? '暂时无法通知 PO，请稍后重试或让小K帮忙。'
-                : '已提交审核。')
-          : '已继续推进项目。';
+                ? t.projectsDetailContinueNotifyUnavailable
+                : t.projectsDetailContinueSubmittedReview)
+          : t.projectsDetailContinueProjectAdvanced;
         showNotice({ action: 'continue', kind: 'success', message }, 5_000);
       } else if (result?.error === 'task_state_changed' || result?.status === 409) {
-        showNotice({ action: 'continue', kind: 'info', message: '状态已变化，已刷新项目。' }, 8_000);
+        showNotice({ action: 'continue', kind: 'info', message: t.projectsDetailContinueStateChanged }, 8_000);
       } else if (result?.error === 'no_recoverable_artifacts') {
-        showNotice({ action: 'continue', kind: 'error', message: '没有找到可恢复产物，请查看原因或让小K帮忙处理。' }, 8_000);
+        showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailContinueNoRecoverableArtifacts }, 8_000);
       } else if (
         result?.outcome === 'needs_user_action' ||
         result?.humanActionRequired ||
@@ -899,14 +904,14 @@ export function ProjectDetailPage() {
             draftPrompt: buildXiaokInterventionDraft(context),
           }));
         }
-        showNotice({ action: 'continue', kind: 'info', message: '需要让小K帮忙诊断并提交修复产物。' }, 8_000);
+        showNotice({ action: 'continue', kind: 'info', message: t.projectsDetailContinueNeedsDiagnose }, 8_000);
       } else if (result?.error === 'needs_conversation' || (result?.strategy === 'needs_conversation' && !result?.error)) {
-        showNotice({ action: 'continue', kind: 'info', message: '当前需要让小K帮忙确认下一步。' }, 8_000);
+        showNotice({ action: 'continue', kind: 'info', message: t.projectsDetailContinueNeedsConfirm }, 8_000);
       } else {
-        showNotice({ action: 'continue', kind: 'error', message: '继续推进失败，请稍后重试。' }, 8_000);
+        showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailContinueFailed }, 8_000);
       }
     } catch {
-      showNotice({ action: 'continue', kind: 'error', message: '继续推进失败，请稍后重试。' }, 8_000);
+      showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailContinueFailed }, 8_000);
     } finally {
       await refreshOnce();
       setActionLoading(null);
@@ -921,7 +926,7 @@ export function ProjectDetailPage() {
       const draftPrompt = buildXiaokInterventionDraft(context);
       const storedContext = { ...context, draftPrompt };
       window.sessionStorage.setItem('xiaok.swarmContinueContext', JSON.stringify(storedContext));
-      const thread = await api.createThread({ title: `让小K帮忙：${detail.project.name}`.slice(0, 40) });
+      const thread = await api.createThread({ title: t.projectsDetailAskXiaokThreadTitle(detail.project.name) });
       storeXiaokThreadDraft(thread.id, storedContext);
       navigate(`/t/${thread.id}`, {
         state: {
@@ -930,7 +935,7 @@ export function ProjectDetailPage() {
         },
       });
     } catch {
-      showNotice({ action: 'continue', kind: 'error', message: '打开小K会话失败，请稍后重试。' }, 8_000);
+      showNotice({ action: 'continue', kind: 'error', message: t.projectsDetailAskXiaokFailed }, 8_000);
     } finally {
       setActionLoading(null);
     }
@@ -947,8 +952,8 @@ export function ProjectDetailPage() {
   if (!detail) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
-        <p className="text-sm text-[var(--c-text-tertiary)]">项目未找到</p>
-        <button type="button" onClick={() => navigate('/projects')} className="text-sm text-[var(--c-text-secondary)] hover:text-[var(--c-text-primary)]">返回项目列表</button>
+        <p className="text-sm text-[var(--c-text-tertiary)]">{t.projectsDetailProjectNotFound}</p>
+        <button type="button" onClick={() => navigate('/projects')} className="text-sm text-[var(--c-text-secondary)] hover:text-[var(--c-text-primary)]">{t.projectsDetailBackToProjects}</button>
       </div>
     );
   }
@@ -973,15 +978,15 @@ export function ProjectDetailPage() {
   const showDeliver = project.status === 'active' && tasks.every(t => t.status === 'done' || t.status === 'cancelled');
   const showClose = project.status === 'active' || project.status === 'delivered';
   const statusLabel = STATUS_LABELS[project.status] || project.status;
-  const healthSummary = summarizeProjectHealth(detail);
+  const healthSummary = summarizeProjectHealth(detail, t);
   const showHealthBanner = shouldShowProjectHealth(healthSummary.status) && !projectIntervention?.required;
   const workflowUnavailableMessage = serviceStatus?.lastError?.includes('dynamic workflows')
-    ? '工作流服务版本过旧，请关闭旧版小K并重启当前版本。'
+    ? t.projectsDetailWorkflowServiceOutdated
     : null;
   const retryBusy = actionLoading === 'retry';
   const retryCoolingDown = retryCooldownUntil > Date.now();
   const retryDisabled = actionLoading !== null || retryCoolingDown;
-  const retryButtonLabel = retryBusy ? '正在发起' : retryCoolingDown ? '已发起' : '重新制定计划';
+  const retryButtonLabel = retryBusy ? t.projectsDetailRetryBusy : retryCoolingDown ? t.projectsDetailRetryCooling : t.projectsDetailRetryPlan;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -1037,7 +1042,7 @@ export function ProjectDetailPage() {
             {showClose && !confirmClose && (
               <button type="button" onClick={() => setConfirmClose(true)}
                 className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-status-error-text)] bg-[var(--c-bg-deep)] hover:brightness-[0.95]">
-                <XCircle size={12} /><span>完成项目</span>
+                <XCircle size={12} /><span>{t.projectsDetailCloseProject}</span>
               </button>
             )}
             {confirmClose && (
@@ -1069,7 +1074,7 @@ export function ProjectDetailPage() {
         {/* Row 3: Metadata tags */}
         <div className="flex items-center gap-3 pl-[38px] flex-wrap">
           <div data-testid="project-instance-id" className="flex items-center gap-1 text-[11px] text-[var(--c-text-muted)]">
-            <span className="shrink-0">项目实例 ID</span>
+            <span className="shrink-0">{t.projectsDetailProjectInstanceId}</span>
             <span className="font-mono text-[var(--c-text-secondary)]">{project.id}</span>
           </div>
           {workspace?.path && (
@@ -1077,7 +1082,7 @@ export function ProjectDetailPage() {
               <FolderOpen size={11} className="shrink-0" />
               <span className="font-mono truncate max-w-[260px]">{workspace.path}</span>
               {workspace.artifacts && workspace.artifacts.length > 0 && (
-                <span className="text-[9px] px-1 rounded bg-[var(--c-bg-deep)]">{workspace.artifacts.length} files</span>
+                <span className="text-[9px] px-1 rounded bg-[var(--c-bg-deep)]">{t.projectsDetailFilesCount(workspace.artifacts.length)}</span>
               )}
             </div>
           )}
@@ -1125,7 +1130,7 @@ export function ProjectDetailPage() {
               : 'border-[var(--c-status-warning-text)]/30 bg-[var(--c-bg-deep)] text-[var(--c-status-warning-text)]'
           }`}>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[12px] font-semibold">{getProjectHealthLabel(healthSummary.status)}</span>
+              <span className="text-[12px] font-semibold">{getProjectHealthLabel(healthSummary.status, t)}</span>
               {healthSummary.primaryTaskId && (
                 <span className="rounded bg-[var(--c-bg-page)]/70 px-1.5 py-0.5 font-mono text-[10px]">{healthSummary.primaryTaskId}</span>
               )}
@@ -1147,9 +1152,9 @@ export function ProjectDetailPage() {
             )}
             {(healthSummary.dispatchableCount > 0 || healthSummary.blockedCount > 0 || healthSummary.waitingCount > 0) && (
               <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-[var(--c-text-muted)]">
-                <span>可派发 {healthSummary.dispatchableCount}</span>
-                <span>阻塞 {healthSummary.blockedCount}</span>
-                <span>等待 {healthSummary.waitingCount}</span>
+                <span>{t.projectsDetailDispatchableLabel} {healthSummary.dispatchableCount}</span>
+                <span>{t.projectsDetailBlockedLabel} {healthSummary.blockedCount}</span>
+                <span>{t.projectsDetailWaitingLabel} {healthSummary.waitingCount}</span>
               </div>
             )}
           </div>
@@ -1159,13 +1164,13 @@ export function ProjectDetailPage() {
         {(!workflowHasProjectProgress && (project.status === 'created' || project.status === 'draft' || project.status === 'planning' || showInterruptedPlanHint)) && (
           <div className="pl-[38px]">
             {showInterruptedPlanHint && (
-              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-[var(--c-bg-deep)] text-[var(--c-status-warning-text)]">计划中断，可重新制定计划</span>
+              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-[var(--c-bg-deep)] text-[var(--c-status-warning-text)]">{t.projectsDetailPlanInterrupted}</span>
             )}
             {!showInterruptedPlanHint && !plan && (
-              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-[var(--c-bg-deep)] text-[var(--c-status-warning-text)]">等待 PO 制定计划...</span>
+              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-[var(--c-bg-deep)] text-[var(--c-status-warning-text)]">{t.projectsDetailWaitingPoPlan}</span>
             )}
             {!showInterruptedPlanHint && plan && (
-              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-[var(--c-bg-deep)] text-[var(--c-status-success-text)]">Plan v{plan.version} 已就绪，可审批</span>
+              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-[var(--c-bg-deep)] text-[var(--c-status-success-text)]">{t.projectsDetailPlanReady(plan.version)}</span>
             )}
           </div>
         )}
@@ -1197,7 +1202,7 @@ export function ProjectDetailPage() {
           data-testid="project-detail-workflow-entry"
           className="ml-2 flex min-w-0 items-center gap-2 border-l border-[var(--c-border-subtle)] py-1.5 pl-3"
         >
-          <span className="shrink-0 text-[11px] font-medium text-[var(--c-text-muted)]">工作流</span>
+          <span className="shrink-0 text-[11px] font-medium text-[var(--c-text-muted)]">{t.projectsDetailWorkflowLabel}</span>
           <WorkflowStatusStrip
             workflowRun={latestWorkflowRun}
             busy={actionLoading === 'workflow'}
@@ -1247,7 +1252,7 @@ export function ProjectDetailPage() {
                         <span className="text-[12px] font-medium text-[var(--c-text-heading)]">{poAgentData?.name || project.poAgent}</span>
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-accent)]/10 text-[var(--c-accent)]">PO</span>
                       </div>
-                      <span className="text-[11px] text-[var(--c-text-muted)]">{formatKSwarmAgentStatus(runtimeStatus)}</span>
+                      <span className="text-[11px] text-[var(--c-text-muted)]">{formatKSwarmAgentStatus(runtimeStatus, t)}</span>
                     </div>
                   </div>
                 );
@@ -1269,14 +1274,14 @@ export function ProjectDetailPage() {
                           <span className="text-[12px] font-medium text-[var(--c-text-heading)]">{agent.name}</span>
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]">Worker</span>
                         </div>
-                        <span className="text-[11px] text-[var(--c-text-muted)]">{formatKSwarmAgentStatus(runtimeStatus)}</span>
+                        <span className="text-[11px] text-[var(--c-text-muted)]">{formatKSwarmAgentStatus(runtimeStatus, t)}</span>
                       </div>
                     </div>
                   );
                 });
               })()}
               {agents.length === 0 && (
-                <p className="text-[12px] text-[var(--c-text-muted)] py-4 text-center">暂无智能体</p>
+                <p className="text-[12px] text-[var(--c-text-muted)] py-4 text-center">{t.projectsDetailNoAgents}</p>
               )}
             </div>
           </div>

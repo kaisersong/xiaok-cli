@@ -1,20 +1,41 @@
 import type { KSwarmProject, KSwarmProjectExecutionMode, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
+import type { LocaleStrings } from '../../locales';
+
+export interface InlineProjectLabels {
+  workflowRunning: string;
+  workflowCompleted: string;
+  workflowBlocked: string;
+  workflowFailed: string;
+  workflowExec: string;
+  poDecomposing: string;
+}
+
+export function buildInlineProjectLabels(t: LocaleStrings): InlineProjectLabels {
+  return {
+    workflowRunning: t.projectsInlineWorkflowRunning,
+    workflowCompleted: t.projectsInlineWorkflowCompleted,
+    workflowBlocked: t.projectsInlineWorkflowBlocked,
+    workflowFailed: t.projectsInlineWorkflowFailed,
+    workflowExec: t.projectsInlineWorkflowExec,
+    poDecomposing: t.projectsInlinePoDecomposing,
+  };
+}
 
 export function getInlineProjectStatusText(input: {
   status: string;
   executionMode?: KSwarmProjectExecutionMode | 'workflow' | string;
   latestWorkflowRun?: KSwarmProject['latestWorkflowRun'] | KSwarmWorkflowRun | null;
-}): string {
+}, labels: InlineProjectLabels): string {
   const executionMode = normalizeInlineExecutionMode(input.executionMode);
   const workflowStatus = input.latestWorkflowRun?.status;
   if (executionMode === 'workflow_preferred') {
-    if (workflowStatus === 'running') return 'Workflow 运行中';
-    if (workflowStatus === 'completed') return 'Workflow 已完成';
-    if (workflowStatus === 'blocked') return 'Workflow 阻塞';
-    if (workflowStatus === 'failed') return 'Workflow 失败';
-    return '工作流执行';
+    if (workflowStatus === 'running') return labels.workflowRunning;
+    if (workflowStatus === 'completed') return labels.workflowCompleted;
+    if (workflowStatus === 'blocked') return labels.workflowBlocked;
+    if (workflowStatus === 'failed') return labels.workflowFailed;
+    return labels.workflowExec;
   }
-  return input.status === 'created' ? 'PO 正在分解...' : input.status;
+  return input.status === 'created' ? labels.poDecomposing : input.status;
 }
 
 export function normalizeInlineExecutionMode(mode?: KSwarmProjectExecutionMode | 'workflow' | string): KSwarmProjectExecutionMode | undefined {

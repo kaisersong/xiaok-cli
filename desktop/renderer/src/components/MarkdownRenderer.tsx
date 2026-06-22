@@ -15,12 +15,22 @@ function linkifyFilePaths(children: ReactNode): ReactNode {
         return (
           <span
             key={i}
+            role="link"
+            tabIndex={0}
             className="text-[var(--c-accent)] hover:underline cursor-pointer font-mono text-xs"
             onClick={() => {
               const api = (window as any).xiaokDesktop;
               if (api?.openPath) api.openPath(part);
               else if (api?.showItemInFolder) api.showItemInFolder(part);
               else window.open(`file://${part}`, '_blank');
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const api = (window as any).xiaokDesktop;
+                if (api?.openPath) api.openPath(part);
+                else if (api?.showItemInFolder) api.showItemInFolder(part);
+                else window.open(`file://${part}`, '_blank');
+              }
             }}
           >
             {part}

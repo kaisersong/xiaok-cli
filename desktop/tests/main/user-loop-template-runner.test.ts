@@ -245,7 +245,7 @@ describe('UserLoopTemplateRunner', () => {
       run: expect.objectContaining({
         id: run.id,
         failureKind: 'executor_failed',
-        message: 'User loop task failed: failed',
+        message: '用户循环任务失败：状态 failed',
       }),
     });
     expect(loopStore.listLoopStages(run.id)).toEqual([

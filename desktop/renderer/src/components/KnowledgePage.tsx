@@ -108,7 +108,7 @@ export function KnowledgePage() {
 
   const handleDeleteCollection = async (id: string) => {
     if (!desktop?.kbDeleteCollection) return;
-    if (!confirm('确定要删除这个集合？其中所有文档将被永久删除。')) return;
+    if (!confirm(t.knowledge.deleteCollectionConfirm)) return;
     try {
       await desktop.kbDeleteCollection(id);
       if (collectionId === id) navigate('/knowledge');
@@ -122,7 +122,7 @@ export function KnowledgePage() {
       await desktop.kbAddSource({
         collectionId,
         kind: 'paste',
-        title: pasteTitle.trim() || '粘贴文本',
+        title: pasteTitle.trim() || t.knowledge.defaultPasteTitle,
         text: pasteText,
       });
       setPasteText('');
@@ -232,7 +232,7 @@ export function KnowledgePage() {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-[var(--c-text-secondary)]">加载中…</p>
+        <p className="text-sm text-[var(--c-text-secondary)]">{t.knowledge.loading}</p>
       </div>
     );
   }
@@ -243,16 +243,16 @@ export function KnowledgePage() {
       <div className="flex h-full flex-col items-center justify-center gap-6 p-8">
         <BookOpen size={48} className="text-[var(--c-text-tertiary)]" />
         <div className="text-center">
-          <h2 className="text-xl font-medium text-[var(--c-text-primary)]">建立你的本地知识库</h2>
-          <p className="mt-2 text-sm text-[var(--c-text-secondary)]">让 AI 能查阅你的资料、文档和笔记</p>
-          <p className="mt-1 text-xs text-[var(--c-text-tertiary)]">所有内容仅保存在本地，不会上传到任何服务器</p>
+          <h2 className="text-xl font-medium text-[var(--c-text-primary)]">{t.knowledge.emptyTitle}</h2>
+          <p className="mt-2 text-sm text-[var(--c-text-secondary)]">{t.knowledge.emptyDesc}</p>
+          <p className="mt-1 text-xs text-[var(--c-text-tertiary)]">{t.knowledge.emptyPrivacy}</p>
         </div>
         <button
           type="button"
           onClick={() => setShowCreateDialog(true)}
           className="rounded-lg bg-[var(--c-accent)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--c-accent-send-hover)]"
         >
-          创建第一个集合
+          {t.knowledge.createFirstCollection}
         </button>
         {showCreateDialog && <CreateCollectionDialog name={newCollectionName} setName={setNewCollectionName} onCreate={handleCreateCollection} onCancel={() => setShowCreateDialog(false)} />}
       </div>
@@ -264,13 +264,13 @@ export function KnowledgePage() {
       {/* Header */}
       <header className="border-b border-[var(--c-border)] px-6 py-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold text-[var(--c-text-primary)]">知识库</h1>
+          <h1 className="text-lg font-semibold text-[var(--c-text-primary)]">{t.knowledge.pageTitle}</h1>
           <button
             type="button"
             onClick={() => setShowCreateDialog(true)}
             className="flex items-center gap-1.5 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-sm text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)]"
           >
-            <Plus size={14} /> 新建集合
+            <Plus size={14} /> {t.knowledge.newCollection}
           </button>
         </div>
       </header>
@@ -281,7 +281,7 @@ export function KnowledgePage() {
           <span className="mt-0.5 shrink-0 text-base">🔒</span>
           <div className="min-w-0 flex-1">
             <p className="text-xs text-blue-800">
-              知识库内容仅保存在本地设备，不会上传到任何服务器。但当 AI 检索知识库时，命中的文本会发送给当前对话使用的模型。
+              {t.knowledge.privacyNotice}
             </p>
           </div>
           <button
@@ -289,7 +289,7 @@ export function KnowledgePage() {
             onClick={() => { localStorage.setItem('kb-privacy-dismissed', '1'); setPrivacyDismissed(true); }}
             className="shrink-0 rounded-md border border-blue-300 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
           >
-            知道了
+            {t.knowledge.privacyDismiss}
           </button>
         </div>
       )}
@@ -300,16 +300,19 @@ export function KnowledgePage() {
           {collections.map(col => (
             <div
               key={col.id}
+              role="button"
+              tabIndex={0}
               className={`group mb-1 flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-sm transition-colors ${
                 collectionId === col.id
                   ? 'bg-[var(--c-accent)]/10 text-[var(--c-accent)]'
                   : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'
               }`}
               onClick={() => navigate(`/knowledge/${col.id}`)}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/knowledge/${col.id}`); } }}
             >
               <div className="min-w-0">
                 <div className="truncate font-medium">{col.name}</div>
-                <div className="text-xs text-[var(--c-text-tertiary)]">{col.chunkCountCached} 片段</div>
+                <div className="text-xs text-[var(--c-text-tertiary)]">{t.knowledge.chunkCount(col.chunkCountCached)}</div>
               </div>
               <button
                 type="button"
@@ -327,7 +330,7 @@ export function KnowledgePage() {
           {!selectedCollection ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-4 text-[var(--c-text-tertiary)]">
               <BookOpen size={32} />
-              <p className="text-sm">选择左侧的集合查看文档</p>
+              <p className="text-sm">{t.knowledge.selectCollection}</p>
             </div>
           ) : (
             <>
@@ -348,25 +351,26 @@ export function KnowledgePage() {
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') void handleSearch(); }}
-                    placeholder="搜索知识库内容…"
+                    placeholder={t.knowledge.searchPlaceholder}
+                    aria-label={t.knowledge.searchPlaceholder}
                     className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] py-1.5 pl-9 pr-3 text-sm text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)]"
                   />
                 </div>
                 <button type="button" onClick={() => void handleSearch()} disabled={searching} className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-sm text-white transition-colors hover:bg-[var(--c-accent-send-hover)] disabled:opacity-50">
-                  {searching ? '搜索中…' : '搜索'}
+                  {searching ? t.knowledge.searching : t.knowledge.searchBtn}
                 </button>
               </div>
 
               {/* Search results */}
               {searchResults.length > 0 && (
                 <div className="mb-4 rounded-lg border border-[var(--c-accent)]/20 bg-[var(--c-accent)]/5 p-3">
-                  <h3 className="mb-2 text-xs font-medium text-[var(--c-accent)]">搜索结果（{searchResults.length} 条命中）</h3>
+                  <h3 className="mb-2 text-xs font-medium text-[var(--c-accent)]">{t.knowledge.searchResultsTitle(searchResults.length)}</h3>
                   <div className="space-y-2">
                     {searchResults.slice(0, 10).map(r => (
                       <div key={r.chunkId} className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] p-2">
                         <div className="flex items-center gap-2 text-xs text-[var(--c-text-secondary)]">
                           <span className="font-medium">{r.sourceTitle}</span>
-                          {r.pageIndex != null && <span>· 第 {r.pageIndex + 1} 页</span>}
+                          {r.pageIndex != null && <span>· {t.knowledge.pageLabel(r.pageIndex + 1)}</span>}
                           <span className="ml-auto text-[var(--c-text-tertiary)]">score: {r.fusedScore.toFixed(2)}</span>
                         </div>
                         <p className="mt-1 text-xs text-[var(--c-text-primary)] line-clamp-3">{r.text}</p>
@@ -386,19 +390,19 @@ export function KnowledgePage() {
                 onDrop={e => void handleDrop(e)}
               >
                 {dragOver ? (
-                  <p className="text-sm text-[var(--c-accent)]">松开以添加文件</p>
+                  <p className="text-sm text-[var(--c-accent)]">{t.knowledge.dropToAdd}</p>
                 ) : (
                   <div className="flex items-center justify-center gap-3 flex-wrap">
                     <button type="button" onClick={() => void handlePickFiles()} className="flex items-center gap-1 rounded-md border border-[var(--c-border)] px-2 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
-                      <FileText size={12} /> 选择文件
+                      <FileText size={12} /> {t.knowledge.pickFiles}
                     </button>
                     <button type="button" onClick={() => { setAddMode('paste'); setShowAddSource(true); }} className="flex items-center gap-1 rounded-md border border-[var(--c-border)] px-2 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
-                      <ClipboardPaste size={12} /> 粘贴文本
+                      <ClipboardPaste size={12} /> {t.knowledge.pasteText}
                     </button>
                     <button type="button" onClick={() => { setAddMode('url'); setShowAddSource(true); }} className="flex items-center gap-1 rounded-md border border-[var(--c-border)] px-2 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
-                      <Link size={12} /> 收录网页
+                      <Link size={12} /> {t.knowledge.addUrl}
                     </button>
-                    <span className="text-xs text-[var(--c-text-tertiary)]">或拖入文件</span>
+                    <span className="text-xs text-[var(--c-text-tertiary)]">{t.knowledge.orDragFiles}</span>
                   </div>
                 )}
               </div>
@@ -412,19 +416,21 @@ export function KnowledgePage() {
                         type="text"
                         value={pasteTitle}
                         onChange={e => setPasteTitle(e.target.value)}
-                        placeholder="标题（可选）"
+                        placeholder={t.knowledge.titleOptional}
+                        aria-label={t.knowledge.titleOptional}
                         className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-1.5 text-sm outline-none focus:border-[var(--c-accent)]"
                       />
                       <textarea
                         value={pasteText}
                         onChange={e => setPasteText(e.target.value)}
-                        placeholder="粘贴文本内容…"
+                        placeholder={t.knowledge.pasteContentPlaceholder}
+                        aria-label={t.knowledge.pasteContentPlaceholder}
                         rows={5}
                         className="w-full resize-none rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-1.5 text-sm outline-none focus:border-[var(--c-accent)]"
                       />
                       <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => setShowAddSource(false)} className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-sm">取消</button>
-                        <button type="button" onClick={() => void handleAddPasteSource()} disabled={!pasteText.trim()} className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-sm text-white disabled:opacity-50">添加</button>
+                        <button type="button" onClick={() => setShowAddSource(false)} className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-sm">{t.knowledge.cancel}</button>
+                        <button type="button" onClick={() => void handleAddPasteSource()} disabled={!pasteText.trim()} className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-sm text-white disabled:opacity-50">{t.knowledge.addSource}</button>
                       </div>
                     </div>
                   ) : (
@@ -433,7 +439,8 @@ export function KnowledgePage() {
                         type="text"
                         value={urlTitle}
                         onChange={e => setUrlTitle(e.target.value)}
-                        placeholder="标题（可选）"
+                        placeholder={t.knowledge.titleOptional}
+                        aria-label={t.knowledge.titleOptional}
                         className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-1.5 text-sm outline-none focus:border-[var(--c-accent)]"
                       />
                       <input
@@ -441,11 +448,12 @@ export function KnowledgePage() {
                         value={urlInput}
                         onChange={e => setUrlInput(e.target.value)}
                         placeholder="https://..."
+                        aria-label="URL"
                         className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-1.5 text-sm outline-none focus:border-[var(--c-accent)]"
                       />
                       <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => setShowAddSource(false)} className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-sm">取消</button>
-                        <button type="button" onClick={() => void handleAddUrlSource()} disabled={!urlInput.trim()} className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-sm text-white disabled:opacity-50">收录</button>
+                        <button type="button" onClick={() => setShowAddSource(false)} className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-sm">{t.knowledge.cancel}</button>
+                        <button type="button" onClick={() => void handleAddUrlSource()} disabled={!urlInput.trim()} className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-sm text-white disabled:opacity-50">{t.knowledge.addUrlBtn}</button>
                       </div>
                     </div>
                   )}
@@ -456,8 +464,8 @@ export function KnowledgePage() {
               {sources.length === 0 ? (
                 <div className="flex flex-1 flex-col items-center justify-center gap-3 text-[var(--c-text-tertiary)]">
                   <FileText size={24} />
-                  <p className="text-sm">这个集合还没有文档</p>
-                  <p className="text-xs">拖入文件、粘贴文本或收录网页来添加知识</p>
+                  <p className="text-sm">{t.knowledge.emptyCollection}</p>
+                  <p className="text-xs">{t.knowledge.emptyCollectionHint}</p>
                 </div>
               ) : (
                 <div className="space-y-1">
@@ -467,7 +475,7 @@ export function KnowledgePage() {
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium text-[var(--c-text-primary)]">{src.title}</div>
                         <div className="flex items-center gap-2 text-xs text-[var(--c-text-tertiary)]">
-                          <span>{src.chunkCount} 片段</span>
+                          <span>{t.knowledge.chunkCount(src.chunkCount)}</span>
                           <StatusBadge status={src.parseStatus} />
                         </div>
                       </div>
@@ -509,11 +517,12 @@ function SourceKindIcon({ kind }: { kind: string }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const { t } = useLocale();
   switch (status) {
-    case 'parsed': return <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] text-green-700">已就绪</span>;
-    case 'pending': return <span className="rounded bg-yellow-100 px-1.5 py-0.5 text-[10px] text-yellow-700">待处理</span>;
-    case 'parsing': return <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700">解析中</span>;
-    case 'failed': return <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] text-red-700">失败</span>;
+    case 'parsed': return <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] text-green-700">{t.knowledge.statusParsed}</span>;
+    case 'pending': return <span className="rounded bg-yellow-100 px-1.5 py-0.5 text-[10px] text-yellow-700">{t.knowledge.statusPending}</span>;
+    case 'parsing': return <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700">{t.knowledge.statusParsing}</span>;
+    case 'failed': return <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] text-red-700">{t.knowledge.statusFailed}</span>;
     default: return null;
   }
 }
@@ -524,22 +533,24 @@ function CreateCollectionDialog({ name, setName, onCreate, onCancel }: {
   onCreate: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useLocale();
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10 backdrop-blur-[2px]" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10 backdrop-blur-[2px]" role="presentation" onClick={onCancel} onKeyDown={e => { if (e.key === 'Escape') onCancel(); }}>
       <div className="w-80 rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] p-5 shadow-lg" onClick={e => e.stopPropagation()}>
-        <h3 className="mb-3 text-sm font-medium text-[var(--c-text-primary)]">新建集合</h3>
+        <h3 className="mb-3 text-sm font-medium text-[var(--c-text-primary)]">{t.knowledge.createCollectionTitle}</h3>
         <input
           autoFocus
           type="text"
           value={name}
           onChange={e => setName(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') onCreate(); }}
-          placeholder="集合名称"
+          placeholder={t.knowledge.collectionNamePlaceholder}
+          aria-label={t.knowledge.collectionNamePlaceholder}
           className="mb-4 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
         />
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onCancel} className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-sm text-[var(--c-text-secondary)]">取消</button>
-          <button type="button" onClick={onCreate} disabled={!name.trim()} className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-sm text-white disabled:opacity-50">创建</button>
+          <button type="button" onClick={onCancel} className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-sm text-[var(--c-text-secondary)]">{t.knowledge.cancel}</button>
+          <button type="button" onClick={onCreate} disabled={!name.trim()} className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-sm text-white disabled:opacity-50">{t.knowledge.createBtn}</button>
         </div>
       </div>
     </div>

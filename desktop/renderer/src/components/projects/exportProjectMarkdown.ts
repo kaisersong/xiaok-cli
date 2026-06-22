@@ -7,6 +7,36 @@ interface ExportLocale {
   projectsStatusReview: string;
   projectsStatusDelivered: string;
   projectsStatusClosed: string;
+  projectsExportStatus: string;
+  projectsExportCreatedAt: string;
+  projectsExportUpdatedAt: string;
+  projectsExportDeliveredAt: string;
+  projectsExportClosedAt: string;
+  projectsExportGoal: string;
+  projectsExportRequirements: string;
+  projectsExportWorkspace: string;
+  projectsExportWorkspacePath: string;
+  projectsExportWorkspaceFiles: (count: number) => string;
+  projectsExportPlan: string;
+  projectsExportAnalysis: string;
+  projectsExportSuccessCriteria: string;
+  projectsExportPhases: string;
+  projectsExportPhaseLabel: (id: string) => string;
+  projectsExportAcceptanceCriteria: string;
+  projectsExportPlanVersion: (version: number) => string;
+  projectsExportTasks: string;
+  projectsExportTaskStatus: string;
+  projectsExportTaskAssignee: string;
+  projectsExportTaskDescription: string;
+  projectsExportTaskPhase: string;
+  projectsExportTaskResult: string;
+  projectsExportTaskArtifacts: string;
+  projectsExportAgents: string;
+  projectsExportActivityLog: string;
+  projectsExportDeliverables: string;
+  projectsExportDeliveryNote: string;
+  projectsExportProjectSummary: string;
+  projectsExportScore: string;
 }
 
 const STATUS_MAP: Record<string, keyof ExportLocale> = {
@@ -53,16 +83,16 @@ export function exportProjectMarkdown(
   // Title & meta
   lines.push(`# ${project.name}`);
   lines.push('');
-  lines.push(`- **状态**: ${statusLabel}`);
-  if (project.createdAt) lines.push(`- **创建时间**: ${formatTime(project.createdAt)}`);
-  if (project.updatedAt) lines.push(`- **更新时间**: ${formatTime(project.updatedAt)}`);
-  if (project.deliveredAt) lines.push(`- **交付时间**: ${formatTime(project.deliveredAt)}`);
-  if (project.closedAt) lines.push(`- **关闭时间**: ${formatTime(project.closedAt)}`);
+  lines.push(`- **${t.projectsExportStatus}**: ${statusLabel}`);
+  if (project.createdAt) lines.push(`- **${t.projectsExportCreatedAt}**: ${formatTime(project.createdAt)}`);
+  if (project.updatedAt) lines.push(`- **${t.projectsExportUpdatedAt}**: ${formatTime(project.updatedAt)}`);
+  if (project.deliveredAt) lines.push(`- **${t.projectsExportDeliveredAt}**: ${formatTime(project.deliveredAt)}`);
+  if (project.closedAt) lines.push(`- **${t.projectsExportClosedAt}**: ${formatTime(project.closedAt)}`);
   lines.push('');
 
   // Goal
   if (project.goal) {
-    lines.push('## 目标');
+    lines.push(`## ${t.projectsExportGoal}`);
     lines.push('');
     lines.push(project.goal);
     lines.push('');
@@ -70,7 +100,7 @@ export function exportProjectMarkdown(
 
   // Requirements
   if (project.requirements) {
-    lines.push('## 需求');
+    lines.push(`## ${t.projectsExportRequirements}`);
     lines.push('');
     lines.push(project.requirements);
     lines.push('');
@@ -78,27 +108,27 @@ export function exportProjectMarkdown(
 
   // Workspace
   if (workspace?.path) {
-    lines.push('## 工作区');
+    lines.push(`## ${t.projectsExportWorkspace}`);
     lines.push('');
-    lines.push(`路径: \`${workspace.path}\``);
+    lines.push(`${t.projectsExportWorkspacePath}: \`${workspace.path}\``);
     if (workspace.artifacts?.length) {
-      lines.push(`文件数: ${workspace.artifacts.length}`);
+      lines.push(t.projectsExportWorkspaceFiles(workspace.artifacts.length));
     }
     lines.push('');
   }
 
   // Plan
   if (plan) {
-    lines.push('## 计划');
+    lines.push(`## ${t.projectsExportPlan}`);
     lines.push('');
     if (plan.analysis) {
-      lines.push('### 分析');
+      lines.push(`### ${t.projectsExportAnalysis}`);
       lines.push('');
       lines.push(plan.analysis);
       lines.push('');
     }
     if (plan.successCriteria?.length) {
-      lines.push('### 成功标准');
+      lines.push(`### ${t.projectsExportSuccessCriteria}`);
       lines.push('');
       for (const c of plan.successCriteria) {
         lines.push(`- ${c}`);
@@ -106,12 +136,12 @@ export function exportProjectMarkdown(
       lines.push('');
     }
     if (plan.phases?.length) {
-      lines.push('### 阶段');
+      lines.push(`### ${t.projectsExportPhases}`);
       lines.push('');
       for (const phase of plan.phases) {
         const phaseProgress = planProgress?.phases?.find(p => String(p.phaseId) === String(phase.id ?? phase.phaseId));
         const progressStr = phaseProgress ? ` (${phaseProgress.done}/${phaseProgress.total})` : '';
-        lines.push(`#### ${phase.title ?? `阶段 ${phase.id ?? ''}`}${progressStr}`);
+        lines.push(`#### ${phase.title ?? t.projectsExportPhaseLabel(String(phase.id ?? ''))}${progressStr}`);
         lines.push('');
         if (phase.items?.length) {
           for (const item of phase.items) {
@@ -119,7 +149,7 @@ export function exportProjectMarkdown(
             lines.push(`- ${check} **${item.title}** — ${item.brief ?? ''}`);
             if (item.acceptanceCriteria?.length) {
               for (const ac of item.acceptanceCriteria) {
-                lines.push(`  - 验收标准: ${ac}`);
+                lines.push(`  - ${t.projectsExportAcceptanceCriteria}: ${ac}`);
               }
             }
           }
@@ -128,25 +158,25 @@ export function exportProjectMarkdown(
       }
     }
     if (plan.version) {
-      lines.push(`> Plan 版本: v${plan.version}`);
+      lines.push(`> ${t.projectsExportPlanVersion(plan.version)}`);
       lines.push('');
     }
   }
 
   // Tasks
   if (tasks.length > 0) {
-    lines.push('## 任务');
+    lines.push(`## ${t.projectsExportTasks}`);
     lines.push('');
     for (const task of tasks) {
       lines.push(`### ${task.title}`);
       lines.push('');
-      lines.push(`- **状态**: ${taskStatusLabel(task.status)}`);
-      lines.push(`- **负责人**: ${agentName(task.assignedAgent, agents)}`);
-      if (task.description) lines.push(`- **描述**: ${task.description}`);
-      if (task.phase !== undefined) lines.push(`- **阶段**: ${task.phase}`);
-      if (task.result) lines.push(`- **结果**: ${task.result}`);
+      lines.push(`- **${t.projectsExportTaskStatus}**: ${taskStatusLabel(task.status)}`);
+      lines.push(`- **${t.projectsExportTaskAssignee}**: ${agentName(task.assignedAgent, agents)}`);
+      if (task.description) lines.push(`- **${t.projectsExportTaskDescription}**: ${task.description}`);
+      if (task.phase !== undefined) lines.push(`- **${t.projectsExportTaskPhase}**: ${task.phase}`);
+      if (task.result) lines.push(`- **${t.projectsExportTaskResult}**: ${task.result}`);
       if (task.artifacts?.length) {
-        lines.push('- **产物**:');
+        lines.push(`- **${t.projectsExportTaskArtifacts}**:`);
         for (const art of task.artifacts) {
           const loc = art.path || art.url || '-';
           lines.push(`  - ${art.name} — \`${loc}\``);
@@ -157,7 +187,7 @@ export function exportProjectMarkdown(
   }
 
   // Agents
-  lines.push('## 智能体');
+  lines.push(`## ${t.projectsExportAgents}`);
   lines.push('');
   if (project.poAgent) {
     lines.push(`- **PO**: ${agentName(project.poAgent, agents)}`);
@@ -173,7 +203,7 @@ export function exportProjectMarkdown(
 
   // Activity log
   if (activities.length > 0) {
-    lines.push('## 活动日志');
+    lines.push(`## ${t.projectsExportActivityLog}`);
     lines.push('');
     for (const evt of activities) {
       const time = formatTime(evt.ts);
@@ -187,7 +217,7 @@ export function exportProjectMarkdown(
   // Deliverables
   const deliverables = project.deliverables;
   if (deliverables?.length) {
-    lines.push('## 产物');
+    lines.push(`## ${t.projectsExportDeliverables}`);
     lines.push('');
     for (const d of deliverables) {
       const loc = d.path || d.url || '-';
@@ -199,7 +229,7 @@ export function exportProjectMarkdown(
   // Project deliverable summary
   const deliverable = project.deliverable;
   if (deliverable && typeof deliverable === 'string') {
-    lines.push('## 交付说明');
+    lines.push(`## ${t.projectsExportDeliveryNote}`);
     lines.push('');
     lines.push(deliverable);
     lines.push('');
@@ -208,11 +238,11 @@ export function exportProjectMarkdown(
   // Project summary (PO-generated)
   const summary = project.summary;
   if (summary && typeof summary === 'string') {
-    lines.push('## 项目小结');
+    lines.push(`## ${t.projectsExportProjectSummary}`);
     lines.push('');
     const score = project.summaryScore;
     if (score != null) {
-      lines.push(`**评分**: ${score}/10`);
+      lines.push(`**${t.projectsExportScore}**: ${score}/10`);
       lines.push('');
     }
     lines.push(summary);

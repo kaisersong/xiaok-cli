@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Sidebar, PanelLeftClose } from 'lucide-react';
 import { SidebarComponent } from '../components/Sidebar';
 import { DesktopSettings } from '../components/DesktopSettings';
+import { useLocale } from '../contexts/LocaleContext';
 
 interface SidebarContextValue {
   collapsed: boolean;
@@ -52,6 +53,7 @@ export function useSidebarCollapse() {
 export function AppLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { t } = useLocale();
   const navigateHistory = (delta: -1 | 1, event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     if (delta < 0 && window.history.length <= 1) return;
@@ -65,21 +67,21 @@ export function AppLayout() {
     ? [
         {
           key: 'back',
-          label: '后退',
+          label: t.appLayoutBack,
           left: 78,
           icon: <ChevronLeft size={16} />,
           onClick: (event) => navigateHistory(-1, event),
         },
         {
           key: 'forward',
-          label: '前进',
+          label: t.appLayoutForward,
           left: 110,
           icon: <ChevronRight size={16} />,
           onClick: (event) => navigateHistory(1, event),
         },
         {
           key: 'expand',
-          label: '展开侧边栏',
+          label: t.appLayoutExpandSidebar,
           left: 142,
           icon: <Sidebar size={16} />,
           onClick: (event) => {
@@ -91,21 +93,21 @@ export function AppLayout() {
     : [
         {
           key: 'back',
-          label: '后退',
+          label: t.appLayoutBack,
           left: 148,
           icon: <ChevronLeft size={16} />,
           onClick: (event) => navigateHistory(-1, event),
         },
         {
           key: 'forward',
-          label: '前进',
+          label: t.appLayoutForward,
           left: 180,
           icon: <ChevronRight size={16} />,
           onClick: (event) => navigateHistory(1, event),
         },
         {
           key: 'collapse',
-          label: '收起侧边栏',
+          label: t.appLayoutCollapseSidebar,
           left: 212,
           icon: <PanelLeftClose size={16} />,
           onClick: (event) => {

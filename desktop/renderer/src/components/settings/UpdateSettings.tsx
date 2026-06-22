@@ -240,7 +240,7 @@ export function UpdateSettingsContent() {
       case 'downloaded':
         return t.desktopSettings.appUpdateReady
       case 'installing':
-        return '正在安装并重启'
+        return t.desktopSettings.appUpdateInstalling
       case 'error':
         return appUpdateState.error ?? t.desktopSettings.appUpdateError
       default:

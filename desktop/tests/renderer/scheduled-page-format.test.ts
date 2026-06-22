@@ -21,6 +21,7 @@ const t = {
   scheduledEvery6Hours: '每 6 小时',
   scheduledEvery8Hours: '每 8 小时',
   scheduledEvery12Hours: '每 12 小时',
+  scheduledEveryNMinutes: (n: number) => `每 ${n} 分钟`,
 } as const;
 
 describe('ScheduledPage formatting', () => {

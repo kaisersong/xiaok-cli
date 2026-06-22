@@ -473,7 +473,7 @@ function ProfileSection({ displayName, localMode, me, ds, t }: {
       const dataUrl = await resizeImage(file);
       // Check final size
       if (dataUrl.length > AVATAR_MAX_SIZE * 1.37) { // base64 overhead
-        alert('头像文件过大，请选择更小的图片');
+        alert(ds.profileAvatarTooLarge || ds.avatarTooLarge);
         return;
       }
       localStorage.setItem('xiaok_avatar_url', dataUrl);
@@ -507,7 +507,7 @@ function ProfileSection({ displayName, localMode, me, ds, t }: {
           </div>
         )}
         <label className="absolute -bottom-0.5 -right-0.5 flex size-5 cursor-pointer items-center justify-center rounded-full bg-[var(--c-bg-card)] shadow"
-          title="更换头像"
+          title={ds.profileChangeAvatar || ds.changeAvatar}
         >
           <Camera size={10} />
           <input aria-label="Change avatar" type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
@@ -527,8 +527,8 @@ function ProfileSection({ displayName, localMode, me, ds, t }: {
               className="min-w-0 flex-1 rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]"
               autoFocus
             />
-            <button type="button" onClick={handleSaveName} className="text-xs text-[var(--c-accent)]">保存</button>
-            <button type="button" onClick={() => setEditing(false)} className="text-xs text-[var(--c-text-tertiary)]">取消</button>
+            <button type="button" onClick={handleSaveName} className="text-xs text-[var(--c-accent)]">{ds.profileSave || ds.save}</button>
+            <button type="button" onClick={() => setEditing(false)} className="text-xs text-[var(--c-text-tertiary)]">{ds.profileCancel || ds.cancelAction}</button>
           </div>
         ) : (
           <button

@@ -40,7 +40,7 @@ export function ProjectsPage() {
       {/* Header with tabs */}
       <div className="flex items-center justify-between border-b border-[var(--c-border-subtle)] px-6 py-3">
         <div className="flex items-center gap-1">
-          <button type="button" onClick={() => navigate('/')} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]" title="返回">
+          <button type="button" onClick={() => navigate('/')} className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)]" title={t.appLayoutBack}>
             <ArrowLeft size={16} />
           </button>
           {TABS.map(tab => (

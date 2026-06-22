@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useContext } from 'react'
 import { createPortal } from 'react-dom'
 import { handleExternalAnchorClick } from '../openExternal'
 import { WebSourcesContext } from '../contexts/web-sources'
+import { useLocale } from '../contexts/LocaleContext'
 
 // 用于 favicon 请求（需要完整域名）
 function getDomain(url: string): string {
@@ -38,6 +39,7 @@ type Props = {
 
 export function CitationBadge({ indices }: Props) {
   const webSources = useContext(WebSourcesContext)
+  const { t } = useLocale()
   const [open, setOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [popoverStyle, setPopoverStyle] = useState<PopoverStyle | null>(null)
@@ -233,7 +235,7 @@ export function CitationBadge({ indices }: Props) {
                 </button>
               </div>
               <span style={{ fontSize: '12px', color: 'var(--c-text-muted)' }}>
-                {validSources.length} sources
+                {t.citationSourcesCount(validSources.length)}
               </span>
             </div>
           )}

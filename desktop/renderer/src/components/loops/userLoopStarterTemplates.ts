@@ -21,12 +21,33 @@ export interface UserLoopStarterTemplate {
   scheduleHint?: string;
 }
 
-export const USER_LOOP_STARTER_TEMPLATES: UserLoopStarterTemplate[] = [
+export interface LoopTemplateLabels {
+  loopTemplateDailyWorkSummary: string;
+  loopTemplateDailyWorkSummaryDesc: string;
+  loopTemplateIndustryNewsDaily: string;
+  loopTemplateIndustryNewsDailyDesc: string;
+  loopTemplateRepoChangesWatch: string;
+  loopTemplateRepoChangesWatchDesc: string;
+  loopTemplateScheduleHintEvening: string;
+  loopTemplateScheduleHintMorning: string;
+}
+
+const TEMPLATE_DEFINITIONS: Array<{
+  templateId: string;
+  titleKey: keyof LoopTemplateLabels;
+  category: 'business' | 'code';
+  descriptionKey: keyof LoopTemplateLabels;
+  kind: 'task_completion' | 'markdown_file';
+  prompt: string;
+  outputDirectory?: string;
+  outputFileName?: string;
+  scheduleHintKey?: keyof LoopTemplateLabels;
+}> = [
   {
     templateId: 'daily-work-summary',
-    title: '每日工作日报',
+    titleKey: 'loopTemplateDailyWorkSummary',
     category: 'business',
-    description: '每天傍晚自动汇总你今天在 xiaok 里完成的对话、项目进展和产出，整理成日报。',
+    descriptionKey: 'loopTemplateDailyWorkSummaryDesc',
     kind: 'task_completion',
     prompt:
       '请汇总今天我在 xiaok 里完成的工作并整理成一份简洁的日报。\n\n' +
@@ -36,13 +57,13 @@ export const USER_LOOP_STARTER_TEMPLATES: UserLoopStarterTemplate[] = [
       '- 遇到的卡点或待跟进事项\n' +
       '- 明天的优先事项建议\n\n' +
       '风格要简洁、结构清晰，控制在 200-400 字。',
-    scheduleHint: '建议每天 18:00 触发',
+    scheduleHintKey: 'loopTemplateScheduleHintEvening',
   },
   {
     templateId: 'industry-news-daily',
-    title: '行业资讯日报',
+    titleKey: 'loopTemplateIndustryNewsDaily',
     category: 'business',
-    description: '使用 web_search 抓取当日 AI / 行业最新动态，按主题归类，生成 Markdown 简报。',
+    descriptionKey: 'loopTemplateIndustryNewsDailyDesc',
     kind: 'markdown_file',
     prompt:
       '请生成一份当日行业资讯简报，写入 output_path 对应的 Markdown 文件。\n\n' +
@@ -57,13 +78,13 @@ export const USER_LOOP_STARTER_TEMPLATES: UserLoopStarterTemplate[] = [
       '3. 末尾给出 3 条"值得关注的趋势"判断。\n',
     outputDirectory: '~/xiaok-loops/industry-news',
     outputFileName: 'industry-news.md',
-    scheduleHint: '建议每天 09:00 触发',
+    scheduleHintKey: 'loopTemplateScheduleHintMorning',
   },
   {
     templateId: 'repo-changes-watch',
-    title: '本地仓库变动巡检',
+    titleKey: 'loopTemplateRepoChangesWatch',
     category: 'code',
-    description: '跟踪指定本地 git 仓库的最新提交、分支变化，生成简明变动报告。',
+    descriptionKey: 'loopTemplateRepoChangesWatchDesc',
     kind: 'markdown_file',
     prompt:
       '请生成本地仓库变动报告，写入 output_path 对应的 Markdown 文件。\n\n' +
@@ -76,6 +97,35 @@ export const USER_LOOP_STARTER_TEMPLATES: UserLoopStarterTemplate[] = [
       '4. 末尾给出"需要关注的异常"——例如长时间未提交、分支偏离主干等。\n',
     outputDirectory: '~/xiaok-loops/repo-watch',
     outputFileName: 'repo-changes.md',
-    scheduleHint: '建议每天 19:00 触发',
+    scheduleHintKey: 'loopTemplateScheduleHintEvening',
   },
 ];
+
+export function resolveUserLoopStarterTemplates(labels: LoopTemplateLabels): UserLoopStarterTemplate[] {
+  return TEMPLATE_DEFINITIONS.map(def => ({
+    templateId: def.templateId,
+    title: labels[def.titleKey],
+    category: def.category,
+    description: labels[def.descriptionKey],
+    kind: def.kind,
+    prompt: def.prompt,
+    outputDirectory: def.outputDirectory,
+    outputFileName: def.outputFileName,
+    scheduleHint: def.scheduleHintKey ? labels[def.scheduleHintKey] : undefined,
+  }));
+}
+
+/**
+ * @deprecated Use resolveUserLoopStarterTemplates(labels) instead for i18n support.
+ */
+export const USER_LOOP_STARTER_TEMPLATES: UserLoopStarterTemplate[] = TEMPLATE_DEFINITIONS.map(def => ({
+  templateId: def.templateId,
+  title: def.titleKey,
+  category: def.category,
+  description: def.descriptionKey,
+  kind: def.kind,
+  prompt: def.prompt,
+  outputDirectory: def.outputDirectory,
+  outputFileName: def.outputFileName,
+  scheduleHint: def.scheduleHintKey,
+}));

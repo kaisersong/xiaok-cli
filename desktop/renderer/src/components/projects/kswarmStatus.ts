@@ -1,5 +1,35 @@
 import type { KSwarmAgent, KSwarmTask, ProjectFullDetail } from '../../hooks/useKSwarmClient';
 
+/** Locale labels consumed by kswarmStatus helper functions. */
+export interface KSwarmLabels {
+  projectHealthBlocked: string;
+  projectHealthFailed: string;
+  projectHealthWaiting: string;
+  projectHealthNeedsReview: string;
+  projectHealthRunning: string;
+  projectHealthHealthy: string;
+  projectHealthUnknown: string;
+  projectHealthBlockedShort: string;
+  projectHealthFailedShort: string;
+  projectHealthWaitingShort: string;
+  projectHealthNeedsReviewShort: string;
+  projectHealthRunningShort: string;
+  projectHealthHealthyShort: string;
+  projectHealthUnknownShort: string;
+  projectHealthMsgNeedsReview: string;
+  projectHealthMsgWaiting: string;
+  projectHealthMsgBlocked: string;
+  projectHealthMsgFailed: string;
+  agentStatusWaiting: string;
+  agentStatusWorking: string;
+  agentStatusBlocked: string;
+  agentStatusFailed: string;
+  agentStatusError: string;
+  agentStatusCompleted: string;
+  agentStatusOffline: string;
+  agentStatusIdle: string;
+}
+
 const KNOWN_TASK_STATUSES = new Set<KSwarmTask['status']>([
   'pending',
   'dispatched',
@@ -37,41 +67,41 @@ export function getNormalizedProjectHealthStatus(health?: Pick<ProjectHealth, 's
   return (health?.status ?? health?.state ?? 'unknown') as ProjectHealthStatus;
 }
 
-export function getProjectHealthLabel(status: ProjectHealthStatus): string {
+export function getProjectHealthLabel(status: ProjectHealthStatus, labels: KSwarmLabels): string {
   switch (status) {
     case 'blocked':
-      return '项目阻塞';
+      return labels.projectHealthBlocked;
     case 'failed':
-      return '项目失败';
+      return labels.projectHealthFailed;
     case 'waiting':
-      return '等待中';
+      return labels.projectHealthWaiting;
     case 'needs_review':
-      return '等待审核';
+      return labels.projectHealthNeedsReview;
     case 'running':
-      return '执行中';
+      return labels.projectHealthRunning;
     case 'healthy':
-      return '正常';
+      return labels.projectHealthHealthy;
     default:
-      return '状态未知';
+      return labels.projectHealthUnknown;
   }
 }
 
-export function getCompactProjectHealthLabel(status: ProjectHealthStatus): string {
+export function getCompactProjectHealthLabel(status: ProjectHealthStatus, labels: KSwarmLabels): string {
   switch (status) {
     case 'blocked':
-      return '阻塞';
+      return labels.projectHealthBlockedShort;
     case 'failed':
-      return '失败';
+      return labels.projectHealthFailedShort;
     case 'waiting':
-      return '等待';
+      return labels.projectHealthWaitingShort;
     case 'needs_review':
-      return '待审核';
+      return labels.projectHealthNeedsReviewShort;
     case 'running':
-      return '执行中';
+      return labels.projectHealthRunningShort;
     case 'healthy':
-      return '正常';
+      return labels.projectHealthHealthyShort;
     default:
-      return '未知';
+      return labels.projectHealthUnknownShort;
   }
 }
 
@@ -86,7 +116,7 @@ export function assertKnownKSwarmTaskStatus(status: string): KSwarmTask['status'
   return status as KSwarmTask['status'];
 }
 
-export function summarizeProjectHealth(detail: ProjectFullDetail): {
+export function summarizeProjectHealth(detail: ProjectFullDetail, labels: KSwarmLabels): {
   status: ProjectHealthStatus;
   message?: string;
   primaryTaskId?: string;
@@ -101,7 +131,7 @@ export function summarizeProjectHealth(detail: ProjectFullDetail): {
 
   return {
     status,
-    message: detail.projectHealth?.message ?? detail.projectHealth?.reasons?.[0]?.message ?? getDefaultProjectHealthMessage(status),
+    message: detail.projectHealth?.message ?? detail.projectHealth?.reasons?.[0]?.message ?? getDefaultProjectHealthMessage(status, labels),
     primaryTaskId: detail.projectHealth?.primaryBlockedTaskId ?? detail.projectHealth?.reasons?.[0]?.taskId,
     dispatchableCount,
     blockedCount: detail.dispatchPlan?.blocked?.length ?? 0,
@@ -109,16 +139,16 @@ export function summarizeProjectHealth(detail: ProjectFullDetail): {
   };
 }
 
-function getDefaultProjectHealthMessage(status: ProjectHealthStatus): string | undefined {
+function getDefaultProjectHealthMessage(status: ProjectHealthStatus, labels: KSwarmLabels): string | undefined {
   switch (status) {
     case 'needs_review':
-      return '等待 PO 复审';
+      return labels.projectHealthMsgNeedsReview;
     case 'waiting':
-      return '等待可派发任务或可用智能体';
+      return labels.projectHealthMsgWaiting;
     case 'blocked':
-      return '项目存在阻塞任务';
+      return labels.projectHealthMsgBlocked;
     case 'failed':
-      return '项目存在失败任务';
+      return labels.projectHealthMsgFailed;
     default:
       return undefined;
   }
@@ -136,31 +166,31 @@ export function describeKSwarmAgentStatus(agent: KSwarmAgent, tasks: KSwarmTask[
   return { status: 'waiting', taskId: assigned.id };
 }
 
-export function formatKSwarmAgentStatus(summary: AgentStatusSummary): string {
-  const parts = [getAgentStatusLabel(summary.status)];
+export function formatKSwarmAgentStatus(summary: AgentStatusSummary, labels: KSwarmLabels): string {
+  const parts = [getAgentStatusLabel(summary.status, labels)];
   if (summary.taskId) parts.push(summary.taskId);
   if (summary.reason) parts.push(summary.reason);
   return parts.join(' · ');
 }
 
-function getAgentStatusLabel(status: AgentCardRuntimeStatus): string {
+function getAgentStatusLabel(status: AgentCardRuntimeStatus, labels: KSwarmLabels): string {
   switch (status) {
     case 'waiting':
-      return '等待';
+      return labels.agentStatusWaiting;
     case 'working':
-      return '工作中';
+      return labels.agentStatusWorking;
     case 'blocked':
-      return '阻塞';
+      return labels.agentStatusBlocked;
     case 'failed':
-      return '失败';
+      return labels.agentStatusFailed;
     case 'error':
-      return '错误';
+      return labels.agentStatusError;
     case 'completed':
-      return '完成';
+      return labels.agentStatusCompleted;
     case 'offline':
-      return '离线';
+      return labels.agentStatusOffline;
     default:
-      return '空闲';
+      return labels.agentStatusIdle;
   }
 }
 

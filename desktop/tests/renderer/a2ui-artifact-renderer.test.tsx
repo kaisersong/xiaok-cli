@@ -2,6 +2,7 @@ import React from 'react';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { A2UI_MIME_TYPE, compileRenderUiToA2ui } from '../../../src/a2ui/index.js';
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { A2uiArtifactRenderer } from '../../renderer/src/components/a2ui/A2uiArtifactRenderer';
 import { ArtifactStreamBlock } from '../../renderer/src/components/ArtifactStreamBlock';
 
@@ -25,13 +26,13 @@ describe('A2UI artifact renderer', () => {
       data: {},
     }, { taskId: 'task_1', toolUseId: 'tool_1' });
 
-    render(<A2uiArtifactRenderer artifactContent={JSON.stringify(compiled.messages)} artifactRef={{
+    render(<LocaleProvider><A2uiArtifactRenderer artifactContent={JSON.stringify(compiled.messages)} artifactRef={{
       artifactId: 'artifact_1',
       type: 'artifact',
       key: 'a2ui/task_1/tool_1.json',
       filename: 'sales.a2ui.json',
       mime_type: A2UI_MIME_TYPE,
-    }} />);
+    }} /></LocaleProvider>);
 
     expect(await screen.findByRole('heading', { name: 'Sales' })).toBeDefined();
     expect(screen.getAllByText('Revenue')).toHaveLength(2);
@@ -44,9 +45,9 @@ describe('A2UI artifact renderer', () => {
   });
 
   it('shows a safe error when payload validation fails', async () => {
-    render(<A2uiArtifactRenderer artifactContent={JSON.stringify([
+    render(<LocaleProvider><A2uiArtifactRenderer artifactContent={JSON.stringify([
       { version: 1, createSurface: { surfaceId: 'a2ui-task_1-tool_1', catalogId: 'default', root: 'root' } },
-    ])} artifactRef={{ artifactId: 'artifact_1', type: 'artifact', mime_type: A2UI_MIME_TYPE }} />);
+    ])} artifactRef={{ artifactId: 'artifact_1', type: 'artifact', mime_type: A2UI_MIME_TYPE }} /></LocaleProvider>);
 
     expect(await screen.findByText('无法渲染该交互式 UI')).toBeDefined();
     expect(screen.queryByText('default')).toBeNull();
@@ -69,7 +70,7 @@ describe('A2UI artifact renderer', () => {
       return new Response(body, { status: 200, headers: { 'content-type': A2UI_MIME_TYPE } });
     });
 
-    const { rerender } = render(<ArtifactStreamBlock accessToken="token" entry={{
+    const { rerender } = render(<LocaleProvider><ArtifactStreamBlock accessToken="token" entry={{
       toolCallIndex: 0,
       argumentsBuffer: '',
       complete: true,
@@ -80,11 +81,11 @@ describe('A2UI artifact renderer', () => {
         filename: 'first.a2ui.json',
         mime_type: A2UI_MIME_TYPE,
       },
-    }} />);
+    }} /></LocaleProvider>);
 
     expect(await screen.findByRole('heading', { name: 'First' })).toBeDefined();
 
-    rerender(<ArtifactStreamBlock accessToken="token" entry={{
+    rerender(<LocaleProvider><ArtifactStreamBlock accessToken="token" entry={{
       toolCallIndex: 0,
       argumentsBuffer: '',
       complete: true,
@@ -95,7 +96,7 @@ describe('A2UI artifact renderer', () => {
         filename: 'second.a2ui.json',
         mime_type: A2UI_MIME_TYPE,
       },
-    }} />);
+    }} /></LocaleProvider>);
 
     expect(await screen.findByRole('heading', { name: 'Second' })).toBeDefined();
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'First' })).toBeNull());

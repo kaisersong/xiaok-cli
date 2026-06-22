@@ -6,7 +6,38 @@ import {
   describeKSwarmAgentStatus,
   summarizeProjectHealth,
 } from '../../renderer/src/components/projects/kswarmStatus';
+import type { KSwarmLabels } from '../../renderer/src/components/projects/kswarmStatus';
 import type { KSwarmAgent, KSwarmTask, ProjectFullDetail } from '../../renderer/src/hooks/useKSwarmClient';
+
+/** Minimal labels fixture for tests. */
+const testLabels: KSwarmLabels = {
+  projectHealthBlocked: '项目阻塞',
+  projectHealthFailed: '项目失败',
+  projectHealthWaiting: '等待中',
+  projectHealthNeedsReview: '等待审核',
+  projectHealthRunning: '执行中',
+  projectHealthHealthy: '正常',
+  projectHealthUnknown: '状态未知',
+  projectHealthBlockedShort: '阻塞',
+  projectHealthFailedShort: '失败',
+  projectHealthWaitingShort: '等待',
+  projectHealthNeedsReviewShort: '待审核',
+  projectHealthRunningShort: '执行中',
+  projectHealthHealthyShort: '正常',
+  projectHealthUnknownShort: '未知',
+  projectHealthMsgNeedsReview: '等待 PO 复审',
+  projectHealthMsgWaiting: '等待可派发任务或可用智能体',
+  projectHealthMsgBlocked: '项目存在阻塞任务',
+  projectHealthMsgFailed: '项目存在失败任务',
+  agentStatusWaiting: '等待',
+  agentStatusWorking: '工作中',
+  agentStatusBlocked: '阻塞',
+  agentStatusFailed: '失败',
+  agentStatusError: '错误',
+  agentStatusCompleted: '完成',
+  agentStatusOffline: '离线',
+  agentStatusIdle: '空闲',
+};
 
 describe('KSwarm renderer contract', () => {
   it('keeps checked fixtures aligned with full-detail API status shape', () => {
@@ -64,7 +95,7 @@ describe('KSwarm renderer contract', () => {
       },
     };
 
-    expect(summarizeProjectHealth(detail)).toEqual({
+    expect(summarizeProjectHealth(detail, testLabels)).toEqual({
       status: 'blocked',
       message: '评审任务缺少证据',
       primaryTaskId: 'item-6',
@@ -98,7 +129,7 @@ describe('KSwarm renderer contract', () => {
       } as any,
     };
 
-    expect(summarizeProjectHealth(detail)).toEqual({
+    expect(summarizeProjectHealth(detail, testLabels)).toEqual({
       status: 'needs_review',
       message: '等待 PO 复审',
       primaryTaskId: undefined,

@@ -19,7 +19,8 @@ interface AvailablePlugin {
 }
 
 export function PluginsSettings() {
-  const { locale } = useLocale()
+  const { t } = useLocale()
+  const ds = t.desktopSettings
   const [servers, setServers] = useState<PluginMcpServer[]>([])
   const [available, setAvailable] = useState<AvailablePlugin[]>([])
   const [loading, setLoading] = useState(true)
@@ -62,7 +63,7 @@ export function PluginsSettings() {
       if (result.success) {
         await loadData()
       } else {
-        setInstallError(result.error || '安装失败')
+        setInstallError(result.error || ds.pluginsInstallFailed)
       }
     } catch (e) {
       setInstallError(String(e))
@@ -84,10 +85,10 @@ export function PluginsSettings() {
 
   return (
     <div className="flex flex-col gap-4">
-      <SettingsSection title={locale === 'zh' ? '已安装的插件' : 'Installed Plugins'}>
+      <SettingsSection title={ds.pluginsInstalledTitle}>
         {servers.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-8 text-sm text-[var(--c-text-secondary)]">
-            <p>{locale === 'zh' ? '暂无已安装的插件 MCP 服务' : 'No plugin MCP servers installed'}</p>
+            <p>{ds.pluginsInstalledEmpty}</p>
           </div>
         ) : (
           <div className="flex flex-col divide-y divide-[var(--c-border-subtle)]">
@@ -131,7 +132,7 @@ export function PluginsSettings() {
       </SettingsSection>
 
       {uninstalled.length > 0 && (
-        <SettingsSection title={locale === 'zh' ? '可用插件' : 'Available Plugins'}>
+        <SettingsSection title={ds.pluginsAvailableTitle}>
           <div className="flex flex-col divide-y divide-[var(--c-border-subtle)]">
             {uninstalled.map((plugin) => (
               <div key={plugin.name} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
@@ -146,8 +147,8 @@ export function PluginsSettings() {
                   className="px-3 py-1 text-xs rounded-md bg-[var(--c-accent)] text-white disabled:opacity-50"
                 >
                   {installing === plugin.name
-                    ? (locale === 'zh' ? '安装中...' : 'Installing...')
-                    : (locale === 'zh' ? '安装' : 'Install')}
+                    ? ds.pluginsInstalling
+                    : ds.pluginsInstall}
                 </button>
               </div>
             ))}
@@ -157,12 +158,12 @@ export function PluginsSettings() {
 
       {installError && (
         <div className="text-xs text-red-500 px-1">
-          {locale === 'zh' ? '安装失败: ' : 'Install failed: '}{installError}
+          {ds.pluginsInstallFailed}: {installError}
         </div>
       )}
 
       <p className="text-xs text-[var(--c-text-tertiary)] px-1">
-        {locale === 'zh' ? '更改将在重启后生效' : 'Changes take effect after restart'}
+        {ds.pluginsRestartHint}
       </p>
     </div>
   )

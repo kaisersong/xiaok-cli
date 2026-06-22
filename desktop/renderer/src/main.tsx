@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App } from './App';
 import { AuthProvider } from './contexts/auth';
 import { LocaleProvider } from './contexts/LocaleContext';
+import { ThemeProvider } from './contexts/ThemeContext';
+import { AppearanceProvider } from './contexts/AppearanceContext';
 import { KSwarmProvider } from './contexts/KSwarmContext';
 import { ThreadListProvider } from './contexts/thread-list';
 import './styles/index.css';
@@ -24,11 +26,15 @@ createRoot(document.getElementById('root')!).render(
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <LocaleProvider>
-            <ThreadListProvider>
-              <KSwarmProvider>
-                <App />
-              </KSwarmProvider>
-            </ThreadListProvider>
+            <ThemeProvider>
+              <AppearanceProvider>
+                <ThreadListProvider>
+                  <KSwarmProvider>
+                    <App />
+                  </KSwarmProvider>
+                </ThreadListProvider>
+              </AppearanceProvider>
+            </ThemeProvider>
           </LocaleProvider>
         </AuthProvider>
       </QueryClientProvider>

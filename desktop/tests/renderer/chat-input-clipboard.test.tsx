@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { ChatInput } from '../../renderer/src/components/ChatInput';
 
 vi.mock('../../renderer/src/api', () => ({
@@ -52,7 +53,7 @@ describe('ChatInput clipboard attachments', () => {
     const readClipboardImage = vi.fn().mockResolvedValue('/tmp/screenshot.png');
     installClipboardApi({ readClipboardFilePaths, readClipboardImage });
 
-    render(<ChatInput onSubmit={() => {}} />);
+    render(<LocaleProvider><ChatInput onSubmit={() => {}} /></LocaleProvider>);
     const input = screen.getByRole('textbox');
 
     fireEvent.keyDown(input, { key: 'v', metaKey: true });
@@ -72,7 +73,7 @@ describe('ChatInput clipboard attachments', () => {
     const readClipboardImage = vi.fn().mockResolvedValue('/tmp/clipboard-image.png');
     installClipboardApi({ readClipboardFilePaths, readClipboardImage });
 
-    render(<ChatInput onSubmit={() => {}} />);
+    render(<LocaleProvider><ChatInput onSubmit={() => {}} /></LocaleProvider>);
     const input = screen.getByRole('textbox');
 
     fireEvent.keyDown(input, { key: 'v', metaKey: true });
@@ -91,7 +92,7 @@ describe('ChatInput clipboard attachments', () => {
     const readClipboardFilePaths = vi.fn().mockResolvedValue(['C:\\Users\\song\\Desktop\\spec.pdf']);
     installClipboardApi({ readClipboardFilePaths });
 
-    render(<ChatInput onSubmit={() => {}} />);
+    render(<LocaleProvider><ChatInput onSubmit={() => {}} /></LocaleProvider>);
     const input = screen.getByRole('textbox');
 
     const pasteEvent = pasteClipboard(input, {
@@ -107,7 +108,7 @@ describe('ChatInput clipboard attachments', () => {
     const readClipboardFilePaths = vi.fn().mockResolvedValue(['/Users/song/Desktop/report.pdf']);
     installClipboardApi({ readClipboardFilePaths });
 
-    render(<ChatInput onSubmit={() => {}} />);
+    render(<LocaleProvider><ChatInput onSubmit={() => {}} /></LocaleProvider>);
     const input = screen.getByRole('textbox') as HTMLTextAreaElement;
 
     fireEvent.keyDown(input, { key: 'v', metaKey: true });
@@ -135,7 +136,7 @@ describe('ChatInput clipboard attachments', () => {
     const readClipboardImage = vi.fn().mockResolvedValue('/tmp/context-menu-image.png');
     installClipboardApi({ readClipboardFilePaths, readClipboardImage });
 
-    render(<ChatInput onSubmit={() => {}} />);
+    render(<LocaleProvider><ChatInput onSubmit={() => {}} /></LocaleProvider>);
     const input = screen.getByRole('textbox');
 
     const pasteEvent = pasteClipboard(input, {

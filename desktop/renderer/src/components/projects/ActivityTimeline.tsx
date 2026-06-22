@@ -40,30 +40,28 @@ function workflowRunTime(run: KSwarmWorkflowRun): number {
   return run.completedAt ?? run.updatedAt ?? run.startedAt ?? run.createdAt ?? 0;
 }
 
-function formatWorkflowRunName(run: KSwarmWorkflowRun): string {
-  if (run.workflowId === 'agent-review-smoke') return 'Agent 复核诊断';
-  if (run.workflowId === 'project-diagnose') return '快速诊断';
-  return run.title || run.workflowId;
+function formatWorkflowRunName(run: KSwarmWorkflowRun, t: ReturnType<typeof import('../../contexts/LocaleContext').useLocale>['t']): string {
+  return t.projectsActivityWorkflowRunName(run.workflowId) || run.title || run.workflowId;
 }
 
-function formatWorkflowRunStatus(status: KSwarmWorkflowRun['status']): string {
+function formatWorkflowRunStatus(status: KSwarmWorkflowRun['status'], t: ReturnType<typeof import('../../contexts/LocaleContext').useLocale>['t']): string {
   const labels: Record<KSwarmWorkflowRun['status'], string> = {
-    awaiting_approval: '待确认',
-    running: '运行中',
-    blocked: '阻塞',
-    completed: '已完成',
-    failed: '失败',
-    cancelled: '已取消',
+    awaiting_approval: t.projectsWorkflowRunAwaitingApproval,
+    running: t.projectsWorkflowRunRunning,
+    blocked: t.projectsWorkflowRunBlocked,
+    completed: t.projectsWorkflowRunCompleted,
+    failed: t.projectsWorkflowRunFailed,
+    cancelled: t.projectsWorkflowRunCancelled,
   };
   return labels[status] || status;
 }
 
-function getWorkflowRunDetail(run: KSwarmWorkflowRun): string {
+function getWorkflowRunDetail(run: KSwarmWorkflowRun, t: ReturnType<typeof import('../../contexts/LocaleContext').useLocale>['t']): string {
   return (
     run.summary?.primaryMessage ||
     run.gateDecision?.reason ||
     (run.gateDecision?.status ? `Gate：${run.gateDecision.status}` : '') ||
-    formatWorkflowRunStatus(run.status)
+    formatWorkflowRunStatus(run.status, t)
   );
 }
 
@@ -71,15 +69,15 @@ function isWorkflowActivity(event: KSwarmActivityEvent): boolean {
   return event.type.startsWith('workflow.');
 }
 
-function formatWorkflowActivityLabel(event: KSwarmActivityEvent): string {
+function formatWorkflowActivityLabel(event: KSwarmActivityEvent, t: ReturnType<typeof import('../../contexts/LocaleContext').useLocale>['t']): string {
   const labels: Record<string, string> = {
-    'workflow.run.started': '工作流启动',
-    'workflow.run.completed': '工作流完成',
-    'workflow.run.cancelled': '工作流取消',
-    'workflow.run.gate_completed': '工作流 Gate 完成',
-    'workflow.node.output_received': '工作流节点提交',
-    'workflow.node.reviewed': '工作流节点复核',
-    'workflow.node.blocked': '工作流节点阻塞',
+    'workflow.run.started': t.projectsActivityWorkflowStarted,
+    'workflow.run.completed': t.projectsActivityWorkflowCompleted,
+    'workflow.run.cancelled': t.projectsActivityWorkflowCancelled,
+    'workflow.run.gate_completed': t.projectsActivityWorkflowGateCompleted,
+    'workflow.node.output_received': t.projectsActivityWorkflowNodeSubmitted,
+    'workflow.node.reviewed': t.projectsActivityWorkflowNodeReviewed,
+    'workflow.node.blocked': t.projectsActivityWorkflowNodeBlocked,
   };
   return labels[event.type] || event.type;
 }
@@ -93,26 +91,26 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
   const EVENT_META: Record<string, { icon: typeof FileText; label: string; color: string }> = {
     'project.created': { icon: Plus, label: t.projectsActivityCreated, color: 'text-[var(--c-text-secondary)]' },
     'po.assigned': { icon: Users, label: t.projectsActivityPoAssigned, color: 'text-[var(--c-text-secondary)]' },
-    'tasks.created': { icon: FileText, label: 'PO 创建任务', color: 'text-[var(--c-text-secondary)]' },
-    'tasks.added_by_human': { icon: Plus, label: '人工添加任务', color: 'text-[var(--c-text-primary)]' },
+    'tasks.created': { icon: FileText, label: t.projectsActivityPoCreatedTasks, color: 'text-[var(--c-text-secondary)]' },
+    'tasks.added_by_human': { icon: Plus, label: t.projectsActivityHumanAddedTasks, color: 'text-[var(--c-text-primary)]' },
     'project.approved': { icon: CheckCircle2, label: t.projectsActivityApproved, color: 'text-[var(--c-status-success-text)]' },
     'task.assigned': { icon: Users, label: t.projectsActivityDispatched, color: 'text-[var(--c-text-secondary)]' },
     'task.dispatched': { icon: Send, label: t.projectsActivityDispatched, color: 'text-[var(--c-text-secondary)]' },
-    'task.accepted': { icon: Play, label: '接受任务', color: 'text-[var(--c-status-warning-text)]' },
+    'task.accepted': { icon: Play, label: t.projectsActivityTaskAccepted, color: 'text-[var(--c-status-warning-text)]' },
     'task.progress': { icon: Play, label: t.projectsActivityInProgress, color: 'text-[var(--c-status-warning-text)]' },
     'task.submitted': { icon: Eye, label: t.projectsActivitySubmitted, color: 'text-[var(--c-status-success-text)]' },
     'task.done': { icon: CheckCircle2, label: t.projectsActivityDone, color: 'text-[var(--c-status-success-text)]' },
     'task.rework': { icon: AlertCircle, label: t.projectsActivityRework, color: 'text-[var(--c-status-error-text)]' },
     'task.failed': { icon: AlertCircle, label: t.projectsActivityFailed, color: 'text-[var(--c-status-error-text)]' },
-    'task.quality_reviewed': { icon: Eye, label: 'PO 质量验收', color: 'text-[var(--c-status-warning-text)]' },
-    'task.blocked': { icon: AlertCircle, label: '任务阻塞', color: 'text-[var(--c-status-error-text)]' },
+    'task.quality_reviewed': { icon: Eye, label: t.projectsActivityTaskQualityReview, color: 'text-[var(--c-status-warning-text)]' },
+    'task.blocked': { icon: AlertCircle, label: t.projectsActivityTaskBlocked, color: 'text-[var(--c-status-error-text)]' },
     'task.cancelled': { icon: AlertCircle, label: t.projectsActivityCancelled, color: 'text-[var(--c-text-muted)]' },
-    'project.delivered': { icon: Archive, label: 'PO 提交交付', color: 'text-[var(--c-status-success-text)]' },
-    'project.closed': { icon: CheckCircle2, label: '项目关闭', color: 'text-[var(--c-text-muted)]' },
-    'approval.pending': { icon: Eye, label: '等待审批', color: 'text-[var(--c-status-warning-text)]' },
-    'plan.submitted': { icon: FileText, label: '提交计划', color: 'text-[var(--c-text-secondary)]' },
-    'plan.revised': { icon: FileText, label: '修订计划', color: 'text-[var(--c-status-warning-text)]' },
-    'task.reviewed': { icon: Eye, label: 'PO 质量验收', color: 'text-[var(--c-status-success-text)]' },
+    'project.delivered': { icon: Archive, label: t.projectsActivityProjectDelivered, color: 'text-[var(--c-status-success-text)]' },
+    'project.closed': { icon: CheckCircle2, label: t.projectsActivityProjectClosed, color: 'text-[var(--c-text-muted)]' },
+    'approval.pending': { icon: Eye, label: t.projectsActivityApprovalPending, color: 'text-[var(--c-status-warning-text)]' },
+    'plan.submitted': { icon: FileText, label: t.projectsActivityPlanSubmitted, color: 'text-[var(--c-text-secondary)]' },
+    'plan.revised': { icon: FileText, label: t.projectsActivityPlanRevised, color: 'text-[var(--c-status-warning-text)]' },
+    'task.reviewed': { icon: Eye, label: t.projectsActivityTaskReviewed, color: 'text-[var(--c-status-success-text)]' },
   };
 
   const agentName = (id?: string) => {
@@ -161,7 +159,7 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
             const { run } = entry;
             const completed = run.summary?.completed ?? 0;
             const total = run.summary?.total ?? 0;
-            const detailText = getWorkflowRunDetail(run);
+            const detailText = getWorkflowRunDetail(run, t);
 
             return (
               <div key={entry.key} data-testid="activity-timeline-entry" className="flex gap-3 group">
@@ -174,9 +172,9 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
 
                 <div className="flex-1 pb-4">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[12px] font-medium text-[var(--c-text-primary)]">{formatWorkflowRunName(run)}</span>
+                    <span className="text-[12px] font-medium text-[var(--c-text-primary)]">{formatWorkflowRunName(run, t)}</span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-accent)]/10 text-[var(--c-accent)]">Workflow</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]">{formatWorkflowRunStatus(run.status)}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]">{formatWorkflowRunStatus(run.status, t)}</span>
                     {total > 0 && (
                       <span className="text-[10px] text-[var(--c-text-tertiary)]">{completed}/{total}</span>
                     )}
@@ -196,7 +194,7 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
           const { event } = entry;
           const workflowActivity = isWorkflowActivity(event);
           const meta = workflowActivity
-            ? { icon: WorkflowIcon, label: formatWorkflowActivityLabel(event), color: 'text-[var(--c-accent)]' }
+            ? { icon: WorkflowIcon, label: formatWorkflowActivityLabel(event, t), color: 'text-[var(--c-accent)]' }
             : EVENT_META[event.type] || { icon: FileText, label: event.type, color: 'text-[var(--c-text-muted)]' };
           const Icon = meta.icon;
           const agent = event.agent || event.by || event.target || '';
@@ -270,7 +268,7 @@ export function ActivityTimeline({ project, activities: propActivities, humanAct
       {/* Human actions */}
       {humanActions.length > 0 && (
         <div className="mt-4 pt-4 border-t border-[var(--c-border-subtle)]">
-          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)] mb-3">你的操作记录</h4>
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)] mb-3">{t.projectsActivityHumanActionsTitle}</h4>
           <div className="flex flex-col gap-1">
             {humanActions.map((action, i) => (
               <div key={i} className="flex items-center gap-2 py-1">

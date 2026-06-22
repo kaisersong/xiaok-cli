@@ -3,6 +3,7 @@
 import React from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { CanvasPreview } from '../../renderer/src/components/CanvasPreview';
 
 describe('CanvasPreview PDF preview', () => {
@@ -14,7 +15,9 @@ describe('CanvasPreview PDF preview', () => {
     const pdfDataUrl = `data:application/pdf;base64,${Buffer.from('%PDF-1.7\nbinary').toString('base64')}`;
 
     const { container } = render(
-      <CanvasPreview filePath="/tmp/report.pdf" content={pdfDataUrl} />,
+      <LocaleProvider>
+        <CanvasPreview filePath="/tmp/report.pdf" content={pdfDataUrl} />
+      </LocaleProvider>,
     );
 
     const frame = screen.getByTitle('PDF preview: report.pdf') as HTMLIFrameElement;

@@ -215,7 +215,7 @@ export function DocumentPanel({ artifact, artifacts, accessToken, runId, onClose
           {loadState.status === 'text' && (
             <button type="button"
               onClick={() => void handleSaveToKb()}
-              title="添加到知识库"
+              title={t.documentPanelAddToKb}
               onPointerDown={() => setKbSavePressed(true)}
               onPointerUp={() => setKbSavePressed(false)}
               onPointerLeave={() => setKbSavePressed(false)}
@@ -314,7 +314,7 @@ export function DocumentPanel({ artifact, artifacts, accessToken, runId, onClose
               fontSize: '13px',
             }}
           >
-            加载中...
+            {t.documentPanelLoading}
           </div>
         )}
 

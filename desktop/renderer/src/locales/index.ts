@@ -891,10 +891,20 @@ export interface LocaleStrings {
     mcpDesc: string;
     mcpPage: {
       add: string;
+      refresh: string;
       scan: string;
       close: string;
+      cancel: string;
+      enable: string;
+      disable: string;
+      scanning: string;
+      saving: string;
       empty: string;
       loading: string;
+      formTitleCreate: string;
+      formTitleEdit: string;
+      scanTitle: string;
+      externalTitle: string;
       fieldName: string;
       fieldTransport: string;
       fieldHost: string;
@@ -910,6 +920,7 @@ export interface LocaleStrings {
       fieldSourceUri: string;
       fieldSyncMode: string;
       fieldDiscoveryPath: string;
+      placeholderFilePath: string;
       enabled: string;
       disabled: string;
       save: string;
@@ -986,6 +997,100 @@ export interface LocaleStrings {
     resetOnboardingDesc: string;
     resetOnboardingBtn: string;
     appVersion: string;
+    // nav items (full labels for settings sidebar)
+    navGeneral: string;
+    navModel: string;
+    navSkills: string;
+    navChannels: string;
+    navMcp: string;
+    navTools: string;
+    navAppearance: string;
+    navData: string;
+    navMemory: string;
+    navAbout: string;
+    // channels pane
+    channelsTitle: string;
+    channelsDesc: string;
+    channelsAdd: string;
+    channelsNameLabel: string;
+    channelsNamePlaceholder: string;
+    channelsTypeLabel: string;
+    channelsCreateBtn: string;
+    channelsCancelBtn: string;
+    channelsEmpty: string;
+    channelsCreatedAt: string;
+    channelsTestSuccess: (latencyMs: number) => string;
+    channelsTestFailed: string;
+    channelsTestBtn: string;
+    channelsEnabled: string;
+    channelsDisabled: string;
+    channelsDeleteConfirm: string;
+    channelsFieldRequired: (label: string) => string;
+    // channel types
+    channelTypeYunzhijia: string;
+    channelTypeFeishu: string;
+    channelTypeDiscord: string;
+    channelTypeWeixin: string;
+    channelTypeQQ: string;
+    channelTypeTelegram: string;
+    // channel field placeholders
+    channelFieldAppId: string;
+    channelFieldAppSecret: string;
+    channelFieldToken: string;
+    channelFieldFeishuAppId: string;
+    channelFieldFeishuAppSecret: string;
+    channelFieldDiscordChannelId: string;
+    channelFieldWeixinAppId: string;
+    channelFieldWeixinToken: string;
+    channelFieldQQAppId: string;
+    channelFieldTelegramChatId: string;
+    // back button
+    back: string;
+    // general pane - profile
+    profileTitle: string;
+    changeAvatar: string;
+    enterYourName: string;
+    save: string;
+    cancelAction: string;
+    clickToSetName: string;
+    nameCallHint: string;
+    // general pane - language
+    languageTitle: string;
+    languageDesc: string;
+    langZh: string;
+    langZhSub: string;
+    langEn: string;
+    langEnSub: string;
+    // general pane - service status
+    serviceStatusTitle: string;
+    serviceStatusChecking: string;
+    serviceStatusLoadError: string;
+    serviceRestartFailed: string;
+    serviceStatusRunning: string;
+    serviceStatusAbnormal: string;
+    serviceStatusUnavailable: string;
+    serviceRestartCount: string;
+    serviceRestart: string;
+    // general pane - task concurrency
+    taskConcurrencyTitle: string;
+    taskConcurrencyDesc: string;
+    taskConcurrencyAria: string;
+    taskConcurrencyMin: string;
+    taskConcurrencyMax: string;
+    // general pane - stage debug
+    stageDebugTitle: string;
+    stageDebugDesc: string;
+    stageDebugOn: string;
+    stageDebugOff: string;
+    stageDebugToggleAria: string;
+    // general pane - app info
+    appInfoTitle: string;
+    appInfoVersion: string;
+    appInfoBuild: string;
+    appInfoDataPath: string;
+    avatarTooLarge: string;
+    memoryPaneTitle: string;
+    memoryPaneDesc: string;
     // voice settings
     voiceTitle: string;
     voiceDesc: string;
@@ -1029,7 +1134,6 @@ export interface LocaleStrings {
     runsHistoryPrev: string;
     runsHistoryNext: string;
     loopsTab: string;
-    openAutomations: string;
     userLoops: string;
     userLoopsDesc: string;
     userLoopsLoading: string;
@@ -1380,6 +1484,290 @@ export interface LocaleStrings {
     appUpdateInstall: string;
     componentUpdateTitle: string;
     componentNotInstalled: string;
+    // ModelPane
+    modelProviders: string;
+    currentModel: string;
+    configured: string;
+    notConfigured: string;
+    protocol: string;
+    testConnection: string;
+    updateKey: string;
+    setKey: string;
+    latencyMs: (ms: number) => string;
+    deleteLabel: string;
+    saveLabel: string;
+    configuredModels: string;
+    defaultBadge: string;
+    setAsDefault: string;
+    deleteModel: string;
+    addModel: string;
+    customModelPlaceholder: string;
+    addLabel: string;
+    addModelProvider: string;
+    apiKeyUpdated: (name: string) => string;
+    connectionSuccessLatency: (ms: number) => string;
+    connectionFailed: string;
+    modelAdded: (label: string) => string;
+    customModelAdded: (name: string) => string;
+    modelSwitched: (label: string) => string;
+    confirmDeleteModel: string;
+    modelDeleted: string;
+    confirmDeleteProvider: string;
+    providerDeleted: string;
+    providerAdded: string;
+    // AddProviderCard
+    customNameRequired: string;
+    customBaseUrlRequired: string;
+    selectProvider: string;
+    selectProviderPlaceholder: string;
+    alreadyConfigured: string;
+    customOpenaiCompatible: string;
+    providerName: string;
+    availableModels: string;
+    defaultModelAfterAdd: (label: string) => string;
+    addingProvider: string;
+    addProvider: string;
+    // SkillsPane
+    confirmUninstallSkill: (name: string) => string;
+    installedSkills: (count: number) => string;
+    skillsDesc: string;
+    installSkill: string;
+    skillName: string;
+    installCommand: string;
+    skillNamePlaceholder: string;
+    installing: string;
+    confirmInstall: string;
+    cancelLabel: string;
+    noInstalledSkills: string;
+    noInstalledSkillsHint: string;
+    skillStats: (calls: number, avgSeconds: number) => string;
+    uninstall: string;
+    skillSources: string;
+    skillSourcesDesc: string;
+    skillSourcesSearch: string;
+    skillSourcesInstall: string;
+    skillSourcesUninstall: string;
+    skillSourcesList: string;
+    skillNameExample: string;
+    // loops - user loops section
+    quickStartFromTemplate: string;
+    categoryBusiness: string;
+    categoryCode: string;
+    useThisTemplate: string;
+    createdFromTemplate: (title: string) => string;
+    createFromTemplateFailed: string;
+    createScheduleForLoop: string;
+    lastRunBlocked: string;
+    lastRunFailed: string;
+    loopEditCancel: string;
+    loopEditSaving: string;
+    loopEditSave: string;
+    deleteLoopConfirm: string;
+    deleteLoopFailed: string;
+    saveLoopFailed: string;
+    // data pane
+    clearDataConfirm: string;
+    dataCleared: string;
+    clearFailed: (detail: string) => string;
+    localData: string;
+    dataStorageLocation: string;
+    dataStorageIndexedDb: string;
+    dataStorageLocalStorage: string;
+    configPath: string;
+    dangerZone: string;
+    clearAllData: string;
+    clearAllDataDesc: string;
+    clearing: string;
+    clearData: string;
+    // about pane
+    aboutTitle: string;
+    aboutLocalMode: string;
+    aboutAppDesc: string;
+    softwareUpdate: string;
+    aboutInstalling: string;
+    aboutUpdateReady: string;
+    aboutDownloading: string;
+    aboutNewVersion: string;
+    aboutCurrentVersion: string;
+    aboutInstallingVersion: (version: string) => string;
+    aboutDownloadedVersion: (version: string) => string;
+    aboutDownloadProgress: (progress: number) => string;
+    aboutVersionAvailable: (version: string) => string;
+    aboutChecking: string;
+    aboutInstallRestart: string;
+    aboutInstallProgress: string;
+    aboutCheckUpdates: string;
+    aboutCheckingUpdates: string;
+    coreFeatures: string;
+    featureIntentRecognition: string;
+    featureIntentRecognitionDesc: string;
+    featureToolCalling: string;
+    featureToolCallingDesc: string;
+    featureSkillExtension: string;
+    featureSkillExtensionDesc: string;
+    featureMcp: string;
+    featureMcpDesc: string;
+    supportedProviders: string;
+    versionInfo: string;
+    versionLabel: string;
+    buildLabel: string;
+    // McpPane (supplemental)
+    mcpServersTitle: string;
+    mcpCreatedAtLabel: string;
+    // mcp pane
+    mcpPluginDeps: string;
+    mcpPluginMcpServices: string;
+    mcpPluginMcpServicesDesc: string;
+    mcpServersDesc: string;
+    mcpAddServer: string;
+    mcpNameLabel: string;
+    mcpNamePlaceholder: string;
+    mcpCommandLabel: string;
+    mcpArgsLabel: string;
+    mcpCreateBtn: string;
+    mcpCancelBtn: string;
+    mcpEmpty: string;
+    mcpSourceLabel: string;
+    mcpConnected: string;
+    mcpDisconnected: string;
+    mcpInstallFailed: string;
+    mcpPluginInstallFailed: string;
+    mcpUpdateFailed: string;
+    mcpDiagnoseFailed: string;
+    mcpInstallConfirm: (name: string) => string;
+    mcpSetupConfirm: (title: string, name: string) => string;
+    mcpUpdateConfirm: (name: string) => string;
+    mcpOpenAccessibility: string;
+    mcpOpenScreenRecording: string;
+    mcpEnableComputerUse: string;
+    mcpConnectMcp: string;
+    mcpReconnectMcp: string;
+    mcpInstallAndEnable: string;
+    mcpInstallDriver: string;
+    mcpUpdate: string;
+    mcpDiagnose: string;
+    // plugin dependency status
+    mcpDepNeedsInstall: (name: string) => string;
+    mcpDepNeedsAccessibility: string;
+    mcpDepNeedsScreenRecording: string;
+    mcpDepNeedsUpdate: string;
+    mcpDepNotEnabled: string;
+    mcpDepAvailable: string;
+    mcpDepUnsupported: string;
+    mcpDepNeedsAttention: string;
+    // plugin dependency layer labels
+    mcpLayerPlugin: string;
+    mcpLayerInstalled: string;
+    mcpLayerNotInstalled: string;
+    mcpLayerPermission: string;
+    mcpLayerServiceConn: string;
+    mcpLayerTools: string;
+    // driver layer status
+    mcpDriverUnsupported: string;
+    mcpDriverNotInstalled: string;
+    mcpDriverNeedsUpdate: string;
+    mcpDriverInstalledUnavailable: string;
+    mcpDriverUnconfirmed: string;
+    // permission layer status
+    mcpPermAccessibilityMissing: string;
+    mcpPermScreenMissing: string;
+    mcpPermVerifyAfterEnable: string;
+    mcpPermGranted: string;
+    mcpPermNotChecked: string;
+    mcpPermUnconfirmed: string;
+    // mcp layer status
+    mcpLayerNotRegistered: string;
+    // tool layer status
+    mcpToolUnavailable: string;
+    mcpToolWaitRegister: string;
+    mcpToolWaitEnable: string;
+    mcpToolMcpDisconnected: string;
+    mcpToolWrapperRegistered: string;
+    mcpToolRawNotHidden: string;
+    // connectors pane
+    connectorSaveFailedNoDesktop: string;
+    connectorConfigParseError: string;
+    connectorLoadFailed: string;
+    networkTools: string;
+    networkToolsDesc: string;
+    searchProviderTitle: string;
+    fetchProviderTitle: string;
+    searchDuckduckgoDesc: string;
+    searchFirecrawlDesc: string;
+    searchTavilyDesc: string;
+    searchBraveDesc: string;
+    fetchBasicDesc: string;
+    fetchJinaDesc: string;
+    fetchFirecrawlDesc: string;
+    firecrawlApiKeyPlaceholder: string;
+    jinaApiKeyPlaceholder: string;
+    tavilyApiKeyPlaceholder: string;
+    braveApiKeyPlaceholder: string;
+    connectorStatusReady: string;
+    connectorStatusInactive: string;
+    connectorStatusMissingConfig: string;
+    connectorStatusInvalidConfig: string;
+    connectorStatusNotImplemented: string;
+    connectorChangeKey: string;
+    connectorCancelEdit: string;
+    connectorTestConnection: string;
+    // embedding model settings
+    embeddingModelTitle: string;
+    embeddingModelDesc: string;
+    embeddingModelDims: (dims: number) => string;
+    embeddingModelDownloading: string;
+    embeddingModelDownloaded: string;
+    embeddingModelClickToDownload: string;
+    embeddingModelManualGuideTitle: string;
+    embeddingModelManualStep1: string;
+    embeddingModelManualStep2: string;
+    embeddingModelManualStep3: string;
+    embeddingModelSwitchTitle: string;
+    embeddingModelDownloadAndSwitchTitle: string;
+    embeddingModelSwitchConfirm: (name: string) => string;
+    embeddingModelDownloadAndSwitchConfirm: (name: string, size: string) => string;
+    embeddingModelCancel: string;
+    embeddingModelConfirm: string;
+    // McpErrorRemediation
+    mcpPythonVersionTooOld: (serverName: string, version: string) => string;
+    mcpPythonDetected: (version: string) => string;
+    mcpPythonUpgradeHint: string;
+    mcpPythonOfficialDownload: string;
+    mcpPythonCopyBrew: string;
+    mcpPythonCopyPyenv: string;
+    mcpPythonCopied: string;
+    mcpPythonModuleMissing: (moduleName: string) => string;
+    mcpPythonModuleMissingDesc: string;
+    mcpPythonCopyCommand: string;
+    // PluginsSettings
+    pluginsInstalledTitle: string;
+    pluginsInstalledEmpty: string;
+    pluginsAvailableTitle: string;
+    pluginsInstalling: string;
+    pluginsInstall: string;
+    pluginsInstallFailed: string;
+    pluginsRestartHint: string;
+    // LocalMemoryStatsCard
+    relativeTimeJustNow: string;
+    relativeTimeMinutesAgo: (n: number) => string;
+    relativeTimeHoursAgo: (n: number) => string;
+    relativeTimeDaysAgo: (n: number) => string;
+    memoryImportedCount: (n: number) => string;
+    memoryImportFailed: string;
+    memoryEditTitle: string;
+    // GeneralSettings
+    profileSave: string;
+    profileCancel: string;
+    profileAvatarTooLarge: string;
+    profileChangeAvatar: string;
+    // ProvidersSettings
+    baseUrlHttpsHint: string;
+    // UpdateSettings
+    appUpdateInstalling: string;
+    // DeveloperSettings
+    designTokensView: string;
+    // VoiceSettings
+    voiceLangZh: string;
   };
 
   // admin providers/models settings (ported from console-lite)
@@ -1919,6 +2307,13 @@ export interface LocaleStrings {
   projectsArtifactLoadFailed: string;
   projectsArtifactUnsupported: string;
   projectsArtifactEmpty: string;
+  projectsDiscussPrefix: (name: string) => string;
+  projectsCreateAgentNamePlaceholder: string;
+  projectsCreateAgentInstructionsPlaceholder: string;
+  projectsCreateProjectNamePlaceholder: string;
+  projectsCreateProjectGoalPlaceholder: string;
+  projectsCreateProjectRequirementsPlaceholder: string;
+  projectsInterventionNeedsAttention: string;
 
   // sidebar - desktop
   sidebarSearch: string;
@@ -1931,6 +2326,77 @@ export interface LocaleStrings {
   sidebarNoRecent: string;
   sidebarRename: string;
   sidebarKnowledge: string;
+  // sidebar - update popover
+  sidebarUpdateNewVersion: string;
+  sidebarUpdateCheckIncomplete: string;
+  sidebarUpdateUpgradeTo: (version: string) => string;
+  sidebarUpdateFoundNewVersion: string;
+  sidebarUpdateCheckIncompleteHint: string;
+  sidebarUpdateFoundVersionHint: (version: string) => string;
+  sidebarUpdateClosePopover: string;
+  sidebarUpdateClose: string;
+  sidebarUpdateAutoCheckFailed: string;
+  sidebarUpdateManualDownload: string;
+  sidebarUpdateGoToGithub: string;
+  // sidebar - tooltip labels
+  sidebarTooltipProject: string;
+  sidebarTooltipStatus: string;
+  sidebarTooltipProjectId: string;
+  sidebarTooltipScheduledTask: string;
+  sidebarTooltipFrequency: string;
+  sidebarTooltipTaskId: string;
+  sidebarTooltipThreadId: string;
+  sidebarTooltipRuntimeTaskId: string;
+  sidebarTooltipRecentTask: string;
+  sidebarTooltipCurrentTaskId: string;
+
+  // welcome page
+  welcome: {
+    greetingSuffix: string;
+    inputPlaceholder: string;
+    quickPrompts: readonly string[];
+  };
+
+  // knowledge page
+  knowledge: {
+    loading: string;
+    pageTitle: string;
+    emptyTitle: string;
+    emptyDesc: string;
+    emptyPrivacy: string;
+    createFirstCollection: string;
+    newCollection: string;
+    deleteCollectionConfirm: string;
+    defaultPasteTitle: string;
+    privacyNotice: string;
+    privacyDismiss: string;
+    chunkCount: (count: number) => string;
+    selectCollection: string;
+    searchPlaceholder: string;
+    searching: string;
+    searchBtn: string;
+    searchResultsTitle: (count: number) => string;
+    pageLabel: (page: number) => string;
+    dropToAdd: string;
+    pickFiles: string;
+    pasteText: string;
+    addUrl: string;
+    orDragFiles: string;
+    titleOptional: string;
+    pasteContentPlaceholder: string;
+    cancel: string;
+    addSource: string;
+    addUrlBtn: string;
+    emptyCollection: string;
+    emptyCollectionHint: string;
+    statusParsed: string;
+    statusPending: string;
+    statusParsing: string;
+    statusFailed: string;
+    createCollectionTitle: string;
+    collectionNamePlaceholder: string;
+    createBtn: string;
+  };
 
   // automations page
   automationsTitle: string;
@@ -2019,6 +2485,642 @@ export interface LocaleStrings {
   scheduledHighFreqConfirmBody: string;
   scheduledStaleConflict: string;
   scheduledLinkedLoop: string;
+
+  // chatView
+  chatView: {
+    copyTitle: string;
+    saveToKbTitle: string;
+    chatExcerpt: string;
+    addedToKb: string;
+    noCollections: string;
+    titleOptional: string;
+    cancel: string;
+    saving: string;
+    save: string;
+    needsComputerUse: string;
+    cuDefaultMessage: string;
+    cuProcessing: string;
+    cuEnabled: string;
+    enableComputerUse: string;
+    cuDismiss: string;
+    taskFailed: string;
+    scrollToBottom: string;
+    inputPlaceholder: string;
+    replyPlaceholder: string;
+    artifact: string;
+    addToKb: string;
+    added: string;
+    taskResult: string;
+    open: string;
+    a2uiLoadFailed: string;
+    a2uiLoading: string;
+  };
+
+  // chatInput
+  chatInput: {
+    replyPlaceholder: string;
+    processFiles: string;
+    skillCommandHint: string;
+    queued: string;
+  };
+
+  // chatShell
+  chatShell: {
+    attachmentLabel: string;
+    cuUnavailable: string;
+    taskCreateFailed: string;
+    cuProcessing: string;
+    cuSettingsOpened: string;
+    cuReady: string;
+    cuConnectFailed: string;
+    cuDismissed: string;
+  };
+
+  // scheduled page (hardcoded strings)
+  scheduledEveryNMinutes: (n: number) => string;
+  scheduledLoopCreated: string;
+  scheduledLoopCreateFailed: (detail: string) => string;
+  scheduledLoopAlreadyRunning: string;
+  scheduledLoopPaused: string;
+  scheduledLoopMissing: string;
+  scheduledLoopDeleted: string;
+  scheduledLoopStarted: string;
+  scheduledLoopBlockedOrFailed: (status: string) => string;
+  scheduledLastRunLabel: string;
+  scheduledNextLabel: string;
+  scheduledNamePlaceholder: string;
+  scheduledDescPlaceholder: string;
+  scheduledPromptPlaceholder: string;
+
+  // app layout
+  appLayoutBack: string;
+  appLayoutForward: string;
+  appLayoutExpandSidebar: string;
+  appLayoutCollapseSidebar: string;
+
+  // canvas preview
+  canvasPreviewUnsupported: string;
+  canvasPreviewOpenSystem: string;
+  canvasPreviewDownload: string;
+
+  // canvas panel
+  canvasPanelCollapseCanvas: string;
+  canvasPanelExpandCanvas: string;
+
+  // document panel
+  documentPanelAddToKb: string;
+  documentPanelLoading: string;
+
+  // task panel
+  taskPanelProgress: string;
+  taskPanelResults: string;
+
+  // mermaid block
+  mermaidEmpty: string;
+  mermaidRendering: string;
+
+  // artifact toolbar
+  artifactFinishRevision: string;
+  artifactStartRevision: string;
+  artifactRevision: string;
+  artifactRefreshPreview: string;
+  artifactRevertChanges: string;
+  artifactRevert: string;
+  artifactFinishEditing: string;
+  artifactFinish: string;
+  artifactWaitingAgent: string;
+  artifactAgentNotResponding: string;
+
+  // memory action block
+  memoryActionWrite: string;
+  memoryActionEdit: string;
+  memoryActionSearch: string;
+  memoryActionRead: string;
+  memoryActionForget: string;
+  memoryActionNotebookWrite: string;
+  memoryActionNotebookRead: string;
+  memoryActionNotebookEdit: string;
+  memoryActionNotebookForget: string;
+  memoryActionBlockTitle: string;
+
+  // error callout
+  errorCalloutClose: string;
+  errorCalloutCollapse: string;
+  errorCalloutExpand: string;
+
+  // local memory stats
+  localMemoryStatsLoading: string;
+  localMemoryStatsCount: (n: number) => string;
+  localMemoryStatsL0: string;
+  localMemoryStatsL1: string;
+  localMemoryStatsL2: string;
+  localMemoryStatsL3: string;
+  localMemoryStatsRefresh: string;
+  localMemoryStatsLoadFailed: (detail: string) => string;
+  localMemoryStatsEmpty: string;
+  localMemoryStatsSource: (source: string) => string;
+
+  // a2ui
+  a2uiLoadFailed: string;
+  a2uiLoading: string;
+  a2uiRenderError: string;
+
+  // sub-agent
+  subAgentCompletedNoOutput: string;
+
+  // email verification gate
+  emailGateSendFailed: string;
+
+  // run detail panel
+  runDetailThreadLabel: string;
+  runDetailExecutionLabel: string;
+
+  // chat tool result messages
+  chatWorkflowCompleted: string;
+  chatWorkflowBlockedOrFailed: (status: string, reason: string) => string;
+  chatWorkflowStarted: string;
+  chatWorkflowProjectId: string;
+
+  // automations page
+  automationsRelativeJustNow: string;
+  automationsRelativeMinutesAgo: (n: number) => string;
+  automationsRelativeHoursAgo: (n: number) => string;
+  automationsViewLoopDetail: string;
+  automationsViewScheduleDetail: string;
+  automationsClearRecord: string;
+  automationsClearConfirm: (title: string) => string;
+
+  // user loop starter templates
+  loopTemplateDailyWorkSummary: string;
+  loopTemplateDailyWorkSummaryDesc: string;
+  loopTemplateIndustryNewsDaily: string;
+  loopTemplateIndustryNewsDailyDesc: string;
+  loopTemplateRepoChangesWatch: string;
+  loopTemplateRepoChangesWatchDesc: string;
+  loopTemplateScheduleHintEvening: string;
+  loopTemplateScheduleHintMorning: string;
+
+  // projects - workflow status strip
+  projectsWorkflowStatusAwaitingApproval: string;
+  projectsWorkflowStatusRunning: string;
+  projectsWorkflowStatusBlocked: string;
+  projectsWorkflowStatusCompleted: string;
+  projectsWorkflowStatusFailed: string;
+  projectsWorkflowStatusCancelled: string;
+  projectsDiagnoseStatusAwaitingApproval: string;
+  projectsDiagnoseStatusRunning: string;
+  projectsDiagnoseStatusBlocked: string;
+  projectsDiagnoseStatusCompleted: string;
+  projectsDiagnoseStatusFailed: string;
+  projectsDiagnoseStatusCancelled: string;
+  projectsWorkflowIdle: string;
+  projectsWorkflowIdleHint: string;
+  projectsWorkflowRunBtn: string;
+  projectsWorkflowRunningBtn: string;
+  projectsWorkflowUnavailableBtn: string;
+  projectsWorkflowRunAriaLabel: string;
+  projectsWorkflowMenuAriaLabel: string;
+  projectsWorkflowQuickDiagnose: string;
+  projectsWorkflowQuickDiagnoseDesc: string;
+  projectsWorkflowAgentReview: string;
+  projectsWorkflowAgentReviewDesc: string;
+  projectsWorkflowCancelRun: string;
+  projectsWorkflowDialogDefault: string;
+  projectsWorkflowDialogAgentReview: string;
+  projectsWorkflowDiagnosisDialog: string;
+  projectsWorkflowConfirmTitle: string;
+  projectsWorkflowConfirmCancel: string;
+  projectsWorkflowConfirmRun: string;
+  projectsWorkflowAgentReviewName: string;
+  projectsWorkflowPoTaskName: string;
+  projectsWorkflowExecLabel: string;
+  projectsWorkflowAgentLabel: string;
+  projectsWorkflowCloseDialogPrefix: string;
+  projectsWorkflowCompletedAwaitingDelivery: string;
+  projectsWorkflowKswarmView: string;
+  projectsWorkflowBuiltinSource: string;
+  projectsWorkflowExecSource: string;
+  projectsWorkflowNoAgentSource: string;
+  projectsWorkflowGoalLabel: string;
+  projectsWorkflowTaskLabel: string;
+  projectsWorkflowPoGenHint: string;
+  projectsWorkflowAcceptanceLabel: string;
+  projectsWorkflowMachineCheck: string;
+  projectsWorkflowReviewerCheck: string;
+  projectsWorkflowAssumptions: string;
+  projectsWorkflowPhases: string;
+  projectsWorkflowPhaseNodes: (count: number) => string;
+  projectsWorkflowDiagProjectStatus: string;
+  projectsWorkflowDiagHealthState: string;
+  projectsWorkflowDiagTasks: string;
+  projectsWorkflowDiagBlocked: string;
+  projectsWorkflowDiagWaiting: string;
+  projectsWorkflowDiagDispatchable: string;
+  projectsWorkflowDiagGate: string;
+  projectsWorkflowDiagSuggestion: string;
+  projectsWorkflowDiagBlockedTasks: string;
+  projectsWorkflowDiagTaskBlocked: string;
+  projectsWorkflowDiagEvidence: string;
+  projectsWorkflowDiagCompactTasks: (count: number) => string;
+  projectsWorkflowDiagNoBlocker: string;
+  projectsWorkflowDiagBlockerCount: (count: number) => string;
+  projectsWorkflowStrategyLabel: string;
+  projectsWorkflowReasonLabel: string;
+  projectsWorkflowPublicProgress: string;
+  projectsWorkflowCurrentPhase: string;
+  projectsWorkflowRecoverySuggestion: string;
+  projectsWorkflowRecoveryLabel: string;
+  projectsWorkflowLatestProgress: string;
+  projectsWorkflowScriptCheckpoint: string;
+  projectsWorkflowCheckpointWaiting: string;
+  projectsWorkflowCheckpointFailed: string;
+  projectsWorkflowParallelOrch: string;
+  projectsWorkflowPolicy: string;
+  projectsWorkflowBranch: string;
+  projectsWorkflowBlockingFailures: string;
+  projectsWorkflowCompletedCount: (done: number, total: number) => string;
+  projectsWorkflowParallelBranch: string;
+
+  // projects - workflow node status labels
+  projectsNodeStatusPending: string;
+  projectsNodeStatusReady: string;
+  projectsNodeStatusRunning: string;
+  projectsNodeStatusCompleted: string;
+  projectsNodeStatusFailed: string;
+  projectsNodeStatusBlocked: string;
+  projectsNodeStatusCancelled: string;
+
+  // projects - workflow progress labels
+  projectsWorkflowProgressRunning: (progress: string) => string;
+  projectsWorkflowProgressBlocked: (progress: string) => string;
+  projectsWorkflowProgressFailed: (progress: string) => string;
+  projectsWorkflowProgressCancelled: (progress: string) => string;
+  projectsWorkflowProgressCompleted: (progress: string) => string;
+
+  // projects - workflow failure policy labels
+  projectsFailurePolicyRequiredAll: string;
+  projectsFailurePolicyCollectErrors: string;
+  projectsFailurePolicyFailFast: string;
+  projectsFailurePolicyQuorum: string;
+  projectsFailurePolicyDefault: string;
+
+  // projects - workflow recovery labels
+  projectsRecoveryResumeCompleted: string;
+  projectsRecoveryWaitRuntime: string;
+  projectsRecoveryRerunFromStart: string;
+  projectsWorkflowCacheSaved: (count: number) => string;
+
+  // projects - project status in workflow context
+  projectsLabelStatusActive: string;
+  projectsLabelStatusCreated: string;
+  projectsLabelStatusDraft: string;
+  projectsLabelStatusPlanning: string;
+  projectsLabelStatusReview: string;
+  projectsLabelStatusDelivered: string;
+  projectsLabelStatusClosed: string;
+  projectsLabelStatusUnknown: string;
+
+  // projects - health state labels in workflow context
+  projectsHealthIdle: string;
+  projectsHealthHealthy: string;
+  projectsHealthRunning: string;
+  projectsHealthDispatchable: string;
+  projectsHealthWaiting: string;
+  projectsHealthNeedsReview: string;
+  projectsHealthBlocked: string;
+  projectsHealthFailed: string;
+  projectsHealthComplete: string;
+  projectsHealthClosed: string;
+  projectsHealthUnknown: string;
+
+  // projects - detail page (additional)
+  projectsDetailAgentsTab: string;
+  projectsDetailExecutionModeLabel: string;
+  projectsDetailExecutionModeGroup: string;
+  projectsDetailExecDirect: string;
+  projectsDetailExecAuto: string;
+  projectsDetailExecWorkflowPreferred: string;
+  projectsDetailProjectNotFound: string;
+  projectsDetailBackToProjects: string;
+  projectsDetailProjectInstanceId: string;
+  projectsDetailFilesCount: (count: number) => string;
+  projectsDetailCloseProject: string;
+  projectsDetailPlanInterrupted: string;
+  projectsDetailWaitingPoPlan: string;
+  projectsDetailPlanReady: (version: number) => string;
+  projectsDetailNoAgents: string;
+  projectsDetailWorkflowLabel: string;
+  projectsDetailSummaryCollapse: string;
+  projectsDetailSummaryExpand: string;
+  projectsDetailTaskScores: string;
+  projectsDetailDispatchableLabel: string;
+  projectsDetailBlockedLabel: string;
+  projectsDetailWaitingLabel: string;
+  projectsDetailNeedsAction: string;
+  projectsDetailRetryBusy: string;
+  projectsDetailRetryCooling: string;
+  projectsDetailRetryPlan: string;
+  // toast / notice messages
+  projectsDetailApproveFailedNotReady: string;
+  projectsDetailApproveSuccess: string;
+  projectsDetailDispatchFailed: string;
+  projectsDetailDispatchWorkflowStarted: string;
+  projectsDetailDispatchTasksDispatched: (count: number) => string;
+  projectsDetailDispatchNone: string;
+  projectsDetailExecModeSwitched: (label: string) => string;
+  projectsDetailExecModeFailed: string;
+  projectsDetailCloseSuccess: string;
+  projectsDetailCloseFailed: string;
+  projectsDetailRetryNotifying: string;
+  projectsDetailRetryReassigned: (agent: string) => string;
+  projectsDetailRetrySuccess: string;
+  projectsDetailRetryFailed: string;
+  projectsDetailExportSuccess: string;
+  projectsDetailExportFailed: string;
+  projectsDetailDiagnoseSuccess: string;
+  projectsDetailDiagnoseFailed: string;
+  projectsDetailAgentReviewFailed: string;
+  projectsDetailTaskWorkflowFailed: string;
+  projectsDetailWorkflowTaskStarted: string;
+  projectsDetailWorkflowAgentStarted: string;
+  projectsDetailWorkflowTaskStartFailed: string;
+  projectsDetailWorkflowAgentStartFailed: string;
+  projectsDetailWorkflowCancelSuccess: string;
+  projectsDetailWorkflowCancelFailed: string;
+  projectsDetailContinueMissingWorkflowId: string;
+  projectsDetailContinueResumedWorkflow: string;
+  projectsDetailContinueNoScript: string;
+  projectsDetailContinueKswarmUnavailable: string;
+  projectsDetailContinueResumeFailed: string;
+  projectsDetailContinueResumeFailedRetry: string;
+  projectsDetailContinueNotifiedPo: string;
+  projectsDetailContinueNotifyFailed: string;
+  projectsDetailContinueNotifyUnavailable: string;
+  projectsDetailContinueSubmittedReview: string;
+  projectsDetailContinueProjectAdvanced: string;
+  projectsDetailContinueStateChanged: string;
+  projectsDetailContinueNoRecoverableArtifacts: string;
+  projectsDetailContinueNeedsDiagnose: string;
+  projectsDetailContinueNeedsConfirm: string;
+  projectsDetailContinueFailed: string;
+  projectsDetailAskXiaokFailed: string;
+  projectsDetailWorkflowServiceOutdated: string;
+  projectsDetailAskXiaokThreadTitle: (projectName: string) => string;
+
+  // projects - task detail drawer
+  projectsTaskDetailTitle: string;
+  projectsTaskStatusPending: string;
+  projectsTaskStatusDispatched: string;
+  projectsTaskStatusAccepted: string;
+  projectsTaskStatusInProgress: string;
+  projectsTaskStatusSubmitted: string;
+  projectsTaskStatusReview: string;
+  projectsTaskStatusDone: string;
+  projectsTaskStatusFailed: string;
+  projectsTaskStatusBlocked: string;
+  projectsTaskStatusCancelled: string;
+  projectsTaskWorkflowExec: string;
+  projectsTaskDirectExec: string;
+  projectsTaskCreated: string;
+  projectsTaskStarted: string;
+  projectsTaskCompleted: string;
+  projectsTaskWorkflowProgress: string;
+  projectsTaskNodeDetails: string;
+  projectsTaskParallelGroups: string;
+  projectsTaskReviewResult: string;
+  projectsTaskArtifacts: string;
+  projectsTaskBlockedReason: string;
+  projectsTaskFailureReason: string;
+  projectsTaskUnknownReason: string;
+  projectsTaskStartWorkflow: string;
+
+  // projects - kanban board (additional)
+  projectsKanbanStartTime: string;
+  projectsKanbanCompleteTime: string;
+  projectsKanbanExecWorkflow: string;
+  projectsKanbanExecDirect: string;
+  projectsKanbanExecAutoSelect: string;
+  projectsKanbanExecHighQuality: string;
+  projectsKanbanReasonDeliveryReview: string;
+  projectsKanbanReasonQualityGate: string;
+  projectsKanbanReasonEvidenceChain: string;
+  projectsKanbanReasonRetryAfterFailure: string;
+  projectsKanbanReasonReworkReview: string;
+  projectsKanbanReasonBlockedDiagnose: string;
+  projectsKanbanReasonHighQuality: string;
+  projectsKanbanReasonManualWorkflow: string;
+  projectsKanbanSuspended: string;
+  projectsKanbanWaitRetry: string;
+  projectsKanbanBlocked: string;
+  projectsKanbanCancelled: string;
+  projectsKanbanFailed: string;
+  projectsKanbanCompleted: string;
+  projectsKanbanTaskDone: string;
+  projectsKanbanUseWorkflow: string;
+  projectsKanbanDeleteProject: string;
+  projectsKanbanNodeCount: (count: string) => string;
+
+  // projects - activity timeline (additional)
+  projectsActivityPoCreatedTasks: string;
+  projectsActivityHumanAddedTasks: string;
+  projectsActivityTaskAccepted: string;
+  projectsActivityTaskQualityReview: string;
+  projectsActivityTaskBlocked: string;
+  projectsActivityProjectDelivered: string;
+  projectsActivityProjectClosed: string;
+  projectsActivityApprovalPending: string;
+  projectsActivityPlanSubmitted: string;
+  projectsActivityPlanRevised: string;
+  projectsActivityTaskReviewed: string;
+  projectsActivityWorkflowStarted: string;
+  projectsActivityWorkflowCompleted: string;
+  projectsActivityWorkflowCancelled: string;
+  projectsActivityWorkflowGateCompleted: string;
+  projectsActivityWorkflowNodeSubmitted: string;
+  projectsActivityWorkflowNodeReviewed: string;
+  projectsActivityWorkflowNodeBlocked: string;
+  projectsActivityHumanActionsTitle: string;
+  projectsActivityWorkflowRunName: (id: string) => string;
+  projectsActivityDiagnoseRun: string;
+
+  // projects - create agent (additional)
+  projectsAgentTypeWorkerDesc: string;
+  projectsAgentTypePoDesc: string;
+  projectsAgentTypeAllDesc: string;
+  projectsAgentConfigTitle: string;
+  projectsAgentNextStep: string;
+  projectsAgentBack: string;
+  projectsAgentRuntimeTitle: string;
+  projectsAgentXiaokBuiltin: string;
+  projectsAgentRecommended: string;
+  projectsAgentNotInstalled: string;
+  projectsAgentXiaokRunDesc: string;
+  projectsAgentXiaokRunSubDesc: string;
+  projectsAgentProviderLabel: string;
+  projectsAgentFollowPlatform: string;
+  projectsAgentFollowPlatformHint: string;
+  projectsAgentModelLabel: string;
+  projectsAgentSelectModel: string;
+  projectsAgentModelDefault: string;
+  projectsAgentInstructionsLabel: string;
+  projectsAgentInstructionsOptional: string;
+  projectsAgentCreateFirstAgent: string;
+  projectsAgentCreateHint: string;
+  projectsAgentCountLabel: (count: number) => string;
+  projectsAgentCreateAgentTabHint: string;
+
+  // projects - edit agent (additional)
+  projectsEditAgentProviderLabel: string;
+  projectsEditAgentSelectModel: string;
+  projectsEditAgentSystemPromptPlaceholder: string;
+  projectsEditAgentApiKeyNotConfigured: string;
+
+  // projects - intervention
+  projectsInterventionDefaultHeadline: string;
+  projectsInterventionBusy: string;
+  projectsInterventionContinueDefault: string;
+  projectsInterventionAskXiaokDefault: string;
+  projectsInterventionViewReason: string;
+  projectsInterventionReasonTitle: string;
+  projectsInterventionTaskLabel: string;
+  projectsInterventionCurrentJudgment: string;
+  projectsInterventionDefaultJudgment: string;
+  projectsInterventionFailureReasonLabel: string;
+  projectsInterventionFeedbackLabel: string;
+  projectsInterventionImpact: (count: number) => string;
+  projectsInterventionSystemSuggestion: string;
+  projectsInterventionStrategyRecoverSubmission: string;
+  projectsInterventionStrategyRetryRepair: string;
+  projectsInterventionStrategyCompleteRetry: string;
+  projectsInterventionStrategyRestartRetry: string;
+  projectsInterventionStrategyNeedsConversation: string;
+  projectsInterventionStrategyDefault: string;
+  projectsInterventionUnknownTask: string;
+
+  // projects - inline card
+  projectsInlineAgentCount: (count: number) => string;
+  projectsInlineWorkflowRunning: string;
+  projectsInlineWorkflowCompleted: string;
+  projectsInlineWorkflowBlocked: string;
+  projectsInlineWorkflowFailed: string;
+  projectsInlineWorkflowExec: string;
+  projectsInlinePoDecomposing: string;
+
+  // projects - artifact preview (additional)
+  projectsArtifactAddToKb: string;
+  projectsArtifactKbAdded: string;
+  projectsArtifactKb: string;
+  projectsArtifactDiscuss: string;
+  projectsArtifactSendToChat: string;
+  projectsArtifactExitFullscreen: string;
+  projectsArtifactFullscreen: string;
+  projectsArtifactDownload: string;
+
+  // projects - deliverable view (additional)
+  projectsDeliverableGenerated: string;
+  projectsDeliverableProjectFiles: string;
+  projectsDeliverableProjectWorkspace: string;
+  projectsDeliverableProjectDeliverable: string;
+  projectsDeliverableTaskOutputs: string;
+
+  // projects - progress card (additional)
+  projectsProgressDone: string;
+  projectsProgressDoneStopped: (done: number, stopped: number) => string;
+  projectsProgressTasks: (done: number, total: number) => string;
+
+  // projects - card (additional)
+  projectsCardTaskProgress: (done: number, total: number) => string;
+  projectsCardTaskProgressStopped: (done: number, stopped: number) => string;
+  projectsCardDeleteTitle: string;
+
+  // projects - create project (additional)
+  projectsCreateNoAgents: string;
+  projectsCreateWorkerOptional: string;
+  projectsCreateWorkDirOptional: string;
+  projectsCreateSelectDir: string;
+  projectsCreateAgentOffline: string;
+
+  // projects - export markdown labels
+  projectsExportStatus: string;
+  projectsExportCreatedAt: string;
+  projectsExportUpdatedAt: string;
+  projectsExportDeliveredAt: string;
+  projectsExportClosedAt: string;
+  projectsExportGoal: string;
+  projectsExportRequirements: string;
+  projectsExportWorkspace: string;
+  projectsExportWorkspacePath: string;
+  projectsExportWorkspaceFiles: (count: number) => string;
+  projectsExportPlan: string;
+  projectsExportAnalysis: string;
+  projectsExportSuccessCriteria: string;
+  projectsExportPhases: string;
+  projectsExportPhaseLabel: (id: string) => string;
+  projectsExportAcceptanceCriteria: string;
+  projectsExportPlanVersion: (version: number) => string;
+  projectsExportTasks: string;
+  projectsExportTaskStatus: string;
+  projectsExportTaskAssignee: string;
+  projectsExportTaskDescription: string;
+  projectsExportTaskPhase: string;
+  projectsExportTaskResult: string;
+  projectsExportTaskArtifacts: string;
+  projectsExportAgents: string;
+  projectsExportActivityLog: string;
+  projectsExportDeliverables: string;
+  projectsExportDeliveryNote: string;
+  projectsExportProjectSummary: string;
+  projectsExportScore: string;
+
+  // projects - workflow run status labels (for ActivityTimeline)
+  projectsWorkflowRunAwaitingApproval: string;
+  projectsWorkflowRunRunning: string;
+  projectsWorkflowRunBlocked: string;
+  projectsWorkflowRunCompleted: string;
+  projectsWorkflowRunFailed: string;
+  projectsWorkflowRunCancelled: string;
+
+  // projects - task workflow progress bar
+  projectsTaskProgressNodes: (done: string, total: string) => string;
+
+  // project status labels (used by kswarmStatus.ts)
+  projectHealthBlocked: string;
+  projectHealthFailed: string;
+  projectHealthWaiting: string;
+  projectHealthNeedsReview: string;
+  projectHealthRunning: string;
+  projectHealthHealthy: string;
+  projectHealthUnknown: string;
+  projectHealthBlockedShort: string;
+  projectHealthFailedShort: string;
+  projectHealthWaitingShort: string;
+  projectHealthNeedsReviewShort: string;
+  projectHealthRunningShort: string;
+  projectHealthHealthyShort: string;
+  projectHealthUnknownShort: string;
+  projectHealthMsgNeedsReview: string;
+  projectHealthMsgWaiting: string;
+  projectHealthMsgBlocked: string;
+  projectHealthMsgFailed: string;
+  agentStatusWaiting: string;
+  agentStatusWorking: string;
+  agentStatusBlocked: string;
+  agentStatusFailed: string;
+  agentStatusError: string;
+  agentStatusCompleted: string;
+  agentStatusOffline: string;
+  agentStatusIdle: string;
+
+  // connection settings
+  connectionPortRange: (label: string) => string;
+
+  // code execution panel
+  codeExecutionCode: string;
+  codeExecutionOutput: string;
+  codeExecutionNoOutput: string;
+
+  // citation badge
+  citationSourcesCount: (n: number) => string;
 
   // common
   commonConfirm: string;

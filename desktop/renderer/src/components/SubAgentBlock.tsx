@@ -57,7 +57,7 @@ export function SubAgentBlock({
   const [scrollEdge, setScrollEdge] = useState<ScrollEdge>('none')
 
   const displayOutput = output?.trim() ? output : error?.trim() ? error : undefined
-  const emptyOutputLabel = status === 'completed' ? 'Sub-agent completed without text output' : t.agentNoOutput
+  const emptyOutputLabel = status === 'completed' ? t.subAgentCompletedNoOutput : t.agentNoOutput
   const rawLabel = nickname || personaId || t.agentSubAgent
   const streamTw = !!live
   const displayedLabel = useTypewriter(rawLabel, !streamTw)

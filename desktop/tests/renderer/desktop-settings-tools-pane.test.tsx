@@ -88,13 +88,13 @@ describe('DesktopSettings tools pane', () => {
     expect(screen.getByText('抓取 Provider')).toBeInTheDocument();
     expect(screen.getByText('Jina Reader')).toBeInTheDocument();
     // Firecrawl kept as not_implemented placeholder
-    expect(screen.getByText('Firecrawl')).toBeInTheDocument();
+    expect(screen.getAllByText('Firecrawl').length).toBeGreaterThanOrEqual(1);
 
     const ddgRadio = screen.getByLabelText('search-duckduckgo') as HTMLInputElement;
     expect(ddgRadio.checked).toBe(true);
 
     const firecrawlRadio = screen.getByLabelText('fetch-firecrawl') as HTMLInputElement;
-    expect(firecrawlRadio.disabled).toBe(true);
+    expect(firecrawlRadio.disabled).toBe(false);
 
     // Test buttons present
     expect(screen.getByLabelText('test-search')).toBeInTheDocument();

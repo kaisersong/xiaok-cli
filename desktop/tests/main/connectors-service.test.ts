@@ -57,7 +57,7 @@ describe('ConnectorsService', () => {
     expect(ready?.runtime_state).toBe('ready');
   });
 
-  it('reflects not_implemented for searxng and firecrawl', async () => {
+  it('reflects not_implemented for searxng and ready for firecrawl', async () => {
     await service.setConfig({
       search: { provider: 'searxng' },
       fetch: { provider: 'firecrawl' },
@@ -65,7 +65,7 @@ describe('ConnectorsService', () => {
     const searxng = service.listProviders().find((r) => r.provider_name === 'web_search.searxng');
     const firecrawl = service.listProviders().find((r) => r.provider_name === 'web_fetch.firecrawl');
     expect(searxng?.runtime_state).toBe('not_implemented');
-    expect(firecrawl?.runtime_state).toBe('not_implemented');
+    expect(firecrawl?.runtime_state).toBe('ready');
   });
 
   it('rebuilds in-memory tool wiring on setConfig', async () => {
