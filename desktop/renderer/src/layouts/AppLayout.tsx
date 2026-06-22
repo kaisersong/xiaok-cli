@@ -17,7 +17,6 @@ const TITLEBAR_BUTTON_TOP = 4;
 type TitlebarControl = {
   key: string;
   label: string;
-  left: number;
   icon: React.ReactNode;
   onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
 };
@@ -32,12 +31,8 @@ function TitlebarControlButton({ control }: { control: TitlebarControl }) {
       onClick={control.onClick}
       style={{
         WebkitAppRegion: 'no-drag',
-        position: 'absolute',
-        top: TITLEBAR_BUTTON_TOP,
-        left: control.left,
         width: TITLEBAR_BUTTON_SIZE,
         height: TITLEBAR_BUTTON_SIZE,
-        zIndex: 50,
       } as React.CSSProperties}
       className="grid place-items-center rounded text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] transition-colors"
     >
@@ -70,21 +65,18 @@ export function AppLayout() {
         {
           key: 'back',
           label: t.appLayoutBack,
-          left: 132,
           icon: <ChevronLeft size={16} />,
           onClick: (event) => navigateHistory(-1, event),
         },
         {
           key: 'forward',
           label: t.appLayoutForward,
-          left: 164,
           icon: <ChevronRight size={16} />,
           onClick: (event) => navigateHistory(1, event),
         },
         {
           key: 'expand',
           label: t.appLayoutExpandSidebar,
-          left: 196,
           icon: <Sidebar size={16} />,
           onClick: (event) => {
             event.stopPropagation();
@@ -93,28 +85,21 @@ export function AppLayout() {
         },
       ]
     : [
-        // 注意: 这三个值与 sidebar 宽度（w-60 = 240px）紧密相关。
-        // 按钮 28px 宽 + 4px 间隔 + 16px 距分界线右侧 padding。
-        // 历史上多次被改回 148/180/212 导致按钮溢出 sidebar 边界，
-        // 修改前请阅读 docs/known-issues/titlebar-button-position.md
         {
           key: 'back',
           label: t.appLayoutBack,
-          left: 132,
           icon: <ChevronLeft size={16} />,
           onClick: (event) => navigateHistory(-1, event),
         },
         {
           key: 'forward',
           label: t.appLayoutForward,
-          left: 164,
           icon: <ChevronRight size={16} />,
           onClick: (event) => navigateHistory(1, event),
         },
         {
           key: 'collapse',
           label: t.appLayoutCollapseSidebar,
-          left: 196,
           icon: <PanelLeftClose size={16} />,
           onClick: (event) => {
             event.stopPropagation();
@@ -162,9 +147,15 @@ export function AppLayout() {
               className="absolute inset-y-0 left-0 w-60 border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)]"
             />
           )}
-          {titlebarControls.map((control) => (
-            <TitlebarControlButton key={control.key} control={control} />
-          ))}
+          <div
+            data-app-region="no-drag"
+            style={{ WebkitAppRegion: 'no-drag', position: 'absolute', top: TITLEBAR_BUTTON_TOP, right: sidebarCollapsed ? undefined : undefined, zIndex: 50 } as React.CSSProperties}
+            className="left-0 flex gap-1 w-60 justify-end pr-3"
+          >
+            {titlebarControls.map((control) => (
+              <TitlebarControlButton key={control.key} control={control} />
+            ))}
+          </div>
         </div>
         <div className="flex min-h-0 flex-1">
           {!sidebarCollapsed && (

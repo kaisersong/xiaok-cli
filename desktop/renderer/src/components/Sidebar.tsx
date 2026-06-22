@@ -303,10 +303,10 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     ? 'inline-flex h-8 items-center rounded-md px-1.5 text-[11px] font-medium text-[var(--c-text-tertiary)] transition-[background-color,color,transform] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)] active:scale-[0.96]'
     : 'inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--c-accent)] px-2 text-xs font-medium text-white transition-[background-color,color,transform] duration-[60ms] hover:opacity-90 active:scale-[0.96]';
   const scheduledListClassName = activeNav === 'new'
-    ? 'flex flex-col gap-0 max-h-[90px] overflow-y-auto'
+    ? 'flex flex-col gap-0 max-h-[90px] overflow-y-auto sidebar-scroll'
     : 'flex flex-col gap-0';
   const projectListClassName = activeNav === 'new'
-    ? 'flex flex-col gap-0 max-h-[150px] overflow-y-auto'
+    ? 'flex flex-col gap-0 max-h-[150px] overflow-y-auto sidebar-scroll'
     : 'flex flex-col gap-0';
 
   const handleUpdateReminderClick = () => {
@@ -399,10 +399,10 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
         <div className="h-px bg-[var(--c-border)]" />
       </div>
 
-      {/* Scheduled tasks list (Claude-style) */}
+      {/* Scheduled tasks list */}
       {sidebarTasks.length > 0 && (activeNav === 'new' || activeNav === 'automations') && (
-        <div className="px-3 py-2">
-          <div className="p-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
+        <div className="py-2">
+          <div className="px-3 p-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
             {t.sidebarScheduled}
           </div>
           <div className={scheduledListClassName}>
@@ -420,8 +420,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
 
       {/* Active projects list */}
       {activeProjects.length > 0 && (activeNav === 'new' || activeNav === 'projects') && (
-        <div className="px-3 py-2">
-          <div className="p-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
+        <div className="py-2">
+          <div className="px-3 p-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
             {t.sidebarProjects}
           </div>
           <div className={projectListClassName}>
@@ -436,10 +436,9 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
         </div>
       )}
 
-      {/* Divider before thread list */}
+      {/* Search + Thread list */}
       {!hideThreadList && (
         <>
-          {/* Search */}
           <div className="px-3 py-2">
             <div className="flex items-center gap-2 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5">
               <Search className="size-3.5 text-[var(--c-text-secondary)]" />
@@ -458,10 +457,9 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
             </div>
           </div>
 
-          {/* Thread list */}
-          <div className="flex-1 overflow-y-auto px-3 py-1">
+          <div className="flex-1 overflow-y-auto py-1 sidebar-scroll">
             {!gtdEnabled && (
-              <div className="py-1 text-xs font-medium text-[var(--c-text-secondary)]">
+              <div className="px-3 py-1 text-xs font-medium text-[var(--c-text-secondary)]">
                 {t.sidebarRecent}
               </div>
             )}
