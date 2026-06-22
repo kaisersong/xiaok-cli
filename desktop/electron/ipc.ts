@@ -389,6 +389,18 @@ export async function registerDesktopIpc(
       throw e;
     }
   });
+  ipcMain.handle('desktop:loops:listConstraints', (_event, loopId) => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.loopStore.getConstraintsByLoopId(readLoopId(loopId));
+  });
+  ipcMain.handle('desktop:loops:setConstraintActive', (_event, constraintId, active) => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.loopStore.setConstraintActive(String(constraintId), Boolean(active));
+  });
+  ipcMain.handle('desktop:loops:confirmConstraint', (_event, constraintId) => {
+    const loopRuntime = getLoopRuntime(options);
+    return loopRuntime.loopStore.confirmConstraint(String(constraintId));
+  });
   ipcMain.handle('desktop:loops:clearRunHistory', (_event, loopId, statuses) => {
     log('info', 'loops:clearRunHistory', { loopId, statuses });
     try {

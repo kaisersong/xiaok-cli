@@ -67,6 +67,7 @@ describe('LoopStore', () => {
 
     expect(rows.map(row => row.name)).toEqual([
       'loop_definitions',
+      'loop_learned_constraints',
       'loop_runs',
       'loop_stages',
       'user_loop_templates',

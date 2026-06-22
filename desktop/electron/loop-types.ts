@@ -127,3 +127,26 @@ export type BeginLoopRunResult =
 export type RecoverStaleRunsResult =
   | { ok: true; recovered: number; failedRunIds: string[] }
   | { ok: false; recovered: number; failedRunIds: string[]; error: string; partial: boolean };
+
+export type LearnedConstraintSource = 'llm_extraction' | 'rule_extraction' | 'user_manual';
+
+export type DeactivationReason = 'user' | 'stale' | 'ineffective' | 'overflow' | 'superseded';
+
+export interface LearnedConstraint {
+  id: string;
+  loopId: string;
+  source: LearnedConstraintSource;
+  rule: string;
+  sourceRunId: string;
+  failureKind: string | null;
+  failureReason: string | null;
+  active: boolean;
+  hitCount: number;
+  consecutiveIneffectiveCount: number;
+  createdAt: number;
+  updatedAt: number;
+  lastHitAt: number | null;
+  supersededBy: string | null;
+  deactivationReason: DeactivationReason | null;
+  extractionContext: string | null;
+}

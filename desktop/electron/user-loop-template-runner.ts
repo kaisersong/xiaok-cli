@@ -1,9 +1,12 @@
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, constants as fsConstants } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { CompletionEvidenceStore } from './completion-evidence-store.js';
 import type { CompletionOwnerKind } from './completion-evidence-types.js';
+import type { LoopLLMPort } from './loop-llm-port.js';
+import { extractViaLLM, extractViaRule } from './loop-llm-port.js';
 import { LoopStore } from './loop-store.js';
-import type { LoopRun, LoopRunTrigger, UserLoopTemplate } from './loop-types.js';
+import type { LearnedConstraint, LoopRun, LoopRunTrigger, UserLoopTemplate } from './loop-types.js';
 import { isSafeLoopOutputFileName } from './loop-output-paths.js';
 import type { TaskCreateInput, TaskPermissionMode, TaskSnapshot } from '../../src/runtime/task-host/types.js';
 
@@ -22,6 +25,7 @@ export interface CreateUserLoopTemplateRunnerOptions {
   loopStore: LoopStore;
   evidenceStore: CompletionEvidenceStore;
   taskPort: UserLoopTaskPort;
+  llmPort?: LoopLLMPort;
   now?: () => number;
   pollIntervalMs?: number;
   maxRunMs?: number;
@@ -47,6 +51,36 @@ const DEFAULT_POLL_INTERVAL_MS = 1_000;
  */
 const DEFAULT_LOOP_TASK_WATCHDOG_MS = 65 * 60_000;
 
+export function buildPromptWithConstraints(
+  basePrompt: string,
+  loopStore: LoopStore,
+  loopId: string
+): { prompt: string; injectedConstraintIds: string[] } {
+  const active = loopStore.getActiveConstraints(loopId);
+  if (!active.length) return { prompt: basePrompt, injectedConstraintIds: [] };
+
+  const block = active.map((c, i) => `${i + 1}. ${c.rule}`).join('\n');
+  const prompt = `${basePrompt}\n\n---\n以下规则必须遵守：\n${block}`;
+  loopStore.bumpConstraintHits(active.map(c => c.id));
+  return { prompt, injectedConstraintIds: active.map(c => c.id) };
+}
+
+export function runPreflight(template: UserLoopTemplate): { ok: true } | { ok: false; reason: string } {
+  if (template.kind === 'markdown_file') {
+    const dir = template.outputDirectory;
+    if (!dir || !isAbsolute(dir)) {
+      return { ok: false, reason: 'output_directory_not_absolute' };
+    }
+    try {
+      mkdirSync(dir, { recursive: true });
+      accessSync(dir, fsConstants.W_OK);
+    } catch {
+      return { ok: false, reason: 'output_directory_not_writable' };
+    }
+  }
+  return { ok: true };
+}
+
 export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunnerOptions): UserLoopTemplateRunner {
   const now = options.now ?? (() => Date.now());
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -63,6 +97,7 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
     template: UserLoopTemplate,
     input: RunUserLoopTemplateInput
   ): Promise<UserLoopTemplateRunResult> {
+    const runStartMs = now();
     const outputTarget = resolveUserLoopOutputTarget(template);
     if (!outputTarget.ok) {
       return blockRun(
@@ -77,17 +112,45 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
     }
 
     const outputPath = outputTarget.outputPath;
+
+    // Preflight: fast environment check before consuming agent resources
+    const preflight = runPreflight(template);
+    if (!preflight.ok) {
+      const result = blockRun(
+        options.loopStore,
+        options.evidenceStore,
+        input.runId,
+        'preflight_failed',
+        `Preflight failed: ${preflight.reason}`,
+        { reason: preflight.reason },
+        timestamp()
+      );
+      recordDuration(options.loopStore, input.runId, runStartMs, now());
+      return result;
+    }
+
+    // Expire stale constraints before injection
+    options.loopStore.deactivateStaleConstraints(input.loopId, now());
+
+    // Inject active constraints into prompt
+    const { prompt: enhancedPrompt, injectedConstraintIds } = buildPromptWithConstraints(
+      buildMarkdownLoopPrompt(template, outputPath),
+      options.loopStore,
+      input.loopId
+    );
+
     const executeStartedAt = timestamp();
     const executeStage = options.loopStore.startLoopStage(input.runId, input.loopId, 'execute', executeStartedAt, {
       trigger: input.trigger,
       outputPath,
+      injectedConstraintIds,
     });
 
     let taskId: string;
     try {
       mkdirSync(template.outputDirectory, { recursive: true });
       const created = await options.taskPort.createTask({
-        prompt: buildMarkdownLoopPrompt(template, outputPath),
+        prompt: enhancedPrompt,
         materials: [],
         permissionMode: permissionModeFor(input.trigger, template),
         watchdogMs: DEFAULT_LOOP_TASK_WATCHDOG_MS,
@@ -115,7 +178,10 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
         || `状态 ${snapshot.status}`;
       const message = `用户循环任务${snapshot.status === 'failed' ? '失败' : '未完成'}：${errorReason}`;
       options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_failed', message, [], timestamp());
-      return failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
+      const result = failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
+      recordDuration(options.loopStore, input.runId, runStartMs, now());
+      triggerAsyncExtraction(options, input, template, 'executor_failed', errorReason, snapshot);
+      return result;
     }
 
     options.loopStore.finishLoopStageSuccess(executeStage.id, [], timestamp(), `Task ${taskId} completed.`, { taskId });
@@ -123,20 +189,19 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
     const verifyStage = options.loopStore.startLoopStage(input.runId, input.loopId, 'verify', verifyStartedAt, {
       taskId,
       outputPath,
+      injectedConstraintIds,
     });
 
-    // Fallback: 如果 task 完成但文件不存在（通常是 finalization 阶段截断了 Write 工具），
-    // 尝试从 result.summary 提取 markdown 内容落盘
+    // Fallback: if task completed but file doesn't exist, try extracting from result.summary
     if (!existsSync(outputPath) && snapshot.result?.summary) {
       const summary = snapshot.result.summary;
       const hasMarkdownStructure = /^#\s+.+/m.test(summary) && summary.length > 500;
       if (hasMarkdownStructure) {
         try {
-          // 去除可能的代码块包裹（model 有时会用 ```markdown 包起来）
           const cleaned = summary.replace(/^```(?:markdown|md)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
           writeFileSync(outputPath, cleaned, 'utf-8');
         } catch {
-          // 写入失败则继续走正常 verify 流程
+          // write failure continues to normal verify flow
         }
       }
     }
@@ -163,7 +228,19 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
         message,
         timestamp()
       );
-      return resultFromRun('blocked', blocked, input.runId, options.loopStore);
+      const result = resultFromRun('blocked', blocked, input.runId, options.loopStore);
+      recordDuration(options.loopStore, input.runId, runStartMs, now());
+      // Verify failed: increment ineffective for injected constraints and trigger extraction
+      if (injectedConstraintIds.length > 0) {
+        options.loopStore.incrementConsecutiveIneffective(injectedConstraintIds);
+      }
+      triggerAsyncExtraction(options, input, template, 'missing_file_artifact', fileCheck.reason, snapshot);
+      return result;
+    }
+
+    // Verify success: reset ineffective counters
+    if (injectedConstraintIds.length > 0) {
+      options.loopStore.resetConsecutiveIneffective(injectedConstraintIds);
     }
 
     const summary = `Markdown file artifact verified: ${outputPath}`;
@@ -171,13 +248,16 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
     options.loopStore.finishLoopStageSuccess(verifyStage.id, stageEvidenceIds, timestamp(), summary, { outputPath });
     const runEvidenceIds = recordFileArtifactEvidence(options.evidenceStore, 'loop_run', input.runId, timestamp(), summary, outputPath);
     const success = options.loopStore.finishLoopRunSuccess(input.runId, runEvidenceIds, timestamp(), summary);
-    return resultFromRun('success', success, input.runId, options.loopStore);
+    const result = resultFromRun('success', success, input.runId, options.loopStore);
+    recordDuration(options.loopStore, input.runId, runStartMs, now());
+    return result;
   }
 
   async function runTaskCompletionLoop(
     template: UserLoopTemplate,
     input: RunUserLoopTemplateInput
   ): Promise<UserLoopTemplateRunResult> {
+    const runStartMs = now();
     const effectivePermission = permissionModeFor(input.trigger, template);
 
     if (effectivePermission === 'plan' && input.trigger.kind === 'scheduled') {
@@ -192,15 +272,26 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
       );
     }
 
+    // Expire stale constraints before injection
+    options.loopStore.deactivateStaleConstraints(input.loopId, now());
+
+    // Inject active constraints into prompt
+    const { prompt: enhancedPrompt, injectedConstraintIds } = buildPromptWithConstraints(
+      template.prompt,
+      options.loopStore,
+      input.loopId
+    );
+
     const executeStartedAt = timestamp();
     const executeStage = options.loopStore.startLoopStage(input.runId, input.loopId, 'execute', executeStartedAt, {
       trigger: input.trigger,
+      injectedConstraintIds,
     });
 
     let taskId: string;
     try {
       const created = await options.taskPort.createTask({
-        prompt: template.prompt,
+        prompt: enhancedPrompt,
         materials: [],
         permissionMode: effectivePermission,
         watchdogMs: DEFAULT_LOOP_TASK_WATCHDOG_MS,
@@ -210,7 +301,9 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
     } catch (error) {
       const message = (error as Error).message || 'Task creation failed.';
       options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_failed', message, [], timestamp());
-      return failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
+      const result = failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
+      recordDuration(options.loopStore, input.runId, runStartMs, now());
+      return result;
     }
 
     options.loopStore.updateLoopStageMetadata(executeStage.id, { taskId });
@@ -229,7 +322,15 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
         ? `Task auto-cancelled after ${Math.round(maxRunMs / 60_000)} minutes timeout.`
         : `Task ended with status: ${snapshot.status}`;
       options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_failed', message, [], timestamp());
-      return failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
+      const result = failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
+      recordDuration(options.loopStore, input.runId, runStartMs, now());
+      triggerAsyncExtraction(options, input, template, 'executor_failed', message, snapshot);
+      return result;
+    }
+
+    // Success: reset ineffective counters
+    if (injectedConstraintIds.length > 0) {
+      options.loopStore.resetConsecutiveIneffective(injectedConstraintIds);
     }
 
     const summary = `Task ${taskId} completed. Prompt: ${template.prompt.slice(0, 80)}`;
@@ -239,7 +340,9 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
       { taskId, promptPreview: template.prompt.slice(0, 100) }
     );
     const success = options.loopStore.finishLoopRunSuccess(input.runId, runEvidenceIds, timestamp(), summary);
-    return resultFromRun('success', success, input.runId, options.loopStore);
+    const result = resultFromRun('success', success, input.runId, options.loopStore);
+    recordDuration(options.loopStore, input.runId, runStartMs, now());
+    return result;
   }
 
   return {
@@ -486,4 +589,68 @@ function resultFromRun(
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function recordDuration(loopStore: LoopStore, runId: string, startMs: number, endMs: number): void {
+  const durationMs = Math.max(0, endMs - startMs);
+  loopStore.finishLoopRunWithDuration(runId, durationMs);
+}
+
+function triggerAsyncExtraction(
+  options: CreateUserLoopTemplateRunnerOptions,
+  input: RunUserLoopTemplateInput,
+  template: UserLoopTemplate,
+  failureKind: string,
+  failureReason: string,
+  snapshot: TaskSnapshot
+): void {
+  const llmPort = options.llmPort;
+  if (!llmPort) return;
+
+  const extractionContext = JSON.stringify({
+    loopTitle: template.prompt.slice(0, 100),
+    failureKind,
+    failureReason: failureReason.slice(0, 300),
+  }).slice(0, 500);
+
+  const extractionInput = {
+    loopTitle: template.prompt.slice(0, 100),
+    loopPrompt: template.prompt.slice(0, 500),
+    failureKind,
+    failureMessage: failureReason.slice(0, 300),
+    lastAgentOutput: snapshot.result?.summary?.slice(-500) ?? '',
+  };
+
+  setImmediate(async () => {
+    try {
+      const rule = await extractViaLLM(llmPort, extractionInput);
+      if (rule) {
+        options.loopStore.addConstraint({
+          loopId: input.loopId,
+          source: 'llm_extraction',
+          rule,
+          sourceRunId: input.runId,
+          failureKind,
+          failureReason,
+          extractionContext,
+          now: Date.now(),
+        });
+      }
+    } catch {
+      // LLM failed, try rule fallback
+      const fallback = extractViaRule(failureKind, failureReason);
+      if (fallback) {
+        options.loopStore.addConstraint({
+          loopId: input.loopId,
+          source: 'rule_extraction',
+          rule: fallback,
+          sourceRunId: input.runId,
+          failureKind,
+          failureReason,
+          extractionContext,
+          now: Date.now(),
+        });
+      }
+    }
+  });
 }

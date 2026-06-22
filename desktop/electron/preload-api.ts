@@ -124,6 +124,9 @@ export const PRELOAD_API_KEYS = [
   'getLoopRuns',
   'getEvidenceAnomalies',
   'runLoopNow',
+  'listLoopConstraints',
+  'setLoopConstraintActive',
+  'confirmLoopConstraint',
   'syncScheduledTasks',
   'getScheduledTasks',
   'createScheduledTask',
@@ -334,6 +337,9 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getLoopRuns: 'desktop:loops:listRuns',
   getEvidenceAnomalies: 'desktop:loops:listAnomalies',
   runLoopNow: 'desktop:loops:runNow',
+  listLoopConstraints: 'desktop:loops:listConstraints',
+  setLoopConstraintActive: 'desktop:loops:setConstraintActive',
+  confirmLoopConstraint: 'desktop:loops:confirmConstraint',
   syncScheduledTasks: 'desktop:syncScheduledTasks',
   getScheduledTasks: 'desktop:getScheduledTasks',
   createScheduledTask: 'desktop:createScheduledTask',
@@ -755,6 +761,9 @@ export interface DesktopApi {
   getLoopRuns(loopId: string): Promise<unknown[]>;
   getEvidenceAnomalies(loopId: string): Promise<unknown[]>;
   runLoopNow(loopId: string): Promise<unknown>;
+  listLoopConstraints(loopId: string): Promise<unknown[]>;
+  setLoopConstraintActive(constraintId: string, active: boolean): Promise<unknown>;
+  confirmLoopConstraint(constraintId: string): Promise<unknown>;
   syncScheduledTasks(tasks: Array<{ id: string; cronExpr: string; enabled: boolean }>): Promise<void>;
   getScheduledTasks(): Promise<unknown[]>;
   createScheduledTask(input: unknown): Promise<unknown>;
@@ -765,7 +774,7 @@ export interface DesktopApi {
   getTimedActionRuns(actionId: string): Promise<unknown[]>;
   approveTimedActionAuto(actionId: string): Promise<unknown | null>;
   revokeTimedActionAuto(actionId: string): Promise<unknown | null>;
-  onScheduledTaskDue(handler: (event: { taskId: string }) => void): () => void;
+  onScheduledTaskDue(handler: (event: { taskId: string; runtimeTaskId?: string; completed?: boolean; success?: boolean; title?: string; lastRunAt?: number; nextRunAt?: number; error?: string }) => void): () => void;
   listMemories(): Promise<unknown[]>;
   createMemory(input: { content: string; tags: string[]; source?: string }): Promise<unknown>;
   updateMemory(input: { id: string; content?: string; tags?: string[] }): Promise<unknown>;
@@ -1044,6 +1053,9 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getLoopRuns: (loopId) => ipcRenderer.invoke('desktop:loops:listRuns', loopId) as Promise<unknown[]>,
     getEvidenceAnomalies: (loopId) => ipcRenderer.invoke('desktop:loops:listAnomalies', loopId) as Promise<unknown[]>,
     runLoopNow: (loopId) => ipcRenderer.invoke('desktop:loops:runNow', loopId) as Promise<unknown>,
+    listLoopConstraints: (loopId) => ipcRenderer.invoke('desktop:loops:listConstraints', loopId) as Promise<unknown[]>,
+    setLoopConstraintActive: (constraintId, active) => ipcRenderer.invoke('desktop:loops:setConstraintActive', constraintId, active) as Promise<unknown>,
+    confirmLoopConstraint: (constraintId) => ipcRenderer.invoke('desktop:loops:confirmConstraint', constraintId) as Promise<unknown>,
     syncScheduledTasks: (tasks) => ipcRenderer.invoke('desktop:syncScheduledTasks', tasks) as Promise<void>,
     getScheduledTasks: () => ipcRenderer.invoke('desktop:getScheduledTasks') as Promise<unknown[]>,
     createScheduledTask: (input) => ipcRenderer.invoke('desktop:createScheduledTask', input) as Promise<unknown>,
@@ -1057,7 +1069,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     onScheduledTaskDue(handler) {
       const channel = 'desktop:scheduledTaskDue';
       const listener = (_event: unknown, payload: unknown) => {
-        handler(payload as { taskId: string });
+        handler(payload as { taskId: string; runtimeTaskId?: string; completed?: boolean; success?: boolean; title?: string; lastRunAt?: number; nextRunAt?: number; error?: string });
       };
       ipcRenderer.on(channel, listener);
       return () => {

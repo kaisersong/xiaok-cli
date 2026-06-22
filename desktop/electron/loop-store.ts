@@ -8,7 +8,10 @@ import {
   type BeginLoopRunResult,
   type CreateUserLoopTemplateInput,
   type CreateUserLoopTemplateResult,
+  type DeactivationReason,
   type IgnoredLegacyScheduleField,
+  type LearnedConstraint,
+  type LearnedConstraintSource,
   type LoopDefinition,
   type LoopDefinitionOrigin,
   type LoopDefinitionStatus,
@@ -90,6 +93,36 @@ interface LoopStageRow {
   metadata_json: string;
   created_at: number;
   updated_at: number;
+}
+
+interface LearnedConstraintRow {
+  id: string;
+  loop_id: string;
+  source: LearnedConstraintSource;
+  rule: string;
+  source_run_id: string;
+  failure_kind: string | null;
+  failure_reason: string | null;
+  active: number;
+  hit_count: number;
+  consecutive_ineffective_count: number;
+  created_at: number;
+  updated_at: number;
+  last_hit_at: number | null;
+  superseded_by: string | null;
+  deactivation_reason: DeactivationReason | null;
+  extraction_context: string | null;
+}
+
+export interface AddConstraintInput {
+  loopId: string;
+  source: LearnedConstraintSource;
+  rule: string;
+  sourceRunId: string;
+  failureKind?: string;
+  failureReason?: string;
+  extractionContext?: string;
+  now: number;
 }
 
 const BUILT_IN_LOOPS: Array<Pick<LoopDefinition, 'id' | 'title' | 'description'>> = [
@@ -609,6 +642,231 @@ export class LoopStore {
     return rows.map(row => this.stageRowToRecord(row));
   }
 
+  // --- Learned Constraints ---
+
+  addConstraint(input: AddConstraintInput): LearnedConstraint {
+    return this.transaction(() => {
+      // Dedup: find existing active/pending constraint with same four-tuple
+      const existing = this.db.prepare(`
+        select id from loop_learned_constraints
+        where loop_id = ? and source = ? and failure_kind = ? and failure_reason = ?
+          and superseded_by is null and deactivation_reason is null
+        order by created_at desc
+        limit 1
+      `).get(
+        input.loopId,
+        input.source,
+        input.failureKind ?? null,
+        input.failureReason ?? null
+      ) as { id: string } | undefined;
+
+      const newId = randomUUID();
+
+      if (existing) {
+        // Supersede the old constraint
+        this.db.prepare(`
+          update loop_learned_constraints
+          set superseded_by = ?, deactivation_reason = 'superseded', updated_at = ?
+          where id = ?
+        `).run(newId, input.now, existing.id);
+      }
+
+      this.db.prepare(`
+        insert into loop_learned_constraints (
+          id, loop_id, source, rule, source_run_id,
+          failure_kind, failure_reason, active, hit_count,
+          consecutive_ineffective_count, created_at, updated_at,
+          last_hit_at, superseded_by, deactivation_reason, extraction_context
+        ) values (
+          @id, @loopId, @source, @rule, @sourceRunId,
+          @failureKind, @failureReason, 0, 0,
+          0, @createdAt, @updatedAt,
+          null, null, null, @extractionContext
+        )
+      `).run({
+        id: newId,
+        loopId: input.loopId,
+        source: input.source,
+        rule: input.rule,
+        sourceRunId: input.sourceRunId,
+        failureKind: input.failureKind ?? null,
+        failureReason: input.failureReason ?? null,
+        createdAt: input.now,
+        updatedAt: input.now,
+        extractionContext: input.extractionContext ?? null,
+      });
+
+      this.bumpAutomationStoreVersion();
+      const row = this.db.prepare('select * from loop_learned_constraints where id = ?').get(newId) as LearnedConstraintRow | undefined;
+      return this.constraintRowToRecord(row!);
+    });
+  }
+
+  getActiveConstraints(loopId: string): LearnedConstraint[] {
+    const rows = typedRows<LearnedConstraintRow>(this.db.prepare(`
+      select * from loop_learned_constraints
+      where loop_id = ? and active = 1 and deactivation_reason is null
+      order by created_at desc
+      limit 10
+    `).all(loopId));
+    return rows.map(row => this.constraintRowToRecord(row));
+  }
+
+  getPendingConstraints(loopId: string): LearnedConstraint[] {
+    const rows = typedRows<LearnedConstraintRow>(this.db.prepare(`
+      select * from loop_learned_constraints
+      where loop_id = ? and active = 0 and deactivation_reason is null and superseded_by is null
+      order by created_at desc
+    `).all(loopId));
+    return rows.map(row => this.constraintRowToRecord(row));
+  }
+
+  bumpConstraintHits(ids: string[]): void {
+    if (ids.length === 0) return;
+    const now = Date.now();
+    for (const id of ids) {
+      this.db.prepare(`
+        update loop_learned_constraints
+        set hit_count = hit_count + 1, last_hit_at = ?, updated_at = ?
+        where id = ?
+      `).run(now, now, id);
+    }
+  }
+
+  confirmConstraint(constraintId: string): LearnedConstraint | undefined {
+    const now = Date.now();
+    const result = this.db.prepare(`
+      update loop_learned_constraints
+      set active = 1, updated_at = ?
+      where id = ? and active = 0 and deactivation_reason is null
+    `).run(now, constraintId);
+    if (result.changes === 0) return undefined;
+
+    // Check overflow: if more than 10 active for this loop, deactivate oldest
+    const row = this.db.prepare('select * from loop_learned_constraints where id = ?').get(constraintId) as LearnedConstraintRow | undefined;
+    if (row) {
+      const activeRows = typedRows<LearnedConstraintRow>(this.db.prepare(`
+        select * from loop_learned_constraints
+        where loop_id = ? and active = 1 and deactivation_reason is null
+        order by created_at desc
+      `).all(row.loop_id));
+      if (activeRows.length > 10) {
+        const overflow = activeRows.slice(10);
+        for (const old of overflow) {
+          this.db.prepare(`
+            update loop_learned_constraints
+            set active = 0, deactivation_reason = 'overflow', updated_at = ?
+            where id = ?
+          `).run(now, old.id);
+        }
+      }
+    }
+
+    this.bumpAutomationStoreVersion();
+    const updated = this.db.prepare('select * from loop_learned_constraints where id = ?').get(constraintId) as LearnedConstraintRow | undefined;
+    return updated ? this.constraintRowToRecord(updated) : undefined;
+  }
+
+  setConstraintActive(constraintId: string, active: boolean): LearnedConstraint | undefined {
+    const now = Date.now();
+    if (active) {
+      this.db.prepare(`
+        update loop_learned_constraints
+        set active = 1, deactivation_reason = null, updated_at = ?
+        where id = ?
+      `).run(now, constraintId);
+    } else {
+      this.db.prepare(`
+        update loop_learned_constraints
+        set active = 0, deactivation_reason = 'user', updated_at = ?
+        where id = ?
+      `).run(now, constraintId);
+    }
+    this.bumpAutomationStoreVersion();
+    const row = this.db.prepare('select * from loop_learned_constraints where id = ?').get(constraintId) as LearnedConstraintRow | undefined;
+    return row ? this.constraintRowToRecord(row) : undefined;
+  }
+
+  incrementConsecutiveIneffective(constraintIds: string[]): void {
+    if (constraintIds.length === 0) return;
+    const now = Date.now();
+    for (const id of constraintIds) {
+      this.db.prepare(`
+        update loop_learned_constraints
+        set consecutive_ineffective_count = consecutive_ineffective_count + 1, updated_at = ?
+        where id = ?
+      `).run(now, id);
+
+      // Auto-deactivate if reached 3
+      const row = this.db.prepare('select * from loop_learned_constraints where id = ?').get(id) as LearnedConstraintRow | undefined;
+      if (row && row.consecutive_ineffective_count >= 3) {
+        this.db.prepare(`
+          update loop_learned_constraints
+          set active = 0, deactivation_reason = 'ineffective', updated_at = ?
+          where id = ? and active = 1
+        `).run(now, id);
+      }
+    }
+    this.bumpAutomationStoreVersion();
+  }
+
+  resetConsecutiveIneffective(constraintIds: string[]): void {
+    if (constraintIds.length === 0) return;
+    const now = Date.now();
+    for (const id of constraintIds) {
+      this.db.prepare(`
+        update loop_learned_constraints
+        set consecutive_ineffective_count = 0, updated_at = ?
+        where id = ?
+      `).run(now, id);
+    }
+  }
+
+  deactivateStaleConstraints(loopId: string, now: number): number {
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+    const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+
+    // Active constraints not hit in 30 days
+    const staleActive = this.db.prepare(`
+      update loop_learned_constraints
+      set active = 0, deactivation_reason = 'stale', updated_at = ?
+      where loop_id = ? and active = 1 and deactivation_reason is null
+        and ((last_hit_at is null and created_at <= ?)
+             or (last_hit_at is not null and last_hit_at <= ?))
+    `).run(now, loopId, now - thirtyDaysMs, now - thirtyDaysMs);
+
+    // Pending constraints not confirmed in 14 days
+    const stalePending = this.db.prepare(`
+      update loop_learned_constraints
+      set deactivation_reason = 'stale', updated_at = ?
+      where loop_id = ? and active = 0 and deactivation_reason is null and superseded_by is null
+        and created_at <= ?
+    `).run(now, loopId, now - fourteenDaysMs);
+
+    const total = Number(staleActive.changes ?? 0) + Number(stalePending.changes ?? 0);
+    if (total > 0) {
+      this.bumpAutomationStoreVersion();
+    }
+    return total;
+  }
+
+  getConstraintsByLoopId(loopId: string): LearnedConstraint[] {
+    const rows = typedRows<LearnedConstraintRow>(this.db.prepare(`
+      select * from loop_learned_constraints
+      where loop_id = ?
+      order by created_at desc
+    `).all(loopId));
+    return rows.map(row => this.constraintRowToRecord(row));
+  }
+
+  finishLoopRunWithDuration(runId: string, durationMs: number): void {
+    this.db.prepare(`
+      update loop_runs
+      set duration_ms = ?
+      where id = ?
+    `).run(durationMs, runId);
+  }
+
   private applySchema(): void {
     this.db.exec(`
       create table if not exists loop_definitions (
@@ -691,13 +949,37 @@ export class LoopStore {
         key text primary key,
         value integer not null
       );
+
+      create table if not exists loop_learned_constraints (
+        id text primary key,
+        loop_id text not null,
+        source text not null,
+        rule text not null,
+        source_run_id text not null,
+        failure_kind text,
+        failure_reason text,
+        active integer not null default 0,
+        hit_count integer not null default 0,
+        consecutive_ineffective_count integer not null default 0,
+        created_at integer not null,
+        updated_at integer not null,
+        last_hit_at integer,
+        superseded_by text,
+        deactivation_reason text,
+        extraction_context text,
+        foreign key(loop_id) references loop_definitions(id)
+      );
+
+      create index if not exists idx_constraints_loop_active
+      on loop_learned_constraints(loop_id, active);
     `);
     this.ensureColumn('loop_definitions', 'origin', "text not null default 'built_in'");
     this.ensureColumn('loop_definitions', 'deleted_at', 'integer');
     this.ensureColumn('loop_definitions', 'delete_reason', 'text');
+    this.ensureColumn('loop_runs', 'duration_ms', 'integer default 0');
   }
 
-  private ensureColumn(tableName: 'loop_definitions', columnName: string, definition: string): void {
+  private ensureColumn(tableName: 'loop_definitions' | 'loop_runs' | 'user_loop_templates', columnName: string, definition: string): void {
     const columns = typedRows<TableColumnRow>(this.db.prepare(`pragma table_info(${tableName})`).all());
     if (columns.some(column => column.name === columnName)) return;
     this.db.exec(`alter table ${tableName} add column ${columnName} ${definition}`);
@@ -968,6 +1250,27 @@ export class LoopStore {
       metadata: parseJson<Record<string, unknown>>(row.metadata_json),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+    };
+  }
+
+  private constraintRowToRecord(row: LearnedConstraintRow): LearnedConstraint {
+    return {
+      id: row.id,
+      loopId: row.loop_id,
+      source: row.source,
+      rule: row.rule,
+      sourceRunId: row.source_run_id,
+      failureKind: row.failure_kind,
+      failureReason: row.failure_reason,
+      active: row.active === 1,
+      hitCount: row.hit_count,
+      consecutiveIneffectiveCount: row.consecutive_ineffective_count,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      lastHitAt: row.last_hit_at,
+      supersededBy: row.superseded_by,
+      deactivationReason: row.deactivation_reason,
+      extractionContext: row.extraction_context,
     };
   }
 }
