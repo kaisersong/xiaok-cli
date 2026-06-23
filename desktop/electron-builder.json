@@ -5,7 +5,9 @@
   "protocols": [
     {
       "name": "xiaok intent-broker protocol",
-      "schemes": ["intent-broker"]
+      "schemes": [
+        "intent-broker"
+      ]
     }
   ],
   "directories": {
@@ -19,12 +21,20 @@
     {
       "from": "../../kswarm/src",
       "to": "services/kswarm/src",
-      "filter": ["**/*.js", "**/*.json", "!**/node_modules/**"]
+      "filter": [
+        "**/*.js",
+        "**/*.json",
+        "!**/node_modules/**"
+      ]
     },
     {
       "from": "../../kswarm/scripts",
       "to": "services/kswarm/scripts",
-      "filter": ["**/*.js", "!**/node_modules/**", "!**/auto-worker.js"]
+      "filter": [
+        "**/*.js",
+        "!**/node_modules/**",
+        "!**/auto-worker.js"
+      ]
     },
     {
       "from": "overrides/kswarm/windows-xiaok-launch.js",
@@ -41,12 +51,18 @@
     {
       "from": "../../kswarm/node_modules/ws",
       "to": "services/kswarm/node_modules/ws",
-      "filter": ["**/*"]
+      "filter": [
+        "**/*"
+      ]
     },
     {
       "from": "../../intent-broker/src",
       "to": "services/intent-broker/src",
-      "filter": ["**/*.js", "**/*.json", "!**/node_modules/**"]
+      "filter": [
+        "**/*.js",
+        "**/*.json",
+        "!**/node_modules/**"
+      ]
     },
     {
       "from": "../../intent-broker/package.json",
@@ -55,17 +71,26 @@
     {
       "from": "../../intent-broker/bin",
       "to": "services/intent-broker/bin",
-      "filter": ["**/*.js"]
+      "filter": [
+        "**/*.js"
+      ]
     },
     {
       "from": "../../intent-broker/adapters",
       "to": "services/intent-broker/adapters",
-      "filter": ["**/*", "!**/node_modules/**", "!**/.env", "!**/.env.*"]
+      "filter": [
+        "**/*",
+        "!**/node_modules/**",
+        "!**/.env",
+        "!**/.env.*"
+      ]
     },
     {
       "from": "../../intent-broker/node_modules/ws",
       "to": "services/intent-broker/node_modules/ws",
-      "filter": ["**/*"]
+      "filter": [
+        "**/*"
+      ]
     },
     {
       "from": "../../kai-xiaok-plugins/plugins/kai-report-creator",
@@ -95,6 +120,10 @@
         "plugin.json",
         "skills/**/*"
       ]
+    },
+    {
+      "from": "app-update.yml",
+      "to": "."
     }
   ],
   "publish": {
@@ -104,7 +133,11 @@
     "releaseType": "release"
   },
   "mac": {
-    "target": ["dir", "dmg", "zip"],
+    "target": [
+      "dir",
+      "dmg",
+      "zip"
+    ],
     "icon": "build/icon.icns",
     "category": "public.app-category.productivity",
     "hardenedRuntime": true,
@@ -112,7 +145,10 @@
     "notarize": true
   },
   "win": {
-    "target": ["nsis", "portable"],
+    "target": [
+      "nsis",
+      "portable"
+    ],
     "icon": "build/icon.ico"
   },
   "nsis": {
@@ -125,6 +161,9 @@
     "artifactName": "${productName}-portable-${version}.${ext}"
   },
   "linux": {
-    "target": ["AppImage", "deb"]
+    "target": [
+      "AppImage",
+      "deb"
+    ]
   }
 }

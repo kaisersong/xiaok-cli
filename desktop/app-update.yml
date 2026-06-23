@@ -1,0 +1,4 @@
+provider: github
+owner: kaisersong
+repo: xiaok-cli
+releaseType: release

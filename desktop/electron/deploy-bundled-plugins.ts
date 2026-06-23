@@ -19,7 +19,7 @@ const __dirname = dirname(__filename);
 
 const execFileAsync = promisify(execFile);
 
-const BUNDLED_PLUGINS = ['kai-report-creator', 'kai-slide-creator', 'cua-computer-use'];
+const BUNDLED_PLUGINS = ['kai-report-creator', 'kai-slide-creator', 'cua-computer-use', 'kai-canvas-creator'];
 
 /** Semver-aware: returns true if a >= b */
 function semverGte(a: string, b: string): boolean {
