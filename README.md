@@ -46,7 +46,17 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
-Xiaok Desktop v1.4.11 makes this model visible in the product. Loops are no longer buried in general settings: user loops, schedules, run history, diagnostics, and output previews are grouped under the Automations surface. A schedule can trigger a loop, a loop run can point back to the schedule run that claimed it, and the UI keeps scheduler status separate from task-content status.
+Xiaok Desktop v1.4.14 closes the Loop Self-Improving feedback loop end-to-end: when a loop run fails, the system analyzes the failure (LLM or rule-based), records an improvement constraint, shows a desktop notification, and surfaces it in a dedicated "Constraints" tab inside Automations. Users can review, activate, or deactivate rules—and active rules are automatically injected into subsequent runs to prevent the same failure pattern. The Automation overview now shows numbers consistent with the tabs you actually click into.
+
+**What's New in v1.4.14:**
+
+- **Loop Self-Improving — Full Phase 1**: LLM extraction now wired via `createDesktopLoopLLMPort` (uses existing model adapter, 30s timeout, graceful degradation to rule fallback). `triggerAsyncExtraction` refactored with unified `recordConstraint` helper + `onConstraintAdded` callback. System notification fired on every new constraint. New `LoopConstraintsTab` UI component with active/pending/archived filter + per-loop filter + confirm/activate/deactivate actions. Real-time highlight when new constraints arrive via `desktop:loops:constraintAdded` event subscription.
+- **Automation Overview Alignment**: Overview card counts now match the actual sub-tab content: Loops = user templates only (excludes built-in diagnostic loops); Schedules = active + paused only (excludes completed/cancelled); "Attention" card scrolls to the in-page failure list instead of jumping to Diagnostics. All failure items (loop_run + timed_action_run) now have a "clear record" button.
+- **KSwarm Workflow Upstream Output Handoff**: `compactNodeOutput` extracts structured node output (summary + artifact paths + small inline fields). `enrichWorkflowNodeInput` collects completed upstream outputs via `dependsOn` edges with 10KB total cap and graceful summary-only fallback. Desktop `buildKSwarmWorkflowNodePrompt` renders upstream outputs as structured reference section. All new logic follows degradation-first: any failure skips injection silently (never blocks dispatch).
+- **Clear Schedule Run History**: New `TimedActionStore.clearActionRunHistory(actionId, statuses?)` + IPC `desktop:scheduledTasks:clearRunHistory` allows users to dismiss failed/stale timed-action runs from the Automation overview.
+- **ChatView Overflow Fix**: Added `break-words` to assistant message and streaming containers; scroll container now uses `overflow-x-hidden` to prevent horizontal scroll on long content.
+- **Project Flow Graph V4**: Actual execution path highlighting, PO start node, click-to-detail, top-to-bottom layout, Handle components for visible edges.
+- **Release Validation**: v1.4.14 verified with 1239 desktop tests (all pass), electron + renderer typecheck clean (baseline 0), build:main + build:renderer + pack:dir green, live install at `/Applications/xiaok.app`.
 
 **What's New in v1.4.11:**
 
