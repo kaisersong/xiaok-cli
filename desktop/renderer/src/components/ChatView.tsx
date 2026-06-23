@@ -275,7 +275,7 @@ export function ChatView({
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-[var(--c-bg-page)]">
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto" style={{ userSelect: 'text' }}>
+      <div ref={scrollRef} className="flex-1 overflow-x-hidden overflow-y-auto" style={{ userSelect: 'text' }}>
         <div className="mx-auto max-w-[800px] px-14 py-6">
           <div className="space-y-6">
             {messages.map((msg) => (
@@ -370,7 +370,7 @@ export function ChatView({
                   </div>
                 ) : (
                   <>
-                    <div className="max-w-[663px] text-sm text-[var(--c-text-primary)] leading-relaxed select-text">
+                    <div className="max-w-[663px] break-words text-sm text-[var(--c-text-primary)] leading-relaxed select-text">
                       <MarkdownRenderer content={msg.content} />
                     </div>
                     <div className="mt-0.5 flex gap-0.5 opacity-0 transition-opacity group-hover/assistantmsg:opacity-100">
@@ -384,7 +384,7 @@ export function ChatView({
 
             {/* Streaming assistant text */}
             {streamingText && (
-              <div className="max-w-[663px] text-sm text-[var(--c-text-primary)] leading-relaxed">
+              <div className="max-w-[663px] break-words text-sm text-[var(--c-text-primary)] leading-relaxed">
                 <MarkdownRenderer content={streamingText} streaming />
               </div>
             )}

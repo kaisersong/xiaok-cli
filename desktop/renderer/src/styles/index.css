@@ -407,7 +407,7 @@ html[data-theme='dark'] .sidebar-scroll:hover::-webkit-scrollbar-thumb:hover {
 
 @keyframes dagNodePulse {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
-  50% { box-shadow: 0 0 8px 2px var(--c-graph-node-running-border); }
+  50% { box-shadow: 0 0 10px 3px rgba(40, 180, 180, 0.55); }
 }
 
 .dag-edge-anim {
