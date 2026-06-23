@@ -3,9 +3,9 @@
  * Uses getProjectFullDetail to fetch activities, humanActions, plan, planProgress, workspace.
  */
 
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, LayoutGrid, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users, Download, FolderOpen, Circle, Loader, Clock, AlertTriangle, CircleOff } from 'lucide-react';
+import { ArrowLeft, FileText, LayoutGrid, Package, CheckCircle2, Send, XCircle, Archive, RefreshCw, Users, Download, FolderOpen, Circle, Loader, Clock, AlertTriangle, CircleOff, GitBranch } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { DispatchTasksResult, KSwarmProject, KSwarmProjectExecutionMode, ProjectIntervention, KSwarmWorkflowProposal, KSwarmWorkflowRun } from '../../hooks/useKSwarmClient';
@@ -31,7 +31,9 @@ import {
   summarizeProjectHealth,
 } from './kswarmStatus';
 
-type TabId = 'plan' | 'board' | 'agents' | 'activity' | 'deliverables';
+type TabId = 'plan' | 'board' | 'graph' | 'agents' | 'activity' | 'deliverables';
+
+const ProjectDagGraph = React.lazy(() => import('./ProjectDagGraph'));
 type ActionNotice = {
   action: 'approve' | 'dispatch' | 'retry' | 'export' | 'continue' | 'close' | 'workflow' | 'execution_mode';
   kind: 'info' | 'success' | 'error';
@@ -442,6 +444,7 @@ export function ProjectDetailPage() {
   const TABS: Array<{ id: TabId; label: string; icon: typeof FileText }> = useMemo(() => [
     { id: 'plan', label: t.projectsDetailPlan, icon: FileText },
     { id: 'board', label: t.projectsDetailKanban, icon: LayoutGrid },
+    { id: 'graph', label: t.projectsDetailGraphTab, icon: GitBranch },
     { id: 'agents', label: t.projectsDetailAgentsTab, icon: Users },
     { id: 'activity', label: t.projectsDetailActivity, icon: Clock },
     { id: 'deliverables', label: t.projectsDetailDeliverables, icon: Package },
@@ -1230,6 +1233,11 @@ export function ProjectDetailPage() {
             workflowRunningOwnsProgress={workflowRunningOwnsProgress}
             workflowRuns={detail.workflowRuns || []}
           />
+        )}
+        {activeTab === 'graph' && detail && (
+          <Suspense fallback={<div className="p-6 text-center text-sm text-[var(--c-text-tertiary)]">{t.projectsDetailGraphLoading}</div>}>
+            <ProjectDagGraph detail={detail} onJumpToBoard={(taskId) => { setActiveTab('board'); }} />
+          </Suspense>
         )}
         {activeTab === 'agents' && (
           <div className="p-6">

@@ -2806,6 +2806,24 @@ export interface LocaleStrings {
 
   // projects - detail page (additional)
   projectsDetailAgentsTab: string;
+  projectsDetailGraphTab: string;
+  projectsDetailGraphLoading: string;
+  projectsDetailGraphEmptyNoTasks: string;
+  projectsDetailGraphEmptyTaskBoardNoDeps: string;
+  projectsDetailGraphEmptyWorkflowNotStarted: string;
+  projectsDetailGraphEmptyTooLarge: (count: number) => string;
+  projectsDetailGraphReturnToBoard: string;
+  projectsDetailGraphPartialBanner: string;
+  projectsDetailGraphStatusPending: string;
+  projectsDetailGraphStatusReady: string;
+  projectsDetailGraphStatusRunning: string;
+  projectsDetailGraphStatusReview: string;
+  projectsDetailGraphStatusDone: string;
+  projectsDetailGraphStatusFailed: string;
+  projectsDetailGraphStatusBlocked: string;
+  projectsDetailGraphStatusCancelled: string;
+  projectsDetailGraphSkip: string;
+  projectsDetailGraphReplay: string;
   projectsDetailExecutionModeLabel: string;
   projectsDetailExecutionModeGroup: string;
   projectsDetailExecDirect: string;

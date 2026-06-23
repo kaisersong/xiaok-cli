@@ -39,6 +39,7 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@dagrejs/dagre": "^3.0.0",
     "@pierre/diffs": "^1.1.20",
     "@pierre/trees": "^1.0.0-beta.3",
     "@playwright/test": "^1.59.1",
@@ -48,6 +49,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "@xyflow/react": "^12.11.1",
     "electron": "^39.2.7",
     "electron-builder": "^26.0.12",
     "framer-motion": "^12.34.3",
