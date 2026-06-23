@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
-import { ReactFlow, Background, Controls, MiniMap, type NodeProps, type Edge } from '@xyflow/react';
+import { ReactFlow, Background, Controls, MiniMap, Handle, Position, type NodeProps, type Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { ExternalLink, Workflow, SkipForward, RefreshCw, ArrowLeft, ClipboardList } from 'lucide-react';
 import { useLocale } from '../../contexts/LocaleContext';
@@ -48,6 +48,7 @@ function DagNodeCard({ data }: NodeProps) {
         animation: pulse ? 'dagNodePulse 2s ease-in-out infinite' : undefined,
       }}
     >
+      <Handle type="target" position={Position.Top} style={{ opacity: 0, pointerEvents: 'none' }} />
       <div className="flex items-center gap-1">
         {isPo && <ClipboardList size={12} className="shrink-0 text-[var(--c-accent)]" />}
         <span className="flex-1 truncate font-medium text-[var(--c-text-primary)]">{nodeData.title}</span>
@@ -60,6 +61,7 @@ function DagNodeCard({ data }: NodeProps) {
       <div className="text-[10px] text-[var(--c-text-tertiary)]">
         {isPo ? t.projectsDetailGraphPoPlanLabel : (STATUS_LABELS[nodeData.status] ?? '—')}
       </div>
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0, pointerEvents: 'none' }} />
     </div>
   );
 }
