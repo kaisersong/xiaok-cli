@@ -32,6 +32,7 @@ import {
   Server,
   Copy,
   RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
@@ -3213,6 +3214,15 @@ function AboutPane() {
             <div className="text-xs text-[var(--c-text-tertiary)] mt-3">
               {t.desktopSettings.aboutAppDesc}
             </div>
+            <a
+              href="https://github.com/kaisersong"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-[var(--c-accent)] hover:underline mt-3"
+            >
+              github.com/kaisersong
+              <ExternalLink size={11} />
+            </a>
           </div>
         </Card>
       </Section>
