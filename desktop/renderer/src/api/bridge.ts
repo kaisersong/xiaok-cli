@@ -23,6 +23,7 @@ import type {
   CreateLoopScheduleInputView,
   CreateUserLoopTemplateInputView,
   CreateUserLoopTemplateResultView,
+  LearnedConstraintView,
   LoopDefinitionView,
   LoopOutputActionResultView,
   LoopOutputPreviewView,
@@ -395,6 +396,10 @@ export const api = {
     return await window.xiaokDesktop.clearLoopRunHistory(loopId, statuses);
   },
 
+  async clearScheduledTaskRunHistory(actionId: string, statuses?: string[]): Promise<{ ok: boolean; removed: number }> {
+    return await window.xiaokDesktop.clearScheduledTaskRunHistory(actionId, statuses);
+  },
+
   async createLoopSchedule(input: CreateLoopScheduleInputView): Promise<TimedActionView> {
     return await window.xiaokDesktop.createLoopSchedule(input) as TimedActionView;
   },
@@ -425,6 +430,22 @@ export const api = {
 
   async readLoopOutputPreview(loopId: string): Promise<LoopOutputPreviewView> {
     return await window.xiaokDesktop.readLoopOutputPreview(loopId) as LoopOutputPreviewView;
+  },
+
+  async listLoopConstraints(loopId: string): Promise<LearnedConstraintView[]> {
+    return await window.xiaokDesktop.listLoopConstraints(loopId) as LearnedConstraintView[];
+  },
+
+  async setLoopConstraintActive(constraintId: string, active: boolean): Promise<LearnedConstraintView | undefined> {
+    return await window.xiaokDesktop.setLoopConstraintActive(constraintId, active) as LearnedConstraintView | undefined;
+  },
+
+  async confirmLoopConstraint(constraintId: string): Promise<LearnedConstraintView | undefined> {
+    return await window.xiaokDesktop.confirmLoopConstraint(constraintId) as LearnedConstraintView | undefined;
+  },
+
+  onLoopConstraintAdded(handler: (constraint: LearnedConstraintView) => void): () => void {
+    return window.xiaokDesktop.onLoopConstraintAdded((constraint) => handler(constraint as LearnedConstraintView));
   },
 
   // ---------------------

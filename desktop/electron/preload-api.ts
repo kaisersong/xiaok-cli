@@ -127,6 +127,7 @@ export const PRELOAD_API_KEYS = [
   'listLoopConstraints',
   'setLoopConstraintActive',
   'confirmLoopConstraint',
+  'onLoopConstraintAdded',
   'syncScheduledTasks',
   'getScheduledTasks',
   'createScheduledTask',
@@ -137,6 +138,7 @@ export const PRELOAD_API_KEYS = [
   'getTimedActionRuns',
   'approveTimedActionAuto',
   'revokeTimedActionAuto',
+  'clearScheduledTaskRunHistory',
   'onScheduledTaskDue',
   'listMemories',
   'createMemory',
@@ -225,6 +227,7 @@ export const EVENT_SUBSCRIPTION_KEYS = [
   'onUpdateStatus',
   'onReminder',
   'onScheduledTaskDue',
+  'onLoopConstraintAdded',
   'onKSwarmStatus',
   'onKSwarmWsEvent',
   'onKSwarmConnectionStatus',
@@ -350,6 +353,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getTimedActionRuns: 'desktop:getTimedActionRuns',
   approveTimedActionAuto: 'desktop:timedAction:approveAuto',
   revokeTimedActionAuto: 'desktop:timedAction:revokeAuto',
+  clearScheduledTaskRunHistory: 'desktop:scheduledTasks:clearRunHistory',
   listMemories: 'desktop:listMemories',
   createMemory: 'desktop:createMemory',
   updateMemory: 'desktop:updateMemory',
@@ -764,6 +768,7 @@ export interface DesktopApi {
   listLoopConstraints(loopId: string): Promise<unknown[]>;
   setLoopConstraintActive(constraintId: string, active: boolean): Promise<unknown>;
   confirmLoopConstraint(constraintId: string): Promise<unknown>;
+  onLoopConstraintAdded(handler: (constraint: unknown) => void): () => void;
   syncScheduledTasks(tasks: Array<{ id: string; cronExpr: string; enabled: boolean }>): Promise<void>;
   getScheduledTasks(): Promise<unknown[]>;
   createScheduledTask(input: unknown): Promise<unknown>;
@@ -774,6 +779,7 @@ export interface DesktopApi {
   getTimedActionRuns(actionId: string): Promise<unknown[]>;
   approveTimedActionAuto(actionId: string): Promise<unknown | null>;
   revokeTimedActionAuto(actionId: string): Promise<unknown | null>;
+  clearScheduledTaskRunHistory(actionId: string, statuses?: string[]): Promise<{ ok: boolean; removed: number }>;
   onScheduledTaskDue(handler: (event: { taskId: string; runtimeTaskId?: string; completed?: boolean; success?: boolean; title?: string; lastRunAt?: number; nextRunAt?: number; error?: string }) => void): () => void;
   listMemories(): Promise<unknown[]>;
   createMemory(input: { content: string; tags: string[]; source?: string }): Promise<unknown>;
@@ -1066,10 +1072,21 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getTimedActionRuns: (actionId) => ipcRenderer.invoke('desktop:getTimedActionRuns', actionId) as Promise<unknown[]>,
     approveTimedActionAuto: (actionId) => ipcRenderer.invoke('desktop:timedAction:approveAuto', actionId) as Promise<unknown | null>,
     revokeTimedActionAuto: (actionId) => ipcRenderer.invoke('desktop:timedAction:revokeAuto', actionId) as Promise<unknown | null>,
+    clearScheduledTaskRunHistory: (actionId, statuses) => ipcRenderer.invoke('desktop:scheduledTasks:clearRunHistory', actionId, statuses) as Promise<{ ok: boolean; removed: number }>,
     onScheduledTaskDue(handler) {
       const channel = 'desktop:scheduledTaskDue';
       const listener = (_event: unknown, payload: unknown) => {
         handler(payload as { taskId: string; runtimeTaskId?: string; completed?: boolean; success?: boolean; title?: string; lastRunAt?: number; nextRunAt?: number; error?: string });
+      };
+      ipcRenderer.on(channel, listener);
+      return () => {
+        ipcRenderer.off(channel, listener);
+      };
+    },
+    onLoopConstraintAdded(handler) {
+      const channel = 'desktop:loops:constraintAdded';
+      const listener = (_event: unknown, payload: unknown) => {
+        handler(payload);
       };
       ipcRenderer.on(channel, listener);
       return () => {

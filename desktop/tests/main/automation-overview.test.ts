@@ -93,7 +93,11 @@ describe('automation overview snapshot', () => {
     expect(snapshot.totals).toMatchObject({
       loops: 1,
       userLoops: 1,
-      schedules: 2,
+      // Once-trigger 'scheduled-briefing' transitions to 'completed' after a
+      // successful run; 'failed-agent' stays 'active' because no
+      // maxConsecutiveFailures policy. Overview counts now match the Schedules
+      // tab which shows only active + paused.
+      schedules: 1,
       activeSchedules: 1,
       recentFailures: 2,
     });

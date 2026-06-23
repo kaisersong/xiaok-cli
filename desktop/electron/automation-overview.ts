@@ -115,9 +115,9 @@ export function buildAutomationOverviewSnapshot(input: BuildAutomationOverviewSn
     },
     globalBackgroundAutoRunEnabled: input.globalBackgroundAutoRunEnabled,
     totals: {
-      loops: definitions.filter(definition => definition.status !== 'deleted').length,
+      loops: definitions.filter(definition => definition.origin === 'user_template' && definition.status !== 'deleted').length,
       userLoops: definitions.filter(definition => definition.origin === 'user_template' && definition.status !== 'deleted').length,
-      schedules: scheduleActions.filter(action => action.status !== 'cancelled').length,
+      schedules: scheduleActions.filter(action => action.status === 'active' || action.status === 'paused').length,
       activeSchedules: scheduleActions.filter(action => action.status === 'active').length,
       diagnostics: recentFailures.length,
       recentFailures: recentFailures.length,

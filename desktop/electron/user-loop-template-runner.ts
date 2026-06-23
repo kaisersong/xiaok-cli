@@ -26,6 +26,7 @@ export interface CreateUserLoopTemplateRunnerOptions {
   evidenceStore: CompletionEvidenceStore;
   taskPort: UserLoopTaskPort;
   llmPort?: LoopLLMPort;
+  onConstraintAdded?: (constraint: LearnedConstraint) => void;
   now?: () => number;
   pollIntervalMs?: number;
   maxRunMs?: number;
@@ -605,13 +606,46 @@ function triggerAsyncExtraction(
   snapshot: TaskSnapshot
 ): void {
   const llmPort = options.llmPort;
-  if (!llmPort) return;
 
   const extractionContext = JSON.stringify({
     loopTitle: template.prompt.slice(0, 100),
     failureKind,
     failureReason: failureReason.slice(0, 300),
   }).slice(0, 500);
+
+  const recordConstraint = (source: LearnedConstraint['source'], rule: string) => {
+    try {
+      const constraint = options.loopStore.addConstraint({
+        loopId: input.loopId,
+        source,
+        rule,
+        sourceRunId: input.runId,
+        failureKind,
+        failureReason,
+        extractionContext,
+        now: Date.now(),
+      });
+      if (options.onConstraintAdded) {
+        try {
+          options.onConstraintAdded(constraint);
+        } catch (e) {
+          console.warn('[loop-runner] onConstraintAdded callback failed:', (e as Error)?.message);
+        }
+      }
+    } catch (e) {
+      console.warn(`[loop-runner] addConstraint (${source}) failed:`, (e as Error)?.message);
+    }
+  };
+
+  const addRuleConstraint = () => {
+    const fallback = extractViaRule(failureKind, failureReason);
+    if (fallback) recordConstraint('rule_extraction', fallback);
+  };
+
+  if (!llmPort) {
+    setImmediate(addRuleConstraint);
+    return;
+  }
 
   const extractionInput = {
     loopTitle: template.prompt.slice(0, 100),
@@ -625,32 +659,13 @@ function triggerAsyncExtraction(
     try {
       const rule = await extractViaLLM(llmPort, extractionInput);
       if (rule) {
-        options.loopStore.addConstraint({
-          loopId: input.loopId,
-          source: 'llm_extraction',
-          rule,
-          sourceRunId: input.runId,
-          failureKind,
-          failureReason,
-          extractionContext,
-          now: Date.now(),
-        });
+        recordConstraint('llm_extraction', rule);
+      } else {
+        addRuleConstraint();
       }
-    } catch {
-      // LLM failed, try rule fallback
-      const fallback = extractViaRule(failureKind, failureReason);
-      if (fallback) {
-        options.loopStore.addConstraint({
-          loopId: input.loopId,
-          source: 'rule_extraction',
-          rule: fallback,
-          sourceRunId: input.runId,
-          failureKind,
-          failureReason,
-          extractionContext,
-          now: Date.now(),
-        });
-      }
+    } catch (e) {
+      console.warn('[loop-runner] extractViaLLM failed:', (e as Error)?.message);
+      addRuleConstraint();
     }
   });
 }

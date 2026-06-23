@@ -398,6 +398,7 @@ export interface LocaleStrings {
   deleteThreadConfirmTitle: string
   deleteThreadConfirmBody: string
   deleteThreadConfirm: string
+  deleteThreadInlineConfirm: string
   deleteThreadCancel: string
   // share
   shareTitle: string
@@ -2428,6 +2429,34 @@ export interface LocaleStrings {
   automationsOverviewLoopsCount: string;
   automationsOverviewSchedulesCount: string;
   automationsOverviewFailuresCount: string;
+
+  // automation constraints (loop self-improving feedback)
+  automationsConstraints: string;
+  automationsConstraintsDesc: string;
+  automationsConstraintsEmpty: string;
+  automationsConstraintsLoopFilterAll: string;
+  automationsConstraintsActive: string;
+  automationsConstraintsPending: string;
+  automationsConstraintsArchived: string;
+  automationsConstraintsSourceLLM: string;
+  automationsConstraintsSourceRule: string;
+  automationsConstraintsSourceManual: string;
+  automationsConstraintsHits: (count: number) => string;
+  automationsConstraintsConfirm: string;
+  automationsConstraintsActivate: string;
+  automationsConstraintsDeactivate: string;
+  automationsConstraintsDeactivationReasonStale: string;
+  automationsConstraintsDeactivationReasonIneffective: string;
+  automationsConstraintsDeactivationReasonOverflow: string;
+  automationsConstraintsDeactivationReasonSuperseded: string;
+  automationsConstraintsDeactivationReasonUser: string;
+  automationsConstraintsCreatedAt: string;
+  automationsConstraintsFromFailure: string;
+  automationsConstraintsToastConfirmed: string;
+  automationsConstraintsToastDeactivated: string;
+  automationsConstraintsToastReactivated: string;
+  automationsConstraintsToastFailed: string;
+  automationsConstraintsNewBadge: string;
 
   // scheduled page
   scheduledTitle: string;

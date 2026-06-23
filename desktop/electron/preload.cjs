@@ -160,6 +160,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   getTimedActionRuns: (actionId) => ipcRenderer.invoke('desktop:getTimedActionRuns', actionId),
   approveTimedActionAuto: (actionId) => ipcRenderer.invoke('desktop:timedAction:approveAuto', actionId),
   revokeTimedActionAuto: (actionId) => ipcRenderer.invoke('desktop:timedAction:revokeAuto', actionId),
+  clearScheduledTaskRunHistory: (actionId, statuses) => ipcRenderer.invoke('desktop:scheduledTasks:clearRunHistory', actionId, statuses),
   showSaveDialog: (input) => ipcRenderer.invoke('desktop:showSaveDialog', input),
   saveFile: (input) => ipcRenderer.invoke('desktop:saveFile', input),
   listPrinciples: () => ipcRenderer.invoke('desktop:listPrinciples'),
@@ -167,6 +168,16 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   deletePrinciple: (id) => ipcRenderer.invoke('desktop:deletePrinciple', id),
   onScheduledTaskDue(handler) {
     const channel = 'desktop:scheduledTaskDue';
+    const listener = (_event, payload) => {
+      handler(payload);
+    };
+    ipcRenderer.on(channel, listener);
+    return () => {
+      ipcRenderer.off(channel, listener);
+    };
+  },
+  onLoopConstraintAdded(handler) {
+    const channel = 'desktop:loops:constraintAdded';
     const listener = (_event, payload) => {
       handler(payload);
     };

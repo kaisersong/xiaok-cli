@@ -2,13 +2,12 @@ import { useState, useEffect, useRef, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Search, X, Bolt, Pencil, RefreshCw, FolderKanban, ExternalLink, BookOpen, MoreHorizontal } from 'lucide-react';
+import { Plus, Search, X, Bolt, Pencil, RefreshCw, FolderKanban, ExternalLink, BookOpen, MoreHorizontal, Workflow } from 'lucide-react';
 import { api, type ThreadResponse } from '../api';
 import { useThreadList } from '../contexts/thread-list';
 import { useKSwarm } from '../contexts/KSwarmContext';
 import { useLocale } from '../contexts/LocaleContext';
 import { getDesktopApi } from '../shared/desktop';
-import { ConfirmDialog } from './shared/ConfirmDialog';
 import {
   collectScheduledRuntimeTaskIds,
   ensureAggregatedScheduledThread,
@@ -220,27 +219,14 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     : threads
   ).filter(t => !scheduledThreadIds.has(t.id) && !threadHasAnyRuntimeTask(t, scheduledRuntimeTaskIds));
 
-  const [deleteCandidate, setDeleteCandidate] = useState<{ id: string; title: string } | null>(null);
-  const [deleteLoading, setDeleteLoading] = useState(false);
-
-  const handleDelete = (e: React.MouseEvent, id: string) => {
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const t = threads.find(x => x.id === id);
-    setDeleteCandidate({ id, title: t?.title || '' });
-  };
-
-  const performDelete = async () => {
-    if (!deleteCandidate) return;
-    setDeleteLoading(true);
     try {
-      log.info('deleteThread', deleteCandidate.id);
-      await api.deleteThread(deleteCandidate.id);
-      removeThread(deleteCandidate.id);
+      log.info('deleteThread', id);
+      await api.deleteThread(id);
+      removeThread(id);
       log.info('deleteThread ok');
-    } finally {
-      setDeleteLoading(false);
-      setDeleteCandidate(null);
-    }
+    } catch { /* ignore */ }
   };
 
   const handleDoubleClick = (thread: ThreadResponse) => {
@@ -302,12 +288,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const updateReminderButtonClassName = hasUpdateFailure
     ? 'inline-flex h-8 items-center rounded-md px-1.5 text-[11px] font-medium text-[var(--c-text-tertiary)] transition-[background-color,color,transform] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)] active:scale-[0.96]'
     : 'inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--c-accent)] px-2 text-xs font-medium text-white transition-[background-color,color,transform] duration-[60ms] hover:opacity-90 active:scale-[0.96]';
-  const scheduledListClassName = activeNav === 'new'
-    ? 'flex flex-col gap-0 max-h-[90px] overflow-y-auto sidebar-scroll'
-    : 'flex flex-col gap-0';
-  const projectListClassName = activeNav === 'new'
-    ? 'flex flex-col gap-0 max-h-[150px] overflow-y-auto sidebar-scroll'
-    : 'flex flex-col gap-0';
+  const scheduledListClassName = 'flex flex-col gap-0 max-h-[90px] overflow-y-auto sidebar-scroll';
+  const projectListClassName = 'flex flex-col gap-0 max-h-[90px] overflow-y-auto sidebar-scroll';
 
   const handleUpdateReminderClick = () => {
     setShowUpdatePopover(prev => {
@@ -362,7 +344,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
             }`}
             title={t.sidebarAutomations}
           >
-            <Bolt size={16} className="shrink-0" />
+            <Workflow size={16} className="shrink-0" />
             <span>{t.sidebarAutomations}</span>
           </button>
           <button
@@ -457,9 +439,9 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto py-1 sidebar-scroll">
+          <div className="flex-1 overflow-y-auto px-2 py-1 sidebar-scroll">
             {!gtdEnabled && (
-              <div className="px-3 py-1 text-xs font-medium text-[var(--c-text-secondary)]">
+              <div className="p-1 text-xs font-medium text-[var(--c-text-secondary)]">
                 {t.sidebarRecent}
               </div>
             )}
@@ -484,7 +466,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                     {buckets.map(({ key, label }) => (
                       grouped[key].length > 0 && (
                         <div key={key} className="mb-2">
-                          <div className="py-1 text-xs font-medium text-[var(--c-text-secondary)]">{label}</div>
+                          <div className="p-1 text-xs font-medium text-[var(--c-text-secondary)]">{label}</div>
                           {grouped[key].map(thread => {
                             const isSelected = routerLocation.pathname === `/t/${thread.id}`;
                             return (
@@ -673,16 +655,6 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
           </div>
         </div>
       </div>
-      <ConfirmDialog
-        open={deleteCandidate !== null}
-        onClose={() => !deleteLoading && setDeleteCandidate(null)}
-        onConfirm={performDelete}
-        title={t.deleteThreadConfirmTitle}
-        message={t.deleteThreadConfirmBody}
-        confirmLabel={t.deleteThreadConfirm}
-        cancelLabel={t.deleteThreadCancel}
-        loading={deleteLoading}
-      />
     </aside>
   );
 }
@@ -820,6 +792,24 @@ function SidebarThreadListItem({
   const { t } = useLocale();
   const [bucketMenuOpen, setBucketMenuOpen] = useState(false);
   const bucketMenuRef = useRef<HTMLDivElement>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => { if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current); };
+  }, []);
+
+  const handleDeleteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirmingDelete) {
+      setConfirmingDelete(false);
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+      onDelete(e);
+    } else {
+      setConfirmingDelete(true);
+      confirmTimerRef.current = setTimeout(() => setConfirmingDelete(false), 2000);
+    }
+  };
 
   useEffect(() => {
     if (isEditing) {
@@ -933,10 +923,10 @@ function SidebarThreadListItem({
         </button>
         <button
           type="button"
-          onClick={onDelete}
-          className="ml-0.5 hidden shrink-0 p-0.5 text-[var(--c-text-secondary)] hover:text-red-500 group-hover:block"
+          onClick={handleDeleteClick}
+          className={`ml-0.5 shrink-0 p-0.5 ${confirmingDelete ? 'block text-[10px] font-medium text-red-500' : 'hidden text-[var(--c-text-secondary)] hover:text-red-500 group-hover:block'}`}
         >
-          <X className="size-3" />
+          {confirmingDelete ? t.deleteThreadInlineConfirm : <X className="size-3" />}
         </button>
       </div>
       {details.detailsOpen && !isEditing && (
