@@ -69,6 +69,12 @@
   --c-graph-node-cancelled-border: var(--c-text-muted);
   --c-graph-edge-depends: var(--c-border-mid);
   --c-graph-edge-blocked: var(--c-status-error-text);
+  --c-graph-edge-done: var(--c-status-success-text);
+  --c-graph-edge-active: var(--c-accent);
+  --c-graph-edge-future: #cfcfcf;
+  --c-graph-edge-plan: #c8c8c8;
+  --c-graph-node-plan-bg: rgba(11, 110, 110, 0.05);
+  --c-graph-node-plan-border: var(--c-accent);
 }
 
 /* Dark theme overrides — applied when <html data-theme="dark"> is set */
@@ -109,6 +115,9 @@ html[data-theme='dark'] {
   --c-graph-node-review-bg: rgba(245, 158, 11, 0.10);
   --c-graph-node-failed-bg: rgba(239, 68, 68, 0.10);
   --c-graph-node-blocked-bg: rgba(245, 158, 11, 0.10);
+  --c-graph-edge-future: #4a4845;
+  --c-graph-edge-plan: #5a5855;
+  --c-graph-node-plan-bg: rgba(78, 197, 197, 0.08);
 }
 
 html, body, #root {

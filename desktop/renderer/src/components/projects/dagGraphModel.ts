@@ -5,23 +5,42 @@ export type DagNodeStatus =
   | 'pending' | 'ready' | 'running' | 'awaiting_review'
   | 'done' | 'failed' | 'blocked' | 'cancelled' | 'unknown';
 
+export type DagNodeKind = 'task' | 'workflow_node' | 'po_plan';
+
 export interface DagNode {
   id: string;
   title: string;
   status: DagNodeStatus;
-  kind: 'task' | 'workflow_node';
+  kind: DagNodeKind;
   agentName?: string;
   errorMessage?: string;
   taskId?: string;
   workflowNodeId?: string;
   hasTaskWorkflow?: boolean;
+  startedAt?: number | null;
+  completedAt?: number | null;
+  parallelGroupId?: string | null;
+  pipelineStageIndex?: number | null;
+  workflowNode?: KSwarmWorkflowNode;
+  task?: KSwarmTask;
+  poPlan?: PoPlanData;
 }
+
+export interface PoPlanData {
+  analysis?: string;
+  successCriteria?: string[];
+  phases?: Array<{ id: string | number; name: string; itemCount?: number }>;
+  poAgent?: string;
+  projectGoal?: string;
+}
+
+export type DagEdgeKind = 'depends_on' | 'blocked_by' | 'inferred' | 'plan';
 
 export interface DagEdge {
   id: string;
   source: string;
   target: string;
-  kind: 'depends_on' | 'blocked_by';
+  kind: DagEdgeKind;
 }
 
 export interface DagGraph {
@@ -33,6 +52,7 @@ export interface DagGraph {
 }
 
 export const GRAPH_NODE_LIMIT = 200;
+export const PO_PLAN_NODE_ID = '__po_plan__';
 
 export const STATUS_STYLE: Record<DagNodeStatus, { bg: string; border: string }> = {
   pending: { bg: 'var(--c-graph-node-pending-bg)', border: 'var(--c-graph-node-pending-border)' },
@@ -88,6 +108,139 @@ function pickPrimaryWorkflowRun(runs?: KSwarmWorkflowRun[]): KSwarmWorkflowRun |
   return [...projectLevel].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
 }
 
+function nodeOrder(n: KSwarmWorkflowNode): number {
+  if (typeof n.pipelineStageIndex === 'number') return n.pipelineStageIndex;
+  if (typeof n.startedAt === 'number') return n.startedAt;
+  return 0;
+}
+
+interface InferredEdgeSource {
+  source: string;
+  target: string;
+  kind: DagEdgeKind;
+}
+
+function inferEdgesFromWorkflow(run: KSwarmWorkflowRun): InferredEdgeSource[] {
+  const inferred: InferredEdgeSource[] = [];
+  const phases = run.phases ?? [];
+  const nodesById = new Map<string, KSwarmWorkflowNode>();
+  for (const n of run.nodes) nodesById.set(n.id, n);
+
+  const phaseUnits: Array<{ phaseId: string | number; entryIds: string[]; exitIds: string[] }> = [];
+
+  if (phases.length > 0) {
+    for (const phase of phases) {
+      const phaseNodes = (phase.nodeIds ?? [])
+        .map(id => nodesById.get(id))
+        .filter((n): n is KSwarmWorkflowNode => Boolean(n));
+      if (phaseNodes.length === 0) continue;
+
+      const grouped = new Map<string | '__no_group__', KSwarmWorkflowNode[]>();
+      for (const n of phaseNodes) {
+        const key = n.parallelGroupId || '__no_group__';
+        const list = grouped.get(key) ?? [];
+        list.push(n);
+        grouped.set(key, list);
+      }
+
+      type Unit = { entryIds: string[]; exitIds: string[]; order: number };
+      const units: Unit[] = [];
+      for (const [key, members] of grouped) {
+        members.sort((a, b) => nodeOrder(a) - nodeOrder(b) || a.id.localeCompare(b.id));
+        const order = nodeOrder(members[0]);
+        if (key === '__no_group__') {
+          for (const m of members) {
+            units.push({ entryIds: [m.id], exitIds: [m.id], order: nodeOrder(m) });
+          }
+        } else {
+          units.push({
+            entryIds: members.map(m => m.id),
+            exitIds: members.map(m => m.id),
+            order,
+          });
+        }
+      }
+      units.sort((a, b) => a.order - b.order);
+
+      for (let i = 0; i + 1 < units.length; i++) {
+        for (const src of units[i].exitIds) {
+          for (const tgt of units[i + 1].entryIds) {
+            inferred.push({ source: src, target: tgt, kind: 'inferred' });
+          }
+        }
+      }
+
+      const phaseEntries = units.length > 0 ? units[0].entryIds : [];
+      const phaseExits = units.length > 0 ? units[units.length - 1].exitIds : [];
+      phaseUnits.push({ phaseId: phase.id, entryIds: phaseEntries, exitIds: phaseExits });
+    }
+
+    for (let i = 0; i + 1 < phaseUnits.length; i++) {
+      for (const src of phaseUnits[i].exitIds) {
+        for (const tgt of phaseUnits[i + 1].entryIds) {
+          inferred.push({ source: src, target: tgt, kind: 'inferred' });
+        }
+      }
+    }
+  }
+
+  return inferred;
+}
+
+function buildPoPlanNode(detail: ProjectFullDetail): DagNode | null {
+  const plan = detail.plan;
+  const project = detail.project;
+  if (!plan && !project?.poAgent && !project?.goal) return null;
+
+  const planPhases = (plan?.phases as Array<{ id: string | number; name?: string; items?: unknown[] }> | undefined) ?? [];
+
+  return {
+    id: PO_PLAN_NODE_ID,
+    title: 'PO 计划',
+    status: 'done',
+    kind: 'po_plan',
+    agentName: project?.poAgent || undefined,
+    poPlan: {
+      analysis: typeof plan?.analysis === 'string' ? plan.analysis : undefined,
+      successCriteria: Array.isArray(plan?.successCriteria) ? plan.successCriteria : undefined,
+      phases: planPhases.map(p => ({
+        id: p.id,
+        name: p.name || String(p.id),
+        itemCount: Array.isArray(p.items) ? p.items.length : undefined,
+      })),
+      poAgent: project?.poAgent || undefined,
+      projectGoal: project?.goal,
+    },
+  };
+}
+
+function attachPoPlanNode(graph: DagGraph, poNode: DagNode): DagGraph {
+  if (graph.nodes.length === 0) return graph;
+
+  const targetIds = new Set(graph.nodes.map(n => n.id));
+  for (const e of graph.edges) targetIds.delete(e.target);
+
+  if (targetIds.size === 0) return graph;
+
+  const planEdges: DagEdge[] = Array.from(targetIds).map(target => ({
+    id: `${PO_PLAN_NODE_ID}->${target}`,
+    source: PO_PLAN_NODE_ID,
+    target,
+    kind: 'plan',
+  }));
+
+  const allNodes = [poNode, ...graph.nodes];
+  const allEdges = [...planEdges, ...graph.edges];
+  allNodes.sort((a, b) => {
+    if (a.id === PO_PLAN_NODE_ID) return -1;
+    if (b.id === PO_PLAN_NODE_ID) return 1;
+    return a.id.localeCompare(b.id);
+  });
+  allEdges.sort((a, b) => a.id.localeCompare(b.id));
+
+  return { ...graph, nodes: allNodes, edges: allEdges };
+}
+
 function buildFromWorkflowRun(run: KSwarmWorkflowRun): DagGraph {
   const nodeMap = new Map<string, KSwarmWorkflowNode>();
   for (const n of run.nodes) {
@@ -103,10 +256,16 @@ function buildFromWorkflowRun(run: KSwarmWorkflowRun): DagGraph {
     agentName: n.assignedAgent || n.producerAgent || undefined,
     errorMessage: typeof n.error === 'string' ? n.error : undefined,
     workflowNodeId: n.id,
+    startedAt: n.startedAt ?? null,
+    completedAt: n.completedAt ?? null,
+    parallelGroupId: n.parallelGroupId ?? null,
+    pipelineStageIndex: n.pipelineStageIndex ?? null,
+    workflowNode: n,
   }));
 
   const edgeSet = new Set<string>();
   const edges: DagEdge[] = [];
+
   for (const n of nodeMap.values()) {
     for (const dep of (n.dependsOn ?? [])) {
       if (!nodeIds.has(dep) || dep === n.id) continue;
@@ -114,6 +273,24 @@ function buildFromWorkflowRun(run: KSwarmWorkflowRun): DagGraph {
       if (edgeSet.has(id)) continue;
       edgeSet.add(id);
       edges.push({ id, source: dep, target: n.id, kind: 'depends_on' });
+    }
+  }
+
+  for (const inf of inferEdgesFromWorkflow(run)) {
+    if (!nodeIds.has(inf.source) || !nodeIds.has(inf.target) || inf.source === inf.target) continue;
+    const id = `${inf.source}->${inf.target}`;
+    if (edgeSet.has(id)) continue;
+    edgeSet.add(id);
+    edges.push({ id, source: inf.source, target: inf.target, kind: inf.kind });
+  }
+
+  if (edges.length === 0 && nodes.length > 1) {
+    const sorted = Array.from(nodeMap.values()).sort((a, b) => nodeOrder(a) - nodeOrder(b) || a.id.localeCompare(b.id));
+    for (let i = 0; i + 1 < sorted.length; i++) {
+      const id = `${sorted[i].id}->${sorted[i + 1].id}`;
+      if (edgeSet.has(id)) continue;
+      edgeSet.add(id);
+      edges.push({ id, source: sorted[i].id, target: sorted[i + 1].id, kind: 'inferred' });
     }
   }
 
@@ -137,6 +314,9 @@ function buildFromTaskBoard(tasks: KSwarmTask[], dispatchPlan?: ProjectFullDetai
     errorMessage: t.failureReason || t.blockedReason || undefined,
     taskId: t.id,
     hasTaskWorkflow: t.execution?.strategy === 'workflow',
+    startedAt: typeof t.startedAt === 'number' ? t.startedAt : null,
+    completedAt: typeof t.completedAt === 'number' ? t.completedAt : null,
+    task: t,
   }));
 
   const edgeSet = new Set<string>();
@@ -172,11 +352,24 @@ export function buildDagFromProject(detail: ProjectFullDetail): DagGraph {
   }
 
   const primaryRun = pickPrimaryWorkflowRun(detail.workflowRuns);
+  let graph: DagGraph;
   if (primaryRun && (primaryRun.nodes?.length ?? 0) > 0) {
-    return buildFromWorkflowRun(primaryRun);
+    graph = buildFromWorkflowRun(primaryRun);
+  } else {
+    graph = buildFromTaskBoard(tasks, detail.dispatchPlan);
   }
 
-  return buildFromTaskBoard(tasks, detail.dispatchPlan);
+  if (graph.emptyReason && graph.emptyReason !== 'task_board_no_deps') return graph;
+
+  const poNode = buildPoPlanNode(detail);
+  if (poNode) {
+    graph = attachPoPlanNode(graph, poNode);
+    if (graph.emptyReason === 'task_board_no_deps') {
+      graph = { ...graph, emptyReason: undefined };
+    }
+  }
+
+  return graph;
 }
 
 export interface LayoutedNode {
@@ -195,15 +388,45 @@ export interface LayoutedEdge {
   markerEnd: { type: string; color?: string };
 }
 
+function classifyEdgeStyle(
+  edge: DagEdge,
+  source: DagNode | undefined,
+  target: DagNode | undefined,
+): { stroke: string; strokeWidth: number; strokeDasharray?: string } {
+  if (edge.kind === 'blocked_by') {
+    return { stroke: 'var(--c-graph-edge-blocked)', strokeWidth: 1.5 };
+  }
+  if (edge.kind === 'plan') {
+    return { stroke: 'var(--c-graph-edge-plan)', strokeWidth: 1, strokeDasharray: '3 4' };
+  }
+  const sStatus = source?.status;
+  const tStatus = target?.status;
+  if (sStatus === 'done' && tStatus === 'done') {
+    return { stroke: 'var(--c-graph-edge-done)', strokeWidth: 1.6 };
+  }
+  if (tStatus === 'running' || tStatus === 'awaiting_review') {
+    return { stroke: 'var(--c-graph-edge-active)', strokeWidth: 1.5 };
+  }
+  if (tStatus === 'pending' || tStatus === 'ready' || tStatus === 'unknown' || !tStatus) {
+    return { stroke: 'var(--c-graph-edge-future)', strokeWidth: 1, strokeDasharray: '4 4' };
+  }
+  if (tStatus === 'failed' || tStatus === 'blocked') {
+    return { stroke: 'var(--c-graph-edge-blocked)', strokeWidth: 1.5 };
+  }
+  return { stroke: 'var(--c-graph-edge-depends)', strokeWidth: 1 };
+}
+
 export function layoutWithDagre(graph: DagGraph): { nodes: LayoutedNode[]; edges: LayoutedEdge[] } {
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: 'LR', nodesep: 30, ranksep: 60, acyclicer: 'greedy' });
+  g.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 80, acyclicer: 'greedy' });
   g.setDefaultEdgeLabel(() => ({}));
-  for (const n of graph.nodes) g.setNode(n.id, { width: 220, height: 80 });
+  for (const n of graph.nodes) g.setNode(n.id, { width: 220, height: 76 });
   for (const e of graph.edges) {
     if (g.hasNode(e.source) && g.hasNode(e.target)) g.setEdge(e.source, e.target);
   }
   dagre.layout(g);
+
+  const nodeById = new Map(graph.nodes.map(n => [n.id, n]));
 
   return {
     nodes: graph.nodes.map(n => {
@@ -211,21 +434,24 @@ export function layoutWithDagre(graph: DagGraph): { nodes: LayoutedNode[]; edges
       return {
         id: n.id,
         type: 'dag',
-        position: { x: pos.x - 110, y: pos.y - 40 },
+        position: { x: pos.x - 110, y: pos.y - 38 },
         data: n,
       };
     }),
-    edges: graph.edges.map(e => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      animated: false,
-      style: e.kind === 'blocked_by'
-        ? { stroke: 'var(--c-graph-edge-blocked)', strokeWidth: 1.5 }
-        : { stroke: 'var(--c-graph-edge-depends)' },
-      markerEnd: e.kind === 'blocked_by'
-        ? { type: 'arrowclosed', color: 'var(--c-graph-edge-blocked)' }
-        : { type: 'arrow' },
-    })),
+    edges: graph.edges.map(e => {
+      const style = classifyEdgeStyle(e, nodeById.get(e.source), nodeById.get(e.target));
+      const markerColor =
+        e.kind === 'blocked_by' ? 'var(--c-graph-edge-blocked)' :
+        e.kind === 'plan' ? 'var(--c-graph-edge-plan)' :
+        style.stroke;
+      return {
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        animated: false,
+        style: { ...style },
+        markerEnd: { type: 'arrowclosed', color: markerColor },
+      };
+    }),
   };
 }

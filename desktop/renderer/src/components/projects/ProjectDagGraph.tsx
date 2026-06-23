@@ -1,11 +1,12 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
-import { ReactFlow, Background, Controls, MiniMap, type NodeProps } from '@xyflow/react';
+import { ReactFlow, Background, Controls, MiniMap, type NodeProps, type Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { ExternalLink, Workflow, SkipForward, RefreshCw, ArrowLeft } from 'lucide-react';
+import { ExternalLink, Workflow, SkipForward, RefreshCw, ArrowLeft, ClipboardList } from 'lucide-react';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { ProjectFullDetail } from '../../hooks/useKSwarmClient';
-import { buildDagFromProject, layoutWithDagre, STATUS_STYLE, type DagNode } from './dagGraphModel';
+import { buildDagFromProject, layoutWithDagre, STATUS_STYLE, GRAPH_NODE_LIMIT, PO_PLAN_NODE_ID, type DagNode } from './dagGraphModel';
 import { computeAnimationSchedule, ANIM, PLAYED_TOPOLOGIES } from './dagGraphAnimation';
+import { DagNodeDetailDrawer } from './DagNodeDetailDrawer';
 
 interface Props {
   detail: ProjectFullDetail;
@@ -17,6 +18,8 @@ function DagNodeCard({ data }: NodeProps) {
   const nodeData = data as unknown as DagNode;
   const style = STATUS_STYLE[nodeData.status];
   const pulse = nodeData.status === 'running';
+  const isPo = nodeData.kind === 'po_plan';
+  const borderWidth = nodeData.status === 'done' ? 4 : 3;
 
   const STATUS_LABELS: Record<string, string> = {
     pending: t.projectsDetailGraphStatusPending,
@@ -34,17 +37,19 @@ function DagNodeCard({ data }: NodeProps) {
     <div
       title={nodeData.errorMessage || nodeData.title}
       style={{
-        borderLeft: `3px solid ${style.border}`,
-        background: style.bg,
+        borderLeft: `${borderWidth}px solid ${isPo ? 'var(--c-graph-node-plan-border)' : style.border}`,
+        background: isPo ? 'var(--c-graph-node-plan-bg)' : style.bg,
         padding: '8px 12px',
         borderRadius: 6,
         width: 220,
-        minHeight: 80,
+        minHeight: 76,
         fontSize: 12,
+        cursor: 'pointer',
         animation: pulse ? 'dagNodePulse 2s ease-in-out infinite' : undefined,
       }}
     >
       <div className="flex items-center gap-1">
+        {isPo && <ClipboardList size={12} className="shrink-0 text-[var(--c-accent)]" />}
         <span className="flex-1 truncate font-medium text-[var(--c-text-primary)]">{nodeData.title}</span>
         {nodeData.hasTaskWorkflow && <Workflow size={12} className="shrink-0 text-[var(--c-accent)]" />}
         {nodeData.taskId && <ExternalLink size={12} className="shrink-0 text-[var(--c-text-muted)]" />}
@@ -52,7 +57,9 @@ function DagNodeCard({ data }: NodeProps) {
       {nodeData.agentName && (
         <div className="truncate text-xs text-[var(--c-text-secondary)]">{nodeData.agentName}</div>
       )}
-      <div className="text-[10px] text-[var(--c-text-tertiary)]">{STATUS_LABELS[nodeData.status] ?? '—'}</div>
+      <div className="text-[10px] text-[var(--c-text-tertiary)]">
+        {isPo ? t.projectsDetailGraphPoPlanLabel : (STATUS_LABELS[nodeData.status] ?? '—')}
+      </div>
     </div>
   );
 }
@@ -86,10 +93,9 @@ function EmptyState({ reason, count, onReturn }: { reason: string; count?: numbe
   );
 }
 
-import { GRAPH_NODE_LIMIT } from './dagGraphModel';
-
 export default function ProjectDagGraph({ detail, onJumpToBoard }: Props) {
   const { t } = useLocale();
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const graph = useMemo(() => buildDagFromProject(detail), [detail]);
 
@@ -171,6 +177,11 @@ export default function ProjectDagGraph({ detail, onJumpToBoard }: Props) {
     });
   }, [layouted.edges, schedule]);
 
+  const selectedNode = useMemo(
+    () => selectedNodeId ? graph.nodes.find(n => n.id === selectedNodeId) ?? null : null,
+    [selectedNodeId, graph.nodes],
+  );
+
   if (graph.emptyReason === 'no_tasks') return <EmptyState reason="no_tasks" />;
   if (graph.emptyReason === 'task_board_no_deps') {
     return <EmptyState reason="task_board_no_deps" onReturn={() => onJumpToBoard()} />;
@@ -213,7 +224,7 @@ export default function ProjectDagGraph({ detail, onJumpToBoard }: Props) {
       </div>
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={edges as unknown as Edge[]}
         nodeTypes={NODE_TYPES}
         fitView={fitView}
         fitViewOptions={{ minZoom: 0.8, maxZoom: 1, padding: 0.2 }}
@@ -221,14 +232,22 @@ export default function ProjectDagGraph({ detail, onJumpToBoard }: Props) {
         nodesConnectable={false}
         elementsSelectable={false}
         onNodeClick={(_, node) => {
-          const data = node.data as unknown as DagNode;
-          if (data.taskId) onJumpToBoard(data.taskId);
+          setSelectedNodeId(node.id);
         }}
       >
         <Background />
         <Controls showInteractive={false} />
         {graph.nodes.length > 30 && <MiniMap pannable zoomable />}
       </ReactFlow>
+      {selectedNode && (
+        <DagNodeDetailDrawer
+          node={selectedNode}
+          graph={graph}
+          onClose={() => setSelectedNodeId(null)}
+          onJumpToBoard={(taskId) => { setSelectedNodeId(null); onJumpToBoard(taskId); }}
+          onSelectNode={(id) => { if (id !== PO_PLAN_NODE_ID || graph.nodes.some(n => n.id === id)) setSelectedNodeId(id); }}
+        />
+      )}
     </div>
   );
 }
