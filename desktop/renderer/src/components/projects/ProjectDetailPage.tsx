@@ -401,6 +401,7 @@ const CRITICAL_DETAIL_EVENTS = new Set([
   'task_failed',
   'task_reviewed',
   'project_deliverable',
+  'workflow_run_completed',
 ]);
 
 const EVENT_THROTTLE_MS = 500;
@@ -582,6 +583,16 @@ export function ProjectDetailPage() {
       abortRef.current?.abort();
     };
   }, [projectId, connected, scheduleRefresh]);
+
+  // Refresh immediately when tab/window becomes visible (catches missed events while hidden)
+  useEffect(() => {
+    if (!projectId) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') scheduleRefresh(true);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [projectId, scheduleRefresh]);
 
   useEffect(() => {
     return () => {

@@ -63,7 +63,7 @@ function JsonBlock({ value, label }: { value: unknown; label: string }) {
         {label}
       </button>
       {open && (
-        <pre className="mt-1 max-h-[260px] overflow-auto rounded-md bg-[var(--c-bg-deep)] p-2 text-[11px] leading-relaxed text-[var(--c-text-secondary)]">
+        <pre className="mt-1 max-h-[260px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--c-bg-deep)] p-2 text-[11px] leading-relaxed text-[var(--c-text-secondary)]">
           {text}
         </pre>
       )}
