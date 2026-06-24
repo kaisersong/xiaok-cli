@@ -1,0 +1,32 @@
+{
+  "comment": "Phase 0 A/B 场景。每条 scenario 指定一个真实仓库目录与一个架构级问题。harness 会在 baseline(关闭结构化首读)与 treatment(开启) 两臂各跑 repeats 次，比较 token / 回合 / 耗时。覆盖 小/中/大 三档以检验文章「小仓负优化」是否在 xiaok 真实规模成立。",
+  "repeats": 2,
+  "scenarios": [
+    {
+      "id": "xiaok-small-lsp-fallback",
+      "size": "small",
+      "repo": ".",
+      "prompt": "lsp 工具在没有配置 LSP server 时对 documentSymbol 是如何降级的？指出实现文件与关键函数。"
+    },
+    {
+      "id": "xiaok-mid-runtime-registry",
+      "size": "mid",
+      "repo": ".",
+      "prompt": "agent 的工具注册流程是怎样的？CLI 与 desktop 两条路径分别在哪里构建工具列表？"
+    },
+    {
+      "id": "desktop-mid-scheduler",
+      "size": "mid",
+      "repo": "./desktop",
+      "prompt": "桌面端 scheduled task 的执行链路是怎样的？谁负责 claim due action 并调用 executor？"
+    },
+    {
+      "id": "external-large-PLACEHOLDER",
+      "size": "large",
+      "repo": "/ABSOLUTE/PATH/TO/A/REPO/WITH/3000+/FILES",
+      "prompt": "这个项目的请求处理主链路是怎样的？从入口到核心处理经过哪些模块？",
+      "skip": true,
+      "note": "上线前替换为真实大仓绝对路径并把 skip 改为 false。建议 clone 一个 >3000 文件 OSS 仓。"
+    }
+  ]
+}
