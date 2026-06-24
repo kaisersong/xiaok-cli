@@ -122,6 +122,16 @@
       ]
     },
     {
+      "from": "../../kai-xiaok-plugins/plugins/kai-infinity-canvas",
+      "to": "bundled-plugins/kai-infinity-canvas",
+      "filter": [
+        "plugin.json",
+        "skills/**/*",
+        "mcp-servers/canvas-server/**/*",
+        "node_modules/fractional-indexing-jittered/**/*"
+      ]
+    },
+    {
       "from": "app-update.yml",
       "to": "."
     }

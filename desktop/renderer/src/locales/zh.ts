@@ -2627,6 +2627,11 @@ export const zh: LocaleStrings = {
     processFiles: "请处理这些文件",
     skillCommandHint: "技能命令 (↑↓选择, Tab确认)",
     queued: "队列中",
+    modelPicker: {
+      empty: "未配置模型",
+      tooltip: "切换默认模型",
+      activeBadge: "当前",
+    },
   },
 
   // chatShell
@@ -2667,6 +2672,7 @@ export const zh: LocaleStrings = {
   canvasPreviewUnsupported: "此文件类型不支持预览",
   canvasPreviewOpenSystem: "用系统默认应用打开",
   canvasPreviewDownload: "下载到本地",
+  canvasPreviewRefresh: "刷新预览",
 
   // canvas panel
   canvasPanelCollapseCanvas: "收起 Canvas",

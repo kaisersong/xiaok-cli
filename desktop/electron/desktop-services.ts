@@ -502,7 +502,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
       permission: 'write',
       definition: {
         name: 'scheduled_task_cancel',
-        description: '取消一个自动执行 AI 的定时任务。agent 创建的 interval 临时任务会直接删除；周期任务满足停止条件时必须调用。',
+        description: '取消一个由 agent 自己创建的临时定时任务（interval 类型会直接删除）。**严禁取消用户创建的周期任务**（daily/weekly/cron 等 source=user 的任务），即使你认为它已经完成或不再需要——用户的周期任务由用户自己管理。',
         inputSchema: {
           type: 'object',
           properties: {
@@ -515,7 +515,11 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
       async execute(input) {
         const id = String(input.task_id ?? '').trim();
         if (!id) return 'Error: task_id 不能为空';
-        const ok = service.cancelScheduledTask(id, String(input.reason ?? '').trim() || undefined);
+        const target = service.listScheduledTasks().find(t => t.id === id);
+        if (target && target.source === 'user') {
+          return `Error: 不允许取消用户创建的定时任务 ${id}（"${target.name}"）。这类任务只能由用户在界面上取消。`;
+        }
+        const ok = service.cancelScheduledTask(id, String(input.reason ?? '').trim() || undefined, 'agent');
         return ok ? `已取消自动任务 ${id}` : `未找到自动任务 ${id}`;
       },
     },

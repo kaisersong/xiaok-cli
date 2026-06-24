@@ -2562,6 +2562,11 @@ export interface LocaleStrings {
     processFiles: string;
     skillCommandHint: string;
     queued: string;
+    modelPicker: {
+      empty: string;
+      tooltip: string;
+      activeBadge: string;
+    };
   };
 
   // chatShell
@@ -2602,6 +2607,7 @@ export interface LocaleStrings {
   canvasPreviewUnsupported: string;
   canvasPreviewOpenSystem: string;
   canvasPreviewDownload: string;
+  canvasPreviewRefresh: string;
 
   // canvas panel
   canvasPanelCollapseCanvas: string;

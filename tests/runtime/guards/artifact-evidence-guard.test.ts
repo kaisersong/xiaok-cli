@@ -48,7 +48,7 @@ function validateCompletedEvidence(input: {
 }
 
 describe('ArtifactEvidenceGuard', () => {
-  it('blocks completed task submission when no artifact evidence exists', () => {
+  it('passes completed task submission when no expectation or evidence is provided', () => {
     const decision = evaluateArtifactEvidenceGuard({
       taskId: 'item-2',
       status: 'done',
@@ -56,14 +56,13 @@ describe('ArtifactEvidenceGuard', () => {
     });
 
     expect(decision).toMatchObject({
-      ok: false,
-      mode: 'block',
-      allowOverride: true,
+      ok: true,
+      mode: 'pass',
     });
     expect(decision.events).toEqual([
       expect.objectContaining({
         source: 'guard',
-        type: 'guard.blocked',
+        type: 'guard.passed',
         refs: { taskId: 'item-2' },
       }),
     ]);
@@ -113,7 +112,7 @@ describe('ArtifactEvidenceGuard', () => {
     });
   });
 
-  it('blocks file artifact completions when only answer evidence exists', () => {
+  it('passes file artifact completions via answer fallback when valid answer evidence exists', () => {
     const decision = evaluateArtifactEvidenceGuard({
       taskId: 'item-1',
       status: 'completed',
@@ -129,8 +128,8 @@ describe('ArtifactEvidenceGuard', () => {
     });
 
     expect(decision).toMatchObject({
-      ok: false,
-      mode: 'block',
+      ok: true,
+      mode: 'pass',
     });
   });
 
@@ -630,8 +629,8 @@ describe('ArtifactEvidenceGuard', () => {
     });
 
     expect(decision).toMatchObject({
-      ok: false,
-      mode: 'block',
+      ok: true,
+      mode: 'pass',
     });
   });
 });

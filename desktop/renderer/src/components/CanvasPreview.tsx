@@ -1,5 +1,5 @@
 import { useMemo, useRef, useEffect, useState, useCallback } from 'react';
-import { Code, Eye, Download } from 'lucide-react';
+import { Code, Eye, Download, RefreshCw } from 'lucide-react';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ArtifactEditableViewer, type AnnotationPayload } from './ArtifactEditableViewer';
 import { formatAnnotationForChat } from '../hooks/useArtifactAnnotation';
@@ -190,6 +190,16 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
       {/* Toolbar */}
       {(hasCodeView || hasPreview) && (
         <div className="flex shrink-0 items-center gap-1 border-b border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1">
+          {onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              className="flex items-center gap-1 rounded p-1 text-xs text-[var(--c-text-tertiary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]"
+              title={t.canvasPreviewRefresh}
+            >
+              <RefreshCw size={12} />
+            </button>
+          )}
           {(hasCodeView && hasPreview) && (
             <div className="flex rounded-lg bg-[var(--c-bg-page)] p-0.5">
               <button

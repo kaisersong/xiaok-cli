@@ -63,6 +63,30 @@ describe('ui orchestration formatting', () => {
     expect(reminder?.text).toContain('Collect');
   });
 
+  it('includes explicitConstraints with "must follow" framing in the reminder block', () => {
+    const reminder = buildIntentReminderBlock(createLedger({
+      explicitConstraints: ['控制在一页内', '用中文'],
+    }), 'inst_owner');
+
+    expect(reminder?.text).toContain('Constraints (must follow): 控制在一页内; 用中文');
+  });
+
+  it('uses semicolons to separate multiple constraints', () => {
+    const reminder = buildIntentReminderBlock(createLedger({
+      explicitConstraints: ['A', 'B', 'C'],
+    }), 'inst_owner');
+
+    expect(reminder?.text).toContain('Constraints (must follow): A; B; C');
+  });
+
+  it('omits constraints line when explicitConstraints is empty', () => {
+    const reminder = buildIntentReminderBlock(createLedger({
+      explicitConstraints: [],
+    }), 'inst_owner');
+
+    expect(reminder?.text).not.toContain('Constraints');
+  });
+
   it('does not build a reminder block for a completed active intent', () => {
     const reminder = buildIntentReminderBlock(createLedger({ overallStatus: 'completed' }), 'inst_owner');
 

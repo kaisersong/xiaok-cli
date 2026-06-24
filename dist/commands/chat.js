@@ -36,7 +36,7 @@ import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
 import { ScrollRegionManager } from '../ui/scroll-region.js';
 import { TuiRuntimeState } from '../ui/tui/runtime-state.js';
-import { renderWelcomeScreen, renderInputSeparator, dim, boldCyan, formatProgressNote, formatSubmittedInput, formatToolActivity, formatHistoryBlock } from '../ui/render.js';
+import { renderWelcomeScreen, renderInputSeparator, dim, boldCyan, yellow, formatProgressNote, formatSubmittedInput, formatToolActivity, formatHistoryBlock } from '../ui/render.js';
 import { getDisplayWidth, stripAnsi } from '../ui/display-width.js';
 import { InputReader } from '../ui/input.js';
 import { sliceByDisplayColumns } from '../ui/text-metrics.js';
@@ -980,6 +980,19 @@ async function runChat(initialInput, opts) {
         endStreamingPhaseForInterrupt();
         runtimeState.markInputReady();
         resetTurnChrome();
+        const noticeText = yellow('- Request cancelled');
+        if (scrollRegion.isActive() && !terminalUiSuspended) {
+            try {
+                scrollRegion.writeAtContentCursor(noticeText + '\n');
+            }
+            catch (uiError) {
+                suspendInteractiveUi('handle_turn_abort', uiError);
+                process.stderr.write(noticeText + '\n');
+            }
+        }
+        else {
+            process.stderr.write(noticeText + '\n');
+        }
         renderFooterChrome();
     };
     const getFooterInputPrompt = () => runtimeState.getFooterInputPrompt();

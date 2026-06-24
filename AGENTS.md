@@ -172,6 +172,36 @@
 - 不要使用 `locale === 'zh' ? '中文' : 'English'` 三元表达式，一律走 `t.*` 系统。
 - PR review 时检查：新增的 `.tsx` / `.ts` 文件中不应出现 `[\u4e00-\u9fff]` 范围的硬编码字符（AI prompt 除外）。
 
+## Agent Tool 权限边界
+
+设计任何会被 agent runtime 调用的 tool（特别是 write 类）时，必须按以下规则贯彻，否则会出现 agent 误删/误改用户数据的事故。
+
+历史教训（2026-06-24）：`scheduled_task_cancel` 工具的 description 写"周期任务满足停止条件时必须调用"，导致 agent 在执行 daily 任务时把用户创建的 AI日报自己取消了。Service 层无权限校验，Tool description 引导主动取消，双重失守。
+
+### 强制规则
+
+- **Service 层显式权限参数**：所有 mutation 类 service 方法（`cancel*` / `delete*` / `update*` / `set*Status` 等）必须接收 `requestSource: 'user' | 'agent' | 'scheduler'` 参数，并在方法内部根据来源 + 数据所有权决定是否放行。**禁止**靠 caller 自觉。
+- **Default deny**：默认拒绝 agent 跨域操作。允许的边界用 allowlist 显式列出（例：agent 只能 cancel `source === 'agent'` 且 `trigger.kind === 'interval'` 的临时任务）。
+- **Tool description 写禁区，不写许可**：用 "**严禁** X" / "只能 Y" 的措辞，列出明确不能做的场景。**避免** "必须调用" / "应该调用" 这类引导性措辞——LLM 会找理由用。
+- **Negative test 必备**：每个 agent tool 必须有"越权调用拒绝"的单测，与 happy path 同等地位。例：`scheduled_task_cancel` 调 user-created task 应返回错误且不修改数据。
+- **Audit log（建议）**：mutation 类操作记录 `who / what / why / when`。出问题能在 timed_action_runs / activity log 类表里 5 分钟 trace 完。SQLite 已有 `timed_action_runs` 是好例子。
+
+### 新增/修改 agent tool 的 checklist
+
+- [ ] Service 层有 `requestSource` 参数？
+- [ ] 默认 deny 还是 default allow？写了 allowlist 还是 denylist？
+- [ ] Tool description 是否包含 "**严禁**" / "只能" 等明确边界？是否避免了"必须调用"这类引导措辞？
+- [ ] 有没有 agent 越权调用的 negative test？
+- [ ] 改了 durable state 有没有 audit log（即使是简单的 console.warn + run history record）？
+- [ ] Renderer IPC 路径默认 `requestSource='user'`，agent tool 路径默认 `'agent'`，两路验证清楚？
+
+### 高风险 tool 类型（必须套用上述规则）
+
+- 取消 / 删除（cancel / delete / archive / soft-delete）
+- 状态变更（status / approve / reject / pause / resume）
+- 数据写入到用户拥有的 store（scheduled tasks、reminders、knowledge、project / task state、artifacts metadata）
+- 涉及外部副作用（发送消息、推送通知、调用第三方 API）
+
 ## Desktop 验证
 
 - desktop main / service / scheduler:
@@ -214,6 +244,15 @@
   cd desktop
   npm run pack:dir
   ```
+- 本地打包**禁止签名**。`npm run pack:dir` 默认会触发 codesign，本机 keychain 经常 `errSecInternalComponent` 失败，且本地验证不需要签名。本地验证使用：
+  ```bash
+  cd desktop
+  CSC_IDENTITY_AUTO_DISCOVERY=false ./node_modules/.bin/electron-builder --dir \
+    --config electron-builder.json \
+    -c.mac.identity=null \
+    -c.win.signAndEditExecutable=false
+  ```
+  仅在需要正式发布产物时才允许签名。
 - `desktop` 的 `typecheck` 使用 baseline；不要因为无关历史错误更新 baseline。只有本次改动确实需要改变 baseline 时，才说明原因并更新。
 
 ## Terminal Frontend 说明
@@ -221,6 +260,7 @@
 - Terminal E2E verification 使用 `tests/e2e/tmux-e2e.py`，它会启动本地 OpenAI-compatible SSE server 和真实 tmux TTY。
 - 首次提交输入后，startup welcome card 应保持在输入上方，直到正常 terminal scrolling 将其滚走；不要在首次 submit 时清空 content region。
 - `Thinking`、`Working` 等 live activity 渲染在 input footer 上方的 activity row，activity 和 `❯` 之间保留一行空白 gap。
+- 不要尝试在 live activity row **上方**（activity 与 transcript 内容之间）加空白 gap。已于 2026-06-24 完整尝试并失败：activity 本身是"覆盖最底行、不移动内容"的 overlay，而要在其上方留空行必然要滚动/移动 transcript 内容；静态预留和 transient 滚动两种实现都会在 24 行终端上把内容挤出可见区，且 transient 方案在多工具一轮内跨多次 activity 累积滚动把 transcript 走飞，破坏 `tests/commands/chat-interactive-runtime.test.ts` 的"换轮后上一轮尾行可见"等内容保留回归。结论：activity 上方留 gap 与"activity overlay 不移动内容"是结构性冲突，除非有全新的不移动内容的机制，否则不要再做。详见 `docs/bugfix/2026-06-24-terminal-activity-transient-lead-gap-design.md`。
 - activity line 不应重复 footer status fields，例如 model、mode、tokens、project。
 - 忙碌/streaming 状态下按 `ESC` 是当前 turn 的用户中断请求，不是失败态；`AbortError` 必须沿 runtime 原样冒泡到 chat 层处理，不能被 normalize 成普通 tool/model failure。
 - ESC 中断必须保留用户 draft 和 queued input，不能清空输入缓冲；`XIAOK_NO_ESC_INTERRUPT=1` 时应退回旧行为。

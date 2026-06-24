@@ -2647,6 +2647,11 @@ export const en: LocaleStrings = {
     processFiles: "Please process these files",
     skillCommandHint: "Skill commands (\u2191\u2193 to navigate, Tab to confirm)",
     queued: "Queued",
+    modelPicker: {
+      empty: "No model configured",
+      tooltip: "Switch default model",
+      activeBadge: "Active",
+    },
   },
 
   // chatShell
@@ -2687,6 +2692,7 @@ export const en: LocaleStrings = {
   canvasPreviewUnsupported: "Preview not supported for this file type",
   canvasPreviewOpenSystem: "Open with system default app",
   canvasPreviewDownload: "Download locally",
+  canvasPreviewRefresh: "Refresh preview",
 
   // canvas panel
   canvasPanelCollapseCanvas: "Collapse Canvas",
