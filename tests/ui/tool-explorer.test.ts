@@ -53,7 +53,7 @@ describe('ToolExplorer', () => {
   it('wraps long rail content with an aligned "│ " prefix instead of overflowing the border', () => {
     const explorer = new ToolExplorer();
 
-    const longCommand = 'cd /Users/song/projects/kai-xiaok-plugins/plugins/kai-canvas-creator && echo "verify selection API and SSE work" && node server/index.mjs --check';
+    const longCommand = 'cd /Users/song/projects/kai-xiaok-plugins/plugins/kai-infinity-canvas && echo "verify selection API and SSE work" && node server/index.mjs --check';
     const output = strip(explorer.record('bash', { command: longCommand }));
 
     const contentLines = output.split('\n').filter((line) => line.includes('│'));
@@ -102,6 +102,26 @@ describe('ToolExplorer', () => {
     const nextTurn = strip(explorer.record('tool_search', { query: 'yzj-context.ts' }));
 
     expect(nextTurn).toContain('  ╭─ Explored');
+  });
+
+  it('separates a standalone fallback activity from a preceding rail block with a blank line', () => {
+    const explorer = new ToolExplorer();
+
+    explorer.record('bash', { command: 'sysctl machdep.xcpm.cpu_thermal_level' });
+    const fallback = strip(explorer.record('render_ui', { component: 'panel' }));
+
+    // Leading "\n" + the fallback line itself ("•  ...\n") => a blank gap row.
+    expect(fallback.startsWith('\n')).toBe(true);
+    expect(fallback.startsWith('\n\n')).toBe(false);
+    expect(fallback).toContain('•');
+  });
+
+  it('does not prepend a blank line to a fallback activity when no rail block precedes it', () => {
+    const explorer = new ToolExplorer();
+
+    const fallback = strip(explorer.record('render_ui', { component: 'panel' }));
+
+    expect(fallback.startsWith('\n')).toBe(false);
   });
 
   it('suppresses internal using-superpowers skill loads from the transcript activity rail', () => {
