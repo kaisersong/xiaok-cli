@@ -46,7 +46,16 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
-Xiaok Desktop v1.4.14 将 Loop 自我改进反馈闭环端到端地打通：循环运行失败时，系统自动分析失败原因（LLM 或规则匹配），记录改进约束规则，弹出系统通知，并在自动化页的”约束规则”子 tab 中展示。用户可以审查、启用或停用规则——已激活的规则会在后续运行中自动注入 prompt，避免重复相同的失败。自动化总览数字现在与子页签完全对齐。
+Xiaok Desktop v1.4.15 强化了 Loop Engineering 的 evidence 管线：用户显式约束（从意图提取）现在会注入到每轮 system reminder 中让 subagent 真正遵守，同时二进制产物 evidence（PDF/PPTX）获得了 warn mode 结构校验——可以捕获损坏文件但不阻塞任务完成。
+
+**v1.4.15 新特性：**
+
+- **约束注入 Intent Reminder**：`buildIntentReminderBlock` 现在渲染 `explicitConstraints`，使用 “must follow” 语义和分号分隔。planner 提取的约束（如”控制在一页内”/”用中文”）终于在每轮对话中对执行 agent 可见，而不是只存在 ledger 里。
+- **二进制产物结构校验（Warn Mode）**：新增 `artifact-structure.ts` 模块，校验 PDF（`%PDF-` header，fd-based 只读 5 字节）和 PPTX（ZIP local file header `PK\x03\x04` + 前 64KB 内是否有 `[Content_Types].xml`）。以 warn mode 接入 `completion-evidence.ts` guard pipeline——检测损坏产物但不杀任务。内存安全：PDF 读 5 字节，PPTX 最多 64KB。
+- **URI/Paths Bypass 修复**：`resolveLocalArtifactPath` 现在统一从 `file://` URI、`metadata.paths`、`metadata.localPaths` 提取可验证的本地路径。之前通过 `uri` 或 `paths` 字段绕过结构校验的 evidence 记录现在也会被验证。
+- **Canvas Preview 默认 Tab**：Canvas 面板默认显示预览 tab + 刷新按钮重新读取文件内容。
+- **Evidence Guard 测试对齐**：修复 `artifact-evidence-guard.test.ts` 中 3 个过期测试，对齐 v1.4.11 引入的 answer-fallback 策略。
+- **发布验证**：v1.4.15 通过 79 个聚焦 guard/orchestration/structure 测试（全通过），sandbox build clean，无新 typecheck 回归。
 
 **v1.4.14 新特性：**
 

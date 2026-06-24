@@ -46,7 +46,16 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
-Xiaok Desktop v1.4.14 closes the Loop Self-Improving feedback loop end-to-end: when a loop run fails, the system analyzes the failure (LLM or rule-based), records an improvement constraint, shows a desktop notification, and surfaces it in a dedicated "Constraints" tab inside Automations. Users can review, activate, or deactivate rules—and active rules are automatically injected into subsequent runs to prevent the same failure pattern. The Automation overview now shows numbers consistent with the tabs you actually click into.
+Xiaok Desktop v1.4.15 strengthens the Loop Engineering evidence pipeline: explicit user constraints (extracted from intent) are now injected into every turn's system reminder so subagents actually respect them, and binary artifact evidence (PDF/PPTX) gets structural validation in warn mode — catching corrupt files without blocking task completion.
+
+**What's New in v1.4.15:**
+
+- **Constraint Injection into Intent Reminder**: `buildIntentReminderBlock` now renders `explicitConstraints` with "must follow" framing and semicolon separators. Constraints like "控制在一页内" / "用中文" extracted by the planner are finally visible to the executing agent on every turn, not just stored in the ledger.
+- **Binary Artifact Structural Validation (Warn Mode)**: New `artifact-structure.ts` module validates PDF (`%PDF-` header, fd-based 5-byte read) and PPTX (ZIP local file header `PK\x03\x04` + `[Content_Types].xml` in first 64KB). Integrated into `completion-evidence.ts` guard pipeline in warn mode — detects corrupt artifacts without killing tasks. Memory-safe: PDF reads 5 bytes, PPTX capped at 64KB regardless of file size.
+- **URI/Paths Bypass Fix**: `resolveLocalArtifactPath` now extracts verifiable local paths from `file://` URIs, `metadata.paths`, and `metadata.localPaths` uniformly. Evidence records that previously bypassed structural checks via `uri` or `paths` fields are now validated.
+- **Canvas Preview as Default Tab**: Canvas panel now defaults to the Preview tab with a refresh button for re-reading file content.
+- **Evidence Guard Test Alignment**: Fixed 3 stale tests in `artifact-evidence-guard.test.ts` that expected block behavior overridden by the answer-fallback policy since v1.4.11.
+- **Release Validation**: v1.4.15 verified with 79 focused guard/orchestration/structure tests (all pass), sandbox build clean, no new typecheck regressions.
 
 **What's New in v1.4.14:**
 
