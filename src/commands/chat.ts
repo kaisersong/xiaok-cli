@@ -3292,9 +3292,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           lastAssistantText += chunk.delta;
           if (/\S/.test(chunk.delta)) {
             runtimeState.noteResponseStarted();
-            ensureStreamingPhase();
           }
           streamingSegmentText += chunk.delta;
+          if (chunk.delta.length > 0) {
+            ensureStreamingPhase();
+          }
           mdRenderer.write(chunk.delta);
         }
         if (chunk.type === 'usage') {
