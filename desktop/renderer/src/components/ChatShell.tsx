@@ -249,6 +249,7 @@ export function ChatShell() {
   const toolStepsMsgIdRef = useRef<string | null>(null);
   const toolStepsActiveRef = useRef(false);
   const computerUseActionCodesRef = useRef<Set<string>>(new Set());
+  const titleLockedRef = useRef(false);
 
   // Read prompt state from navigation (WelcomePage initial submit or project help draft)
   const state = location.state as { initialPrompt?: string; initialFiles?: DisplayFileRef[]; draftPrompt?: string } | undefined;
@@ -363,7 +364,8 @@ export function ChatShell() {
           setStatus('completed');
           setPlanSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'completed' } : s));
           // Only set title if thread has no title yet (preserve user's prompt as title)
-          if (taskId && !thread?.title) {
+          if (taskId && !titleLockedRef.current) {
+            titleLockedRef.current = true;
             api.updateThreadTitle(taskId, r.summary.slice(0, 40)).catch(() => {});
           }
         } else {
@@ -661,6 +663,7 @@ export function ChatShell() {
     toolStepsMsgIdRef.current = null;
     toolStepsActiveRef.current = false;
     computerUseActionCodesRef.current = new Set();
+    titleLockedRef.current = false;
 
     // Cleanup previous subscription
     unsubRef.current?.();
@@ -871,6 +874,7 @@ export function ChatShell() {
 
     // Update thread title only on first user message (keep original topic as title)
     if (taskId && messages.filter(m => m.role === 'user').length === 0) {
+      titleLockedRef.current = true;
       api.updateThreadTitle(taskId, text.slice(0, 40)).catch(() => {});
     }
 
