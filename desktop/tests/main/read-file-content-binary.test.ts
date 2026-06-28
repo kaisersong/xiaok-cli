@@ -42,7 +42,14 @@ describe('desktop file content IPC binary handling', () => {
   });
 
   afterEach(() => {
-    rmSync(rootDir, { recursive: true, force: true });
+    // Windows can hold transient locks on just-written files, making recursive
+    // cleanup throw EPERM well after the assertions have already passed. Treat
+    // teardown cleanup as best-effort so it never masks real test results.
+    try {
+      rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    } catch {
+      /* best-effort temp cleanup; OS reclaims tmpdir entries */
+    }
   });
 
   it('returns PDF files as application/pdf data URLs instead of UTF-8 text', async () => {
@@ -152,6 +159,27 @@ describe('desktop file content IPC binary handling', () => {
       content: '<html><body>edited</body></html>',
       purpose: 'html-edit',
     })).resolves.toEqual({ success: false, error: 'html_edit_path_not_allowed' });
+  });
+
+  it('allows html-edit saves for report artifacts under the working directory', async () => {
+    // Report-renderer writes artifacts under process.cwd()/artifacts; editing
+    // such a freshly generated report must succeed (regression: save was
+    // rejected with html_edit_path_not_allowed on Windows/dev runs).
+    const artifactsDir = join(process.cwd(), `artifacts-edit-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(artifactsDir, { recursive: true });
+    const savePath = join(artifactsDir, 'report-jun-2026.html');
+    const handler = handlers.get('desktop:saveFile');
+
+    try {
+      await expect(handler?.({}, {
+        filePath: savePath,
+        content: '<html><body>edited under cwd</body></html>',
+        purpose: 'html-edit',
+      })).resolves.toEqual({ success: true });
+      expect(readFileSync(savePath, 'utf8')).toContain('edited under cwd');
+    } finally {
+      rmSync(artifactsDir, { recursive: true, force: true });
+    }
   });
 
   it('rejects html-edit saves for non-html files', async () => {

@@ -9,6 +9,7 @@ import { A2uiArtifactBlock } from './a2ui/A2uiArtifactBlock';
 import { api } from '../api';
 import { getDesktopApi } from '../shared/desktop';
 import { useLocale } from '../contexts/LocaleContext';
+import { fileBasename } from '../lib/file-path';
 import type { ThreadRecord } from '../api/types';
 import type { ArtifactSummary, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
 import { A2UI_MIME_TYPE, isA2UIMimeType } from '../../../../src/a2ui/index.js';
@@ -674,6 +675,7 @@ function ResultCard({
               );
             }
             const ext = a.title?.split('.').pop()?.toUpperCase() || 'FILE';
+            const displayTitle = fileBasename(a.title) || a.title;
             const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
             return (
               <div key={a.artifactId} className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)]">
@@ -697,7 +699,7 @@ function ResultCard({
                     {'</>'}
                   </div>
                   <div className="flex min-w-0 flex-1 flex-col items-start">
-                    <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{a.title}</span>
+                    <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{displayTitle}</span>
                     <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
                   </div>
                 </div>
@@ -717,6 +719,7 @@ function ResultCard({
         <div className="mt-3 flex flex-col gap-2" data-testid="generated-files-list">
           {generatedFiles.map(f => {
             const ext = f.name?.split('.').pop()?.toUpperCase() || 'FILE';
+            const displayName = fileBasename(f.name) || f.name;
             const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
             return (
               <div
@@ -743,7 +746,7 @@ function ResultCard({
                     {'</>'}
                   </div>
                   <div className="flex min-w-0 flex-1 flex-col items-start">
-                    <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{f.name}</span>
+                    <span className="truncate text-sm font-medium text-[var(--c-text-heading)]">{displayName}</span>
                     <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
                   </div>
                 </div>

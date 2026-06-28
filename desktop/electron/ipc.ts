@@ -95,6 +95,11 @@ async function validateArtifactEditWritePath(
     app.getPath('downloads'),
     join(os.homedir(), '.kswarm', 'projects'),
     join(os.homedir(), '.xiaok', 'tasks'),
+    // Report-renderer artifacts are written under the current working directory
+    // (see isAllowedReportArtifactOutputPath in desktop-services, which allows
+    // process.cwd()). Editing must be allowed there too, otherwise saving an
+    // edit to a freshly generated report fails with path_not_allowed.
+    process.cwd(),
   ];
   const parentReal = await realpathIfExists(dirname(resolved));
   const allowed = await Promise.all(allowedRoots.map((root) => realpathIfExists(root)));

@@ -2,6 +2,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { memo, type ReactNode, Children } from 'react';
 import { MermaidBlock } from './MermaidBlock';
+import { toFileUrl } from '../lib/file-path';
 
 const FILE_PATH_RE = /(\/(?:Users|home|tmp|var|etc|opt|mnt|srv)\/[\w./ -]+|[A-Z]:\\[\w.\\ -]+)/g;
 
@@ -22,14 +23,14 @@ function linkifyFilePaths(children: ReactNode): ReactNode {
               const api = (window as any).xiaokDesktop;
               if (api?.openPath) api.openPath(part);
               else if (api?.showItemInFolder) api.showItemInFolder(part);
-              else window.open(`file://${part}`, '_blank');
+              else window.open(toFileUrl(part), '_blank');
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 const api = (window as any).xiaokDesktop;
                 if (api?.openPath) api.openPath(part);
                 else if (api?.showItemInFolder) api.showItemInFolder(part);
-                else window.open(`file://${part}`, '_blank');
+                else window.open(toFileUrl(part), '_blank');
               }
             }}
           >

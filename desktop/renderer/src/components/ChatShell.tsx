@@ -11,6 +11,7 @@ import { useSidebarCollapse } from '../layouts/AppLayout';
 import { useLocale } from '../contexts/LocaleContext';
 import { sanitizeUserFacingErrorMessage } from '../lib/error-display';
 import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-display';
+import { fileBasename, isAbsoluteFilePath, toFileUrl } from '../lib/file-path';
 import {
   buildProjectCardMessageFromToolResult,
   buildWorkflowMessageFromToolResult,
@@ -124,8 +125,7 @@ function formatUserMessageContent(prompt: string, files?: DisplayFileRef[], atta
 function addGeneratedFile(target: GeneratedFile[], seen: Set<string>, fp: string | undefined): void {
   if (!fp || seen.has(fp)) return;
   seen.add(fp);
-  const parts = fp.split('/');
-  target.push({ filePath: fp, name: parts[parts.length - 1] });
+  target.push({ filePath: fp, name: fileBasename(fp) });
 }
 
 function collectGeneratedFilesFromEvents(events: DesktopTaskEvent[]): GeneratedFile[] {
@@ -147,7 +147,7 @@ function collectGeneratedFilesFromTexts(texts: string[]): GeneratedFile[] {
     let match;
     while ((match = fileExtMatch.exec(text)) !== null) {
       const candidate = match[1];
-      if (candidate.startsWith('/')) addGeneratedFile(files, seen, candidate);
+      if (isAbsoluteFilePath(candidate)) addGeneratedFile(files, seen, candidate);
     }
   }
   return files;
@@ -1172,7 +1172,7 @@ export function ChatShell() {
           onArtifactClick={openArtifactInCanvas}
           onArtifactOpenExternal={(artifact) => {
             if (artifact.filePath) {
-              window.open(`file://${artifact.filePath}`, '_blank');
+              window.open(toFileUrl(artifact.filePath), '_blank');
             }
           }}
         />
