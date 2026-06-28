@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import remarkGfm from 'remark-gfm';
-import { BookOpen, ChevronDown } from 'lucide-react';
+import { BookOpen, ChevronDown, ExternalLink, PencilLine } from 'lucide-react';
 import { ChatInput } from './ChatInput';
 import { ToolStepsMessage } from './ToolStepsMessage';
 import { ProjectInlineCard } from './projects/ProjectInlineCard';
@@ -197,6 +197,17 @@ export interface GeneratedFile {
   name: string;
 }
 
+export interface ArtifactOpenInfo {
+  artifactId: string;
+  title: string;
+  kind: string;
+  filePath?: string;
+}
+
+export interface ArtifactOpenOptions {
+  startInEditMode?: boolean;
+}
+
 interface ChatViewProps {
   thread: ThreadRecord;
   messages: ChatMessage[];
@@ -217,8 +228,8 @@ interface ChatViewProps {
   onComputerUseDismiss?: (messageId: string) => void;
   canvasOpen: boolean;
   onToggleCanvas: () => void;
-  onArtifactClick?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
-  onArtifactOpenExternal?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
+  onArtifactClick?: (artifact: ArtifactOpenInfo, options?: ArtifactOpenOptions) => void;
+  onArtifactOpenExternal?: (artifact: ArtifactOpenInfo) => void;
 }
 
 export function ChatView({
@@ -494,6 +505,8 @@ export function ChatView({
   );
 }
 
+const artifactActionButtonClass = 'flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-[var(--c-text-tertiary)] transition-colors hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]';
+
 function ArtifactKbButton({ artifactId, title, filePath }: { artifactId: string; title: string; filePath?: string }) {
   const [saved, setSaved] = useState(false);
   const { t } = useLocale();
@@ -519,13 +532,78 @@ function ArtifactKbButton({ artifactId, title, filePath }: { artifactId: string;
   return (
     <button
       type="button"
+      aria-label={saved ? t.chatView.addedToKb : t.chatView.addToKb}
       onClick={e => void handleSave(e)}
       disabled={saved}
       title={saved ? t.chatView.addedToKb : t.chatView.addToKb}
-      className={`shrink-0 flex items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors ${saved ? 'text-[var(--c-accent)] cursor-default' : 'text-[var(--c-text-tertiary)] hover:text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] cursor-pointer'}`}
+      className={`${artifactActionButtonClass} ${saved ? 'text-[var(--c-accent)] cursor-default' : ''}`}
     >
-      <BookOpen size={13} />
-      {saved && <span>{t.chatView.added}</span>}
+      <BookOpen size={14} aria-hidden="true" />
+    </button>
+  );
+}
+
+function isHtmlArtifact({ title, kind, filePath, mimeType }: { title: string; kind?: string; filePath?: string; mimeType?: string }) {
+  if (kind === 'html') return true;
+  if (mimeType?.toLowerCase().includes('html')) return true;
+  return /\.(html|htm)$/i.test(title) || Boolean(filePath && /\.(html|htm)$/i.test(filePath));
+}
+
+function isMarkdownArtifact({ title, kind, filePath, mimeType }: { title: string; kind?: string; filePath?: string; mimeType?: string }) {
+  if (kind === 'markdown') return true;
+  if (mimeType?.toLowerCase().includes('markdown')) return true;
+  return /\.(md|markdown)$/i.test(title) || Boolean(filePath && /\.(md|markdown)$/i.test(filePath));
+}
+
+function isEditableArtifact(artifact: { title: string; kind?: string; filePath?: string; mimeType?: string }) {
+  return isHtmlArtifact(artifact) || isMarkdownArtifact(artifact);
+}
+
+function ArtifactEditButton({
+  info,
+  onArtifactClick,
+}: {
+  info: ArtifactOpenInfo;
+  onArtifactClick?: (artifact: ArtifactOpenInfo, options?: ArtifactOpenOptions) => void;
+}) {
+  const { t } = useLocale();
+  if (!onArtifactClick) return null;
+  return (
+    <button
+      type="button"
+      aria-label={t.artifactDirectEdit}
+      title={t.artifactDirectEdit}
+      className={artifactActionButtonClass}
+      onClick={(e) => {
+        e.stopPropagation();
+        onArtifactClick(info, { startInEditMode: true });
+      }}
+    >
+      <PencilLine size={14} aria-hidden="true" />
+    </button>
+  );
+}
+
+function ArtifactOpenButton({
+  info,
+  onArtifactClick,
+}: {
+  info: ArtifactOpenInfo;
+  onArtifactClick?: (artifact: ArtifactOpenInfo, options?: ArtifactOpenOptions) => void;
+}) {
+  const { t } = useLocale();
+  return (
+    <button
+      type="button"
+      aria-label={t.chatView.open}
+      title={t.chatView.open}
+      className={artifactActionButtonClass}
+      onClick={(e) => {
+        e.stopPropagation();
+        onArtifactClick?.(info);
+      }}
+    >
+      <ExternalLink size={14} aria-hidden="true" />
     </button>
   );
 }
@@ -538,8 +616,8 @@ function ResultCard({
 }: {
   result: TaskResult | null;
   generatedFiles: GeneratedFile[];
-  onArtifactClick?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
-  onArtifactOpenExternal?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
+  onArtifactClick?: (artifact: ArtifactOpenInfo, options?: ArtifactOpenOptions) => void;
+  onArtifactOpenExternal?: (artifact: ArtifactOpenInfo) => void;
 }) {
   const [kbSaved, setKbSaved] = useState(false);
   const { t } = useLocale();
@@ -596,6 +674,7 @@ function ResultCard({
               );
             }
             const ext = a.title?.split('.').pop()?.toUpperCase() || 'FILE';
+            const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
             return (
               <div key={a.artifactId} className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)]">
                 <div
@@ -603,14 +682,12 @@ function ResultCard({
                   tabIndex={0}
                   className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
                   onClick={(e) => {
-                    const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
                     if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
                     else onArtifactClick?.(info);
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
                       onArtifactClick?.(info);
                     }
                   }}
@@ -624,16 +701,13 @@ function ResultCard({
                     <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
                   </div>
                 </div>
-                <ArtifactKbButton artifactId={a.artifactId} title={a.title} filePath={a.filePath} />
-                <button
-                  type="button"
-                  className="shrink-0 cursor-pointer rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
-                    onArtifactClick?.(info);
-                  }}
-                >{t.chatView.open}</button>
+                <div data-testid={`artifact-actions-${a.artifactId}`} className="flex shrink-0 items-center gap-1">
+                  {isEditableArtifact(a) && (
+                    <ArtifactEditButton info={info} onArtifactClick={onArtifactClick} />
+                  )}
+                  <ArtifactKbButton artifactId={a.artifactId} title={a.title} filePath={a.filePath} />
+                  <ArtifactOpenButton info={info} onArtifactClick={onArtifactClick} />
+                </div>
               </div>
             );
           })}
@@ -643,6 +717,7 @@ function ResultCard({
         <div className="mt-3 flex flex-col gap-2" data-testid="generated-files-list">
           {generatedFiles.map(f => {
             const ext = f.name?.split('.').pop()?.toUpperCase() || 'FILE';
+            const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
             return (
               <div
                 key={f.filePath}
@@ -653,14 +728,12 @@ function ResultCard({
                   tabIndex={0}
                   className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
                   onClick={(e) => {
-                    const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
                     if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
                     else onArtifactClick?.(info);
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
                       onArtifactClick?.(info);
                     }
                   }}
@@ -674,15 +747,13 @@ function ResultCard({
                     <span className="text-xs text-[var(--c-text-tertiary)]">Code · {ext}</span>
                   </div>
                 </div>
-                <ArtifactKbButton artifactId={f.filePath} title={f.name} filePath={f.filePath} />
-                <button
-                  type="button"
-                  className="shrink-0 cursor-pointer rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
-                  onClick={() => {
-                    const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
-                    onArtifactClick?.(info);
-                  }}
-                >{t.chatView.open}</button>
+                <div data-testid={`generated-file-actions-${f.filePath}`} className="flex shrink-0 items-center gap-1">
+                  {isEditableArtifact({ title: f.name, filePath: f.filePath }) && (
+                    <ArtifactEditButton info={info} onArtifactClick={onArtifactClick} />
+                  )}
+                  <ArtifactKbButton artifactId={f.filePath} title={f.name} filePath={f.filePath} />
+                  <ArtifactOpenButton info={info} onArtifactClick={onArtifactClick} />
+                </div>
               </div>
             );
           })}
@@ -705,8 +776,8 @@ function A2uiResultArtifactPreview({
   onArtifactOpenExternal,
 }: {
   artifact: ArtifactSummary;
-  onArtifactClick?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
-  onArtifactOpenExternal?: (artifact: { artifactId: string; title: string; kind: string; filePath?: string }) => void;
+  onArtifactClick?: (artifact: ArtifactOpenInfo, options?: ArtifactOpenOptions) => void;
+  onArtifactOpenExternal?: (artifact: ArtifactOpenInfo) => void;
 }) {
   const [content, setContent] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);

@@ -40,6 +40,7 @@ export const PRELOAD_API_KEYS = [
   'listAvailableModelsForProvider',
   'deleteProvider',
   'deleteModel',
+  'getMobilePairingInfo',
   'readClipboardFilePaths',
   'readClipboardImage',
   'selectDirectory',
@@ -55,6 +56,7 @@ export const PRELOAD_API_KEYS = [
   'openArtifact',
   'openFileInSystemApp',
   'readFileContent',
+  'selectHtmlEditMedia',
   'listSkills',
   'installSkill',
   'uninstallSkill',
@@ -260,6 +262,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   listAvailableModelsForProvider: 'desktop:listAvailableModelsForProvider',
   deleteProvider: 'desktop:deleteProvider',
   deleteModel: 'desktop:deleteModel',
+  getMobilePairingInfo: 'desktop:mobile:getPairingInfo',
   readClipboardFilePaths: 'desktop:readClipboardFilePaths',
   readClipboardImage: 'desktop:readClipboardImage',
   selectDirectory: 'desktop:selectDirectory',
@@ -274,6 +277,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   openArtifact: 'desktop:openArtifact',
   openFileInSystemApp: 'desktop:openFileInSystemApp',
   readFileContent: 'desktop:readFileContent',
+  selectHtmlEditMedia: 'desktop:selectHtmlEditMedia',
   listSkills: 'desktop:listSkills',
   installSkill: 'desktop:installSkill',
   uninstallSkill: 'desktop:uninstallSkill',
@@ -489,6 +493,17 @@ export interface TestProviderConnectionResult {
   error?: string;
 }
 
+export interface DesktopMobilePairingInfo {
+  desktopId: string;
+  desktopName: string;
+  gatewayURL: string;
+  reachableURLs: string[];
+  relayUrl?: string;
+  relayJwt?: string;
+  relayRoomSecret: string;
+  deepLink: string;
+}
+
 export type DesktopChannelType = 'yunzhijia' | 'discord' | 'feishu' | 'qq' | 'qqbot' | 'weixin' | 'telegram';
 
 export interface DesktopChannelView {
@@ -643,6 +658,13 @@ export interface ConnectorsConfigSnapshot {
 
 export type DesktopTraceTarget = { kind: 'session' | 'project' | 'task'; id: string };
 
+export interface HtmlEditMediaSelection {
+  canceled: boolean;
+  filePath: string;
+  content: string;
+  error?: string;
+}
+
 export interface DesktopApi {
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
@@ -658,6 +680,7 @@ export interface DesktopApi {
   listAvailableModelsForProvider(providerId: string): Promise<AvailableModelView[]>;
   deleteProvider(providerId: string): Promise<void>;
   deleteModel(modelId: string): Promise<void>;
+  getMobilePairingInfo(): Promise<DesktopMobilePairingInfo>;
   readClipboardFilePaths(): Promise<string[]>;
   readClipboardImage(): Promise<string | null>;
   selectDirectory(): Promise<{ filePath: string }>;
@@ -681,6 +704,7 @@ export interface DesktopApi {
   openArtifact(artifactId: string): Promise<void>;
   openFileInSystemApp(filePath: string): Promise<void>;
   readFileContent(filePath: string): Promise<{ content: string; error?: string }>;
+  selectHtmlEditMedia(input: { kind: 'image' | 'svg' }): Promise<HtmlEditMediaSelection>;
   listSkills(): Promise<Array<{ name: string; aliases: string[]; description: string; source: string; tier: string }>>;
   installSkill(skillName: string): Promise<{ success: boolean; message: string }>;
   uninstallSkill(skillName: string): Promise<{ success: boolean; message: string }>;
@@ -916,7 +940,7 @@ export interface KSwarmProxyApi {
  */
 export type FullDesktopApi = DesktopApi & KSwarmProxyApi & {
   showSaveDialog(input: { defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }): Promise<{ filePath: string; canceled: boolean }>;
-  saveFile(input: { filePath: string; content: string }): Promise<{ ok: boolean; error?: string }>;
+  saveFile(input: { filePath: string; content: string; purpose?: 'html-edit' | 'text-edit' }): Promise<{ ok?: boolean; success?: boolean; error?: string }>;
   listPrinciples(): Promise<unknown[]>;
   savePrinciple(principle: unknown): Promise<unknown>;
   deletePrinciple(id: string): Promise<void>;
@@ -938,6 +962,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     listAvailableModelsForProvider: (providerId) => ipcRenderer.invoke('desktop:listAvailableModelsForProvider', providerId) as ReturnType<DesktopApi['listAvailableModelsForProvider']>,
     deleteProvider: (providerId) => ipcRenderer.invoke('desktop:deleteProvider', providerId) as Promise<void>,
     deleteModel: (modelId) => ipcRenderer.invoke('desktop:deleteModel', modelId) as Promise<void>,
+    getMobilePairingInfo: () => ipcRenderer.invoke('desktop:mobile:getPairingInfo') as Promise<DesktopMobilePairingInfo>,
     readClipboardFilePaths: () => ipcRenderer.invoke('desktop:readClipboardFilePaths') as Promise<string[]>,
     readClipboardImage: () => ipcRenderer.invoke('desktop:readClipboardImage') as Promise<string | null>,
     selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory') as Promise<{ filePath: string }>,
@@ -963,6 +988,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }) as Promise<void>,
     openFileInSystemApp: (filePath) => ipcRenderer.invoke('desktop:openFileInSystemApp', { filePath }) as Promise<void>,
     readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }) as Promise<{ content: string; error?: string }>,
+    selectHtmlEditMedia: (input) => ipcRenderer.invoke('desktop:selectHtmlEditMedia', input) as Promise<HtmlEditMediaSelection>,
     listSkills: () => ipcRenderer.invoke('desktop:listSkills') as ReturnType<DesktopApi['listSkills']>,
     installSkill: (skillName) => ipcRenderer.invoke('desktop:installSkill', skillName) as Promise<{ success: boolean; message: string }>,
     uninstallSkill: (skillName) => ipcRenderer.invoke('desktop:uninstallSkill', skillName) as Promise<{ success: boolean; message: string }>,
@@ -1130,7 +1156,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     setAppFlag: (key, value) => ipcRenderer.invoke('desktop:setAppFlag', key, value) as Promise<ThreadMetaWriteResult>,
     migrateLegacyThreadMeta: (data) => ipcRenderer.invoke('desktop:migrateLegacyThreadMeta', data) as Promise<{ migrated: boolean; reason?: string }>,
     showSaveDialog: (input) => ipcRenderer.invoke('desktop:showSaveDialog', input) as Promise<{ filePath: string; canceled: boolean }>,
-    saveFile: (input) => ipcRenderer.invoke('desktop:saveFile', input) as Promise<{ ok: boolean; error?: string }>,
+    saveFile: (input) => ipcRenderer.invoke('desktop:saveFile', input) as Promise<{ ok?: boolean; success?: boolean; error?: string }>,
     listPrinciples: () => ipcRenderer.invoke('desktop:listPrinciples') as Promise<unknown[]>,
     savePrinciple: (principle) => ipcRenderer.invoke('desktop:savePrinciple', principle) as Promise<unknown>,
     deletePrinciple: (id) => ipcRenderer.invoke('desktop:deletePrinciple', id) as Promise<void>,

@@ -9,10 +9,16 @@ import { useLocale } from '../contexts/LocaleContext';
 interface CanvasPreviewProps {
   filePath: string;
   content: string;
+  modeRequest?: CanvasPreviewModeRequest;
   /** Called when user submits an annotation from the artifact toolbar */
   onAnnotation?: (message: string) => void;
   /** Called when user clicks refresh button */
   onRefresh?: () => void;
+}
+
+export interface CanvasPreviewModeRequest {
+  id: number;
+  startInEditMode: boolean;
 }
 
 const textLikeMimeTypes = new Set([
@@ -70,10 +76,15 @@ function getFileName(path: string): string {
   return path.split(/[\\/]/).pop() || path || 'download';
 }
 
-export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: CanvasPreviewProps) {
+export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, onRefresh }: CanvasPreviewProps) {
   const { t } = useLocale();
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
+  const [markdownEditEnabled, setMarkdownEditEnabled] = useState(false);
+  const [markdownDraft, setMarkdownDraft] = useState(content);
+  const [markdownSavedContent, setMarkdownSavedContent] = useState(content);
+  const [markdownSaveStatus, setMarkdownSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
   const iframeSrc = useRef<string | null>(null);
+  const lastMarkdownEditRequestIdRef = useRef<number | null>(null);
 
   const isHtml = isHtmlFile(filePath);
   const isMarkdown = isMarkdownFile(filePath);
@@ -113,6 +124,35 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
       setViewMode('preview');
     }
   }, [filePath, isHtml, isMarkdown, isImage, isPdf]);
+
+  useEffect(() => {
+    setMarkdownEditEnabled(false);
+    setMarkdownDraft(content);
+    setMarkdownSavedContent(content);
+    setMarkdownSaveStatus('idle');
+    lastMarkdownEditRequestIdRef.current = null;
+  }, [filePath]);
+
+  useEffect(() => {
+    if (markdownEditEnabled) return;
+    setMarkdownDraft(content);
+    setMarkdownSavedContent(content);
+    setMarkdownSaveStatus('idle');
+  }, [content, markdownEditEnabled]);
+
+  useEffect(() => {
+    if (!isMarkdown || !modeRequest || modeRequest.id === 0 || lastMarkdownEditRequestIdRef.current === modeRequest.id) return;
+    lastMarkdownEditRequestIdRef.current = modeRequest.id;
+    if (modeRequest.startInEditMode) {
+      setMarkdownDraft(content);
+      setMarkdownSavedContent(content);
+      setMarkdownSaveStatus('idle');
+      setMarkdownEditEnabled(true);
+      setViewMode('preview');
+    } else {
+      setMarkdownEditEnabled(false);
+    }
+  }, [content, isMarkdown, modeRequest]);
 
   const handleAnnotation = useCallback((payload: AnnotationPayload) => {
     if (onAnnotation) {
@@ -163,6 +203,23 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
     }
   }, [content, fileName, isPdf]);
 
+  const handleSaveMarkdown = useCallback(async () => {
+    setMarkdownSaveStatus('saving');
+    try {
+      const api = getDesktopApi() as { saveFile?: (input: { filePath: string; content: string; purpose?: string }) => Promise<{ ok?: boolean; success?: boolean; error?: string }> } | null;
+      const result = await api?.saveFile?.({ filePath, content: markdownDraft, purpose: 'text-edit' });
+      if (!result || (!result.ok && !result.success)) {
+        setMarkdownSaveStatus('failed');
+        return;
+      }
+      setMarkdownSavedContent(markdownDraft);
+      setMarkdownSaveStatus('saved');
+      onRefresh?.();
+    } catch {
+      setMarkdownSaveStatus('failed');
+    }
+  }, [filePath, markdownDraft, onRefresh]);
+
   if (isBinary) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
@@ -184,6 +241,7 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
   const hasCodeView = isText;
   const hasPreview = isHtml || isMarkdown || isImage || isPdf;
   const isFramedPreview = viewMode === 'preview' && (isHtml || isPdf);
+  const markdownDirty = markdownDraft !== markdownSavedContent;
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -226,6 +284,25 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
               </button>
             </div>
           )}
+          {isMarkdown && (
+            <button
+              type="button"
+              onClick={() => {
+                setMarkdownEditEnabled((enabled) => !enabled);
+                setMarkdownSaveStatus('idle');
+                setViewMode('preview');
+              }}
+              className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs transition-colors ${
+                markdownEditEnabled
+                  ? 'bg-[var(--c-bg-page)] text-[var(--c-text-heading)]'
+                  : 'text-[var(--c-text-tertiary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)]'
+              }`}
+              aria-pressed={markdownEditEnabled}
+            >
+              {markdownEditEnabled ? <Eye size={12} /> : <Code size={12} />}
+              {markdownEditEnabled ? t.artifactMarkdownPreview : t.artifactDirectEdit}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleDownload}
@@ -244,6 +321,7 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
           <ArtifactEditableViewer
             htmlContent={content}
             filePath={filePath}
+            editModeRequest={modeRequest}
             onAnnotation={handleAnnotation}
             onRevert={handleRevert}
             onFinish={handleFinish}
@@ -251,7 +329,50 @@ export function CanvasPreview({ filePath, content, onAnnotation, onRefresh }: Ca
           />
         )}
 
-        {viewMode === 'preview' && isMarkdown && (
+        {viewMode === 'preview' && isMarkdown && markdownEditEnabled && (
+          <div className="flex h-full flex-col bg-[var(--c-bg-card)]">
+            <div className="flex shrink-0 items-center gap-2 border-b border-[var(--c-border)] px-3 py-2">
+              <span className="text-xs font-medium text-[var(--c-text-secondary)]">{t.artifactMarkdownTextLabel}</span>
+              <span className={`text-xs ${
+                markdownSaveStatus === 'failed'
+                  ? 'text-red-500'
+                  : markdownSaveStatus === 'saved'
+                    ? 'text-[var(--c-accent)]'
+                    : 'text-[var(--c-text-tertiary)]'
+              }`}>
+                {markdownSaveStatus === 'saving'
+                  ? t.artifactMarkdownSaving
+                  : markdownSaveStatus === 'saved'
+                    ? t.artifactHtmlSavedStatus
+                    : markdownSaveStatus === 'failed'
+                      ? t.artifactHtmlSaveFailed
+                      : markdownDirty
+                        ? t.artifactHtmlDirtyStatus
+                        : ''}
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleSaveMarkdown()}
+                disabled={markdownSaveStatus === 'saving' || !markdownDirty}
+                className="ml-auto rounded-md bg-[var(--c-accent)] px-3 py-1 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-45"
+              >
+                {t.artifactHtmlSave}
+              </button>
+            </div>
+            <textarea
+              aria-label={t.artifactMarkdownTextLabel}
+              value={markdownDraft}
+              onChange={(event) => {
+                setMarkdownDraft(event.target.value);
+                setMarkdownSaveStatus('idle');
+              }}
+              spellCheck={false}
+              className="min-h-0 flex-1 resize-none bg-[var(--c-bg-card)] p-4 font-mono text-sm leading-6 text-[var(--c-text-secondary)] outline-none"
+            />
+          </div>
+        )}
+
+        {viewMode === 'preview' && isMarkdown && !markdownEditEnabled && (
           <div className="h-full overflow-auto bg-[var(--c-bg-card)] p-4">
             <MarkdownRenderer content={content} />
           </div>

@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
+import { resolveStructuralKind, validateArtifactStructure } from '../../quality/artifact-structure.js';
 export function mergeCompletionExpectations(expectations) {
     if (expectations.length === 0) {
         return undefined;
@@ -59,7 +60,7 @@ export function validateCompletionEvidence(input) {
     for (const record of expectedEvidence) {
         const result = validateEvidenceRecord(record);
         if (result.ok) {
-            return { ok: true };
+            return result;
         }
         lastFailure = result;
     }
@@ -87,7 +88,7 @@ function validateEvidenceRecord(record) {
             return { ok: true };
         case 'file_artifact':
             if (hasText(record.uri) || isNonEmptyStringArray(record.metadata?.paths)) {
-                return { ok: true };
+                return runStructuralCheck(resolveLocalArtifactPath(record));
             }
             {
                 const localResult = validateLocalFileArtifactEvidence(record);
@@ -96,7 +97,12 @@ function validateEvidenceRecord(record) {
                 }
             }
             if (isNonEmptyStringArray(record.metadata?.localPaths)) {
-                return { ok: true };
+                const localPaths = record.metadata.localPaths;
+                const workspaceRoot = record.metadata?.workspaceRoot;
+                const firstPath = workspaceRoot && !isAbsolute(localPaths[0])
+                    ? resolve(workspaceRoot, localPaths[0])
+                    : localPaths[0];
+                return runStructuralCheck(firstPath);
             }
             return fail('validation_failed', 'File artifact evidence requires a URI or paths metadata.');
         case 'command_action':
@@ -219,6 +225,52 @@ function validateLocalFileArtifactEvidence(record) {
         if (!existsSync(resolvedPath)) {
             return fail('validation_failed', `File artifact evidence local path is missing: ${localPath}`);
         }
+    }
+    return { ok: true };
+}
+function resolveLocalArtifactPath(record) {
+    if (isNonEmptyStringArray(record.metadata?.localPaths)) {
+        const localPaths = record.metadata.localPaths;
+        const workspaceRoot = record.metadata?.workspaceRoot;
+        if (workspaceRoot && !isAbsolute(localPaths[0])) {
+            return resolve(workspaceRoot, localPaths[0]);
+        }
+        return localPaths[0];
+    }
+    if (hasText(record.uri)) {
+        const uri = record.uri;
+        if (uri.startsWith('file://')) {
+            try {
+                return new URL(uri).pathname;
+            }
+            catch {
+                return undefined;
+            }
+        }
+        return undefined;
+    }
+    if (isNonEmptyStringArray(record.metadata?.paths)) {
+        const paths = record.metadata.paths;
+        const candidate = paths[0];
+        if (isAbsolute(candidate))
+            return candidate;
+    }
+    return undefined;
+}
+function runStructuralCheck(localPath) {
+    if (!localPath) {
+        return { ok: true };
+    }
+    const structKind = resolveStructuralKind(localPath);
+    if (!structKind) {
+        return { ok: true };
+    }
+    if (!existsSync(localPath)) {
+        return { ok: true };
+    }
+    const result = validateArtifactStructure(localPath, structKind);
+    if (!result.ok) {
+        return { ok: true, warning: `Artifact structural issue (${structKind}): ${result.error}` };
     }
     return { ok: true };
 }

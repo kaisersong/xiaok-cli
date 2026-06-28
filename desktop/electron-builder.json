@@ -127,6 +127,7 @@
       "filter": [
         "plugin.json",
         "skills/**/*",
+        "scripts/**/*",
         "mcp-servers/canvas-server/**/*",
         "node_modules/fractional-indexing-jittered/**/*"
       ]

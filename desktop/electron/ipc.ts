@@ -1,7 +1,7 @@
-import { clipboard, dialog, shell, type BrowserWindow, type IpcMain } from 'electron';
-import { lstat, mkdir, open as openFile, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { app, clipboard, dialog, shell, type BrowserWindow, type IpcMain } from 'electron';
+import { lstat, mkdir, open as openFile, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
-import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
 import type { DesktopLoopRuntime } from './loop-executor.js';
 import type { CreateUserLoopTemplateInput, UserLoopTemplate } from './loop-types.js';
@@ -18,14 +18,87 @@ const DATA_URL_MIME_BY_EXTENSION = new Map<string, string>([
   ['.pdf', 'application/pdf'],
 ]);
 
+const HTML_EDIT_IMAGE_MIME_BY_EXTENSION = new Map<string, string>([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.webp', 'image/webp'],
+  ['.avif', 'image/avif'],
+]);
+
 function getDataUrlMimeType(filePath: string): string | null {
   return DATA_URL_MIME_BY_EXTENSION.get(extname(filePath).toLowerCase()) ?? null;
+}
+
+function getHtmlEditImageMimeType(filePath: string): string | null {
+  return HTML_EDIT_IMAGE_MIME_BY_EXTENSION.get(extname(filePath).toLowerCase()) ?? null;
 }
 
 function decodeBase64DataUrl(content: string): Buffer | null {
   const match = /^data:[^,;]+(?:;[^,]*)*;base64,([\s\S]*)$/i.exec(content);
   if (!match) return null;
   return Buffer.from(match[1], 'base64');
+}
+
+function isPathInside(childPath: string, parentPath: string): boolean {
+  const child = resolve(childPath);
+  const parent = resolve(parentPath);
+  const rel = relative(parent, child);
+  return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel));
+}
+
+async function realpathIfExists(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+type ArtifactEditPurpose = 'html-edit' | 'text-edit';
+
+const EDIT_PURPOSE_CONFIG: Record<ArtifactEditPurpose, { extensions: Set<string>; errorPrefix: string }> = {
+  'html-edit': {
+    extensions: new Set(['.html', '.htm']),
+    errorPrefix: 'html_edit',
+  },
+  'text-edit': {
+    extensions: new Set(['.md', '.markdown']),
+    errorPrefix: 'text_edit',
+  },
+};
+
+async function validateArtifactEditWritePath(
+  filePath: string,
+  services: DesktopServices,
+  purpose: ArtifactEditPurpose,
+): Promise<string | null> {
+  const config = EDIT_PURPOSE_CONFIG[purpose];
+  if (!filePath || typeof filePath !== 'string' || !isAbsolute(filePath)) {
+    return `${config.errorPrefix}_path_not_allowed`;
+  }
+
+  const resolved = resolve(filePath);
+  const extension = extname(resolved).toLowerCase();
+  if (!config.extensions.has(extension)) {
+    return `${config.errorPrefix}_invalid_extension`;
+  }
+
+  const segments = resolved.split(/[\\/]+/);
+  if (segments.includes('node_modules') || basename(resolved).startsWith('.')) {
+    return `${config.errorPrefix}_path_not_allowed`;
+  }
+
+  const allowedRoots = [
+    services.getDataRoot(),
+    app.getPath('downloads'),
+    join(os.homedir(), '.kswarm', 'projects'),
+    join(os.homedir(), '.xiaok', 'tasks'),
+  ];
+  const parentReal = await realpathIfExists(dirname(resolved));
+  const allowed = await Promise.all(allowedRoots.map((root) => realpathIfExists(root)));
+  return allowed.some((root) => isPathInside(parentReal, root)) ? null : `${config.errorPrefix}_path_not_allowed`;
 }
 
 function log(level: string, msg: string, ...args: unknown[]) {
@@ -193,6 +266,41 @@ export async function registerDesktopIpc(
       return { content };
     } catch (e) {
       return { content: '', error: String(e) };
+    }
+  });
+  ipcMain.handle('desktop:selectHtmlEditMedia', async (_event, input) => {
+    const kind = input?.kind as 'image' | 'svg' | undefined;
+    if (kind !== 'image' && kind !== 'svg') {
+      return { canceled: true, filePath: '', content: '', error: 'invalid_kind' };
+    }
+
+    const result = await dialog.showOpenDialog(window, {
+      properties: ['openFile'],
+      filters: kind === 'image'
+        ? [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'] }]
+        : [{ name: 'SVG', extensions: ['svg'] }],
+    });
+    const filePath = result.filePaths[0];
+    if (result.canceled || !filePath) {
+      return { canceled: true, filePath: '', content: '' };
+    }
+
+    try {
+      if (kind === 'image') {
+        const mimeType = getHtmlEditImageMimeType(filePath);
+        if (!mimeType) {
+          return { canceled: true, filePath, content: '', error: 'invalid_extension' };
+        }
+        const content = await readFile(filePath);
+        return { canceled: false, filePath, content: `data:${mimeType};base64,${content.toString('base64')}` };
+      }
+
+      if (extname(filePath).toLowerCase() !== '.svg') {
+        return { canceled: true, filePath, content: '', error: 'invalid_extension' };
+      }
+      return { canceled: false, filePath, content: await readFile(filePath, 'utf-8') };
+    } catch (e) {
+      return { canceled: true, filePath, content: '', error: String(e) };
     }
   });
   const activeTaskSubs = new Map<string, AbortController>();
@@ -611,9 +719,16 @@ export async function registerDesktopIpc(
     return { canceled: false, filePath: result.filePath };
   });
 
-  ipcMain.handle('desktop:saveFile', async (_event, input: { filePath: string; content: string }) => {
+  ipcMain.handle('desktop:saveFile', async (_event, input: { filePath: string; content: string; purpose?: string }) => {
     log('info', 'saveFile', { filePath: input?.filePath });
     try {
+      if (input?.purpose === 'html-edit' || input?.purpose === 'text-edit') {
+        const validationError = await validateArtifactEditWritePath(input.filePath, services, input.purpose);
+        if (validationError) {
+          log('warn', 'saveFile rejected artifact edit', { filePath: input?.filePath, purpose: input.purpose, error: validationError });
+          return { success: false, error: validationError };
+        }
+      }
       const binaryContent = decodeBase64DataUrl(input.content);
       if (binaryContent) {
         await writeFile(input.filePath, binaryContent);

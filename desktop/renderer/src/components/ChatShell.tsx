@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
 import { useParams, useLocation } from 'react-router-dom';
 import { api } from '../api';
-import { ChatView, type ChatMessage, type ComputerUseActionData, type GeneratedFile, type ToolStep } from './ChatView';
+import { ChatView, type ArtifactOpenInfo, type ArtifactOpenOptions, type ChatMessage, type ComputerUseActionData, type GeneratedFile, type ToolStep } from './ChatView';
 import { CanvasPanel } from './CanvasPanel';
 import { TaskPanel } from './TaskPanel';
 import type { ThreadRecord } from '../api/types';
@@ -223,6 +223,11 @@ export function ChatShell() {
   const [canvasExpanded, setCanvasExpanded] = useState(false);
   const [canvasPreviewFile, setCanvasPreviewFile] = useState<string | undefined>();
   const [canvasPreviewContent, setCanvasPreviewContent] = useState<string | undefined>();
+  const [canvasPreviewModeRequest, setCanvasPreviewModeRequest] = useState({ id: 0, startInEditMode: false });
+  // Canvas is per-session: it must close when switching to another conversation
+  // and reopen only when returning to the session that opened it. Keyed by taskId.
+  const canvasStateByTaskRef = useRef<Map<string, { open: boolean; expanded: boolean; file?: string; content?: string }>>(new Map());
+  const prevCanvasTaskRef = useRef<string | undefined>(undefined);
   const [planSteps, setPlanSteps] = useState<Array<{ id: string; label: string; status: string }>>([]);
   const [queuedPrompt, setQueuedPrompt] = useState<string | null>(null);
   const queuedDrainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -649,6 +654,41 @@ export function ChatShell() {
     return { msgs, result: lastResult, events: replayEvents, toolStepsMsgId: replayToolMsgId };
   }, []);
 
+  // Scope the Canvas panel to the active session. On a session switch, persist
+  // the outgoing session's canvas state and restore the incoming session's
+  // (closed by default), so the canvas does not bleed across conversations and
+  // reappears only when returning to the session that opened it.
+  useEffect(() => {
+    const prev = prevCanvasTaskRef.current;
+    if (prev === taskId) return;
+    if (prev) {
+      canvasStateByTaskRef.current.set(prev, {
+        open: canvasOpen,
+        expanded: canvasExpanded,
+        file: canvasPreviewFile,
+        content: canvasPreviewContent,
+      });
+    }
+    prevCanvasTaskRef.current = taskId;
+    const saved = taskId ? canvasStateByTaskRef.current.get(taskId) : undefined;
+    if (saved?.open) {
+      setCanvasPreviewFile(saved.file);
+      setCanvasPreviewContent(saved.content);
+      setCanvasPreviewModeRequest((request) => ({ id: request.id + 1, startInEditMode: false }));
+      setCanvasExpanded(saved.expanded);
+      setCanvasOpen(true);
+    } else {
+      setCanvasOpen(false);
+      setCanvasExpanded(false);
+      setCanvasPreviewFile(undefined);
+      setCanvasPreviewContent(undefined);
+      setCanvasPreviewModeRequest((request) => ({ id: request.id + 1, startInEditMode: false }));
+    }
+    // Intentionally keyed only on taskId: the canvas state read here is the
+    // outgoing session's value captured at switch time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
+
   useEffect(() => {
     if (!taskId) return;
 
@@ -1045,6 +1085,24 @@ export function ChatShell() {
     };
   }, []);
 
+  const openArtifactInCanvas = useCallback(async (artifact: ArtifactOpenInfo, options?: ArtifactOpenOptions) => {
+    let content = '';
+    if (artifact.filePath) {
+      const r = await api.readFileContent(artifact.filePath);
+      content = r.content;
+    }
+    sidebarWasCollapsedRef.current = sidebarCollapse.collapsed;
+    setCanvasPreviewFile(artifact.filePath ?? artifact.title);
+    setCanvasPreviewContent(content);
+    setCanvasPreviewModeRequest((request) => ({
+      id: request.id + 1,
+      startInEditMode: Boolean(options?.startInEditMode),
+    }));
+    setCanvasExpanded(true);
+    sidebarCollapse.setCollapsed(true);
+    setCanvasOpen(true);
+  }, [sidebarCollapse.collapsed, sidebarCollapse.setCollapsed]);
+
   if (loadError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 text-[var(--c-text-secondary)]">
@@ -1111,19 +1169,7 @@ export function ChatShell() {
           canvasOpen={canvasOpen}
           initialFiles={!initialPrompt && initialFiles ? initialFiles.map(f => ({ filePath: f.filePath || '', name: f.name || f.originalName || '', isImage: false })) : undefined}
           onToggleCanvas={() => setCanvasOpen(v => !v)}
-          onArtifactClick={async (artifact) => {
-            let content = '';
-            if (artifact.filePath) {
-              const r = await api.readFileContent(artifact.filePath);
-              content = r.content;
-            }
-            sidebarWasCollapsedRef.current = sidebarCollapse.collapsed;
-            setCanvasPreviewFile(artifact.filePath ?? artifact.title);
-            setCanvasPreviewContent(content);
-            setCanvasExpanded(true);
-            sidebarCollapse.setCollapsed(true);
-            setCanvasOpen(true);
-          }}
+          onArtifactClick={openArtifactInCanvas}
           onArtifactOpenExternal={(artifact) => {
             if (artifact.filePath) {
               window.open(`file://${artifact.filePath}`, '_blank');
@@ -1146,23 +1192,12 @@ export function ChatShell() {
             sidebarWasCollapsedRef.current = sidebarCollapse.collapsed;
             setCanvasPreviewFile(file.filePath);
             setCanvasPreviewContent(content);
+            setCanvasPreviewModeRequest((request) => ({ id: request.id + 1, startInEditMode: false }));
             setCanvasExpanded(true);
             sidebarCollapse.setCollapsed(true);
             setCanvasOpen(true);
           }}
-          onArtifactClick={async (artifact) => {
-            let content = '';
-            if (artifact.filePath) {
-              const r = await api.readFileContent(artifact.filePath);
-              content = r.content;
-            }
-            sidebarWasCollapsedRef.current = sidebarCollapse.collapsed;
-            setCanvasPreviewFile(artifact.filePath ?? artifact.title);
-            setCanvasPreviewContent(content);
-            setCanvasExpanded(true);
-            sidebarCollapse.setCollapsed(true);
-            setCanvasOpen(true);
-          }}
+          onArtifactClick={openArtifactInCanvas}
         />
       )}
       {canvasOpen && (
@@ -1171,6 +1206,7 @@ export function ChatShell() {
           onClose={() => { setCanvasOpen(false); setCanvasExpanded(false); sidebarCollapse.setCollapsed(sidebarWasCollapsedRef.current); }}
           initialPreviewFile={canvasPreviewFile}
           initialPreviewContent={canvasPreviewContent}
+          initialPreviewModeRequest={canvasPreviewModeRequest}
           expanded={canvasExpanded}
           onToggleExpand={() => {
             const next = !canvasExpanded;

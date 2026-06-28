@@ -138,6 +138,29 @@ export function ensureReportRendererDistCompat(pluginDir: string, bundledPluginD
   ensureReportRendererCssCompat(pluginDir);
 }
 
+/**
+ * Ensure the kai-infinity-canvas canvas-server MCP can launch from the installed
+ * plugin. Its only load-time hard dependency is `fractional-indexing-jittered`
+ * (zero-dep, pure JS); `sharp` is imported dynamically and is optional. When a
+ * same-version bundled-managed install is missing this dependency (e.g. an older
+ * deploy that copied the plugin before node_modules was packaged), the MCP server
+ * crashes on startup with ERR_MODULE_NOT_FOUND and its canvas-read tools
+ * (kai_canvas_get_content / kai_canvas_export_png / ...) never register — which
+ * pushes the agent to fall back to Computer Use to "see" the canvas. Repair it
+ * from the bundled source, mirroring ensureReportRendererDistCompat.
+ */
+export function ensureCanvasServerDepsCompat(pluginDir: string, bundledPluginDir: string): void {
+  const depRelative = join('node_modules', 'fractional-indexing-jittered');
+  const installedDep = join(pluginDir, depRelative);
+  const bundledDep = join(bundledPluginDir, depRelative);
+  if (!existsSync(bundledDep)) return;
+  if (existsSync(join(installedDep, 'package.json'))) return;
+
+  mkdirSync(dirname(installedDep), { recursive: true });
+  rmSync(installedDep, { recursive: true, force: true });
+  cpSync(bundledDep, installedDep, { recursive: true });
+}
+
 export function ensureSlideRendererWheelhouseCompat(
   pluginDir: string,
   bundledPluginDir: string,
@@ -231,6 +254,9 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
             ensureReportRendererDistCompat(dest, src);
             ensureReportRendererCssCompat(dest);
           }
+          if (name === 'kai-infinity-canvas') {
+            ensureCanvasServerDepsCompat(dest, src);
+          }
           if (name === 'kai-slide-creator') {
             slideWheelhouseCompatTargets.push({ dest, src });
           }
@@ -245,6 +271,9 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
     if (name === 'kai-report-creator') {
       ensureReportRendererDistCompat(dest, src);
       ensureReportRendererCssCompat(dest);
+    }
+    if (name === 'kai-infinity-canvas') {
+      ensureCanvasServerDepsCompat(dest, src);
     }
     if (name === 'kai-slide-creator') {
       slideWheelhouseCompatTargets.push({ dest, src });

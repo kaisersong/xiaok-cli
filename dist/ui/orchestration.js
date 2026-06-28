@@ -43,6 +43,10 @@ export function buildIntentReminderBlock(ledger, instanceId) {
     if (activeIntent.latestBreadcrumb) {
         lines.push(`Latest progress: ${activeIntent.latestBreadcrumb}`);
     }
+    const constraints = activeIntent.explicitConstraints ?? [];
+    if (constraints.length > 0) {
+        lines.push(`Constraints (must follow): ${constraints.join('; ')}`);
+    }
     return {
         type: 'text',
         text: `<system-reminder>${lines.join('\n')}</system-reminder>`,

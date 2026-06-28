@@ -7,6 +7,7 @@ import {
   ensureManagedPythonVenv,
   ensureReportRendererDistCompat,
   ensureReportRendererCssCompat,
+  ensureCanvasServerDepsCompat,
   ensureSlideRendererWheelhouseCompat,
 } from '../../electron/deploy-bundled-plugins.js';
 
@@ -318,6 +319,50 @@ describe('deploy-bundled-plugins', () => {
         .toBe('current server bundle');
       expect(existsSync(join(installedPluginDir, 'mcp-servers', 'report-renderer', 'dist', 'renderer', 'html-builder.js'))).toBe(true);
       expect(existsSync(join(installedPluginDir, 'mcp-servers', 'report-renderer', 'dist', 'css', 'corporate-blue.css'))).toBe(true);
+    });
+
+    it('restores the missing canvas-server runtime dependency for a same-version bundled install', () => {
+      const bundledPluginDir = join(bundledDir, 'kai-infinity-canvas');
+      const installedPluginDir = join(pluginsDir, 'kai-infinity-canvas');
+      createPluginWithFiles(bundledPluginDir, {
+        name: 'kai-infinity-canvas',
+        version: '0.2.0',
+      }, {
+        'mcp-servers/canvas-server/server.mjs': 'export {}',
+        'node_modules/fractional-indexing-jittered/package.json': '{"name":"fractional-indexing-jittered","version":"1.0.0"}',
+        'node_modules/fractional-indexing-jittered/lib/index.js': 'export const generateKeyBetween = () => "a0";',
+      });
+      // Installed at the same version (bundled-managed) but missing the dependency.
+      createPluginWithFiles(installedPluginDir, {
+        name: 'kai-infinity-canvas',
+        version: '0.2.0',
+        source: 'bundled',
+      }, {
+        'mcp-servers/canvas-server/server.mjs': 'export {}',
+      });
+      expect(existsSync(join(installedPluginDir, 'node_modules', 'fractional-indexing-jittered', 'package.json'))).toBe(false);
+
+      ensureCanvasServerDepsCompat(installedPluginDir, bundledPluginDir);
+
+      expect(existsSync(join(installedPluginDir, 'node_modules', 'fractional-indexing-jittered', 'package.json'))).toBe(true);
+      expect(existsSync(join(installedPluginDir, 'node_modules', 'fractional-indexing-jittered', 'lib', 'index.js'))).toBe(true);
+    });
+
+    it('does not clobber an existing canvas-server dependency', () => {
+      const bundledPluginDir = join(bundledDir, 'kai-infinity-canvas');
+      const installedPluginDir = join(pluginsDir, 'kai-infinity-canvas');
+      createPluginWithFiles(bundledPluginDir, { name: 'kai-infinity-canvas', version: '0.2.0' }, {
+        'node_modules/fractional-indexing-jittered/package.json': '{"name":"fractional-indexing-jittered","version":"1.0.0"}',
+      });
+      createPluginWithFiles(installedPluginDir, { name: 'kai-infinity-canvas', version: '0.2.0', source: 'bundled' }, {
+        'node_modules/fractional-indexing-jittered/package.json': '{"name":"fractional-indexing-jittered","version":"1.0.0"}',
+        'node_modules/fractional-indexing-jittered/lib/index.js': 'export const KEEP = true;',
+      });
+
+      ensureCanvasServerDepsCompat(installedPluginDir, bundledPluginDir);
+
+      // Existing install is left intact (no clobber of the local lib file).
+      expect(existsSync(join(installedPluginDir, 'node_modules', 'fractional-indexing-jittered', 'lib', 'index.js'))).toBe(true);
     });
 
     it('replaces stale same-version bundled slide wheels with current-platform wheels', () => {

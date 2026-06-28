@@ -56,7 +56,7 @@ export type RunLoopNowResult =
   | { status: 'skipped'; reason: 'paused' | 'missing_loop' | 'deleted_loop' };
 
 export interface LoopRunner {
-  runLoopNow(loopId: string, trigger?: LoopRunTrigger): Promise<RunLoopNowResult>;
+  runLoopNow(loopId: string, trigger?: LoopRunTrigger, signal?: AbortSignal): Promise<RunLoopNowResult>;
 }
 
 export interface CreateLoopRunnerOptions {
@@ -74,7 +74,7 @@ export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
   const staleAfterMs = options.staleAfterMs ?? 30 * 60_000;
 
   return {
-    async runLoopNow(loopId, trigger) {
+    async runLoopNow(loopId, trigger, signal) {
       const startedAt = now();
       assertRecoveredStaleRuns(options.loopStore.recoverStaleRuns(startedAt, staleAfterMs));
       const effectiveTrigger = trigger ?? { kind: 'manual' };
@@ -100,6 +100,7 @@ export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
           loopId,
           runId: run.id,
           trigger: effectiveTrigger,
+          signal,
         });
       }
 
@@ -179,7 +180,7 @@ export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
 }
 
 export interface CreateLoopExecutorOptions {
-  runLoop: (loopId: string, trigger: LoopRunTrigger) => Promise<RunLoopNowResult> | RunLoopNowResult;
+  runLoop: (loopId: string, trigger: LoopRunTrigger, signal?: AbortSignal) => Promise<RunLoopNowResult> | RunLoopNowResult;
 }
 
 export function createLoopExecutor(options: CreateLoopExecutorOptions): TimedActionExecutorHandler {
@@ -189,7 +190,7 @@ export function createLoopExecutor(options: CreateLoopExecutorOptions): TimedAct
       if (action.executor.kind !== 'loop') {
         return { skip: { action: 'skip', reason: `not a loop executor: ${action.executor.kind}` } };
       }
-      const result = await options.runLoop(action.executor.loopId, scheduledLoopTrigger(action, context, runtimeContext));
+      const result = await options.runLoop(action.executor.loopId, scheduledLoopTrigger(action, context, runtimeContext), runtimeContext?.signal);
       if (result.status === 'already_running') {
         return { skip: { action: 'skip', reason: `loop already running: ${result.activeRunId}` } };
       }
@@ -306,7 +307,7 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
     kswarmHealthScanner,
     runner,
     executor: createLoopExecutor({
-      runLoop: (loopId, trigger) => runner.runLoopNow(loopId, trigger),
+      runLoop: (loopId, trigger, signal) => runner.runLoopNow(loopId, trigger, signal),
     }),
     listAnomalies(loopId) {
       if (loopId === KSWARM_SERVICE_HEALTH_LOOP_ID) {

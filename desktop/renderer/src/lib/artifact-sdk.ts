@@ -18,12 +18,21 @@ export const ARTIFACT_SDK_CODE = `(function() {
   'use strict';
 
   let annotationMode = false;
+  let editMode = false;
   let hovered = null;
   let selected = null;
+  let editHovered = null;
+  let editSelected = null;
   let ignoreNextClick = false;
+  let editSyncFrame = 0;
+  let editSyncTimeout = 0;
   let shadow = null;
   let counter = 0;
   const ids = new WeakMap();
+  const EDITABLE_TAGS = ['h1','h2','h3','h4','h5','h6','p','span','a','button','li','td','th','blockquote','figcaption','label','strong','em','small','mark','code'];
+  const PROTECTED_IDS = ['toc-toggle-btn','card-mode-btn','ai-summary-btn','export-btn','export-menu','edit-hotzone'];
+  const PROTECTED_SELF_SELECTORS = ['[data-export-role]','[data-export-progress]','script','style','meta','link'];
+  const PROTECTED_ANCESTOR_SELECTORS = ['.nav-dots','.progress-bar','.slide-nav','[id^="export-"]'];
 
   function uid(el) {
     if (!ids.has(el)) ids.set(el, String(++counter));
@@ -124,6 +133,105 @@ export const ARTIFACT_SDK_CODE = `(function() {
     return !!(el && el.closest && el.closest('[data-lavish-action]'));
   }
 
+  function isProtectedElement(el) {
+    if (!el || !el.matches) return true;
+    if (PROTECTED_IDS.indexOf(el.id) >= 0) return true;
+    if (el.hasAttribute && el.hasAttribute('data-xk-no-edit')) return true;
+    for (var i = 0; i < PROTECTED_SELF_SELECTORS.length; i++) {
+      if (el.matches(PROTECTED_SELF_SELECTORS[i])) return true;
+    }
+    for (var j = 0; j < PROTECTED_ANCESTOR_SELECTORS.length; j++) {
+      if (el.matches(PROTECTED_ANCESTOR_SELECTORS[j]) || (el.closest && el.closest(PROTECTED_ANCESTOR_SELECTORS[j]))) return true;
+    }
+    return false;
+  }
+
+  function isVisibleElement(el) {
+    if (!el || !el.getBoundingClientRect) return false;
+    var style = window.getComputedStyle(el);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    var rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function hasDirectText(el) {
+    if (!el || !el.childNodes) return false;
+    for (var i = 0; i < el.childNodes.length; i++) {
+      var child = el.childNodes[i];
+      if (child.nodeType === 3 && child.textContent && child.textContent.trim()) return true;
+    }
+    return false;
+  }
+
+  function isEditableElement(el) {
+    if (!el || !el.tagName || isLavishUi(el) || isLavishAction(el) || isProtectedElement(el) || !isVisibleElement(el)) return false;
+    var tag = el.tagName.toLowerCase();
+    if (tag === 'code' && el.parentElement && el.parentElement.tagName.toLowerCase() !== 'pre') return false;
+    if (EDITABLE_TAGS.indexOf(tag) >= 0) return true;
+    if ((tag === 'section' || tag === 'article' || tag === 'div') && hasDirectText(el)) return true;
+    return false;
+  }
+
+  function closestEditableElement(node) {
+    var el = closestElement(node);
+    while (el && el !== document.body && el !== document.documentElement) {
+      if (isEditableElement(el)) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  function editKind(el) {
+    return el && el.tagName && el.tagName.toLowerCase() === 'a' ? 'link' : 'text';
+  }
+
+  function sourceOccurrence(el) {
+    var html = el.outerHTML;
+    var tag = el.tagName.toLowerCase();
+    var all = document.querySelectorAll(tag);
+    var count = 0;
+    for (var i = 0; i < all.length; i++) {
+      if (all[i] === el) return count;
+      if (all[i].outerHTML === html) count++;
+    }
+    return 0;
+  }
+
+  function editStyle(el) {
+    var style = el && el.style ? el.style : {};
+    return {
+      color: style.color || '',
+      fontSize: style.fontSize || '',
+      fontFamily: style.fontFamily || '',
+      fontWeight: style.fontWeight || '',
+    };
+  }
+
+  function editTargetPayload(el) {
+    var kind = editKind(el);
+    var payload = {
+      id: uid(el),
+      kind: kind,
+      tagName: (el.tagName || '').toLowerCase(),
+      selector: selector(el),
+      text: (el.innerText || el.textContent || '').trim(),
+      outerHtml: el.outerHTML,
+      sourceOccurrence: sourceOccurrence(el),
+      style: editStyle(el),
+    };
+    if (kind === 'link') payload.href = el.getAttribute('href') || '';
+    return payload;
+  }
+
+  function countEditableElements() {
+    var all = document.body ? document.body.querySelectorAll('*') : [];
+    var count = 0;
+    for (var i = 0; i < all.length; i++) {
+      if (isEditableElement(all[i])) count++;
+    }
+    return count;
+  }
+
   function highlightElement(el) {
     if (!el) return;
     el.style.outline = '2px solid #3b82f6';
@@ -138,6 +246,71 @@ export const ARTIFACT_SDK_CODE = `(function() {
     if (!shadow) return;
     var highlights = shadow.querySelectorAll('.xiaok-text-highlight');
     for (var i = 0; i < highlights.length; i++) highlights[i].remove();
+  }
+
+  function showEditBox(el, selectedBox) {
+    var root = ensureShadow();
+    var className = selectedBox ? 'xiaok-edit-selected-box' : 'xiaok-edit-hover-box';
+    var otherClassName = selectedBox ? 'xiaok-edit-hover-box' : 'xiaok-edit-selected-box';
+    var other = root.querySelector('.' + otherClassName);
+    if (!selectedBox && other) return;
+    var box = root.querySelector('.' + className);
+    if (!box) {
+      box = document.createElement('div');
+      box.className = className;
+      root.appendChild(box);
+    }
+    var rect = el.getBoundingClientRect();
+    box.style.left = rect.left + 'px';
+    box.style.top = rect.top + 'px';
+    box.style.width = rect.width + 'px';
+    box.style.height = rect.height + 'px';
+  }
+
+  function clearEditBox(selectedBox) {
+    if (!shadow) return;
+    var className = selectedBox ? 'xiaok-edit-selected-box' : 'xiaok-edit-hover-box';
+    var box = shadow.querySelector('.' + className);
+    if (box) box.remove();
+  }
+
+  function syncEditBoxes() {
+    editSyncFrame = 0;
+    if (!editMode) return;
+    if (editHovered && editHovered !== editSelected) {
+      if (editHovered.isConnected && isVisibleElement(editHovered)) {
+        showEditBox(editHovered, false);
+      } else {
+        editHovered = null;
+        clearEditBox(false);
+      }
+    }
+    if (editSelected) {
+      if (editSelected.isConnected && isVisibleElement(editSelected)) {
+        showEditBox(editSelected, true);
+      } else {
+        editSelected = null;
+        clearEditBox(true);
+        parent.postMessage({ type: 'xiaok:editDeselect' }, '*');
+      }
+    }
+  }
+
+  function scheduleEditBoxSync() {
+    if (!editMode || editSyncFrame || editSyncTimeout) return;
+    var run = function() {
+      if (editSyncFrame) {
+        window.cancelAnimationFrame(editSyncFrame);
+        editSyncFrame = 0;
+      }
+      if (editSyncTimeout) {
+        window.clearTimeout(editSyncTimeout);
+        editSyncTimeout = 0;
+      }
+      syncEditBoxes();
+    };
+    editSyncFrame = window.requestAnimationFrame(run);
+    editSyncTimeout = window.setTimeout(run, 80);
   }
 
   function highlightTextRange(range) {
@@ -210,6 +383,7 @@ export const ARTIFACT_SDK_CODE = `(function() {
 
   function setAnnotationMode(enabled) {
     annotationMode = !!enabled;
+    if (annotationMode) setEditMode(false);
     var style = document.getElementById('xiaok-cursor-style');
     if (annotationMode && !style) {
       style = document.createElement('style');
@@ -221,6 +395,38 @@ export const ARTIFACT_SDK_CODE = `(function() {
     if (!annotationMode) closeCard();
   }
 
+  function setEditMode(enabled) {
+    editMode = !!enabled;
+    if (editMode) {
+      annotationMode = false;
+      closeCard();
+    }
+    var style = document.getElementById('xiaok-edit-cursor-style');
+    if (editMode && !style) {
+      style = document.createElement('style');
+      style.id = 'xiaok-edit-cursor-style';
+      style.textContent = 'body *{cursor:default!important}';
+      document.head.appendChild(style);
+    }
+    if (!editMode && style) style.remove();
+    if (!editMode) {
+      if (editSyncFrame) {
+        window.cancelAnimationFrame(editSyncFrame);
+        editSyncFrame = 0;
+      }
+      if (editSyncTimeout) {
+        window.clearTimeout(editSyncTimeout);
+        editSyncTimeout = 0;
+      }
+      editHovered = null;
+      editSelected = null;
+      clearEditBox(false);
+      clearEditBox(true);
+    } else {
+      parent.postMessage({ type: 'xiaok:editReady', payload: { elementCount: countEditableElements() } }, '*');
+    }
+  }
+
   function ensureShadow() {
     if (shadow) return shadow;
     var host = document.createElement('div');
@@ -228,7 +434,7 @@ export const ARTIFACT_SDK_CODE = `(function() {
     document.documentElement.appendChild(host);
     shadow = host.attachShadow({ mode: 'open' });
     var style = document.createElement('style');
-    style.textContent = ':host{all:initial;position:fixed;z-index:2147483647;left:0;top:0;pointer-events:none}.xiaok-text-highlight{position:fixed;pointer-events:none;background:rgba(59,130,246,.15);border-radius:2px;box-shadow:0 0 0 1px rgba(59,130,246,.35)}.xiaok-annotation-card{position:fixed;pointer-events:all;width:min(320px,calc(100vw - 24px));padding:14px;border-radius:14px;background:#FFFFFF;color:#141412;border:1px solid #DEDEDE;box-shadow:0 8px 32px rgba(0,0,0,.12),0 0 1px rgba(0,0,0,.08);font:13px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;box-sizing:border-box}.xiaok-annotation-card textarea{width:100%;min-height:80px;resize:vertical;border-radius:8px;border:1px solid #DEDEDE;background:#FFFFFF;color:#141412;padding:8px 10px;font:inherit;box-sizing:border-box;outline:none;transition:border-color .15s}.xiaok-annotation-card textarea:focus{border-color:#B9B9B7}.xiaok-annotation-card textarea::placeholder{color:#8C8C8A}.xiaok-annotation-card .xiaok-row{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}.xiaok-annotation-card button{border:0;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s}.xiaok-annotation-card .xiaok-send{background:#1A1A18;color:#FAFAFA}.xiaok-annotation-card .xiaok-send:hover{opacity:.85}.xiaok-annotation-card .xiaok-cancel{background:#EBEBEB;color:#3D3D3B}.xiaok-annotation-card .xiaok-cancel:hover{background:#E5E5E3}';
+    style.textContent = ':host{all:initial;position:fixed;z-index:2147483647;left:0;top:0;pointer-events:none}.xiaok-text-highlight{position:fixed;pointer-events:none;background:rgba(59,130,246,.15);border-radius:2px;box-shadow:0 0 0 1px rgba(59,130,246,.35)}.xiaok-edit-hover-box,.xiaok-edit-selected-box{position:fixed;pointer-events:none;box-sizing:border-box}.xiaok-edit-hover-box{border:1px dashed rgba(37,99,235,.95);background:rgba(37,99,235,.06)}.xiaok-edit-selected-box{border:2px solid rgba(37,99,235,.95);background:rgba(37,99,235,.08)}.xiaok-annotation-card{position:fixed;pointer-events:all;width:min(320px,calc(100vw - 24px));padding:14px;border-radius:14px;background:#FFFFFF;color:#141412;border:1px solid #DEDEDE;box-shadow:0 8px 32px rgba(0,0,0,.12),0 0 1px rgba(0,0,0,.08);font:13px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;box-sizing:border-box}.xiaok-annotation-card textarea{width:100%;min-height:80px;resize:vertical;border-radius:8px;border:1px solid #DEDEDE;background:#FFFFFF;color:#141412;padding:8px 10px;font:inherit;box-sizing:border-box;outline:none;transition:border-color .15s}.xiaok-annotation-card textarea:focus{border-color:#B9B9B7}.xiaok-annotation-card textarea::placeholder{color:#8C8C8A}.xiaok-annotation-card .xiaok-row{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}.xiaok-annotation-card button{border:0;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s}.xiaok-annotation-card .xiaok-send{background:#1A1A18;color:#FAFAFA}.xiaok-annotation-card .xiaok-send:hover{opacity:.85}.xiaok-annotation-card .xiaok-cancel{background:#EBEBEB;color:#3D3D3B}.xiaok-annotation-card .xiaok-cancel:hover{background:#E5E5E3}';
     shadow.appendChild(style);
     return shadow;
   }
@@ -300,6 +506,7 @@ export const ARTIFACT_SDK_CODE = `(function() {
   window.addEventListener('message', function(event) {
     var msg = event.data || {};
     if (msg.type === 'xiaok:setAnnotationMode') setAnnotationMode(msg.enabled);
+    if (msg.type === 'xiaok:setEditMode') setEditMode(msg.enabled);
     if (msg.type === 'xiaok:getScrollAnchor') {
       parent.postMessage({ type: 'xiaok:scrollAnchor', selector: getScrollAnchor() }, '*');
     }
@@ -311,8 +518,19 @@ export const ARTIFACT_SDK_CODE = `(function() {
       window.scrollTo(0, 0);
     }
   });
+  window.addEventListener('scroll', scheduleEditBoxSync, true);
+  window.addEventListener('resize', scheduleEditBoxSync);
 
   document.addEventListener('mouseover', function(event) {
+    if (editMode) {
+      if (isLavishUi(event.target) || isLavishAction(event.target)) return;
+      var editTarget = closestEditableElement(event.target);
+      if (!editTarget || editTarget === editSelected) return;
+      editHovered = editTarget;
+      showEditBox(editHovered, false);
+      parent.postMessage({ type: 'xiaok:editHover', payload: { id: uid(editHovered), rect: editHovered.getBoundingClientRect() } }, '*');
+      return;
+    }
     if (!annotationMode || isLavishUi(event.target) || isLavishAction(event.target)) return;
     if (event.target === selected) return;
     if (hovered && hovered !== selected) clearHighlight(hovered);
@@ -321,6 +539,12 @@ export const ARTIFACT_SDK_CODE = `(function() {
   }, true);
 
   document.addEventListener('mouseout', function() {
+    if (editMode && editHovered && editHovered !== editSelected) {
+      editHovered = null;
+      clearEditBox(false);
+      parent.postMessage({ type: 'xiaok:editHover', payload: null }, '*');
+      return;
+    }
     if (hovered && hovered !== selected) {
       clearHighlight(hovered);
       hovered = null;
@@ -328,6 +552,7 @@ export const ARTIFACT_SDK_CODE = `(function() {
   }, true);
 
   document.addEventListener('mouseup', function(event) {
+    if (editMode) return;
     if (!annotationMode || isLavishUi(event.target) || isLavishAction(event.target)) return;
     var c = textSelectionContext(document.getSelection());
     if (!c) return;
@@ -336,6 +561,23 @@ export const ARTIFACT_SDK_CODE = `(function() {
   }, true);
 
   document.addEventListener('click', function(event) {
+    if (editMode) {
+      if (isLavishUi(event.target) || isLavishAction(event.target)) return;
+      var editTarget = closestEditableElement(event.target);
+      event.preventDefault();
+      event.stopPropagation();
+      if (!editTarget) {
+        editSelected = null;
+        clearEditBox(true);
+        parent.postMessage({ type: 'xiaok:editDeselect' }, '*');
+        return;
+      }
+      editSelected = editTarget;
+      clearEditBox(false);
+      showEditBox(editSelected, true);
+      parent.postMessage({ type: 'xiaok:editSelect', payload: editTargetPayload(editSelected) }, '*');
+      return;
+    }
     if (!annotationMode || isLavishUi(event.target) || isLavishAction(event.target)) return;
     event.preventDefault();
     event.stopPropagation();

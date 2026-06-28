@@ -46,16 +46,23 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
-Xiaok Desktop v1.4.15 强化了 Loop Engineering 的 evidence 管线：用户显式约束（从意图提取）现在会注入到每轮 system reminder 中让 subagent 真正遵守，同时二进制产物 evidence（PDF/PPTX）获得了 warn mode 结构校验——可以捕获损坏文件但不阻塞任务完成。
+Xiaok Desktop v1.4.15 同时交付新的产物编辑界面和 Loop Engineering evidence 能力：HTML 产物可以在 Canvas 里直接编辑，Markdown 产物可以用纯文本方式编辑，本地图片/SVG 可以通过真实桌面文件选择框插入，移动端伴随 API 也能从桌面 runtime 镜像对话、审批、项目、循环和产物预览。
 
 **v1.4.15 新特性：**
 
+- **HTML 产物直接编辑器**：HTML 产物现在在 Canvas 和产物卡片里都有更靠前的编辑入口。点击预览中的文字或链接后，右侧 inspector 支持改文字、删除组件、设置文字颜色/字体/字号/粗细，以及插入图片/SVG。编辑工具栏固定在产物区域底部，预览区域不会被挤到只剩一小块。
+- **Markdown 纯文本编辑**：Markdown 产物不再只能预览，可以用简单源码文本框编辑，并通过同一套受保护的产物保存链路写回。
+- **本地图片与 SVG 插入**：HTML 编辑器支持图片 URL、本地图片文件（写入 `data:image/*;base64`）、SVG 源码、本地 `.svg` 文件四种插入方式。macOS 文件选择框通过 preload IPC 暴露，并有 main process 测试覆盖。
+- **产物卡片编辑入口**：会话里的产物卡片现在提供更紧凑的 icon 操作：打开、收藏到知识库、编辑，适合高频操作。
+- **保存权限修复**：HTML/Markdown 产物保存改为按用途校验路径，允许桌面 data root 和 Electron downloads 目录里的生成产物，同时继续拒绝无关路径或错误扩展名。应用修改失败与保存失败拆开处理，文字/样式“应用”不再误报“请检查文件权限或路径”。
+- **移动端伴随基础能力**：Desktop 新增本地 mobile gateway，包含配对身份、Bonjour 广播、relay 配置、二维码、发送聊天、审批响应、项目/循环快照和产物预览查找；首个 iOS 客户端位于 `mobile/ios`。
+- **内置无限画布打包**：Desktop 打包现在包含 `kai-infinity-canvas` 的 `scripts` 目录，安装包内的画布插件可以正常启动。
 - **约束注入 Intent Reminder**：`buildIntentReminderBlock` 现在渲染 `explicitConstraints`，使用 “must follow” 语义和分号分隔。planner 提取的约束（如”控制在一页内”/”用中文”）终于在每轮对话中对执行 agent 可见，而不是只存在 ledger 里。
 - **二进制产物结构校验（Warn Mode）**：新增 `artifact-structure.ts` 模块，校验 PDF（`%PDF-` header，fd-based 只读 5 字节）和 PPTX（ZIP local file header `PK\x03\x04` + 前 64KB 内是否有 `[Content_Types].xml`）。以 warn mode 接入 `completion-evidence.ts` guard pipeline——检测损坏产物但不杀任务。内存安全：PDF 读 5 字节，PPTX 最多 64KB。
 - **URI/Paths Bypass 修复**：`resolveLocalArtifactPath` 现在统一从 `file://` URI、`metadata.paths`、`metadata.localPaths` 提取可验证的本地路径。之前通过 `uri` 或 `paths` 字段绕过结构校验的 evidence 记录现在也会被验证。
 - **Canvas Preview 默认 Tab**：Canvas 面板默认显示预览 tab + 刷新按钮重新读取文件内容。
 - **Evidence Guard 测试对齐**：修复 `artifact-evidence-guard.test.ts` 中 3 个过期测试，对齐 v1.4.11 引入的 answer-fallback 策略。
-- **发布验证**：v1.4.15 通过 79 个聚焦 guard/orchestration/structure 测试（全通过），sandbox build clean，无新 typecheck 回归。
+- **发布验证**：v1.4.15 已通过 HTML/Markdown 编辑器聚焦测试、preload/main 保存路径测试、mobile gateway/snapshot 测试、guard/orchestration/structure 测试、desktop typecheck/build、`/Applications/xiaok.app` 无签名安装包实装，以及对真实幻灯片 HTML 产物的 Computer Use 验证。
 
 **v1.4.14 新特性：**
 

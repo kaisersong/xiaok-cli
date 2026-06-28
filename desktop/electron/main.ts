@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createDesktopServices, resumeOneScriptWorkflow } from './desktop-services.js';
 import { registerDesktopIpc } from './ipc.js';
 import {
@@ -45,6 +45,25 @@ import { XIAOK_DESKTOP_HOST_PARTICIPANT_ID, XIAOK_WORKER_SEED_ID } from '../shar
 import { KSwarmStreamBridge } from './kswarm-stream-bridge.js';
 import { registerKSwarmProxy } from './kswarm-ipc-proxy.js';
 import { configureDefaultRemoteDebugging } from './remote-debugging.js';
+import {
+  buildMobilePairingPayload,
+  createMobileBonjourAdvertiser,
+  createMobileGateway,
+  loadOrCreateMobileIdentity,
+  type MobileApprovalDecision,
+  type MobileArtifactPreview,
+  type MobileChatMessage,
+} from './mobile-gateway.js';
+import {
+  createMobileRelayBridge,
+  loadMobileRelayConfig,
+} from './mobile-relay.js';
+import {
+  buildMobileSnapshotFromSources,
+  resolveMobileApprovalAnswer,
+  type KSwarmProjectLike,
+} from './mobile-snapshot.js';
+import type { TaskSnapshot } from '../../src/runtime/task-host/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -59,6 +78,122 @@ function debugMain(message: string, extra?: unknown): void {
     appendFileSync(join(logDir, 'main-debug.log'), `${new Date().toISOString()} ${line}\n`);
   } catch {}
   console.log(line);
+}
+
+function readRecentTaskSnapshots(dataRoot: string, limit = 20): TaskSnapshot[] {
+  const snapshotDir = join(dataRoot, 'tasks', 'snapshots');
+  if (!existsSync(snapshotDir)) return [];
+  return readdirSync(snapshotDir)
+    .filter(name => name.endsWith('.json'))
+    .map(name => {
+      const filePath = join(snapshotDir, name);
+      return { filePath, mtimeMs: statSync(filePath).mtimeMs };
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .slice(0, limit)
+    .flatMap(({ filePath }) => {
+      try {
+        return [JSON.parse(readFileSync(filePath, 'utf8')) as TaskSnapshot];
+      } catch {
+        return [];
+      }
+    });
+}
+
+function findMobileArtifactPreview(dataRoot: string, artifactId: string): MobileArtifactPreview | null {
+  for (const snapshot of readRecentTaskSnapshots(dataRoot, 30)) {
+    for (const artifact of snapshot.result?.artifacts ?? []) {
+      if (artifact.artifactId !== artifactId) continue;
+      return buildArtifactPreview({
+        artifact: {
+          id: artifact.artifactId,
+          name: artifact.title || artifact.filePath?.split(/[\\/]/).pop() || artifact.artifactId,
+          kind: mapMobileArtifactKind(artifact.kind),
+          source: snapshot.taskId,
+          status: 'ready',
+          previewAvailable: artifact.previewAvailable,
+          mimeType: artifact.mimeType,
+          sizeBytes: artifact.sizeBytes,
+        },
+        filePath: artifact.filePath,
+        previewAvailable: artifact.previewAvailable,
+        mimeType: artifact.mimeType,
+        kind: artifact.kind,
+      });
+    }
+
+    for (const event of snapshot.events) {
+      if (event.type !== 'artifact_recorded' || event.artifactId !== artifactId) continue;
+      return buildArtifactPreview({
+        artifact: {
+          id: event.artifactId,
+          name: event.label || event.filePath.split(/[\\/]/).pop() || event.artifactId,
+          kind: mapMobileArtifactKind(event.kind),
+          source: snapshot.taskId,
+          status: 'ready',
+          previewAvailable: event.previewAvailable,
+          mimeType: event.mimeType,
+        },
+        filePath: event.filePath,
+        previewAvailable: event.previewAvailable,
+        mimeType: event.mimeType,
+        kind: event.kind,
+      });
+    }
+  }
+  return null;
+}
+
+function buildArtifactPreview(input: {
+  artifact: unknown;
+  filePath?: string;
+  previewAvailable?: boolean;
+  mimeType?: string;
+  kind: string;
+}): MobileArtifactPreview | null {
+  if (!input.previewAvailable) return null;
+  const contentType = input.mimeType || contentTypeForArtifactKind(input.kind);
+  const preview: MobileArtifactPreview = {
+    artifact: input.artifact,
+    contentType,
+  };
+  if (input.filePath && isTextPreviewKind(input.kind, contentType) && existsSync(input.filePath)) {
+    preview.text = readFileSync(input.filePath, 'utf8').slice(0, 200_000);
+  }
+  return preview;
+}
+
+function mapMobileArtifactKind(kind: string): string {
+  if (kind === 'pptx' || kind === 'pdf' || kind === 'html' || kind === 'image' || kind === 'text' || kind === 'markdown') {
+    return kind;
+  }
+  return 'other';
+}
+
+function contentTypeForArtifactKind(kind: string): string {
+  if (kind === 'markdown') return 'text/markdown';
+  if (kind === 'html') return 'text/html';
+  if (kind === 'text') return 'text/plain';
+  if (kind === 'pdf') return 'application/pdf';
+  if (kind === 'pptx') return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  return 'application/octet-stream';
+}
+
+function isTextPreviewKind(kind: string, contentType: string): boolean {
+  return kind === 'markdown'
+    || kind === 'text'
+    || kind === 'html'
+    || contentType.startsWith('text/')
+    || contentType === 'application/json';
+}
+
+async function fetchKSwarmProjectsForMobile(kswarmService: ReturnType<typeof createKSwarmService>): Promise<KSwarmProjectLike[]> {
+  const status = kswarmService.getStatus();
+  if (!status.running || !status.port) return [];
+  const response = await fetch(`http://127.0.0.1:${status.port}/projects`);
+  if (!response.ok) return [];
+  const body = await response.json() as { projects?: KSwarmProjectLike[] };
+  return Array.isArray(body.projects) ? body.projects : [];
 }
 
 // Suppress EPIPE errors from console.log after stdout pipe closes
@@ -142,8 +277,151 @@ async function createWindow(): Promise<BrowserWindow> {
     dataRoot,
     kswarmService,
   });
-  const loopNotificationPort = createElectronDesktopNotificationPort();
   let loopStoreRef: import('./loop-store.js').LoopStore | undefined;
+  const mobileIdentity = loadOrCreateMobileIdentity(dataRoot);
+  const mobileBonjourAdvertiser = createMobileBonjourAdvertiser();
+  const mobileMessages: MobileChatMessage[] = [];
+  const getMobileSnapshot = async () => {
+    const activeTask = await services.getActiveTask().catch(() => null);
+    const snapshots = readRecentTaskSnapshots(dataRoot);
+    if (activeTask && !snapshots.some(snapshot => snapshot.taskId === activeTask.taskId)) {
+      const recovered = await services.recoverTask(activeTask.taskId).catch(() => null);
+      if (recovered?.snapshot) snapshots.unshift(recovered.snapshot);
+    }
+    const loopDefinitions = loopStoreRef?.listLoopDefinitions() ?? [];
+    const loopRunsByLoopId = new Map(loopDefinitions.map(definition => [
+      definition.id,
+      loopStoreRef?.listLoopRuns(definition.id, 1) ?? [],
+    ]));
+    return buildMobileSnapshotFromSources({
+      desktopName: 'Xiaok Desktop',
+      activeTaskId: activeTask?.taskId ?? null,
+      mobileMessages,
+      snapshots,
+      kswarmProjects: await fetchKSwarmProjectsForMobile(kswarmService).catch(() => []),
+      loopDefinitions,
+      userLoopTemplates: loopStoreRef?.listUserLoopTemplates() ?? [],
+      loopRunsByLoopId,
+    });
+  };
+  const sendMobileMessage = async (text: string) => {
+    const created = await services.createTask({ prompt: text, materials: [] });
+    const sequence = Date.now();
+    const userMessage = {
+      id: `mobile-user-${sequence}`,
+      conversationId: created.taskId,
+      role: 'user' as const,
+      text,
+      createdAt: new Date(sequence).toISOString(),
+      deliveryStatus: 'sent' as const,
+    };
+    mobileMessages.push(userMessage);
+    mobileMessages.splice(0, Math.max(0, mobileMessages.length - 30));
+    return [
+      {
+        type: 'chat.message_appended' as const,
+        sequence,
+        message: userMessage,
+      },
+      {
+        type: 'turn.started' as const,
+        sequence: sequence + 1,
+        turn: {
+          id: created.taskId,
+          title: text.slice(0, 80) || 'Mobile message',
+          status: 'running' as const,
+        },
+      },
+      { type: 'snapshot.required' as const, sequence: sequence + 2 },
+    ];
+  };
+  const respondMobileApproval = async (input: { id: string; decision: MobileApprovalDecision }) => {
+    const [taskId, questionId] = input.id.split(':');
+    if (!taskId || !questionId) throw new Error('invalid_mobile_approval_id');
+    const recovered = await services.recoverTask(taskId);
+    const event = recovered.snapshot.events.find(candidate => (
+      candidate.type === 'needs_user' && candidate.question.questionId === questionId
+    ));
+    if (!event || event.type !== 'needs_user') throw new Error('mobile_approval_not_found');
+    const answer = resolveMobileApprovalAnswer(event.question, input.decision);
+    if (!answer) throw new Error('mobile_approval_not_resolvable');
+    await services.answerQuestion({ taskId, answer });
+    return {
+      id: input.id,
+      title: event.question.prompt.slice(0, 80),
+      detail: event.question.choices?.map(choice => choice.label).join(' / ') ?? event.question.kind,
+      risk: 'low',
+      status: input.decision === 'approve' ? 'approved' : 'rejected',
+      createdAt: new Date().toISOString(),
+    };
+  };
+  const mobileGateway = createMobileGateway({
+    host: process.env.XIAOK_MOBILE_GATEWAY_HOST ?? '0.0.0.0',
+    port: Number(process.env.XIAOK_MOBILE_GATEWAY_PORT ?? '47891'),
+    desktopName: 'Xiaok Desktop',
+    desktopId: mobileIdentity.desktopId,
+    mobileAccessToken: mobileIdentity.mobileAccessToken,
+    getSnapshot: getMobileSnapshot,
+    sendMessage: sendMobileMessage,
+    respondToApproval: respondMobileApproval,
+    getArtifactPreview: (artifactId) => findMobileArtifactPreview(dataRoot, artifactId),
+    onRequest: (event) => {
+      debugMain('mobile-gateway:request', event);
+    },
+  });
+  const mobileRelayConfig = loadMobileRelayConfig();
+  ipcMain.handle('desktop:mobile:getPairingInfo', () => buildMobilePairingPayload({
+    desktopName: 'Xiaok Desktop',
+    identity: mobileIdentity,
+    gatewayStatus: mobileGateway.getStatus(),
+    relayUrl: mobileRelayConfig?.relayUrl,
+    relayJwt: mobileRelayConfig?.relayJwt,
+  }));
+  const mobileRelayBridge = mobileRelayConfig
+    ? createMobileRelayBridge({
+      identity: mobileIdentity,
+      desktopName: 'Xiaok Desktop',
+      relayUrl: mobileRelayConfig.relayUrl,
+      relayJwt: mobileRelayConfig.relayJwt,
+      getHello: () => ({
+        desktopId: mobileIdentity.desktopId,
+        desktopName: 'Xiaok Desktop',
+        protocol: 'mobile-v1',
+        health: 'online',
+        reachableURLs: mobileGateway.getStatus().reachableURLs,
+      }),
+      getSnapshot: getMobileSnapshot,
+      sendMessage: sendMobileMessage,
+      respondToApproval: respondMobileApproval,
+      getArtifactPreview: (artifactId) => findMobileArtifactPreview(dataRoot, artifactId),
+      onStatus: (status) => {
+        debugMain('mobile-relay:status', {
+          running: status.running,
+          connected: status.connected,
+          relayUrl: status.relayUrl,
+          roomId: status.roomId,
+          lastError: status.lastError,
+        });
+      },
+    })
+    : null;
+  mobileGateway.start()
+    .then((status) => {
+      debugMain('mobile-gateway:started', status);
+      mobileBonjourAdvertiser.start({
+        name: 'Xiaok Desktop',
+        port: status.port,
+        txt: { protocol: 'mobile-v1' },
+      });
+      debugMain('mobile-gateway:bonjour', mobileBonjourAdvertiser.getStatus());
+    })
+    .catch((err) => debugMain('mobile-gateway:start-failed', err instanceof Error ? err.message : String(err)));
+  if (mobileRelayBridge) {
+    mobileRelayBridge.start();
+  } else {
+    debugMain('mobile-relay:disabled', 'missing relay credentials');
+  }
+  const loopNotificationPort = createElectronDesktopNotificationPort();
   const loopRuntime = createDesktopLoopRuntime({
     dataRoot,
     taskPort: {
@@ -587,6 +865,11 @@ async function createWindow(): Promise<BrowserWindow> {
     timedActionScheduler.stop();
     loopRuntime.close();
     timedActionStore.close();
+    mobileBonjourAdvertiser.stop();
+    mobileGateway.stop().catch((err) => {
+      debugMain('mobileGateway.stop failed', err instanceof Error ? err.message : String(err));
+    });
+    mobileRelayBridge?.stop();
     mcpDispose?.();
   });
 

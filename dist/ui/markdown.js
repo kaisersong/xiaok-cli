@@ -1,6 +1,6 @@
 import { bold, dim, cyan, green, magenta, getTheme } from "./render.js";
 import { highlightLine } from "./highlight.js";
-import { getDisplayWidth, stripAnsi } from "./text-metrics.js";
+import { getDisplayWidth, isFullWidthCodePoint, stripAnsi } from "./text-metrics.js";
 import { renderMermaidASCII } from "beautiful-mermaid";
 const BODY_GUTTER = "";
 const LEAD_BULLET = '●';
@@ -68,12 +68,11 @@ export class MarkdownRenderer {
             this.pendingLen = 0;
             this.pendingPrefix = "";
             const isBlank = line.trim() === "";
-            // Skip all blank lines outside code blocks to prevent
-            // extra \n from pushing content into footer area.
             if (isBlank && !this.inCodeBlock) {
                 this.consecutiveBlankLines++;
-                // Still call newline callback for standalone blank lines between content
-                // to ensure cursor moves to next row.
+                if (this.consecutiveBlankLines > 1) {
+                    continue;
+                }
                 if (this.newlineFn) {
                     this.newlineFn();
                 }
@@ -319,17 +318,33 @@ export class MarkdownRenderer {
         let current = '';
         let currentWidth = 0;
         let currentLimit = firstLineWidth;
-        for (const symbol of Array.from(text)) {
-            const symbolWidth = Math.max(1, getDisplayWidth(stripAnsi(symbol)));
-            if (current !== '' && currentWidth + symbolWidth > currentLimit) {
-                lines.push(current);
-                current = symbol;
-                currentWidth = symbolWidth;
-                currentLimit = continuationWidth;
+        const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/y;
+        let i = 0;
+        while (i < text.length) {
+            ANSI_RE.lastIndex = i;
+            const match = ANSI_RE.exec(text);
+            if (match) {
+                current += match[0];
+                i += match[0].length;
                 continue;
             }
-            current += symbol;
-            currentWidth += symbolWidth;
+            const codePoint = text.codePointAt(i);
+            const charLen = codePoint > 0xffff ? 2 : 1;
+            const char = text.slice(i, i + charLen);
+            const charWidth = (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f))
+                ? 0
+                : isFullWidthCodePoint(codePoint) ? 2 : 1;
+            if (current !== '' && charWidth > 0 && currentWidth + charWidth > currentLimit) {
+                lines.push(current);
+                current = char;
+                currentWidth = charWidth;
+                currentLimit = continuationWidth;
+            }
+            else {
+                current += char;
+                currentWidth += charWidth;
+            }
+            i += charLen;
         }
         if (current.length > 0 || lines.length === 0) {
             lines.push(current);
