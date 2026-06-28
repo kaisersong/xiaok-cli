@@ -46,9 +46,9 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
-Xiaok Desktop v1.4.15 同时交付新的产物编辑界面和 Loop Engineering evidence 能力：HTML 产物可以在 Canvas 里直接编辑，Markdown 产物可以用纯文本方式编辑，本地图片/SVG 可以通过真实桌面文件选择框插入，移动端伴随 API 也能从桌面 runtime 镜像对话、审批、项目、循环和产物预览。
+Xiaok Desktop v1.4.16 同时交付新的产物编辑界面和 Loop Engineering evidence 能力：HTML 产物可以在 Canvas 里直接编辑，Markdown 产物可以用纯文本方式编辑，本地图片/SVG 可以通过真实桌面文件选择框插入，移动端伴随 API 也能从桌面 runtime 镜像对话、审批、项目、循环和产物预览。
 
-**v1.4.15 新特性：**
+**v1.4.16 新特性：**
 
 - **HTML 产物直接编辑器**：HTML 产物现在在 Canvas 和产物卡片里都有更靠前的编辑入口。点击预览中的文字或链接后，右侧 inspector 支持改文字、删除组件、设置文字颜色/字体/字号/粗细，以及插入图片/SVG。编辑工具栏固定在产物区域底部，预览区域不会被挤到只剩一小块。
 - **Markdown 纯文本编辑**：Markdown 产物不再只能预览，可以用简单源码文本框编辑，并通过同一套受保护的产物保存链路写回。
@@ -62,7 +62,7 @@ Xiaok Desktop v1.4.15 同时交付新的产物编辑界面和 Loop Engineering e
 - **URI/Paths Bypass 修复**：`resolveLocalArtifactPath` 现在统一从 `file://` URI、`metadata.paths`、`metadata.localPaths` 提取可验证的本地路径。之前通过 `uri` 或 `paths` 字段绕过结构校验的 evidence 记录现在也会被验证。
 - **Canvas Preview 默认 Tab**：Canvas 面板默认显示预览 tab + 刷新按钮重新读取文件内容。
 - **Evidence Guard 测试对齐**：修复 `artifact-evidence-guard.test.ts` 中 3 个过期测试，对齐 v1.4.11 引入的 answer-fallback 策略。
-- **发布验证**：v1.4.15 已通过 HTML/Markdown 编辑器聚焦测试、preload/main 保存路径测试、mobile gateway/snapshot 测试、guard/orchestration/structure 测试、desktop typecheck/build、`/Applications/xiaok.app` 无签名安装包实装，以及对真实幻灯片 HTML 产物的 Computer Use 验证。
+- **发布验证**：v1.4.16 已通过 HTML/Markdown 编辑器聚焦测试、preload/main 保存路径测试、mobile gateway/snapshot 测试、guard/orchestration/structure 测试、desktop typecheck/build、`/Applications/xiaok.app` 无签名安装包实装，以及对真实幻灯片 HTML 产物的 Computer Use 验证。
 
 **v1.4.14 新特性：**
 

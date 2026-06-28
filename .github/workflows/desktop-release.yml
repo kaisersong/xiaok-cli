@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. desktop-v1.4.15)'
+        description: 'Tag to release (e.g. desktop-v1.4.16)'
         required: true
-        default: 'desktop-v1.4.15'
+        default: 'desktop-v1.4.16'
 
 permissions:
   contents: write

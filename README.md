@@ -46,9 +46,9 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
-Xiaok Desktop v1.4.15 ships the new artifact editing surface alongside the Loop Engineering evidence work: HTML deliverables can be edited directly in Canvas, Markdown deliverables can be edited as plain text, local image/SVG insertion is available from the real desktop file picker, and mobile companion APIs can mirror chats, approvals, projects, loops, and artifact previews from the desktop runtime.
+Xiaok Desktop v1.4.16 ships the new artifact editing surface alongside the Loop Engineering evidence work: HTML deliverables can be edited directly in Canvas, Markdown deliverables can be edited as plain text, local image/SVG insertion is available from the real desktop file picker, and mobile companion APIs can mirror chats, approvals, projects, loops, and artifact previews from the desktop runtime.
 
-**What's New in v1.4.15:**
+**What's New in v1.4.16:**
 
 - **Direct HTML Artifact Editor**: HTML deliverables now have an editor-first action in Canvas and artifact cards. Selecting rendered text or links opens an inspector for text edits, component deletion, color/font/size/weight styling, and image/SVG insertion. The edit toolbar stays pinned at the bottom of the artifact area so the preview keeps usable vertical space.
 - **Markdown Plain-Text Editing**: Markdown artifacts can be edited with a simple source-text editor and saved through the same guarded artifact-save path instead of being preview-only.
@@ -62,7 +62,7 @@ Xiaok Desktop v1.4.15 ships the new artifact editing surface alongside the Loop 
 - **URI/Paths Bypass Fix**: `resolveLocalArtifactPath` now extracts verifiable local paths from `file://` URIs, `metadata.paths`, and `metadata.localPaths` uniformly. Evidence records that previously bypassed structural checks via `uri` or `paths` fields are now validated.
 - **Canvas Preview as Default Tab**: Canvas panel now defaults to the Preview tab with a refresh button for re-reading file content.
 - **Evidence Guard Test Alignment**: Fixed 3 stale tests in `artifact-evidence-guard.test.ts` that expected block behavior overridden by the answer-fallback policy since v1.4.11.
-- **Release Validation**: v1.4.15 verified with focused HTML/Markdown editor tests, preload/main save-path tests, mobile gateway/snapshot tests, guard/orchestration/structure tests, desktop typecheck/build, unsigned packaged install at `/Applications/xiaok.app`, and Computer Use validation on a real slide HTML artifact.
+- **Release Validation**: v1.4.16 verified with focused HTML/Markdown editor tests, preload/main save-path tests, mobile gateway/snapshot tests, guard/orchestration/structure tests, desktop typecheck/build, unsigned packaged install at `/Applications/xiaok.app`, and Computer Use validation on a real slide HTML artifact.
 
 **What's New in v1.4.14:**
 
