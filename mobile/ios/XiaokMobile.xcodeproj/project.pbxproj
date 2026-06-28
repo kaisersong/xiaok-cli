@@ -1,0 +1,530 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		28C87B2A23AFA5B4EEC3B22E /* XiaokMobileModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC07597314CE07E308E9532C /* XiaokMobileModelTests.swift */; };
+		37B1BB0EDA9371655BDCBC4F /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7E7A3F4A06DD18937C38B85 /* Models.swift */; };
+		400FEDA906FBA59508965598 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1EF42ACD8D281EA4413AD29 /* ContentView.swift */; };
+		7409D373D84E25701637644A /* XiaokMobileUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 597FA20F5E456623EEECC42B /* XiaokMobileUITests.swift */; };
+		9DDC9166AA99DCC58CE0B6CB /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00AC5267C480756A2B6327DC /* AppEnvironment.swift */; };
+		A41B02364B0B9BD715A117E9 /* DesktopDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6411B45CB6161D3B35B83D43 /* DesktopDiscovery.swift */; };
+		C0CE54FAC3152E9854A635D2 /* AppLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28F8EC1EFB44FF521F178188 /* AppLocalization.swift */; };
+		C31AAEA55F8F52A6864E48E1 /* XiaokMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBBB6E1BCE7D40FBA491A167 /* XiaokMobileApp.swift */; };
+		D32201618F092751ADB78646 /* XiaokAppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5250A1C377C8DF6C0BBA79E /* XiaokAppStore.swift */; };
+		E9909DA829599B6AE63071E3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6555036B0335D53F93011DEF /* Assets.xcassets */; };
+		F210F060681CB8893BC1CE34 /* MobileGatewayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A99E30321CBCB4370FB8DEBA /* MobileGatewayClient.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		8968A2CF2B65D38BAB388A6B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F549115448745D6EA5129A72 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DA280CD0B9E0B43DCA953037;
+			remoteInfo = XiaokMobile;
+		};
+		D0FB69CADA7AF62015AB8009 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F549115448745D6EA5129A72 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DA280CD0B9E0B43DCA953037;
+			remoteInfo = XiaokMobile;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		00AC5267C480756A2B6327DC /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
+		08F27D9F5CD4B6166180AADF /* XiaokMobileTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = XiaokMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		16D2137568E9780F1E45ADF3 /* XiaokMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = XiaokMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		21A9859DAE78BD3BBEB68961 /* XiaokMobileUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = XiaokMobileUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		28F8EC1EFB44FF521F178188 /* AppLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLocalization.swift; sourceTree = "<group>"; };
+		597FA20F5E456623EEECC42B /* XiaokMobileUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XiaokMobileUITests.swift; sourceTree = "<group>"; };
+		6411B45CB6161D3B35B83D43 /* DesktopDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopDiscovery.swift; sourceTree = "<group>"; };
+		6555036B0335D53F93011DEF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		7F9C1FFE459FCA33D58A3360 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		A1EF42ACD8D281EA4413AD29 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A99E30321CBCB4370FB8DEBA /* MobileGatewayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileGatewayClient.swift; sourceTree = "<group>"; };
+		C5250A1C377C8DF6C0BBA79E /* XiaokAppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XiaokAppStore.swift; sourceTree = "<group>"; };
+		CBBB6E1BCE7D40FBA491A167 /* XiaokMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XiaokMobileApp.swift; sourceTree = "<group>"; };
+		D7E7A3F4A06DD18937C38B85 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		DC07597314CE07E308E9532C /* XiaokMobileModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XiaokMobileModelTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		3882AE1452A24337E969479B /* XiaokMobileUITests */ = {
+			isa = PBXGroup;
+			children = (
+				597FA20F5E456623EEECC42B /* XiaokMobileUITests.swift */,
+			);
+			path = XiaokMobileUITests;
+			sourceTree = "<group>";
+		};
+		4033B1411C4AB24350F92C9C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				16D2137568E9780F1E45ADF3 /* XiaokMobile.app */,
+				08F27D9F5CD4B6166180AADF /* XiaokMobileTests.xctest */,
+				21A9859DAE78BD3BBEB68961 /* XiaokMobileUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		95750E2427D4E25FBEAE1A97 /* XiaokMobileTests */ = {
+			isa = PBXGroup;
+			children = (
+				DC07597314CE07E308E9532C /* XiaokMobileModelTests.swift */,
+			);
+			path = XiaokMobileTests;
+			sourceTree = "<group>";
+		};
+		C65D882CF50AAB21E7D66DDC = {
+			isa = PBXGroup;
+			children = (
+				DD1771B2FDB71121BF166A9C /* XiaokMobile */,
+				95750E2427D4E25FBEAE1A97 /* XiaokMobileTests */,
+				3882AE1452A24337E969479B /* XiaokMobileUITests */,
+				4033B1411C4AB24350F92C9C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DD1771B2FDB71121BF166A9C /* XiaokMobile */ = {
+			isa = PBXGroup;
+			children = (
+				00AC5267C480756A2B6327DC /* AppEnvironment.swift */,
+				28F8EC1EFB44FF521F178188 /* AppLocalization.swift */,
+				6555036B0335D53F93011DEF /* Assets.xcassets */,
+				A1EF42ACD8D281EA4413AD29 /* ContentView.swift */,
+				6411B45CB6161D3B35B83D43 /* DesktopDiscovery.swift */,
+				7F9C1FFE459FCA33D58A3360 /* Info.plist */,
+				A99E30321CBCB4370FB8DEBA /* MobileGatewayClient.swift */,
+				D7E7A3F4A06DD18937C38B85 /* Models.swift */,
+				C5250A1C377C8DF6C0BBA79E /* XiaokAppStore.swift */,
+				CBBB6E1BCE7D40FBA491A167 /* XiaokMobileApp.swift */,
+			);
+			path = XiaokMobile;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		3CC1D157602B3B62C2333BCA /* XiaokMobileUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1835B5C9355E39DD3D9A9732 /* Build configuration list for PBXNativeTarget "XiaokMobileUITests" */;
+			buildPhases = (
+				593CF4C6303C128573ED97E1 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				65CB158E2D5D900851082649 /* PBXTargetDependency */,
+			);
+			name = XiaokMobileUITests;
+			packageProductDependencies = (
+			);
+			productName = XiaokMobileUITests;
+			productReference = 21A9859DAE78BD3BBEB68961 /* XiaokMobileUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		DA280CD0B9E0B43DCA953037 /* XiaokMobile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C1B59485B735094B18A86E81 /* Build configuration list for PBXNativeTarget "XiaokMobile" */;
+			buildPhases = (
+				F0EA6D42C318A50B2C32DFC3 /* Sources */,
+				416837D41EE0EF7BE9DDFFBF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = XiaokMobile;
+			packageProductDependencies = (
+			);
+			productName = XiaokMobile;
+			productReference = 16D2137568E9780F1E45ADF3 /* XiaokMobile.app */;
+			productType = "com.apple.product-type.application";
+		};
+		FBB9945AB04E25160488B57F /* XiaokMobileTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 88CE84A9B3D0B33639CE78CB /* Build configuration list for PBXNativeTarget "XiaokMobileTests" */;
+			buildPhases = (
+				94DAD326F60208E7BEB5D640 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B4399CFDA123EE34ECB3778B /* PBXTargetDependency */,
+			);
+			name = XiaokMobileTests;
+			packageProductDependencies = (
+			);
+			productName = XiaokMobileTests;
+			productReference = 08F27D9F5CD4B6166180AADF /* XiaokMobileTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F549115448745D6EA5129A72 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					3CC1D157602B3B62C2333BCA = {
+						TestTargetID = DA280CD0B9E0B43DCA953037;
+					};
+				};
+			};
+			buildConfigurationList = 7D58B18E4F4812492C84FB1A /* Build configuration list for PBXProject "XiaokMobile" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = C65D882CF50AAB21E7D66DDC;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 4033B1411C4AB24350F92C9C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				DA280CD0B9E0B43DCA953037 /* XiaokMobile */,
+				FBB9945AB04E25160488B57F /* XiaokMobileTests */,
+				3CC1D157602B3B62C2333BCA /* XiaokMobileUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		416837D41EE0EF7BE9DDFFBF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E9909DA829599B6AE63071E3 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		593CF4C6303C128573ED97E1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7409D373D84E25701637644A /* XiaokMobileUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		94DAD326F60208E7BEB5D640 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				28C87B2A23AFA5B4EEC3B22E /* XiaokMobileModelTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0EA6D42C318A50B2C32DFC3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9DDC9166AA99DCC58CE0B6CB /* AppEnvironment.swift in Sources */,
+				C0CE54FAC3152E9854A635D2 /* AppLocalization.swift in Sources */,
+				400FEDA906FBA59508965598 /* ContentView.swift in Sources */,
+				A41B02364B0B9BD715A117E9 /* DesktopDiscovery.swift in Sources */,
+				F210F060681CB8893BC1CE34 /* MobileGatewayClient.swift in Sources */,
+				37B1BB0EDA9371655BDCBC4F /* Models.swift in Sources */,
+				D32201618F092751ADB78646 /* XiaokAppStore.swift in Sources */,
+				C31AAEA55F8F52A6864E48E1 /* XiaokMobileApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		65CB158E2D5D900851082649 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DA280CD0B9E0B43DCA953037 /* XiaokMobile */;
+			targetProxy = 8968A2CF2B65D38BAB388A6B /* PBXContainerItemProxy */;
+		};
+		B4399CFDA123EE34ECB3778B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DA280CD0B9E0B43DCA953037 /* XiaokMobile */;
+			targetProxy = D0FB69CADA7AF62015AB8009 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		2C90D4B4D8114ABD3A88D866 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = XiaokMobile/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.xiaok.mobile;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		3D64AF0005000DBBB202DBFD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.xiaok.mobile.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = XiaokMobile;
+			};
+			name = Release;
+		};
+		44F77AECD0F9AEC4D530D345 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.xiaok.mobile.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = XiaokMobile;
+			};
+			name = Debug;
+		};
+		6A455DFF998D4EDDEF87CEDA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.xiaok.mobile.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/XiaokMobile.app/XiaokMobile";
+			};
+			name = Debug;
+		};
+		944143941C5E38766BF7C40F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.xiaok.mobile.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/XiaokMobile.app/XiaokMobile";
+			};
+			name = Release;
+		};
+		B233411BAA9DBA00E1A92EF3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		B37E4C7CFF5EA509D737756F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		C122EF7E6E6C0B392C20D5E6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = XiaokMobile/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.xiaok.mobile;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1835B5C9355E39DD3D9A9732 /* Build configuration list for PBXNativeTarget "XiaokMobileUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				44F77AECD0F9AEC4D530D345 /* Debug */,
+				3D64AF0005000DBBB202DBFD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7D58B18E4F4812492C84FB1A /* Build configuration list for PBXProject "XiaokMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B37E4C7CFF5EA509D737756F /* Debug */,
+				B233411BAA9DBA00E1A92EF3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		88CE84A9B3D0B33639CE78CB /* Build configuration list for PBXNativeTarget "XiaokMobileTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6A455DFF998D4EDDEF87CEDA /* Debug */,
+				944143941C5E38766BF7C40F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C1B59485B735094B18A86E81 /* Build configuration list for PBXNativeTarget "XiaokMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2C90D4B4D8114ABD3A88D866 /* Debug */,
+				C122EF7E6E6C0B392C20D5E6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = F549115448745D6EA5129A72 /* Project object */;
+}

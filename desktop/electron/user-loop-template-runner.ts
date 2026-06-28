@@ -37,6 +37,7 @@ export interface RunUserLoopTemplateInput {
   loopId: string;
   runId: string;
   trigger: LoopRunTrigger;
+  signal?: AbortSignal;
 }
 
 export interface UserLoopTemplateRunner {
@@ -147,6 +148,14 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
       injectedConstraintIds,
     });
 
+    if (input.signal?.aborted) {
+      const message = 'Loop run aborted before task creation.';
+      options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_crash', message, [], timestamp());
+      const result = failRun(options.loopStore, input.runId, 'executor_crash', message, timestamp());
+      recordDuration(options.loopStore, input.runId, runStartMs, now());
+      return result;
+    }
+
     let taskId: string;
     try {
       mkdirSync(template.outputDirectory, { recursive: true });
@@ -170,6 +179,7 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
       maxRunMs,
       pollIntervalMs,
       sleep,
+      signal: input.signal,
     });
     if (snapshot.status !== 'completed') {
       const errorEvent = [...(snapshot.events ?? [])].reverse().find(e => (e as any).type === 'error') as { type: 'error'; message?: string } | undefined;
@@ -289,6 +299,14 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
       injectedConstraintIds,
     });
 
+    if (input.signal?.aborted) {
+      const message = 'Loop run aborted before task creation.';
+      options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_crash', message, [], timestamp());
+      const result = failRun(options.loopStore, input.runId, 'executor_crash', message, timestamp());
+      recordDuration(options.loopStore, input.runId, runStartMs, now());
+      return result;
+    }
+
     let taskId: string;
     try {
       const created = await options.taskPort.createTask({
@@ -316,6 +334,7 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
       pollIntervalMs,
       sleep,
       onPoll: () => options.loopStore.touchLoopRun(input.runId, timestamp()),
+      signal: input.signal,
     });
 
     if (snapshot.status !== 'completed') {
@@ -425,9 +444,24 @@ async function waitForTerminalSnapshot(input: {
   pollIntervalMs: number;
   sleep: (ms: number) => Promise<void>;
   onPoll?: () => void;
+  signal?: AbortSignal;
 }): Promise<TaskSnapshot> {
   const startedAt = Date.now();
   while (true) {
+    if (input.signal?.aborted) {
+      try {
+        await input.taskPort.cancelTask(input.taskId, 'loop_aborted');
+      } catch {
+        // cancelTask may fail if task is already terminal
+      }
+      try {
+        const { snapshot: final } = await input.taskPort.recoverTask(input.taskId);
+        if (isTerminalTaskSnapshot(final)) return final;
+        return { ...final, status: 'cancelled' } as TaskSnapshot;
+      } catch {
+        return { status: 'cancelled', events: [] } as unknown as TaskSnapshot;
+      }
+    }
     const { snapshot } = await input.taskPort.recoverTask(input.taskId);
     if (isTerminalTaskSnapshot(snapshot)) return snapshot;
     input.onPoll?.();

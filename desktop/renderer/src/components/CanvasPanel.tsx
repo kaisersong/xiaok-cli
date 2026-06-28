@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { X, FolderTree, Code, Wrench, Maximize2, Minimize2 } from 'lucide-react';
 import { WorkspaceTree } from './WorkspaceTree';
-import { CanvasPreview } from './CanvasPreview';
+import { CanvasPreview, type CanvasPreviewModeRequest } from './CanvasPreview';
 import { ToolsPanel } from './ToolsPanel';
 import { CanvasEmptyState } from './CanvasEmptyState';
 import { api } from '../api';
@@ -13,6 +13,7 @@ interface CanvasPanelProps {
   onClose: () => void;
   initialPreviewFile?: string;
   initialPreviewContent?: string;
+  initialPreviewModeRequest?: CanvasPreviewModeRequest;
   expanded?: boolean;
   onToggleExpand?: () => void;
   onAnnotation?: (message: string) => void;
@@ -26,7 +27,7 @@ const TABS: Array<{ key: CanvasTab; label: string; icon: typeof X }> = [
   { key: 'tools', label: 'Tools', icon: Wrench },
 ];
 
-export function CanvasPanel({ events, onClose, initialPreviewFile, initialPreviewContent, expanded, onToggleExpand, onAnnotation }: CanvasPanelProps) {
+export function CanvasPanel({ events, onClose, initialPreviewFile, initialPreviewContent, initialPreviewModeRequest, expanded, onToggleExpand, onAnnotation }: CanvasPanelProps) {
   const { t } = useLocale();
   const [activeTab, setActiveTab] = useState<CanvasTab>('preview');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -199,6 +200,7 @@ export function CanvasPanel({ events, onClose, initialPreviewFile, initialPrevie
           <CanvasPreview
             filePath={selectedFile}
             content={previewContent || fileContents[selectedFile] || ''}
+            modeRequest={initialPreviewModeRequest}
             onAnnotation={onAnnotation}
             onRefresh={handleRefreshPreview}
           />

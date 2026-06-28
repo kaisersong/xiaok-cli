@@ -313,6 +313,58 @@ describe('project artifact actions', () => {
     expect(await screen.findByTitle('task-report.html')).toBeInTheDocument();
   });
 
+  it('opens local HTML project artifacts directly in edit mode from the preview modal', async () => {
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:project-artifact-edit') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => '<!doctype html><html><body><h1>项目报告</h1></body></html>',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      render(
+        <MemoryRouter>
+          <LocaleProvider>
+            <DeliverableView
+              project={{
+                id: 'proj-local-html',
+                name: '本地 HTML 产物',
+                status: 'delivered',
+                deliverable: {
+                  artifacts: [
+                    {
+                      path: '/tmp/project-report.html',
+                      name: 'project-report.html',
+                      mimeType: 'text/html',
+                    },
+                  ],
+                },
+              } as any}
+              tasks={[]}
+            />
+          </LocaleProvider>
+        </MemoryRouter>
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /project-report\.html/ }));
+      expect(await screen.findByTitle('project-report.html')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /直接编辑|Edit HTML/i }));
+
+      expect(screen.getByRole('button', { name: /退出编辑|Stop editing/i })).toBeInTheDocument();
+      expect(screen.getByLabelText(/HTML 编辑|HTML edit/i)).toBeInTheDocument();
+      const viewer = document.querySelector('.artifact-editable-viewer');
+      expect(viewer?.parentElement).toHaveClass('artifact-preview-modal__content--editing');
+    } finally {
+      cleanup();
+      Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: originalCreateObjectURL });
+      Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: originalRevokeObjectURL });
+    }
+  });
+
   it('shows unlinked workspace artifacts while hiding generated plan files', () => {
     render(
       <MemoryRouter>

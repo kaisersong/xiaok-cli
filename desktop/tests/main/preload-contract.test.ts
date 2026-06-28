@@ -26,6 +26,7 @@ describe('preload API contract', () => {
       'listAvailableModelsForProvider',
       'deleteProvider',
       'deleteModel',
+      'getMobilePairingInfo',
       'readClipboardFilePaths',
       'readClipboardImage',
       'selectDirectory',
@@ -41,6 +42,7 @@ describe('preload API contract', () => {
       'openArtifact',
       'openFileInSystemApp',
       'readFileContent',
+      'selectHtmlEditMedia',
       'listSkills',
       'installSkill',
       'uninstallSkill',
@@ -511,12 +513,14 @@ describe('preload API contract', () => {
 
     await api.showSaveDialog({ defaultPath: '/tmp/test.md' });
     await api.saveFile({ filePath: '/tmp/test.md', content: 'hello' });
+    await (api as any).selectHtmlEditMedia({ kind: 'image' });
     await api.listPrinciples();
     await api.savePrinciple({ id: 'p1', content: 'test' });
     await api.deletePrinciple('p1');
 
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:showSaveDialog', { defaultPath: '/tmp/test.md' });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:saveFile', { filePath: '/tmp/test.md', content: 'hello' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:selectHtmlEditMedia', { kind: 'image' });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:listPrinciples');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:savePrinciple', { id: 'p1', content: 'test' });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:deletePrinciple', 'p1');

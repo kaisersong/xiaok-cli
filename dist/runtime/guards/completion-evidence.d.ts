@@ -19,6 +19,7 @@ export interface EvidenceValidationResult {
     ok: boolean;
     failureKind?: EvidenceValidationFailure;
     message?: string;
+    warning?: string;
 }
 export declare function mergeCompletionExpectations(expectations: CompletionExpectation[]): CompletionExpectation | undefined;
 export declare function validateCompletionEvidence(input: {

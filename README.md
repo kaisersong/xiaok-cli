@@ -46,16 +46,23 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
-Xiaok Desktop v1.4.15 strengthens the Loop Engineering evidence pipeline: explicit user constraints (extracted from intent) are now injected into every turn's system reminder so subagents actually respect them, and binary artifact evidence (PDF/PPTX) gets structural validation in warn mode — catching corrupt files without blocking task completion.
+Xiaok Desktop v1.4.16 ships the new artifact editing surface alongside the Loop Engineering evidence work: HTML deliverables can be edited directly in Canvas, Markdown deliverables can be edited as plain text, local image/SVG insertion is available from the real desktop file picker, and mobile companion APIs can mirror chats, approvals, projects, loops, and artifact previews from the desktop runtime.
 
-**What's New in v1.4.15:**
+**What's New in v1.4.16:**
 
+- **Direct HTML Artifact Editor**: HTML deliverables now have an editor-first action in Canvas and artifact cards. Selecting rendered text or links opens an inspector for text edits, component deletion, color/font/size/weight styling, and image/SVG insertion. The edit toolbar stays pinned at the bottom of the artifact area so the preview keeps usable vertical space.
+- **Markdown Plain-Text Editing**: Markdown artifacts can be edited with a simple source-text editor and saved through the same guarded artifact-save path instead of being preview-only.
+- **Local Image and SVG Insertion**: The HTML editor can insert images from URLs, local image files as `data:image/*;base64`, SVG source text, or local `.svg` files. The macOS file picker path is exposed through preload IPC and covered by main-process tests.
+- **Artifact Card Edit Entry Point**: Conversation artifact cards now expose compact icon actions for open, add-to-knowledge, and edit, with tighter spacing for repeated use.
+- **Save Permission Fix**: HTML/Markdown artifact saves now use purpose-specific path validation, allowing generated artifacts under the desktop data root and Electron downloads directory while still rejecting unrelated paths or wrong extensions. Apply-time errors are separated from save-time errors, so style/text updates no longer surface the misleading "check file permissions" message.
+- **Mobile Companion Foundation**: Desktop now exposes a local mobile gateway with pairing identity, Bonjour advertisement, relay config, QR support, chat send, approval response, project/loop snapshots, and artifact preview lookup. A first iOS client lives under `mobile/ios`.
+- **Bundled Infinity Canvas Packaging**: Desktop packaging now includes the `kai-infinity-canvas` scripts directory so the canvas plugin can start from installed builds.
 - **Constraint Injection into Intent Reminder**: `buildIntentReminderBlock` now renders `explicitConstraints` with "must follow" framing and semicolon separators. Constraints like "控制在一页内" / "用中文" extracted by the planner are finally visible to the executing agent on every turn, not just stored in the ledger.
 - **Binary Artifact Structural Validation (Warn Mode)**: New `artifact-structure.ts` module validates PDF (`%PDF-` header, fd-based 5-byte read) and PPTX (ZIP local file header `PK\x03\x04` + `[Content_Types].xml` in first 64KB). Integrated into `completion-evidence.ts` guard pipeline in warn mode — detects corrupt artifacts without killing tasks. Memory-safe: PDF reads 5 bytes, PPTX capped at 64KB regardless of file size.
 - **URI/Paths Bypass Fix**: `resolveLocalArtifactPath` now extracts verifiable local paths from `file://` URIs, `metadata.paths`, and `metadata.localPaths` uniformly. Evidence records that previously bypassed structural checks via `uri` or `paths` fields are now validated.
 - **Canvas Preview as Default Tab**: Canvas panel now defaults to the Preview tab with a refresh button for re-reading file content.
 - **Evidence Guard Test Alignment**: Fixed 3 stale tests in `artifact-evidence-guard.test.ts` that expected block behavior overridden by the answer-fallback policy since v1.4.11.
-- **Release Validation**: v1.4.15 verified with 79 focused guard/orchestration/structure tests (all pass), sandbox build clean, no new typecheck regressions.
+- **Release Validation**: v1.4.16 verified with focused HTML/Markdown editor tests, preload/main save-path tests, mobile gateway/snapshot tests, guard/orchestration/structure tests, desktop typecheck/build, unsigned packaged install at `/Applications/xiaok.app`, and Computer Use validation on a real slide HTML artifact.
 
 **What's New in v1.4.14:**
 

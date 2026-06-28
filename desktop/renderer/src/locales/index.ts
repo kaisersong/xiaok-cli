@@ -1002,6 +1002,7 @@ export interface LocaleStrings {
     appVersion: string;
     // nav items (full labels for settings sidebar)
     navGeneral: string;
+    navMobile: string;
     navModel: string;
     navSkills: string;
     navChannels: string;
@@ -1049,6 +1050,26 @@ export interface LocaleStrings {
     channelFieldTelegramChatId: string;
     // back button
     back: string;
+    // mobile pairing
+    mobilePairingTitle: string;
+    mobilePairingLoading: string;
+    mobilePairingLoadFailed: string;
+    mobilePairingQrAlt: string;
+    mobilePairingCopyLink: string;
+    mobilePairingRefresh: string;
+    mobilePairingCopied: string;
+    mobilePairingCopyFailed: string;
+    mobilePairingScanTitle: string;
+    mobilePairingScanDesc: string;
+    mobilePairingDesktopId: string;
+    mobilePairingLanAddress: string;
+    mobilePairingNoLanAddress: string;
+    mobilePairingRelay: string;
+    mobilePairingRelayReady: string;
+    mobilePairingRelayMissing: string;
+    mobilePairingReachableCount: string;
+    mobilePairingReachableCountValue: (count: number) => string;
+    mobilePairingSecurityNote: string;
     // general pane - profile
     profileTitle: string;
     changeAvatar: string;
@@ -2636,6 +2657,43 @@ export interface LocaleStrings {
   artifactFinish: string;
   artifactWaitingAgent: string;
   artifactAgentNotResponding: string;
+  artifactDirectEdit: string;
+  artifactHtmlEdit: string;
+  artifactHtmlStopEditing: string;
+  artifactHtmlSave: string;
+  artifactHtmlApply: string;
+  artifactHtmlUndo: string;
+  artifactHtmlRedo: string;
+  artifactHtmlInspectorTitle: string;
+  artifactHtmlSelectHint: string;
+  artifactHtmlNoSelection: string;
+  artifactHtmlTextLabel: string;
+  artifactHtmlLinkTextLabel: string;
+  artifactHtmlHrefLabel: string;
+  artifactHtmlDeleteComponent: string;
+  artifactHtmlStyleSection: string;
+  artifactHtmlColorLabel: string;
+  artifactHtmlFontSizeLabel: string;
+  artifactHtmlFontFamilyLabel: string;
+  artifactHtmlFontWeightLabel: string;
+  artifactHtmlApplyStyle: string;
+  artifactHtmlMediaSection: string;
+  artifactHtmlImageUrlLabel: string;
+  artifactHtmlImageAltLabel: string;
+  artifactHtmlImageCaptionLabel: string;
+  artifactHtmlChooseImageFile: string;
+  artifactHtmlInsertImage: string;
+  artifactHtmlSvgSourceLabel: string;
+  artifactHtmlChooseSvgFile: string;
+  artifactHtmlInsertSvg: string;
+  artifactHtmlDirtyStatus: string;
+  artifactHtmlSavedStatus: string;
+  artifactHtmlApplyFailed: string;
+  artifactHtmlSaveFailed: string;
+  artifactHtmlUnsavedConfirm: string;
+  artifactMarkdownTextLabel: string;
+  artifactMarkdownPreview: string;
+  artifactMarkdownSaving: string;
 
   // memory action block
   memoryActionWrite: string;

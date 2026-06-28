@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
+import * as QRCode from 'qrcode';
 import {
   ChevronLeft,
   Settings,
@@ -33,6 +34,8 @@ import {
   Copy,
   RefreshCw,
   ExternalLink,
+  Smartphone,
+  QrCode,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
@@ -47,6 +50,7 @@ import type {
   DesktopSaveModelConfigInput,
   DesktopServiceStatusSnapshot,
   TestProviderConnectionResult,
+  DesktopMobilePairingInfo,
 } from '../../../electron/preload-api';
 import type {
   ConnectorsConfig,
@@ -74,7 +78,7 @@ import {
   getOpenLoopAnomalies,
 } from './settings/loopDiagnostics';
 
-type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'tools' | 'general' | 'appearance' | 'data' | 'memory' | 'about';
+type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'tools' | 'general' | 'mobile' | 'appearance' | 'data' | 'memory' | 'about';
 
 interface NavItem {
   key: SettingsTab;
@@ -85,6 +89,7 @@ interface NavItem {
 function getNavItems(t: ReturnType<typeof useLocale>['t']): NavItem[] {
   return [
     { key: 'general', icon: SlidersHorizontal, label: t.desktopSettings.navGeneral },
+    { key: 'mobile', icon: Smartphone, label: t.desktopSettings.navMobile },
     { key: 'model', icon: Cpu, label: t.desktopSettings.navModel },
     { key: 'skills', icon: Puzzle, label: t.desktopSettings.navSkills },
     { key: 'channels', icon: Globe, label: t.desktopSettings.navChannels },
@@ -155,6 +160,7 @@ export function DesktopSettings({ onClose }: Props) {
           {activeTab === 'mcp' && <McpPane />}
           {activeTab === 'tools' && <ToolsPane />}
           {activeTab === 'general' && <GeneralPane />}
+          {activeTab === 'mobile' && <MobilePane />}
           {activeTab === 'appearance' && <DesktopAppearanceSettings />}
           {activeTab === 'data' && <DataPane />}
           {activeTab === 'memory' && <MemoryPane />}
@@ -194,6 +200,137 @@ const inputCls = 'w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-
 const btnPrimary = 'rounded-lg bg-[var(--c-accent)] px-4 py-2 text-sm text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed';
 const btnSecondary = 'rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors';
 const btnDanger = 'rounded-lg border border-red-200 px-4 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors';
+
+function MobilePane() {
+  const { t } = useLocale();
+  const [pairing, setPairing] = useState<DesktopMobilePairingInfo | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+
+  const loadPairingInfo = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
+    if (mode === 'refresh') setRefreshing(true);
+    else setLoading(true);
+    setError('');
+    try {
+      const info = await api.getMobilePairingInfo();
+      setPairing(info);
+      setQrDataUrl(await QRCode.toDataURL(info.deepLink, {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 220,
+        color: {
+          dark: '#111827',
+          light: '#ffffff',
+        },
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t.desktopSettings.mobilePairingLoadFailed);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [t.desktopSettings.mobilePairingLoadFailed]);
+
+  useEffect(() => {
+    void loadPairingInfo();
+  }, [loadPairingInfo]);
+
+  const copyPairingLink = useCallback(async () => {
+    if (!pairing?.deepLink) return;
+    try {
+      await navigator.clipboard.writeText(pairing.deepLink);
+      setCopyStatus('copied');
+    } catch {
+      setCopyStatus('failed');
+    }
+    window.setTimeout(() => setCopyStatus('idle'), 2500);
+  }, [pairing?.deepLink]);
+
+  const relayReady = Boolean(pairing?.relayUrl && pairing.relayJwt && pairing.relayRoomSecret);
+
+  return (
+    <div className="space-y-6">
+      <Section>
+        <SectionHeader icon={Smartphone}>{t.desktopSettings.mobilePairingTitle}</SectionHeader>
+        <Card>
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-[var(--c-text-secondary)]">
+              <Loader2 size={14} className="animate-spin" />
+              <span>{t.desktopSettings.mobilePairingLoading}</span>
+            </div>
+          ) : error ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+          ) : pairing ? (
+            <div className="grid gap-5 md:grid-cols-[240px_1fr]">
+              <div className="flex flex-col items-center gap-3">
+                <div className="flex size-[240px] items-center justify-center rounded-lg border border-[var(--c-border)] bg-white p-3">
+                  {qrDataUrl ? (
+                    <img src={qrDataUrl} alt={t.desktopSettings.mobilePairingQrAlt} className="size-full object-contain" />
+                  ) : (
+                    <QrCode size={64} className="text-[var(--c-text-muted)]" />
+                  )}
+                </div>
+                <div className="flex w-full gap-2">
+                  <button type="button" onClick={copyPairingLink} className={`${btnSecondary} flex flex-1 items-center justify-center gap-2 px-3`}>
+                    <Copy size={14} />
+                    <span>{t.desktopSettings.mobilePairingCopyLink}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void loadPairingInfo('refresh')}
+                    disabled={refreshing}
+                    className={`${btnSecondary} flex items-center justify-center px-3`}
+                    title={t.desktopSettings.mobilePairingRefresh}
+                    aria-label={t.desktopSettings.mobilePairingRefresh}
+                  >
+                    <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+                {copyStatus !== 'idle' && (
+                  <div className={copyStatus === 'copied' ? 'text-xs text-emerald-600' : 'text-xs text-red-600'}>
+                    {copyStatus === 'copied' ? t.desktopSettings.mobilePairingCopied : t.desktopSettings.mobilePairingCopyFailed}
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0 space-y-4">
+                <div>
+                  <div className="text-sm font-medium text-[var(--c-text-primary)]">{t.desktopSettings.mobilePairingScanTitle}</div>
+                  <p className="mt-1 text-sm leading-6 text-[var(--c-text-secondary)]">{t.desktopSettings.mobilePairingScanDesc}</p>
+                </div>
+                <div className="grid gap-2 text-sm">
+                  <MobileInfoRow label={t.desktopSettings.mobilePairingDesktopId} value={pairing.desktopId} />
+                  <MobileInfoRow label={t.desktopSettings.mobilePairingLanAddress} value={pairing.gatewayURL || t.desktopSettings.mobilePairingNoLanAddress} />
+                  <MobileInfoRow label={t.desktopSettings.mobilePairingRelay} value={relayReady ? t.desktopSettings.mobilePairingRelayReady : t.desktopSettings.mobilePairingRelayMissing} tone={relayReady ? 'ok' : 'warn'} />
+                  <MobileInfoRow label={t.desktopSettings.mobilePairingReachableCount} value={t.desktopSettings.mobilePairingReachableCountValue(pairing.reachableURLs.length)} />
+                </div>
+                <div className="rounded-lg bg-[var(--c-bg-deep)] px-3 py-2 text-xs leading-5 text-[var(--c-text-secondary)]">
+                  {t.desktopSettings.mobilePairingSecurityNote}
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </Card>
+      </Section>
+    </div>
+  );
+}
+
+function MobileInfoRow({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'ok' | 'warn' }) {
+  const toneClass = tone === 'ok'
+    ? 'text-emerald-600'
+    : tone === 'warn'
+      ? 'text-amber-600'
+      : 'text-[var(--c-text-primary)]';
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-[var(--c-border)] px-3 py-2">
+      <span className="shrink-0 text-xs text-[var(--c-text-tertiary)]">{label}</span>
+      <span className={`min-w-0 truncate text-right text-xs font-medium ${toneClass}`}>{value}</span>
+    </div>
+  );
+}
 
 // ---- Model Settings ----
 

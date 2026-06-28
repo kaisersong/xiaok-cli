@@ -83,3 +83,6 @@ docs/skill-observability-design.md
 /desktop/test-results/
 /desktop/claude-*.html
 /desktop/OpenAI*.md
+
+# iOS 本地构建产物
+/mobile/ios/build/

@@ -353,7 +353,7 @@ describe('loop executor', () => {
       timedActionRunId: 'timed-run-1',
       scheduledDueAt: 1_000,
       claimedAt: 2_000,
-    }));
+    }), undefined);
   });
 
   it('loop timed action executor throws when the loop run fails', async () => {
@@ -393,6 +393,254 @@ describe('loop executor', () => {
       overdueMs: 1_000,
       recoveryReason: 'normal_tick',
     })).rejects.toThrow('loop failed: scanner failed');
+  });
+});
+
+describe('loop executor abort signal', () => {
+  let rootDir: string;
+  let store: LoopStore;
+  let evidenceStore: CompletionEvidenceStore;
+  let now: number;
+
+  beforeEach(() => {
+    rootDir = join(tmpdir(), `xiaok-loop-abort-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(rootDir, { recursive: true });
+    store = new LoopStore(join(rootDir, 'loops.sqlite'));
+    store.ensureBuiltInLoops(1_000);
+    evidenceStore = new CompletionEvidenceStore(join(rootDir, 'completion-evidence.sqlite'));
+    now = 2_000;
+  });
+
+  afterEach(() => {
+    evidenceStore.close();
+    store.close();
+    rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('executor passes runtimeContext.signal through to runLoop', async () => {
+    const controller = new AbortController();
+    const runLoop = vi.fn().mockResolvedValue({ status: 'success', run: { id: 'r1', status: 'success' } });
+    const executor = createLoopExecutor({ runLoop });
+
+    await executor.execute({
+      id: 'action-1',
+      title: 'Loop',
+      trigger: { kind: 'daily', hour: 1, minute: 0 },
+      executor: { kind: 'loop', loopId: ARTIFACT_LOOP_ID },
+      policy: {},
+      status: 'active',
+      source: 'user',
+      runCount: 0,
+      consecutiveFailures: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    }, {
+      scheduledDueAt: 1_000,
+      claimedAt: 2_000,
+      overdueMs: 1_000,
+      recoveryReason: 'normal_tick',
+    }, {
+      timedActionRunId: 'run-1',
+      signal: controller.signal,
+    });
+
+    expect(runLoop).toHaveBeenCalledWith(
+      ARTIFACT_LOOP_ID,
+      expect.objectContaining({ kind: 'scheduled' }),
+      controller.signal
+    );
+  });
+
+  it('user loop template runner aborts before createTask when signal is pre-aborted', async () => {
+    const outputDir = join(rootDir, 'outputs');
+    mkdirSync(outputDir, { recursive: true });
+    store.createUserLoopTemplate({
+      loopId: 'user-abort-1',
+      title: 'Abort Test',
+      kind: 'markdown_file',
+      prompt: 'Write something.',
+      outputDirectory: outputDir,
+      outputFileName: 'out.md',
+      now: 1_500,
+    });
+
+    const taskPort = {
+      createTask: vi.fn().mockResolvedValue({ taskId: 'task-1' }),
+      recoverTask: vi.fn().mockResolvedValue({ snapshot: { status: 'completed', events: [] } }),
+      cancelTask: vi.fn().mockResolvedValue(undefined),
+    };
+    const { createUserLoopTemplateRunner } = await import('../../electron/user-loop-template-runner.js');
+    const runner = createUserLoopTemplateRunner({
+      loopStore: store,
+      evidenceStore,
+      taskPort,
+      now: () => now,
+      pollIntervalMs: 10,
+      maxRunMs: 5_000,
+    });
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const begin = store.beginLoopRun('user-abort-1', { kind: 'manual' }, now, 60_000);
+    expect(begin.status).toBe('started');
+    if (begin.status !== 'started') throw new Error('expected started');
+
+    const result = await runner.runTemplateLoop({
+      loopId: 'user-abort-1',
+      runId: begin.run.id,
+      trigger: { kind: 'manual' },
+      signal: controller.signal,
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.run.failureKind).toBe('executor_crash');
+    expect(taskPort.createTask).not.toHaveBeenCalled();
+  });
+
+  it('signal abort during poll cancels the task and fails the run', async () => {
+    const outputDir = join(rootDir, 'outputs2');
+    mkdirSync(outputDir, { recursive: true });
+    store.createUserLoopTemplate({
+      loopId: 'user-abort-2',
+      title: 'Abort During Poll',
+      kind: 'markdown_file',
+      prompt: 'Write something.',
+      outputDirectory: outputDir,
+      outputFileName: 'out.md',
+      now: 1_500,
+    });
+
+    const controller = new AbortController();
+    let pollCount = 0;
+
+    const taskPort = {
+      createTask: vi.fn().mockResolvedValue({ taskId: 'task-2' }),
+      recoverTask: vi.fn().mockImplementation(() => {
+        pollCount++;
+        if (pollCount === 2) controller.abort();
+        return Promise.resolve({ snapshot: { status: 'running', events: [] } });
+      }),
+      cancelTask: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const { createUserLoopTemplateRunner } = await import('../../electron/user-loop-template-runner.js');
+    const runner = createUserLoopTemplateRunner({
+      loopStore: store,
+      evidenceStore,
+      taskPort,
+      now: () => now,
+      pollIntervalMs: 1,
+      maxRunMs: 60_000,
+      sleep: () => Promise.resolve(),
+    });
+
+    const begin = store.beginLoopRun('user-abort-2', { kind: 'manual' }, now, 60_000);
+    if (begin.status !== 'started') throw new Error('expected started');
+
+    const result = await runner.runTemplateLoop({
+      loopId: 'user-abort-2',
+      runId: begin.run.id,
+      trigger: { kind: 'manual' },
+      signal: controller.signal,
+    });
+
+    expect(result.status).toBe('failed');
+    expect(taskPort.cancelTask).toHaveBeenCalledWith('task-2', 'loop_aborted');
+  });
+
+  it('signal=undefined preserves existing behavior (no abort check)', async () => {
+    const outputDir = join(rootDir, 'outputs3');
+    mkdirSync(outputDir, { recursive: true });
+    store.createUserLoopTemplate({
+      loopId: 'user-no-signal',
+      title: 'No Signal',
+      kind: 'task_completion',
+      prompt: 'Do something.',
+      outputDirectory: outputDir,
+      outputFileName: 'x.md',
+      now: 1_500,
+    });
+
+    const taskPort = {
+      createTask: vi.fn().mockResolvedValue({ taskId: 'task-3' }),
+      recoverTask: vi.fn().mockResolvedValue({ snapshot: { status: 'completed', events: [], result: { summary: 'done' } } }),
+      cancelTask: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const { createUserLoopTemplateRunner } = await import('../../electron/user-loop-template-runner.js');
+    const runner = createUserLoopTemplateRunner({
+      loopStore: store,
+      evidenceStore,
+      taskPort,
+      now: () => now,
+      pollIntervalMs: 1,
+      maxRunMs: 60_000,
+      sleep: () => Promise.resolve(),
+    });
+
+    const begin = store.beginLoopRun('user-no-signal', { kind: 'manual' }, now, 60_000);
+    if (begin.status !== 'started') throw new Error('expected started');
+
+    const result = await runner.runTemplateLoop({
+      loopId: 'user-no-signal',
+      runId: begin.run.id,
+      trigger: { kind: 'manual' },
+    });
+
+    expect(result.status).toBe('success');
+    expect(taskPort.cancelTask).not.toHaveBeenCalled();
+  });
+
+  it('abort takes priority even if task completes on same poll cycle', async () => {
+    const outputDir = join(rootDir, 'outputs4');
+    mkdirSync(outputDir, { recursive: true });
+    store.createUserLoopTemplate({
+      loopId: 'user-abort-priority',
+      title: 'Abort Priority',
+      kind: 'markdown_file',
+      prompt: 'Write something.',
+      outputDirectory: outputDir,
+      outputFileName: 'out.md',
+      now: 1_500,
+    });
+
+    const controller = new AbortController();
+
+    const taskPort = {
+      createTask: vi.fn().mockResolvedValue({ taskId: 'task-4' }),
+      recoverTask: vi.fn().mockImplementation(() => {
+        return Promise.resolve({ snapshot: { status: 'completed', events: [], result: { summary: 'done' } } });
+      }),
+      cancelTask: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const { createUserLoopTemplateRunner } = await import('../../electron/user-loop-template-runner.js');
+    const runner = createUserLoopTemplateRunner({
+      loopStore: store,
+      evidenceStore,
+      taskPort,
+      now: () => now,
+      pollIntervalMs: 1,
+      maxRunMs: 60_000,
+      sleep: () => Promise.resolve(),
+    });
+
+    const begin = store.beginLoopRun('user-abort-priority', { kind: 'manual' }, now, 60_000);
+    if (begin.status !== 'started') throw new Error('expected started');
+
+    controller.abort();
+
+    const result = await runner.runTemplateLoop({
+      loopId: 'user-abort-priority',
+      runId: begin.run.id,
+      trigger: { kind: 'manual' },
+      signal: controller.signal,
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.run.failureKind).toBe('executor_crash');
+    expect(taskPort.createTask).not.toHaveBeenCalled();
   });
 });
 

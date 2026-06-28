@@ -1,4 +1,5 @@
 export declare function stripAnsi(text: string): string;
+export declare function isFullWidthCodePoint(codePoint: number): boolean;
 export declare function splitSymbols(text: string): string[];
 export declare function clampOffset(text: string, offset: number): number;
 export declare function getDisplayWidth(text: string): number;

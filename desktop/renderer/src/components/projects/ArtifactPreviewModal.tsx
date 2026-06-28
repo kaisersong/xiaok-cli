@@ -2,14 +2,15 @@
  * ArtifactPreviewModal — inline preview with Markdown rendering, HTML iframe, JSON formatting.
  */
 
-import { useState, useEffect } from 'react';
-import { X, Download, BookOpen, Maximize2, Minimize2, MessageSquare } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { X, Download, BookOpen, Maximize2, Minimize2, MessageSquare, PencilLine } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmArtifact } from '../../hooks/useKSwarmClient';
 import { artifactDisplayName, downloadArtifact, resolveArtifactUrl } from './artifactActions';
 import { getDesktopApi } from '../../shared/desktop';
 import { api } from '../../api';
+import { ArtifactEditableViewer } from '../ArtifactEditableViewer';
 
 interface ArtifactPreviewModalProps {
   artifact: KSwarmArtifact;
@@ -25,12 +26,14 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
   const [kbSaving, setKbSaving] = useState(false);
   const [kbSaved, setKbSaved] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [htmlEditMode, setHtmlEditMode] = useState(false);
+  const [htmlEditRequest, setHtmlEditRequest] = useState({ id: 0, startInEditMode: false });
   const displayName = artifactDisplayName(artifact);
 
   const isPreviewable = /\.(md|markdown|html|htm|txt|json|svg)$/i.test(displayName) ||
     /text|json|html|markdown|svg/.test(artifact.mimeType || '');
 
-  useEffect(() => {
+  const loadContent = useCallback(async () => {
     setContent(null);
     setError(null);
     setLoading(true);
@@ -40,40 +43,43 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
       return;
     }
 
-    const loadContent = async () => {
-      try {
-        const url = resolveArtifactUrl(artifact);
-        if (!url) {
-          setError(t.projectsArtifactNoPath);
-          setLoading(false);
-          return;
-        }
-        const api = getDesktopApi();
-        let text: string;
-        if (url.includes(':4400') && api?.kswarmProxyGetText) {
-          const path = new URL(url).pathname;
-          const data = await api.kswarmProxyGetText(path);
-          if (data === null || data === undefined) throw new Error('fetch failed');
-          text = data;
-        } else if (api?.readFileContent && (artifact.path || artifact.filename)) {
-          const filePath = artifact.path || artifact.filename || '';
-          const data = await api.readFileContent(filePath);
-          text = typeof data === 'string' ? data : (data as any)?.text ?? '';
-          if (!text) throw new Error('empty content');
-        } else {
-          const res = await fetch(url);
-          if (!res.ok) throw new Error(`${res.status}`);
-          text = await res.text();
-        }
-        setContent(text);
-      } catch (err) {
-        setError((err as Error).message);
-      } finally {
+    try {
+      const url = resolveArtifactUrl(artifact);
+      if (!url) {
+        setError(t.projectsArtifactNoPath);
         setLoading(false);
+        return;
       }
-    };
-    loadContent();
-  }, [artifact, isPreviewable]);
+      const api = getDesktopApi();
+      let text: string;
+      if (url.includes(':4400') && api?.kswarmProxyGetText) {
+        const path = new URL(url).pathname;
+        const data = await api.kswarmProxyGetText(path);
+        if (data === null || data === undefined) throw new Error('fetch failed');
+        text = data;
+      } else if (api?.readFileContent && (artifact.path || artifact.filename)) {
+        const filePath = artifact.path || artifact.filename || '';
+        const data = await api.readFileContent(filePath);
+        text = typeof data === 'string' ? data : (data as any)?.text ?? '';
+        if (!text) throw new Error('empty content');
+      } else {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`${res.status}`);
+        text = await res.text();
+      }
+      setContent(text);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [artifact, isPreviewable, t.projectsArtifactNoPath]);
+
+  useEffect(() => {
+    setHtmlEditMode(false);
+    setHtmlEditRequest((request) => ({ id: request.id + 1, startInEditMode: false }));
+    void loadContent();
+  }, [loadContent]);
 
   const handleDownload = () => {
     downloadArtifact(artifact);
@@ -118,6 +124,14 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
   const isHtml = /\.(html|htm|svg)$/i.test(displayName) || artifact.mimeType?.includes('html') || artifact.mimeType?.includes('svg');
   const isJson = /\.json$/i.test(displayName) || artifact.mimeType?.includes('json');
   const isMarkdown = /\.(md|markdown)$/i.test(displayName) || artifact.mimeType?.includes('markdown');
+  const editableHtmlFilePath = isHtml && artifact.path ? artifact.path : '';
+  const canDirectEditHtml = Boolean(content && editableHtmlFilePath);
+
+  const handleStartHtmlEdit = () => {
+    if (!canDirectEditHtml) return;
+    setHtmlEditMode(true);
+    setHtmlEditRequest((request) => ({ id: request.id + 1, startInEditMode: true }));
+  };
 
   const renderMarkdown = (md: string) => {
     const html = md
@@ -151,6 +165,25 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
     }
 
     if (isHtml) {
+      if (htmlEditMode && editableHtmlFilePath) {
+        return (
+          <ArtifactEditableViewer
+            htmlContent={content}
+            filePath={editableHtmlFilePath}
+            editModeRequest={htmlEditRequest}
+            onAnnotation={() => {}}
+            onRevert={() => {
+              setHtmlEditMode(false);
+              void loadContent();
+            }}
+            onFinish={() => {
+              setHtmlEditMode(false);
+              void loadContent();
+            }}
+            onRefresh={() => void loadContent()}
+          />
+        );
+      }
       const previewContent = prepareHtmlArtifactPreview(content);
       return (
         <iframe srcDoc={previewContent} className="h-full w-full rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-white" sandbox="allow-scripts" title={displayName} />
@@ -178,6 +211,7 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
   const modalSizeClass = fullscreen
     ? 'w-[calc(100vw-32px)] h-[calc(100vh-32px)]'
     : 'w-[90vw] max-w-5xl h-[90vh]';
+  const isEditingHtmlPreview = isHtml && htmlEditMode && Boolean(editableHtmlFilePath);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -195,6 +229,17 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
             <p className="text-[10px] text-[var(--c-text-muted)]">{artifact.mimeType || t.projectsDeliverableUnknownType}</p>
           </div>
           <div className="flex items-center gap-1">
+            {canDirectEditHtml && !htmlEditMode && (
+              <button
+                type="button"
+                aria-label={t.artifactHtmlEdit}
+                onClick={handleStartHtmlEdit}
+                className="rounded-md p-1.5 text-[var(--c-text-muted)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]"
+                title={t.artifactHtmlEdit}
+              >
+                <PencilLine size={15} />
+              </button>
+            )}
             {content && (
               <button
                 type="button"
@@ -232,7 +277,9 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
           </div>
         </div>
         {/* Content */}
-        <div className="flex-1 min-h-0 p-5">{renderContent()}</div>
+        <div className={`artifact-preview-modal__content ${isEditingHtmlPreview ? 'artifact-preview-modal__content--editing' : ''}`}>
+          {renderContent()}
+        </div>
       </div>
     </div>
   );

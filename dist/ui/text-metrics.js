@@ -2,7 +2,7 @@ const ANSI_SEQUENCE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 export function stripAnsi(text) {
     return text.replace(ANSI_SEQUENCE, '');
 }
-function isFullWidthCodePoint(codePoint) {
+export function isFullWidthCodePoint(codePoint) {
     return (codePoint >= 0x1100 && (codePoint <= 0x115f ||
         codePoint === 0x2329 ||
         codePoint === 0x232a ||

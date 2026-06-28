@@ -4,6 +4,7 @@ import type {
   DesktopRelatedServiceId,
   DesktopServiceStatusSnapshot,
   DesktopModelConfigSnapshot,
+  DesktopMobilePairingInfo,
   DesktopSaveModelConfigInput,
   MaterialView,
   MaterialRole,
@@ -503,6 +504,10 @@ export const api = {
     log.info('deleteModel', modelId);
     await window.xiaokDesktop.deleteModel(modelId);
     log.info('deleteModel ok');
+  },
+
+  async getMobilePairingInfo(): Promise<DesktopMobilePairingInfo> {
+    return await window.xiaokDesktop.getMobilePairingInfo();
   },
 
   // ---------------------
