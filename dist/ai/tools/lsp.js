@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { runFallbackGrepSearch } from './grep.js';
 function formatLocation(loc, cwd) {
     const uri = loc.uri.startsWith('file://') ? loc.uri.slice('file://'.length) : loc.uri;
     const path = cwd && uri.startsWith(cwd) ? uri.slice(cwd.length + 1) : uri;
@@ -10,9 +12,65 @@ function fileToUri(filePath) {
     return pathToFileURL(filePath).toString();
 }
 function ensureAbsolute(filePath, cwd) {
-    if (filePath.startsWith('/'))
-        return filePath;
-    return `${cwd}/${filePath}`;
+    return isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
+}
+// 声明语句的多语言近似正则：捕获 (关键字, 符号名)。
+// 注意：这是语法近似（非语义真相），仅用于未配置 LSP server 时的 documentSymbol 降级。
+const DECLARATION_REGEX = '^\\s*(?:export\\s+(?:default\\s+)?)?(?:declare\\s+)?(?:public\\s+|private\\s+|protected\\s+)?(?:pub(?:\\s*\\([^)]*\\))?\\s+)?(?:abstract\\s+)?(?:async\\s+)?(class|interface|enum|struct|trait|impl|type|function|func|def|fn)\\s+([A-Za-z_$][\\w$]*)';
+const KEYWORD_KIND = {
+    class: 'class',
+    interface: 'interface',
+    enum: 'enum',
+    struct: 'struct',
+    trait: 'interface',
+    impl: 'class',
+    type: 'type',
+    function: 'function',
+    func: 'function',
+    def: 'function',
+    fn: 'function',
+};
+/**
+ * 未配置 LSP server 时的 documentSymbol 降级。
+ * 复用 grep.ts 的纯 JS 正则回退 runFallbackGrepSearch，
+ * 不依赖 rg/grep 二进制，保证 Windows / 精简环境也能工作（AGENTS.md 跨平台硬规则）。
+ */
+async function fallbackDocumentSymbols(absPath) {
+    let matches;
+    try {
+        matches = await runFallbackGrepSearch({
+            pattern: DECLARATION_REGEX,
+            path: absPath,
+            output_mode: 'lines',
+        });
+    }
+    catch {
+        return '无符号信息（regex 降级失败，未配置 LSP server）';
+    }
+    const prefix = `${absPath}:`;
+    const re = new RegExp(DECLARATION_REGEX);
+    const entries = [];
+    for (const entry of matches) {
+        // runFallbackGrepSearch 返回 `${absPath}:${line}:${content}`；
+        // 按已知 absPath 长度切割，避免 Windows 盘符冒号（C:\）误判。
+        if (!entry.startsWith(prefix))
+            continue;
+        const rest = entry.slice(prefix.length);
+        const sep = rest.indexOf(':');
+        if (sep < 0)
+            continue;
+        const lineNo = rest.slice(0, sep);
+        const content = rest.slice(sep + 1);
+        const m = re.exec(content);
+        if (!m)
+            continue;
+        const kind = KEYWORD_KIND[m[1]] ?? m[1];
+        entries.push(`${m[2]} [${kind}] line ${lineNo}`);
+    }
+    if (entries.length === 0) {
+        return '无符号信息（regex 降级，未配置 LSP server）';
+    }
+    return `（regex 降级：未配置 LSP server；语法近似，非语义真相，精确语义请配置 LSP）\n${entries.join('\n')}`;
 }
 export function createLspTool(options) {
     const cwd = options.cwd ?? process.cwd();
@@ -20,7 +78,7 @@ export function createLspTool(options) {
         permission: 'safe',
         definition: {
             name: 'lsp',
-            description: '代码智能工具：跳转定义、查找引用、悬停文档、文档符号列表。需要项目配置 LSP 服务器。',
+            description: '代码智能工具：跳转定义、查找引用、悬停文档、文档符号列表。goToDefinition/findReferences/hover 需要项目配置 LSP 服务器；documentSymbol 在未配置 LSP 时自动用语法正则降级（近似，非语义真相）。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -47,13 +105,17 @@ export function createLspTool(options) {
         },
         async execute(input) {
             const { operation, file_path, line = 1, character = 1 } = input;
-            const client = options.getLspClient();
-            if (!client) {
-                return 'Error: 没有可用的 LSP 服务器。请在 .xiaok/settings.json 中配置 lspServers。';
-            }
             const absPath = ensureAbsolute(file_path, cwd);
             if (!existsSync(absPath)) {
                 return `Error: 文件不存在: ${absPath}`;
+            }
+            const client = options.getLspClient();
+            if (!client) {
+                // 未配置 LSP server 时，documentSymbol 用纯 JS 正则降级，而非直接报错。
+                if (operation === 'documentSymbol') {
+                    return await fallbackDocumentSymbols(absPath);
+                }
+                return 'Error: 没有可用的 LSP 服务器。请在 .xiaok/settings.json 中配置 lspServers。（documentSymbol 操作支持无 server 正则降级，其余操作需要 LSP）';
             }
             const uri = fileToUri(absPath);
             // LSP 行列号是 0-based

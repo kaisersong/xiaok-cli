@@ -32,6 +32,7 @@ import { TimedActionScheduler } from './timed-action-scheduler.js';
 import { createDesktopTimedActionExecutors } from './timed-action-executors.js';
 import { createElectronDesktopNotificationPort } from './desktop-notifications.js';
 import { createDesktopLoopRuntime } from './loop-executor.js';
+import { createDesktopLoopLLMPort } from './loop-llm-port-impl.js';
 import { buildAutomationOverviewSnapshot, buildAutomationRunHistory } from './automation-overview.js';
 import { attachDesktopContextMenu } from './context-menu.js';
 import {
@@ -141,6 +142,8 @@ async function createWindow(): Promise<BrowserWindow> {
     dataRoot,
     kswarmService,
   });
+  const loopNotificationPort = createElectronDesktopNotificationPort();
+  let loopStoreRef: import('./loop-store.js').LoopStore | undefined;
   const loopRuntime = createDesktopLoopRuntime({
     dataRoot,
     taskPort: {
@@ -148,12 +151,47 @@ async function createWindow(): Promise<BrowserWindow> {
       recoverTask: (taskId) => services.recoverTask(taskId),
       cancelTask: (taskId, reason) => services.cancelTask(taskId, reason),
     },
+    llmPort: createDesktopLoopLLMPort(),
+    onConstraintAdded: (constraint) => {
+      try {
+        const template = loopStoreRef?.getUserLoopTemplate(constraint.loopId);
+        const definition = loopStoreRef?.getLoopDefinition(constraint.loopId);
+        const loopTitle = definition?.title ?? template?.prompt?.slice(0, 60) ?? constraint.loopId;
+        const sourceLabel = constraint.source === 'llm_extraction' ? 'AI 分析' : '规则匹配';
+        void loopNotificationPort.show({
+          title: `循环改进建议（${sourceLabel}）：${loopTitle}`,
+          body: `${constraint.rule}\n点击查看 Automations → 约束规则`,
+          silent: false,
+          onClick: () => {
+            try {
+              if (window.isDestroyed()) return;
+              if (window.isMinimized()) window.restore();
+              window.show();
+              window.focus();
+              window.webContents.send('desktop:loops:constraintAdded', constraint);
+            } catch {
+              // ignore window restore failures
+            }
+          },
+        });
+      } catch (e) {
+        console.warn('[main] loop constraint notification failed:', (e as Error)?.message);
+      }
+      try {
+        if (!window.isDestroyed()) {
+          window.webContents.send('desktop:loops:constraintAdded', constraint);
+        }
+      } catch (e) {
+        console.warn('[main] loop constraint IPC send failed:', (e as Error)?.message);
+      }
+    },
     kswarmHealthProbe: () => kswarmService.getHealthDiagnosticInput(),
     kswarmHealthLogPaths: [
       join(resolveKSwarmServiceLogRoot(app.getPath('userData')), 'server.log'),
       join(resolveKSwarmServiceLogRoot(app.getPath('userData')), 'broker.log'),
     ],
   });
+  loopStoreRef = loopRuntime.loopStore;
 
   await registerDesktopIpc(ipcMain, window, services, { loopRuntime });
   debugMain('createWindow:ipc-registered');
@@ -480,6 +518,16 @@ async function createWindow(): Promise<BrowserWindow> {
   });
   ipcMain.handle('desktop:getTimedActionRuns', (_event, actionId: string) => {
     return timedActionService.getRuns(actionId);
+  });
+  ipcMain.handle('desktop:scheduledTasks:clearRunHistory', (_event, actionId: string, statuses?: unknown) => {
+    if (typeof actionId !== 'string' || actionId.trim().length === 0) {
+      throw new Error('actionId must be a non-empty string');
+    }
+    const validStatuses = Array.isArray(statuses) && statuses.every((s) => typeof s === 'string')
+      ? (statuses as string[])
+      : undefined;
+    const removed = timedActionStore.clearActionRunHistory(actionId, validStatuses);
+    return { ok: true, removed };
   });
   ipcMain.handle('desktop:timedAction:approveAuto', (_event, actionId: string) => {
     return timedActionService.approveAuto(actionId) ?? null;

@@ -181,9 +181,15 @@ export class ToolExplorer {
       return lines.join('');
     }
 
+    const previousGroup = this.activeGroup;
     this.activeGroup = null;
     const fallback = this.formatActivity(name, input);
-    return fallback ? `${fallback}\n` : '';
+    if (!fallback) return '';
+    // Separate a standalone fallback activity from a preceding rail block
+    // (Ran/Explored/Changed) with a blank line so it does not visually stick
+    // to the railed content above it.
+    const separator = previousGroup ? '\n' : '';
+    return `${separator}${fallback}\n`;
   }
 
   reset(): void {

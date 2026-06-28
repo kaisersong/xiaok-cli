@@ -13,6 +13,8 @@ import type {
   LoopRun,
   LoopRunTrigger,
 } from './loop-types.js';
+import type { LearnedConstraint } from './loop-types.js';
+import type { LoopLLMPort } from './loop-llm-port.js';
 import { createUserLoopTemplateRunner, type UserLoopTaskPort, type UserLoopTemplateRunner } from './user-loop-template-runner.js';
 import type {
   CompletionOwnerKind,
@@ -256,6 +258,8 @@ export interface CreateDesktopLoopRuntimeOptions {
   loopDbPath?: string;
   completionEvidenceDbPath?: string;
   taskPort?: UserLoopTaskPort;
+  llmPort?: LoopLLMPort;
+  onConstraintAdded?: (constraint: LearnedConstraint) => void;
   kswarmHealthProbe?: () => KSwarmHealthDiagnosticInput | Promise<KSwarmHealthDiagnosticInput>;
   kswarmHealthLogPaths?: string[];
 }
@@ -279,6 +283,8 @@ export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOption
       loopStore,
       evidenceStore,
       taskPort: options.taskPort,
+      llmPort: options.llmPort,
+      onConstraintAdded: options.onConstraintAdded,
       now,
     })
     : undefined;

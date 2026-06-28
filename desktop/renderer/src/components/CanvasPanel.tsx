@@ -21,14 +21,14 @@ interface CanvasPanelProps {
 type CanvasTab = 'workspace' | 'preview' | 'tools';
 
 const TABS: Array<{ key: CanvasTab; label: string; icon: typeof X }> = [
-  { key: 'workspace', label: 'Workspace', icon: FolderTree },
   { key: 'preview', label: 'Preview', icon: Code },
+  { key: 'workspace', label: 'Workspace', icon: FolderTree },
   { key: 'tools', label: 'Tools', icon: Wrench },
 ];
 
 export function CanvasPanel({ events, onClose, initialPreviewFile, initialPreviewContent, expanded, onToggleExpand, onAnnotation }: CanvasPanelProps) {
   const { t } = useLocale();
-  const [activeTab, setActiveTab] = useState<CanvasTab>('workspace');
+  const [activeTab, setActiveTab] = useState<CanvasTab>('preview');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [previewContent, setPreviewContent] = useState<string>('');
 

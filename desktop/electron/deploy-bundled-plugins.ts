@@ -19,7 +19,7 @@ const __dirname = dirname(__filename);
 
 const execFileAsync = promisify(execFile);
 
-const BUNDLED_PLUGINS = ['kai-report-creator', 'kai-slide-creator', 'cua-computer-use'];
+const BUNDLED_PLUGINS = ['kai-report-creator', 'kai-slide-creator', 'cua-computer-use', 'kai-infinity-canvas'];
 
 /** Semver-aware: returns true if a >= b */
 function semverGte(a: string, b: string): boolean {
@@ -189,6 +189,19 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
   const pluginsDir = getConfigDir('plugins');
   mkdirSync(pluginsDir, { recursive: true });
   const slideWheelhouseCompatTargets: Array<{ dest: string; src: string }> = [];
+
+  // Legacy migration: kai-canvas-creator → kai-infinity-canvas (renamed in v1.4.15).
+  // Move the old folder aside so it does not load alongside the new plugin.
+  try {
+    const legacyCanvasDir = join(pluginsDir, 'kai-canvas-creator');
+    if (existsSync(legacyCanvasDir) && !isSymlink(legacyCanvasDir)) {
+      const backup = join(pluginsDir, 'kai-canvas-creator.legacy-backup');
+      if (existsSync(backup)) rmSync(backup, { recursive: true, force: true });
+      renameSync(legacyCanvasDir, backup);
+    }
+  } catch {
+    // legacy migration is best-effort; never block deploy
+  }
 
   const bundledDir = resolveBundledPluginsDir();
 

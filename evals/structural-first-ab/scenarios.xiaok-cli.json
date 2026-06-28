@@ -1,0 +1,24 @@
+{
+  "comment": "xiaok-cli 自身 A/B。约 1.4 万文件（VS Code 量级），src+desktop 约 880 个 ts/tsx，含超大文件 chat.ts(128KB,~3000+行)。属大仓+大文件档，是决策门 §3.3 要求的规模。问题指向超大文件与多模块架构以考察结构化首读。",
+  "repeats": 3,
+  "scenarios": [
+    {
+      "id": "xk-chat-print-mode",
+      "size": "large-repo/huge-file",
+      "repo": "/Users/song/projects/xiaok-cli",
+      "prompt": "在 src/commands/chat.ts 中，--print / --json headless 模式的输出是在哪里组装的？涉及哪些函数和字段？指出关键行号。"
+    },
+    {
+      "id": "xk-tool-registration",
+      "size": "large-repo/multi-module",
+      "repo": "/Users/song/projects/xiaok-cli",
+      "prompt": "agent 的工具注册流程是怎样的？CLI 与 desktop 两条路径分别在哪里构建工具列表？lsp 工具在哪些路径生效？"
+    },
+    {
+      "id": "xk-tools-surface",
+      "size": "large-repo/dir-surface",
+      "repo": "/Users/song/projects/xiaok-cli",
+      "prompt": "src/ai/tools 目录下有哪些 agent 工具？分别负责什么？列出工具名与对应文件。"
+    }
+  ]
+}

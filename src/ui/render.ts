@@ -146,7 +146,21 @@ export function formatRailHeader(label: string, detail?: string): string {
 }
 
 export function formatRailLine(content: string): string {
-  return `${RAIL_INDENT}${dimCyan("│")} ${content}`;
+  const prefix = `${RAIL_INDENT}${dimCyan("│")} `;
+  // Visible columns consumed by the rail prefix: indent + "│" + trailing space.
+  const prefixWidth = RAIL_INDENT.length + 2;
+  const cols = process.stdout.columns ?? 80;
+  const available = cols - prefixWidth;
+
+  if (available <= 0 || getDisplayWidth(content) <= available) {
+    return `${prefix}${content}`;
+  }
+
+  // Wrap long content so continuation lines stay aligned under the first line
+  // and keep the rail border instead of overflowing to the terminal edge.
+  return wrapDisplayLine(content, available)
+    .map((segment) => `${prefix}${segment}`)
+    .join("\n");
 }
 
 export function formatRailFooter(): string {

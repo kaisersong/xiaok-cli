@@ -49,6 +49,32 @@
   --color-input: var(--c-border);
   --color-ring: var(--c-accent);
   --radius: 0.5rem;
+
+  /* DAG graph */
+  --c-status-success-text: #15803d;
+  --c-status-warning-text: #b45309;
+  --c-status-error-text: #b91c1c;
+  --c-graph-node-pending-bg: var(--c-bg-card);
+  --c-graph-node-pending-border: var(--c-text-muted);
+  --c-graph-node-ready-border: var(--c-text-secondary);
+  --c-graph-node-running-bg: rgba(11, 110, 110, 0.06);
+  --c-graph-node-running-border: var(--c-accent);
+  --c-graph-node-review-bg: rgba(217, 119, 6, 0.06);
+  --c-graph-node-review-border: var(--c-status-warning-text);
+  --c-graph-node-done-border: var(--c-status-success-text);
+  --c-graph-node-failed-bg: rgba(220, 38, 38, 0.06);
+  --c-graph-node-failed-border: var(--c-status-error-text);
+  --c-graph-node-blocked-bg: rgba(217, 119, 6, 0.06);
+  --c-graph-node-blocked-border: var(--c-status-warning-text);
+  --c-graph-node-cancelled-border: var(--c-text-muted);
+  --c-graph-edge-depends: var(--c-border-mid);
+  --c-graph-edge-blocked: var(--c-status-error-text);
+  --c-graph-edge-done: var(--c-status-success-text);
+  --c-graph-edge-active: var(--c-accent);
+  --c-graph-edge-future: #cfcfcf;
+  --c-graph-edge-plan: #c8c8c8;
+  --c-graph-node-plan-bg: rgba(11, 110, 110, 0.05);
+  --c-graph-node-plan-border: var(--c-accent);
 }
 
 /* Dark theme overrides — applied when <html data-theme="dark"> is set */
@@ -80,6 +106,18 @@ html[data-theme='dark'] {
   --c-input-shadow-focus: 0 4px 10px -2px rgba(0,0,0,0.4);
   --c-placeholder: #6e6b66;
   color-scheme: dark;
+
+  /* DAG graph dark overrides */
+  --c-status-success-text: #22c55e;
+  --c-status-warning-text: #f59e0b;
+  --c-status-error-text: #ef4444;
+  --c-graph-node-running-bg: rgba(78, 197, 197, 0.10);
+  --c-graph-node-review-bg: rgba(245, 158, 11, 0.10);
+  --c-graph-node-failed-bg: rgba(239, 68, 68, 0.10);
+  --c-graph-node-blocked-bg: rgba(245, 158, 11, 0.10);
+  --c-graph-edge-future: #4a4845;
+  --c-graph-edge-plan: #5a5855;
+  --c-graph-node-plan-bg: rgba(78, 197, 197, 0.08);
 }
 
 html, body, #root {
@@ -348,4 +386,50 @@ html[data-theme='dark'] .sidebar-scroll:hover::-webkit-scrollbar-thumb:hover {
   font-size: 11px;
   color: var(--c-text-tertiary);
   margin-left: 8px;
+}
+
+/* DAG Graph animations */
+@keyframes dagEdgeFlow {
+  0% { stroke-dashoffset: 20; opacity: 0.3; }
+  50% { opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 1; }
+}
+
+@keyframes dagNodeHighlight {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); box-shadow: 0 0 12px var(--c-graph-node-running-border); }
+}
+
+@keyframes dagWarnPulse {
+  0%, 100% { transform: scale(1); }
+  25%, 75% { transform: scale(1.03); }
+}
+
+@keyframes dagNodePulse {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 10px 3px rgba(40, 180, 180, 0.55); }
+}
+
+.dag-edge-anim {
+  stroke-dasharray: 5 5;
+  stroke-dashoffset: 20;
+  opacity: 0.3;
+  animation: dagEdgeFlow var(--anim-duration, 500ms) ease-out forwards;
+  animation-delay: var(--anim-delay, 0ms);
+}
+
+.dag-node-anim {
+  animation: dagNodeHighlight 200ms ease-out;
+  animation-delay: var(--anim-delay, 0ms);
+}
+
+.dag-node-warn-anim {
+  animation: dagWarnPulse 800ms ease-out;
+  animation-delay: var(--anim-delay, 0ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dag-edge-anim, .dag-node-anim, .dag-node-warn-anim {
+    animation: none;
+  }
 }

@@ -4,7 +4,7 @@ export function stripAnsi(text: string): string {
   return text.replace(ANSI_SEQUENCE, '');
 }
 
-function isFullWidthCodePoint(codePoint: number): boolean {
+export function isFullWidthCodePoint(codePoint: number): boolean {
   return (
     codePoint >= 0x1100 && (
       codePoint <= 0x115f ||

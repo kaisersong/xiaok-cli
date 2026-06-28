@@ -162,15 +162,13 @@ export function AppLayout() {
             <SidebarComponent onOpenSettings={() => setSettingsOpen(true)} />
           )}
           <div className="relative flex min-w-0 flex-1 flex-col">
-            {/* Frosted glass fade at top of content - overlay above main, fixed at top of viewport */}
+            {/* Subtle fade at top of content - overlay above main, fixed at top of viewport */}
             {!hideTopFade && (
               <div
                 className="pointer-events-none absolute inset-x-0 top-0 z-10 h-6"
                 aria-hidden="true"
                 style={{
                   background: 'linear-gradient(to bottom, color-mix(in srgb, var(--c-bg-page) 70%, transparent) 0%, color-mix(in srgb, var(--c-bg-page) 30%, transparent) 70%, transparent 100%)',
-                  backdropFilter: 'blur(1.5px)',
-                  WebkitBackdropFilter: 'blur(1.5px)',
                 }}
               />
             )}

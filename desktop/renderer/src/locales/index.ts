@@ -398,6 +398,7 @@ export interface LocaleStrings {
   deleteThreadConfirmTitle: string
   deleteThreadConfirmBody: string
   deleteThreadConfirm: string
+  deleteThreadInlineConfirm: string
   deleteThreadCancel: string
   // share
   shareTitle: string
@@ -2429,6 +2430,34 @@ export interface LocaleStrings {
   automationsOverviewSchedulesCount: string;
   automationsOverviewFailuresCount: string;
 
+  // automation constraints (loop self-improving feedback)
+  automationsConstraints: string;
+  automationsConstraintsDesc: string;
+  automationsConstraintsEmpty: string;
+  automationsConstraintsLoopFilterAll: string;
+  automationsConstraintsActive: string;
+  automationsConstraintsPending: string;
+  automationsConstraintsArchived: string;
+  automationsConstraintsSourceLLM: string;
+  automationsConstraintsSourceRule: string;
+  automationsConstraintsSourceManual: string;
+  automationsConstraintsHits: (count: number) => string;
+  automationsConstraintsConfirm: string;
+  automationsConstraintsActivate: string;
+  automationsConstraintsDeactivate: string;
+  automationsConstraintsDeactivationReasonStale: string;
+  automationsConstraintsDeactivationReasonIneffective: string;
+  automationsConstraintsDeactivationReasonOverflow: string;
+  automationsConstraintsDeactivationReasonSuperseded: string;
+  automationsConstraintsDeactivationReasonUser: string;
+  automationsConstraintsCreatedAt: string;
+  automationsConstraintsFromFailure: string;
+  automationsConstraintsToastConfirmed: string;
+  automationsConstraintsToastDeactivated: string;
+  automationsConstraintsToastReactivated: string;
+  automationsConstraintsToastFailed: string;
+  automationsConstraintsNewBadge: string;
+
   // scheduled page
   scheduledTitle: string;
   scheduledSubtitle: string;
@@ -2533,6 +2562,11 @@ export interface LocaleStrings {
     processFiles: string;
     skillCommandHint: string;
     queued: string;
+    modelPicker: {
+      empty: string;
+      tooltip: string;
+      activeBadge: string;
+    };
   };
 
   // chatShell
@@ -2573,6 +2607,7 @@ export interface LocaleStrings {
   canvasPreviewUnsupported: string;
   canvasPreviewOpenSystem: string;
   canvasPreviewDownload: string;
+  canvasPreviewRefresh: string;
 
   // canvas panel
   canvasPanelCollapseCanvas: string;
@@ -2806,6 +2841,54 @@ export interface LocaleStrings {
 
   // projects - detail page (additional)
   projectsDetailAgentsTab: string;
+  projectsDetailGraphTab: string;
+  projectsDetailGraphLoading: string;
+  projectsDetailGraphEmptyNoTasks: string;
+  projectsDetailGraphEmptyTaskBoardNoDeps: string;
+  projectsDetailGraphEmptyWorkflowNotStarted: string;
+  projectsDetailGraphEmptyTooLarge: (count: number) => string;
+  projectsDetailGraphReturnToBoard: string;
+  projectsDetailGraphPartialBanner: string;
+  projectsDetailGraphStatusPending: string;
+  projectsDetailGraphStatusReady: string;
+  projectsDetailGraphStatusRunning: string;
+  projectsDetailGraphStatusReview: string;
+  projectsDetailGraphStatusDone: string;
+  projectsDetailGraphStatusFailed: string;
+  projectsDetailGraphStatusBlocked: string;
+  projectsDetailGraphStatusCancelled: string;
+  projectsDetailGraphSkip: string;
+  projectsDetailGraphReplay: string;
+  projectsDetailGraphPoPlanLabel: string;
+  projectsDetailGraphNodeKindWorkflow: string;
+  projectsDetailGraphNodeKindTask: string;
+  projectsDetailGraphDrawerClose: string;
+  projectsDetailGraphDrawerTimeline: string;
+  projectsDetailGraphDrawerStartedAt: string;
+  projectsDetailGraphDrawerCompletedAt: string;
+  projectsDetailGraphDrawerDuration: string;
+  projectsDetailGraphDrawerError: string;
+  projectsDetailGraphDrawerWorkflowMeta: string;
+  projectsDetailGraphDrawerStageIndex: string;
+  projectsDetailGraphDrawerParallelGroup: string;
+  projectsDetailGraphDrawerAttempt: string;
+  projectsDetailGraphDrawerProducerAgent: string;
+  projectsDetailGraphDrawerCache: string;
+  projectsDetailGraphDrawerInput: string;
+  projectsDetailGraphDrawerOutput: string;
+  projectsDetailGraphDrawerReview: string;
+  projectsDetailGraphDrawerTaskMeta: string;
+  projectsDetailGraphDrawerAcceptance: string;
+  projectsDetailGraphDrawerArtifacts: string;
+  projectsDetailGraphDrawerOpenInBoard: string;
+  projectsDetailGraphDrawerPoPlan: string;
+  projectsDetailGraphDrawerProjectGoal: string;
+  projectsDetailGraphDrawerAnalysis: string;
+  projectsDetailGraphDrawerSuccessCriteria: string;
+  projectsDetailGraphDrawerPhases: string;
+  projectsDetailGraphDrawerRelations: string;
+  projectsDetailGraphDrawerUpstream: string;
+  projectsDetailGraphDrawerDownstream: string;
   projectsDetailExecutionModeLabel: string;
   projectsDetailExecutionModeGroup: string;
   projectsDetailExecDirect: string;

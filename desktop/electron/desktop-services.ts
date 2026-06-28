@@ -502,7 +502,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
       permission: 'write',
       definition: {
         name: 'scheduled_task_cancel',
-        description: '取消一个自动执行 AI 的定时任务。agent 创建的 interval 临时任务会直接删除；周期任务满足停止条件时必须调用。',
+        description: '取消一个由 agent 自己创建的临时定时任务（interval 类型会直接删除）。**严禁取消用户创建的周期任务**（daily/weekly/cron 等 source=user 的任务），即使你认为它已经完成或不再需要——用户的周期任务由用户自己管理。',
         inputSchema: {
           type: 'object',
           properties: {
@@ -515,7 +515,11 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
       async execute(input) {
         const id = String(input.task_id ?? '').trim();
         if (!id) return 'Error: task_id 不能为空';
-        const ok = service.cancelScheduledTask(id, String(input.reason ?? '').trim() || undefined);
+        const target = service.listScheduledTasks().find(t => t.id === id);
+        if (target && target.source === 'user') {
+          return `Error: 不允许取消用户创建的定时任务 ${id}（"${target.name}"）。这类任务只能由用户在界面上取消。`;
+        }
+        const ok = service.cancelScheduledTask(id, String(input.reason ?? '').trim() || undefined, 'agent');
         return ok ? `已取消自动任务 ${id}` : `未找到自动任务 ${id}`;
       },
     },
@@ -2354,8 +2358,40 @@ function isRetryableKSwarmRuntimeTaskFailure(reason: string): boolean {
   return /Premature close|ERR_STREAM_PREMATURE_CLOSE|ECONNRESET|ETIMEDOUT|EPIPE|socket hang up|fetch failed|terminated/i.test(reason);
 }
 
+function formatUpstreamOutputsSection(upstreamOutputs: Record<string, { nodeId?: string; nodeTitle?: string; summary?: string; artifactPaths?: string[]; _truncated?: boolean; [key: string]: unknown }> | undefined): string {
+  if (!upstreamOutputs || typeof upstreamOutputs !== 'object') return '';
+  const entries = Object.values(upstreamOutputs);
+  if (entries.length === 0) return '';
+
+  const lines = ['', '## 上游节点产出（参考信息）', ''];
+  for (const entry of entries) {
+    const title = entry.nodeTitle || entry.nodeId || '未知节点';
+    lines.push(`### ${title}`);
+    if (entry.summary) lines.push(`- 摘要：${entry.summary}`);
+    if (Array.isArray(entry.artifactPaths) && entry.artifactPaths.length > 0) {
+      lines.push(`- 产物文件：${entry.artifactPaths.join(', ')}`);
+    }
+    if (entry._truncated) lines.push('- （部分信息被截断，如需完整内容请读取产物文件）');
+    const extraKeys = Object.keys(entry).filter(k => !['nodeId', 'nodeTitle', 'summary', 'artifactPaths', '_truncated'].includes(k));
+    for (const k of extraKeys.slice(0, 5)) {
+      try {
+        const v = JSON.stringify(entry[k]);
+        if (v && v.length < 200) lines.push(`- ${k}：${v}`);
+      } catch { /* skip */ }
+    }
+    lines.push('');
+  }
+  lines.push('如需完整内容，请使用 Read 工具读取上述文件路径。');
+  return lines.join('\n');
+}
+
 function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, participantId: string, options: { artifactsDir?: string } = {}): string {
   const project = handoff.project || { id: handoff.projectId };
+  const inputWithoutUpstream = handoff.input ? (() => {
+    const { upstreamOutputs: _u, ...rest } = handoff.input as Record<string, unknown>;
+    return Object.keys(rest).length > 0 ? rest : null;
+  })() : null;
+  const upstreamSection = formatUpstreamOutputsSection((handoff.input as Record<string, unknown>)?.upstreamOutputs as Record<string, { nodeId?: string; nodeTitle?: string; summary?: string; artifactPaths?: string[]; _truncated?: boolean }> | undefined);
   const base = [
     'KSwarm 动态工作流节点执行。',
     `执行者：${participantId}`,
@@ -2365,7 +2401,7 @@ function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, parti
     `项目：${project.name || project.id}`,
     project.goal ? `目标：${project.goal}` : '',
     project.workFolder ? `工作区：${project.workFolder}` : '',
-    handoff.input ? `节点输入：${JSON.stringify(handoff.input)}` : '',
+    inputWithoutUpstream ? `节点输入：${JSON.stringify(inputWithoutUpstream)}` : '',
   ].filter(Boolean);
 
   if (handoff.nodeKind === 'review') {
@@ -2374,10 +2410,11 @@ function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, parti
       '你是 reviewer / adversarial agent。请审查 worker 输出是否足够可靠、是否存在明显遗漏、是否包含可复核交付物证据、是否能支撑下一步行动。',
       '如果节点输入包含 sourceTask，则 sourceTask 是唯一验收范围；项目 plan、plan-v1 或其他任务只能作为背景证据，不能要求源任务以外的任务先完成。',
       `如果交付物需要 workflow run ID，必须检查它是否使用真实 workflow run ID：${handoff.workflowRunId}；不能接受自行推导或占位 ID。`,
+      upstreamSection,
       '只返回一个 JSON 对象，不要返回 Markdown 包裹：',
       '{"reviewDecision":{"status":"passed|needs_rework|blocked","reason":"一句明确原因","evidenceRefs":["可选证据引用"]},"output":{"summary":"复核摘要"}}',
       'status 只能是 passed、needs_rework、blocked。reason 不能为空。',
-    ].join('\n');
+    ].filter(Boolean).join('\n');
   }
 
   if (isKSwarmTaskDeliverableWorkflowNode(handoff)) {
@@ -2390,6 +2427,7 @@ function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, parti
       '必须逐条满足 sourceTask.description、sourceTask.acceptanceCriteria 和 sourceTask.requiredOutputs；如果验收标准要求项目 ID、任务 ID、workflow run ID 或 artifact 路径，正文中必须明确写出这些值。',
       '必须把完整、可复核的交付物文件写入产物目录；推荐 markdown 文件，文件名使用英文小写和连字符。',
       '如果 sourceTask 要求 HTML 报告、report renderer 或 kai-report-creator，必须先生成完整 .report.md IR 内容，再调用 render_report_artifact 输出 .html；不要读取 ~/.xiaok/plugins 插件内部文件，不要手写 HTML。',
+      upstreamSection,
       'JSON 输出只放 manifest，不要把完整正文塞进 JSON。',
       '只返回一个 JSON 对象，不要返回 Markdown 包裹：',
       '{"output":{"summary":"交付物摘要，说明文件内容和完成范围","artifacts":[{"path":"绝对路径或相对产物路径","kind":"markdown","label":"文件名"}],"workFolder":"项目工作区路径","evidenceRefs":["artifact:文件路径"]}}',
@@ -2406,6 +2444,7 @@ function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, parti
       '项目目标、项目要求、计划和 taskSnapshot 共同构成本节点的工作范围；请覆盖所有尚未完成但属于项目目标的任务。',
       '必须生成完整、可读、可复核的最终项目交付物文件，并写入产物目录；推荐 markdown 文件，文件名使用英文小写和连字符。',
       '如果项目要求 HTML 报告、report renderer 或 kai-report-creator，必须先生成完整 .report.md IR 内容，再调用 render_report_artifact 输出 .html；不要读取 ~/.xiaok/plugins 插件内部文件，不要手写 HTML。',
+      upstreamSection,
       'JSON 输出只放 manifest，不要把完整正文塞进 JSON。',
       '只返回一个 JSON 对象，不要返回 Markdown 包裹：',
       '{"output":{"summary":"项目交付物摘要，说明覆盖范围和文件内容","artifacts":[{"path":"绝对路径或相对产物路径","kind":"markdown","label":"文件名"}],"workFolder":"项目工作区路径","evidenceRefs":["artifact:文件路径"]}}',
@@ -2421,6 +2460,7 @@ function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, parti
     '如果 prompt 要求生成报告、分析、代码或其他交付物，必须把完整、可复核的文件写入产物目录；推荐文件名使用英文小写和连字符。',
     '如果 prompt 要求 HTML 报告、report renderer 或 kai-report-creator，必须先生成完整 .report.md IR 内容，再调用 render_report_artifact 输出 .html；不要读取 ~/.xiaok/plugins 插件内部文件，不要手写 HTML。',
     `真实 workflow run ID 是 ${handoff.workflowRunId}；如果正文需要 workflow run ID，只能使用这个值，不要自行推导、缩写或伪造。`,
+    upstreamSection,
     'JSON 输出只放 manifest，不要把完整正文塞进 JSON。',
     '只返回一个 JSON 对象，不要返回 Markdown 包裹：',
     '{"output":{"summary":"节点执行摘要","artifacts":[{"path":"绝对路径或相对产物路径","kind":"markdown","label":"文件名"}],"evidenceRefs":["artifact:文件路径"]}}',

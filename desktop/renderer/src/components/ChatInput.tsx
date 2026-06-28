@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 're
 import { Send, Square, X, Plus } from 'lucide-react';
 import { api } from '../api';
 import { useLocale } from '../contexts/LocaleContext';
+import { ChatModelPicker } from './ChatModelPicker';
 
 interface AttachedFile {
   filePath: string;
@@ -517,6 +518,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
                 <Plus size={18} />
               </button>
             )}
+            <ChatModelPicker />
             <div style={{ flex: 1, minWidth: 0 }} />
 
             {isRunning ? (

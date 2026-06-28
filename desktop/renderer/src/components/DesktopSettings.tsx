@@ -32,6 +32,7 @@ import {
   Server,
   Copy,
   RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
@@ -2255,13 +2256,27 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                 {newLoopKind === 'markdown_file' ? <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
                     {t.desktopSettings.userLoopOutputDirectoryLabel}
-                    <input
-                      aria-label={t.desktopSettings.userLoopOutputDirectoryLabel}
-                      type="text"
-                      value={newLoopOutputDirectory}
-                      onChange={(event) => setNewLoopOutputDirectory(event.target.value)}
-                      className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]"
-                    />
+                    <div className="flex gap-1.5">
+                      <input
+                        aria-label={t.desktopSettings.userLoopOutputDirectoryLabel}
+                        type="text"
+                        value={newLoopOutputDirectory}
+                        onChange={(event) => setNewLoopOutputDirectory(event.target.value)}
+                        className="flex-1 rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const result = await window.xiaokDesktop?.selectDirectory();
+                            if (result?.filePath) setNewLoopOutputDirectory(result.filePath);
+                          } catch { /* user cancel */ }
+                        }}
+                        className="shrink-0 rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
+                      >
+                        {t.desktopSettings.advancedChooseFolder}
+                      </button>
+                    </div>
                   </label>
                   <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
                     {t.desktopSettings.userLoopOutputFileNameLabel}
@@ -2499,7 +2514,21 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                             <div className="grid grid-cols-2 gap-2">
                               <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
                                 {t.desktopSettings.userLoopOutputDirectoryLabel}
-                                <input type="text" value={editLoopOutputDir} onChange={e => setEditLoopOutputDir(e.target.value)} className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]" />
+                                <div className="flex gap-1.5">
+                                  <input type="text" value={editLoopOutputDir} onChange={e => setEditLoopOutputDir(e.target.value)} className="flex-1 rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-sm text-[var(--c-text-heading)] outline-none focus:border-[var(--c-accent)]" />
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      try {
+                                        const result = await window.xiaokDesktop?.selectDirectory();
+                                        if (result?.filePath) setEditLoopOutputDir(result.filePath);
+                                      } catch { /* user cancel */ }
+                                    }}
+                                    className="shrink-0 rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
+                                  >
+                                    {t.desktopSettings.advancedChooseFolder}
+                                  </button>
+                                </div>
                               </label>
                               <label className="grid gap-1 text-xs text-[var(--c-text-secondary)]">
                                 {t.desktopSettings.userLoopOutputFileNameLabel}
@@ -3213,6 +3242,15 @@ function AboutPane() {
             <div className="text-xs text-[var(--c-text-tertiary)] mt-3">
               {t.desktopSettings.aboutAppDesc}
             </div>
+            <a
+              href="https://github.com/kaisersong"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-[var(--c-accent)] hover:underline mt-3"
+            >
+              github.com/kaisersong
+              <ExternalLink size={11} />
+            </a>
           </div>
         </Card>
       </Section>

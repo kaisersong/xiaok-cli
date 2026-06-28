@@ -46,7 +46,26 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
-Xiaok Desktop v1.4.11 把这套模型放到了产品界面里。Loop 不再藏在通用设置中；用户循环、定时任务、运行历史、诊断和输出预览统一进入”自动化”入口。一个定时任务可以触发一个 loop，一个 loop run 可以反查是哪次定时调度 claim 了它，界面也会把”调度是否按时执行”和”任务内容是否正确”分开呈现。
+Xiaok Desktop v1.4.15 强化了 Loop Engineering 的 evidence 管线：用户显式约束（从意图提取）现在会注入到每轮 system reminder 中让 subagent 真正遵守，同时二进制产物 evidence（PDF/PPTX）获得了 warn mode 结构校验——可以捕获损坏文件但不阻塞任务完成。
+
+**v1.4.15 新特性：**
+
+- **约束注入 Intent Reminder**：`buildIntentReminderBlock` 现在渲染 `explicitConstraints`，使用 “must follow” 语义和分号分隔。planner 提取的约束（如”控制在一页内”/”用中文”）终于在每轮对话中对执行 agent 可见，而不是只存在 ledger 里。
+- **二进制产物结构校验（Warn Mode）**：新增 `artifact-structure.ts` 模块，校验 PDF（`%PDF-` header，fd-based 只读 5 字节）和 PPTX（ZIP local file header `PK\x03\x04` + 前 64KB 内是否有 `[Content_Types].xml`）。以 warn mode 接入 `completion-evidence.ts` guard pipeline——检测损坏产物但不杀任务。内存安全：PDF 读 5 字节，PPTX 最多 64KB。
+- **URI/Paths Bypass 修复**：`resolveLocalArtifactPath` 现在统一从 `file://` URI、`metadata.paths`、`metadata.localPaths` 提取可验证的本地路径。之前通过 `uri` 或 `paths` 字段绕过结构校验的 evidence 记录现在也会被验证。
+- **Canvas Preview 默认 Tab**：Canvas 面板默认显示预览 tab + 刷新按钮重新读取文件内容。
+- **Evidence Guard 测试对齐**：修复 `artifact-evidence-guard.test.ts` 中 3 个过期测试，对齐 v1.4.11 引入的 answer-fallback 策略。
+- **发布验证**：v1.4.15 通过 79 个聚焦 guard/orchestration/structure 测试（全通过），sandbox build clean，无新 typecheck 回归。
+
+**v1.4.14 新特性：**
+
+- **Loop 自我改进 — Phase 1 完整闭环**：LLM 提取已通过 `createDesktopLoopLLMPort` 接入（复用现有 model adapter，30s 超时，异常降级为纯规则兜底）。`triggerAsyncExtraction` 重构为统一的 `recordConstraint` 辅助方法 + `onConstraintAdded` 回调。新约束写入时弹系统通知 + IPC 推送。新增 `LoopConstraintsTab` UI（active/pending/archived 三态过滤 + 按循环过滤 + 启用/停用/重新启用操作），通过 `desktop:loops:constraintAdded` 事件订阅实时高亮新条目。
+- **Automation 总览对齐**：循环数仅统计用户模板（排除内置诊断循环）；计划数仅统计 active + paused（排除 completed/cancelled）；”待处理”卡片点击改为滚动到本页失败列表；所有失败项（loop_run + timed_action_run）均提供”清除此记录”按钮。
+- **KSwarm Workflow 节点间上游 output 传递**：`compactNodeOutput` 提取结构化节点产出（摘要 + 产物路径 + 小字段）；`enrichWorkflowNodeInput` 通过 `dependsOn` 边收集已完成上游节点 output，总量 10KB 上限 + 优雅降级为 summary-only。Desktop `buildKSwarmWorkflowNodePrompt` 将上游产出渲染为结构化参考段。所有新逻辑遵循降级优先：任何失败都静默跳过注入（不阻塞 dispatch）。
+- **清除定时任务运行记录**：新增 `TimedActionStore.clearActionRunHistory(actionId, statuses?)` + IPC `desktop:scheduledTasks:clearRunHistory`，用户可在自动化总览中清除失败/过时的定时任务运行记录。
+- **ChatView 文本溢出修复**：助手消息和流式区域添加 `break-words`；滚动容器改为 `overflow-x-hidden` 避免横向滚动。
+- **项目流程图 V4**：实际执行路径高亮、PO 起始节点、点击查看详情、自上而下布局、Handle 组件使边可见。
+- **发布验证**：v1.4.14 通过 1239 个 desktop 测试（全通过）、electron + renderer typecheck clean（baseline 0）、build:main + build:renderer + pack:dir 全绿，在 `/Applications/xiaok.app` 实装验证。
 
 **v1.4.11 新特性：**
 

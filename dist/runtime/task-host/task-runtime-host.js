@@ -911,7 +911,22 @@ function isClarificationSummary(summary) {
     if (!CLARIFICATION_RESULT_PATTERN.test(summary)) {
         return false;
     }
-    return !COMPLETION_CLAIM_PATTERN.test(summary);
+    // If the summary has completion claims, it's not purely clarification
+    if (COMPLETION_CLAIM_PATTERN.test(summary)) {
+        return false;
+    }
+    // Only treat as clarification if the summary is short and question-heavy
+    // Longer responses with questions are likely explanations + clarification, not pure clarification
+    const questionCount = (summary.match(/[?？]/g) || []).length;
+    const sentenceCount = summary.split(/[。.!！\n]/).filter(s => s.trim().length > 10).length;
+    // If more than 50% of sentences are questions, or if it's very short with questions, it's clarification
+    if (summary.length < 150 && questionCount > 0) {
+        return true;
+    }
+    if (sentenceCount > 0 && questionCount / sentenceCount > 0.5) {
+        return true;
+    }
+    return false;
 }
 function isBlockedSummary(summary) {
     return BLOCKED_RESULT_PATTERN.test(summary) && !COMPLETION_CLAIM_PATTERN.test(summary);

@@ -137,4 +137,58 @@ describe('createLspTool', () => {
     expect(result).toContain('Error');
     expect(result).toContain('unknownOp');
   });
+
+  describe('documentSymbol regex fallback (no LSP server)', () => {
+    it('falls back to regex outline for documentSymbol when no client', async () => {
+      writeFileSync(
+        join(dir, 'shapes.ts'),
+        [
+          'import { x } from "./x";',
+          '',
+          'export function parseRule(source) {',
+          '  return source;',
+          '}',
+          '',
+          'export class Parser {',
+          '  parse() {}',
+          '}',
+          '',
+          'interface Rule {}',
+        ].join('\n'),
+      );
+      const tool = createLspTool({ getLspClient: () => undefined, cwd: dir });
+      const result = await tool.execute({ operation: 'documentSymbol', file_path: 'shapes.ts' });
+      // 降级标注 + 带行号的符号
+      expect(result).toContain('降级');
+      expect(result).toContain('parseRule [function] line 3');
+      expect(result).toContain('Parser [class] line 7');
+      expect(result).toContain('Rule [interface] line 11');
+    });
+
+    it('still errors for non-documentSymbol operations when no client', async () => {
+      const tool = createLspTool({ getLspClient: () => undefined, cwd: dir });
+      const result = await tool.execute({ operation: 'hover', file_path: 'sample.ts', line: 1, character: 1 });
+      expect(result).toContain('Error');
+      expect(result).toContain('LSP');
+    });
+
+    it('returns 无符号信息 when fallback finds no declarations', async () => {
+      writeFileSync(join(dir, 'empty.ts'), 'const a = 1;\nconsole.log(a);\n');
+      const tool = createLspTool({ getLspClient: () => undefined, cwd: dir });
+      const result = await tool.execute({ operation: 'documentSymbol', file_path: 'empty.ts' });
+      expect(result).toContain('无符号信息');
+    });
+
+    it('uses LSP path for documentSymbol when client is available (no fallback)', async () => {
+      const client = makeMockClient({
+        documentSymbols: vi.fn(async () => [
+          { name: 'hello', kind: 12, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 25 } } },
+        ]),
+      });
+      const tool = createLspTool({ getLspClient: () => client as any, cwd: dir });
+      const result = await tool.execute({ operation: 'documentSymbol', file_path: 'sample.ts' });
+      expect(result).toBe('hello [function] line 1');
+      expect(client.documentSymbols).toHaveBeenCalled();
+    });
+  });
 });

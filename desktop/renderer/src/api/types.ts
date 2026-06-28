@@ -379,3 +379,25 @@ export type RunLoopNowResultView =
   | { status: 'skipped'; reason: 'paused' | 'missing_loop' | 'deleted_loop' };
 
 export interface UploadedThreadAttachment { id: string; fileName: string; fileSize: number }
+
+export type LearnedConstraintSourceView = 'llm_extraction' | 'rule_extraction' | 'user_manual';
+export type LearnedConstraintDeactivationReasonView = 'user' | 'stale' | 'ineffective' | 'overflow' | 'superseded';
+
+export interface LearnedConstraintView {
+  id: string;
+  loopId: string;
+  source: LearnedConstraintSourceView;
+  rule: string;
+  sourceRunId: string;
+  failureKind: string | null;
+  failureReason: string | null;
+  active: boolean;
+  hitCount: number;
+  consecutiveIneffectiveCount: number;
+  createdAt: number;
+  updatedAt: number;
+  lastHitAt: number | null;
+  supersededBy: string | null;
+  deactivationReason: LearnedConstraintDeactivationReasonView | null;
+  extractionContext: string | null;
+}

@@ -450,6 +450,24 @@ export class TimedActionStore {
     });
   }
 
+  clearActionRunHistory(actionId: string, statuses?: string[]): number {
+    return this.transaction(() => {
+      let removed = 0;
+      if (statuses && statuses.length > 0) {
+        const placeholders = statuses.map(() => '?').join(',');
+        const result = this.db
+          .prepare(`delete from timed_action_runs where action_id = ? and status in (${placeholders})`)
+          .run(actionId, ...statuses);
+        removed = Number(result.changes ?? 0);
+      } else {
+        const result = this.db.prepare('delete from timed_action_runs where action_id = ?').run(actionId);
+        removed = Number(result.changes ?? 0);
+      }
+      if (removed > 0) this.bumpAutomationStoreVersion();
+      return removed;
+    });
+  }
+
   releaseStaleLocks(now: number, staleAfterMs: number, options: ReleaseStaleLocksOptions = {}): number {
     return this.transaction(() => {
       const rows = typedRows<TimedActionRow>(this.db.prepare(`

@@ -1,0 +1,12 @@
+{
+  "comment": "隔离 multi-module 场景，配合 XIAOK_TURN_TIMEOUT_MS 提高超时，去除上一轮 240s 超时伪影。",
+  "repeats": 3,
+  "scenarios": [
+    {
+      "id": "xk-tool-registration",
+      "size": "large-repo/multi-module",
+      "repo": "/Users/song/projects/xiaok-cli",
+      "prompt": "agent 的工具注册流程是怎样的？CLI 与 desktop 两条路径分别在哪里构建工具列表？lsp 工具在哪些路径生效？"
+    }
+  ]
+}

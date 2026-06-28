@@ -1,0 +1,24 @@
+{
+  "comment": "kualityforge A/B 场景。注意：该仓约 97 文件，属小仓档（与 benchmark 中负优化的 Gin 99 文件同级），结果须带规模注意解读。问题刻意指向大文件/多模块以最大化结构化首读的潜在收益。",
+  "repeats": 2,
+  "scenarios": [
+    {
+      "id": "kf-contextpack",
+      "size": "small-repo/large-file",
+      "repo": "/Users/song/projects/kualityforge",
+      "prompt": "src/core/context-pack.mjs 是如何组装 context pack 的？列出它导出的主要函数及各自职责，并指出关键行号。"
+    },
+    {
+      "id": "kf-brokered-runtime",
+      "size": "small-repo/multi-module",
+      "repo": "/Users/song/projects/kualityforge",
+      "prompt": "kualityforge 的 kswarm brokered runtime 执行链路是怎样的？从任务进入到产物提交经过哪些核心模块和函数？"
+    },
+    {
+      "id": "kf-report-formats",
+      "size": "small-repo/dir-surface",
+      "repo": "/Users/song/projects/kualityforge",
+      "prompt": "report 生成支持哪些格式？markdown 与 html 报告分别由哪些文件和入口函数负责？"
+    }
+  ]
+}

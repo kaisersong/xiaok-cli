@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import { ScheduledPage } from '../ScheduledPage';
 import { LoopsPane } from '../DesktopSettings';
+import { LoopConstraintsTab } from './LoopConstraintsTab';
 import { DirectionAwareTabs, type DirectionAwareTab } from '../ui/direction-aware-tabs';
 import { useLocale } from '../../contexts/LocaleContext';
 import { api } from '../../api';
@@ -17,17 +18,18 @@ function formatRelativeTime(ts: number, t: Pick<import('../../locales').LocaleSt
   return new Date(ts).toLocaleDateString();
 }
 
-type AutomationsTab = 'overview' | 'schedules' | 'loops' | 'diagnostics';
+type AutomationsTab = 'overview' | 'schedules' | 'loops' | 'constraints' | 'diagnostics';
 
-const TABS: Array<{ key: AutomationsTab; labelKey: 'automationsOverview' | 'automationsSchedules' | 'automationsLoops' | 'automationsDiagnostics' }> = [
+const TABS: Array<{ key: AutomationsTab; labelKey: 'automationsOverview' | 'automationsSchedules' | 'automationsLoops' | 'automationsConstraints' | 'automationsDiagnostics' }> = [
   { key: 'overview', labelKey: 'automationsOverview' },
   { key: 'schedules', labelKey: 'automationsSchedules' },
   { key: 'loops', labelKey: 'automationsLoops' },
+  { key: 'constraints', labelKey: 'automationsConstraints' },
   { key: 'diagnostics', labelKey: 'automationsDiagnostics' },
 ];
 
 function normalizeTab(value: string | undefined): AutomationsTab {
-  if (value === 'schedules' || value === 'loops' || value === 'diagnostics') return value;
+  if (value === 'schedules' || value === 'loops' || value === 'constraints' || value === 'diagnostics') return value;
   return 'overview';
 }
 
@@ -140,10 +142,12 @@ export function AutomationsPage() {
                 title={t.automationsOverviewFailuresCount}
                 value={overviewSnapshot?.totals.recentFailures ?? 0}
                 body={t.automationsDiagnosticsDesc}
-                onOpen={() => openTab('diagnostics')}
+                onOpen={() => {
+                  document.getElementById('automations-recent-failures')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
               />
             </section>
-            <section className="mt-4 border border-[var(--c-border)] bg-[var(--c-bg-card)] px-4 py-3">
+            <section id="automations-recent-failures" className="mt-4 border border-[var(--c-border)] bg-[var(--c-bg-card)] px-4 py-3">
               <h2 className="text-sm font-medium text-[var(--c-text-primary)]">{t.automationsOverviewRecentFailures}</h2>
               {overviewSnapshot && overviewSnapshot.recentFailures.length > 0 ? (
                 <div className="mt-3 space-y-2">
@@ -196,6 +200,24 @@ export function AutomationsPage() {
                             {t.automationsClearRecord}
                           </button>
                         )}
+                        {item.source === 'timed_action_run' && item.actionId && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!confirm(t.automationsClearConfirm(item.title))) return;
+                              try {
+                                await api.clearScheduledTaskRunHistory(item.actionId!, ['failed', 'failed_stale', 'pause', 'skip']);
+                                const snapshot = await api.getAutomationOverviewSnapshot();
+                                setOverviewSnapshot(snapshot);
+                              } catch (e) {
+                                console.error('[Automations] clear schedule failures failed', e);
+                              }
+                            }}
+                            className="text-[10px] text-[var(--c-text-tertiary)] hover:text-red-600 hover:underline"
+                          >
+                            {t.automationsClearRecord}
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -216,6 +238,12 @@ export function AutomationsPage() {
         {activeTab === 'loops' && (
           <div className="mx-auto max-w-[800px]">
             <LoopsPane sections="user" />
+          </div>
+        )}
+
+        {activeTab === 'constraints' && (
+          <div className="mx-auto max-w-[800px]">
+            <LoopConstraintsTab />
           </div>
         )}
 

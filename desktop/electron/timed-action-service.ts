@@ -24,6 +24,7 @@ export interface ScheduledTaskRecord {
   loopId?: string;
   frequency: 'manual' | 'hourly' | 'interval' | 'daily' | 'weekdays' | 'weekly';
   status: 'active' | 'paused';
+  source: 'user' | 'agent';
   createdAt: number;
   updatedAt: number;
   automationStoreVersion?: number;
@@ -289,9 +290,11 @@ export class TimedActionService {
     return updated ? this.actionToScheduledTask(updated) : undefined;
   }
 
-  cancelScheduledTask(id: string, reason?: string): boolean {
+  cancelScheduledTask(id: string, reason?: string, requestSource: 'user' | 'agent' = 'user'): boolean {
     const action = this.store.getAction(id);
     if (!action || (action.executor.kind !== 'agent_task' && action.executor.kind !== 'loop')) return false;
+    // Protect user-created scheduled tasks from being cancelled by agents
+    if (requestSource === 'agent' && action.source === 'user') return false;
     if (this.isTemporaryAgentIntervalTask(action)) {
       return this.store.deleteAction(id);
     }
@@ -376,6 +379,7 @@ export class TimedActionService {
       loopId,
       frequency: triggerToFrequency(action.trigger),
       status: action.status === 'active' ? 'active' : 'paused',
+      source: action.source === 'agent' ? 'agent' : 'user',
       nextRunAt: action.nextDueAt,
       lastRunAt: action.lastDueAt,
       scheduleConfig: triggerToScheduleConfig(action.trigger),

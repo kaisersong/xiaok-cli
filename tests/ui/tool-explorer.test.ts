@@ -6,6 +6,15 @@ function strip(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
+// Long rail content wraps across multiple "│ " lines. Rejoin the wrapped
+// content (dropping the rail prefixes) to assert the original text survives.
+function joinRailContent(s: string): string {
+  return s
+    .split('\n')
+    .map((line) => line.replace(/^\s*[│╭╰]─?\s?/, ''))
+    .join('');
+}
+
 describe('ToolExplorer', () => {
   it('groups exploration activity under an indented Explored block', () => {
     const explorer = new ToolExplorer();
@@ -36,8 +45,24 @@ describe('ToolExplorer', () => {
     }));
 
     expect(output).toContain('  ╭─ Ran');
-    expect(output).toContain('sqlite3 ~/.mempalace/knowledge_graph.sqlite3 ".tables" 2>/dev/null && echo ---');
+    // Content may wrap across aligned "│ " rail lines; rejoin to verify it survives.
+    expect(joinRailContent(output)).toContain('sqlite3 ~/.mempalace/knowledge_graph.sqlite3 ".tables" 2>/dev/null && echo ---');
     expect(output).not.toContain('执行本地命令');
+  });
+
+  it('wraps long rail content with an aligned "│ " prefix instead of overflowing the border', () => {
+    const explorer = new ToolExplorer();
+
+    const longCommand = 'cd /Users/song/projects/kai-xiaok-plugins/plugins/kai-infinity-canvas && echo "verify selection API and SSE work" && node server/index.mjs --check';
+    const output = strip(explorer.record('bash', { command: longCommand }));
+
+    const contentLines = output.split('\n').filter((line) => line.includes('│'));
+    // The command is long enough to wrap into more than one rail line.
+    expect(contentLines.length).toBeGreaterThan(1);
+    // Every wrapped continuation keeps the aligned rail prefix, never the bare left edge.
+    for (const line of contentLines) {
+      expect(line.startsWith('  │ ')).toBe(true);
+    }
   });
 
   it('does not inline heredoc bodies into the Ran block preview', () => {
@@ -77,6 +102,26 @@ describe('ToolExplorer', () => {
     const nextTurn = strip(explorer.record('tool_search', { query: 'yzj-context.ts' }));
 
     expect(nextTurn).toContain('  ╭─ Explored');
+  });
+
+  it('separates a standalone fallback activity from a preceding rail block with a blank line', () => {
+    const explorer = new ToolExplorer();
+
+    explorer.record('bash', { command: 'sysctl machdep.xcpm.cpu_thermal_level' });
+    const fallback = strip(explorer.record('render_ui', { component: 'panel' }));
+
+    // Leading "\n" + the fallback line itself ("•  ...\n") => a blank gap row.
+    expect(fallback.startsWith('\n')).toBe(true);
+    expect(fallback.startsWith('\n\n')).toBe(false);
+    expect(fallback).toContain('•');
+  });
+
+  it('does not prepend a blank line to a fallback activity when no rail block precedes it', () => {
+    const explorer = new ToolExplorer();
+
+    const fallback = strip(explorer.record('render_ui', { component: 'panel' }));
+
+    expect(fallback.startsWith('\n')).toBe(false);
   });
 
   it('suppresses internal using-superpowers skill loads from the transcript activity rail', () => {
