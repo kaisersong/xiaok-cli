@@ -1,4 +1,5 @@
 import type { KSwarmArtifact } from '../../hooks/useKSwarmClient';
+import { toFileUrl } from '../../lib/file-path';
 
 function getKswarmBaseUrl(): string {
   return 'http://127.0.0.1:4400';
@@ -49,7 +50,7 @@ export function resolveArtifactUrl(artifact: ArtifactLike): string | null {
 
   if (rawPath) {
     if (rawPath.startsWith('file://')) return rawPath;
-    return `file://${rawPath}`;
+    return toFileUrl(rawPath);
   }
 
   const filename = (artifact.filename || artifact.name)?.trim();

@@ -3508,12 +3508,12 @@ function toolNameToLabel(name: string, input?: Record<string, unknown>): string 
   switch (name) {
     case 'Write': {
       const fp = input?.file_path as string | undefined;
-      const fname = fp?.split('/').pop() || '';
+      const fname = fp ? basename(fp) : '';
       return fname ? `写入 ${fname}` : '写入文件';
     }
     case 'Read': {
       const fp = input?.file_path as string | undefined;
-      const fname = fp?.split('/').pop() || '';
+      const fname = fp ? basename(fp) : '';
       return fname ? `读取 ${fname}` : '读取文件';
     }
     case 'read_material': return '读取附件';
@@ -4288,7 +4288,7 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
         ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });
         const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
         const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
-        const fileName = filePath.split('/').pop() || filePath;
+        const fileName = basename(filePath) || filePath;
         ctx.emitRuntimeEvent({
           type: 'artifact_recorded',
           sessionId: ctx.sessionId,
@@ -4315,7 +4315,7 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });
           const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
           const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
-          const fileName = filePath.split('/').pop() || filePath;
+          const fileName = basename(filePath) || filePath;
           ctx.emitRuntimeEvent({
             type: 'artifact_recorded',
             sessionId: ctx.sessionId,

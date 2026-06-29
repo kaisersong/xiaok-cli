@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { ToolStep } from './ChatView';
 import { DiffView } from './DiffView';
 import { ChangedFilesTree } from './ChangedFilesTree';
+import { fileBasename } from '../lib/file-path';
 
 interface Props {
   steps: ToolStep[];
@@ -34,9 +35,9 @@ function stepPreview(step: ToolStep): string {
   const input = step.input as Record<string, unknown> | null;
   if (!input) return '';
   if (step.toolName === 'bash' && input.command) return String(input.command).split('\n')[0].slice(0, 80);
-  if (step.toolName === 'read' && input.file_path) return String(input.file_path).split('/').pop() || '';
-  if (step.toolName === 'write' && input.file_path) return String(input.file_path).split('/').pop() || '';
-  if (step.toolName === 'edit' && input.file_path) return String(input.file_path).split('/').pop() || '';
+  if (step.toolName === 'read' && input.file_path) return fileBasename(String(input.file_path));
+  if (step.toolName === 'write' && input.file_path) return fileBasename(String(input.file_path));
+  if (step.toolName === 'edit' && input.file_path) return fileBasename(String(input.file_path));
   if (step.toolName === 'glob' && input.pattern) return String(input.pattern);
   if (step.toolName === 'grep' && input.pattern) return String(input.pattern);
   const vals = Object.values(input).slice(0, 2).map(v => typeof v === 'string' ? v.slice(0, 30) : '');
@@ -177,7 +178,7 @@ export function ToolStepsMessage({ steps, live }: Props) {
           try { return <ChangedFilesTree steps={steps} onFileSelect={(fp) => {
             const s = steps.find(s => {
               const p = s.input && typeof s.input === 'object' ? (s.input as Record<string, unknown>).file_path : null;
-              return typeof p === 'string' && p.endsWith(fp.split('/').pop() || '');
+              return typeof p === 'string' && p.endsWith(fileBasename(fp));
             });
             if (s) setExpandedSteps(prev => { const next = new Set(prev); next.add(s.toolUseId); return next; });
           }} />; } catch { return null; }

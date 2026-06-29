@@ -3,6 +3,7 @@ import { Send, Square, X, Plus } from 'lucide-react';
 import { api } from '../api';
 import { useLocale } from '../contexts/LocaleContext';
 import { ChatModelPicker } from './ChatModelPicker';
+import { toFileUrl } from '../lib/file-path';
 
 interface AttachedFile {
   filePath: string;
@@ -367,7 +368,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
                 style={{ position: 'relative', display: 'inline-block' }}
               >
                 <img
-                  src={`file://${f.filePath}`}
+                  src={toFileUrl(f.filePath)}
                   alt={f.name}
                   title={f.filePath}
                   style={{

@@ -29,7 +29,7 @@ export function WorkspaceTree({ fileChanges, onSelectFile }: WorkspaceTreeProps)
 
     for (const change of fileChanges) {
       const path = change.filePath;
-      const parts = path.split('/').filter(Boolean);
+      const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
 
       // Build directory nodes for each level
       for (let i = 0; i < parts.length - 1; i++) {

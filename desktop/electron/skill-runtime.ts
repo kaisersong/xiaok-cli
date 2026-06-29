@@ -1,8 +1,33 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, relative, isAbsolute, sep } from 'node:path';
 import { homedir } from 'node:os';
 import type { SkillCatalog, SkillMeta } from '../../src/ai/skills/loader.js';
 import { buildSkillExecutionPlan, type SkillExecutionPlan, type SkillPlanStep } from '../../src/ai/skills/planner.js';
+
+/**
+ * Returns true when a skill-relative reference path would escape the skill root.
+ *
+ * The check is cross-platform and does not rely on string heuristics alone:
+ * - rejects absolute paths on any host — POSIX (`/x`), Windows drive (`C:\x`,
+ *   `C:/x`) and UNC (`\\server`, `//server`), including Windows-style paths even
+ *   when the runtime is POSIX;
+ * - resolves the path against the root and uses path.relative to reject any
+ *   `..` traversal regardless of separator.
+ *
+ * Historically this only checked `startsWith('/')` / `..\\`, which let Windows
+ * absolute paths like `C:\Windows\System32` slip through on Windows hosts.
+ */
+export function referenceEscapesSkillRoot(rootDir: string, p: string): boolean {
+  if (!p) return true;
+  if (isAbsolute(p)) return true;
+  if (/^[a-zA-Z]:[\\/]/.test(p)) return true;
+  if (p.startsWith('\\\\') || p.startsWith('//')) return true;
+  const root = resolve(rootDir);
+  const target = resolve(root, p);
+  const rel = relative(root, target);
+  if (rel === '') return false;
+  return rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('../') || isAbsolute(rel);
+}
 
 // ---- Skill Trace ----
 
@@ -151,8 +176,8 @@ export function createSkillBundleRefsTool(skillCatalog: SkillCatalog) {
       const errors: string[] = [];
 
       for (const p of paths) {
-        // Reject paths that escape skill root
-        if (p.startsWith('../') || p.startsWith('/') || p.includes('..\\')) {
+        // Reject paths that escape skill root (cross-platform; see referenceEscapesSkillRoot)
+        if (referenceEscapesSkillRoot(skill.rootDir, p)) {
           errors.push(`"${p}" escapes skill root directory`);
         } else {
           validPaths.push(p);

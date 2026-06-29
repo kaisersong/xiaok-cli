@@ -17,23 +17,40 @@ function getFilePath(input: unknown): string | null {
   return typeof obj.file_path === 'string' ? obj.file_path : null
 }
 
-function toRelativePath(absPath: string): string {
-  const cwd = '/Users/song/projects/xiaok-cli/'
-  return absPath.startsWith(cwd) ? absPath.slice(cwd.length) : absPath
+/**
+ * Strips the longest common directory prefix shared by all changed-file paths
+ * so the tree shows short, relative labels. Works on both POSIX and Windows
+ * paths (normalizes separators) and is root-agnostic — no hardcoded cwd.
+ */
+export function relativizePaths(absPaths: string[]): string[] {
+  const normalized = absPaths.map(p => p.replace(/\\/g, '/'))
+  if (normalized.length === 0) return normalized
+  const splitParts = normalized.map(p => p.split('/'))
+  const first = splitParts[0]
+  let prefixLen = 0
+  for (let i = 0; i < first.length - 1; i++) {
+    const seg = first[i]
+    if (splitParts.every(parts => parts[i] === seg)) prefixLen = i + 1
+    else break
+  }
+  if (prefixLen === 0) return normalized
+  return splitParts.map(parts => parts.slice(prefixLen).join('/'))
 }
 
 export function ChangedFilesTree({ steps, onFileSelect }: Props) {
   const { paths, gitStatusEntries } = useMemo(() => {
-    const fileSet = new Map<string, 'added' | 'modified'>()
+    const collected: Array<{ path: string; status: 'added' | 'modified' }> = []
     for (const step of steps) {
       if (!isFileTool(step.toolName) || step.status === 'running') continue
       const fp = getFilePath(step.input)
       if (!fp) continue
-      const rel = toRelativePath(fp)
-      if (!fileSet.has(rel)) {
-        fileSet.set(rel, step.toolName === 'Write' ? 'added' : 'modified')
-      }
+      collected.push({ path: fp, status: step.toolName === 'Write' ? 'added' : 'modified' })
     }
+    const relPaths = relativizePaths(collected.map(c => c.path))
+    const fileSet = new Map<string, 'added' | 'modified'>()
+    relPaths.forEach((rel, i) => {
+      if (!fileSet.has(rel)) fileSet.set(rel, collected[i].status)
+    })
     const sorted = [...fileSet.keys()].sort()
     const entries = sorted.map((path) => ({ path, status: fileSet.get(path)! }))
     return { paths: sorted, gitStatusEntries: entries }
