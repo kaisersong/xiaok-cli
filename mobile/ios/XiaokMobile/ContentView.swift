@@ -1,7 +1,6 @@
 import AVFoundation
 import SwiftUI
 import UIKit
-import WebKit
 
 struct ContentView: View {
     @StateObject private var store: XiaokAppStore
@@ -161,6 +160,7 @@ private struct TasksView: View {
                         taskConversationRows(for: conversation)
                     }
                     .listStyle(.plain)
+                    .simultaneousGesture(conversationBackGesture)
                 } else {
                     NewTaskComposerView(
                         draft: $draft,
@@ -191,6 +191,17 @@ private struct TasksView: View {
             }
             .navigationTitle(strings.tasksTitle)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if activeConversation != nil {
+                        Button {
+                            closeConversation()
+                        } label: {
+                            Label(strings.back, systemImage: "chevron.left")
+                        }
+                        .accessibilityIdentifier("ConversationBackButton")
+                    }
+                }
+
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
                         startNewTask()
@@ -225,6 +236,17 @@ private struct TasksView: View {
                 showsTaskHistory = false
             }
         }
+    }
+
+    private var conversationBackGesture: some Gesture {
+        DragGesture(minimumDistance: 30)
+            .onEnded { value in
+                guard value.translation.width > 80,
+                      abs(value.translation.height) < 80 else {
+                    return
+                }
+                closeConversation()
+            }
     }
 
     private var activeConversation: ConversationSummary? {
@@ -267,6 +289,11 @@ private struct TasksView: View {
         activeConversationId = conversationId
         showsTaskHistory = false
         store.selectConversation(conversationId)
+    }
+
+    private func closeConversation() {
+        activeConversationId = nil
+        showsTaskHistory = false
     }
 
     private func startNewTask() {
@@ -441,7 +468,7 @@ private struct WorkView: View {
                     }
                 }
 
-                Section(strings.files) {
+                Section(strings.artifactsTitle) {
                     ForEach(store.artifacts) { artifact in
                         Button {
                             selectedArtifact = artifact
@@ -565,15 +592,33 @@ private struct ProjectDetailView: View {
     var body: some View {
         List {
             Section(strings.projectDetails) {
+                if let goal = project.nonEmptyGoal {
+                    ProjectTextBlock(title: strings.goal, text: goal)
+                }
+                if let requirements = project.nonEmptyRequirements {
+                    ProjectTextBlock(title: strings.requirements, text: requirements)
+                }
+                if let summary = project.nonEmptySummary {
+                    ProjectTextBlock(title: strings.summary, text: summary)
+                }
                 LabeledContent(strings.progress) {
                     Text(project.progress, format: .percent.precision(.fractionLength(0)))
                 }
                 ProgressView(value: project.progress)
                 LabeledContent(strings.activeTasks(project.activeTasks), value: strings.projectStatus(project.status))
+                if let taskCount = project.taskCount {
+                    LabeledContent(strings.projectTaskStats(project.doneCount ?? 0, taskCount, project.stoppedCount ?? 0), value: strings.projectStatus(project.status))
+                }
+                HStack {
+                    Text(strings.artifactsTitle)
+                    Spacer()
+                    Text(strings.artifactCount(resolvedArtifactCount))
+                        .foregroundStyle(.secondary)
+                }
                 LabeledContent(strings.lastUpdated, value: project.updatedAt.formatted(date: .abbreviated, time: .shortened))
             }
 
-            Section(strings.files) {
+            Section(strings.artifactsTitle) {
                 if artifacts.isEmpty {
                     Text(strings.noFiles)
                         .foregroundStyle(.secondary)
@@ -590,6 +635,40 @@ private struct ProjectDetailView: View {
             }
         }
         .navigationTitle(project.name)
+    }
+
+    private var resolvedArtifactCount: Int {
+        max(project.artifactCount ?? 0, artifacts.count)
+    }
+}
+
+private struct ProjectTextBlock: View {
+    let title: String
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.body)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+private extension DesktopProjectSummary {
+    var nonEmptyGoal: String? {
+        goal?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyPrefix(maxLength: 600)
+    }
+
+    var nonEmptyRequirements: String? {
+        requirements?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyPrefix(maxLength: 900)
+    }
+
+    var nonEmptySummary: String? {
+        summary?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyPrefix(maxLength: 900)
     }
 }
 
@@ -1029,29 +1108,9 @@ private struct MessageRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(message.role.rawValue.capitalized)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                let deliveryText = strings.messageDeliveryStatus(message.deliveryStatus)
-                if !deliveryText.isEmpty {
-                    Text(deliveryText)
-                        .font(.caption2)
-                        .foregroundStyle(deliveryColor)
-                }
-            }
             MessageBodyView(text: message.text, strings: strings)
         }
         .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var deliveryColor: Color {
-        switch message.deliveryStatus {
-        case .sending: .orange
-        case .failed: .red
-        case .sent, .none: .secondary
-        }
     }
 }
 
@@ -1073,27 +1132,52 @@ private struct MessageBodyView: View {
     }
 
     private func parseMessageContent(_ text: String) -> [MessageContentPart] {
+        MessageContentParser.parse(text)
+    }
+}
+
+struct MessageContentPart: Identifiable, Equatable {
+    enum Kind {
+        case markdown
+        case mermaid
+    }
+
+    let id: Int
+    let kind: Kind
+    let text: String
+
+    init(id: Int = 0, kind: Kind, text: String) {
+        self.id = id
+        self.kind = kind
+        self.text = text
+    }
+
+    static func == (lhs: MessageContentPart, rhs: MessageContentPart) -> Bool {
+        lhs.kind == rhs.kind && lhs.text == rhs.text
+    }
+}
+
+enum MessageContentParser {
+    static func parse(_ text: String) -> [MessageContentPart] {
         var parts: [MessageContentPart] = []
         var markdownLines: [String] = []
         var mermaidLines: [String]?
 
-        func flushMarkdown() {
-            let markdown = markdownLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !markdown.isEmpty else {
-                markdownLines.removeAll()
+        func appendPart(kind: MessageContentPart.Kind, text: String) {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
                 return
             }
-            parts.append(MessageContentPart(id: parts.count, kind: .markdown, text: markdown))
+            parts.append(MessageContentPart(id: parts.count, kind: kind, text: trimmed))
+        }
+
+        func flushMarkdown() {
+            appendPart(kind: .markdown, text: markdownLines.joined(separator: "\n"))
             markdownLines.removeAll()
         }
 
         func flushMermaid() {
-            let code = (mermaidLines ?? []).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !code.isEmpty else {
-                mermaidLines = nil
-                return
-            }
-            parts.append(MessageContentPart(id: parts.count, kind: .mermaid, text: code))
+            appendPart(kind: .mermaid, text: (mermaidLines ?? []).joined(separator: "\n"))
             mermaidLines = nil
         }
 
@@ -1125,17 +1209,6 @@ private struct MessageBodyView: View {
     }
 }
 
-private struct MessageContentPart: Identifiable {
-    enum Kind {
-        case markdown
-        case mermaid
-    }
-
-    let id: Int
-    let kind: Kind
-    let text: String
-}
-
 private struct MarkdownText: View {
     let text: String
 
@@ -1144,15 +1217,347 @@ private struct MarkdownText: View {
     }
 
     var body: some View {
-        if let attributed = try? AttributedString(markdown: text) {
-            Text(attributed)
-                .font(.body)
-                .textSelection(.enabled)
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(MarkdownBlockParser.parse(text)) { block in
+                switch block.kind {
+                case let .heading(level, value):
+                    InlineMarkdownText(value)
+                        .font(level == 1 ? .title3.weight(.semibold) : .headline)
+                case let .paragraph(value):
+                    InlineMarkdownText(value)
+                        .font(.body)
+                case let .bullet(value):
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("•")
+                            .font(.body.weight(.semibold))
+                        InlineMarkdownText(value)
+                            .font(.body)
+                    }
+                case let .code(_, value):
+                    Text(value)
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.secondary.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
+    }
+}
+
+private struct InlineMarkdownText: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        let segments = MarkdownInlineParser.parse(text)
+        if segments.containsLink {
+            WrappingHStack(alignment: .firstTextBaseline, horizontalSpacing: 0, verticalSpacing: 4) {
+                ForEach(segments) { segment in
+                    switch segment.kind {
+                    case .text:
+                        formattedText(segment.text)
+                    case let .link(url):
+                        Link(segment.text, destination: url)
+                            .accessibilityAddTraits(.isLink)
+                    }
+                }
+            }
         } else {
-            Text(text)
-                .font(.body)
+            formattedText(text)
                 .textSelection(.enabled)
         }
+    }
+
+    @ViewBuilder
+    private func formattedText(_ value: String) -> some View {
+        if let attributed = try? AttributedString(markdown: value) {
+            Text(attributed)
+        } else {
+            Text(value)
+        }
+    }
+}
+
+private struct WrappingHStack<Content: View>: View {
+    let horizontalSpacing: CGFloat
+    let verticalSpacing: CGFloat
+    @ViewBuilder let content: Content
+
+    init(
+        alignment _: VerticalAlignment = .center,
+        horizontalSpacing: CGFloat = 0,
+        verticalSpacing: CGFloat = 4,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.horizontalSpacing = horizontalSpacing
+        self.verticalSpacing = verticalSpacing
+        self.content = content()
+    }
+
+    var body: some View {
+        FlowLayout(horizontalSpacing: horizontalSpacing, verticalSpacing: verticalSpacing) {
+            content
+        }
+    }
+}
+
+private struct FlowLayout: Layout {
+    let horizontalSpacing: CGFloat
+    let verticalSpacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+        let positions = layoutPositions(proposal: proposal, subviews: subviews)
+        return positions.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        let positions = layoutPositions(proposal: proposal, subviews: subviews)
+        for (index, origin) in positions.origins.enumerated() {
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y),
+                proposal: .unspecified
+            )
+        }
+    }
+
+    private func layoutPositions(proposal: ProposedViewSize, subviews: Subviews) -> (origins: [CGPoint], size: CGSize) {
+        let maxWidth = proposal.width ?? .greatestFiniteMagnitude
+        var origins: [CGPoint] = []
+        var cursorX: CGFloat = 0
+        var cursorY: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var measuredWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let nextX = cursorX == 0 ? size.width : cursorX + horizontalSpacing + size.width
+            if cursorX > 0, nextX > maxWidth {
+                measuredWidth = max(measuredWidth, cursorX)
+                cursorY += rowHeight + verticalSpacing
+                cursorX = 0
+                rowHeight = 0
+            }
+
+            if cursorX > 0 {
+                cursorX += horizontalSpacing
+            }
+
+            origins.append(CGPoint(x: cursorX, y: cursorY))
+            cursorX += size.width
+            rowHeight = max(rowHeight, size.height)
+        }
+
+        measuredWidth = max(measuredWidth, cursorX)
+        let measuredHeight = cursorY + rowHeight
+        return (
+            origins,
+            CGSize(width: proposal.width ?? measuredWidth, height: measuredHeight)
+        )
+    }
+}
+
+struct MarkdownInlineSegment: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case text
+        case link(URL)
+    }
+
+    let id: Int
+    let kind: Kind
+    let text: String
+
+    init(id: Int = 0, kind: Kind, text: String) {
+        self.id = id
+        self.kind = kind
+        self.text = text
+    }
+
+    static func == (lhs: MarkdownInlineSegment, rhs: MarkdownInlineSegment) -> Bool {
+        lhs.kind == rhs.kind && lhs.text == rhs.text
+    }
+}
+
+private extension Array where Element == MarkdownInlineSegment {
+    var containsLink: Bool {
+        contains { segment in
+            if case .link = segment.kind {
+                return true
+            }
+            return false
+        }
+    }
+}
+
+enum MarkdownInlineParser {
+    static func parse(_ text: String) -> [MarkdownInlineSegment] {
+        guard text.contains("["),
+              let regex = try? NSRegularExpression(pattern: #"\[([^\]\n]+)\]\((https?://[^\s\)]+)\)"#) else {
+            return [MarkdownInlineSegment(kind: .text, text: text)]
+        }
+
+        let source = text as NSString
+        let fullRange = NSRange(location: 0, length: source.length)
+        let matches = regex.matches(in: text, range: fullRange)
+        guard !matches.isEmpty else {
+            return [MarkdownInlineSegment(kind: .text, text: text)]
+        }
+
+        var segments: [MarkdownInlineSegment] = []
+        var cursor = 0
+
+        func appendSegment(kind: MarkdownInlineSegment.Kind, text: String) {
+            guard !text.isEmpty else {
+                return
+            }
+            segments.append(MarkdownInlineSegment(id: segments.count, kind: kind, text: text))
+        }
+
+        for match in matches {
+            guard match.numberOfRanges == 3,
+                  match.range.location >= cursor else {
+                continue
+            }
+
+            if match.range.location > cursor {
+                appendSegment(
+                    kind: .text,
+                    text: source.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+                )
+            }
+
+            let label = source.substring(with: match.range(at: 1))
+            let urlText = source.substring(with: match.range(at: 2))
+            if let url = URL(string: urlText) {
+                appendSegment(kind: .link(url), text: label)
+            } else {
+                appendSegment(kind: .text, text: source.substring(with: match.range))
+            }
+            cursor = NSMaxRange(match.range)
+        }
+
+        if cursor < source.length {
+            appendSegment(
+                kind: .text,
+                text: source.substring(with: NSRange(location: cursor, length: source.length - cursor))
+            )
+        }
+
+        return segments.isEmpty ? [MarkdownInlineSegment(kind: .text, text: text)] : segments
+    }
+}
+
+private struct MarkdownBlock: Identifiable {
+    enum Kind {
+        case heading(level: Int, text: String)
+        case paragraph(String)
+        case bullet(String)
+        case code(language: String?, text: String)
+    }
+
+    let id: Int
+    let kind: Kind
+}
+
+private enum MarkdownBlockParser {
+    static func parse(_ markdown: String) -> [MarkdownBlock] {
+        var blocks: [MarkdownBlock] = []
+        var paragraphLines: [String] = []
+        var codeLines: [String]?
+        var codeLanguage: String?
+
+        func append(_ kind: MarkdownBlock.Kind) {
+            blocks.append(MarkdownBlock(id: blocks.count, kind: kind))
+        }
+
+        func flushParagraph() {
+            let paragraph = paragraphLines
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !paragraph.isEmpty {
+                append(.paragraph(paragraph))
+            }
+            paragraphLines.removeAll()
+        }
+
+        func flushCode() {
+            let code = (codeLines ?? []).joined(separator: "\n").trimmingCharacters(in: .newlines)
+            if !code.isEmpty {
+                append(.code(language: codeLanguage, text: code))
+            }
+            codeLines = nil
+            codeLanguage = nil
+        }
+
+        for line in markdown.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if codeLines != nil {
+                if trimmed.hasPrefix("```") {
+                    flushCode()
+                } else {
+                    codeLines?.append(line)
+                }
+                continue
+            }
+
+            if trimmed.hasPrefix("```") {
+                flushParagraph()
+                codeLanguage = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+                codeLines = []
+                continue
+            }
+
+            if trimmed.isEmpty {
+                flushParagraph()
+                continue
+            }
+
+            if let heading = parseHeading(trimmed) {
+                flushParagraph()
+                append(.heading(level: heading.level, text: heading.text))
+                continue
+            }
+
+            if let bullet = parseBullet(trimmed) {
+                flushParagraph()
+                append(.bullet(bullet))
+                continue
+            }
+
+            paragraphLines.append(line)
+        }
+
+        if codeLines != nil {
+            flushCode()
+        }
+        flushParagraph()
+        return blocks.isEmpty ? [MarkdownBlock(id: 0, kind: .paragraph(markdown))] : blocks
+    }
+
+    private static func parseHeading(_ line: String) -> (level: Int, text: String)? {
+        let markerCount = line.prefix { $0 == "#" }.count
+        guard markerCount > 0, markerCount <= 6 else {
+            return nil
+        }
+        let rest = line.dropFirst(markerCount)
+        guard rest.first == " " else {
+            return nil
+        }
+        return (markerCount, String(rest).trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private static func parseBullet(_ line: String) -> String? {
+        for marker in ["- ", "* "] where line.hasPrefix(marker) {
+            return String(line.dropFirst(marker.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
     }
 }
 
@@ -1165,13 +1570,17 @@ private struct MermaidDiagramCard: View {
             Text(strings.mermaidDiagram)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            MermaidWebView(code: code)
-                .frame(height: 130)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(.secondary.opacity(0.18), lineWidth: 1)
-                )
+            if let diagram = MermaidDiagramParser.parse(code) {
+                MermaidFlowchartView(diagram: diagram)
+            } else {
+                Text(code)
+                    .font(.system(.footnote, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.background.opacity(0.7))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
         }
         .padding(10)
         .background(.thinMaterial)
@@ -1179,43 +1588,210 @@ private struct MermaidDiagramCard: View {
     }
 }
 
-private struct MermaidWebView: UIViewRepresentable {
-    let code: String
-
-    func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView(frame: .zero)
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
-        webView.scrollView.isScrollEnabled = false
-        return webView
+struct MermaidDiagram: Equatable {
+    enum Direction: Equatable {
+        case topDown
+        case leftToRight
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        webView.loadHTMLString(Self.html(for: code), baseURL: nil)
+    struct Node: Identifiable, Equatable {
+        let id: String
+        let label: String
     }
 
-    private static func html(for code: String) -> String {
-        """
-        <!doctype html>
-        <html>
-          <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1" />
-            <style>
-              html, body { margin: 0; background: transparent; color: #111827; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
-              .mermaid { width: 100%; min-height: 200px; display: flex; align-items: center; justify-content: center; }
-              svg { max-width: 100%; height: auto; }
-            </style>
-            <script type="module">
-              import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-              mermaid.initialize({ startOnLoad: true, securityLevel: 'strict', theme: 'default' });
-            </script>
-          </head>
-          <body>
-            <pre class="mermaid">\(code.htmlEscaped)</pre>
-          </body>
-        </html>
-        """
+    struct Edge: Identifiable, Equatable {
+        let id: String
+        let from: Node
+        let to: Node
+    }
+
+    let direction: Direction
+    let nodes: [Node]
+    let edges: [Edge]
+}
+
+enum MermaidDiagramParser {
+    static func parse(_ code: String) -> MermaidDiagram? {
+        let lines = code.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("%%") }
+        guard let header = lines.first else {
+            return nil
+        }
+
+        let headerParts = header.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+        guard headerParts.count >= 2,
+              ["graph", "flowchart"].contains(headerParts[0].lowercased()) else {
+            return nil
+        }
+
+        let direction = parseDirection(headerParts[1])
+        var nodeById: [String: MermaidDiagram.Node] = [:]
+        var nodeOrder: [String] = []
+        var edges: [MermaidDiagram.Edge] = []
+
+        func remember(_ node: MermaidDiagram.Node) -> MermaidDiagram.Node {
+            if let existing = nodeById[node.id] {
+                return existing
+            }
+            nodeById[node.id] = node
+            nodeOrder.append(node.id)
+            return node
+        }
+
+        for line in lines.dropFirst() {
+            guard let edgeParts = splitEdge(line),
+                  let fromNode = parseNode(edgeParts.from),
+                  let toNode = parseNode(edgeParts.to) else {
+                continue
+            }
+            let from = remember(fromNode)
+            let to = remember(toNode)
+            edges.append(MermaidDiagram.Edge(
+                id: "\(edges.count)-\(from.id)-\(to.id)",
+                from: from,
+                to: to
+            ))
+        }
+
+        guard !edges.isEmpty else {
+            return nil
+        }
+
+        let nodes = nodeOrder.compactMap { nodeById[$0] }
+        return MermaidDiagram(direction: direction, nodes: nodes, edges: edges)
+    }
+
+    private static func parseDirection(_ value: String) -> MermaidDiagram.Direction {
+        switch value.uppercased() {
+        case "LR", "RL":
+            return .leftToRight
+        default:
+            return .topDown
+        }
+    }
+
+    private static func splitEdge(_ rawLine: String) -> (from: String, to: String)? {
+        let line = rawLine.trimmingCharacters(in: CharacterSet(charactersIn: ";").union(.whitespacesAndNewlines))
+        let arrows = ["-.->", "==>", "-->", "---"]
+        var match: Range<String.Index>?
+        for arrow in arrows {
+            guard let range = line.range(of: arrow) else {
+                continue
+            }
+            if let existing = match {
+                match = range.lowerBound < existing.lowerBound ? range : existing
+            } else {
+                match = range
+            }
+        }
+        guard let match else {
+            return nil
+        }
+
+        let from = String(line[..<match.lowerBound])
+        var to = String(line[match.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if to.hasPrefix("|"), let close = to.dropFirst().firstIndex(of: "|") {
+            to = String(to[to.index(after: close)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return (from, to)
+    }
+
+    private static func parseNode(_ rawToken: String) -> MermaidDiagram.Node? {
+        let token = rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            return nil
+        }
+
+        let delimiters: [(Character, Character)] = [("[", "]"), ("(", ")"), ("{", "}")]
+        for delimiter in delimiters {
+            guard let open = token.firstIndex(of: delimiter.0),
+                  let close = token.lastIndex(of: delimiter.1),
+                  open < close else {
+                continue
+            }
+            let id = String(token[..<open]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let label = String(token[token.index(after: open)..<close])
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'").union(.whitespacesAndNewlines))
+            guard !id.isEmpty, !label.isEmpty else {
+                return nil
+            }
+            return MermaidDiagram.Node(id: id, label: label)
+        }
+
+        let id = token.trimmingCharacters(in: CharacterSet(charactersIn: "\"'").union(.whitespacesAndNewlines))
+        guard !id.isEmpty else {
+            return nil
+        }
+        return MermaidDiagram.Node(id: id, label: id)
+    }
+}
+
+private struct MermaidFlowchartView: View {
+    let diagram: MermaidDiagram
+
+    var body: some View {
+        switch diagram.direction {
+        case .leftToRight:
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    orderedNodeSequence
+                }
+                .padding(2)
+            }
+        case .topDown:
+            VStack(spacing: 8) {
+                orderedNodeSequence
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var orderedNodeSequence: some View {
+        let nodes = linearizedNodes
+        ForEach(Array(nodes.enumerated()), id: \.element.id) { index, node in
+            MermaidNodeView(node: node)
+            if index < nodes.count - 1 {
+                Image(systemName: diagram.direction == .leftToRight ? "arrow.right" : "arrow.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private var linearizedNodes: [MermaidDiagram.Node] {
+        var seen = Set<String>()
+        var nodes: [MermaidDiagram.Node] = []
+        for edge in diagram.edges {
+            if seen.insert(edge.from.id).inserted {
+                nodes.append(edge.from)
+            }
+            if seen.insert(edge.to.id).inserted {
+                nodes.append(edge.to)
+            }
+        }
+        return nodes
+    }
+}
+
+private struct MermaidNodeView: View {
+    let node: MermaidDiagram.Node
+
+    var body: some View {
+        Text(node.label)
+            .font(.footnote.weight(.medium))
+            .multilineTextAlignment(.center)
+            .lineLimit(3)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(minWidth: 86)
+            .background(.background.opacity(0.85))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(.secondary.opacity(0.2), lineWidth: 1)
+            )
     }
 }
 
@@ -1253,6 +1829,11 @@ private struct ProjectRow: View {
             Text(strings.activeTasks(project.activeTasks))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if let artifactCount = project.artifactCount {
+                Text(strings.artifactCount(artifactCount))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.vertical, 4)
     }
@@ -1346,7 +1927,7 @@ private struct ArtifactRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(artifact.name)
+                Text(displayName)
                     .font(.body.weight(.semibold))
                 Spacer()
                 Text(artifact.kind.displayText)
@@ -1354,24 +1935,29 @@ private struct ArtifactRow: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text(artifact.source)
-                .font(.caption)
-                .foregroundStyle(.secondary)
             Text(strings.artifactStatus(artifact.status))
                 .font(.caption)
                 .foregroundStyle(artifact.status == .ready ? .green : .secondary)
         }
         .padding(.vertical, 4)
     }
-}
 
-private extension String {
-    var htmlEscaped: String {
-        replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "'", with: "&#39;")
+    private var displayName: String {
+        let trimmedName = artifact.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty, !Self.looksInternalArtifactIdentifier(trimmedName) {
+            return trimmedName
+        }
+        return strings.artifactFallbackName(artifact.kind)
+    }
+
+    private static func looksInternalArtifactIdentifier(_ value: String) -> Bool {
+        let lowercased = value.lowercased()
+        return lowercased == "artifact"
+            || lowercased.hasPrefix("artifact:")
+            || lowercased.hasPrefix("artifact_")
+            || lowercased.hasPrefix("artifact-")
+            || lowercased.hasPrefix("artifact_call_")
+            || lowercased.hasPrefix("kswarm:")
     }
 }
 

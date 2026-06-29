@@ -7,7 +7,7 @@ import { X, Download, BookOpen, Maximize2, Minimize2, MessageSquare, PencilLine 
 import { useNavigate } from 'react-router-dom';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmArtifact } from '../../hooks/useKSwarmClient';
-import { artifactDisplayName, downloadArtifact, resolveArtifactUrl } from './artifactActions';
+import { artifactDisplayName, downloadArtifact, resolveArtifactProxyPath, resolveArtifactUrl } from './artifactActions';
 import { getDesktopApi } from '../../shared/desktop';
 import { api } from '../../api';
 import { ArtifactEditableViewer } from '../ArtifactEditableViewer';
@@ -15,6 +15,13 @@ import { ArtifactEditableViewer } from '../ArtifactEditableViewer';
 interface ArtifactPreviewModalProps {
   artifact: KSwarmArtifact;
   onClose(): void;
+}
+
+type HtmlEditSaveResult = { ok?: boolean; success?: boolean; error?: string };
+
+interface ArtifactPreviewDesktopApi {
+  kswarmProxyPut?: (path: string, body: unknown) => Promise<unknown>;
+  saveFile?: (input: { filePath: string; content: string; purpose?: 'html-edit' }) => Promise<HtmlEditSaveResult>;
 }
 
 export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModalProps) {
@@ -124,7 +131,8 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
   const isHtml = /\.(html|htm|svg)$/i.test(displayName) || artifact.mimeType?.includes('html') || artifact.mimeType?.includes('svg');
   const isJson = /\.json$/i.test(displayName) || artifact.mimeType?.includes('json');
   const isMarkdown = /\.(md|markdown)$/i.test(displayName) || artifact.mimeType?.includes('markdown');
-  const editableHtmlFilePath = isHtml && artifact.path ? artifact.path : '';
+  const artifactProxyPath = isHtml ? resolveArtifactProxyPath(artifact) : null;
+  const editableHtmlFilePath = isHtml ? (artifact.path || artifactProxyPath || artifact.filename || displayName) : '';
   const canDirectEditHtml = Boolean(content && editableHtmlFilePath);
 
   const handleStartHtmlEdit = () => {
@@ -132,6 +140,17 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
     setHtmlEditMode(true);
     setHtmlEditRequest((request) => ({ id: request.id + 1, startInEditMode: true }));
   };
+
+  const handleSaveHtmlEdit = useCallback(async (source: string): Promise<HtmlEditSaveResult | null> => {
+    const desktop = getDesktopApi() as ArtifactPreviewDesktopApi | null;
+    if (artifactProxyPath && desktop?.kswarmProxyPut) {
+      return await desktop.kswarmProxyPut(artifactProxyPath, { content: source }) as HtmlEditSaveResult | null;
+    }
+    if (artifact.path && desktop?.saveFile) {
+      return await desktop.saveFile({ filePath: artifact.path, content: source, purpose: 'html-edit' });
+    }
+    return { success: false, error: 'save_unavailable' };
+  }, [artifact.path, artifactProxyPath]);
 
   const renderMarkdown = (md: string) => {
     const html = md
@@ -170,6 +189,7 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
           <ArtifactEditableViewer
             htmlContent={content}
             filePath={editableHtmlFilePath}
+            onSaveHtmlEdit={artifactProxyPath || artifact.path ? handleSaveHtmlEdit : undefined}
             editModeRequest={htmlEditRequest}
             onAnnotation={() => {}}
             onRevert={() => {

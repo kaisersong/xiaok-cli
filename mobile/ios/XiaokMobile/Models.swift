@@ -107,9 +107,16 @@ enum ProjectStatus: String, Codable, Equatable {
 struct DesktopProjectSummary: Codable, Equatable, Identifiable {
     let id: String
     let name: String
+    var goal: String? = nil
+    var requirements: String? = nil
+    var summary: String? = nil
     let status: ProjectStatus
     let progress: Double
     let activeTasks: Int
+    var taskCount: Int? = nil
+    var doneCount: Int? = nil
+    var stoppedCount: Int? = nil
+    var artifactCount: Int? = nil
     let updatedAt: Date
 }
 

@@ -300,9 +300,16 @@ final class XiaokMobileModelTests: XCTestCase {
             {
               "id": "project-mobile",
               "name": "Launch desktop gateway",
+              "goal": "Keep mobile work view aligned with desktop",
+              "requirements": "Show project status, goal, summary, task counts, and artifacts.",
+              "summary": "Project artifacts are ready for review.",
               "status": "active",
               "progress": 0.42,
               "activeTasks": 3,
+              "taskCount": 7,
+              "doneCount": 4,
+              "stoppedCount": 1,
+              "artifactCount": 2,
               "updatedAt": "2026-06-28T10:01:00Z"
             }
           ],
@@ -342,6 +349,19 @@ final class XiaokMobileModelTests: XCTestCase {
         XCTAssertEqual(snapshot.projects.map(\.name), ["Launch desktop gateway"])
         XCTAssertEqual(snapshot.projects.first?.status, .active)
         XCTAssertEqual(snapshot.projects.first?.activeTasks, 3)
+        let projectFields = Dictionary(uniqueKeysWithValues: Mirror(reflecting: try XCTUnwrap(snapshot.projects.first)).children.compactMap { child -> (String, Any)? in
+            guard let label = child.label else {
+                return nil
+            }
+            return (label, child.value)
+        })
+        XCTAssertEqual(projectFields["goal"] as? String, "Keep mobile work view aligned with desktop")
+        XCTAssertEqual(projectFields["requirements"] as? String, "Show project status, goal, summary, task counts, and artifacts.")
+        XCTAssertEqual(projectFields["summary"] as? String, "Project artifacts are ready for review.")
+        XCTAssertEqual(projectFields["taskCount"] as? Int, 7)
+        XCTAssertEqual(projectFields["doneCount"] as? Int, 4)
+        XCTAssertEqual(projectFields["stoppedCount"] as? Int, 1)
+        XCTAssertEqual(projectFields["artifactCount"] as? Int, 2)
         XCTAssertEqual(snapshot.approvals.first?.title, "Allow Codex to run build")
         XCTAssertEqual(snapshot.approvals.first?.status, .pending)
         XCTAssertEqual(snapshot.loops.first?.name, "Daily report loop")
@@ -409,6 +429,53 @@ final class XiaokMobileModelTests: XCTestCase {
         XCTAssertEqual(store.visibleConversations.count, 14)
         XCTAssertEqual(store.visibleProjects.count, 18)
         XCTAssertEqual(store.visibleMessages(for: "conversation-1").count, 25)
+    }
+
+    func testMessageContentParserKeepsMarkdownTogetherAndExtractsMermaidFence() {
+        let parts = MessageContentParser.parse("""
+        ## Mobile ready
+
+        - LAN first
+        - Relay fallback
+
+        ```mermaid
+        graph TD
+        Phone[Phone] --> Desktop[Desktop]
+        ```
+
+        Done.
+        """)
+
+        XCTAssertEqual(parts, [
+            MessageContentPart(kind: .markdown, text: "## Mobile ready\n\n- LAN first\n- Relay fallback"),
+            MessageContentPart(kind: .mermaid, text: "graph TD\nPhone[Phone] --> Desktop[Desktop]"),
+            MessageContentPart(kind: .markdown, text: "Done.")
+        ])
+    }
+
+    func testMermaidFlowchartParserBuildsRenderableNodesAndEdges() throws {
+        let diagram = try XCTUnwrap(MermaidDiagramParser.parse("""
+        flowchart LR
+        Phone[Phone] --> Desktop[Desktop]
+        Desktop --> Artifact[Artifact preview]
+        """))
+
+        XCTAssertEqual(diagram.direction, .leftToRight)
+        XCTAssertEqual(diagram.nodes.map(\.label), ["Phone", "Desktop", "Artifact preview"])
+        XCTAssertEqual(diagram.edges.map { [$0.from.label, $0.to.label] }, [
+            ["Phone", "Desktop"],
+            ["Desktop", "Artifact preview"]
+        ])
+    }
+
+    func testMarkdownInlineParserExtractsTappableLinks() throws {
+        let segments = MarkdownInlineParser.parse("Open [Xiaok Desktop](https://example.com/xiaok).")
+
+        XCTAssertEqual(segments, [
+            MarkdownInlineSegment(kind: .text, text: "Open "),
+            MarkdownInlineSegment(kind: .link(URL(string: "https://example.com/xiaok")!), text: "Xiaok Desktop"),
+            MarkdownInlineSegment(kind: .text, text: ".")
+        ])
     }
 
     @MainActor

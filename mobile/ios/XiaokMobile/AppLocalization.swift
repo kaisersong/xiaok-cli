@@ -70,6 +70,7 @@ struct AppStrings {
     let suggestedPromptPlan: String
     let noTasks: String
     let done: String
+    let back: String
     let messagePlaceholder: String
     let send: String
     let loadMore: String
@@ -80,16 +81,22 @@ struct AppStrings {
     let workTitle: String
     let projects: String
     let projectDetails: String
+    let goal: String
+    let requirements: String
+    let summary: String
     let progress: String
     let lastUpdated: String
     let noFiles: String
     let artifactsTitle: String
+    let artifactFallbackName: (ArtifactKind) -> String
     let artifactPreviewTitle: String
     let artifactPreviewUnavailable: String
     let mermaidDiagram: String
     let loops: String
     let files: String
     let activeTasks: (Int) -> String
+    let projectTaskStats: (Int, Int, Int) -> String
+    let artifactCount: (Int) -> String
     let lastRun: (String) -> String
     let approvalsTitle: String
     let approvalEmptyTitle: String
@@ -161,7 +168,7 @@ extension AppStrings {
         activeProjects: { "\($0) active projects" },
         pendingApprovals: { "\($0) pending approvals" },
         runningLoops: { "\($0) running loops" },
-        recentFiles: { "\($0) recent files" },
+        recentFiles: { "\($0) recent artifacts" },
         tasksTitle: "Tasks",
         taskHistoryTitle: "Task history",
         newTask: "New task",
@@ -172,6 +179,7 @@ extension AppStrings {
         suggestedPromptPlan: "Plan next steps",
         noTasks: "No tasks yet",
         done: "Done",
+        back: "Back",
         messagePlaceholder: "Message",
         send: "Send",
         loadMore: "Load more",
@@ -196,16 +204,26 @@ extension AppStrings {
         workTitle: "Work",
         projects: "Projects",
         projectDetails: "Project details",
+        goal: "Goal",
+        requirements: "Requirements",
+        summary: "Summary",
         progress: "Progress",
         lastUpdated: "Last updated",
-        noFiles: "No files",
+        noFiles: "No artifacts",
         artifactsTitle: "Artifacts",
+        artifactFallbackName: { "\($0.displayText) artifact" },
         artifactPreviewTitle: "Artifact preview",
         artifactPreviewUnavailable: "Preview is not available for this artifact.",
         mermaidDiagram: "Mermaid diagram",
         loops: "Loops",
-        files: "Files",
+        files: "Artifacts",
         activeTasks: { "\($0) active tasks" },
+        projectTaskStats: { done, total, stopped in
+            stopped > 0 ? "\(done)/\(total) tasks done, \(stopped) stopped" : "\(done)/\(total) tasks done"
+        },
+        artifactCount: { count in
+            count == 1 ? "1 artifact" : "\(count) artifacts"
+        },
         lastRun: { "Last run: \($0)" },
         approvalsTitle: "Approvals",
         approvalEmptyTitle: "No approvals",
@@ -317,7 +335,7 @@ extension AppStrings {
         activeProjects: { "\($0) 个活跃项目" },
         pendingApprovals: { "\($0) 个待审批" },
         runningLoops: { "\($0) 个运行中的 Loop" },
-        recentFiles: { "\($0) 个近期文件" },
+        recentFiles: { "\($0) 个近期产物" },
         tasksTitle: "任务",
         taskHistoryTitle: "历史任务",
         newTask: "新建任务",
@@ -328,6 +346,7 @@ extension AppStrings {
         suggestedPromptPlan: "规划下一步",
         noTasks: "还没有任务",
         done: "完成",
+        back: "返回",
         messagePlaceholder: "输入任务",
         send: "发送",
         loadMore: "加载更多",
@@ -352,16 +371,24 @@ extension AppStrings {
         workTitle: "工作",
         projects: "项目",
         projectDetails: "项目详情",
+        goal: "目标",
+        requirements: "要求",
+        summary: "摘要",
         progress: "进度",
         lastUpdated: "最后更新",
-        noFiles: "暂无文件",
+        noFiles: "暂无产物",
         artifactsTitle: "产物",
+        artifactFallbackName: { "\($0.displayText) 产物" },
         artifactPreviewTitle: "产物预览",
         artifactPreviewUnavailable: "这个产物暂时无法预览。",
         mermaidDiagram: "Mermaid 图",
         loops: "Loop",
-        files: "文件",
+        files: "产物",
         activeTasks: { "\($0) 个活跃任务" },
+        projectTaskStats: { done, total, stopped in
+            stopped > 0 ? "\(done)/\(total) 个任务完成，\(stopped) 个已停止" : "\(done)/\(total) 个任务完成"
+        },
+        artifactCount: { "\($0) 个产物" },
         lastRun: { "上次运行：\($0)" },
         approvalsTitle: "审批",
         approvalEmptyTitle: "暂无审批",

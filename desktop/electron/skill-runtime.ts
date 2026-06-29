@@ -22,8 +22,9 @@ export function referenceEscapesSkillRoot(rootDir: string, p: string): boolean {
   if (isAbsolute(p)) return true;
   if (/^[a-zA-Z]:[\\/]/.test(p)) return true;
   if (p.startsWith('\\\\') || p.startsWith('//')) return true;
+  const referencePath = p.replace(/\\/g, '/');
   const root = resolve(rootDir);
-  const target = resolve(root, p);
+  const target = resolve(root, referencePath);
   const rel = relative(root, target);
   if (rel === '') return false;
   return rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('../') || isAbsolute(rel);

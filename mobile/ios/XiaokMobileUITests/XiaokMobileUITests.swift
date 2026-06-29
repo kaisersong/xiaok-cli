@@ -68,6 +68,50 @@ final class XiaokMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts[message].waitForExistence(timeout: 20))
     }
 
+    func testRealDesktopTaskHistoryShowsConversationMessagesFromDevice() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let gatewayURL = environment["XIAOK_MOBILE_REAL_GATEWAY_URL"],
+              let desktopId = environment["XIAOK_MOBILE_REAL_DESKTOP_ID"],
+              let accessToken = environment["XIAOK_MOBILE_REAL_ACCESS_TOKEN"],
+              let conversationTitle = environment["XIAOK_MOBILE_REAL_CONVERSATION_TITLE"],
+              let expectedReplyText = environment["XIAOK_MOBILE_REAL_CONVERSATION_REPLY"],
+              !gatewayURL.isEmpty,
+              !desktopId.isEmpty,
+              !accessToken.isEmpty,
+              !conversationTitle.isEmpty,
+              !expectedReplyText.isEmpty else {
+            throw XCTSkip("Set real desktop gateway credentials and a conversation title/reply to run the real task history test.")
+        }
+
+        let app = XCUIApplication()
+        app.launchEnvironment["XIAOK_MOBILE_LANGUAGE"] = "zh-Hans"
+        app.launchEnvironment["XIAOK_MOBILE_GATEWAY_URL"] = gatewayURL
+        app.launchEnvironment["XIAOK_MOBILE_DESKTOP_ID"] = desktopId
+        app.launchEnvironment["XIAOK_MOBILE_ACCESS_TOKEN"] = accessToken
+        app.launch()
+        allowSystemAlertIfPresent()
+
+        XCTAssertTrue(app.staticTexts["桌面端在线"].waitForExistence(timeout: 20))
+        app.tabBars.buttons["任务"].tap()
+        XCTAssertTrue(app.staticTexts["任务"].waitForExistence(timeout: 5))
+
+        app.buttons["TaskHistoryButton"].tap()
+        XCTAssertTrue(app.staticTexts["历史任务"].waitForExistence(timeout: 5))
+        for _ in 0..<8 where !app.staticTexts[conversationTitle].exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(app.staticTexts[conversationTitle].waitForExistence(timeout: 5))
+        app.staticTexts[conversationTitle].tap()
+
+        XCTAssertTrue(app.staticTexts[conversationTitle].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", expectedReplyText)).element.waitForExistence(timeout: 5))
+        let screenshot = XCUIScreen.main.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = "Real desktop task history conversation"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testSettingsRendersConnectionAndLanguageControls() {
         let app = XCUIApplication()
         app.launchArguments = ["--xiaok-ui-test"]
@@ -129,13 +173,44 @@ final class XiaokMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Mobile ready"].waitForExistence(timeout: 5))
         app.staticTexts["Mobile ready"].tap()
         XCTAssertTrue(app.staticTexts["mobile ready"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Assistant"].exists)
+        XCTAssertFalse(app.staticTexts["User"].exists)
+        XCTAssertFalse(app.staticTexts["Sent"].exists)
         XCTAssertTrue(app.staticTexts["Mermaid diagram"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Phone app"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Mac desktop"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Artifact viewer"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Artifacts"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["mobile-output.md"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["mock-ready"].exists)
         app.staticTexts["mobile-output.md"].tap()
         XCTAssertTrue(app.staticTexts["Artifact preview"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Mock artifact preview")).element.waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
+
+        let xiaokDesktopLink = app.links["Xiaok Desktop"]
+        let xiaokDesktopButton = app.buttons["Xiaok Desktop"]
+        var linkScrollAttempts = 0
+        while !xiaokDesktopLink.exists && !xiaokDesktopButton.exists && linkScrollAttempts < 3 {
+            app.swipeUp()
+            linkScrollAttempts += 1
+        }
+        let didFindDesktopLink = xiaokDesktopLink.waitForExistence(timeout: 1)
+            || xiaokDesktopButton.waitForExistence(timeout: 1)
+        XCTAssertTrue(didFindDesktopLink)
+        XCTAssertTrue(xiaokDesktopLink.exists ? xiaokDesktopLink.isHittable : xiaokDesktopButton.isHittable)
+
+        XCTAssertTrue(app.buttons["Back"].waitForExistence(timeout: 5))
+        app.swipeRight()
+        XCTAssertTrue(app.staticTexts["What are we working on?"].waitForExistence(timeout: 5))
+
+        app.buttons["TaskHistoryButton"].tap()
+        XCTAssertTrue(app.staticTexts["Task history"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Mobile ready"].waitForExistence(timeout: 5))
+        app.staticTexts["Mobile ready"].tap()
+        XCTAssertTrue(app.buttons["Back"].waitForExistence(timeout: 5))
+        app.buttons["Back"].tap()
+        XCTAssertTrue(app.staticTexts["What are we working on?"].waitForExistence(timeout: 5))
 
         app.buttons["NewTaskButton"].tap()
         XCTAssertFalse(app.staticTexts["Mobile ready"].waitForExistence(timeout: 1))
@@ -166,7 +241,11 @@ final class XiaokMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Daily report loop"].waitForExistence(timeout: 5))
         app.staticTexts["Launch desktop gateway"].tap()
         XCTAssertTrue(app.staticTexts["Project details"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Goal"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Keep mobile work view aligned with desktop"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Progress"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["2 artifacts"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Artifacts"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["report-preview.pdf"].waitForExistence(timeout: 5))
         app.navigationBars.buttons.element(boundBy: 0).tap()
 

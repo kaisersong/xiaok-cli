@@ -244,6 +244,153 @@ describe('mobile snapshot projection', () => {
       }),
     ]));
   });
+
+  it('projects kswarm project details and project-owned artifacts for mobile work views', () => {
+    const snapshot = buildMobileSnapshotFromSources({
+      desktopName: 'Xiaok Desktop',
+      now: Date.parse('2026-06-28T10:15:00.000Z'),
+      snapshots: [],
+      kswarmProjects: [
+        {
+          id: 'proj-alpha',
+          name: 'Alpha project',
+          goal: 'Compare desktop and mobile task outputs',
+          requirements: 'Show project details and artifacts on mobile.',
+          summary: 'Two project artifacts are ready.',
+          status: 'active',
+          taskCount: 5,
+          doneCount: 3,
+          stoppedCount: 1,
+          updatedAt: Date.parse('2026-06-28T10:14:00.000Z'),
+          deliverable: {
+            artifacts: [
+              {
+                path: 'artifacts/desktop-mobile-review.md',
+                kind: 'markdown',
+                label: 'desktop-mobile-review.md',
+                mimeType: 'text/markdown',
+                sizeBytes: 101,
+              },
+            ],
+          },
+          workspaceArtifacts: [
+            {
+              path: '/tmp/alpha/artifacts/mobile-project-report.html',
+              kind: 'html',
+              label: 'mobile-project-report.html',
+              mimeType: 'text/html',
+              sizeBytes: 202,
+            },
+          ],
+        } as any,
+      ],
+    });
+
+    expect(snapshot.projects).toEqual([
+      expect.objectContaining({
+        id: 'proj-alpha',
+        name: 'Alpha project',
+        goal: 'Compare desktop and mobile task outputs',
+        requirements: 'Show project details and artifacts on mobile.',
+        summary: 'Two project artifacts are ready.',
+        progress: 0.6,
+        activeTasks: 1,
+        taskCount: 5,
+        doneCount: 3,
+        stoppedCount: 1,
+        artifactCount: 2,
+      }),
+    ]);
+    expect(snapshot.artifacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'desktop-mobile-review.md',
+        kind: 'markdown',
+        source: 'proj-alpha',
+        status: 'ready',
+        previewAvailable: true,
+        mimeType: 'text/markdown',
+        sizeBytes: 101,
+      }),
+      expect.objectContaining({
+        name: 'mobile-project-report.html',
+        kind: 'html',
+        source: 'proj-alpha',
+        status: 'ready',
+        previewAvailable: true,
+        mimeType: 'text/html',
+        sizeBytes: 202,
+      }),
+    ]));
+  });
+
+  it('coalesces streamed assistant deltas into one mobile task message without splitting markdown blocks', () => {
+    const snapshot = buildMobileSnapshotFromSources({
+      desktopName: 'Xiaok Desktop',
+      now: Date.parse('2026-06-28T10:20:00.000Z'),
+      snapshots: [
+        taskSnapshot({
+          taskId: 'task-streamed',
+          status: 'completed',
+          prompt: 'Explain the mobile sync plan',
+          createdAt: Date.parse('2026-06-28T10:18:00.000Z'),
+          updatedAt: Date.parse('2026-06-28T10:19:00.000Z'),
+          events: [
+            { type: 'assistant_delta', delta: '## Plan\n\n', eventId: 'evt-delta-1', ts: Date.parse('2026-06-28T10:18:01.000Z') },
+            { type: 'assistant_delta', delta: '- Keep LAN first\n', eventId: 'evt-delta-2', ts: Date.parse('2026-06-28T10:18:02.000Z') },
+            { type: 'assistant_delta', delta: '- Fall back to relay\n\n', eventId: 'evt-delta-3', ts: Date.parse('2026-06-28T10:18:03.000Z') },
+            { type: 'assistant_delta', delta: '```mermaid\ngraph TD\nPhone[Phone] --> Desktop[Desktop]\n```\n', eventId: 'evt-delta-4', ts: Date.parse('2026-06-28T10:18:04.000Z') },
+          ],
+        }),
+      ],
+    });
+
+    const messages = snapshot.messages.filter(message => message.conversationId === 'task-streamed');
+
+    expect(messages.map(message => message.id)).toEqual([
+      'desktop-prompt-task-streamed',
+      'desktop-assistant-task-streamed',
+    ]);
+    expect(messages[1]).toMatchObject({
+      role: 'assistant',
+      text: '## Plan\n\n- Keep LAN first\n- Fall back to relay\n\n```mermaid\ngraph TD\nPhone[Phone] --> Desktop[Desktop]\n```',
+    });
+    expect(snapshot.conversations.find(conversation => conversation.id === 'task-streamed')).toMatchObject({
+      messageCount: 2,
+      lastMessagePreview: '## Plan\n\n- Keep LAN first\n- Fall back to relay\n\n```mermaid\ngraph TD\nPhone[Phone] --> Desktop[Desktop]\n```',
+    });
+  });
+
+  it('keeps at least openable messages for every returned desktop conversation when the global message budget is exceeded', () => {
+    const baseTime = Date.parse('2026-06-28T11:00:00.000Z');
+    const snapshot = buildMobileSnapshotFromSources({
+      desktopName: 'Xiaok Desktop',
+      now: baseTime + 30_000,
+      snapshots: Array.from({ length: 20 }, (_, taskIndex) => taskSnapshot({
+        taskId: `task-over-budget-${taskIndex}`,
+        status: 'completed',
+        prompt: `Task ${taskIndex}`,
+        createdAt: baseTime + taskIndex * 1_000,
+        updatedAt: baseTime + taskIndex * 1_000 + 900,
+        events: Array.from({ length: 18 }, (_, eventIndex) => ({
+          type: 'progress',
+          message: `Task ${taskIndex} progress ${eventIndex}`,
+          eventId: `evt-${taskIndex}-${eventIndex}`,
+        })),
+        result: {
+          summary: `Task ${taskIndex} done`,
+          artifacts: [],
+        },
+      })),
+    });
+
+    expect(snapshot.messages.length).toBeLessThanOrEqual(120);
+    expect(snapshot.conversations).toHaveLength(20);
+    expect(snapshot.conversations.every(conversation => conversation.messageCount > 0)).toBe(true);
+    expect(snapshot.messages.some(message => message.conversationId === 'task-over-budget-0')).toBe(true);
+    expect(snapshot.messages.filter(message => message.conversationId === 'task-over-budget-0').map(message => message.text)).toEqual(
+      expect.arrayContaining(['Task 0', 'Task 0 done']),
+    );
+  });
 });
 
 function taskSnapshot(input: Partial<TaskSnapshot> & Pick<TaskSnapshot, 'taskId' | 'status' | 'prompt'>): TaskSnapshot {

@@ -25,8 +25,10 @@ export interface AnnotationPayload {
 interface ArtifactEditableViewerProps {
   /** HTML content to render */
   htmlContent: string;
-  /** Absolute path to the artifact file */
+  /** Absolute path, artifact route, or stable edit target id */
   filePath: string;
+  /** Optional save implementation for project-scoped artifacts */
+  onSaveHtmlEdit?: (content: string) => Promise<{ ok?: boolean; success?: boolean; error?: string } | null | undefined>;
   /** External request to switch the initial viewer mode for a specific open action */
   editModeRequest?: { id: number; startInEditMode: boolean };
   /** Called when user submits an annotation */
@@ -58,6 +60,7 @@ interface HtmlEditDesktopApi {
 export function ArtifactEditableViewer({
   htmlContent,
   filePath,
+  onSaveHtmlEdit,
   editModeRequest,
   onAnnotation,
   onRevert,
@@ -407,7 +410,9 @@ export function ArtifactEditableViewer({
     setApplyStatus('idle');
     try {
       const api = getDesktopApi() as HtmlEditDesktopApi | null;
-      const result = await api?.saveFile?.({ filePath, content: markedSource, purpose: 'html-edit' });
+      const result = onSaveHtmlEdit
+        ? await onSaveHtmlEdit(markedSource)
+        : await api?.saveFile?.({ filePath, content: markedSource, purpose: 'html-edit' });
       if (!result || (!result.ok && !result.success)) {
         setSaveStatus('failed');
         return;
@@ -421,7 +426,7 @@ export function ArtifactEditableViewer({
     } catch {
       setSaveStatus('failed');
     }
-  }, [draftSource, filePath, onRefresh]);
+  }, [draftSource, filePath, onRefresh, onSaveHtmlEdit]);
 
   const handleRevert = useCallback(() => {
     if (!confirmDiscardDirty()) return;

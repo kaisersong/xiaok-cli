@@ -3,12 +3,22 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { DeliverableView } from '../../renderer/src/components/projects/DeliverableView';
-import { artifactDisplayName, resolveArtifactUrl } from '../../renderer/src/components/projects/artifactActions';
+import { artifactDisplayName, resolveArtifactProxyPath, resolveArtifactUrl } from '../../renderer/src/components/projects/artifactActions';
+
+const { mockGetDesktopApi } = vi.hoisted(() => ({
+  mockGetDesktopApi: vi.fn(() => null as unknown),
+}));
+
+vi.mock('../../renderer/src/shared/desktop', () => ({
+  getDesktopApi: mockGetDesktopApi,
+}));
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  mockGetDesktopApi.mockReset();
+  mockGetDesktopApi.mockReturnValue(null);
 });
 
 describe('project artifact actions', () => {
@@ -41,6 +51,11 @@ describe('project artifact actions', () => {
       path: 'C:\\Users\\song\\.kswarm\\projects\\proj-win\\artifacts\\june-global-ai-product-trends.html',
       mimeType: 'text/html',
     })).toBe('http://127.0.0.1:4400/projects/proj-win/artifacts/june-global-ai-product-trends.html');
+    expect(resolveArtifactProxyPath({
+      projectId: 'proj-win',
+      path: 'C:\\Users\\song\\.kswarm\\projects\\proj-win\\artifacts\\june-global-ai-product-trends.html',
+      mimeType: 'text/html',
+    })).toBe('/projects/proj-win/artifacts/june-global-ai-product-trends.html');
   });
 
   it('shows generated time after artifact task and mime annotation', () => {
@@ -311,6 +326,86 @@ describe('project artifact actions', () => {
       expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:4400/projects/proj-task-win/artifacts/task-report.html');
     });
     expect(await screen.findByTitle('task-report.html')).toBeInTheDocument();
+  });
+
+  it('saves edited Windows project HTML artifacts through the KSwarm artifact route', async () => {
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:project-artifact-edit') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+
+    const kswarmProxyGetText = vi.fn(async () => '<!doctype html><html><body><h1>任务报告</h1></body></html>');
+    const kswarmProxyPut = vi.fn(async () => ({ ok: true }));
+    const saveFile = vi.fn(async () => ({ success: true }));
+    mockGetDesktopApi.mockReturnValue({
+      kswarmProxyGetText,
+      kswarmProxyPut,
+      saveFile,
+    });
+
+    try {
+      render(
+        <MemoryRouter>
+          <LocaleProvider>
+            <DeliverableView
+              project={{ id: 'proj-task-win', name: '任务报告项目', status: 'delivered' } as any}
+              tasks={[
+                {
+                  id: 'task-1',
+                  title: '生成 HTML 报告',
+                  status: 'done',
+                  result: {
+                    summary: '已生成报告',
+                    artifacts: [
+                      {
+                        path: 'C:\\Users\\song\\.kswarm\\projects\\proj-task-win\\artifacts\\task-report.html',
+                        kind: 'report_html',
+                        mimeType: 'text/html',
+                      },
+                    ],
+                  },
+                } as any,
+              ]}
+            />
+          </LocaleProvider>
+        </MemoryRouter>
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /task-report\.html/ }));
+      await waitFor(() => {
+        expect(kswarmProxyGetText).toHaveBeenCalledWith('/projects/proj-task-win/artifacts/task-report.html');
+      });
+
+      fireEvent.click(await screen.findByRole('button', { name: /直接编辑|Edit HTML/i }));
+      window.dispatchEvent(new MessageEvent('message', {
+        data: {
+          type: 'xiaok:editSelect',
+          payload: {
+            id: 'h1-1',
+            kind: 'text',
+            tagName: 'h1',
+            selector: 'h1',
+            text: '任务报告',
+            outerHtml: '<h1>任务报告</h1>',
+            sourceOccurrence: 0,
+          },
+        },
+      }));
+
+      fireEvent.change(await screen.findByLabelText(/文本内容|Text content/i), { target: { value: '已保存的新标题' } });
+      fireEvent.click(screen.getByRole('button', { name: /^(应用|Apply)$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /保存|Save/i }));
+
+      await waitFor(() => expect(kswarmProxyPut).toHaveBeenCalledTimes(1));
+      expect(kswarmProxyPut).toHaveBeenCalledWith('/projects/proj-task-win/artifacts/task-report.html', expect.objectContaining({
+        content: expect.stringContaining('<h1>已保存的新标题</h1>'),
+      }));
+      expect(saveFile).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+      Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: originalCreateObjectURL });
+      Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: originalRevokeObjectURL });
+    }
   });
 
   it('opens local HTML project artifacts directly in edit mode from the preview modal', async () => {

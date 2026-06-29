@@ -47,7 +47,7 @@ struct MockMobileGatewayClient: MobileGatewayClient {
                     id: "mock-progress-ready",
                     conversationId: "mock-ready",
                     role: .assistant,
-                    text: "## Mobile ready\n\n```mermaid\ngraph TD\nPhone[Mobile] --> Desktop[Desktop]\nDesktop --> Artifact[Artifacts]\n```",
+                    text: "## Mobile ready\n\n```mermaid\ngraph TD\nPhone[Phone app] --> Desktop[Mac desktop]\nDesktop --> Artifact[Artifact viewer]\n```",
                     createdAt: baseDate.addingTimeInterval(-60),
                     deliveryStatus: .sent
                 ),
@@ -55,7 +55,7 @@ struct MockMobileGatewayClient: MobileGatewayClient {
                     id: "mock-assistant-ready",
                     conversationId: "mock-ready",
                     role: .assistant,
-                    text: "mobile ready\n\nGenerated `mobile-output.md`.",
+                    text: "mobile ready\n\nGenerated `mobile-output.md`.\n\nOpen [Xiaok Desktop](https://example.com/xiaok).",
                     createdAt: baseDate,
                     deliveryStatus: .sent
                 )
@@ -74,17 +74,29 @@ struct MockMobileGatewayClient: MobileGatewayClient {
                 DesktopProjectSummary(
                     id: "project-gateway",
                     name: "Launch desktop gateway",
+                    goal: "Keep mobile work view aligned with desktop",
+                    requirements: "Show project status, goal, summary, task counts, and artifacts.",
+                    summary: "Project artifacts are ready for review.",
                     status: .active,
                     progress: 0.42,
                     activeTasks: 3,
+                    taskCount: 7,
+                    doneCount: 4,
+                    stoppedCount: 1,
+                    artifactCount: 2,
                     updatedAt: baseDate.addingTimeInterval(60)
                 ),
                 DesktopProjectSummary(
                     id: "project-mobile-sync",
                     name: "Design mobile sync",
+                    goal: "Keep mobile task messages and previews in sync",
                     status: .active,
                     progress: 0.68,
                     activeTasks: 2,
+                    taskCount: 4,
+                    doneCount: 2,
+                    stoppedCount: 0,
+                    artifactCount: 1,
                     updatedAt: baseDate.addingTimeInterval(120)
                 )
             ],
@@ -139,6 +151,16 @@ struct MockMobileGatewayClient: MobileGatewayClient {
                     kind: .pdf,
                     source: "project-gateway",
                     status: .ready
+                ),
+                DesktopArtifactSummary(
+                    id: "artifact-gateway-runbook",
+                    name: "gateway-runbook.md",
+                    kind: .markdown,
+                    source: "project-gateway",
+                    status: .ready,
+                    previewAvailable: true,
+                    mimeType: "text/markdown",
+                    sizeBytes: 72
                 )
             ]
         )

@@ -60,8 +60,10 @@ import {
 } from './mobile-relay.js';
 import {
   buildMobileSnapshotFromSources,
+  collectKSwarmProjectArtifacts,
   resolveMobileApprovalAnswer,
   type KSwarmProjectLike,
+  type MobileProjectArtifactRecord,
 } from './mobile-snapshot.js';
 import type { TaskSnapshot } from '../../src/runtime/task-host/types.js';
 
@@ -144,6 +146,27 @@ function findMobileArtifactPreview(dataRoot: string, artifactId: string): Mobile
   return null;
 }
 
+async function findKSwarmMobileArtifactPreview(
+  kswarmService: ReturnType<typeof createKSwarmService>,
+  artifactId: string,
+): Promise<MobileArtifactPreview | null> {
+  const projects = await fetchKSwarmProjectsForMobile(kswarmService).catch(() => []);
+  for (const project of projects) {
+    for (const artifact of collectKSwarmProjectArtifacts(project)) {
+      if (artifact.id !== artifactId) continue;
+      const { filePath: _filePath, artifactPath: _artifactPath, ...artifactSummary } = artifact;
+      return buildArtifactPreview({
+        artifact: artifactSummary,
+        filePath: resolveKSwarmArtifactFilePath(project, artifact),
+        previewAvailable: artifact.previewAvailable,
+        mimeType: artifact.mimeType,
+        kind: artifact.kind,
+      });
+    }
+  }
+  return null;
+}
+
 function buildArtifactPreview(input: {
   artifact: unknown;
   filePath?: string;
@@ -193,7 +216,77 @@ async function fetchKSwarmProjectsForMobile(kswarmService: ReturnType<typeof cre
   const response = await fetch(`http://127.0.0.1:${status.port}/projects`);
   if (!response.ok) return [];
   const body = await response.json() as { projects?: KSwarmProjectLike[] };
-  return Array.isArray(body.projects) ? body.projects : [];
+  return Array.isArray(body.projects)
+    ? body.projects.map(project => ({
+      ...project,
+      workspaceArtifacts: [
+        ...arrayValue(project.workspaceArtifacts),
+        ...readKSwarmWorkspaceArtifacts(project),
+      ],
+    }))
+    : [];
+}
+
+function readKSwarmWorkspaceArtifacts(project: KSwarmProjectLike): unknown[] {
+  const workFolder = typeof project.workFolder === 'string' && project.workFolder.trim()
+    ? project.workFolder.trim()
+    : '';
+  if (!workFolder) return [];
+  const artifactsDir = join(workFolder, 'artifacts');
+  if (!existsSync(artifactsDir)) return [];
+
+  try {
+    return readdirSync(artifactsDir)
+      .sort()
+      .flatMap(name => {
+        const filePath = join(artifactsDir, name);
+        const stats = statSync(filePath);
+        if (!stats.isFile()) return [];
+        const kind = artifactKindFromFileName(name);
+        const mimeType = contentTypeForArtifactKind(kind);
+        return [{
+          path: `artifacts/${name}`,
+          filePath,
+          label: name,
+          kind,
+          mimeType,
+          sizeBytes: stats.size,
+          previewAvailable: isTextPreviewKind(kind, mimeType),
+        }];
+      });
+  } catch {
+    return [];
+  }
+}
+
+function resolveKSwarmArtifactFilePath(
+  project: KSwarmProjectLike,
+  artifact: MobileProjectArtifactRecord,
+): string | undefined {
+  if (artifact.filePath) return artifact.filePath;
+  const artifactPath = artifact.artifactPath;
+  const workFolder = typeof project.workFolder === 'string' && project.workFolder.trim()
+    ? project.workFolder.trim()
+    : '';
+  if (!artifactPath || !workFolder) return undefined;
+  return artifactPath.startsWith('/')
+    ? artifactPath
+    : join(workFolder, artifactPath);
+}
+
+function artifactKindFromFileName(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.md') || lower.endsWith('.markdown')) return 'markdown';
+  if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'html';
+  if (lower.endsWith('.pdf')) return 'pdf';
+  if (lower.endsWith('.pptx')) return 'pptx';
+  if (/\.(png|jpg|jpeg|webp|gif|svg)$/.test(lower)) return 'image';
+  if (/\.(txt|log|json|csv|xml|yaml|yml)$/.test(lower)) return 'text';
+  return 'other';
+}
+
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 // Suppress EPIPE errors from console.log after stdout pipe closes
@@ -355,6 +448,10 @@ async function createWindow(): Promise<BrowserWindow> {
       createdAt: new Date().toISOString(),
     };
   };
+  const getMobileArtifactPreview = async (artifactId: string) => (
+    findMobileArtifactPreview(dataRoot, artifactId)
+      ?? await findKSwarmMobileArtifactPreview(kswarmService, artifactId)
+  );
   const mobileGateway = createMobileGateway({
     host: process.env.XIAOK_MOBILE_GATEWAY_HOST ?? '0.0.0.0',
     port: Number(process.env.XIAOK_MOBILE_GATEWAY_PORT ?? '47891'),
@@ -364,7 +461,7 @@ async function createWindow(): Promise<BrowserWindow> {
     getSnapshot: getMobileSnapshot,
     sendMessage: sendMobileMessage,
     respondToApproval: respondMobileApproval,
-    getArtifactPreview: (artifactId) => findMobileArtifactPreview(dataRoot, artifactId),
+    getArtifactPreview: getMobileArtifactPreview,
     onRequest: (event) => {
       debugMain('mobile-gateway:request', event);
     },
@@ -393,7 +490,7 @@ async function createWindow(): Promise<BrowserWindow> {
       getSnapshot: getMobileSnapshot,
       sendMessage: sendMobileMessage,
       respondToApproval: respondMobileApproval,
-      getArtifactPreview: (artifactId) => findMobileArtifactPreview(dataRoot, artifactId),
+      getArtifactPreview: getMobileArtifactPreview,
       onStatus: (status) => {
         debugMain('mobile-relay:status', {
           running: status.running,

@@ -13,9 +13,16 @@ type MobileArtifactStatus = 'ready' | 'generating' | 'failed';
 export interface MobileProjectSummary {
   id: string;
   name: string;
+  goal?: string;
+  requirements?: string;
+  summary?: string;
   status: MobileProjectStatus;
   progress: number;
   activeTasks: number;
+  taskCount?: number;
+  doneCount?: number;
+  stoppedCount?: number;
+  artifactCount?: number;
   updatedAt: string;
 }
 
@@ -51,12 +58,23 @@ export interface KSwarmProjectLike {
   id?: unknown;
   name?: unknown;
   goal?: unknown;
+  requirements?: unknown;
+  summary?: unknown;
   status?: unknown;
   taskCount?: unknown;
   doneCount?: unknown;
   stoppedCount?: unknown;
   updatedAt?: unknown;
   createdAt?: unknown;
+  workFolder?: unknown;
+  deliverable?: unknown;
+  artifacts?: unknown;
+  workspaceArtifacts?: unknown;
+}
+
+export interface MobileProjectArtifactRecord extends MobileArtifactSummary {
+  filePath?: string;
+  artifactPath?: string;
 }
 
 export function buildMobileSnapshotFromSources(input: {
@@ -90,8 +108,31 @@ export function buildMobileSnapshotFromSources(input: {
     projects,
     approvals: buildApprovalSummaries(snapshots),
     loops: buildLoopSummaries(input.loopDefinitions ?? [], input.userLoopTemplates ?? [], input.loopRunsByLoopId ?? new Map()),
-    artifacts: buildArtifactSummaries(snapshots),
+    artifacts: buildArtifactSummaries(snapshots, input.kswarmProjects ?? []),
   };
+}
+
+export function mobileKSwarmArtifactId(projectId: string, artifactPath: string): string {
+  return `kswarm:${projectId}:${Buffer.from(artifactPath).toString('base64url')}`;
+}
+
+export function collectKSwarmProjectArtifacts(project: KSwarmProjectLike): MobileProjectArtifactRecord[] {
+  const projectId = stringValue(project.id, '');
+  if (!projectId) return [];
+
+  const artifacts: MobileProjectArtifactRecord[] = [];
+  for (const rawArtifact of rawKSwarmProjectArtifacts(project)) {
+    const artifact = mapKSwarmArtifact(projectId, rawArtifact);
+    if (artifact) artifacts.push(artifact);
+  }
+
+  const seen = new Set<string>();
+  return artifacts.filter(artifact => {
+    const key = artifact.id || `${artifact.source}:${artifact.artifactPath ?? artifact.name}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export function resolveMobileApprovalAnswer(
@@ -116,13 +157,45 @@ export function resolveMobileApprovalAnswer(
 
 function buildMobileMessages(snapshots: TaskSnapshot[], mobileMessages: MobileChatMessage[]): MobileChatMessage[] {
   const desktopMessages = snapshots.flatMap(buildTaskMessagesForMobile);
-  return [...mobileMessages.map(message => ({
+  const normalizedMobileMessages = mobileMessages.map(message => ({
     ...message,
     conversationId: message.conversationId ?? 'default',
     deliveryStatus: message.deliveryStatus ?? 'sent',
-  })), ...desktopMessages]
-    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-    .slice(-120);
+  }));
+  return boundMobileMessages([...normalizedMobileMessages, ...desktopMessages], 120);
+}
+
+function boundMobileMessages(messages: MobileChatMessage[], maxMessages: number): MobileChatMessage[] {
+  const sortedMessages = [...messages]
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  const byConversation = new Map<string, MobileChatMessage[]>();
+  for (const message of sortedMessages) {
+    const conversationId = message.conversationId ?? 'default';
+    const list = byConversation.get(conversationId) ?? [];
+    list.push(message);
+    byConversation.set(conversationId, list);
+  }
+
+  const selected = new Map<string, MobileChatMessage>();
+  const select = (message: MobileChatMessage | undefined) => {
+    if (!message || (selected.size >= maxMessages && !selected.has(message.id))) return;
+    selected.set(message.id, message);
+  };
+
+  for (const conversationMessages of byConversation.values()) {
+    select(conversationMessages[0]);
+    for (const message of conversationMessages.slice(1).slice(-2)) {
+      select(message);
+    }
+  }
+
+  for (const message of [...sortedMessages].reverse()) {
+    if (selected.size >= maxMessages) break;
+    selected.set(message.id, message);
+  }
+
+  return [...selected.values()]
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 }
 
 function buildTaskMessagesForMobile(snapshot: TaskSnapshot): MobileChatMessage[] {
@@ -137,8 +210,7 @@ function buildTaskMessagesForMobile(snapshot: TaskSnapshot): MobileChatMessage[]
     deliveryStatus: 'sent',
   });
 
-  const eventMessages = snapshot.events
-    .flatMap((event, index) => mobileMessagesForEvent(snapshot, event, index, baseTime))
+  const eventMessages = buildTaskEventMessagesForMobile(snapshot, baseTime)
     .slice(-18);
   messages.push(...eventMessages);
 
@@ -153,6 +225,49 @@ function buildTaskMessagesForMobile(snapshot: TaskSnapshot): MobileChatMessage[]
     });
   }
 
+  return messages;
+}
+
+function buildTaskEventMessagesForMobile(snapshot: TaskSnapshot, baseTime: number): MobileChatMessage[] {
+  const messages: MobileChatMessage[] = [];
+  let assistantDeltaBuffer = '';
+  let assistantDeltaStartedAt: string | null = null;
+  let assistantDeltaGroupCount = 0;
+
+  const flushAssistantDeltaBuffer = () => {
+    if (!assistantDeltaBuffer.trim()) {
+      assistantDeltaBuffer = '';
+      assistantDeltaStartedAt = null;
+      return;
+    }
+    const id = assistantDeltaGroupCount === 0
+      ? `desktop-assistant-${snapshot.taskId}`
+      : `desktop-assistant-${snapshot.taskId}-${assistantDeltaGroupCount + 1}`;
+    messages.push({
+      id,
+      conversationId: snapshot.taskId,
+      role: 'assistant',
+      text: assistantDeltaBuffer.trim(),
+      createdAt: assistantDeltaStartedAt ?? new Date(baseTime + messages.length + 1).toISOString(),
+      deliveryStatus: 'sent',
+    });
+    assistantDeltaGroupCount += 1;
+    assistantDeltaBuffer = '';
+    assistantDeltaStartedAt = null;
+  };
+
+  snapshot.events.forEach((event, index) => {
+    if (event.type === 'assistant_delta') {
+      assistantDeltaStartedAt ??= new Date(eventTimestamp(event) ?? baseTime + index + 1).toISOString();
+      assistantDeltaBuffer += event.delta;
+      return;
+    }
+
+    flushAssistantDeltaBuffer();
+    messages.push(...mobileMessagesForEvent(snapshot, event, index, baseTime));
+  });
+
+  flushAssistantDeltaBuffer();
   return messages;
 }
 
@@ -287,7 +402,7 @@ function buildApprovalSummaries(snapshots: TaskSnapshot[]): MobileApprovalSummar
       })));
 }
 
-function buildArtifactSummaries(snapshots: TaskSnapshot[]): MobileArtifactSummary[] {
+function buildArtifactSummaries(snapshots: TaskSnapshot[], kswarmProjects: KSwarmProjectLike[]): MobileArtifactSummary[] {
   const artifacts: MobileArtifactSummary[] = [];
   for (const snapshot of snapshots) {
     for (const artifact of snapshot.result?.artifacts ?? []) {
@@ -306,6 +421,12 @@ function buildArtifactSummaries(snapshots: TaskSnapshot[]): MobileArtifactSummar
       });
     }
   }
+  for (const project of kswarmProjects) {
+    for (const artifact of collectKSwarmProjectArtifacts(project)) {
+      const { filePath: _filePath, artifactPath: _artifactPath, ...summary } = artifact;
+      artifacts.push(summary);
+    }
+  }
 
   const seen = new Set<string>();
   return artifacts
@@ -314,7 +435,7 @@ function buildArtifactSummaries(snapshots: TaskSnapshot[]): MobileArtifactSummar
       seen.add(artifact.id);
       return true;
     })
-    .slice(0, 30);
+    .slice(0, 120);
 }
 
 function buildLoopSummaries(
@@ -353,12 +474,24 @@ function mapTaskSnapshotProject(snapshot: TaskSnapshot): MobileProjectSummary {
 function mapKSwarmProject(project: KSwarmProjectLike): MobileProjectSummary {
   const taskCount = numberValue(project.taskCount);
   const doneCount = numberValue(project.doneCount);
+  const stoppedCount = numberValue(project.stoppedCount);
+  const artifacts = collectKSwarmProjectArtifacts(project);
+  const goal = optionalTextValue(project.goal);
+  const requirements = optionalTextValue(project.requirements);
+  const summary = optionalTextValue(project.summary);
   return {
     id: stringValue(project.id, 'project'),
     name: truncate(stringValue(project.name ?? project.goal, 'Project'), 80),
+    ...(goal ? { goal } : {}),
+    ...(requirements ? { requirements } : {}),
+    ...(summary ? { summary } : {}),
     status: mapProjectStatus(project.status),
     progress: taskCount > 0 ? Math.max(0, Math.min(1, doneCount / taskCount)) : 0,
-    activeTasks: Math.max(0, taskCount - doneCount - numberValue(project.stoppedCount)),
+    activeTasks: Math.max(0, taskCount - doneCount - stoppedCount),
+    taskCount,
+    doneCount,
+    stoppedCount,
+    artifactCount: artifacts.length,
     updatedAt: new Date(numberValue(project.updatedAt) || numberValue(project.createdAt) || Date.now()).toISOString(),
   };
 }
@@ -389,6 +522,86 @@ function mapArtifactKind(kind: string): MobileArtifactKind {
   if (kind === 'docx' || kind === 'xlsx' || kind === 'a2ui') return 'other';
   if (kind === 'markdown') return 'markdown';
   return 'other';
+}
+
+function mapKSwarmArtifact(projectId: string, rawArtifact: unknown): MobileProjectArtifactRecord | null {
+  const artifact = objectValue(rawArtifact);
+  if (!artifact) return null;
+  const artifactPath = optionalStringValue(artifact.path)
+    ?? optionalStringValue(artifact.filePath)
+    ?? optionalStringValue(artifact.relativePath)
+    ?? optionalStringValue(artifact.url)
+    ?? optionalStringValue(artifact.name)
+    ?? optionalStringValue(artifact.label);
+  const name = optionalStringValue(artifact.label)
+    ?? optionalStringValue(artifact.title)
+    ?? optionalStringValue(artifact.name)
+    ?? fileNameFromPath(artifactPath ?? '')
+    ?? optionalStringValue(artifact.id)
+    ?? optionalStringValue(artifact.artifactId);
+  if (!artifactPath && !name) return null;
+
+  const rawKind = optionalStringValue(artifact.kind) ?? artifactKindFromPath(artifactPath ?? name ?? '');
+  const kind = mapArtifactKind(rawKind);
+  const mimeType = optionalStringValue(artifact.mimeType) ?? mimeTypeForMobileArtifactKind(kind);
+  const stablePath = artifactPath ?? name ?? projectId;
+  const previewAvailable = booleanValue(artifact.previewAvailable) ?? isPreviewableMobileArtifact(kind, mimeType);
+  return {
+    id: optionalStringValue(artifact.id)
+      ?? optionalStringValue(artifact.artifactId)
+      ?? mobileKSwarmArtifactId(projectId, stablePath),
+    name: name ?? stablePath,
+    kind,
+    source: projectId,
+    status: mapArtifactStatus(artifact.status),
+    previewAvailable,
+    mimeType,
+    sizeBytes: optionalNumberValue(artifact.sizeBytes),
+    filePath: optionalStringValue(artifact.filePath),
+    artifactPath: artifactPath ?? undefined,
+  };
+}
+
+function rawKSwarmProjectArtifacts(project: KSwarmProjectLike): unknown[] {
+  const deliverable = objectValue(project.deliverable);
+  return [
+    ...arrayValue(deliverable?.artifacts),
+    ...arrayValue(project.artifacts),
+    ...arrayValue(project.workspaceArtifacts),
+  ];
+}
+
+function mapArtifactStatus(status: unknown): MobileArtifactStatus {
+  if (status === 'generating' || status === 'failed') return status;
+  return 'ready';
+}
+
+function artifactKindFromPath(filePath: string): string {
+  const lower = filePath.toLowerCase();
+  if (lower.endsWith('.md') || lower.endsWith('.markdown')) return 'markdown';
+  if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'html';
+  if (lower.endsWith('.pdf')) return 'pdf';
+  if (lower.endsWith('.pptx')) return 'pptx';
+  if (/\.(png|jpg|jpeg|webp|gif|svg)$/.test(lower)) return 'image';
+  if (/\.(txt|log|json|csv|xml|yaml|yml)$/.test(lower)) return 'text';
+  return 'other';
+}
+
+function mimeTypeForMobileArtifactKind(kind: MobileArtifactKind): string | undefined {
+  if (kind === 'markdown') return 'text/markdown';
+  if (kind === 'html') return 'text/html';
+  if (kind === 'text') return 'text/plain';
+  if (kind === 'pdf') return 'application/pdf';
+  if (kind === 'pptx') return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  return undefined;
+}
+
+function isPreviewableMobileArtifact(kind: MobileArtifactKind, mimeType: string | undefined): boolean {
+  return kind === 'markdown'
+    || kind === 'html'
+    || kind === 'text'
+    || Boolean(mimeType?.startsWith('text/'))
+    || mimeType === 'application/json';
 }
 
 function mapLoopStatus(definition: LoopDefinition, template: UserLoopTemplate | undefined): MobileLoopStatus {
@@ -455,4 +668,53 @@ function stringValue(value: unknown, fallback: string): string {
 
 function numberValue(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function optionalStringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function optionalTextValue(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+  if (Array.isArray(value)) {
+    const lines = value
+      .map(item => {
+        if (typeof item === 'string') return item.trim();
+        const object = objectValue(item);
+        return optionalStringValue(object?.title)
+          ?? optionalStringValue(object?.name)
+          ?? optionalStringValue(object?.description)
+          ?? optionalStringValue(object?.text)
+          ?? '';
+      })
+      .filter(Boolean);
+    return lines.length ? lines.join('\n') : undefined;
+  }
+  return undefined;
+}
+
+function optionalNumberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function fileNameFromPath(filePath: string): string | undefined {
+  const name = filePath.split(/[\\/]/).pop()?.trim();
+  return name || undefined;
 }

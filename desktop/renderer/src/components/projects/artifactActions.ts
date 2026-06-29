@@ -61,6 +61,20 @@ export function resolveArtifactUrl(artifact: ArtifactLike): string | null {
   return null;
 }
 
+export function resolveArtifactProxyPath(artifact: ArtifactLike): string | null {
+  const url = resolveArtifactUrl(artifact);
+  if (!url) return null;
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.origin !== getKswarmBaseUrl()) return null;
+    if (!/^\/projects\/[^/]+\/artifacts\/.+/.test(parsed.pathname)) return null;
+    return parsed.pathname;
+  } catch {
+    return null;
+  }
+}
+
 export function downloadArtifact(artifact: ArtifactLike): boolean {
   const url = resolveArtifactUrl(artifact);
   if (!url) return false;
