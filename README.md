@@ -46,6 +46,15 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+Xiaok Desktop v1.4.17 tightens artifact persistence and release hygiene: transient A2UI artifacts now default to the user Xiaok data directory instead of the source checkout, project HTML/Markdown artifact edits save through the guarded project artifact route, and the desktop release workflow defaults to the `desktop-v1.4.17` tag.
+
+**What's New in v1.4.17:**
+
+- **User-Scoped A2UI Artifacts**: `render_ui` now writes implicit `.a2ui.json` outputs to `XIAOK_CONFIG_DIR/artifacts` or `~/.xiaok/artifacts`, keeping transient UI payloads out of source repositories. Explicit `output_path` values are still supported and continue to use workspace path validation.
+- **Project Artifact Edit Saves**: Project-scoped HTML and Markdown artifacts save back through KSwarm's text artifact update route, fixing the path/permission failure seen when editing generated project deliverables from the desktop preview.
+- **Release Version Alignment**: Root CLI metadata, Desktop package metadata, package locks, README release notes, and the Desktop Release workflow default now align on `1.4.17` / `desktop-v1.4.17`.
+- **Release Validation**: v1.4.17 is prepared with focused A2UI artifact root tests, CLI `build:release`, TypeScript `--noEmit`, desktop build, and a real `render_ui` smoke test proving default output lands under the user artifact directory instead of the current repository.
+
 Xiaok Desktop v1.4.16 ships the new artifact editing surface alongside the Loop Engineering evidence work: HTML deliverables can be edited directly in Canvas, Markdown deliverables can be edited as plain text, local image/SVG insertion is available from the real desktop file picker, and mobile companion APIs can mirror chats, approvals, projects, loops, and artifact previews from the desktop runtime.
 
 **What's New in v1.4.16:**

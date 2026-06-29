@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -8,11 +8,18 @@ import { buildToolList, ToolRegistry } from '../../../src/ai/tools/index.js';
 const DASHBOARD_TOOL_NAME = ['render', 'ui'].join('_');
 
 describe('A2UI dashboard tool', () => {
-  let tempDir: string | null = null;
+  const tempDirs: string[] = [];
+
+  function createTempDir(prefix: string): string {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    tempDirs.push(dir);
+    return dir;
+  }
 
   afterEach(() => {
-    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
-    tempDir = null;
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('exposes a discriminated section schema with the exact supported DSL fields', () => {
@@ -32,7 +39,7 @@ describe('A2UI dashboard tool', () => {
   });
 
   it('is registered by default and writes an A2UI artifact file with a short ack', async () => {
-    tempDir = mkdtempSync(join(tmpdir(), 'xiaok-dashboard-'));
+    const tempDir = createTempDir('xiaok-dashboard-');
     const outputPath = join(tempDir, 'artifacts', 'sales.a2ui.json');
     const registry = new ToolRegistry({ autoMode: true }, buildToolList(undefined, { cwd: tempDir, allowOutsideCwd: false }));
 
@@ -78,8 +85,37 @@ describe('A2UI dashboard tool', () => {
     expect(JSON.stringify(payload)).not.toContain('do not serialize');
   });
 
+  it('writes default A2UI artifacts to the user artifact root instead of cwd', async () => {
+    const tempDir = createTempDir('xiaok-dashboard-default-');
+    const artifactRoot = createTempDir('xiaok-dashboard-user-artifacts-');
+    const registry = new ToolRegistry(
+      { autoMode: true },
+      buildToolList(undefined, { cwd: tempDir, allowOutsideCwd: false, artifactRoot }),
+    );
+
+    const resultText = await registry.executeTool(DASHBOARD_TOOL_NAME, {
+      title: 'Default artifact root',
+      sections: [
+        { kind: 'heading', text: 'Default Root', level: 2 },
+      ],
+      data: {},
+    });
+
+    const result = JSON.parse(resultText) as {
+      output_path: string;
+      artifactPath: string;
+      artifacts: Array<{ filename: string; key: string }>;
+    };
+
+    expect(result.output_path.startsWith(artifactRoot)).toBe(true);
+    expect(result.artifactPath).toBe(result.output_path);
+    expect(result.artifacts[0]?.key).toBe(result.output_path);
+    expect(existsSync(result.output_path)).toBe(true);
+    expect(existsSync(join(tempDir, 'artifacts', result.artifacts[0]!.filename))).toBe(false);
+  });
+
   it('rejects invalid DSL without writing an artifact', async () => {
-    tempDir = mkdtempSync(join(tmpdir(), 'xiaok-dashboard-invalid-'));
+    const tempDir = createTempDir('xiaok-dashboard-invalid-');
     const outputPath = join(tempDir, 'bad.a2ui.json');
     const registry = new ToolRegistry({ autoMode: true }, buildToolList(undefined, { cwd: tempDir, allowOutsideCwd: false }));
 
@@ -95,7 +131,7 @@ describe('A2UI dashboard tool', () => {
   });
 
   it('normalizes common type and text aliases before writing the artifact', async () => {
-    tempDir = mkdtempSync(join(tmpdir(), 'xiaok-dashboard-alias-'));
+    const tempDir = createTempDir('xiaok-dashboard-alias-');
     const outputPath = join(tempDir, 'alias.a2ui.json');
     const registry = new ToolRegistry({ autoMode: true }, buildToolList(undefined, { cwd: tempDir, allowOutsideCwd: false }));
 

@@ -6,6 +6,7 @@ import { truncateText } from './truncation.js';
 export interface WorkspaceToolOptions {
   cwd?: string;
   allowOutsideCwd?: boolean;
+  artifactRoot?: string;
 }
 
 export function createReadTool(options: WorkspaceToolOptions = {}): Tool {

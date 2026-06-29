@@ -9,6 +9,7 @@ import {
   sanitizeA2UIIdPart,
 } from '../../a2ui/index.js';
 import { assertWorkspacePath } from '../permissions/workspace.js';
+import { getConfigDir } from '../../utils/config.js';
 import type { WorkspaceToolOptions } from './read.js';
 
 const renderUiSectionSchema = {
@@ -82,6 +83,7 @@ const renderUiSectionSchema = {
 export function createRenderUiTool(options: WorkspaceToolOptions = {}): Tool {
   const cwd = options.cwd ?? process.cwd();
   const allowOutsideCwd = options.allowOutsideCwd ?? false;
+  const artifactRoot = options.artifactRoot ?? getConfigDir('artifacts');
 
   return {
     permission: 'write',
@@ -95,7 +97,7 @@ export function createRenderUiTool(options: WorkspaceToolOptions = {}): Tool {
         type: 'object',
         properties: {
           title: { type: 'string', description: 'UI 标题' },
-          output_path: { type: 'string', description: '可选，.a2ui.json 输出路径；缺省写入当前工作区 artifacts/' },
+          output_path: { type: 'string', description: '可选，.a2ui.json 输出路径；缺省写入用户级小 K artifacts 目录' },
           task_id: { type: 'string', description: '可选，用于生成稳定 surfaceId' },
           data: { type: 'object', description: '可选，原始数据；compiler 只写入组件实际引用的数据' },
           sections: {
@@ -114,10 +116,11 @@ export function createRenderUiTool(options: WorkspaceToolOptions = {}): Tool {
       const toolUseId = `tool_${Date.now().toString(36)}`;
       const compiled = compileRenderUiToA2ui(input as never, { taskId, toolUseId });
       const defaultFilename = `${sanitizeA2UIIdPart(compiled.surfaceId)}.a2ui.json`;
-      const requestedPath = typeof input.output_path === 'string' && input.output_path.trim()
-        ? input.output_path.trim()
-        : join(cwd, 'artifacts', defaultFilename);
-      const outputPath = assertWorkspacePath(requestedPath, cwd, 'write', allowOutsideCwd);
+      const explicitOutputPath = typeof input.output_path === 'string' ? input.output_path.trim() : '';
+      const requestedPath = explicitOutputPath || join(artifactRoot, defaultFilename);
+      const outputPath = explicitOutputPath
+        ? assertWorkspacePath(requestedPath, cwd, 'write', allowOutsideCwd)
+        : requestedPath;
       if (!outputPath.endsWith('.a2ui.json')) {
         throw new Error('output_path 必须以 .a2ui.json 结尾');
       }

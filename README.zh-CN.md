@@ -46,6 +46,15 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+Xiaok Desktop v1.4.17 加固产物持久化和发布一致性：临时 A2UI 产物默认写入用户级小 K 数据目录，不再污染源码 checkout；项目 HTML/Markdown 产物编辑通过受保护的项目产物路由保存；Desktop Release workflow 默认 tag 已更新为 `desktop-v1.4.17`。
+
+**v1.4.17 新特性：**
+
+- **用户级 A2UI 产物目录**：`render_ui` 未显式传 `output_path` 时，现在把 `.a2ui.json` 写入 `XIAOK_CONFIG_DIR/artifacts` 或 `~/.xiaok/artifacts`，避免临时 UI payload 落到源码仓库。显式 `output_path` 仍然支持，并继续走 workspace 路径校验。
+- **项目产物编辑保存**：项目里的 HTML/Markdown 产物通过 KSwarm 文本产物更新路由写回，修复桌面预览里编辑生成产物后出现路径/权限保存失败的问题。
+- **发布版本对齐**：root CLI 元数据、Desktop package 元数据、package locks、README 发布说明和 Desktop Release workflow 默认值统一为 `1.4.17` / `desktop-v1.4.17`。
+- **发布验证**：v1.4.17 已用 A2UI artifact root 聚焦测试、CLI `build:release`、TypeScript `--noEmit`、desktop build、真实 `render_ui` smoke 验证准备发布；smoke 证明默认输出进入用户 artifact 目录，而不是当前仓库。
+
 Xiaok Desktop v1.4.16 同时交付新的产物编辑界面和 Loop Engineering evidence 能力：HTML 产物可以在 Canvas 里直接编辑，Markdown 产物可以用纯文本方式编辑，本地图片/SVG 可以通过真实桌面文件选择框插入，移动端伴随 API 也能从桌面 runtime 镜像对话、审批、项目、循环和产物预览。
 
 **v1.4.16 新特性：**
