@@ -270,7 +270,17 @@ describe('KB Integration — Chinese search with jieba', () => {
     rmSync(rootDir, { recursive: true, force: true });
   });
 
-  it('finds Chinese content via jieba-segmented query terms', async () => {
+  it('finds Chinese content via jieba-segmented query terms', async (ctx) => {
+    // nodejieba is an optional native addon. When it cannot load on this
+    // platform/build, Chinese segmentation gracefully degrades to the raw
+    // string, so this jieba-recall assertion is not meaningful — skip it
+    // rather than failing.
+    const { segmentQuery } = await import('../../../src/ai/memory/segment.js');
+    if (segmentQuery('原生组织') === '原生组织') {
+      ctx.skip();
+      return;
+    }
+
     const col = store.createCollection({ name: 'CN', embeddingModelId: 'm', embeddingDim: 384 });
     const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'AI文档' });
     store.insertChunks(src.id, [
@@ -280,7 +290,6 @@ describe('KB Integration — Chinese search with jieba', () => {
     (store as any)._db?.prepare("UPDATE sources SET parse_status = 'parsed' WHERE id = ?").run(src.id);
 
     // Simulate search with jieba segmentation
-    const { segmentQuery } = await import('../../../src/ai/memory/segment.js');
     const query = 'AI原生组织';
     const segmented = segmentQuery(query);
     const terms = [...new Set(segmented.split(/\s+/).filter(Boolean).map((t: string) => t.toLowerCase()))];

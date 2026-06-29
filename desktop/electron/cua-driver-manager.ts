@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { posix as posixPath } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import type { McpToolSchema } from '../../src/ai/mcp/client.js';
@@ -55,8 +55,10 @@ export function shouldPrelaunchCuaDriverDaemonForMcp(
 ): boolean {
   if (currentPlatform !== 'darwin') return false;
   if (serverName !== 'cua-driver') return false;
-  if (basename(resolvedBinary) !== 'cua-driver') return false;
-  return fileExists(join(DEFAULT_CUA_DRIVER_APP_PATH, 'Contents', 'MacOS', 'cua-driver'));
+  // CUA is macOS-only, so the driver paths are always POSIX; use posix path
+  // semantics so this stays correct when the suite runs on a Windows host.
+  if (posixPath.basename(resolvedBinary) !== 'cua-driver') return false;
+  return fileExists(posixPath.join(DEFAULT_CUA_DRIVER_APP_PATH, 'Contents', 'MacOS', 'cua-driver'));
 }
 
 export function prelaunchCuaDriverDaemonForMcp(

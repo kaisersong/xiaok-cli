@@ -1,7 +1,18 @@
 import { existsSync } from 'node:fs';
-import { delimiter, isAbsolute, join } from 'node:path';
+import { posix as posixPath, win32 as win32Path, type PlatformPath } from 'node:path';
 import { homedir, platform as osPlatform } from 'node:os';
 import { spawn } from 'node:child_process';
+
+/**
+ * Selects POSIX vs Windows path semantics for dependency resolution. When a
+ * platform is given (tests, or an explicit target) it is honored regardless of
+ * the host OS, so macOS dependency resolution stays deterministic when the
+ * suite runs on Windows. Without one, the host platform is used.
+ */
+function pathModuleFor(platform?: NodeJS.Platform | string): PlatformPath {
+  const target = platform ?? process.platform;
+  return target === 'win32' ? win32Path : posixPath;
+}
 
 export type PluginDependencyKind = 'macos_app_cli';
 export type PluginDependencyState = 'ready' | 'missing' | 'needs_permission' | 'degraded' | 'unsupported';
@@ -88,31 +99,32 @@ export interface InstallerExecution {
   args: string[];
 }
 
-export function expandHomePath(path: string, homeDir = homedir()): string {
+export function expandHomePath(path: string, homeDir = homedir(), pathModule: PlatformPath = pathModuleFor()): string {
   if (path === '~') return homeDir;
-  if (path.startsWith('~/')) return join(homeDir, path.slice(2));
+  if (path.startsWith('~/')) return pathModule.join(homeDir, path.slice(2));
   return path;
 }
 
 export function resolveDependencyBinary(
   candidates: string[],
-  options: Pick<PluginDependencyStatusOptions, 'homeDir' | 'pathEnv' | 'exists'> = {},
+  options: Pick<PluginDependencyStatusOptions, 'homeDir' | 'pathEnv' | 'exists' | 'platform'> = {},
 ): string | null {
   const exists = options.exists ?? existsSync;
   const homeDir = options.homeDir ?? homedir();
+  const pathMod = pathModuleFor(options.platform);
   const pathDirs = (options.pathEnv ?? process.env.PATH ?? '')
-    .split(delimiter)
+    .split(pathMod.delimiter)
     .filter(Boolean);
 
   for (const candidate of candidates) {
-    const expanded = expandHomePath(candidate, homeDir);
-    if (expanded.includes('/') || isAbsolute(expanded)) {
+    const expanded = expandHomePath(candidate, homeDir, pathMod);
+    if (/[\\/]/.test(expanded) || pathMod.isAbsolute(expanded)) {
       if (exists(expanded)) return expanded;
       continue;
     }
 
     for (const dir of pathDirs) {
-      const resolved = join(dir, expanded);
+      const resolved = pathMod.join(dir, expanded);
       if (exists(resolved)) return resolved;
     }
   }
@@ -122,7 +134,7 @@ export function resolveDependencyBinary(
 
 function resolveEnvOverrideBinary(
   envName: string | undefined,
-  options: Pick<PluginDependencyStatusOptions, 'homeDir' | 'pathEnv' | 'exists'> = {},
+  options: Pick<PluginDependencyStatusOptions, 'homeDir' | 'pathEnv' | 'exists' | 'platform'> = {},
 ): { binary: string | null; error?: string } {
   if (!envName) return { binary: null };
   const raw = process.env[envName]?.trim();
@@ -136,17 +148,18 @@ function resolveEnvOverrideBinary(
 
   const exists = options.exists ?? existsSync;
   const homeDir = options.homeDir ?? homedir();
-  const expanded = expandHomePath(raw, homeDir);
-  if (expanded.includes('/') || isAbsolute(expanded)) {
+  const pathMod = pathModuleFor(options.platform);
+  const expanded = expandHomePath(raw, homeDir, pathMod);
+  if (/[\\/]/.test(expanded) || pathMod.isAbsolute(expanded)) {
     if (exists(expanded)) return { binary: expanded };
     return { binary: null, error: `${envName} points to a binary that does not exist: ${expanded}` };
   }
 
   const pathDirs = (options.pathEnv ?? process.env.PATH ?? '')
-    .split(delimiter)
+    .split(pathMod.delimiter)
     .filter(Boolean);
   for (const dir of pathDirs) {
-    const resolved = join(dir, expanded);
+    const resolved = pathMod.join(dir, expanded);
     if (exists(resolved)) return { binary: resolved };
   }
   return { binary: null, error: `${envName} command was not found on PATH: ${expanded}` };

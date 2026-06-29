@@ -30,7 +30,7 @@ const ALLOWED_OCCURRENCES = [
   { file: 'src/components/settings/MemoryConfigModal.tsx', line: 871, reason: 'placeholder text' },
   { file: 'src/components/settings/MemorySettings.tsx', line: 1002, reason: 'connectionHealth arg (IPC, not direct fetch)' },
   { file: 'src/components/settings/MemorySettings.tsx', line: 1005, reason: 'string assignment from IPC result' },
-  { file: 'src/components/projects/artifactActions.ts', line: 4, reason: 'getKswarmBaseUrl return value (used for URL construction, fetched via IPC proxy)' },
+  { file: 'src/components/projects/artifactActions.ts', line: 5, reason: 'getKswarmBaseUrl return value (used for URL construction, fetched via IPC proxy); shifted +1 by toFileUrl import' },
   { file: 'src/components/projects/ArtifactPreviewModal.tsx', line: 46, reason: 'comparison string to route through IPC proxy' },
 ];
 
@@ -52,7 +52,9 @@ describe('no-direct-backend-fetch', () => {
     const violations: string[] = [];
 
     for (const file of files) {
-      const relative = file.slice(RENDERER_SRC.length + 1);
+      // Normalize separators so the POSIX-style allowlist matches on Windows,
+      // where path.slice yields backslash-separated relative paths.
+      const relative = file.slice(RENDERER_SRC.length + 1).replace(/\\/g, '/');
       if (ALLOWED_FILES.some(af => relative.endsWith(af.replace('src/', '')))) continue;
 
       const content = readFileSync(file, 'utf8');

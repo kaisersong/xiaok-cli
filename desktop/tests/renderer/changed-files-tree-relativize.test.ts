@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { relativizePaths } from '../../renderer/src/components/ChangedFilesTree'
+import { relativizePaths } from '../../renderer/src/lib/file-path'
 
 describe('relativizePaths', () => {
   it('strips the longest common POSIX directory prefix', () => {

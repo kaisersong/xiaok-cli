@@ -1,6 +1,7 @@
 import { useMemo, useCallback } from 'react'
 import { useFileTree, FileTree } from '@pierre/trees/react'
 import type { ToolStep } from './ChatView'
+import { relativizePaths } from '../lib/file-path'
 
 interface Props {
   steps: ToolStep[]
@@ -15,26 +16,6 @@ function getFilePath(input: unknown): string | null {
   if (!input || typeof input !== 'object') return null
   const obj = input as Record<string, unknown>
   return typeof obj.file_path === 'string' ? obj.file_path : null
-}
-
-/**
- * Strips the longest common directory prefix shared by all changed-file paths
- * so the tree shows short, relative labels. Works on both POSIX and Windows
- * paths (normalizes separators) and is root-agnostic — no hardcoded cwd.
- */
-export function relativizePaths(absPaths: string[]): string[] {
-  const normalized = absPaths.map(p => p.replace(/\\/g, '/'))
-  if (normalized.length === 0) return normalized
-  const splitParts = normalized.map(p => p.split('/'))
-  const first = splitParts[0]
-  let prefixLen = 0
-  for (let i = 0; i < first.length - 1; i++) {
-    const seg = first[i]
-    if (splitParts.every(parts => parts[i] === seg)) prefixLen = i + 1
-    else break
-  }
-  if (prefixLen === 0) return normalized
-  return splitParts.map(parts => parts.slice(prefixLen).join('/'))
 }
 
 export function ChangedFilesTree({ steps, onFileSelect }: Props) {

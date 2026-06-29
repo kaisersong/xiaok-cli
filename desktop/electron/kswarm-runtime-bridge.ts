@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { isAbortError } from '../../src/ai/runtime/abort-utils.js';
 
@@ -726,7 +726,12 @@ function isAllowedPath(filePath: string, allowedRoots: string[] | undefined): bo
   const resolvedFile = resolve(filePath);
   return allowedRoots.some((root) => {
     const resolvedRoot = resolve(root);
-    return resolvedFile === resolvedRoot || resolvedFile.startsWith(`${resolvedRoot}/`);
+    if (resolvedFile === resolvedRoot) return true;
+    // Use path.relative for containment instead of a hardcoded `/` prefix,
+    // which never matched on Windows (separator is `\`) and rejected valid
+    // in-root handoff paths.
+    const rel = relative(resolvedRoot, resolvedFile);
+    return Boolean(rel) && !rel.startsWith('..') && !isAbsolute(rel);
   });
 }
 

@@ -59,13 +59,18 @@ export async function readReactDoctorDiagnostics(maxBuffer = 80 * 1024 * 1024): 
 }
 
 async function runReactDoctor(maxBuffer: number): Promise<ReactDoctorDiagnostic[]> {
+  // On Windows the npm bin shim is `react-doctor.cmd`, and modern Node requires
+  // a shell to launch .cmd files. POSIX uses the extensionless shim directly.
+  const isWindows = process.platform === 'win32';
+  const binPath = join(desktopRoot, 'node_modules', '.bin', isWindows ? 'react-doctor.cmd' : 'react-doctor');
   const { stdout } = await execFileAsync(
-    join(desktopRoot, 'node_modules', '.bin', 'react-doctor'),
+    binPath,
     ['--json', '--no-score', '--fail-on', 'none'],
     {
       cwd: desktopRoot,
       encoding: 'utf8',
       maxBuffer,
+      shell: isWindows,
     },
   );
   const report = JSON.parse(stdout) as ReactDoctorReport;
