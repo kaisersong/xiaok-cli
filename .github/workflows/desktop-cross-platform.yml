@@ -1,0 +1,60 @@
+name: Desktop Cross-Platform Tests
+
+# Runs the cross-platform path test suite on real Windows and macOS runners so
+# Windows-only path regressions (artifact cards, file:// URLs, basename, path
+# escape checks, hardcoded home paths) are caught in CI instead of by users.
+#
+# Scope is intentionally focused: it runs the path-related test files plus the
+# self-contained renderer build. It does NOT run the full desktop suite, which
+# needs the sidecar repos and has unrelated Windows temp-dir teardown flakiness.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-cross-platform.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-cross-platform.yml'
+  workflow_dispatch: {}
+
+jobs:
+  cross-platform-tests:
+    name: Desktop path tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install desktop dependencies
+        # --ignore-scripts skips the better-sqlite3/electron native postinstall,
+        # which is unnecessary for these unit tests + renderer build and whose
+        # bash `$(...)` step is fragile under npm's cmd.exe script shell on Windows.
+        run: cd desktop && npm ci --ignore-scripts
+
+      - name: Run cross-platform path tests
+        run: >
+          cd desktop && npm run test -- --run
+          tests/renderer/file-path.test.ts
+          tests/main/skill-runtime-path-escape.test.ts
+          tests/renderer/changed-files-tree-relativize.test.ts
+          tests/main/cross-platform-path-guard.test.ts
+          tests/renderer/project-artifact-actions.test.tsx
+          tests/main/read-file-content-binary.test.ts
+
+      - name: Build renderer
+        run: cd desktop && npm run build:renderer
