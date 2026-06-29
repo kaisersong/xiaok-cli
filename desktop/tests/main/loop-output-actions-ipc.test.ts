@@ -63,7 +63,13 @@ describe('desktop loop output action IPC', () => {
     } catch {
       // already closed
     }
-    rmSync(rootDir, { recursive: true, force: true });
+    // Windows keeps a transient lock on the SQLite/WAL files just after close;
+    // retry and treat cleanup as best-effort so it never masks test results.
+    try {
+      rmSync(rootDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      /* best-effort temp cleanup */
+    }
   });
 
   function createLoop(outputDirectory = join(rootDir, 'outputs')) {

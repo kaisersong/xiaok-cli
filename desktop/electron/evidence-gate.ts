@@ -122,9 +122,14 @@ async function runAllowedTestCommand({
   return new Promise((resolvePromise) => {
     let settled = false;
     let capturedBytes = 0;
+    // On Windows the allowlisted command resolves to a `.cmd` shim (npm.cmd),
+    // which modern Node refuses to spawn without a shell (throws EINVAL). The
+    // arguments come from a fixed allowlist (no user input), so enabling the
+    // shell here is safe. POSIX keeps shell:false.
+    const useShell = process.platform === 'win32';
     const child = spawn(allowed.command, allowed.args, {
       cwd: workspaceRoot,
-      shell: false,
+      shell: useShell,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const finish = (result: { ok: true } | { ok: false; error: string }) => {

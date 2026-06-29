@@ -36,7 +36,17 @@ describe('evidence gate', () => {
       mkdirSync(join(workspace, 'artifacts'));
       writeFileSync(join(workspace, 'artifacts', 'report.md'), '# report\n');
       writeFileSync(join(outside, 'secret.md'), '# secret\n');
-      symlinkSync(join(outside, 'secret.md'), join(workspace, 'artifacts', 'secret-link.md'));
+
+      // Creating symlinks on Windows requires elevated privileges (or Developer
+      // Mode); skip the symlink-specific assertion when it is not permitted so
+      // the cross-platform artifact checks still run.
+      let symlinkCreated = false;
+      try {
+        symlinkSync(join(outside, 'secret.md'), join(workspace, 'artifacts', 'secret-link.md'));
+        symlinkCreated = true;
+      } catch (err) {
+        if (process.platform !== 'win32') throw err;
+      }
 
       await expect(verifyEvidenceChecks({
         runId: 'run-1',
@@ -54,13 +64,15 @@ describe('evidence gate', () => {
         checks: [{ kind: 'artifact_exists', path: '../secret.md' }],
       })).resolves.toMatchObject({ ok: false, failures: ['artifact_exists path outside workspace'] });
 
-      await expect(verifyEvidenceChecks({
-        runId: 'run-1',
-        nodeId: 'node-run-1-1',
-        result: {},
-        workspaceRoot: workspace,
-        checks: [{ kind: 'artifact_exists', path: 'artifacts/secret-link.md' }],
-      })).resolves.toMatchObject({ ok: false, failures: ['artifact_exists symlink rejected'] });
+      if (symlinkCreated) {
+        await expect(verifyEvidenceChecks({
+          runId: 'run-1',
+          nodeId: 'node-run-1-1',
+          result: {},
+          workspaceRoot: workspace,
+          checks: [{ kind: 'artifact_exists', path: 'artifacts/secret-link.md' }],
+        })).resolves.toMatchObject({ ok: false, failures: ['artifact_exists symlink rejected'] });
+      }
     } finally {
       rmSync(workspace, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });

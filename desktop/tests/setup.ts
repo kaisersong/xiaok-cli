@@ -1,5 +1,45 @@
 import '@testing-library/jest-dom/vitest'
 import { afterEach } from 'vitest'
+import fs from 'node:fs'
+
+// Windows holds transient locks on just-written files / just-closed SQLite
+// handles, so recursive temp-dir cleanup in test teardown frequently throws
+// EPERM/EBUSY *after* the assertions have already passed. That used to surface
+// as dozens of spurious red tests. Make recursive directory removal resilient
+// on Windows only: always retry, and treat transient lock errors during a
+// recursive delete as best-effort (the OS reclaims the temp entry anyway).
+// Single-file removals stay strict so real failures are never masked.
+if (process.platform === 'win32') {
+  const TRANSIENT = new Set(['EPERM', 'EBUSY', 'ENOTEMPTY', 'EACCES'])
+  const isRecursive = (options: unknown): boolean =>
+    typeof options === 'object' && options !== null && (options as { recursive?: boolean }).recursive === true
+
+  const originalRmSync = fs.rmSync.bind(fs)
+  fs.rmSync = ((path: fs.PathLike, options?: fs.RmOptions) => {
+    if (!isRecursive(options)) return originalRmSync(path, options)
+    const opts: fs.RmOptions = { maxRetries: 10, retryDelay: 100, ...options }
+    try {
+      return originalRmSync(path, opts)
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code
+      if (code && TRANSIENT.has(code)) return undefined
+      throw err
+    }
+  }) as typeof fs.rmSync
+
+  const originalRm = fs.promises.rm.bind(fs.promises)
+  fs.promises.rm = (async (path: fs.PathLike, options?: fs.RmOptions) => {
+    if (!isRecursive(options)) return originalRm(path, options)
+    const opts: fs.RmOptions = { maxRetries: 10, retryDelay: 100, ...options }
+    try {
+      return await originalRm(path, opts)
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code
+      if (code && TRANSIENT.has(code)) return undefined
+      throw err
+    }
+  }) as typeof fs.promises.rm
+}
 
 // Reset the desktop API cache between tests so window.xiaokDesktop mocks take effect
 import { _resetDesktopApiCache } from '../renderer/src/shared/desktop';
