@@ -6,6 +6,10 @@ import { spawn } from 'node:child_process';
 import { existsSync, watch, copyFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const isWin = process.platform === 'win32';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(__dirname, '..');
@@ -90,7 +94,10 @@ async function waitForFile(path, timeoutMs = 60_000) {
 function startElectron() {
   copyAssets();
   log('electron', `starting (XIAOK_DESKTOP_DEV_SERVER=${VITE_URL})\n`);
-  const electronBin = resolve(desktopDir, 'node_modules/.bin/electron');
+  // The `electron` module exports the path to the real Electron executable
+  // (electron.exe on Windows), so spawning it needs no shell and is immune to
+  // the .cmd/spaces pitfalls of node_modules/.bin shims.
+  const electronBin = require('electron');
   const child = spawn(electronBin, [mainEntry], {
     cwd: desktopDir,
     env: { ...process.env, XIAOK_DESKTOP_DEV_SERVER: VITE_URL, NODE_ENV: 'development' },
@@ -173,7 +180,10 @@ async function main() {
   process.on('SIGTERM', shutdown);
 
   log('runner', 'launching tsc --watch (main)\n');
-  spawnLogged('tsc', resolve(desktopDir, 'node_modules/.bin/tsc'), [
+  // Run tsc via the current Node on its JS entry instead of the node_modules/.bin
+  // shim, which on Windows is tsc.cmd and cannot be spawned without a shell.
+  spawnLogged('tsc', process.execPath, [
+    resolve(desktopDir, 'node_modules/typescript/bin/tsc'),
     '-p',
     'tsconfig.electron.json',
     '--watch',
@@ -181,8 +191,9 @@ async function main() {
   ]);
 
   log('runner', 'launching vite dev server (renderer)\n');
-  // Use the same vite invocation as `npm run dev` to keep parity.
-  spawnLogged('vite', 'npm', ['run', 'dev'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  // Use the same vite invocation as `npm run dev` to keep parity. `npm` is
+  // npm.cmd on Windows, which requires a shell to launch.
+  spawnLogged('vite', 'npm', ['run', 'dev'], { stdio: ['ignore', 'pipe', 'pipe'], shell: isWin });
 
   log('runner', `waiting for ${mainEntry}\n`);
   await waitForFile(mainEntry, 60_000);
