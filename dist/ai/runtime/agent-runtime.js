@@ -6,6 +6,7 @@ import { buildPromptCacheSegments, resolveModelCapabilities, } from './model-cap
 import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
 import { CompactRunner } from './compact-runner.js';
 import { evaluateVerificationBeforeCompletionGuard } from '../../runtime/guards/verification-before-completion-guard.js';
+import { MODEL_OUTPUT_CAP, MODEL_OUTPUT_TRUNCATION_MARKER } from '../../shared/stream-safety/redact.js';
 export class AgentRuntime {
     adapter;
     registry;
@@ -216,7 +217,7 @@ export class AgentRuntime {
                         ok,
                     });
                     const sessionSnapshot = this.session.exportSnapshot();
-                    const truncated = truncateToolResult(result, undefined, {
+                    const truncated = truncateToolResult(result, MODEL_OUTPUT_CAP + MODEL_OUTPUT_TRUNCATION_MARKER.length, {
                         sessionId: sessionSnapshot.sessionId,
                         toolCallId: toolCall.id,
                         spillDir: join(sessionSnapshot.cwd, '.xiaok', 'spill'),

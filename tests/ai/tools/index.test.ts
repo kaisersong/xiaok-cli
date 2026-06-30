@@ -4,6 +4,7 @@ import { PermissionManager } from '../../../src/ai/permissions/manager.js';
 import { ToolRegistry } from '../../../src/ai/tools/index.js';
 import type { Tool } from '../../../src/types.js';
 import { CapabilityRegistry } from '../../../src/platform/runtime/capability-registry.js';
+import { MODEL_OUTPUT_CAP } from '../../../src/shared/stream-safety/redact.js';
 
 describe('ToolRegistry', () => {
   it('safe tools execute without prompting', async () => {
@@ -195,6 +196,38 @@ describe('ToolRegistry', () => {
         agentId: 'worker-1',
       },
     ]);
+  });
+
+  it('redacts tool results and only caps the model-facing return value', async () => {
+    const observed: string[] = [];
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      onToolObserved: async (event) => {
+        observed.push(event.result);
+      },
+    }, [{
+      permission: 'safe',
+      definition: {
+        name: 'secret_tool',
+        description: 'secret output',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      execute: async () => [
+        'Authorization: Bearer sk-live_abcdefghijklmnopqrstuvwxyz',
+        'x'.repeat(MODEL_OUTPUT_CAP + 32),
+      ].join('\n'),
+    }]);
+
+    const result = await registry.executeTool('secret_tool', {});
+
+    expect(result).toContain('Authorization: Bearer <redacted>');
+    expect(result).toContain('输出已截断');
+    expect(result).not.toContain('sk-live_abcdefghijklmnopqrstuvwxyz');
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toContain('Authorization: Bearer <redacted>');
+    expect(observed[0]).not.toContain('输出已截断');
+    expect(observed[0]).not.toContain('sk-live_abcdefghijklmnopqrstuvwxyz');
+    expect(observed[0].length).toBeGreaterThan(MODEL_OUTPUT_CAP);
   });
 
   it('blocks protected delivered artifact overwrites before tool execution', async () => {

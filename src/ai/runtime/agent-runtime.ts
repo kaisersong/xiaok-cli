@@ -20,6 +20,7 @@ import { CompactRunner } from './compact-runner.js';
 import type { MemoryStore } from '../memory/store.js';
 import { evaluateVerificationBeforeCompletionGuard } from '../../runtime/guards/verification-before-completion-guard.js';
 import type { TraceBundleV1, TraceToolCall } from '../../runtime/trace/schema.js';
+import { MODEL_OUTPUT_CAP, MODEL_OUTPUT_TRUNCATION_MARKER } from '../../shared/stream-safety/redact.js';
 
 export interface AgentRuntimeOptions {
   adapter: ModelAdapter;
@@ -277,7 +278,7 @@ export class AgentRuntime {
             ok,
           });
           const sessionSnapshot = this.session.exportSnapshot();
-          const truncated = truncateToolResult(result, undefined, {
+          const truncated = truncateToolResult(result, MODEL_OUTPUT_CAP + MODEL_OUTPUT_TRUNCATION_MARKER.length, {
             sessionId: sessionSnapshot.sessionId,
             toolCallId: toolCall.id,
             spillDir: join(sessionSnapshot.cwd, '.xiaok', 'spill'),

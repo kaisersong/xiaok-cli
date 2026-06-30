@@ -15,6 +15,7 @@ import { installSkillTool } from './install-skill.js';
 import { uninstallSkillTool } from './uninstall-skill.js';
 import { validateSkillTool } from './validate-skill.js';
 import { createRenderUiTool } from './render-ui.js';
+import { sanitizeToolOutput } from '../../shared/stream-safety/redact.js';
 import { buildCapabilityToolDefinition, buildToolSearchEntry, dedupeToolSearchEntries, getCanonicalToolId, selectToolEntries, } from './tool-identity.js';
 export function buildToolList(skillTool, workspace, extraTools = []) {
     const tools = [
@@ -213,12 +214,14 @@ export class ToolRegistry {
             return `Error: ${protectedOutputDecision.reason}\n${protectedOutputDecision.action}`;
         }
         try {
-            let result = await tool.execute(input, context);
-            const observedResult = result;
+            const rawResult = await tool.execute(input, context);
             // Append hook-provided additional context
+            let result = rawResult;
             if (preHookResult?.additionalContext) {
                 result = `${result}\n${preHookResult.additionalContext}`;
             }
+            const observedOutput = sanitizeToolOutput(rawResult, { cap: false });
+            const observedResult = appendToolWarnings(observedOutput.text, observedOutput.warnings);
             await this.options.onToolObserved?.({
                 phase: 'after',
                 agentId: this.options.agentId ?? 'main',
@@ -228,10 +231,8 @@ export class ToolRegistry {
                 ok: isSuccessfulToolResult(observedResult),
             });
             const warnings = await this.options.hooksRunner?.runPostHooks(tool.definition.name, input) ?? [];
-            if (warnings.length === 0) {
-                return result;
-            }
-            return `${result}\nWarning: ${warnings.join('\nWarning: ')}`;
+            const modelOutput = sanitizeToolOutput(result);
+            return appendToolWarnings(modelOutput.text, [...modelOutput.warnings, ...warnings]);
         }
         catch (e) {
             const errorMessage = formatErrorText(String(e));
@@ -272,6 +273,13 @@ function isSuccessfulToolResult(result) {
         return false;
     }
     return true;
+}
+function appendToolWarnings(result, warnings) {
+    const uniqueWarnings = [...new Set(warnings)];
+    if (uniqueWarnings.length === 0) {
+        return result;
+    }
+    return `${result}\nWarning: ${uniqueWarnings.join('\nWarning: ')}`;
 }
 function resolveWriteTargetPath(toolName, input) {
     const normalized = toolName.toLowerCase();
