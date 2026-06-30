@@ -32,6 +32,7 @@ import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
 import { loadAutoContext, formatLoadedContext } from '../ai/runtime/context-loader.js';
 import { FileSessionStore } from '../ai/runtime/session-store.js';
 import { formatPrintOutput } from './chat-print-mode.js';
+import { writeAssistantTextChunkInOrder } from './chat/assistant-streaming.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
 import { ScrollRegionManager } from '../ui/scroll-region.js';
@@ -1063,6 +1064,22 @@ async function runChat(initialInput, opts) {
         runtimeState.enterStreamingContent();
         mdRenderer.setNewlineCallback(scrollRegion.getNewlineCallback());
     };
+    const handleAssistantTextChunk = (delta, appendText) => {
+        writeAssistantTextChunkInOrder(delta, {
+            noteVisibleAssistantText,
+            appendAssistantText: appendText,
+            noteResponseStarted: () => {
+                runtimeState.noteResponseStarted();
+            },
+            appendStreamingSegment: (text) => {
+                streamingSegmentText += text;
+            },
+            ensureStreamingPhase,
+            writeMarkdown: (text) => {
+                mdRenderer.write(text);
+            },
+        });
+    };
     const getCurrentIntentSummaryLine = () => {
         let source = 'none';
         let line = '';
@@ -1203,14 +1220,9 @@ async function runChat(initialInput, opts) {
             input,
         }, (chunk) => {
             if (chunk.type === 'text') {
-                noteVisibleAssistantText(chunk.delta);
-                continuationText += chunk.delta;
-                if (/\S/.test(chunk.delta)) {
-                    runtimeState.noteResponseStarted();
-                    ensureStreamingPhase();
-                }
-                streamingSegmentText += chunk.delta;
-                mdRenderer.write(chunk.delta);
+                handleAssistantTextChunk(chunk.delta, (delta) => {
+                    continuationText += delta;
+                });
             }
             if (chunk.type === 'usage') {
                 statusBar.update(chunk.usage);
@@ -2776,14 +2788,9 @@ async function runChat(initialInput, opts) {
                                 input: userMsg,
                             }, (chunk) => {
                                 if (chunk.type === 'text') {
-                                    noteVisibleAssistantText(chunk.delta);
-                                    slashAssistantText += chunk.delta;
-                                    if (/\S/.test(chunk.delta)) {
-                                        runtimeState.noteResponseStarted();
-                                        ensureStreamingPhase();
-                                    }
-                                    streamingSegmentText += chunk.delta;
-                                    mdRenderer.write(chunk.delta);
+                                    handleAssistantTextChunk(chunk.delta, (delta) => {
+                                        slashAssistantText += delta;
+                                    });
                                 }
                                 if (chunk.type === 'usage') {
                                     statusBar.update(chunk.usage);
@@ -2869,16 +2876,9 @@ async function runChat(initialInput, opts) {
                     input: inputBlocks,
                 }, (chunk) => {
                     if (chunk.type === 'text') {
-                        noteVisibleAssistantText(chunk.delta);
-                        lastAssistantText += chunk.delta;
-                        if (/\S/.test(chunk.delta)) {
-                            runtimeState.noteResponseStarted();
-                        }
-                        streamingSegmentText += chunk.delta;
-                        if (chunk.delta.length > 0) {
-                            ensureStreamingPhase();
-                        }
-                        mdRenderer.write(chunk.delta);
+                        handleAssistantTextChunk(chunk.delta, (delta) => {
+                            lastAssistantText += delta;
+                        });
                     }
                     if (chunk.type === 'usage') {
                         statusBar.update(chunk.usage);
@@ -2951,14 +2951,9 @@ async function runChat(initialInput, opts) {
                             input: continueBlocks,
                         }, (chunk) => {
                             if (chunk.type === 'text') {
-                                noteVisibleAssistantText(chunk.delta);
-                                lastAssistantText += chunk.delta;
-                                if (/\S/.test(chunk.delta)) {
-                                    runtimeState.noteResponseStarted();
-                                    ensureStreamingPhase();
-                                }
-                                streamingSegmentText += chunk.delta;
-                                mdRenderer.write(chunk.delta);
+                                handleAssistantTextChunk(chunk.delta, (delta) => {
+                                    lastAssistantText += delta;
+                                });
                             }
                             if (chunk.type === 'usage') {
                                 statusBar.update(chunk.usage);

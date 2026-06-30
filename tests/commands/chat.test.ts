@@ -327,6 +327,37 @@ describe('chat terminal layout', () => {
     expect(source).toContain("if (scrollRegion.isActive() && !terminalUiSuspended) {");
   });
 
+  it('should start the interactive streaming phase for every non-empty text chunk before markdown writes', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const helperStart = source.indexOf('const handleAssistantTextChunk = (');
+    const helperEnd = source.indexOf('const getCurrentIntentSummaryLine', helperStart);
+    const helperSource = source.slice(helperStart, helperEnd);
+
+    expect(source).toContain("from './chat/assistant-streaming.js';");
+    expect(helperStart).toBeGreaterThan(-1);
+    expect(helperEnd).toBeGreaterThan(helperStart);
+    expect(helperSource).toContain('writeAssistantTextChunkInOrder(delta, {');
+    expect(helperSource.match(/writeAssistantTextChunkInOrder\(/g) ?? []).toHaveLength(1);
+    expect(source).not.toMatch(/if \(\/\\S\/\.test\(chunk\.delta\)\) \{\s*runtimeState\.noteResponseStarted\(\);\s*ensureStreamingPhase\(\);\s*\}/);
+    expect(source.match(/handleAssistantTextChunk\(chunk\.delta,/g) ?? []).toHaveLength(4);
+  });
+
+  it('should keep print and json text chunks outside the interactive streaming helper', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const printPush = source.indexOf('printChunks.push(chunk.delta);');
+    const printBranchStart = source.lastIndexOf("if (chunk.type === 'text') {", printPush);
+    const printBranchEnd = source.indexOf("if (chunk.type === 'tool_use') {", printPush);
+    const printBranch = source.slice(printBranchStart, printBranchEnd);
+
+    expect(printPush).toBeGreaterThan(-1);
+    expect(printBranchStart).toBeGreaterThan(-1);
+    expect(printBranchEnd).toBeGreaterThan(printPush);
+    expect(printBranch).toContain('printChunks.push(chunk.delta);');
+    expect(printBranch).not.toContain('writeAssistantTextChunkInOrder');
+    expect(printBranch).not.toContain('handleAssistantTextChunk');
+    expect(printBranch).not.toContain('ensureStreamingPhase');
+  });
+
   it('describes --auto as low-risk auto approval instead of unconditional execution', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
