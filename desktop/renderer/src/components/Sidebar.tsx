@@ -288,8 +288,12 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const updateReminderButtonClassName = hasUpdateFailure
     ? 'inline-flex h-8 items-center rounded-md px-1.5 text-[11px] font-medium text-[var(--c-text-tertiary)] transition-[background-color,color,transform] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)] active:scale-[0.96]'
     : 'inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--c-accent)] px-2 text-xs font-medium text-white transition-[background-color,color,transform] duration-[60ms] hover:opacity-90 active:scale-[0.96]';
-  const scheduledListClassName = 'flex flex-col gap-0 max-h-[90px] overflow-y-auto sidebar-scroll';
-  const projectListClassName = 'flex flex-col gap-0 max-h-[90px] overflow-y-auto sidebar-scroll';
+  const scheduledListClassName = activeNav === 'automations'
+    ? 'flex flex-col gap-0'
+    : 'flex flex-col gap-0 max-h-[90px] overflow-y-auto sidebar-scroll';
+  const projectListClassName = activeNav === 'projects'
+    ? 'flex flex-col gap-0'
+    : 'flex flex-col gap-0 max-h-[150px] overflow-y-auto sidebar-scroll';
 
   const handleUpdateReminderClick = () => {
     setShowUpdatePopover(prev => {

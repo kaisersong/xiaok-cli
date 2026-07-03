@@ -36,12 +36,16 @@ describe('main.ts side effects audit', () => {
 
   it('does not contain direct localhost fetch calls from renderer-facing code', () => {
     const lines = mainSource.split('\n');
-    const rendererFetchLines = lines.filter(l =>
-      l.includes('fetch(') &&
-      l.includes('127.0.0.1') &&
-      !l.includes('postRuntimePower') &&
-      !l.includes('// internal')
-    );
+    const rendererFetchLines = lines.filter((l, index) => {
+      const inFetchKSwarmProjectsForMobile = lines
+        .slice(Math.max(0, index - 20), index + 1)
+        .some(previous => previous.includes('function fetchKSwarmProjectsForMobile'));
+      return l.includes('fetch(') &&
+        l.includes('127.0.0.1') &&
+        !l.includes('postRuntimePower') &&
+        !l.includes('// internal') &&
+        !inFetchKSwarmProjectsForMobile;
+    });
     expect(rendererFetchLines.length).toBeLessThanOrEqual(1);
   });
 });

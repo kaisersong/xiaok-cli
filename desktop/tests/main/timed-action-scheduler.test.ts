@@ -379,7 +379,7 @@ describe('TimedActionScheduler', () => {
     expect(runLoop).toHaveBeenCalledWith('artifact-evidence-regression', expect.objectContaining({
       timedActionId: 'loop_with_run_context',
       timedActionRunId: timedRun.runId,
-    }));
+    }), expect.any(AbortSignal));
     expect(timedRun.decision).toEqual(expect.objectContaining({
       loopRunId: 'loop-run-context',
       loopStatus: 'success',

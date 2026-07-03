@@ -345,7 +345,7 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
             status: string;
             scriptResult?: { summary?: string; artifacts?: Array<{ path?: string; type?: string }>; evidenceRefs?: string[] };
             gateDecision?: { status?: string };
-            projectDelivery?: { status?: string };
+            projectDelivery?: { status?: string; finalDeliverableId?: string };
             nodes?: Array<{ id: string; status: string; output?: unknown; parallelGroupId?: string | null }>;
             parallelGroups?: Array<{ id: string; status: string; completedCount: number }>;
           };
@@ -365,7 +365,8 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
         'artifacts/workflow-report.pdf: E2E PDF 交付物',
       ]);
       expect(completedRun.workflowRun.gateDecision?.status).toBe('passed');
-      expect(completedRun.workflowRun.projectDelivery?.status).toBe('delivered');
+      expect(completedRun.workflowRun.projectDelivery?.status).toBe('candidate');
+      expect(completedRun.workflowRun.projectDelivery?.finalDeliverableId).toMatch(/^fd-/);
       expect(seenPrompts.length).toBe(5);
       expect(seenPrompts[0]).toContain('读取报告、产物清单和用户要求');
       expect(seenPrompts.slice(1, 4)).toEqual(expect.arrayContaining([
@@ -404,13 +405,22 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
 
       const detail = await fetchJson<{
         project: { status: string; deliverable?: { artifacts?: Array<{ path?: string; label?: string; type?: string }> } | null };
+        deliverables: Array<{
+          deliverableId: string;
+          status: string;
+          artifactRef?: { path?: string; relativePath?: string; type?: string; mimeType?: string };
+        }>;
         tasks: Array<{ status: string; result?: { artifacts?: Array<{ path?: string; label?: string; type?: string }> } | null }>;
       }>(`${kswarmUrl}/projects/${created.project.id}`);
-      expect(['delivered', 'closed']).toContain(detail.project.status);
-      expect(detail.project.deliverable?.artifacts?.map(artifact => artifact.path)).toEqual([
-        'artifacts/workflow-report.html',
-        'artifacts/workflow-report.pdf',
-      ]);
+      expect(['delivered', 'closed']).not.toContain(detail.project.status);
+      const candidate = detail.deliverables.find(
+        deliverable => deliverable.deliverableId === completedRun.workflowRun.projectDelivery?.finalDeliverableId,
+      );
+      expect(candidate).toMatchObject({
+        status: 'candidate',
+        artifactRef: { relativePath: 'artifacts/workflow-report.html', type: 'report_html', mimeType: 'text/html' },
+      });
+      expect(detail.project.deliverable ?? null).toBeNull();
       expect(detail.tasks.map(task => task.status)).toEqual(['done']);
       expect(detail.tasks[0].result?.artifacts?.map(artifact => artifact.path)).toEqual([
         'artifacts/workflow-report.html',
