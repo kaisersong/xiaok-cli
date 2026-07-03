@@ -15,6 +15,7 @@ function mockKSwarmService(): KSwarmService {
     restart: async () => {},
     getStatus: () => ({ running: true, port: 4400, pid: 1, restartCount: 0, lastError: null }),
     onStatusChange: () => () => {},
+    getDesktopMutationToken: () => 'desktop-token',
     request: async (path: string, init?: RequestInit) => new Response('{"error":"mock"}', { status: 501 }),
   };
 }
@@ -320,6 +321,8 @@ describe('desktop services', () => {
     });
 
     expect(receivedPrompt).toContain(`产物目录：${join(rootDir, 'artifacts')}`);
+    expect(receivedPrompt).toContain('浏览器打印/print-to-pdf');
+    expect(receivedPrompt).toContain('不要用 make-pdf');
     expect(receivedPrompt).toContain('必须产出：markdown, report_html, json');
     expect(receivedPrompt).not.toContain('[object Object]');
     expect(result).toMatchObject({
@@ -2316,8 +2319,12 @@ describe('desktop services', () => {
         if (path === '/projects/proj-bootstrap/tasks') {
           return new Response(JSON.stringify({ ok: true, taskIds: ['item-1'] }));
         }
-        if (path === '/projects/proj-bootstrap/dispatch') {
-          return new Response(JSON.stringify({ ok: true, dispatched: ['item-1'] }));
+        if (path === '/projects/proj-bootstrap/activate-and-start') {
+          return new Response(JSON.stringify({
+            ok: true,
+            phase: 'dispatch_started',
+            dispatch: { ok: true, dispatched: ['item-1'] },
+          }));
         }
         return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
       },
@@ -2387,6 +2394,7 @@ describe('desktop services', () => {
     expect(requests.find(request => request.path === '/projects')?.body).toMatchObject({
       name: '海外AI产品五月动态分析',
       autoStartPlanning: false,
+      startPolicy: 'activate_and_dispatch_after_plan',
       poAgent: 'xiaok-po',
       members: ['xiaok-worker'],
     });
@@ -2403,14 +2411,14 @@ describe('desktop services', () => {
     releasePlanner();
     await waitFor(() => requests.some(request => request.path === '/projects/proj-bootstrap/plan'));
     await waitFor(() => requests.some(request => request.path === '/projects/proj-bootstrap/tasks'));
-    await waitFor(() => requests.some(request => request.path === '/projects/proj-bootstrap/dispatch'));
+    await waitFor(() => requests.some(request => request.path === '/projects/proj-bootstrap/activate-and-start'));
 
     expect(requests.map(request => request.path)).toEqual([
       '/agents',
       '/projects',
       '/projects/proj-bootstrap/plan',
       '/projects/proj-bootstrap/tasks',
-      '/projects/proj-bootstrap/dispatch',
+      '/projects/proj-bootstrap/activate-and-start',
     ]);
     expect(requests.find(request => request.path === '/projects/proj-bootstrap/plan')?.body).toMatchObject({
       fromAgent: 'xiaok-po',
@@ -2425,6 +2433,13 @@ describe('desktop services', () => {
         title: '完成五月 AI 产品动态分析报告',
         assignedAgent: 'xiaok-worker',
       })],
+    });
+    const activateRequest = requests.find(request => request.path === '/projects/proj-bootstrap/activate-and-start');
+    expect(activateRequest?.init?.headers instanceof Headers ? activateRequest.init.headers.get('x-kswarm-mutation-token') : undefined).toBe('desktop-token');
+    expect(activateRequest?.body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      startPolicy: 'activate_and_dispatch_after_plan',
+      idempotencyKey: 'initial-plan-bootstrap:proj-bootstrap:activate_and_dispatch_after_plan',
     });
   });
 
@@ -2516,8 +2531,12 @@ describe('desktop services', () => {
         if (path === '/projects/proj-recover/tasks') {
           return new Response(JSON.stringify({ ok: true, taskIds: ['item-1'] }));
         }
-        if (path === '/projects/proj-recover/dispatch') {
-          return new Response(JSON.stringify({ ok: true, dispatched: ['item-1'] }));
+        if (path === '/projects/proj-recover/activate-and-start') {
+          return new Response(JSON.stringify({
+            ok: true,
+            phase: 'dispatch_started',
+            dispatch: { ok: true, dispatched: ['item-1'] },
+          }));
         }
         return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
       },
@@ -2553,7 +2572,7 @@ describe('desktop services', () => {
 
     await waitFor(() => requests.some(request => request.path === '/projects/proj-recover/plan'));
     await waitFor(() => requests.some(request => request.path === '/projects/proj-recover/tasks'));
-    await waitFor(() => requests.some(request => request.path === '/projects/proj-recover/dispatch'));
+    await waitFor(() => requests.some(request => request.path === '/projects/proj-recover/activate-and-start'));
 
     const jobsData = JSON.parse(readFileSync(join(dataRoot, 'kswarm-initial-plan-bootstrap-jobs.json'), 'utf8'));
     expect(jobsData.jobs).toContainEqual(expect.objectContaining({
@@ -2588,7 +2607,7 @@ describe('desktop services', () => {
         if (path === '/projects/proj-dispatch-fail/tasks') {
           return new Response(JSON.stringify({ ok: true, taskIds: ['item-1'] }));
         }
-        if (path === '/projects/proj-dispatch-fail/dispatch') {
+        if (path === '/projects/proj-dispatch-fail/activate-and-start') {
           return new Response(JSON.stringify({ ok: false, error: 'dispatch_unavailable' }), { status: 200 });
         }
         return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
@@ -2628,7 +2647,7 @@ describe('desktop services', () => {
     }));
     expect(result).toMatchObject({ projectId: 'proj-dispatch-fail', planningStatus: 'queued' });
 
-    await waitFor(() => requests.some(request => request.path === '/projects/proj-dispatch-fail/dispatch'));
+    await waitFor(() => requests.some(request => request.path === '/projects/proj-dispatch-fail/activate-and-start'));
     await waitFor(() => {
       const jobsFile = join(rootDir, 'data', 'kswarm-initial-plan-bootstrap-jobs.json');
       if (!existsSync(jobsFile)) return false;
@@ -2666,8 +2685,12 @@ describe('desktop services', () => {
         if (path === '/projects/proj-replan/tasks') {
           return new Response(JSON.stringify({ ok: true, taskIds: ['item-1'] }));
         }
-        if (path === '/projects/proj-replan/dispatch') {
-          return new Response(JSON.stringify({ ok: true, dispatched: ['item-1'] }));
+        if (path === '/projects/proj-replan/activate-and-start') {
+          return new Response(JSON.stringify({
+            ok: true,
+            phase: 'dispatch_started',
+            dispatch: { ok: true, dispatched: ['item-1'] },
+          }));
         }
         return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
       },
@@ -2706,7 +2729,7 @@ describe('desktop services', () => {
     }));
     expect(result).toMatchObject({ projectId: 'proj-replan', planningStatus: 'queued' });
 
-    await waitFor(() => requests.some(request => request.path === '/projects/proj-replan/dispatch'));
+    await waitFor(() => requests.some(request => request.path === '/projects/proj-replan/activate-and-start'));
     await waitFor(() => {
       const jobsFile = join(rootDir, 'data', 'kswarm-initial-plan-bootstrap-jobs.json');
       if (!existsSync(jobsFile)) return false;
@@ -2715,7 +2738,7 @@ describe('desktop services', () => {
       return job?.status === 'succeeded';
     }, 3000);
     expect(requests.some(request => request.path === '/projects/proj-replan/tasks')).toBe(true);
-    expect(requests.some(request => request.path === '/projects/proj-replan/dispatch')).toBe(true);
+    expect(requests.some(request => request.path === '/projects/proj-replan/activate-and-start')).toBe(true);
   });
 
   it('forwards workFolder from the chat create_project tool to kswarm', async () => {
@@ -2962,6 +2985,45 @@ describe('desktop services', () => {
     expect(body.planningGuidance).toMatch(/report renderer/i);
     expect(body.planningGuidance).toMatch(/HTML/);
     expect(body.planningGuidance).not.toContain('Markdown 报告');
+  });
+
+  it('adds visual PDF export guidance for PDF report projects', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    const kswarmService: KSwarmService = {
+      ...mockKSwarmService(),
+      request: async (path: string, init?: RequestInit) => {
+        requests.push({ path, init });
+        if (path === '/agents') {
+          return new Response(JSON.stringify({
+            agents: [
+              { id: 'po-agent', name: 'PO', roles: ['project_owner'], status: 'idle' },
+              { id: 'worker-agent', name: 'Worker', roles: ['worker'], status: 'idle' },
+            ],
+          }));
+        }
+        if (path === '/projects') {
+          return new Response(JSON.stringify({
+            ok: true,
+            project: { id: 'proj-pdf-report', name: 'PDF Report', status: 'created', createdAt: 123 },
+          }));
+        }
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 });
+      },
+    };
+
+    const tool = createKSwarmCreateProjectTool(kswarmService);
+    await tool.execute({
+      name: 'PDF Report',
+      goal: '输出 PDF 报告',
+      requirements: '先做分析，再交付 PDF 文件。',
+    });
+
+    const createRequest = requests.find(request => request.path === '/projects');
+    expect(createRequest).toBeTruthy();
+    const body = JSON.parse(String(createRequest?.init?.body));
+    expect(body.planningGuidance).toMatch(/report renderer/i);
+    expect(body.planningGuidance).toContain('浏览器打印/print-to-pdf');
+    expect(body.planningGuidance).toContain('不要用 make-pdf');
   });
 
   it('adds report renderer guidance for high-level analysis projects without mutating user fields', async () => {
@@ -3522,6 +3584,16 @@ describe('desktop services', () => {
     expect(sourceFile).toContain('每隔N分钟检查/执行/直到完成');
     expect(sourceFile).toContain('如果用户明确要求写脚本或使用系统定时，则遵循用户要求');
     expect(sourceFile).toContain('不要用 reminder_create 承诺会自动检查项目');
+  });
+
+  it('system prompt preserves visual PDF export format instead of Markdown repagination', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join: pathJoin } = await import('node:path');
+    const sourceFile = readFileSync(pathJoin(__dirname, '../../electron/desktop-services.ts'), 'utf-8');
+
+    expect(sourceFile).toContain('## 视觉产物导出 PDF');
+    expect(sourceFile).toContain('浏览器打印/print-to-pdf');
+    expect(sourceFile).toContain('不要用 make-pdf');
   });
 
   it('timed action tools create notification reminders and agent scheduled tasks', async () => {

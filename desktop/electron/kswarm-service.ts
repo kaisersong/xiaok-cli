@@ -9,7 +9,7 @@
  */
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -494,6 +494,7 @@ export interface KSwarmService {
   getHealthDiagnosticInput(): Promise<KSwarmHealthDiagnosticInput>;
   restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void>;
   onStatusChange(cb: (status: KSwarmServiceStatus) => void): () => void;
+  getDesktopMutationToken(): string;
   /** Make an HTTP request to the KSwarm service. Auto-starts if not running. */
   request(path: string, init?: RequestInit): Promise<Response>;
 }
@@ -557,6 +558,7 @@ export function createKSwarmService(): KSwarmService {
   let stopping = false;
   let startingPromise: Promise<void> | null = null;
   let healthFailureCount = 0;
+  const desktopMutationToken = `xiaok-desktop-${randomBytes(32).toString('base64url')}`;
   const listeners = new Set<(status: KSwarmServiceStatus) => void>();
 
   function getStatus(): KSwarmServiceStatus {
@@ -941,6 +943,7 @@ export function createKSwarmService(): KSwarmService {
         ...process.env,
         KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`,
+        KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken,
         ...(await (async () => {
           try {
             const cfg = await loadConfig();
@@ -1051,6 +1054,10 @@ export function createKSwarmService(): KSwarmService {
       init,
       timeoutMs: REQUEST_TIMEOUT_MS,
     });
+  }
+
+  function getDesktopMutationToken(): string {
+    return desktopMutationToken;
   }
 
   async function start(): Promise<void> {
@@ -1188,5 +1195,5 @@ export function createKSwarmService(): KSwarmService {
     notifyListeners();
   }
 
-  return { start, stop, restart, getStatus, getServiceStatus, getHealthDiagnosticInput, restartRelatedService, onStatusChange, request };
+  return { start, stop, restart, getStatus, getServiceStatus, getHealthDiagnosticInput, restartRelatedService, onStatusChange, getDesktopMutationToken, request };
 }

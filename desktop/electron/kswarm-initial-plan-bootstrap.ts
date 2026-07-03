@@ -9,6 +9,7 @@ export interface KSwarmInitialPlanBootstrapPayload {
   planningGuidance: string;
   poAgent: string;
   members: string[];
+  startPolicy?: 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan';
 }
 
 export interface KSwarmInitialPlanBootstrapJob extends KSwarmInitialPlanBootstrapPayload {

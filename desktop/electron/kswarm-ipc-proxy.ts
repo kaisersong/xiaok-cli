@@ -3,7 +3,7 @@ import type { KSwarmService } from './kswarm-service.js';
 import { KSwarmStreamBridge } from './kswarm-stream-bridge.js';
 
 async function kswarmFetch<T>(
-  service: Pick<KSwarmService, 'request'> | null,
+  service: Pick<KSwarmService, 'request'> & Partial<Pick<KSwarmService, 'getDesktopMutationToken'>> | null,
   method: string,
   path: string,
   body?: unknown,
@@ -12,7 +12,7 @@ async function kswarmFetch<T>(
   try {
     const opts: RequestInit = {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildKSwarmProxyHeaders(service, method),
     };
     if (body !== undefined) opts.body = JSON.stringify(body);
     const res = await service.request(path, opts);
@@ -25,7 +25,7 @@ async function kswarmFetch<T>(
 }
 
 async function kswarmFetchRaw(
-  service: Pick<KSwarmService, 'request'> | null,
+  service: Pick<KSwarmService, 'request'> & Partial<Pick<KSwarmService, 'getDesktopMutationToken'>> | null,
   method: string,
   path: string,
   body?: unknown,
@@ -34,7 +34,7 @@ async function kswarmFetchRaw(
   try {
     const opts: RequestInit = {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildKSwarmProxyHeaders(service, method),
     };
     if (body !== undefined) opts.body = JSON.stringify(body);
     const res = await service.request(path, opts);
@@ -62,7 +62,7 @@ async function kswarmFetchText(
 export function registerKSwarmProxy(
   ipcMain: IpcMain,
   bridge: KSwarmStreamBridge,
-  kswarmService: Pick<KSwarmService, 'request'> | null = null,
+  kswarmService: Pick<KSwarmService, 'request'> & Partial<Pick<KSwarmService, 'getDesktopMutationToken'>> | null = null,
 ): void {
   ipcMain.handle('desktop:kswarm:proxy:get', (_event, path: string) =>
     kswarmFetch(kswarmService, 'GET', path));
@@ -88,7 +88,10 @@ export function registerKSwarmProxy(
   ipcMain.handle('desktop:kswarm:proxy:delete', async (_event, path: string) => {
     try {
       if (!kswarmService) return false;
-      const res = await kswarmService.request(path, { method: 'DELETE' });
+      const res = await kswarmService.request(path, {
+        method: 'DELETE',
+        headers: buildKSwarmProxyHeaders(kswarmService, 'DELETE'),
+      });
       return res.ok;
     } catch {
       return false;
@@ -132,4 +135,16 @@ export function registerKSwarmProxy(
       return { ok: false };
     }
   });
+}
+
+function buildKSwarmProxyHeaders(
+  service: Partial<Pick<KSwarmService, 'getDesktopMutationToken'>> | null,
+  method: string,
+): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (method !== 'GET') {
+    const token = service?.getDesktopMutationToken?.();
+    if (token) headers['x-kswarm-mutation-token'] = token;
+  }
+  return headers;
 }

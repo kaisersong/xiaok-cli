@@ -1056,6 +1056,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       handoff.task.evidenceContract ? `外部来源证据要求：${JSON.stringify(handoff.task.evidenceContract)}` : '',
       handoff.task.repairInstruction ? `修复反馈：${handoff.task.repairInstruction}` : '',
       requiresArtifactEvidence ? '本任务必须写入至少一个完整产物文件到产物目录；不要只在摘要里描述文件，最终交接必须能看到文件路径。' : '',
+      VISUAL_PDF_EXPORT_GUIDANCE,
       requiresArtifactEvidence
         ? '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，把产物文件写入上面的产物目录，使用文件路径作为交接依据，并返回 result manifest。'
         : '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，并返回 result manifest。如果任务没有要求生成文件，artifacts 可以为空数组，但 summary 必须说明完成了哪些要求。',
@@ -1300,21 +1301,24 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     if (!result.ok) {
       return result;
     }
-    // Phase 3: dispatch. Server `/dispatch` is idempotent (only dispatches
-    // pending tasks), so failing the whole job here is safe — the queue will
-    // retry plan(skipped)/tasks(skipped)/dispatch until tasks actually run.
-    // Silently swallowing this left projects planned-but-never-running.
+    // Phase 3: activate and start through the KSwarm lifecycle gate. Calling
+    // `/dispatch` directly leaves dialogue-created projects stuck before
+    // approval, so the retryable queue must own activation + dispatch together.
     try {
-      await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(input.projectId)}/dispatch`, {
+      await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(input.projectId)}/activate-and-start`, withKSwarmDesktopMutationToken(options.kswarmService, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ fromAgent: input.poAgent }),
-      });
+        body: JSON.stringify({
+          fromAgent: input.poAgent,
+          startPolicy: input.startPolicy || 'activate_and_dispatch_after_plan',
+          idempotencyKey: `initial-plan-bootstrap:${input.projectId}:${input.startPolicy || 'activate_and_dispatch_after_plan'}`,
+        }),
+      }));
     } catch (dispatchError) {
       return {
         ok: false as const,
         error: dispatchError instanceof Error ? dispatchError.message : String(dispatchError),
-        phase: 'dispatch' as const,
+        phase: 'activate_and_start' as const,
       };
     }
     return { ok: true as const };
@@ -2132,7 +2136,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     getDataRoot() {
       return options.dataRoot;
     },
-    startProjectPlanning(input: { projectId: string; projectName: string; goal: string; requirements: string; planningGuidance: string; poAgent: string; members: string[] }) {
+    startProjectPlanning(input: KSwarmInitialPlanBootstrapInput) {
       return initialPlanBootstrapQueue.enqueue(input);
     },
   };
@@ -2427,6 +2431,7 @@ function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, parti
       '必须逐条满足 sourceTask.description、sourceTask.acceptanceCriteria 和 sourceTask.requiredOutputs；如果验收标准要求项目 ID、任务 ID、workflow run ID 或 artifact 路径，正文中必须明确写出这些值。',
       '必须把完整、可复核的交付物文件写入产物目录；推荐 markdown 文件，文件名使用英文小写和连字符。',
       '如果 sourceTask 要求 HTML 报告、report renderer 或 kai-report-creator，必须先生成完整 .report.md IR 内容，再调用 render_report_artifact 输出 .html；不要读取 ~/.xiaok/plugins 插件内部文件，不要手写 HTML。',
+      VISUAL_PDF_EXPORT_GUIDANCE,
       upstreamSection,
       'JSON 输出只放 manifest，不要把完整正文塞进 JSON。',
       '只返回一个 JSON 对象，不要返回 Markdown 包裹：',
@@ -2444,6 +2449,7 @@ function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, parti
       '项目目标、项目要求、计划和 taskSnapshot 共同构成本节点的工作范围；请覆盖所有尚未完成但属于项目目标的任务。',
       '必须生成完整、可读、可复核的最终项目交付物文件，并写入产物目录；推荐 markdown 文件，文件名使用英文小写和连字符。',
       '如果项目要求 HTML 报告、report renderer 或 kai-report-creator，必须先生成完整 .report.md IR 内容，再调用 render_report_artifact 输出 .html；不要读取 ~/.xiaok/plugins 插件内部文件，不要手写 HTML。',
+      VISUAL_PDF_EXPORT_GUIDANCE,
       upstreamSection,
       'JSON 输出只放 manifest，不要把完整正文塞进 JSON。',
       '只返回一个 JSON 对象，不要返回 Markdown 包裹：',
@@ -2459,6 +2465,7 @@ function buildKSwarmWorkflowNodePrompt(handoff: KSwarmWorkflowNodeHandoff, parti
     '节点输入里的 prompt 是当前 workflow 节点的唯一工作指令；项目状态和计划只能作为背景。',
     '如果 prompt 要求生成报告、分析、代码或其他交付物，必须把完整、可复核的文件写入产物目录；推荐文件名使用英文小写和连字符。',
     '如果 prompt 要求 HTML 报告、report renderer 或 kai-report-creator，必须先生成完整 .report.md IR 内容，再调用 render_report_artifact 输出 .html；不要读取 ~/.xiaok/plugins 插件内部文件，不要手写 HTML。',
+    VISUAL_PDF_EXPORT_GUIDANCE,
     `真实 workflow run ID 是 ${handoff.workflowRunId}；如果正文需要 workflow run ID，只能使用这个值，不要自行推导、缩写或伪造。`,
     upstreamSection,
     'JSON 输出只放 manifest，不要把完整正文塞进 JSON。',
@@ -2773,6 +2780,14 @@ async function requestKSwarmJson(kswarmService: KSwarmService, path: string, ini
     throw new Error(readString(body.error) || 'kswarm_request_failed');
   }
   return body;
+}
+
+function withKSwarmDesktopMutationToken(kswarmService: KSwarmService, init: RequestInit): RequestInit {
+  const token = kswarmService.getDesktopMutationToken();
+  if (!token) return init;
+  const headers = new Headers(init.headers || {});
+  headers.set('x-kswarm-mutation-token', token);
+  return { ...init, headers };
 }
 
 export async function recoverInterruptedScriptWorkflows(kswarmService: KSwarmService): Promise<void> {
@@ -3283,6 +3298,8 @@ class InMemoryIntentLedgerStore {
   }
 }
 
+const VISUAL_PDF_EXPORT_GUIDANCE = '如果用户要求把已有 HTML、Canvas、报告、幻灯片或网页产物导出为 PDF，必须从对应视觉产物执行浏览器打印/print-to-pdf，保留原产物版式；不要用 make-pdf 或普通 Markdown 转 PDF 重新排版，除非用户明确要求 Markdown 文档 PDF。';
+
 function buildSystemPrompt(): string {
   const home = homedir();
   const cwd = process.cwd();
@@ -3477,6 +3494,10 @@ xiaok 支持从 ClawHub 安装技能。当用户说"安装XX技能"时：
 - **图表/数据可视化**：用 mermaid xychart，不要生成 HTML 文件
 - 只在用户明确要求"生成网页"、"导出 HTML"等场景下才生成 HTML 文件
 - 需要画图时直接在回复中嵌入 mermaid 代码块，渲染器会自动渲染为图形
+
+## 视觉产物导出 PDF
+
+${VISUAL_PDF_EXPORT_GUIDANCE}
 
 ## 任务进度报告
 
@@ -4403,7 +4424,10 @@ interface KSwarmInitialPlanBootstrapInput {
   planningGuidance: string;
   poAgent: string;
   members: string[];
+  startPolicy?: KSwarmProjectStartPolicy;
 }
+
+type KSwarmProjectStartPolicy = 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan';
 
 interface KSwarmCreateProjectToolOptions {
   enqueuePlanBootstrap?: (input: KSwarmInitialPlanBootstrapInput) => { ok: true; status: 'queued' } | { ok: false; error: string };
@@ -4439,19 +4463,30 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
             enum: ['direct', 'workflow', 'auto'],
             description: '项目执行方式。用户明确说 workflow/动态工作流/工作流方式时填 workflow；用户明确说 direct/快速编排时填 direct；不确定时不填或填 auto。',
           },
+          startPolicy: {
+            type: 'string',
+            enum: ['plan_only', 'auto_activate_after_plan', 'activate_and_dispatch_after_plan'],
+            description: '计划完成后的启动策略。用户明确只要计划/先不要执行时填 plan_only；只要自动审批但暂不派发时填 auto_activate_after_plan；对话里要求做完、搞定、自动开始、持续推进到结果时填 activate_and_dispatch_after_plan。',
+          },
         },
         required: ['name', 'goal'],
       },
     },
     async execute(input) {
-      const { name, goal, requirements, memberNames = [], memberCount = 0, workFolder, executionMode, _xiaokRequestScope } = input as {
+      const { name, goal, requirements, memberNames = [], memberCount = 0, workFolder, executionMode, startPolicy, _xiaokRequestScope } = input as {
         name: string; goal: string; requirements?: string;
-        memberNames?: string[]; memberCount?: number; workFolder?: string; executionMode?: string;
+        memberNames?: string[]; memberCount?: number; workFolder?: string; executionMode?: string; startPolicy?: string;
         _xiaokRequestScope?: string;
       };
       const resolvedWorkFolder = typeof workFolder === 'string' ? workFolder.trim() : '';
       const resolvedExecutionMode = resolveCreateProjectExecutionMode({
         executionMode,
+        name,
+        goal,
+        requirements: requirements || '',
+      });
+      const resolvedStartPolicy = resolveCreateProjectStartPolicy({
+        startPolicy,
         name,
         goal,
         requirements: requirements || '',
@@ -4534,6 +4569,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
                 source: explicitlyNamedMemberIds.has(agentId) ? 'explicit_user' : 'default_seed',
               })),
             },
+            startPolicy: resolvedStartPolicy,
             ...(resolvedExecutionMode ? { executionMode: resolvedExecutionMode } : {}),
             ...(options.enqueuePlanBootstrap ? { autoStartPlanning: false } : {}),
             ...(resolvedWorkFolder ? { workFolder: resolvedWorkFolder } : {}),
@@ -4553,6 +4589,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
             planningGuidance,
             poAgent,
             members: sanitizedMembers,
+            startPolicy: resolvedStartPolicy,
           });
           if (!enqueueResult.ok) {
             return JSON.stringify({
@@ -4575,6 +4612,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
           createdAt: project.createdAt,
           memberCount: sanitizedMembers.length,
           ...(resolvedExecutionMode ? { executionMode: resolvedExecutionMode } : {}),
+          startPolicy: resolvedStartPolicy,
           ...(reused ? { reused: true } : {}),
           ...(planningStatus ? { planningStatus } : {}),
         });
@@ -4599,6 +4637,34 @@ function resolveCreateProjectExecutionMode(input: {
     input.requirements,
   ].join('\n'));
   return inferred || (explicit === 'auto' ? 'auto' : undefined);
+}
+
+function resolveCreateProjectStartPolicy(input: {
+  startPolicy?: unknown;
+  name: string;
+  goal: string;
+  requirements: string;
+}): KSwarmProjectStartPolicy {
+  const explicit = normalizeCreateProjectStartPolicy(input.startPolicy);
+  if (explicit) return explicit;
+  const text = [input.name, input.goal, input.requirements].join('\n');
+  if (/(先不要执行|不要开始执行|暂不执行|只要计划|只出计划|只规划|先出计划|让我审批|等我确认)/i.test(text)) {
+    return 'plan_only';
+  }
+  if (/(先规划|帮我拆计划|先拆解|先建项目)/i.test(text)) {
+    return 'auto_activate_after_plan';
+  }
+  return 'activate_and_dispatch_after_plan';
+}
+
+function normalizeCreateProjectStartPolicy(value: unknown): KSwarmProjectStartPolicy | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  if (normalized === 'plan_only' || normalized === 'auto_activate_after_plan' || normalized === 'activate_and_dispatch_after_plan') {
+    return normalized;
+  }
+  if (normalized === 'auto_dispatch_after_plan') return 'activate_and_dispatch_after_plan';
+  return undefined;
 }
 
 function normalizeCreateProjectExecutionMode(value: unknown): 'direct' | 'workflow_preferred' | 'auto' | undefined {
@@ -4647,6 +4713,7 @@ function buildCreateProjectPlanningGuidanceForTool(input: { goal: string; requir
   const text = `${input.goal || ''}\n${input.requirements || ''}`;
   const explicitMarkdown = /(\.md\b|\.markdown\b|\bmarkdown\b)/i.test(text);
   const explicitPptx = /(\.pptx\b|\bpptx\b|\bpowerpoint\b|\bppt\s*(文件|file|deck)?\b)/i.test(text);
+  const explicitPdf = /(\.pdf\b|\bpdf\b|PDF文件|pdf文件)/i.test(text);
   const slide = /(幻灯片|演示文稿|slide deck|slides|presentation)/i.test(text);
   const report = /(报告|\breport\b)/i.test(text);
   const analysisReport = !report && isAnalysisReportLikeProject(text);
@@ -4662,7 +4729,8 @@ function buildCreateProjectPlanningGuidanceForTool(input: { goal: string; requir
       '输出意图：用户要演示文稿/幻灯片。',
       '计划中必须安排最终任务使用 slide renderer 生成 HTML deck；不要默认改成 PPTX。',
       '前序内容任务可以产出素材或草稿，但最终交付物必须是 slide renderer HTML。',
-    ].join('\n');
+      explicitPdf ? VISUAL_PDF_EXPORT_GUIDANCE : '',
+    ].filter(Boolean).join('\n');
   }
   if (report && explicitMarkdown) {
     return [
@@ -4678,7 +4746,8 @@ function buildCreateProjectPlanningGuidanceForTool(input: { goal: string; requir
         : '输出意图：用户要报告，最终任务必须使用 report renderer 生成 HTML 报告。',
       '不要把用户目标改写为其他交付格式。',
       '前序研究/写作任务可以产出素材或中间 Markdown，但最终交付物必须是 report renderer HTML。',
-    ].join('\n');
+      explicitPdf ? VISUAL_PDF_EXPORT_GUIDANCE : '',
+    ].filter(Boolean).join('\n');
   }
   return '';
 }

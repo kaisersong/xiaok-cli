@@ -19,7 +19,7 @@ describe('kswarm ipc proxy', () => {
     const { ipcMain, handlers } = createIpcMainMock();
     const request = vi.fn(async () => new Response(JSON.stringify({ ok: true, project: { id: 'proj-1' } }), { status: 200 }));
 
-    registerKSwarmProxy(ipcMain as never, { subscribe: vi.fn(), unsubscribe: vi.fn(), getConnectionStatus: vi.fn(() => 'connected') } as never, { request });
+    registerKSwarmProxy(ipcMain as never, { subscribe: vi.fn(), unsubscribe: vi.fn(), getConnectionStatus: vi.fn(() => 'connected') } as never, { request, getDesktopMutationToken: () => 'desktop-token' });
 
     const handler = handlers.get('desktop:kswarm:proxy:post');
     expect(handler).toBeDefined();
@@ -27,6 +27,7 @@ describe('kswarm ipc proxy', () => {
 
     expect(request).toHaveBeenCalledWith('/projects', expect.objectContaining({
       method: 'POST',
+      headers: expect.objectContaining({ 'x-kswarm-mutation-token': 'desktop-token' }),
       body: JSON.stringify({ name: 'Demo' }),
     }));
     expect(result).toEqual({ ok: true, project: { id: 'proj-1' } });
