@@ -358,6 +358,63 @@ describe('chat terminal layout', () => {
     expect(printBranch).not.toContain('ensureStreamingPhase');
   });
 
+  it('should keep terminal streaming boundary helpers behind local post-flush wrappers', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const renderStart = source.indexOf('const renderFooterChrome = (): void => {');
+    const renderEnd = source.indexOf('const endStreamingPhaseForInterrupt = (): void => {', renderStart);
+    const renderSource = source.slice(renderStart, renderEnd);
+    const interruptStart = renderEnd;
+    const interruptEnd = source.indexOf('const ensureStreamingPhase = (): void => {', interruptStart);
+    const interruptSource = source.slice(interruptStart, interruptEnd);
+
+    expect(source).toContain("from './chat/terminal-streaming-boundary.js';");
+    expect(renderStart).toBeGreaterThan(-1);
+    expect(renderEnd).toBeGreaterThan(renderStart);
+    expect(interruptEnd).toBeGreaterThan(interruptStart);
+
+    const renderFlush = renderSource.indexOf('flushStreamingMarkdown();');
+    const renderFooterState = renderSource.indexOf('const footerOptions = {');
+    const renderHelper = renderSource.indexOf('renderFooterChromeInOrder(');
+    expect(renderFlush).toBeGreaterThan(-1);
+    expect(renderFooterState).toBeGreaterThan(renderFlush);
+    expect(renderHelper).toBeGreaterThan(renderFooterState);
+    expect(renderSource).not.toContain('scrollRegion.endContentStreaming(');
+    expect(renderSource).not.toContain('scrollRegion.renderFooter(');
+
+    const interruptFlush = interruptSource.indexOf('flushStreamingMarkdown();');
+    const interruptFooterState = interruptSource.indexOf('const footerOptions = {');
+    const interruptHelper = interruptSource.indexOf('endStreamingPhaseForInterruptInOrder(');
+    expect(interruptFlush).toBeGreaterThan(-1);
+    expect(interruptFooterState).toBeGreaterThan(interruptFlush);
+    expect(interruptHelper).toBeGreaterThan(interruptFooterState);
+    expect(interruptSource).not.toContain('runtimeState.enterToolInterrupt();');
+    expect(interruptSource).not.toContain('scrollRegion.endContentStreaming(');
+  });
+
+  it('should keep flushStreamingMarkdown synchronous while terminal boundary extraction is local', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+
+    expect(source).toContain('const flushStreamingMarkdown = (): void => {');
+    expect(source).not.toContain('const flushStreamingMarkdown = async');
+    expect(source).not.toContain('await flushStreamingMarkdown();');
+  });
+
+  it('should invalidate the pending streaming segment when markdown flush throws', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const flushStart = source.indexOf('const flushStreamingMarkdown = (): void => {');
+    const flushEnd = source.indexOf('// 收集历史消息用于稍后打印', flushStart);
+    const flushSource = source.slice(flushStart, flushEnd);
+    const finallyIndex = flushSource.indexOf('finally');
+    const resetIndex = flushSource.lastIndexOf('resetStreamingSegment();');
+
+    expect(flushStart).toBeGreaterThan(-1);
+    expect(flushEnd).toBeGreaterThan(flushStart);
+    expect(flushSource).toContain('const renderedSegment = streamingSegmentText;');
+    expect(flushSource).toContain('mdRenderer.flush();');
+    expect(finallyIndex).toBeGreaterThan(-1);
+    expect(resetIndex).toBeGreaterThan(finallyIndex);
+  });
+
   it('describes --auto as low-risk auto approval instead of unconditional execution', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 

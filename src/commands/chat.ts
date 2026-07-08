@@ -47,6 +47,10 @@ import { loadAutoContext, formatLoadedContext } from '../ai/runtime/context-load
 import { FileSessionStore, type PersistedSessionSnapshot } from '../ai/runtime/session-store.js';
 import { formatPrintOutput } from './chat-print-mode.js';
 import { writeAssistantTextChunkInOrder } from './chat/assistant-streaming.js';
+import {
+  endStreamingPhaseForInterruptInOrder,
+  renderFooterChromeInOrder,
+} from './chat/terminal-streaming-boundary.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
 import { ScrollRegionManager } from '../ui/scroll-region.js';
@@ -928,19 +932,22 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
   const flushStreamingMarkdown = (): void => {
     const renderedSegment = streamingSegmentText;
-    const flushResult = mdRenderer.flush();
-    if (scrollRegion.isActive() && scrollRegion.isContentStreaming()) {
-      if (renderedSegment) {
-        scrollRegion.syncContentCursorFromRenderedLines(MarkdownRenderer.renderToLines(renderedSegment));
-      } else if (flushResult.rows > 0) {
-        if (flushResult.renderedLine) {
-          scrollRegion.advanceContentCursorByRenderedText(flushResult.renderedLine, { finalizeLine: true });
-        } else {
-          scrollRegion.advanceContentCursor(flushResult.rows);
+    try {
+      const flushResult = mdRenderer.flush();
+      if (scrollRegion.isActive() && scrollRegion.isContentStreaming()) {
+        if (renderedSegment) {
+          scrollRegion.syncContentCursorFromRenderedLines(MarkdownRenderer.renderToLines(renderedSegment));
+        } else if (flushResult.rows > 0) {
+          if (flushResult.renderedLine) {
+            scrollRegion.advanceContentCursorByRenderedText(flushResult.renderedLine, { finalizeLine: true });
+          } else {
+            scrollRegion.advanceContentCursor(flushResult.rows);
+          }
         }
       }
+    } finally {
+      resetStreamingSegment();
     }
-    resetStreamingSegment();
   };
 
   // 收集历史消息用于稍后打印（在欢迎页之后）
@@ -1162,20 +1169,18 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
 
     try {
+      flushStreamingMarkdown();
       const footerOptions = {
         inputPrompt: getFooterInputPrompt(),
         summaryLine: getCurrentIntentSummaryLine(),
         statusLine: statusBar.getStatusLine(),
       };
 
-      if (scrollRegion.isContentStreaming()) {
-        scrollRegion.endContentStreaming(footerOptions);
-        mdRenderer.beginNewSegment();
-        resetStreamingSegment();
-      } else {
-        scrollRegion.renderFooter(footerOptions);
-      }
-      replRenderer.prepareForInput();
+      renderFooterChromeInOrder({
+        scrollRegion,
+        replRenderer,
+        mdRenderer,
+      }, footerOptions);
     } catch (error) {
       suspendInteractiveUi('render_footer_chrome', error);
     }
@@ -1186,20 +1191,23 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       return;
     }
 
-    flushStreamingMarkdown();
-    runtimeState.enterToolInterrupt();
     try {
-      scrollRegion.endContentStreaming({
+      flushStreamingMarkdown();
+      const footerOptions = {
         inputPrompt: getFooterInputPrompt(),
         summaryLine: getCurrentIntentSummaryLine(),
         statusLine: statusBar.getStatusLine(),
-      });
+      };
+
+      endStreamingPhaseForInterruptInOrder({
+        scrollRegion,
+        runtimeState,
+        mdRenderer,
+      }, footerOptions);
       replRenderer.prepareForInput();
     } catch (error) {
       suspendInteractiveUi('end_streaming_interrupt', error);
     }
-    mdRenderer.beginNewSegment();
-    resetStreamingSegment();
   };
 
   const ensureStreamingPhase = (): void => {
