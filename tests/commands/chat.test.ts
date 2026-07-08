@@ -391,6 +391,46 @@ describe('chat terminal layout', () => {
     expect(interruptSource).not.toContain('scrollRegion.endContentStreaming(');
   });
 
+  it('should keep orchestration and progress transcript writes local and after streaming interruption flush', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const progressStart = source.indexOf('function writeProgressTranscriptNote(note: string): void {');
+    const progressEnd = source.indexOf('const maybeWriteThinkingOnlyToolNotice = (): void => {', progressStart);
+    const progressSource = source.slice(progressStart, progressEnd);
+    const orchestrationStart = source.indexOf('const writeOrchestrationBlock = (block: string): void => {');
+    const orchestrationEnd = source.indexOf('const persistSession = async', orchestrationStart);
+    const orchestrationSource = source.slice(orchestrationStart, orchestrationEnd);
+
+    expect(source).not.toContain("from './chat/terminal-surface.js';");
+    expect(source).not.toContain("from './chat/orchestration-transcript.js';");
+    expect(source).not.toContain('new TerminalSurface(');
+
+    expect(progressStart).toBeGreaterThan(-1);
+    expect(progressEnd).toBeGreaterThan(progressStart);
+    const progressBlock = progressSource.indexOf('const block = formatProgressNote(note);');
+    const progressFlush = progressSource.indexOf('endStreamingPhaseForInterrupt();');
+    const progressScrollWrite = progressSource.indexOf('scrollRegion.writeAtContentCursor(block);');
+    const progressStdoutWrite = progressSource.indexOf('process.stdout.write(block);');
+    expect(progressBlock).toBeGreaterThan(-1);
+    expect(progressFlush).toBeGreaterThan(progressBlock);
+    expect(progressScrollWrite).toBeGreaterThan(progressFlush);
+    expect(progressStdoutWrite).toBeGreaterThan(progressFlush);
+    expect(progressSource).not.toContain('renderFooterChromeInOrder(');
+
+    expect(orchestrationStart).toBeGreaterThan(-1);
+    expect(orchestrationEnd).toBeGreaterThan(orchestrationStart);
+    const orchestrationFlush = orchestrationSource.indexOf('endStreamingPhaseForInterrupt();');
+    const orchestrationSeparator = orchestrationSource.indexOf('const separatedBlock =');
+    const orchestrationScrollWrite = orchestrationSource.indexOf('scrollRegion.writeAtContentCursor(separatedBlock);');
+    const orchestrationStdoutWrite = orchestrationSource.indexOf('process.stdout.write(separatedBlock);');
+    expect(orchestrationFlush).toBeGreaterThan(-1);
+    expect(orchestrationSeparator).toBeGreaterThan(orchestrationFlush);
+    expect(orchestrationScrollWrite).toBeGreaterThan(orchestrationSeparator);
+    expect(orchestrationStdoutWrite).toBeGreaterThan(orchestrationSeparator);
+    expect(orchestrationSource.match(/resetStreamingSegment\(\);/g) ?? []).toHaveLength(2);
+    expect(orchestrationSource).not.toContain('renderFooterChromeInOrder(');
+    expect(orchestrationSource).not.toContain('endStreamingPhaseForInterruptInOrder(');
+  });
+
   it('should keep flushStreamingMarkdown synchronous while terminal boundary extraction is local', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
