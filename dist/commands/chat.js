@@ -34,6 +34,7 @@ import { FileSessionStore } from '../ai/runtime/session-store.js';
 import { formatPrintOutput } from './chat-print-mode.js';
 import { writeAssistantTextChunkInOrder } from './chat/assistant-streaming.js';
 import { runInteractiveRuntimeTurn, } from './chat/runtime-turn-runner.js';
+import { createChatIntentTurnState } from './chat/intent-turn-state.js';
 import { endStreamingPhaseForInterruptInOrder, renderFooterChromeInOrder, } from './chat/terminal-streaming-boundary.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
@@ -248,12 +249,9 @@ async function runChat(initialInput, opts) {
     let stopBusyCapture = () => { };
     let currentTurnAbortController = null;
     let skipStopHookAutoContinue = false;
-    let activeIntentReminderBlock;
-    let currentTurnIntentPlan;
-    let currentTurnStageIndex = 0;
-    let currentTurnStageStatus = 'Drafting Plan';
+    const intentTurnState = createChatIntentTurnState();
+    let preparedIntentTurnSequence = 0;
     let currentTurnStageObservedSkillNames = new Map();
-    let completedTurnIntentSummaryLine = '';
     let currentIntentLedger;
     let currentSkillEvalState = persistedSession?.skillEval
         ? cloneSessionSkillEvalState(persistedSession.skillEval)
@@ -263,6 +261,25 @@ async function runChat(initialInput, opts) {
         : createEmptySessionSkillExecutionState(Date.now());
     const skillAdherenceStore = new FileSkillAdherenceStore();
     let activeSkillInvocationId = null;
+    const beginPreparedIntentTurnContext = () => {
+        const turnToken = `${sessionId}:prepared-intent:${++preparedIntentTurnSequence}`;
+        intentTurnState.beginTurn(turnToken);
+        currentTurnStageObservedSkillNames = new Map();
+        return turnToken;
+    };
+    const carryPreparedIntentContextToRuntimeTurn = (turnToken) => {
+        const snapshot = intentTurnState.getSnapshot();
+        const plan = snapshot.currentTurnIntentPlan;
+        const reminderBlock = snapshot.activeIntentReminderBlock;
+        intentTurnState.beginTurn(turnToken);
+        if (plan) {
+            intentTurnState.setPlan(turnToken, plan);
+        }
+        if (reminderBlock) {
+            intentTurnState.setActiveIntentReminderBlock(turnToken, reminderBlock);
+        }
+        currentTurnStageObservedSkillNames = new Map();
+    };
     const requestCurrentTurnAbort = () => {
         if (process.env['XIAOK_NO_ESC_INTERRUPT'] === '1') {
             return;
@@ -486,7 +503,7 @@ async function runChat(initialInput, opts) {
             ledgerStore: intentLedgerStore,
             sessionId,
             instanceId,
-            getTurnIntentPlan: () => currentTurnIntentPlan,
+            getTurnIntentPlan: () => intentTurnState.getSnapshot().currentTurnIntentPlan,
         }),
         createAskUserQuestionTool({
             onEnterInteractive: () => askUserOnEnter?.(),
@@ -682,7 +699,7 @@ async function runChat(initialInput, opts) {
         getPromptInput: async (promptCwd) => getPromptInput(promptCwd, skills),
         agent,
         getSkillEntries: () => toSkillEntries(skills),
-        getIntentReminderBlock: () => activeIntentReminderBlock,
+        getIntentReminderBlock: () => intentTurnState.getSnapshot().activeIntentReminderBlock,
     });
     skillCatalogWatcher = createSkillCatalogWatcher({
         cwd,
@@ -1106,13 +1123,14 @@ async function runChat(initialInput, opts) {
     const getCurrentIntentSummaryLine = () => {
         let source = 'none';
         let line = '';
-        if (currentTurnIntentPlan) {
+        const intentTurnSnapshot = intentTurnState.getSnapshot();
+        if (intentTurnSnapshot.currentTurnIntentPlan) {
             source = 'turn';
             line = getCurrentTurnSummaryLine();
         }
-        else if (completedTurnIntentSummaryLine) {
+        else if (intentTurnSnapshot.completedTurnIntentSummaryLine) {
             source = 'completed_turn';
-            line = completedTurnIntentSummaryLine;
+            line = intentTurnSnapshot.completedTurnIntentSummaryLine;
         }
         else if (currentIntentLedger.activeIntentId
             && currentIntentLedger.intents.find((intent) => (intent.intentId === currentIntentLedger.activeIntentId
@@ -1303,8 +1321,10 @@ async function runChat(initialInput, opts) {
         return activeIntent;
     };
     const resetCurrentTurnSummary = () => {
-        currentTurnStageIndex = 0;
-        currentTurnStageStatus = 'Drafting Plan';
+        const snapshot = intentTurnState.getSnapshot();
+        if (snapshot.activeTurnToken) {
+            intentTurnState.setPlan(snapshot.activeTurnToken, snapshot.currentTurnIntentPlan);
+        }
         currentTurnStageObservedSkillNames = new Map();
     };
     const normalizeStageMatchText = (value) => value.toLowerCase();
@@ -1345,12 +1365,13 @@ async function runChat(initialInput, opts) {
         return score;
     };
     const findBestMatchingStageIndex = (scoreStage) => {
-        if (!currentTurnIntentPlan) {
+        const plan = intentTurnState.getSnapshot().currentTurnIntentPlan;
+        if (!plan) {
             return -1;
         }
         let bestIndex = -1;
         let bestScore = 0;
-        currentTurnIntentPlan.stages.forEach((stage, index) => {
+        plan.stages.forEach((stage, index) => {
             const score = scoreStage(stage);
             if (score > bestScore || (score === bestScore && score > 0 && index > bestIndex)) {
                 bestIndex = index;
@@ -1361,18 +1382,23 @@ async function runChat(initialInput, opts) {
     };
     const inferStageIndexForSkillName = (skillName) => (findBestMatchingStageIndex((stage) => scoreStageForSkillName(stage, skillName)));
     const inferStageIndexForTool = (toolName, toolInput) => (findBestMatchingStageIndex((stage) => scoreStageForToolInput(stage, toolName, toolInput)));
-    const advanceCurrentTurnStage = (stageIndex, announce = false) => {
-        if (!currentTurnIntentPlan || stageIndex < 0 || stageIndex >= currentTurnIntentPlan.stages.length) {
+    const advanceCurrentTurnStage = (turnToken, stageIndex, announce = false) => {
+        const snapshot = intentTurnState.getSnapshot();
+        const plan = snapshot.currentTurnIntentPlan;
+        if (!intentTurnState.isActiveTurn(turnToken)
+            || !plan
+            || stageIndex < 0
+            || stageIndex >= plan.stages.length) {
             return;
         }
-        if (stageIndex > currentTurnStageIndex) {
-            currentTurnStageIndex = stageIndex;
+        if (stageIndex > snapshot.currentTurnStageIndex) {
+            intentTurnState.noteStageActivated(turnToken, stageIndex);
             if (announce) {
-                const stage = currentTurnIntentPlan.stages[stageIndex];
+                const stage = plan.stages[stageIndex];
                 if (stage) {
                     writeOrchestrationBlock(formatStageActivatedTranscriptBlock({
                         order: stage.order,
-                        totalStages: currentTurnIntentPlan.stages.length,
+                        totalStages: plan.stages.length,
                         label: stage.label,
                     }));
                 }
@@ -1380,11 +1406,13 @@ async function runChat(initialInput, opts) {
         }
     };
     const getStageSkillNames = (stage) => ([...(currentTurnStageObservedSkillNames.get(stage.order) ?? [])]);
-    const recordCurrentTurnStageSkill = (stageIndex, skillName) => {
+    const recordCurrentTurnStageSkill = (turnToken, stageIndex, skillName) => {
         const normalized = skillName.trim();
-        if (!currentTurnIntentPlan
+        const plan = intentTurnState.getSnapshot().currentTurnIntentPlan;
+        if (!intentTurnState.isActiveTurn(turnToken)
+            || !plan
             || stageIndex < 0
-            || stageIndex >= currentTurnIntentPlan.stages.length
+            || stageIndex >= plan.stages.length
             || !normalized
             || normalized.startsWith('generic_llm::')) {
             return;
@@ -1393,61 +1421,65 @@ async function runChat(initialInput, opts) {
         current.add(normalized);
         currentTurnStageObservedSkillNames.set(stageIndex, current);
     };
-    const maybeAdvanceCurrentTurnStageForTool = (toolName, toolInput) => {
-        if (!currentTurnIntentPlan) {
+    const maybeAdvanceCurrentTurnStageForTool = (turnToken, toolName, toolInput) => {
+        if (!intentTurnState.isActiveTurn(turnToken) || !intentTurnState.getSnapshot().currentTurnIntentPlan) {
             return;
         }
         if (toolName !== 'skill') {
-            advanceCurrentTurnStage(inferStageIndexForTool(toolName, toolInput), true);
-            currentTurnStageStatus = 'Working';
+            advanceCurrentTurnStage(turnToken, inferStageIndexForTool(toolName, toolInput), true);
+            intentTurnState.noteStepRunning(turnToken);
             return;
         }
         const skillName = typeof toolInput.name === 'string' ? toolInput.name.trim() : '';
         if (!skillName) {
-            currentTurnStageStatus = 'Working';
+            intentTurnState.noteStepRunning(turnToken);
             return;
         }
         const stageIndex = inferStageIndexForSkillName(skillName);
-        advanceCurrentTurnStage(stageIndex, true);
-        recordCurrentTurnStageSkill(stageIndex, skillName);
-        currentTurnStageStatus = 'Working';
+        advanceCurrentTurnStage(turnToken, stageIndex, true);
+        recordCurrentTurnStageSkill(turnToken, stageIndex, skillName);
+        intentTurnState.noteStepRunning(turnToken);
     };
     const getCurrentTurnSummaryLine = () => {
-        if (!currentTurnIntentPlan) {
+        const snapshot = intentTurnState.getSnapshot();
+        const plan = snapshot.currentTurnIntentPlan;
+        if (!plan) {
             return '';
         }
-        const stages = currentTurnIntentPlan.stages;
-        const stage = stages[Math.min(currentTurnStageIndex, Math.max(stages.length - 1, 0))];
+        const stages = plan.stages;
+        const stage = stages[Math.min(snapshot.currentTurnStageIndex, Math.max(stages.length - 1, 0))];
         if (!stage) {
             return '';
         }
         return formatCurrentTurnIntentSummaryLine({
-            deliverable: currentTurnIntentPlan.deliverable,
+            deliverable: plan.deliverable,
             stageOrder: stage.order,
             totalStages: stages.length,
             stageLabel: stage.label,
             skillNames: getStageSkillNames(stage),
-            status: currentTurnStageStatus,
+            status: snapshot.currentTurnStageStatus,
         });
     };
     const getCurrentTurnStageSummaryBlock = () => {
-        if (!currentTurnIntentPlan || currentTurnIntentPlan.stages.length <= 1) {
+        const snapshot = intentTurnState.getSnapshot();
+        const plan = snapshot.currentTurnIntentPlan;
+        if (!plan || plan.stages.length <= 1) {
             return '';
         }
-        const totalStages = currentTurnIntentPlan.stages.length;
+        const totalStages = plan.stages.length;
         return formatIntentStageSummaryTranscriptBlock({
-            deliverable: currentTurnIntentPlan.deliverable,
-            stages: currentTurnIntentPlan.stages.map((stage) => ({
+            deliverable: plan.deliverable,
+            stages: plan.stages.map((stage) => ({
                 order: stage.order,
                 totalStages,
                 label: stage.label,
                 skillNames: getStageSkillNames(stage),
-                status: stage.order <= currentTurnStageIndex ? 'Completed' : 'Skipped',
+                status: stage.order <= snapshot.currentTurnStageIndex ? 'Completed' : 'Skipped',
             })),
         });
     };
     const finalizeCurrentTurnIntentIfNeeded = async () => {
-        const intentId = currentTurnIntentPlan?.intentId;
+        const intentId = intentTurnState.getSnapshot().currentTurnIntentPlan?.intentId;
         if (!intentId) {
             return;
         }
@@ -1484,6 +1516,7 @@ async function runChat(initialInput, opts) {
     };
     let intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
     const prepareIntentReminderForInput = async (input) => {
+        const turnToken = beginPreparedIntentTurnContext();
         const activeIntent = getWaitingUserIntentForInput(input);
         const decision = await intentBoundaryResolver.resolve({
             instanceId,
@@ -1506,18 +1539,17 @@ async function runChat(initialInput, opts) {
                 }
                 : undefined,
         });
-        currentTurnIntentPlan = decision.kind === 'intent' ? decision.plan : undefined;
-        resetCurrentTurnSummary();
-        if (currentTurnIntentPlan?.continuationMode === 'continue_active') {
-            activeIntentReminderBlock = buildIntentReminderBlock(currentIntentLedger, instanceId);
+        intentTurnState.setPlan(turnToken, decision.kind === 'intent' ? decision.plan : undefined);
+        const plan = intentTurnState.getSnapshot().currentTurnIntentPlan;
+        if (plan?.continuationMode === 'continue_active') {
+            intentTurnState.setActiveIntentReminderBlock(turnToken, buildIntentReminderBlock(currentIntentLedger, instanceId));
             return;
         }
-        activeIntentReminderBlock = undefined;
+        intentTurnState.setActiveIntentReminderBlock(turnToken, undefined);
     };
     const clearTurnIntentContext = () => {
-        currentTurnIntentPlan = undefined;
-        activeIntentReminderBlock = undefined;
-        resetCurrentTurnSummary();
+        intentTurnState.clearTurnContextPreservingCompletedSummary();
+        currentTurnStageObservedSkillNames = new Map();
     };
     // Stage executor debug analysis
     const runStageAnalysis = async (userInput) => {
@@ -1561,14 +1593,16 @@ async function runChat(initialInput, opts) {
         return { stages, results, debugEvents };
     };
     const primeTurnIntentPlan = async (renderTranscriptBlock = false) => {
-        if (!currentTurnIntentPlan) {
+        const snapshot = intentTurnState.getSnapshot();
+        const turnIntentPlan = snapshot.currentTurnIntentPlan;
+        const turnToken = snapshot.activeTurnToken;
+        if (!turnIntentPlan || !turnToken) {
             return;
         }
-        const turnIntentPlan = currentTurnIntentPlan;
         const beforeIntentCount = currentIntentLedger.intents.length;
         currentIntentLedger = await bootstrapTurnIntentPlan(intentLedgerStore, sessionId, currentIntentLedger, turnIntentPlan);
         if (turnIntentPlan.continuationMode === 'new_intent') {
-            activeIntentReminderBlock = buildIntentReminderBlock(currentIntentLedger, instanceId);
+            intentTurnState.setActiveIntentReminderBlock(turnToken, buildIntentReminderBlock(currentIntentLedger, instanceId));
             const createdIntent = currentIntentLedger.intents.find((intent) => intent.intentId === turnIntentPlan.intentId);
             if (createdIntent) {
                 currentSkillEvalState = await skillEvalStore.ensureObservationsForIntent(sessionId, createdIntent);
@@ -1591,7 +1625,10 @@ async function runChat(initialInput, opts) {
         currentIntentLedger = await intentLedgerStore.saveDispatchedIntent(sessionId, consumeFreshContextHandoff(activeIntent, Date.now()));
         agent.clearHistory();
         runtimeFacade?.resetSkillTracking();
-        activeIntentReminderBlock = buildIntentReminderBlock(currentIntentLedger, instanceId);
+        const turnToken = intentTurnState.getSnapshot().activeTurnToken;
+        if (turnToken) {
+            intentTurnState.setActiveIntentReminderBlock(turnToken, buildIntentReminderBlock(currentIntentLedger, instanceId));
+        }
         await persistSession();
     };
     const writeOrchestrationBlock = (block) => {
@@ -2210,7 +2247,7 @@ async function runChat(initialInput, opts) {
         };
         runtimeHooks.on('turn_started', (e) => {
             log.debug('turn_started', JSON.stringify({ turnId: e?.turnId }));
-            completedTurnIntentSummaryLine = '';
+            carryPreparedIntentContextToRuntimeTurn(e.turnId);
             toolExplorer.reset();
             turnLayout.reset();
             resetStreamingSegment();
@@ -2231,12 +2268,12 @@ async function runChat(initialInput, opts) {
             if (e.toolName === 'AskUserQuestion') {
                 turnHadAskUserQuestion = true;
                 enterAskUserQuestionPrompt();
-                maybeAdvanceCurrentTurnStageForTool(e.toolName, e.toolInput);
+                maybeAdvanceCurrentTurnStageForTool(e.turnId, e.toolName, e.toolInput);
                 return;
             }
             runtimeState.enterToolInterrupt();
             beginActivity(describeLiveActivity(e.toolName, e.toolInput));
-            maybeAdvanceCurrentTurnStageForTool(e.toolName, e.toolInput);
+            maybeAdvanceCurrentTurnStageForTool(e.turnId, e.toolName, e.toolInput);
             maybeWriteThinkingOnlyToolNotice();
             const activity = toolExplorer.record(e.toolName, e.toolInput);
             if (activity) {
@@ -2266,8 +2303,7 @@ async function runChat(initialInput, opts) {
         });
         runtimeHooks.on('stage_activated', async (event) => {
             await refreshIntentLedger();
-            currentTurnStageIndex = event.order;
-            currentTurnStageStatus = 'Working';
+            intentTurnState.noteStageActivated(event.turnId, event.order);
             writeOrchestrationBlock(formatStageActivatedTranscriptBlock({
                 order: event.order,
                 totalStages: event.totalStages,
@@ -2277,7 +2313,7 @@ async function runChat(initialInput, opts) {
         });
         runtimeHooks.on('step_activated', async (event) => {
             await refreshIntentLedger();
-            currentTurnStageStatus = 'Working';
+            intentTurnState.noteStepRunning(event.turnId);
             writeOrchestrationBlock(formatProgressTranscriptBlock({
                 stepId: event.stepId,
                 status: 'running',
@@ -2287,7 +2323,7 @@ async function runChat(initialInput, opts) {
         });
         runtimeHooks.on('breadcrumb_emitted', async (event) => {
             await refreshIntentLedger();
-            currentTurnStageStatus = event.status === 'blocked' ? 'Waiting User' : 'Working';
+            intentTurnState.noteBreadcrumbStatus(event.turnId, event.status);
             writeOrchestrationBlock(formatProgressTranscriptBlock({
                 stepId: event.stepId,
                 status: event.status,
@@ -2297,7 +2333,7 @@ async function runChat(initialInput, opts) {
         });
         runtimeHooks.on('receipt_emitted', async (event) => {
             await refreshIntentLedger();
-            currentTurnStageStatus = 'Completed';
+            intentTurnState.setStageCompleted(event.turnId, intentTurnState.getSnapshot().currentTurnIntentPlan?.stages.length ?? 1);
             writeOrchestrationBlock(formatReceiptTranscriptBlock(event.note));
             renderIntentSummaryLine();
         });
@@ -2306,15 +2342,16 @@ async function runChat(initialInput, opts) {
             writeOrchestrationBlock(formatSalvageTranscriptBlock(event.summary, event.reason));
             renderIntentSummaryLine();
         });
-        runtimeHooks.on('turn_completed', () => {
+        runtimeHooks.on('turn_completed', (event) => {
             clearLongThinkingTimer();
             stashQueuedInputIfAny({ stopCapture: turnHadAskUserQuestion });
             turnHadAskUserQuestion = false;
             toolExplorer.reset();
-            if (currentTurnIntentPlan?.stages.length) {
-                currentTurnStageIndex = currentTurnIntentPlan.stages.length - 1;
-                currentTurnStageStatus = 'Completed';
-                completedTurnIntentSummaryLine = getCurrentTurnSummaryLine();
+            const turnPlan = intentTurnState.getSnapshot().currentTurnIntentPlan;
+            if (turnPlan?.stages.length) {
+                intentTurnState.setStageCompleted(event.turnId, turnPlan.stages.length);
+                const completedSummaryLine = getCurrentTurnSummaryLine();
+                intentTurnState.captureCompletedSummary(event.turnId, completedSummaryLine);
                 const stageSummaryBlock = getCurrentTurnStageSummaryBlock();
                 if (stageSummaryBlock) {
                     if (scrollRegion.isActive() && scrollRegion.isContentStreaming() && !terminalUiSuspended) {
@@ -2341,18 +2378,20 @@ async function runChat(initialInput, opts) {
             stopActivity();
             void refreshIntentLedger().then(renderIntentSummaryLine);
         });
-        runtimeHooks.on('turn_failed', () => {
+        runtimeHooks.on('turn_failed', (event) => {
             clearLongThinkingTimer();
             turnHadAskUserQuestion = false;
-            completedTurnIntentSummaryLine = '';
+            intentTurnState.clearTurnContext(event.turnId);
+            currentTurnStageObservedSkillNames = new Map();
             runtimeState.markInputReady();
             resetTurnChrome();
             void refreshIntentLedger().then(renderIntentSummaryLine);
         });
-        runtimeHooks.on('turn_aborted', () => {
+        runtimeHooks.on('turn_aborted', (event) => {
             clearLongThinkingTimer();
             turnHadAskUserQuestion = false;
-            completedTurnIntentSummaryLine = '';
+            intentTurnState.clearTurnContext(event.turnId);
+            currentTurnStageObservedSkillNames = new Map();
             runtimeState.markInputReady();
             resetTurnChrome();
             void refreshIntentLedger().then(renderIntentSummaryLine);
@@ -2467,8 +2506,8 @@ async function runChat(initialInput, opts) {
             const trimmed = input.trim();
             if (!trimmed)
                 continue;
-            if (completedTurnIntentSummaryLine) {
-                completedTurnIntentSummaryLine = '';
+            if (intentTurnState.getSnapshot().completedTurnIntentSummaryLine) {
+                intentTurnState.clearCompletedSummary();
                 renderFooterChrome();
             }
             const shellEscape = parseShellEscapeInput(trimmed);
@@ -2743,7 +2782,10 @@ async function runChat(initialInput, opts) {
                         const plan = buildSkillExecutionPlan([skill.name], skills);
                         const primaryStep = plan.resolved[plan.resolved.length - 1];
                         const invocation = activateTrackedSkillPlan(plan, plan.strategy === 'fork' && primaryStep?.agent ? primaryStep.agent : 'main');
-                        activeIntentReminderBlock = undefined;
+                        const activeTurnToken = intentTurnState.getSnapshot().activeTurnToken;
+                        if (activeTurnToken) {
+                            intentTurnState.setActiveIntentReminderBlock(activeTurnToken, undefined);
+                        }
                         process.stdout.write('\n');
                         mdRenderer.reset();
                         resetStreamingSegment();

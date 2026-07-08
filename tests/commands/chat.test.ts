@@ -186,7 +186,7 @@ describe('chat terminal layout', () => {
 
     expect(source).toContain('bootstrapTurnIntentPlan');
     expect(source).toContain("turnIntentPlan.continuationMode === 'new_intent'");
-    expect(source).toContain('activeIntentReminderBlock = buildIntentReminderBlock');
+    expect(source).toContain('intentTurnState.setActiveIntentReminderBlock(turnToken, buildIntentReminderBlock');
   });
 
   it('should ignore completed intents when priming reminders for the next input, while still collecting completion feedback', () => {
@@ -493,6 +493,67 @@ describe('chat terminal layout', () => {
     for (const identifier of forbidden) {
       expect(adapterSource).not.toMatch(new RegExp(`\\b${identifier}\\b`));
     }
+  });
+
+  it('should keep intent turn state pure and outside ledger or terminal rendering ownership', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const stateSource = readFileSync(
+      join(process.cwd(), 'src', 'commands', 'chat', 'intent-turn-state.ts'),
+      'utf8',
+    );
+    const forbidden = [
+      'SessionIntentDelegationStore',
+      'SessionSkillEvalStore',
+      'ScrollRegionManager',
+      'TuiRuntimeState',
+      'MarkdownRenderer',
+      'refreshIntentLedger',
+      'bootstrapTurnIntentPlan',
+      '.load(',
+      '.save(',
+      '.update',
+      'flushStreamingMarkdown',
+      'renderFooter',
+      'writeOrchestrationBlock',
+    ];
+
+    expect(source).toContain("from './chat/intent-turn-state.js';");
+    expect(source).toContain('const intentTurnState = createChatIntentTurnState();');
+    for (const item of forbidden) {
+      expect(stateSource).not.toContain(item);
+    }
+  });
+
+  it('should update intent turn state at runtime event sites while chat.ts owns rendering order', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const stageStart = source.indexOf("runtimeHooks.on('stage_activated'");
+    const stageEnd = source.indexOf("runtimeHooks.on('step_activated'", stageStart);
+    const stageSource = source.slice(stageStart, stageEnd);
+    const breadcrumbStart = source.indexOf("runtimeHooks.on('breadcrumb_emitted'");
+    const breadcrumbEnd = source.indexOf("runtimeHooks.on('receipt_emitted'", breadcrumbStart);
+    const breadcrumbSource = source.slice(breadcrumbStart, breadcrumbEnd);
+    const completedStart = source.indexOf("runtimeHooks.on('turn_completed'");
+    const completedEnd = source.indexOf("runtimeHooks.on('turn_failed'", completedStart);
+    const completedSource = source.slice(completedStart, completedEnd);
+
+    expect(stageSource).toContain('intentTurnState.noteStageActivated(event.turnId, event.order);');
+    expect(breadcrumbSource).toContain('intentTurnState.noteBreadcrumbStatus(event.turnId, event.status);');
+
+    const setCompleted = completedSource.indexOf('intentTurnState.setStageCompleted(event.turnId,');
+    const summaryLine = completedSource.indexOf('const completedSummaryLine = getCurrentTurnSummaryLine();');
+    const captureSummary = completedSource.indexOf('intentTurnState.captureCompletedSummary(event.turnId, completedSummaryLine);');
+    const stageSummary = completedSource.indexOf('const stageSummaryBlock = getCurrentTurnStageSummaryBlock();');
+    const flush = completedSource.indexOf('flushStreamingMarkdown();');
+    const endStreaming = completedSource.indexOf('scrollRegion.endContentStreaming({');
+    const writeBlock = completedSource.indexOf('writeOrchestrationBlock(stageSummaryBlock);');
+
+    expect(setCompleted).toBeGreaterThan(-1);
+    expect(summaryLine).toBeGreaterThan(setCompleted);
+    expect(captureSummary).toBeGreaterThan(summaryLine);
+    expect(stageSummary).toBeGreaterThan(captureSummary);
+    expect(flush).toBeGreaterThan(stageSummary);
+    expect(endStreaming).toBeGreaterThan(flush);
+    expect(writeBlock).toBeGreaterThan(endStreaming);
   });
 
   it('should keep flushStreamingMarkdown synchronous while terminal boundary extraction is local', () => {
