@@ -26,8 +26,7 @@ import { createSkillCatalog, parseSlashCommand, toSkillEntries, findSkillByComma
 import { createSkillCatalogWatcher } from '../ai/skills/watcher.js';
 import { createSkillTool } from '../ai/skills/tool.js';
 import { buildSkillExecutionPlan } from '../ai/skills/planner.js';
-import { buildComplianceReminder, evaluateSkillCompliance } from '../ai/skills/compliance.js';
-import { activateSkillInvocation, cloneSessionSkillExecutionState, createEmptySessionSkillExecutionState, findLatestRunningInvocation, recordSkillEvidence, updateSkillCompliance, } from '../ai/skills/execution-state.js';
+import { activateSkillInvocation, cloneSessionSkillExecutionState, createEmptySessionSkillExecutionState, findLatestRunningInvocation, recordSkillEvidence, } from '../ai/skills/execution-state.js';
 import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
 import { loadAutoContext, formatLoadedContext } from '../ai/runtime/context-loader.js';
 import { FileSessionStore } from '../ai/runtime/session-store.js';
@@ -35,6 +34,7 @@ import { formatPrintOutput } from './chat-print-mode.js';
 import { writeAssistantTextChunkInOrder } from './chat/assistant-streaming.js';
 import { runInteractiveRuntimeTurn, } from './chat/runtime-turn-runner.js';
 import { createChatIntentTurnState } from './chat/intent-turn-state.js';
+import { createStrictSkillAdherenceFlow } from './chat/skill-adherence-flow.js';
 import { endStreamingPhaseForInterruptInOrder, renderFooterChromeInOrder, } from './chat/terminal-streaming-boundary.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
@@ -1184,73 +1184,6 @@ async function runChat(initialInput, opts) {
     const refreshSkillEvalState = async () => {
         currentSkillEvalState = await skillEvalStore.load(sessionId) ?? currentSkillEvalState;
     };
-    const buildComplianceEvidenceView = (invocation) => ({
-        readReferences: invocation.evidence
-            .filter((event) => event.type === 'read_reference' && event.path)
-            .map((event) => event.path),
-        runScripts: invocation.evidence
-            .filter((event) => event.type === 'run_script' && event.command)
-            .map((event) => event.command),
-        completedSteps: invocation.evidence
-            .filter((event) => event.type === 'step_completed' && event.stepId)
-            .map((event) => event.stepId),
-    });
-    const applyComplianceResult = (invocation, finalAnswerText) => {
-        const liveInvocation = getInvocationById(invocation.invocationId) ?? invocation;
-        const compliance = evaluateSkillCompliance({
-            plan: liveInvocation.plan,
-            evidence: buildComplianceEvidenceView(liveInvocation),
-            finalAnswer: finalAnswerText,
-        });
-        currentSkillExecutionState = updateSkillCompliance(currentSkillExecutionState, liveInvocation.invocationId, compliance);
-        const refreshedInvocation = getInvocationById(liveInvocation.invocationId);
-        if (refreshedInvocation) {
-            if (compliance.missingReferences.length === 0) {
-                currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, liveInvocation.invocationId, {
-                    type: 'step_completed',
-                    agentId: refreshedInvocation.agentId,
-                    stepId: 'read_required_references',
-                });
-            }
-            if (compliance.missingScripts.length === 0) {
-                currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, liveInvocation.invocationId, {
-                    type: 'step_completed',
-                    agentId: refreshedInvocation.agentId,
-                    stepId: 'run_required_scripts',
-                });
-            }
-            if (/\S/.test(finalAnswerText)) {
-                currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, liveInvocation.invocationId, {
-                    type: 'step_completed',
-                    agentId: refreshedInvocation.agentId,
-                    stepId: 'summarize_findings',
-                });
-            }
-            for (const failedCheck of compliance.failedChecks) {
-                currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, liveInvocation.invocationId, {
-                    type: 'success_check_result',
-                    agentId: refreshedInvocation.agentId,
-                    stepId: `${failedCheck.type}:${failedCheck.terms.join('|')}`,
-                    passed: false,
-                });
-            }
-            for (const step of liveInvocation.plan.resolved) {
-                for (const successCheck of step.successChecks) {
-                    const key = `${successCheck.type}:${successCheck.terms.join('|')}`;
-                    const failed = compliance.failedChecks.some((check) => `${check.type}:${check.terms.join('|')}` === key);
-                    if (!failed) {
-                        currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, liveInvocation.invocationId, {
-                            type: 'success_check_result',
-                            agentId: refreshedInvocation.agentId,
-                            stepId: key,
-                            passed: true,
-                        });
-                    }
-                }
-            }
-        }
-        return compliance;
-    };
     const runStrictContinuationTurn = async (input) => {
         let continuationText = '';
         await maybePrepareFreshContextHandoff();
@@ -1262,33 +1195,18 @@ async function runChat(initialInput, opts) {
         await finalizeCurrentTurnIntentIfNeeded();
         return continuationText;
     };
-    const maybeRunStrictCompletionLoop = async (assistantText) => {
-        let combinedAssistantText = assistantText;
-        const invocation = getTrackedInvocation();
-        if (!invocation?.strictMode) {
-            return combinedAssistantText;
-        }
-        let latestInvocation = invocation;
-        let finalCompliance = applyComplianceResult(latestInvocation, combinedAssistantText);
-        let attempts = 0;
-        while (!finalCompliance.passed && attempts < 2) {
-            attempts += 1;
-            const continuationText = await runStrictContinuationTurn(buildComplianceReminder(finalCompliance));
-            combinedAssistantText += continuationText;
-            latestInvocation = getInvocationById(latestInvocation.invocationId) ?? latestInvocation;
-            finalCompliance = applyComplianceResult(latestInvocation, combinedAssistantText);
-        }
-        skillAdherenceStore.record(latestInvocation.skillName, finalCompliance);
-        if (!finalCompliance.passed) {
-            writeProgressTranscriptNote(`Strict skill contract still incomplete: ${[
-                ...finalCompliance.missingReferences.map((item) => `reference:${item}`),
-                ...finalCompliance.missingScripts.map((item) => `script:${item}`),
-                ...finalCompliance.missingSteps.map((item) => `step:${item}`),
-                ...finalCompliance.failedChecks.map((item) => `check:${item.type}`),
-            ].join(', ')}`);
-        }
-        return combinedAssistantText;
-    };
+    const strictSkillAdherenceFlow = createStrictSkillAdherenceFlow({
+        getTrackedInvocation: () => getTrackedInvocation(),
+        getInvocationById: (invocationId) => getInvocationById(invocationId),
+        getSkillExecutionState: () => currentSkillExecutionState,
+        setSkillExecutionState: (nextState) => {
+            currentSkillExecutionState = nextState;
+        },
+        continuationRunner: { runContinuation: runStrictContinuationTurn },
+        adherenceStore: skillAdherenceStore,
+        writeProgressTranscriptNote,
+    });
+    const maybeRunStrictCompletionLoop = strictSkillAdherenceFlow.maybeRunStrictCompletionLoop;
     const renderIntentSummaryLine = () => {
         if (!scrollRegion.isActive() || scrollRegion.isContentStreaming()) {
             return;
@@ -2813,14 +2731,7 @@ async function runChat(initialInput, opts) {
                                 },
                             });
                             if (invocation.strictMode) {
-                                const compliance = applyComplianceResult(invocation, result);
-                                if (!compliance.passed) {
-                                    result += await runStrictContinuationTurn(buildComplianceReminder(compliance));
-                                    result = await maybeRunStrictCompletionLoop(result);
-                                }
-                                else {
-                                    skillAdherenceStore.record(invocation.skillName, compliance);
-                                }
+                                result = await maybeRunStrictCompletionLoop(result);
                             }
                             mdRenderer.write(result);
                         }

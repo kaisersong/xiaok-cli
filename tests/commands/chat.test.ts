@@ -435,7 +435,7 @@ describe('chat terminal layout', () => {
   it('should route only strict continuation and ordinary turns through the runtime turn runner', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
     const strictStart = source.indexOf('const runStrictContinuationTurn = async');
-    const strictEnd = source.indexOf('const maybeRunStrictCompletionLoop = async', strictStart);
+    const strictEnd = source.indexOf('const strictSkillAdherenceFlow = createStrictSkillAdherenceFlow', strictStart);
     const strictSource = source.slice(strictStart, strictEnd);
     const slashStart = source.indexOf('const userMsg = slash.rest');
     const slashEnd = source.indexOf('slashAssistantText = await maybeRunStrictCompletionLoop', slashStart);
@@ -554,6 +554,28 @@ describe('chat terminal layout', () => {
     expect(flush).toBeGreaterThan(stageSummary);
     expect(endStreaming).toBeGreaterThan(flush);
     expect(writeBlock).toBeGreaterThan(endStreaming);
+  });
+
+  it('should delegate strict skill adherence loop to the extracted flow without owning terminal rendering', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const flowSource = readFileSync(
+      join(process.cwd(), 'src', 'commands', 'chat', 'skill-adherence-flow.ts'),
+      'utf8',
+    );
+
+    expect(source).toContain("from './chat/skill-adherence-flow.js';");
+    expect(source).toContain('const strictSkillAdherenceFlow = createStrictSkillAdherenceFlow({');
+    expect(source).toContain('const maybeRunStrictCompletionLoop = strictSkillAdherenceFlow.maybeRunStrictCompletionLoop;');
+    expect(source).not.toContain('const maybeRunStrictCompletionLoop = async (assistantText: string): Promise<string> => {');
+
+    expect(flowSource).toContain('evaluateSkillCompliance');
+    expect(flowSource).toContain('buildComplianceReminder');
+    expect(flowSource).toContain('recordSkillEvidence');
+    expect(flowSource).toContain('updateSkillCompliance');
+    expect(flowSource).not.toContain('ScrollRegionManager');
+    expect(flowSource).not.toContain('MarkdownRenderer');
+    expect(flowSource).not.toContain('writeAtContentCursor');
+    expect(flowSource).not.toContain('flushStreamingMarkdown');
   });
 
   it('should keep flushStreamingMarkdown synchronous while terminal boundary extraction is local', () => {
