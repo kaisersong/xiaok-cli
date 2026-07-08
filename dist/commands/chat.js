@@ -33,6 +33,7 @@ import { loadAutoContext, formatLoadedContext } from '../ai/runtime/context-load
 import { FileSessionStore } from '../ai/runtime/session-store.js';
 import { formatPrintOutput } from './chat-print-mode.js';
 import { writeAssistantTextChunkInOrder } from './chat/assistant-streaming.js';
+import { runInteractiveRuntimeTurn, } from './chat/runtime-turn-runner.js';
 import { endStreamingPhaseForInterruptInOrder, renderFooterChromeInOrder, } from './chat/terminal-streaming-boundary.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
 import { StatusBar } from '../ui/statusbar.js';
@@ -1084,6 +1085,24 @@ async function runChat(initialInput, opts) {
             },
         });
     };
+    let interactiveRuntimeTurnSequence = 0;
+    const createInteractiveRuntimeTurnRequest = (input, signal) => ({
+        turnToken: `${sessionId}:interactive:${++interactiveRuntimeTurnSequence}`,
+        sessionId,
+        cwd,
+        source: 'chat',
+        input,
+        ...(signal ? { signal } : {}),
+    });
+    const createInteractiveTurnChunkHandlers = (appendAssistantText) => ({
+        writeAssistantText(delta) {
+            handleAssistantTextChunk(delta, appendAssistantText);
+        },
+        updateUsage(usage) {
+            statusBar.update(usage);
+            scrollRegion.updateStatusLine(statusBar.getStatusLine());
+        },
+    });
     const getCurrentIntentSummaryLine = () => {
         let source = 'none';
         let line = '';
@@ -1217,22 +1236,10 @@ async function runChat(initialInput, opts) {
     const runStrictContinuationTurn = async (input) => {
         let continuationText = '';
         await maybePrepareFreshContextHandoff();
-        await runRuntimeTurn({
-            sessionId,
-            cwd,
-            source: 'chat',
-            input,
-        }, (chunk) => {
-            if (chunk.type === 'text') {
-                handleAssistantTextChunk(chunk.delta, (delta) => {
-                    continuationText += delta;
-                });
-            }
-            if (chunk.type === 'usage') {
-                statusBar.update(chunk.usage);
-                scrollRegion.updateStatusLine(statusBar.getStatusLine());
-            }
-        });
+        const continuationResult = await runInteractiveRuntimeTurn(runRuntimeTurn, createInteractiveRuntimeTurnRequest(input), createInteractiveTurnChunkHandlers((delta) => {
+            continuationText += delta;
+        }));
+        continuationText = continuationResult.assistantText;
         flushStreamingMarkdown();
         await finalizeCurrentTurnIntentIfNeeded();
         return continuationText;
@@ -2873,22 +2880,10 @@ async function runChat(initialInput, opts) {
                 let lastAssistantText = '';
                 await primeTurnIntentPlan(true);
                 await maybePrepareFreshContextHandoff();
-                await runRuntimeTurn({
-                    sessionId,
-                    cwd,
-                    source: 'chat',
-                    input: inputBlocks,
-                }, (chunk) => {
-                    if (chunk.type === 'text') {
-                        handleAssistantTextChunk(chunk.delta, (delta) => {
-                            lastAssistantText += delta;
-                        });
-                    }
-                    if (chunk.type === 'usage') {
-                        statusBar.update(chunk.usage);
-                        scrollRegion.updateStatusLine(statusBar.getStatusLine());
-                    }
-                });
+                const turnResult = await runInteractiveRuntimeTurn(runRuntimeTurn, createInteractiveRuntimeTurnRequest(inputBlocks), createInteractiveTurnChunkHandlers((delta) => {
+                    lastAssistantText += delta;
+                }));
+                lastAssistantText = turnResult.assistantText;
                 flushStreamingMarkdown();
                 lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);
                 await finalizeCurrentTurnIntentIfNeeded();

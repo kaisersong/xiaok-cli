@@ -339,7 +339,8 @@ describe('chat terminal layout', () => {
     expect(helperSource).toContain('writeAssistantTextChunkInOrder(delta, {');
     expect(helperSource.match(/writeAssistantTextChunkInOrder\(/g) ?? []).toHaveLength(1);
     expect(source).not.toMatch(/if \(\/\\S\/\.test\(chunk\.delta\)\) \{\s*runtimeState\.noteResponseStarted\(\);\s*ensureStreamingPhase\(\);\s*\}/);
-    expect(source.match(/handleAssistantTextChunk\(chunk\.delta,/g) ?? []).toHaveLength(4);
+    expect(source.match(/handleAssistantTextChunk\(chunk\.delta,/g) ?? []).toHaveLength(2);
+    expect(source).toContain('handleAssistantTextChunk(delta, appendAssistantText);');
   });
 
   it('should keep print and json text chunks outside the interactive streaming helper', () => {
@@ -429,6 +430,69 @@ describe('chat terminal layout', () => {
     expect(orchestrationSource.match(/resetStreamingSegment\(\);/g) ?? []).toHaveLength(2);
     expect(orchestrationSource).not.toContain('renderFooterChromeInOrder(');
     expect(orchestrationSource).not.toContain('endStreamingPhaseForInterruptInOrder(');
+  });
+
+  it('should route only strict continuation and ordinary turns through the runtime turn runner', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const strictStart = source.indexOf('const runStrictContinuationTurn = async');
+    const strictEnd = source.indexOf('const maybeRunStrictCompletionLoop = async', strictStart);
+    const strictSource = source.slice(strictStart, strictEnd);
+    const slashStart = source.indexOf('const userMsg = slash.rest');
+    const slashEnd = source.indexOf('slashAssistantText = await maybeRunStrictCompletionLoop', slashStart);
+    const slashSource = source.slice(slashStart, slashEnd);
+    const ordinaryStart = source.indexOf('let lastAssistantText = \'\';');
+    const ordinaryEnd = source.indexOf('// Stop hook', ordinaryStart);
+    const ordinarySource = source.slice(ordinaryStart, ordinaryEnd);
+    const stopStart = ordinaryEnd;
+    const stopEnd = source.indexOf('lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);', stopStart);
+    const stopSource = source.slice(stopStart, stopEnd);
+
+    expect(source).toContain("from './chat/runtime-turn-runner.js';");
+    expect(strictSource).toContain('runInteractiveRuntimeTurn(');
+    expect(ordinarySource).toContain('runInteractiveRuntimeTurn(');
+    expect(source.match(/runInteractiveRuntimeTurn\(/g) ?? []).toHaveLength(2);
+
+    expect(slashSource).toContain('await runRuntimeTurn({');
+    expect(slashSource).not.toContain('runInteractiveRuntimeTurn(');
+    expect(stopSource).toContain('await runtimeFacade.runTurn({');
+    expect(stopSource).not.toContain('runInteractiveRuntimeTurn(');
+  });
+
+  it('should keep runtime turn runner and handler adapter out of permission and tool-explorer state', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const runnerSource = readFileSync(
+      join(process.cwd(), 'src', 'commands', 'chat', 'runtime-turn-runner.ts'),
+      'utf8',
+    );
+    const adapterStart = source.indexOf('const createInteractiveTurnChunkHandlers = (');
+    const adapterEnd = source.indexOf('const runStrictContinuationTurn = async', adapterStart);
+    const adapterSource = source.slice(adapterStart, adapterEnd);
+    const forbidden = [
+      'permissionManager',
+      'approvalStore',
+      'embeddedApprovalStore',
+      'ToolExplorer',
+      'toolExplorer',
+      'permissionPrompt',
+      'autoApproval',
+      'approval',
+    ];
+
+    expect(runnerSource).not.toMatch(/^let\s/m);
+    expect(runnerSource).not.toMatch(/^class\s/m);
+    expect(runnerSource).not.toContain('new Map(');
+    expect(runnerSource).not.toContain('new Set(');
+    for (const identifier of forbidden) {
+      expect(runnerSource).not.toMatch(new RegExp(`\\b${identifier}\\b`));
+    }
+
+    expect(adapterStart).toBeGreaterThan(-1);
+    expect(adapterEnd).toBeGreaterThan(adapterStart);
+    expect(adapterSource).not.toContain('class ');
+    expect(adapterSource).not.toContain('return new ');
+    for (const identifier of forbidden) {
+      expect(adapterSource).not.toMatch(new RegExp(`\\b${identifier}\\b`));
+    }
   });
 
   it('should keep flushStreamingMarkdown synchronous while terminal boundary extraction is local', () => {

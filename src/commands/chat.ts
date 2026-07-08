@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { Command } from 'commander';
-import type { ModelAdapter, MessageBlock } from '../types.js';
+import type { ModelAdapter, MessageBlock, UsageStats } from '../types.js';
 import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../types.js';
 import type { IntentPlanDraft } from '../ai/intent-delegation/types.js';
 import { loadConfig, saveConfig } from '../utils/config.js';
@@ -47,6 +47,11 @@ import { loadAutoContext, formatLoadedContext } from '../ai/runtime/context-load
 import { FileSessionStore, type PersistedSessionSnapshot } from '../ai/runtime/session-store.js';
 import { formatPrintOutput } from './chat-print-mode.js';
 import { writeAssistantTextChunkInOrder } from './chat/assistant-streaming.js';
+import {
+  runInteractiveRuntimeTurn,
+  type InteractiveRuntimeTurnRequest,
+  type InteractiveTurnChunkHandlers,
+} from './chat/runtime-turn-runner.js';
 import {
   endStreamingPhaseForInterruptInOrder,
   renderFooterChromeInOrder,
@@ -1254,6 +1259,31 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     });
   };
 
+  let interactiveRuntimeTurnSequence = 0;
+  const createInteractiveRuntimeTurnRequest = <Input>(
+    input: Input,
+    signal?: AbortSignal,
+  ): InteractiveRuntimeTurnRequest<Input> => ({
+    turnToken: `${sessionId}:interactive:${++interactiveRuntimeTurnSequence}`,
+    sessionId,
+    cwd,
+    source: 'chat',
+    input,
+    ...(signal ? { signal } : {}),
+  });
+
+  const createInteractiveTurnChunkHandlers = (
+    appendAssistantText: (delta: string) => void,
+  ): InteractiveTurnChunkHandlers => ({
+    writeAssistantText(delta) {
+      handleAssistantTextChunk(delta, appendAssistantText);
+    },
+    updateUsage(usage) {
+      statusBar.update(usage as UsageStats);
+      scrollRegion.updateStatusLine(statusBar.getStatusLine());
+    },
+  });
+
   const getCurrentIntentSummaryLine = (): string => {
     let source: TuiSummarySource = 'none';
     let line = '';
@@ -1413,22 +1443,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const runStrictContinuationTurn = async (input: string): Promise<string> => {
     let continuationText = '';
     await maybePrepareFreshContextHandoff();
-    await runRuntimeTurn({
-      sessionId,
-      cwd,
-      source: 'chat',
-      input,
-    }, (chunk) => {
-      if (chunk.type === 'text') {
-        handleAssistantTextChunk(chunk.delta, (delta) => {
-          continuationText += delta;
-        });
-      }
-      if (chunk.type === 'usage') {
-        statusBar.update(chunk.usage);
-        scrollRegion.updateStatusLine(statusBar.getStatusLine());
-      }
-    });
+    const continuationResult = await runInteractiveRuntimeTurn(
+      runRuntimeTurn,
+      createInteractiveRuntimeTurnRequest(input),
+      createInteractiveTurnChunkHandlers((delta) => {
+        continuationText += delta;
+      }),
+    );
+    continuationText = continuationResult.assistantText;
     flushStreamingMarkdown();
     await finalizeCurrentTurnIntentIfNeeded();
     return continuationText;
@@ -3300,22 +3322,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       await primeTurnIntentPlan(true);
 
       await maybePrepareFreshContextHandoff();
-      await runRuntimeTurn({
-        sessionId,
-        cwd,
-        source: 'chat',
-        input: inputBlocks,
-      }, (chunk) => {
-        if (chunk.type === 'text') {
-          handleAssistantTextChunk(chunk.delta, (delta) => {
-            lastAssistantText += delta;
-          });
-        }
-        if (chunk.type === 'usage') {
-          statusBar.update(chunk.usage);
-          scrollRegion.updateStatusLine(statusBar.getStatusLine());
-        }
-      });
+      const turnResult = await runInteractiveRuntimeTurn(
+        runRuntimeTurn,
+        createInteractiveRuntimeTurnRequest(inputBlocks),
+        createInteractiveTurnChunkHandlers((delta) => {
+          lastAssistantText += delta;
+        }),
+      );
+      lastAssistantText = turnResult.assistantText;
       flushStreamingMarkdown();
       lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);
       await finalizeCurrentTurnIntentIfNeeded();
